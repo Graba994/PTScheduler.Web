@@ -1,0 +1,103 @@
+@page "/admin/users"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Admin)]
+@inject IUserManagementService UserService
+@inject NavigationManager Nav
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Użytkownicy</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h2>Użytkownicy</h2>
+</div>
+<hr />
+
+@if (users is null)
+{
+    <p><span class="spinner-border spinner-border-sm me-2" />Ładowanie...</p>
+}
+else
+{
+    <div class="mb-3">
+        <input class="form-control w-25" placeholder="Szukaj..." @bind="search" @bind:event="oninput" />
+    </div>
+
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th>Użytkownik</th>
+                    <th>Rola</th>
+                    <th>Przełożony</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var user in Filtered)
+                {
+                    <tr>
+                        <td>
+                            <div class="fw-semibold">@user.FullName</div>
+                            <small class="text-muted">@user.Email</small>
+                        </td>
+                        <td>
+                            <span class="badge @RoleBadge(user.Role)">@(string.IsNullOrEmpty(user.Role) ? "Brak roli" : user.Role)</span>
+                        </td>
+                        <td>
+                            @if (user.Role == Roles.Subordinate)
+                            {
+                                <small>@(user.SupervisorEmail ?? "— brak —")</small>
+                            }
+                            else { <span class="text-muted">—</span> }
+                        </td>
+                        <td>
+                            @if (user.IsLockedOut)
+                            {
+                                <span class="badge bg-danger">Zablokowany</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-success">Aktywny</span>
+                            }
+                        </td>
+                        <td class="text-end">
+                            <a href="@($"/admin/users/{user.Id}")" class="btn btn-sm btn-outline-primary">
+                                Edytuj
+                            </a>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+
+    <small class="text-muted">Łącznie: @Filtered.Count() użytkowników</small>
+}
+
+@code {
+    private List<UserDto>? users;
+    private string search = string.Empty;
+
+    private IEnumerable<UserDto> Filtered => users?
+        .Where(u => string.IsNullOrEmpty(search) ||
+            u.Email.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            u.FullName.Contains(search, StringComparison.OrdinalIgnoreCase))
+        ?? [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        users = await UserService.GetAllUsersAsync();
+    }
+
+    private static string RoleBadge(string role) => role switch
+    {
+        Roles.Admin       => "bg-danger",
+        Roles.Trainer     => "bg-primary",
+        Roles.Subordinate => "bg-info text-dark",
+        Roles.Client      => "bg-secondary",
+        _                 => "bg-light text-dark"
+    };
+}

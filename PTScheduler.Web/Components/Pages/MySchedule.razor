@@ -1,0 +1,277 @@
+@page "/my"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Client")]
+@inject IClientService ClientService
+@inject ISessionService SessionService
+@inject NavigationManager Nav
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Enums
+@using Microsoft.AspNetCore.Components.Authorization
+@inject AuthenticationStateProvider AuthStateProvider
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Mój grafik</PageTitle>
+
+@if (loading)
+{
+    <div class="text-center py-5">
+        <div class="spinner-border text-primary"></div>
+    </div>
+}
+else if (client is null)
+{
+    <div class="alert alert-warning text-center mt-4">
+        <i class="bi bi-person-x fs-2 d-block mb-2"></i>
+        Twój profil klienta nie został jeszcze założony. Skontaktuj się z trenerem.
+    </div>
+}
+else if (client.Status == ClientStatus.Pending)
+{
+    <div class="text-center py-5">
+        <i class="bi bi-hourglass-split fs-1 text-warning d-block mb-3"></i>
+        <h5>Twoje konto oczekuje na zatwierdzenie</h5>
+        <p class="text-muted">Trener wkrótce aktywuje Twoje konto. Wtedy uzyskasz pełny dostęp do grafiku i pakietów.</p>
+        <div class="text-muted small">Masz pytania? Skontaktuj się ze swoim trenerem.</div>
+    </div>
+}
+else
+{
+    <div class="d-flex align-items-center gap-3 mb-3">
+        <div class="avatar-circle">
+            @if (!string.IsNullOrEmpty(client.ProfilePictureUrl))
+            {
+                <img src="@client.ProfilePictureUrl" class="rounded-circle" width="52" height="52" style="object-fit:cover" alt="@client.FullName" />
+            }
+            else
+            {
+                <span>@(string.IsNullOrEmpty(client.Initials) ? "?" : client.Initials)</span>
+            }
+        </div>
+        <div>
+            <h5 class="mb-0">Cześć, @client.FirstName!</h5>
+            <div class="text-muted small">@client.Email</div>
+        </div>
+    </div>
+
+    @if (client.ActivePackage is not null)
+    {
+        var pkg = client.ActivePackage;
+        var daysLeft = pkg.ExpiresAt.HasValue ? (int)(pkg.ExpiresAt.Value - DateTime.UtcNow).TotalDays : (int?)null;
+        <div class="card border-0 mb-4 @(daysLeft < 30 && daysLeft.HasValue ? "bg-warning-subtle" : "bg-primary-subtle")">
+            <div class="card-body py-3 px-3 d-flex align-items-center gap-3">
+                <i class="bi bi-box-seam fs-4 text-primary flex-shrink-0"></i>
+                <div class="flex-grow-1">
+                    <div class="fw-semibold small">@pkg.Name</div>
+                    <div class="progress mt-1" style="height:5px">
+                        <div class="progress-bar bg-primary" style="width:@(pkg.TotalSessions > 0 ? pkg.UsedSessions * 100 / pkg.TotalSessions : 0)%"></div>
+                    </div>
+                </div>
+                <div class="text-end flex-shrink-0">
+                    <div class="fw-bold">@pkg.RemainingCredits</div>
+                    <div class="text-muted" style="font-size:.7rem">/ @pkg.TotalSessions sesji</div>
+                    @if (daysLeft.HasValue)
+                    {
+                        <div class="@(daysLeft < 14 ? "text-danger" : "text-muted")" style="font-size:.7rem">
+                            @(daysLeft <= 0 ? "Wygasł!" : $"{daysLeft} dni")
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- Upcoming sessions -->
+    <h6 class="mb-3 text-uppercase text-muted fw-semibold" style="font-size:.7rem;letter-spacing:.05em">
+        <i class="bi bi-calendar-week me-1"></i>Nadchodzące treningi
+    </h6>
+
+    @if (!upcoming.Any())
+    {
+        <div class="card border-0 bg-body-secondary rounded-3 p-4 text-center mb-4">
+            <i class="bi bi-calendar-x fs-2 text-muted d-block mb-2"></i>
+            <p class="mb-0 text-muted small">Brak zaplanowanych treningów.</p>
+        </div>
+    }
+    else
+    {
+        <div class="d-flex flex-column gap-2 mb-4">
+            @foreach (var s in upcoming)
+            {
+                <div class="card shadow-sm border-start border-primary border-3">
+                    <div class="card-body py-3 px-3 d-flex align-items-center gap-3">
+                        <div class="text-center flex-shrink-0" style="min-width:48px">
+                            <div class="fw-bold fs-5 lh-1">@s.StartTime.ToString("dd")</div>
+                            <div class="text-muted small text-uppercase">@s.StartTime.ToString("MMM")</div>
+                        </div>
+                        <div class="flex-grow-1">
+                            <div class="fw-semibold">@s.SessionTypeName</div>
+                            <div class="text-muted small">
+                                <i class="bi bi-clock me-1"></i>@s.StartTime.ToString("HH:mm") — @s.EndTime.ToString("HH:mm")
+                                &nbsp;·&nbsp;<i class="bi bi-person me-1"></i>@s.TrainerName
+                            </div>
+                            @if (!string.IsNullOrEmpty(s.Notes))
+                            {
+                                <div class="text-muted small mt-1 text-truncate"><i class="bi bi-chat-left-text me-1"></i>@s.Notes</div>
+                            }
+                        </div>
+                        <div class="flex-shrink-0 text-end">
+                            @if (s.StartTime > DateTime.Now.AddHours(24))
+                            {
+                                <button class="btn btn-outline-danger btn-sm" @onclick="() => ConfirmCancel(s)">
+                                    <i class="bi bi-x-circle me-1"></i>Odwołaj
+                                </button>
+                            }
+                            else
+                            {
+                                <span class="badge bg-warning-subtle text-warning small">Wkrótce</span>
+                            }
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    <!-- Past sessions -->
+    <h6 class="mb-3 text-uppercase text-muted fw-semibold" style="font-size:.7rem;letter-spacing:.05em">
+        <i class="bi bi-clock-history me-1"></i>Historia treningów
+    </h6>
+
+    @if (!past.Any())
+    {
+        <p class="text-muted small text-center">Brak historii treningów.</p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Data</th>
+                        <th>Typ</th>
+                        <th>Trener</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var s in past)
+                    {
+                        <tr>
+                            <td class="text-nowrap small">@s.StartTime.ToString("dd.MM.yy HH:mm")</td>
+                            <td class="small">@s.SessionTypeName</td>
+                            <td class="small text-muted">@s.TrainerName</td>
+                            <td><span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+        <div class="text-muted small">Łącznie: @past.Count sesji</div>
+    }
+}
+
+<!-- Cancel confirm modal -->
+@if (cancelTarget is not null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.45)">
+        <div class="modal-dialog modal-dialog-centered modal-sm">
+            <div class="modal-content">
+                <div class="modal-body text-center p-4">
+                    <i class="bi bi-exclamation-triangle-fill text-warning fs-2 d-block mb-3"></i>
+                    <p class="mb-1 fw-semibold">Odwołać trening?</p>
+                    <p class="text-muted small mb-3">@cancelTarget.SessionTypeName — @cancelTarget.StartTime.ToString("dd.MM.yyyy HH:mm")</p>
+                    <div class="mb-2">
+                        <input class="form-control form-control-sm" placeholder="Powód (opcjonalnie)" @bind="cancelReason" />
+                    </div>
+                </div>
+                <div class="modal-footer justify-content-center gap-2 border-0 pb-4">
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => cancelTarget = null">Nie</button>
+                    <button class="btn btn-danger btn-sm" @onclick="DoCancel" disabled="@isBusy">
+                        @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        Tak, odwołaj
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool loading = true;
+    private bool isBusy;
+    private ClientDto? client;
+    private List<SessionDto> upcoming = [];
+    private List<SessionDto> past = [];
+
+    private SessionDto? cancelTarget;
+    private string cancelReason = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        var userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (userId is not null)
+        {
+            client = await ClientService.GetClientByUserIdAsync(userId);
+            if (client is not null)
+            {
+                var all = await SessionService.GetClientSessionsAsync(client.Id, 500);
+                var now = DateTime.Now;
+                upcoming = all.Where(s => s.Status == SessionStatus.Scheduled && s.StartTime >= now)
+                              .OrderBy(s => s.StartTime).ToList();
+                past = all.Where(s => s.StartTime < now || s.Status != SessionStatus.Scheduled)
+                          .OrderByDescending(s => s.StartTime).ToList();
+            }
+        }
+        loading = false;
+    }
+
+    private void ConfirmCancel(SessionDto s)
+    {
+        cancelTarget = s;
+        cancelReason = string.Empty;
+    }
+
+    private async Task DoCancel()
+    {
+        if (cancelTarget is null) return;
+        isBusy = true;
+        try
+        {
+            var reason = string.IsNullOrWhiteSpace(cancelReason) ? null : cancelReason.Trim();
+            await SessionService.UpdateStatusAsync(cancelTarget.Id, SessionStatus.Cancelled, reason);
+            var all = await SessionService.GetClientSessionsAsync(client!.Id, 500);
+            var now = DateTime.Now;
+            upcoming = all.Where(s => s.Status == SessionStatus.Scheduled && s.StartTime >= now)
+                          .OrderBy(s => s.StartTime).ToList();
+            past = all.Where(s => s.StartTime < now || s.Status != SessionStatus.Scheduled)
+                      .OrderByDescending(s => s.StartTime).ToList();
+            cancelTarget = null;
+        }
+        catch (Exception ex)
+        {
+            cancelTarget = null;
+            Console.WriteLine(ex.Message);
+        }
+        finally { isBusy = false; }
+    }
+
+    private static string StatusBadge(SessionStatus s) => s switch
+    {
+        SessionStatus.Scheduled => "bg-primary-subtle text-primary",
+        SessionStatus.Completed => "bg-success-subtle text-success",
+        SessionStatus.Cancelled => "bg-danger-subtle text-danger",
+        SessionStatus.NoShow    => "bg-warning-subtle text-warning",
+        _ => "bg-secondary-subtle text-secondary"
+    };
+
+    private static string StatusLabel(SessionStatus s) => s switch
+    {
+        SessionStatus.Scheduled => "Zaplanowana",
+        SessionStatus.Completed => "Zakończona",
+        SessionStatus.Cancelled => "Anulowana",
+        SessionStatus.NoShow    => "Nieobecność",
+        _ => s.ToString()
+    };
+}
+

@@ -1,0 +1,178 @@
+@page "/admin/users/{Id}"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Admin)]
+@inject IUserManagementService UserService
+@inject NavigationManager Nav
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Edycja użytkownika</PageTitle>
+
+<nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/admin/users">Użytkownicy</a></li>
+        <li class="breadcrumb-item active">Edycja</li>
+    </ol>
+</nav>
+
+@if (user is null)
+{
+    <p><span class="spinner-border spinner-border-sm me-2" />Ładowanie...</p>
+}
+else
+{
+    <div class="row">
+        <div class="col-md-6">
+            <div class="card">
+                <div class="card-body">
+                    <h5 class="card-title">@user.FullName</h5>
+                    <p class="text-muted mb-4">@user.Email</p>
+
+                    @if (!string.IsNullOrEmpty(message))
+                    {
+                        <div class="alert @(isError ? "alert-danger" : "alert-success") py-2">@message</div>
+                    }
+
+                    <div class="mb-3">
+                        <label class="form-label fw-semibold">Rola</label>
+                        <select class="form-select" @bind="selectedRole">
+                            <option value="">— brak roli —</option>
+                            <option value="@Roles.Admin">Admin</option>
+                            <option value="@Roles.Trainer">Trainer</option>
+                            <option value="@Roles.Subordinate">Subordinate</option>
+                            <option value="@Roles.Client">Client</option>
+                        </select>
+                    </div>
+
+                    @if (selectedRole == Roles.Subordinate)
+                    {
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold">Przełożony (Trainer)</label>
+                            <select class="form-select" @bind="selectedSupervisorId">
+                                <option value="">— brak —</option>
+                                @foreach (var trainer in trainers)
+                                {
+                                    <option value="@trainer.Id">@trainer.FullName (@trainer.Email)</option>
+                                }
+                            </select>
+                        </div>
+                    }
+
+                    <div class="mb-4">
+                        <label class="form-label fw-semibold">Status konta</label>
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" role="switch"
+                                   id="lockSwitch" @bind="isLocked" />
+                            <label class="form-check-label" for="lockSwitch">
+                                @(isLocked ? "Zablokowany" : "Aktywny")
+                            </label>
+                        </div>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary" @onclick="Save" disabled="@isBusy">
+                            @if (isBusy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                            Zapisz zmiany
+                        </button>
+                        <a href="/admin/users" class="btn btn-outline-secondary">Anuluj</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-4">
+            <div class="card border-danger">
+                <div class="card-body">
+                    <h6 class="card-title text-danger">Strefa niebezpieczna</h6>
+                    <p class="small text-muted">Usunięcie użytkownika jest nieodwracalne.</p>
+                    <button class="btn btn-outline-danger btn-sm" @onclick="ConfirmDelete">
+                        Usuń użytkownika
+                    </button>
+
+                    @if (showDeleteConfirm)
+                    {
+                        <div class="mt-3 p-2 bg-danger bg-opacity-10 rounded">
+                            <p class="small mb-2">Na pewno? Tej operacji nie można cofnąć.</p>
+                            <button class="btn btn-danger btn-sm me-2" @onclick="Delete">Tak, usuń</button>
+                            <button class="btn btn-secondary btn-sm" @onclick="() => showDeleteConfirm = false">Anuluj</button>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public string Id { get; set; } = string.Empty;
+
+    private UserDto? user;
+    private List<UserDto> trainers = [];
+    private string selectedRole = string.Empty;
+    private string? selectedSupervisorId;
+    private bool isLocked;
+    private bool isBusy;
+    private bool showDeleteConfirm;
+    private string message = string.Empty;
+    private bool isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        user = await UserService.GetUserAsync(Id);
+        trainers = await UserService.GetTrainersAsync();
+
+        if (user is not null)
+        {
+            selectedRole = user.Role;
+            selectedSupervisorId = user.SupervisorId;
+            isLocked = user.IsLockedOut;
+        }
+    }
+
+    private async Task Save()
+    {
+        isBusy = true;
+        message = string.Empty;
+        try
+        {
+            await UserService.SetRoleAsync(Id, selectedRole);
+
+            if (selectedRole == Roles.Subordinate)
+                await UserService.SetSupervisorAsync(Id, selectedSupervisorId);
+
+            await UserService.SetLockoutAsync(Id, isLocked);
+
+            message = "Zmiany zapisane.";
+            isError = false;
+            user = await UserService.GetUserAsync(Id);
+            trainers = await UserService.GetTrainersAsync();
+        }
+        catch (Exception ex)
+        {
+            message = $"Błąd: {ex.Message}";
+            isError = true;
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+
+    private void ConfirmDelete() => showDeleteConfirm = true;
+
+    private async Task Delete()
+    {
+        try
+        {
+            await UserService.DeleteUserAsync(Id);
+            Nav.NavigateTo("/admin/users");
+        }
+        catch (Exception ex)
+        {
+            message = $"Błąd usuwania: {ex.Message}";
+            isError = true;
+            showDeleteConfirm = false;
+        }
+    }
+}

@@ -1,0 +1,116 @@
+@page "/clients"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@inject IClientService ClientService
+@inject NavigationManager Nav
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Enums
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Klienci</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="bi bi-people-fill me-2"></i>Klienci</h4>
+    <a href="/clients/new" class="btn btn-primary btn-sm">
+        <i class="bi bi-person-plus-fill me-1"></i>Dodaj klienta
+    </a>
+</div>
+
+@if (clients is null)
+{
+    <div class="text-center py-5">
+        <div class="spinner-border text-primary"></div>
+    </div>
+}
+else if (!Filtered.Any())
+{
+    <div class="text-center py-5 text-muted">
+        <i class="bi bi-people fs-1 d-block mb-3"></i>
+        @if (string.IsNullOrEmpty(search))
+        {
+            <p>Brak klientów. <a href="/clients/new">Dodaj pierwszego klienta</a>.</p>
+        }
+        else
+        {
+            <p>Nie znaleziono klientów dla "<strong>@search</strong>".</p>
+        }
+    </div>
+}
+else
+{
+    <div class="mb-3">
+        <div class="input-group input-group-sm" style="max-width:320px">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input class="form-control" placeholder="Szukaj klienta..." @bind="search" @bind:event="oninput" />
+        </div>
+    </div>
+
+    <div class="row g-3">
+        @foreach (var c in Filtered)
+        {
+            <div class="col-12 col-sm-6 col-xl-4">
+                <div class="card client-card h-100 position-relative" @onclick="@(() => Nav.NavigateTo($"/clients/{c.Id}"))">
+                    @if (c.Status == ClientStatus.Pending)
+                    {
+                        <span class="position-absolute top-0 end-0 m-2 badge bg-warning text-dark" style="font-size:.65rem">Oczekuje</span>
+                    }
+                    <div class="card-body d-flex gap-3 align-items-center">
+                        <div class="avatar-circle flex-shrink-0">
+                            @if (!string.IsNullOrEmpty(c.ProfilePictureUrl))
+                            {
+                                <img src="@c.ProfilePictureUrl" class="rounded-circle" width="52" height="52" style="object-fit:cover" alt="@c.FullName" />
+                            }
+                            else
+                            {
+                                <span>@(string.IsNullOrEmpty(c.Initials) ? "?" : c.Initials)</span>
+                            }
+                        </div>
+                        <div class="flex-grow-1 overflow-hidden">
+                            <div class="fw-semibold text-truncate">@c.FullName</div>
+                            <div class="text-muted small text-truncate">@c.Email</div>
+                            @if (!string.IsNullOrEmpty(c.Phone))
+                            {
+                                <div class="text-muted small"><i class="bi bi-telephone me-1"></i>@c.Phone</div>
+                            }
+                            @if (!string.IsNullOrEmpty(c.TrainingGoal))
+                            {
+                                <div class="text-muted small text-truncate mt-1">
+                                    <i class="bi bi-bullseye me-1"></i>@c.TrainingGoal
+                                </div>
+                            }
+                        </div>
+                        <div class="text-end flex-shrink-0">
+                            <div class="badge bg-primary-subtle text-primary rounded-pill">
+                                @c.TotalSessions sesji
+                            </div>
+                            @if (c.LastSessionDate.HasValue)
+                            {
+                                <div class="text-muted" style="font-size:.7rem;margin-top:4px">
+                                    @c.LastSessionDate.Value.ToString("dd.MM.yy")
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+
+    <div class="text-muted small mt-3">Łącznie: @Filtered.Count() klientów</div>
+}
+
+@code {
+    private List<ClientDto>? clients;
+    private string search = string.Empty;
+
+    private IEnumerable<ClientDto> Filtered => clients?
+        .Where(c => string.IsNullOrEmpty(search) ||
+            c.FullName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            c.Email.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            (c.Phone ?? "").Contains(search)) ?? [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        clients = await ClientService.GetClientsAsync();
+    }
+}

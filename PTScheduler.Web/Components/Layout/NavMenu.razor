@@ -1,0 +1,129 @@
+@implements IDisposable
+@inject NavigationManager NavigationManager
+@inject PTScheduler.Application.Interfaces.IBrandingService BrandingService
+@using PTScheduler.Domain.Constants
+
+<!-- Sidebar brand -->
+<a href="/" class="sidebar-brand">
+    @if (!string.IsNullOrEmpty(_logoPath))
+    {
+        <img src="@_logoPath" alt="@_companyName" />
+    }
+    else
+    {
+        <i class="bi bi-calendar-heart"></i>
+        <span>@_companyName</span>
+    }
+</a>
+
+<!-- Navigation -->
+<div class="sidebar-nav">
+    <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer},{Roles.Subordinate}")">
+        <NavLink class="sidebar-link" href="" Match="NavLinkMatch.All">
+            <i class="bi bi-house-fill"></i><span>Dashboard</span>
+        </NavLink>
+        <NavLink class="sidebar-link" href="calendar">
+            <i class="bi bi-calendar3"></i><span>Kalendarz</span>
+        </NavLink>
+        <NavLink class="sidebar-link" href="clients">
+            <i class="bi bi-people-fill"></i><span>Klienci</span>
+        </NavLink>
+    </AuthorizeView>
+
+    <AuthorizeView Roles="@Roles.Client">
+        <NavLink class="sidebar-link" href="my">
+            <i class="bi bi-calendar-week-fill"></i><span>Mój grafik</span>
+        </NavLink>
+    </AuthorizeView>
+
+    <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer}")">
+        <div class="sidebar-divider"></div>
+        <NavLink class="sidebar-link" href="trainer/intro-config">
+            <i class="bi bi-person-lines-fill"></i><span>Pierwsza wizyta</span>
+        </NavLink>
+    </AuthorizeView>
+
+    <AuthorizeView Roles="@Roles.Admin">
+        <div class="sidebar-divider"></div>
+        <NavLink class="sidebar-link" href="admin/branding">
+            <i class="bi bi-palette-fill"></i><span>Wygląd</span>
+        </NavLink>
+        <NavLink class="sidebar-link" href="admin/users">
+            <i class="bi bi-shield-person-fill"></i><span>Użytkownicy</span>
+        </NavLink>
+        <NavLink class="sidebar-link" href="admin/settings">
+            <i class="bi bi-gear-fill"></i><span>Ustawienia</span>
+        </NavLink>
+        <NavLink class="sidebar-link" href="admin/backup">
+            <i class="bi bi-database"></i><span>Backup</span>
+        </NavLink>
+    </AuthorizeView>
+</div>
+
+<!-- Sidebar footer -->
+<div class="sidebar-footer">
+    <AuthorizeView>
+        <Authorized>
+            <a href="/Account/Manage" class="sidebar-user">
+                <div class="sidebar-user-avatar">
+                    @(_initials)
+                </div>
+                <span class="sidebar-user-name">@context.User.Identity?.Name</span>
+            </a>
+            <form action="Account/Logout" method="post" style="margin:0">
+                <AntiforgeryToken />
+                <input type="hidden" name="ReturnUrl" value="@_currentUrl" />
+                <button type="submit" class="sidebar-logout">
+                    <i class="bi bi-box-arrow-left"></i>Wyloguj
+                </button>
+            </form>
+        </Authorized>
+        <NotAuthorized>
+            <NavLink class="sidebar-link" href="Account/Login">
+                <i class="bi bi-box-arrow-in-right"></i><span>Zaloguj</span>
+            </NavLink>
+        </NotAuthorized>
+    </AuthorizeView>
+</div>
+
+@code {
+    private string? _currentUrl;
+    private string? _logoPath;
+    private string _companyName = "PTScheduler";
+    private string _initials = "?";
+
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthState { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _currentUrl = NavigationManager.ToBaseRelativePath(NavigationManager.Uri);
+        NavigationManager.LocationChanged += OnLocationChanged;
+
+        try
+        {
+            var branding = await BrandingService.GetAsync();
+            _logoPath = branding.LogoPath;
+            _companyName = branding.CompanyName ?? "PTScheduler";
+        }
+        catch { }
+
+        if (AuthState is not null)
+        {
+            var auth = await AuthState;
+            var name = auth.User.Identity?.Name ?? "";
+            var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            _initials = parts.Length >= 2
+                ? $"{parts[0][0]}{parts[^1][0]}".ToUpper()
+                : name.Length > 0 ? name[0].ToString().ToUpper() : "?";
+        }
+    }
+
+    private void OnLocationChanged(object? sender, LocationChangedEventArgs e)
+    {
+        _currentUrl = NavigationManager.ToBaseRelativePath(e.Location);
+        StateHasChanged();
+    }
+
+    public void Dispose() => NavigationManager.LocationChanged -= OnLocationChanged;
+}

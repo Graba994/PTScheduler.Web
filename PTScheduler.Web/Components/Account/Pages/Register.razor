@@ -1,0 +1,208 @@
+@page "/Account/Register"
+
+@using System.ComponentModel.DataAnnotations
+@using System.Text
+@using System.Text.Encodings.Web
+@using Microsoft.AspNetCore.Identity
+@using Microsoft.AspNetCore.WebUtilities
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Entities
+
+@inject UserManager<ApplicationUser> UserManager
+@inject IUserStore<ApplicationUser> UserStore
+@inject SignInManager<ApplicationUser> SignInManager
+@inject ILogger<Register> Logger
+@inject NavigationManager NavigationManager
+@inject IdentityRedirectManager RedirectManager
+@inject PTScheduler.Infrastructure.Data.ApplicationDbContext DbContext
+
+<PageTitle>Rejestracja</PageTitle>
+
+<div class="row justify-content-center mt-4">
+    <div class="col-12 col-md-6 col-lg-5">
+        <div class="card shadow-sm">
+            <div class="card-body p-4">
+                <div class="text-center mb-4">
+                    <i class="bi bi-calendar-heart fs-1 text-primary"></i>
+                    <h4 class="mt-2 mb-0">Dołącz do PTScheduler</h4>
+                    <p class="text-muted small">Załóż konto klienta</p>
+                </div>
+
+                <StatusMessage Message="@Message" />
+
+                <EditForm Model="Input" method="post" OnValidSubmit="RegisterUser" FormName="register">
+                    <DataAnnotationsValidator />
+                    <ValidationSummary class="text-danger small" role="alert" />
+
+                    <div class="mb-3">
+                        <label class="form-label">Imię</label>
+                        <input class="form-control" @bind="Input.FirstName" placeholder="Jan" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Nazwisko</label>
+                        <input class="form-control" @bind="Input.LastName" placeholder="Kowalski" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Email <span class="text-danger">*</span></label>
+                        <InputText @bind-Value="Input.Email" id="Input.Email" class="form-control"
+                                   autocomplete="username" placeholder="jan@example.com" />
+                        <ValidationMessage For="() => Input.Email" class="text-danger small" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Hasło <span class="text-danger">*</span></label>
+                        <InputText type="password" @bind-Value="Input.Password" id="Input.Password"
+                                   class="form-control" autocomplete="new-password" />
+                        <ValidationMessage For="() => Input.Password" class="text-danger small" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Powtórz hasło <span class="text-danger">*</span></label>
+                        <InputText type="password" @bind-Value="Input.ConfirmPassword" id="Input.ConfirmPassword"
+                                   class="form-control" autocomplete="new-password" />
+                        <ValidationMessage For="() => Input.ConfirmPassword" class="text-danger small" />
+                    </div>
+
+                    <!-- Trainer assignment -->
+                    @if (trainers.Count == 1)
+                    {
+                        <div class="alert alert-info py-2 small mb-3">
+                            <i class="bi bi-person-check me-1"></i>
+                            Twoim trenerem będzie <strong>@trainers[0].Name</strong>
+                        </div>
+                    }
+                    else if (trainers.Count > 1)
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">Wybierz trenera <span class="text-danger">*</span></label>
+                            <select class="form-select" @bind="selectedTrainerId">
+                                <option value="">— wybierz trenera —</option>
+                                @foreach (var t in trainers)
+                                {
+                                    <option value="@t.Id">@t.Name</option>
+                                }
+                            </select>
+                        </div>
+                    }
+
+                    <button type="submit" class="btn btn-primary w-100 mt-2">
+                        <i class="bi bi-person-plus-fill me-1"></i>Zarejestruj się
+                    </button>
+                </EditForm>
+
+                <hr class="my-3" />
+                <div class="text-center small text-muted">
+                    Masz już konto? <a href="/Account/Login">Zaloguj się</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private IEnumerable<IdentityError>? identityErrors;
+    private List<TrainerItem> trainers = [];
+    private string selectedTrainerId = string.Empty;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    [SupplyParameterFromQuery]
+    private string? ReturnUrl { get; set; }
+
+    private string? Message => identityErrors is null ? null : $"Błąd: {string.Join(", ", identityErrors.Select(e => e.Description))}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+        var trainerUsers = await UserManager.GetUsersInRoleAsync(Roles.Trainer);
+        var subordinateUsers = await UserManager.GetUsersInRoleAsync(Roles.Subordinate);
+        trainers = trainerUsers.Concat(subordinateUsers)
+            .Select(u => new TrainerItem
+            {
+                Id = u.Id,
+                Name = $"{u.FirstName} {u.LastName}".Trim() is { Length: > 0 } n ? n : u.Email ?? u.Id
+            })
+            .DistinctBy(t => t.Id)
+            .OrderBy(t => t.Name)
+            .ToList();
+
+        if (trainers.Count == 1)
+            selectedTrainerId = trainers[0].Id;
+    }
+
+    public async Task RegisterUser(EditContext editContext)
+    {
+        if (trainers.Count > 1 && string.IsNullOrEmpty(selectedTrainerId))
+        {
+            identityErrors = [new IdentityError { Description = "Wybierz trenera." }];
+            return;
+        }
+
+        var user = new ApplicationUser
+        {
+            FirstName = Input.FirstName,
+            LastName = Input.LastName,
+            EmailConfirmed = true
+        };
+
+        await UserStore.SetUserNameAsync(user, Input.Email, CancellationToken.None);
+        var emailStore = GetEmailStore();
+        await emailStore.SetEmailAsync(user, Input.Email, CancellationToken.None);
+        var result = await UserManager.CreateAsync(user, Input.Password);
+
+        if (!result.Succeeded)
+        {
+            identityErrors = result.Errors;
+            return;
+        }
+
+        await UserManager.AddToRoleAsync(user, Roles.Client);
+
+        var trainerId = trainers.Count == 1 ? trainers[0].Id : selectedTrainerId;
+        DbContext.Clients.Add(new Client
+        {
+            ApplicationUserId = user.Id,
+            FirstName = Input.FirstName,
+            LastName = Input.LastName,
+            TrainerUserId = string.IsNullOrEmpty(trainerId) ? null : trainerId,
+            Status = PTScheduler.Domain.Enums.ClientStatus.Pending,
+            CreatedAt = DateTime.UtcNow
+        });
+        await DbContext.SaveChangesAsync();
+
+        Logger.LogInformation("New client self-registered: {Email}", Input.Email);
+        await SignInManager.SignInAsync(user, isPersistent: false);
+        RedirectManager.RedirectTo(ReturnUrl ?? "/my");
+    }
+
+    private IUserEmailStore<ApplicationUser> GetEmailStore()
+    {
+        if (!UserManager.SupportsUserEmail)
+            throw new NotSupportedException("The default UI requires a user store with email support.");
+        return (IUserEmailStore<ApplicationUser>)UserStore;
+    }
+
+    private sealed class TrainerItem
+    {
+        public string Id { get; set; } = string.Empty;
+        public string Name { get; set; } = string.Empty;
+    }
+
+    private sealed class InputModel
+    {
+        public string FirstName { get; set; } = string.Empty;
+        public string LastName { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Email jest wymagany.")]
+        [EmailAddress(ErrorMessage = "Nieprawidłowy adres email.")]
+        public string Email { get; set; } = "";
+
+        [Required(ErrorMessage = "Hasło jest wymagane.")]
+        [StringLength(100, ErrorMessage = "Hasło musi mieć co najmniej {2} znaków.", MinimumLength = 6)]
+        [DataType(DataType.Password)]
+        public string Password { get; set; } = "";
+
+        [DataType(DataType.Password)]
+        [Compare("Password", ErrorMessage = "Hasła nie są identyczne.")]
+        public string ConfirmPassword { get; set; } = "";
+    }
+}

@@ -1,0 +1,315 @@
+@page "/calendar"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@implements IAsyncDisposable
+@inject IJSRuntime JS
+@inject ISessionService SessionService
+@inject AuthenticationStateProvider AuthState
+@inject ILogger<Calendar> Logger
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Enums
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Kalendarz</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3">
+    <h4 class="mb-0"><i class="bi bi-calendar3 me-2"></i>Kalendarz</h4>
+    <button class="btn btn-primary btn-sm" @onclick="() => OpenBookingModal(DateTime.Now)">
+        <i class="bi bi-plus-lg me-1"></i>Nowa rezerwacja
+    </button>
+</div>
+
+<div @ref="calendarEl" id="main-calendar"></div>
+
+<!-- Booking Modal -->
+@if (showModal)
+{
+    <div class="modal-backdrop fade show"></div>
+    <div class="modal d-block" tabindex="-1">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-@(editSession is null ? "plus-circle" : "pencil") me-2"></i>
+                        @(editSession is null ? "Nowa rezerwacja" : "Edycja rezerwacji")
+                    </h5>
+                    <button class="btn-close" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(modalError))
+                    {
+                        <div class="alert alert-danger py-2 small">@modalError</div>
+                    }
+
+                    @if (editSession is not null)
+                    {
+                        <!-- View/Edit mode -->
+                        <dl class="row mb-3">
+                            <dt class="col-5">Klient</dt>
+                            <dd class="col-7">@editSession.ClientName</dd>
+                            <dt class="col-5">Typ sesji</dt>
+                            <dd class="col-7">@editSession.SessionTypeName</dd>
+                            <dt class="col-5">Data i godzina</dt>
+                            <dd class="col-7">@editSession.StartTime.ToString("dd.MM.yyyy HH:mm")</dd>
+                            <dt class="col-5">Czas trwania</dt>
+                            <dd class="col-7">@editSession.DurationMinutes min</dd>
+                            <dt class="col-5">Status</dt>
+                            <dd class="col-7"><span class="badge @StatusBadge(editSession.Status)">@editSession.Status</span></dd>
+                            @if (!string.IsNullOrEmpty(editSession.Notes))
+                            {
+                                <dt class="col-5">Notatki</dt>
+                                <dd class="col-7">@editSession.Notes</dd>
+                            }
+                        </dl>
+                        @if (editSession.Status == SessionStatus.Scheduled)
+                        {
+                            <div class="d-flex gap-2 flex-wrap">
+                                <button class="btn btn-success btn-sm" @onclick="() => ChangeStatus(SessionStatus.Completed)">
+                                    <i class="bi bi-check-circle me-1"></i>Zakończ
+                                </button>
+                                <button class="btn btn-warning btn-sm" @onclick="() => ChangeStatus(SessionStatus.NoShow)">
+                                    <i class="bi bi-person-x me-1"></i>No-Show
+                                </button>
+                                <button class="btn btn-outline-danger btn-sm" @onclick="ShowCancelForm">
+                                    <i class="bi bi-x-circle me-1"></i>Anuluj
+                                </button>
+                            </div>
+                            @if (showCancelForm)
+                            {
+                                <div class="mt-3">
+                                    <label class="form-label small">Powód anulowania</label>
+                                    <input class="form-control form-control-sm" @bind="cancelReason" placeholder="Opcjonalny powód..." />
+                                    <button class="btn btn-danger btn-sm mt-2" @onclick="ConfirmCancel" disabled="@isBusy">
+                                        Potwierdź anulowanie
+                                    </button>
+                                </div>
+                            }
+                        }
+                    }
+                    else
+                    {
+                        <!-- Create mode -->
+                        <div class="mb-3">
+                            <label class="form-label">Klient <span class="text-danger">*</span></label>
+                            <select class="form-select" @bind="newSession.ClientId">
+                                <option value="0">— wybierz klienta —</option>
+                                @foreach (var c in clients)
+                                {
+                                    <option value="@c.Id">@c.FullName (@c.Email)</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Typ sesji <span class="text-danger">*</span></label>
+                            <select class="form-select" @bind="newSession.SessionTypeId">
+                                <option value="0">— wybierz typ —</option>
+                                @foreach (var t in sessionTypes)
+                                {
+                                    <option value="@t.Id">@t.Name (@t.DurationMinutes min)</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Data i godzina <span class="text-danger">*</span></label>
+                            <input type="datetime-local" class="form-control"
+                                   value="@newSession.StartTime.ToString("yyyy-MM-ddTHH:mm")"
+                                   @onchange="e => newSession.StartTime = DateTime.Parse(e.Value!.ToString()!)" />
+                        </div>
+                        <div class="mb-3">
+                            <label class="form-label">Notatki</label>
+                            <textarea class="form-control" rows="2" @bind="newSession.Notes" placeholder="Opcjonalne..."></textarea>
+                        </div>
+                    }
+                </div>
+                @if (editSession is null)
+                {
+                    <div class="modal-footer">
+                        <button class="btn btn-secondary" @onclick="CloseModal">Anuluj</button>
+                        <button class="btn btn-primary" @onclick="SaveBooking" disabled="@isBusy">
+                            @if (isBusy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                            Zapisz rezerwację
+                        </button>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private ElementReference calendarEl;
+    private IJSObjectReference? _module;
+    private DotNetObjectReference<Calendar>? _ref;
+
+    private bool showModal;
+    private bool isBusy;
+    private string modalError = string.Empty;
+    private SessionDto? editSession;
+    private bool showCancelForm;
+    private string cancelReason = string.Empty;
+
+    private CreateSessionDto newSession = new();
+    private List<SessionTypeDto> sessionTypes = [];
+    private List<ClientSummaryDto> clients = [];
+    private string currentUserId = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        currentUserId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        sessionTypes = await SessionService.GetSessionTypesAsync();
+        clients = await SessionService.GetClientsAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _ref = DotNetObjectReference.Create(this);
+        _module = await JS.InvokeAsync<IJSObjectReference>("import", "/js/calendar-interop.js");
+        await _module.InvokeVoidAsync("initCalendar", _ref, calendarEl);
+    }
+
+    [JSInvokable]
+    public async Task<object[]> GetEvents(string start, string end)
+    {
+        try
+        {
+            var from = DateTime.Parse(start);
+            var to = DateTime.Parse(end);
+            var sessions = await SessionService.GetSessionsAsync(from, to, currentUserId);
+            return sessions.Select(s => (object)new
+            {
+                id = s.Id.ToString(),
+                title = $"{s.ClientName} — {s.SessionTypeName}",
+                start = s.StartTime.ToString("o"),
+                end = s.EndTime.ToString("o"),
+                color = StatusColor(s.Status),
+                extendedProps = new { status = s.Status.ToString(), trainerName = s.TrainerName }
+            }).ToArray();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "GetEvents failed");
+            return [];
+        }
+    }
+
+    [JSInvokable]
+    public void OnDateClick(string dateStr)
+    {
+        var dt = DateTime.Parse(dateStr);
+        OpenBookingModal(dt.Hour == 0 ? dt.AddHours(9) : dt);
+    }
+
+    [JSInvokable]
+    public async Task OnEventClick(int sessionId)
+    {
+        editSession = await SessionService.GetSessionAsync(sessionId);
+        showCancelForm = false;
+        cancelReason = string.Empty;
+        modalError = string.Empty;
+        showModal = true;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void OpenBookingModal(DateTime dt)
+    {
+        editSession = null;
+        showCancelForm = false;
+        modalError = string.Empty;
+        newSession = new CreateSessionDto
+        {
+            StartTime = dt,
+            TrainerUserId = currentUserId
+        };
+        showModal = true;
+    }
+
+    private void CloseModal()
+    {
+        showModal = false;
+        editSession = null;
+        showCancelForm = false;
+        modalError = string.Empty;
+    }
+
+    private async Task SaveBooking()
+    {
+        if (newSession.ClientId == 0) { modalError = "Wybierz klienta."; return; }
+        if (newSession.SessionTypeId == 0) { modalError = "Wybierz typ sesji."; return; }
+
+        isBusy = true;
+        modalError = string.Empty;
+        try
+        {
+            await SessionService.CreateSessionAsync(newSession);
+            CloseModal();
+            if (_module is not null)
+                await _module.InvokeVoidAsync("refetchEvents");
+        }
+        catch (Exception ex)
+        {
+            modalError = ex.Message;
+        }
+        finally { isBusy = false; }
+    }
+
+    private async Task ChangeStatus(SessionStatus status)
+    {
+        if (editSession is null) return;
+        isBusy = true;
+        try
+        {
+            await SessionService.UpdateStatusAsync(editSession.Id, status);
+            CloseModal();
+            if (_module is not null) await _module.InvokeVoidAsync("refetchEvents");
+        }
+        catch (Exception ex) { modalError = ex.Message; }
+        finally { isBusy = false; }
+    }
+
+    private void ShowCancelForm() => showCancelForm = true;
+
+    private async Task ConfirmCancel()
+    {
+        if (editSession is null) return;
+        isBusy = true;
+        try
+        {
+            await SessionService.UpdateStatusAsync(editSession.Id, SessionStatus.Cancelled, cancelReason);
+            CloseModal();
+            if (_module is not null) await _module.InvokeVoidAsync("refetchEvents");
+        }
+        catch (Exception ex) { modalError = ex.Message; }
+        finally { isBusy = false; }
+    }
+
+    private static string StatusColor(SessionStatus s) => s switch
+    {
+        SessionStatus.Scheduled  => "#e91e8c",
+        SessionStatus.Completed  => "#28a745",
+        SessionStatus.Cancelled  => "#dc3545",
+        SessionStatus.NoShow     => "#fd7e14",
+        _                        => "#6c757d"
+    };
+
+    private static string StatusBadge(SessionStatus s) => s switch
+    {
+        SessionStatus.Scheduled  => "bg-primary",
+        SessionStatus.Completed  => "bg-success",
+        SessionStatus.Cancelled  => "bg-danger",
+        SessionStatus.NoShow     => "bg-warning text-dark",
+        _                        => "bg-secondary"
+    };
+
+    public async ValueTask DisposeAsync()
+    {
+        if (_module is not null)
+        {
+            await _module.InvokeVoidAsync("destroyCalendar");
+            await _module.DisposeAsync();
+        }
+        _ref?.Dispose();
+    }
+}

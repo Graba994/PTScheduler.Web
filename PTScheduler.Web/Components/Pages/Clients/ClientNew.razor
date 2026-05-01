@@ -1,0 +1,101 @@
+@page "/clients/new"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@inject IClientService ClientService
+@inject NavigationManager Nav
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Nowy klient</PageTitle>
+
+<nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/clients">Klienci</a></li>
+        <li class="breadcrumb-item active">Nowy klient</li>
+    </ol>
+</nav>
+
+<div class="row justify-content-center">
+    <div class="col-12 col-md-7 col-lg-5">
+        <div class="card shadow-sm">
+            <div class="card-body p-4">
+                <h5 class="card-title mb-4">
+                    <i class="bi bi-person-plus-fill me-2 text-primary"></i>Dodaj nowego klienta
+                </h5>
+
+                @if (!string.IsNullOrEmpty(error))
+                {
+                    <div class="alert alert-danger py-2">@error</div>
+                }
+
+                <div class="row g-3">
+                    <div class="col-6">
+                        <label class="form-label">Imię <span class="text-danger">*</span></label>
+                        <input class="form-control" @bind="dto.FirstName" placeholder="Jan" />
+                    </div>
+                    <div class="col-6">
+                        <label class="form-label">Nazwisko <span class="text-danger">*</span></label>
+                        <input class="form-control" @bind="dto.LastName" placeholder="Kowalski" />
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Email <span class="text-danger">*</span></label>
+                        <input type="email" class="form-control" @bind="dto.Email" placeholder="jan@example.com" />
+                        <div class="form-text">Klient użyje tego emaila do logowania.</div>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Telefon</label>
+                        <input class="form-control" @bind="dto.Phone" placeholder="+48 123 456 789" />
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Data urodzenia</label>
+                        <input type="date" class="form-control"
+                               value="@(dto.DateOfBirth?.ToString("yyyy-MM-dd") ?? "")"
+                               @onchange="e => dto.DateOfBirth = string.IsNullOrEmpty(e.Value?.ToString()) ? null : DateOnly.Parse(e.Value!.ToString()!)" />
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label">Cel treningowy</label>
+                        <textarea class="form-control" rows="2" @bind="dto.TrainingGoal"
+                                  placeholder="np. Redukcja wagi, budowa masy, poprawa kondycji..."></textarea>
+                    </div>
+                </div>
+
+                <div class="d-flex gap-2 mt-4">
+                    <button class="btn btn-primary flex-grow-1" @onclick="Submit" disabled="@isBusy">
+                        @if (isBusy)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Dodaj klienta
+                    </button>
+                    <a href="/clients" class="btn btn-outline-secondary">Anuluj</a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private CreateClientDto dto = new();
+    private bool isBusy;
+    private string error = string.Empty;
+
+    private async Task Submit()
+    {
+        if (string.IsNullOrWhiteSpace(dto.Email)) { error = "Email jest wymagany."; return; }
+        if (string.IsNullOrWhiteSpace(dto.FirstName) && string.IsNullOrWhiteSpace(dto.LastName))
+        { error = "Podaj imię lub nazwisko."; return; }
+
+        isBusy = true;
+        error = string.Empty;
+        try
+        {
+            var client = await ClientService.CreateClientAsync(dto);
+            Nav.NavigateTo($"/clients/{client.Id}");
+        }
+        catch (Exception ex)
+        {
+            error = ex.Message;
+            isBusy = false;
+        }
+    }
+}

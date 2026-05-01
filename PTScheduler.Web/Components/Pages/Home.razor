@@ -1,0 +1,195 @@
+@page "/"
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject IClientService ClientService
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Dashboard</PageTitle>
+
+<!-- ADMIN -->
+<AuthorizeView Roles="@Roles.Admin">
+    <Authorized>
+        @if (_previewRole is null)
+        {
+            <!-- Admin overview -->
+            <div class="page-header">
+                <h4 class="page-title"><i class="bi bi-speedometer2 me-2" style="color:var(--c-primary)"></i>Dashboard admina</h4>
+                <div class="d-flex gap-2 flex-wrap">
+                    <button class="btn btn-sm btn-outline-primary" @onclick='() => SetPreview("trainer")'>
+                        <i class="bi bi-person-badge me-1"></i>Podgląd: trener
+                    </button>
+                    <button class="btn btn-sm btn-outline-primary" @onclick='() => SetPreview("client")'>
+                        <i class="bi bi-person me-1"></i>Podgląd: klient
+                    </button>
+                </div>
+            </div>
+
+            <div class="row g-3 mb-4">
+                <div class="col-6 col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-icon"><i class="bi bi-people-fill"></i></div>
+                        <div>
+                            <div class="stat-value">@_allClients.Count(c => c.Status == ClientStatus.Active)</div>
+                            <div class="stat-label">Aktywnych klientów</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background:#FEF3C7;color:#D97706"><i class="bi bi-hourglass-split"></i></div>
+                        <div>
+                            <div class="stat-value">@_allClients.Count(c => c.Status == ClientStatus.Pending)</div>
+                            <div class="stat-label">Oczekujących</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="stat-card">
+                        <div class="stat-icon" style="background:#F0FDF4;color:#16A34A"><i class="bi bi-person-badge-fill"></i></div>
+                        <div>
+                            <div class="stat-value">@_allClients.Count</div>
+                            <div class="stat-label">Wszystkich klientów</div>
+                        </div>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <a href="/admin/branding" class="stat-card text-decoration-none d-flex">
+                        <div class="stat-icon"><i class="bi bi-palette-fill"></i></div>
+                        <div>
+                            <div class="stat-label">Wygląd aplikacji</div>
+                            <div class="fw-semibold small" style="color:var(--c-primary)">Zmień motyw →</div>
+                        </div>
+                    </a>
+                </div>
+            </div>
+
+            <div class="row g-3">
+                <div class="col-12 col-md-4">
+                    <a href="/clients" class="card text-decoration-none d-block">
+                        <div class="card-body d-flex align-items-center gap-3">
+                            <div class="stat-icon"><i class="bi bi-people-fill"></i></div>
+                            <div><div class="fw-semibold">Klienci</div><div class="text-muted small">Lista i profile</div></div>
+                            <i class="bi bi-arrow-right ms-auto text-muted"></i>
+                        </div>
+                    </a>
+                </div>
+                <div class="col-12 col-md-4">
+                    <a href="/admin/users" class="card text-decoration-none d-block">
+                        <div class="card-body d-flex align-items-center gap-3">
+                            <div class="stat-icon"><i class="bi bi-shield-person-fill"></i></div>
+                            <div><div class="fw-semibold">Użytkownicy</div><div class="text-muted small">Trenerzy i role</div></div>
+                            <i class="bi bi-arrow-right ms-auto text-muted"></i>
+                        </div>
+                    </a>
+                </div>
+                <div class="col-12 col-md-4">
+                    <a href="/admin/backup" class="card text-decoration-none d-block">
+                        <div class="card-body d-flex align-items-center gap-3">
+                            <div class="stat-icon"><i class="bi bi-database"></i></div>
+                            <div><div class="fw-semibold">Backup / Reset</div><div class="text-muted small">Dane i backup</div></div>
+                            <i class="bi bi-arrow-right ms-auto text-muted"></i>
+                        </div>
+                    </a>
+                </div>
+            </div>
+        }
+        else
+        {
+            <!-- Preview mode banner -->
+            <div class="alert d-flex align-items-center justify-content-between mb-3 py-2 px-3"
+                 style="background:var(--c-primary-light);border:1px solid var(--c-primary);color:var(--c-primary);border-radius:8px">
+                <span><i class="bi bi-eye me-2"></i>Podgląd jako: <strong>@(_previewRole == "trainer" ? "Trener" : "Klient")</strong></span>
+                <button class="btn btn-sm" style="color:var(--c-primary);border-color:var(--c-primary);border:1px solid" @onclick="ExitPreview">
+                    <i class="bi bi-x-lg me-1"></i>Wyjdź
+                </button>
+            </div>
+
+            @if (_previewRole == "trainer")
+            {
+                <TrainerDashboard TrainerUserId="@_adminUserId" />
+            }
+            else
+            {
+                @if (_previewClientId is null)
+                {
+                    <div class="card">
+                        <div class="card-header"><i class="bi bi-person me-2"></i>Wybierz klienta do podglądu</div>
+                        <div class="card-body">
+                            <div class="row g-2">
+                                @foreach (var c in _allClients.Where(c => c.Status == ClientStatus.Active).Take(24))
+                                {
+                                    <div class="col-12 col-sm-6 col-md-4">
+                                        <button class="btn btn-outline-primary btn-sm w-100 text-start d-flex align-items-center gap-2"
+                                                @onclick="() => PickClient(c.Id)">
+                                            <div class="avatar-circle flex-shrink-0" style="width:24px;height:24px;font-size:.65rem">@c.Initials</div>
+                                            <span class="text-truncate">@c.FullName</span>
+                                        </button>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    <ClientDashboard ClientIdOverride="@_previewClientId" />
+                }
+            }
+        }
+    </Authorized>
+</AuthorizeView>
+
+<!-- TRAINER / SUBORDINATE -->
+<AuthorizeView Roles="@($"{Roles.Trainer},{Roles.Subordinate}")">
+    <Authorized>
+        <TrainerDashboard TrainerUserId="@_trainerUserId" />
+    </Authorized>
+</AuthorizeView>
+
+<!-- CLIENT -->
+<AuthorizeView Roles="@Roles.Client">
+    <Authorized>
+        <ClientDashboard UserId="@_clientUserId" />
+    </Authorized>
+</AuthorizeView>
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
+
+    private List<ClientDto> _allClients = [];
+    private string? _adminUserId;
+    private string? _trainerUserId;
+    private string? _clientUserId;
+
+    private string? _previewRole;
+    private int? _previewClientId;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateTask;
+        var userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+
+        if (auth.User.IsInRole(Roles.Admin))
+        {
+            _adminUserId = userId;
+            _allClients = await ClientService.GetClientsAsync();
+        }
+        else if (auth.User.IsInRole(Roles.Trainer) || auth.User.IsInRole(Roles.Subordinate))
+        {
+            _trainerUserId = userId;
+        }
+        else if (auth.User.IsInRole(Roles.Client))
+        {
+            _clientUserId = userId;
+        }
+    }
+
+    private void SetPreview(string role) { _previewRole = role; _previewClientId = null; }
+    private void ExitPreview()          { _previewRole = null;  _previewClientId = null; }
+    private void PickClient(int id)     { _previewClientId = id; }
+}

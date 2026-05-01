@@ -1,0 +1,258 @@
+@page "/trainer/intro-config"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Authorization
+@attribute [Authorize(Roles = "Admin,Trainer")]
+@inject IIntroSessionService IntroService
+@inject AuthenticationStateProvider AuthStateProvider
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Konfiguracja sesji wstępnej</PageTitle>
+
+<div class="container-fluid px-4">
+    <div class="d-flex align-items-center gap-2 mb-4">
+        <i class="bi bi-gear-fill fs-4 text-primary"></i>
+        <h2 class="mb-0">Sesja wstępna — konfiguracja</h2>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-7">
+            <div class="card shadow-sm">
+                <div class="card-header d-flex align-items-center gap-2">
+                    <i class="bi bi-sliders"></i>
+                    <span class="fw-semibold">Ustawienia</span>
+                </div>
+                <div class="card-body">
+                    @if (successMsg is not null)
+                    {
+                        <div class="alert alert-success d-flex align-items-center gap-2 py-2" role="alert">
+                            <i class="bi bi-check-circle-fill"></i>
+                            @successMsg
+                        </div>
+                    }
+                    @if (errorMsg is not null)
+                    {
+                        <div class="alert alert-danger d-flex align-items-center gap-2 py-2" role="alert">
+                            <i class="bi bi-exclamation-triangle-fill"></i>
+                            @errorMsg
+                        </div>
+                    }
+
+                    <EditForm Model="dto" OnValidSubmit="HandleSubmit">
+                        <DataAnnotationsValidator />
+
+                        <div class="mb-4">
+                            <div class="form-check form-switch">
+                                <InputCheckbox class="form-check-input" id="isActive" @bind-Value="dto.IsActive" />
+                                <label class="form-check-label fw-semibold" for="isActive">
+                                    Aktywna — nowi klienci mogą zapisać się na sesję wstępną
+                                </label>
+                            </div>
+                            <div class="form-text">Wyłącz, aby tymczasowo zablokować możliwość rejestracji.</div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label fw-semibold" for="duration">
+                                <i class="bi bi-clock me-1"></i>Czas trwania (minuty)
+                            </label>
+                            <InputNumber class="form-control" id="duration" @bind-Value="dto.DurationMinutes"
+                                         min="15" max="180" step="15" style="max-width: 140px;" />
+                            <div class="form-text">Od 15 do 180 minut, co 15 minut.</div>
+                        </div>
+
+                        <hr />
+
+                        <div class="mb-3">
+                            <div class="form-check">
+                                <InputCheckbox class="form-check-input" id="isFree" @bind-Value="dto.IsFree" />
+                                <label class="form-check-label fw-semibold" for="isFree">
+                                    Sesja bezpłatna
+                                </label>
+                            </div>
+                        </div>
+
+                        @if (!dto.IsFree)
+                        {
+                            <div class="mb-3">
+                                <label class="form-label" for="price">
+                                    <i class="bi bi-currency-dollar me-1"></i>Cena (PLN)
+                                </label>
+                                <div class="input-group" style="max-width: 200px;">
+                                    <InputNumber class="form-control" id="price" @bind-Value="dto.Price" min="0" step="0.01" />
+                                    <span class="input-group-text">zł</span>
+                                </div>
+                            </div>
+                        }
+
+                        <div class="mb-3">
+                            <label class="form-label" for="promoPrice">
+                                <i class="bi bi-tag me-1"></i>Cena promocyjna (PLN) <span class="text-muted fw-normal small">(opcjonalnie)</span>
+                            </label>
+                            <div class="input-group" style="max-width: 200px;">
+                                <InputNumber class="form-control" id="promoPrice" @bind-Value="dto.PromoPrice" min="0" step="0.01" />
+                                <span class="input-group-text">zł</span>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label" for="promoValidUntil">
+                                <i class="bi bi-calendar-event me-1"></i>Promocja ważna do <span class="text-muted fw-normal small">(opcjonalnie)</span>
+                            </label>
+                            <InputDate class="form-control" id="promoValidUntil" @bind-Value="dto.PromoValidUntil" style="max-width: 200px;" />
+                        </div>
+
+                        <hr />
+
+                        <div class="mb-4">
+                            <label class="form-label" for="description">
+                                <i class="bi bi-card-text me-1"></i>Opis dla klienta <span class="text-muted fw-normal small">(opcjonalnie)</span>
+                            </label>
+                            <InputTextArea class="form-control" id="description" @bind-Value="dto.Description"
+                                           rows="4" placeholder="Opisz, czego klient może się spodziewać na pierwszej sesji..." />
+                        </div>
+
+                        <button type="submit" class="btn btn-primary" disabled="@isBusy">
+                            @if (isBusy)
+                            {
+                                <span class="spinner-border spinner-border-sm me-2" role="status"></span>
+                            }
+                            else
+                            {
+                                <i class="bi bi-floppy me-2"></i>
+                            }
+                            Zapisz ustawienia
+                        </button>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="card shadow-sm border-info">
+                <div class="card-header d-flex align-items-center gap-2 bg-info bg-opacity-10 border-info">
+                    <i class="bi bi-eye text-info"></i>
+                    <span class="fw-semibold text-info">Podgląd — co widzi nowy klient</span>
+                </div>
+                <div class="card-body">
+                    <div class="d-flex align-items-center gap-2 mb-3">
+                        @if (dto.IsActive)
+                        {
+                            <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Dostępna</span>
+                        }
+                        else
+                        {
+                            <span class="badge bg-secondary"><i class="bi bi-x-circle me-1"></i>Niedostępna</span>
+                        }
+                    </div>
+
+                    <ul class="list-group list-group-flush">
+                        <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+                            <span><i class="bi bi-clock me-2 text-muted"></i>Czas trwania</span>
+                            <span class="fw-semibold">@dto.DurationMinutes min</span>
+                        </li>
+                        <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+                            <span><i class="bi bi-cash-coin me-2 text-muted"></i>Cena</span>
+                            <span class="fw-semibold">
+                                @if (dto.IsFree)
+                                {
+                                    <span class="text-success">Bezpłatnie</span>
+                                }
+                                else if (dto.PromoPrice.HasValue && dto.PromoPrice > 0 && dto.PromoValidUntil.HasValue && dto.PromoValidUntil > DateTime.Today)
+                                {
+                                    <span>
+                                        <span class="text-decoration-line-through text-muted me-1">@dto.Price.ToString("0.00") zł</span>
+                                        <span class="text-danger">@dto.PromoPrice.Value.ToString("0.00") zł</span>
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span>@dto.Price.ToString("0.00") zł</span>
+                                }
+                            </span>
+                        </li>
+                        @if (dto.PromoValidUntil.HasValue && dto.PromoPrice.HasValue && !dto.IsFree)
+                        {
+                            <li class="list-group-item d-flex justify-content-between align-items-center px-0">
+                                <span><i class="bi bi-calendar-check me-2 text-muted"></i>Promocja do</span>
+                                <span class="fw-semibold @(dto.PromoValidUntil > DateTime.Today ? "text-success" : "text-danger")">
+                                    @dto.PromoValidUntil.Value.ToString("dd.MM.yyyy")
+                                    @if (dto.PromoValidUntil <= DateTime.Today)
+                                    {
+                                        <span class="badge bg-danger ms-1">wygasła</span>
+                                    }
+                                </span>
+                            </li>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(dto.Description))
+                        {
+                            <li class="list-group-item px-0">
+                                <div class="text-muted small mb-1"><i class="bi bi-card-text me-1"></i>Opis</div>
+                                <div class="fst-italic">@dto.Description</div>
+                            </li>
+                        }
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private SaveIntroConfigDto dto = new();
+    private bool isBusy;
+    private string? successMsg;
+    private string? errorMsg;
+    private string userId = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        userId = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+
+        var config = await IntroService.GetConfigAsync(userId);
+        if (config is not null)
+        {
+            dto = new SaveIntroConfigDto
+            {
+                IsActive = config.IsActive,
+                DurationMinutes = config.DurationMinutes,
+                IsFree = config.IsFree,
+                Price = config.Price,
+                PromoPrice = config.PromoPrice,
+                PromoValidUntil = config.PromoValidUntil,
+                Description = config.Description
+            };
+        }
+        else
+        {
+            dto = new SaveIntroConfigDto
+            {
+                IsActive = true,
+                DurationMinutes = 60,
+                IsFree = true
+            };
+        }
+    }
+
+    private async Task HandleSubmit()
+    {
+        isBusy = true;
+        successMsg = null;
+        errorMsg = null;
+
+        try
+        {
+            await IntroService.SaveConfigAsync(userId, dto);
+            successMsg = "Ustawienia zostały zapisane.";
+        }
+        catch (Exception ex)
+        {
+            errorMsg = $"Błąd zapisu: {ex.Message}";
+        }
+        finally
+        {
+            isBusy = false;
+        }
+    }
+}

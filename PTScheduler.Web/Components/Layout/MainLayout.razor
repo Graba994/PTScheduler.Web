@@ -1,0 +1,69 @@
+@inherits LayoutComponentBase
+@inject NavigationManager Nav
+@using PTScheduler.Domain.Constants
+
+<div class="app-shell">
+    <aside class="app-sidebar">
+        <NavMenu />
+    </aside>
+
+    <main class="app-main">
+        <div class="app-content">
+            @Body
+        </div>
+    </main>
+</div>
+
+<!-- Mobile bottom nav -->
+<AuthorizeView Roles="Admin,Trainer,Subordinate">
+    <Authorized>
+        <nav class="mobile-bottom-nav">
+            <a href="/" class="mobile-nav-item @IsActive("")">
+                <i class="bi bi-house-fill"></i>
+                <span>Home</span>
+            </a>
+            <a href="/calendar" class="mobile-nav-item @IsActive("calendar")">
+                <i class="bi bi-calendar3"></i>
+                <span>Kalendarz</span>
+            </a>
+            <a href="/clients" class="mobile-nav-item @IsActive("clients")">
+                <i class="bi bi-people-fill"></i>
+                <span>Klienci</span>
+            </a>
+            <a href="/Account/Manage" class="mobile-nav-item @IsActive("Account/Manage")">
+                <i class="bi bi-person-circle"></i>
+                <span>Profil</span>
+            </a>
+        </nav>
+    </Authorized>
+</AuthorizeView>
+<AuthorizeView Roles="Client">
+    <Authorized>
+        <nav class="mobile-bottom-nav">
+            <a href="/my" class="mobile-nav-item @IsActive("my")">
+                <i class="bi bi-calendar-week-fill"></i>
+                <span>Mój grafik</span>
+            </a>
+            <a href="/Account/Manage" class="mobile-nav-item @IsActive("Account/Manage")">
+                <i class="bi bi-person-circle"></i>
+                <span>Profil</span>
+            </a>
+        </nav>
+    </Authorized>
+</AuthorizeView>
+
+<div id="blazor-error-ui" data-nosnippet>
+    Wystąpił nieoczekiwany błąd.
+    <a href="." class="reload">Odśwież</a>
+    <span class="dismiss">✕</span>
+</div>
+
+@code {
+    private string IsActive(string path)
+    {
+        var current = Nav.ToBaseRelativePath(Nav.Uri).TrimStart('/');
+        if (path == "" && current == "") return "active";
+        if (path != "" && current.StartsWith(path, StringComparison.OrdinalIgnoreCase)) return "active";
+        return string.Empty;
+    }
+}

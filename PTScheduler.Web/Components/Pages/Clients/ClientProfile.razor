@@ -1,0 +1,686 @@
+@page "/clients/{Id:int}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@inject IClientService ClientService
+@inject ISessionService SessionService
+@inject ISessionPackageService PackageService
+@inject NavigationManager Nav
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Enums
+@using Microsoft.AspNetCore.Components.Authorization
+@inject AuthenticationStateProvider AuthStateProvider
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>@(client?.FullName ?? "Profil klienta")</PageTitle>
+
+@if (client is null && !notFound)
+{
+    <div class="text-center py-5">
+        <div class="spinner-border text-primary"></div>
+    </div>
+}
+else if (notFound)
+{
+    <div class="alert alert-warning">Klient nie został znaleziony.</div>
+}
+else if (client is not null)
+{
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="/clients">Klienci</a></li>
+            <li class="breadcrumb-item active">@client.FullName</li>
+        </ol>
+    </nav>
+
+    @if (client.Status == ClientStatus.Pending)
+    {
+        <div class="alert alert-warning d-flex align-items-center gap-3 mb-3">
+            <i class="bi bi-hourglass-split fs-4 flex-shrink-0"></i>
+            <div class="flex-grow-1">
+                <strong>Klient oczekuje na zatwierdzenie.</strong>
+                <div class="small">Zarejestrował się samodzielnie. Zatwierdź, aby uzyskał pełny dostęp.</div>
+            </div>
+            <button class="btn btn-warning btn-sm flex-shrink-0" @onclick="ApproveClient" disabled="@isBusy">
+                @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                <i class="bi bi-check-circle me-1"></i>Zatwierdź klienta
+            </button>
+        </div>
+    }
+
+    <div class="row g-4">
+
+        <!-- Left column: profile card + notes -->
+        <div class="col-12 col-lg-4">
+
+            <!-- Profile card -->
+            <div class="card shadow-sm mb-4">
+                <div class="card-body p-4">
+                    <div class="d-flex align-items-center gap-3 mb-4">
+                        <div class="avatar-circle-lg">
+                            @if (!string.IsNullOrEmpty(client.ProfilePictureUrl))
+                            {
+                                <img src="@client.ProfilePictureUrl" class="rounded-circle" width="96" height="96" style="object-fit:cover" alt="@client.FullName" />
+                            }
+                            else
+                            {
+                                <span>@(string.IsNullOrEmpty(client.Initials) ? "?" : client.Initials)</span>
+                            }
+                        </div>
+                        <div>
+                            <h5 class="mb-0">@client.FullName</h5>
+                            <div class="text-muted small">@client.Email</div>
+                            <div class="badge bg-primary-subtle text-primary mt-1">@client.TotalSessions sesji</div>
+                        </div>
+                    </div>
+
+                    @if (!editMode)
+                    {
+                        <dl class="row mb-0 small">
+                            @if (!string.IsNullOrEmpty(client.Phone))
+                            {
+                                <dt class="col-5 text-muted">Telefon</dt>
+                                <dd class="col-7">@client.Phone</dd>
+                            }
+                            @if (client.DateOfBirth.HasValue)
+                            {
+                                <dt class="col-5 text-muted">Data ur.</dt>
+                                <dd class="col-7">@client.DateOfBirth.Value.ToString("dd.MM.yyyy")</dd>
+                            }
+                            @if (!string.IsNullOrEmpty(client.TrainingGoal))
+                            {
+                                <dt class="col-5 text-muted">Cel</dt>
+                                <dd class="col-7">@client.TrainingGoal</dd>
+                            }
+                            <dt class="col-5 text-muted">Klient od</dt>
+                            <dd class="col-7">@client.CreatedAt.ToString("dd.MM.yyyy")</dd>
+                        </dl>
+
+                        <div class="d-flex gap-2 mt-3">
+                            <button class="btn btn-primary btn-sm flex-grow-1" @onclick="OpenBooking">
+                                <i class="bi bi-calendar-plus me-1"></i>Zarezerwuj
+                            </button>
+                            <button class="btn btn-outline-secondary btn-sm flex-grow-1" @onclick="StartEdit">
+                                <i class="bi bi-pencil me-1"></i>Edytuj
+                            </button>
+                        </div>
+                        <div class="d-flex align-items-center justify-content-between mt-3 pt-2 border-top">
+                            <span class="small text-muted">Samodzielna rezerwacja</span>
+                            <div class="form-check form-switch mb-0">
+                                <input class="form-check-input" type="checkbox" role="switch"
+                                       checked="@client.AllowSelfBooking"
+                                       @onchange="ToggleSelfBooking" />
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        @if (!string.IsNullOrEmpty(editError))
+                        {
+                            <div class="alert alert-danger py-2 small">@editError</div>
+                        }
+
+                        <div class="row g-2 mb-3">
+                            <div class="col-6">
+                                <label class="form-label form-label-sm">Imię</label>
+                                <input class="form-control form-control-sm" @bind="editDto.FirstName" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label form-label-sm">Nazwisko</label>
+                                <input class="form-control form-control-sm" @bind="editDto.LastName" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label form-label-sm">Telefon</label>
+                                <input class="form-control form-control-sm" @bind="editDto.Phone" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label form-label-sm">Data urodzenia</label>
+                                <input type="date" class="form-control form-control-sm"
+                                       value="@(editDto.DateOfBirth?.ToString("yyyy-MM-dd") ?? "")"
+                                       @onchange="e => editDto.DateOfBirth = string.IsNullOrEmpty(e.Value?.ToString()) ? null : DateOnly.Parse(e.Value!.ToString()!)" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label form-label-sm">Cel treningowy</label>
+                                <textarea class="form-control form-control-sm" rows="2" @bind="editDto.TrainingGoal"></textarea>
+                            </div>
+                        </div>
+
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-primary btn-sm flex-grow-1" @onclick="SaveEdit" disabled="@isBusy">
+                                @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                Zapisz
+                            </button>
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="CancelEdit">Anuluj</button>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- Trainer notes -->
+            <div class="card shadow-sm">
+                <div class="card-body p-4">
+                    <h6 class="card-title mb-3"><i class="bi bi-journal-text me-2 text-primary"></i>Notatki trenera</h6>
+
+                    <div class="mb-3">
+                        <textarea class="form-control form-control-sm" rows="2" placeholder="Dodaj notatkę..." @bind="newNote"></textarea>
+                        <button class="btn btn-outline-primary btn-sm mt-2 w-100" @onclick="AddNote" disabled="@(string.IsNullOrWhiteSpace(newNote) || isBusy)">
+                            <i class="bi bi-plus-lg me-1"></i>Dodaj notatkę
+                        </button>
+                    </div>
+
+                    @if (notes is null)
+                    {
+                        <div class="text-center"><div class="spinner-border spinner-border-sm text-primary"></div></div>
+                    }
+                    else if (!notes.Any())
+                    {
+                        <p class="text-muted small text-center mb-0">Brak notatek.</p>
+                    }
+                    else
+                    {
+                        @foreach (var note in notes)
+                        {
+                            <div class="border rounded p-2 mb-2 position-relative">
+                                <div class="small text-muted mb-1">
+                                    <i class="bi bi-person me-1"></i>@note.TrainerName
+                                    <span class="ms-2">@note.CreatedAt.ToString("dd.MM.yyyy HH:mm")</span>
+                                </div>
+                                <div class="small" style="white-space:pre-wrap">@note.Content</div>
+                                <button class="btn btn-link btn-sm text-danger p-0 position-absolute top-0 end-0 me-1"
+                                        title="Usuń" @onclick="() => DeleteNote(note.Id)">
+                                    <i class="bi bi-x-lg"></i>
+                                </button>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+
+            <!-- Packages card -->
+            <div class="card shadow-sm">
+                <div class="card-body p-4">
+                    <div class="d-flex align-items-center justify-content-between mb-3">
+                        <h6 class="card-title mb-0"><i class="bi bi-box-seam me-2 text-primary"></i>Pakiety</h6>
+                        <button class="btn btn-outline-primary btn-sm" @onclick="OpenAddPackage">
+                            <i class="bi bi-plus-lg me-1"></i>Dodaj
+                        </button>
+                    </div>
+
+                    @if (packages is null)
+                    {
+                        <div class="text-center"><div class="spinner-border spinner-border-sm text-primary"></div></div>
+                    }
+                    else if (!packages.Any())
+                    {
+                        <p class="text-muted small text-center mb-0">Brak pakietów.</p>
+                    }
+                    else
+                    {
+                        @foreach (var pkg in packages)
+                        {
+                            <div class="border rounded p-3 mb-2 @(pkg.Status == PackageStatus.Active ? "" : "opacity-75")">
+                                <div class="d-flex justify-content-between align-items-start mb-1">
+                                    <div class="fw-semibold small">@pkg.Name</div>
+                                    <div class="d-flex gap-1">
+                                        <span class="badge @PackageBadge(pkg.Status)">@PackageLabel(pkg.Status)</span>
+                                        @if (pkg.IsPaid)
+                                        {
+                                            <span class="badge bg-success-subtle text-success">Opłacony</span>
+                                        }
+                                        else
+                                        {
+                                            <button class="badge bg-warning-subtle text-warning border-0"
+                                                    style="cursor:pointer" @onclick="() => MarkPaid(pkg.Id)">
+                                                Nieopłacony ✓
+                                            </button>
+                                        }
+                                    </div>
+                                </div>
+                                <div class="progress mb-1" style="height:6px">
+                                    <div class="progress-bar @(pkg.Status == PackageStatus.Depleted ? "bg-secondary" : "bg-primary")"
+                                         style="width:@(pkg.TotalSessions > 0 ? pkg.UsedSessions * 100 / pkg.TotalSessions : 0)%"></div>
+                                </div>
+                                <div class="d-flex justify-content-between small text-muted">
+                                    <span>@pkg.RemainingCredits / @pkg.TotalSessions sesji pozostało</span>
+                                    <span>@pkg.TotalPrice.ToString("N2") zł</span>
+                                </div>
+                                @if (pkg.ExpiresAt.HasValue)
+                                {
+                                    <div class="small @(pkg.Status == PackageStatus.Expired ? "text-danger" : "text-muted") mt-1">
+                                        <i class="bi bi-calendar-x me-1"></i>
+                                        @if (pkg.Status == PackageStatus.Expired)
+                                        {
+                                            <span>Przepadł @pkg.ExpiresAt.Value.ToString("dd.MM.yyyy")</span>
+                                        }
+                                        else
+                                        {
+                                            <span>Ważny do @pkg.ExpiresAt.Value.ToString("dd.MM.yyyy")</span>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+
+        <!-- Right column: session history -->
+        <div class="col-12 col-lg-8">
+            <div class="card shadow-sm">
+                <div class="card-body p-4">
+                    <h6 class="card-title mb-3"><i class="bi bi-clock-history me-2 text-primary"></i>Historia treningów</h6>
+
+                    @if (sessions is null)
+                    {
+                        <div class="text-center py-3"><div class="spinner-border text-primary"></div></div>
+                    }
+                    else if (!sessions.Any())
+                    {
+                        <p class="text-muted text-center py-3 mb-0">Brak treningów.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-sm table-hover align-middle">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Data</th>
+                                        <th>Typ</th>
+                                        <th>Trener</th>
+                                        <th>Status</th>
+                                        <th>Notatki</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var s in sessions)
+                                    {
+                                        <tr>
+                                            <td class="text-nowrap">@s.StartTime.ToString("dd.MM.yy HH:mm")</td>
+                                            <td>@s.SessionTypeName <span class="text-muted small">(@s.DurationMinutes min)</span></td>
+                                            <td class="text-muted small">@s.TrainerName</td>
+                                            <td>
+                                                <span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span>
+                                            </td>
+                                            <td class="text-muted small text-truncate" style="max-width:180px" title="@s.Notes">@s.Notes</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <div class="text-muted small mt-1">Łącznie: @sessions.Count sesji</div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Add package modal -->
+@if (addPackageOpen)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.45)">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-box-seam me-2 text-primary"></i>Nowy pakiet — @client!.FullName</h5>
+                    <button type="button" class="btn-close" @onclick="() => addPackageOpen = false"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(pkgError))
+                    {
+                        <div class="alert alert-danger py-2 small">@pkgError</div>
+                    }
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label">Typ sesji <span class="text-danger">*</span></label>
+                            <select class="form-select" @bind="newPkg.SessionTypeId" @bind:after="UpdatePkgName">
+                                <option value="0">— wybierz —</option>
+                                @foreach (var t in sessionTypes)
+                                {
+                                    <option value="@t.Id">@t.Name (@t.DurationMinutes min)</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Liczba sesji <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" min="1" @bind="newPkg.TotalSessions" @bind:after="UpdatePkgName" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Cena / sesję (zł)</label>
+                            <input type="number" class="form-control" min="0" step="0.01" @bind="newPkg.PricePerSession" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Nazwa pakietu</label>
+                            <input class="form-control" @bind="newPkg.Name" placeholder="auto" />
+                            @if (newPkg.PricePerSession > 0 && newPkg.TotalSessions > 0)
+                            {
+                                <div class="form-text">Łącznie: <strong>@((newPkg.PricePerSession * newPkg.TotalSessions).ToString("N2")) zł</strong></div>
+                            }
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Data ważności (opcjonalnie)</label>
+                            <input type="date" class="form-control"
+                                   value="@(newPkg.ExpiresAt?.ToString("yyyy-MM-dd") ?? "")"
+                                   @onchange="e => newPkg.ExpiresAt = string.IsNullOrEmpty(e.Value?.ToString()) ? null : DateTime.Parse(e.Value!.ToString()!)" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Notatki</label>
+                            <textarea class="form-control" rows="2" @bind="newPkg.Notes"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="() => addPackageOpen = false">Anuluj</button>
+                    <button class="btn btn-primary" @onclick="SavePackage" disabled="@isBusy">
+                        @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        Dodaj pakiet
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Booking modal -->
+@if (bookingOpen)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.45)">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-calendar-plus me-2 text-primary"></i>Nowa sesja — @client!.FullName</h5>
+                    <button type="button" class="btn-close" @onclick="CloseBooking"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(bookingError))
+                    {
+                        <div class="alert alert-danger py-2">@bookingError</div>
+                    }
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label">Typ sesji <span class="text-danger">*</span></label>
+                            <select class="form-select" @bind="bookingDto.SessionTypeId">
+                                <option value="0">— wybierz —</option>
+                                @foreach (var t in sessionTypes)
+                                {
+                                    <option value="@t.Id">@t.Name (@t.DurationMinutes min)</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Data <span class="text-danger">*</span></label>
+                            <input type="date" class="form-control"
+                                   value="@bookingDate"
+                                   @onchange="e => bookingDate = e.Value?.ToString() ?? bookingDate" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Godzina <span class="text-danger">*</span></label>
+                            <input type="time" class="form-control"
+                                   value="@bookingTime"
+                                   @onchange="e => bookingTime = e.Value?.ToString() ?? bookingTime" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Notatki</label>
+                            <textarea class="form-control" rows="2" @bind="bookingDto.Notes"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="CloseBooking">Anuluj</button>
+                    <button class="btn btn-primary" @onclick="SubmitBooking" disabled="@isBusy">
+                        @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        Zarezerwuj
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private ClientDto? client;
+    private List<TrainerNoteDto>? notes;
+    private List<SessionDto>? sessions;
+    private bool notFound;
+    private bool isBusy;
+
+    private bool editMode;
+    private UpdateClientDto editDto = new();
+    private string editError = string.Empty;
+
+    private string newNote = string.Empty;
+    private string currentUserId = string.Empty;
+
+    private bool bookingOpen;
+    private CreateSessionDto bookingDto = new();
+    private string bookingDate = string.Empty;
+    private string bookingTime = string.Empty;
+    private string bookingError = string.Empty;
+    private List<SessionTypeDto> sessionTypes = [];
+
+    private List<SessionPackageDto>? packages;
+    private bool addPackageOpen;
+    private CreateSessionPackageDto newPkg = new();
+    private string pkgError = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+        currentUserId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+
+        client = await ClientService.GetClientAsync(Id);
+        if (client is null) { notFound = true; return; }
+
+        await Task.WhenAll(LoadNotes(), LoadSessions(), LoadSessionTypes(), LoadPackages());
+    }
+
+    private async Task LoadNotes()
+    {
+        notes = await ClientService.GetNotesAsync(Id);
+    }
+
+    private async Task LoadSessions()
+    {
+        sessions = await SessionService.GetClientSessionsAsync(Id, 200);
+    }
+
+    private async Task LoadSessionTypes()
+    {
+        sessionTypes = await SessionService.GetSessionTypesAsync();
+    }
+
+    private async Task LoadPackages()
+    {
+        packages = await PackageService.GetPackagesAsync(Id);
+    }
+
+    private async Task ApproveClient()
+    {
+        isBusy = true;
+        try
+        {
+            await ClientService.ApproveClientAsync(Id);
+            client = await ClientService.GetClientAsync(Id);
+        }
+        finally { isBusy = false; }
+    }
+
+    private async Task ToggleSelfBooking(ChangeEventArgs e)
+    {
+        var allow = (bool)(e.Value ?? false);
+        await ClientService.SetAllowSelfBookingAsync(Id, allow);
+        client = await ClientService.GetClientAsync(Id);
+    }
+
+    private void OpenAddPackage()
+    {
+        newPkg = new CreateSessionPackageDto
+        {
+            ClientId = Id,
+            CreatedByUserId = currentUserId,
+            TotalSessions = 10,
+            PricePerSession = 0
+        };
+        pkgError = string.Empty;
+        addPackageOpen = true;
+    }
+
+    private void UpdatePkgName()
+    {
+        var type = sessionTypes.FirstOrDefault(t => t.Id == newPkg.SessionTypeId);
+        if (type is not null && newPkg.TotalSessions > 0)
+            newPkg.Name = $"Pakiet {newPkg.TotalSessions}×{type.Name}";
+    }
+
+    private async Task SavePackage()
+    {
+        if (newPkg.SessionTypeId == 0) { pkgError = "Wybierz typ sesji."; return; }
+        if (newPkg.TotalSessions < 1) { pkgError = "Podaj liczbę sesji."; return; }
+        isBusy = true;
+        pkgError = string.Empty;
+        try
+        {
+            await PackageService.CreatePackageAsync(newPkg);
+            addPackageOpen = false;
+            packages = await PackageService.GetPackagesAsync(Id);
+            client = await ClientService.GetClientAsync(Id);
+        }
+        catch (Exception ex) { pkgError = ex.Message; }
+        finally { isBusy = false; }
+    }
+
+    private async Task MarkPaid(int packageId)
+    {
+        await PackageService.MarkPaidAsync(packageId);
+        packages = await PackageService.GetPackagesAsync(Id);
+    }
+
+    private static string PackageBadge(PackageStatus s) => s switch
+    {
+        PackageStatus.Active    => "bg-success-subtle text-success",
+        PackageStatus.Depleted  => "bg-secondary-subtle text-secondary",
+        PackageStatus.Expired   => "bg-danger-subtle text-danger",
+        PackageStatus.Cancelled => "bg-dark-subtle text-dark",
+        _ => "bg-secondary-subtle text-secondary"
+    };
+
+    private static string PackageLabel(PackageStatus s) => s switch
+    {
+        PackageStatus.Active    => "Aktywny",
+        PackageStatus.Depleted  => "Wyczerpany",
+        PackageStatus.Expired   => "Przepadł",
+        PackageStatus.Cancelled => "Anulowany",
+        _ => s.ToString()
+    };
+
+    private void OpenBooking()
+    {
+        bookingDto = new CreateSessionDto
+        {
+            ClientId = Id,
+            TrainerUserId = currentUserId
+        };
+        var now = DateTime.Now.AddHours(1);
+        bookingDate = now.ToString("yyyy-MM-dd");
+        bookingTime = now.ToString("HH:00");
+        bookingError = string.Empty;
+        bookingOpen = true;
+    }
+
+    private void CloseBooking() => bookingOpen = false;
+
+    private async Task SubmitBooking()
+    {
+        if (bookingDto.SessionTypeId == 0) { bookingError = "Wybierz typ sesji."; return; }
+        if (!DateTime.TryParse($"{bookingDate} {bookingTime}", out var startTime))
+        { bookingError = "Nieprawidłowa data lub godzina."; return; }
+
+        bookingDto.StartTime = startTime;
+        isBusy = true;
+        bookingError = string.Empty;
+        try
+        {
+            await SessionService.CreateSessionAsync(bookingDto);
+            bookingOpen = false;
+            sessions = await SessionService.GetClientSessionsAsync(Id, 200);
+            client = await ClientService.GetClientAsync(Id);
+        }
+        catch (Exception ex)
+        {
+            bookingError = ex.Message;
+        }
+        finally { isBusy = false; }
+    }
+
+    private void StartEdit()
+    {
+        editDto = new UpdateClientDto
+        {
+            FirstName = client!.FirstName,
+            LastName = client.LastName,
+            Phone = client.Phone,
+            TrainingGoal = client.TrainingGoal,
+            DateOfBirth = client.DateOfBirth
+        };
+        editError = string.Empty;
+        editMode = true;
+    }
+
+    private void CancelEdit() => editMode = false;
+
+    private async Task SaveEdit()
+    {
+        isBusy = true;
+        editError = string.Empty;
+        try
+        {
+            await ClientService.UpdateClientAsync(Id, editDto);
+            client = await ClientService.GetClientAsync(Id);
+            editMode = false;
+        }
+        catch (Exception ex)
+        {
+            editError = ex.Message;
+        }
+        finally { isBusy = false; }
+    }
+
+    private async Task AddNote()
+    {
+        if (string.IsNullOrWhiteSpace(newNote)) return;
+        isBusy = true;
+        try
+        {
+            await ClientService.AddNoteAsync(Id, currentUserId, newNote.Trim());
+            newNote = string.Empty;
+            notes = await ClientService.GetNotesAsync(Id);
+        }
+        finally { isBusy = false; }
+    }
+
+    private async Task DeleteNote(int noteId)
+    {
+        await ClientService.DeleteNoteAsync(noteId);
+        notes = await ClientService.GetNotesAsync(Id);
+    }
+
+    private static string StatusBadge(PTScheduler.Domain.Enums.SessionStatus s) => s switch
+    {
+        PTScheduler.Domain.Enums.SessionStatus.Scheduled  => "bg-primary-subtle text-primary",
+        PTScheduler.Domain.Enums.SessionStatus.Completed  => "bg-success-subtle text-success",
+        PTScheduler.Domain.Enums.SessionStatus.Cancelled  => "bg-danger-subtle text-danger",
+        PTScheduler.Domain.Enums.SessionStatus.NoShow     => "bg-warning-subtle text-warning",
+        _ => "bg-secondary-subtle text-secondary"
+    };
+
+    private static string StatusLabel(PTScheduler.Domain.Enums.SessionStatus s) => s switch
+    {
+        PTScheduler.Domain.Enums.SessionStatus.Scheduled  => "Zaplanowana",
+        PTScheduler.Domain.Enums.SessionStatus.Completed  => "Zakończona",
+        PTScheduler.Domain.Enums.SessionStatus.Cancelled  => "Anulowana",
+        PTScheduler.Domain.Enums.SessionStatus.NoShow     => "Nieobecność",
+        _ => s.ToString()
+    };
+}

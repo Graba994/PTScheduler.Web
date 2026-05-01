@@ -1,0 +1,79 @@
+@inject PTScheduler.Application.Interfaces.IBrandingService BrandingService
+
+<!DOCTYPE html>
+<html lang="pl" data-theme="@_theme">
+
+<head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+    <base href="/" />
+
+    <!-- PWA -->
+    <link rel="manifest" href="/manifest.json" />
+    <meta name="theme-color" content="#0284C7" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="@_companyName" />
+    <link rel="apple-touch-icon" href="@(_faviconPath ?? "/favicon.png")" />
+
+    <ResourcePreloader />
+    <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]" />
+    <!-- Bootstrap Icons -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
+    <!-- FullCalendar -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css" />
+    <link rel="stylesheet" href="@Assets["app.css"]" />
+    <link rel="stylesheet" href="@Assets["PTScheduler.Web.styles.css"]" />
+    <ImportMap />
+    <link rel="icon" type="image/png" href="@(_faviconPath ?? "/favicon.png")" />
+    <HeadOutlet />
+</head>
+
+<body>
+    <Routes />
+    <ReconnectModal />
+    <script src="@Assets["_framework/blazor.web.js"]"></script>
+    <script src="@Assets["Components/Account/Shared/PasskeySubmit.razor.js"]" type="module"></script>
+    <!-- FullCalendar global bundle -->
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/locales/pl.global.min.js"></script>
+    <!-- PWA: Service Worker + Install Prompt -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
+        }
+        let _installPrompt = null;
+        window.addEventListener('beforeinstallprompt', e => {
+            e.preventDefault();
+            _installPrompt = e;
+            window.dispatchEvent(new CustomEvent('pwa-installable'));
+        });
+        window.triggerPwaInstall = async () => {
+            if (!_installPrompt) return false;
+            _installPrompt.prompt();
+            const { outcome } = await _installPrompt.userChoice;
+            _installPrompt = null;
+            return outcome === 'accepted';
+        };
+    </script>
+</body>
+
+</html>
+
+@code {
+    private string _theme = "ocean";
+    private string _companyName = "PTScheduler";
+    private string? _faviconPath;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var branding = await BrandingService.GetAsync();
+            _theme = branding.ThemeName ?? "ocean";
+            _companyName = branding.CompanyName ?? "PTScheduler";
+            _faviconPath = branding.FaviconPath;
+        }
+        catch { }
+    }
+}
