@@ -3,6 +3,7 @@
 @inject IClientService ClientService
 @inject ISessionService SessionService
 @inject ITrainerAvailabilityService AvailabilityService
+@inject IAuditLogService AuditLogService
 @inject NavigationManager Nav
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
@@ -426,6 +427,8 @@ else
     private ClientDto? client;
     private List<SessionDto> upcoming = [];
     private List<SessionDto> past = [];
+    private string _userId = string.Empty;
+    private string _userEmail = string.Empty;
 
     private SessionDto? cancelTarget;
     private string cancelReason = string.Empty;
@@ -445,10 +448,11 @@ else
     protected override async Task OnInitializedAsync()
     {
         var auth = await AuthStateProvider.GetAuthenticationStateAsync();
-        var userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
-        if (userId is not null)
+        _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        _userEmail = auth.User.Identity?.Name ?? _userId;
+        if (!string.IsNullOrEmpty(_userId))
         {
-            client = await ClientService.GetClientByUserIdAsync(userId);
+            client = await ClientService.GetClientByUserIdAsync(_userId);
             if (client is not null)
                 await RefreshSessions();
         }
@@ -559,7 +563,10 @@ else
                 StartTime = selectedSlot.Start,
                 Notes = string.IsNullOrWhiteSpace(bookingNotes) ? null : bookingNotes.Trim()
             };
-            await SessionService.CreateSessionAsync(dto);
+            var created = await SessionService.CreateSessionAsync(dto);
+
+            await AuditLogService.LogAsync(_userId, _userEmail, "Client", "ClientSelfBooked", "Session",
+                created.Id.ToString(), $"Typ: {selectedType.Name}, termin: {selectedSlot.Start:dd.MM.yyyy HH:mm}");
 
             bookingOpen = false;
             showSuccess = true;
@@ -585,7 +592,11 @@ else
         try
         {
             var reason = string.IsNullOrWhiteSpace(cancelReason) ? null : cancelReason.Trim();
-            await SessionService.UpdateStatusAsync(cancelTarget.Id, SessionStatus.Cancelled, reason);
+            var target = cancelTarget;
+            await SessionService.UpdateStatusAsync(target.Id, SessionStatus.Cancelled, reason);
+            await AuditLogService.LogAsync(_userId, _userEmail, "Client", "ClientCancelledSession", "Session",
+                target.Id.ToString(), $"Typ: {target.SessionTypeName}, termin: {target.StartTime:dd.MM.yyyy HH:mm}" +
+                (reason is null ? "" : $", powód: {reason}"));
             cancelTarget = null;
             await RefreshSessions();
         }

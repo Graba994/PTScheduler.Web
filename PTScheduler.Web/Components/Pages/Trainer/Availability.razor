@@ -1,11 +1,13 @@
 ﻿@page "/trainer/availability"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
 @inject ITrainerAvailabilityService AvailabilityService
+@inject IAuditLogService AuditLogService
 @inject AuthenticationStateProvider AuthState
 @inject ILogger<Availability> Logger
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
 @using System.Globalization
 @rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
 
@@ -220,6 +222,8 @@
 
 @code {
     private string _trainerUserId = string.Empty;
+    private string _trainerEmail = string.Empty;
+    private string _trainerRole = string.Empty;
     private List<TrainerAvailabilityDto> _rules = [];
     private TrainerConfigDto _cfg = new();
     private bool _loading = true;
@@ -240,6 +244,9 @@
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
         _trainerUserId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _trainerEmail = auth.User.Identity?.Name ?? _trainerUserId;
+        _trainerRole = auth.User.IsInRole(Roles.Admin) ? Roles.Admin
+                     : auth.User.IsInRole(Roles.Trainer) ? Roles.Trainer : Roles.Subordinate;
         await LoadAsync();
     }
 
@@ -254,6 +261,8 @@
     private async Task SaveConfigAsync()
     {
         await AvailabilityService.SaveConfigAsync(_trainerUserId, _cfg);
+        await AuditLogService.LogAsync(_trainerUserId, _trainerEmail, _trainerRole, "AvailabilityConfigSaved", "TrainerConfig",
+            null, $"Przerwa: {_cfg.BreakAfterSessionMinutes}min, granularność: {_cfg.SlotGranularityMinutes}min");
         _configSaved = true;
         await Task.Delay(2000);
         _configSaved = false;
@@ -289,7 +298,9 @@
                 return;
             }
 
-            await AvailabilityService.AddRuleAsync(dto);
+            var added = await AvailabilityService.AddRuleAsync(dto);
+            await AuditLogService.LogAsync(_trainerUserId, _trainerEmail, _trainerRole, "AvailabilityRuleAdded", "TrainerAvailability",
+                added.Id.ToString(), $"{(dto.DayOfWeek.HasValue ? DayName(dto.DayOfWeek.Value) : dto.SpecificDate?.ToString("dd.MM.yyyy"))}: {dto.StartTime:HH:mm}–{dto.EndTime:HH:mm}");
             _newLabel = null;
             _rules = await AvailabilityService.GetAvailabilityRulesAsync(_trainerUserId);
         }
@@ -302,13 +313,18 @@
 
     private async Task DeleteRuleAsync(int id)
     {
+        var rule = _rules.FirstOrDefault(r => r.Id == id);
         await AvailabilityService.DeleteRuleAsync(id);
+        await AuditLogService.LogAsync(_trainerUserId, _trainerEmail, _trainerRole, "AvailabilityRuleDeleted", "TrainerAvailability",
+            id.ToString(), rule is null ? null : $"{(rule.DayOfWeek.HasValue ? DayName(rule.DayOfWeek.Value) : rule.SpecificDate?.ToString("dd.MM.yyyy"))}: {rule.StartTime:HH:mm}–{rule.EndTime:HH:mm}");
         _rules = await AvailabilityService.GetAvailabilityRulesAsync(_trainerUserId);
     }
 
     private async Task ToggleActiveAsync(TrainerAvailabilityDto rule, bool isActive)
     {
         await AvailabilityService.SetActiveAsync(rule.Id, isActive);
+        await AuditLogService.LogAsync(_trainerUserId, _trainerEmail, _trainerRole, "AvailabilityRuleToggled", "TrainerAvailability",
+            rule.Id.ToString(), $"Aktywny: {isActive}");
         rule.IsActive = isActive;
     }
 

@@ -5,6 +5,7 @@
 @inject ISessionPackageService PackageService
 @inject IUserManagementService UserManagementService
 @inject IBodyMeasurementService MeasurementService
+@inject IAuditLogService AuditLogService
 @inject NavigationManager Nav
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
@@ -611,6 +612,8 @@ else if (client is not null)
 
     private string newNote = string.Empty;
     private string currentUserId = string.Empty;
+    private string currentUserEmail = string.Empty;
+    private string currentUserRole = string.Empty;
 
     private string newPw  = string.Empty;
     private string pwMsg  = string.Empty;
@@ -637,6 +640,10 @@ else if (client is not null)
     {
         var auth = await AuthStateProvider.GetAuthenticationStateAsync();
         currentUserId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        currentUserEmail = auth.User.Identity?.Name ?? currentUserId;
+        currentUserRole = auth.User.IsInRole(PTScheduler.Domain.Constants.Roles.Admin) ? PTScheduler.Domain.Constants.Roles.Admin
+                        : auth.User.IsInRole(PTScheduler.Domain.Constants.Roles.Trainer) ? PTScheduler.Domain.Constants.Roles.Trainer
+                        : PTScheduler.Domain.Constants.Roles.Subordinate;
 
         client = await ClientService.GetClientAsync(Id);
         if (client is null) { notFound = true; return; }
@@ -681,6 +688,8 @@ else if (client is not null)
         try
         {
             await MeasurementService.AddAsync(newMeasurement);
+            await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "MeasurementAdded", "BodyMeasurement",
+                null, $"Klient: {client?.FullName}, data: {newMeasurement.MeasurementDate:dd.MM.yyyy}");
             newMeasurement = new CreateBodyMeasurementDto();
             addMeasurementOpen = false;
             measurements = await MeasurementService.GetAsync(Id);
@@ -692,6 +701,8 @@ else if (client is not null)
     private async Task DeleteMeasurement(int id)
     {
         await MeasurementService.DeleteAsync(id);
+        await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "MeasurementDeleted", "BodyMeasurement",
+            id.ToString(), $"Klient: {client?.FullName}");
         measurements = await MeasurementService.GetAsync(Id);
     }
 
@@ -716,6 +727,8 @@ else if (client is not null)
         {
             await ClientService.ApproveClientAsync(Id);
             client = await ClientService.GetClientAsync(Id);
+            await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "ClientApproved", "Client",
+                Id.ToString(), $"Klient: {client?.FullName}");
         }
         finally { isBusy = false; }
     }
@@ -725,6 +738,8 @@ else if (client is not null)
         var allow = (bool)(e.Value ?? false);
         await ClientService.SetAllowSelfBookingAsync(Id, allow);
         client = await ClientService.GetClientAsync(Id);
+        await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "ClientSelfBookingToggled", "Client",
+            Id.ToString(), $"Klient: {client?.FullName}, samodzielna rezerwacja: {allow}");
     }
 
     private void OpenAddPackage()
@@ -756,6 +771,8 @@ else if (client is not null)
         try
         {
             await PackageService.CreatePackageAsync(newPkg);
+            await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "PackageCreated", "SessionPackage",
+                null, $"Klient: {client?.FullName}, pakiet: {newPkg.Name}, sesji: {newPkg.TotalSessions}");
             addPackageOpen = false;
             packages = await PackageService.GetPackagesAsync(Id);
             client = await ClientService.GetClientAsync(Id);
@@ -767,6 +784,8 @@ else if (client is not null)
     private async Task MarkPaid(int packageId)
     {
         await PackageService.MarkPaidAsync(packageId);
+        await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "PackageMarkedPaid", "SessionPackage",
+            packageId.ToString(), $"Klient: {client?.FullName}");
         packages = await PackageService.GetPackagesAsync(Id);
     }
 
@@ -815,7 +834,9 @@ else if (client is not null)
         bookingError = string.Empty;
         try
         {
-            await SessionService.CreateSessionAsync(bookingDto);
+            var created = await SessionService.CreateSessionAsync(bookingDto);
+            await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "SessionBooked", "Session",
+                created.Id.ToString(), $"Klient: {client?.FullName}, termin: {bookingDto.StartTime:dd.MM.yyyy HH:mm}");
             bookingOpen = false;
             sessions = await SessionService.GetClientSessionsAsync(Id, 200);
             client = await ClientService.GetClientAsync(Id);
@@ -851,6 +872,8 @@ else if (client is not null)
         {
             await ClientService.UpdateClientAsync(Id, editDto);
             client = await ClientService.GetClientAsync(Id);
+            await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "ClientProfileUpdated", "Client",
+                Id.ToString(), $"Klient: {client?.FullName}");
             editMode = false;
         }
         catch (Exception ex)
@@ -887,8 +910,13 @@ else if (client is not null)
         try
         {
             var (success, error) = await UserManagementService.ResetPasswordAsync(client.ApplicationUserId, newPw);
-            if (success) { pwMsg = "Hasło klienta zostało zmienione."; pwError = false; newPw = string.Empty; }
-            else         { pwMsg = error ?? "Błąd zmiany hasła."; pwError = true; }
+            if (success)
+            {
+                await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "ClientPasswordReset", "Client",
+                    Id.ToString(), $"Klient: {client?.FullName}");
+                pwMsg = "Hasło klienta zostało zmienione."; pwError = false; newPw = string.Empty;
+            }
+            else { pwMsg = error ?? "Błąd zmiany hasła."; pwError = true; }
         }
         catch (Exception ex) { pwMsg = ex.Message; pwError = true; }
         finally { isBusy = false; }

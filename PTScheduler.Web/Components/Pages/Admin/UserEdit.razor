@@ -2,8 +2,11 @@
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
+@using Microsoft.AspNetCore.Components.Authorization
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Admin)]
 @inject IUserManagementService UserService
+@inject IAuditLogService AuditLogService
+@inject AuthenticationStateProvider AuthState
 @inject NavigationManager Nav
 @rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
 
@@ -145,8 +148,15 @@ else
     private string pwMsg = string.Empty;
     private bool pwError;
 
+    private string _adminId = string.Empty;
+    private string _adminEmail = string.Empty;
+
     protected override async Task OnInitializedAsync()
     {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _adminId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        _adminEmail = auth.User.Identity?.Name ?? _adminId;
+
         user = await UserService.GetUserAsync(Id);
         trainers = await UserService.GetTrainersAsync();
 
@@ -171,6 +181,9 @@ else
 
             await UserService.SetLockoutAsync(Id, isLocked);
 
+            await AuditLogService.LogAsync(_adminId, _adminEmail, Roles.Admin, "UserUpdated", "User",
+                Id, $"Email: {user?.Email}, rola: {selectedRole}, zablokowany: {isLocked}");
+
             message = "Zmiany zapisane.";
             isError = false;
             user = await UserService.GetUserAsync(Id);
@@ -194,8 +207,13 @@ else
         try
         {
             var (success, error) = await UserService.ResetPasswordAsync(Id, newPw);
-            if (success) { pwMsg = "Hasło zostało zmienione."; pwError = false; newPw = string.Empty; }
-            else         { pwMsg = error ?? "Błąd zmiany hasła."; pwError = true; }
+            if (success)
+            {
+                await AuditLogService.LogAsync(_adminId, _adminEmail, Roles.Admin, "UserPasswordReset", "User",
+                    Id, $"Email: {user?.Email}");
+                pwMsg = "Hasło zostało zmienione."; pwError = false; newPw = string.Empty;
+            }
+            else { pwMsg = error ?? "Błąd zmiany hasła."; pwError = true; }
         }
         catch (Exception ex) { pwMsg = ex.Message; pwError = true; }
         finally { isBusy = false; }
@@ -207,7 +225,10 @@ else
     {
         try
         {
+            var deletedEmail = user?.Email ?? Id;
             await UserService.DeleteUserAsync(Id);
+            await AuditLogService.LogAsync(_adminId, _adminEmail, Roles.Admin, "UserDeleted", "User",
+                Id, $"Email: {deletedEmail}");
             Nav.NavigateTo("/admin/users");
         }
         catch (Exception ex)
