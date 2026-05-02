@@ -19,7 +19,8 @@ public static class DependencyInjection
         {
             var connStr = sp.GetRequiredService<IConfiguration>().GetConnectionString("DefaultConnection")
                 ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
-            options.UseNpgsql(connStr);
+            options.UseNpgsql(connStr)
+                   .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
         });
 
         var settingsFilePath = Path.Combine(contentRootPath, "connections.json");
