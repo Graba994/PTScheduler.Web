@@ -7,6 +7,7 @@ using PTScheduler.Infrastructure.Data;
 using PTScheduler.Web;
 using PTScheduler.Web.Components;
 using PTScheduler.Web.Components.Account;
+using PTScheduler.Web.Services;
 
 AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 
@@ -47,8 +48,9 @@ builder.Services.AddIdentityCore<ApplicationUser>(options =>
     .AddErrorDescriber<PolishIdentityErrorDescriber>()
     .AddDefaultTokenProviders();
 
-builder.Services.AddSingleton<IEmailSender<ApplicationUser>, IdentityNoOpEmailSender>();
+builder.Services.AddScoped<IEmailSender<ApplicationUser>, PTScheduler.Web.Components.Account.IdentityEmailSender>();
 builder.Services.AddSingleton<IWebRootPathProvider, WebRootPathProvider>();
+builder.Services.AddHostedService<SessionReminderService>();
 
 var app = builder.Build();
 
@@ -72,7 +74,10 @@ else
     app.UseHsts();
 }
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
-app.UseHttpsRedirection();
+
+// Skip HTTPS redirect inside Docker container — handle TLS at reverse proxy level
+if (Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") != "true")
+    app.UseHttpsRedirection();
 
 app.UseAntiforgery();
 

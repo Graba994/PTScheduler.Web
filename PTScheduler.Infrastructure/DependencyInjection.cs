@@ -41,6 +41,9 @@ public static class DependencyInjection
         services.AddScoped<IClientContactService, ClientContactService>();
         services.AddScoped<IDemoDataService, DemoDataService>();
         services.AddScoped<ISessionInvitationService, SessionInvitationService>();
+        services.AddScoped<IEmailSettingsService, EmailSettingsService>();
+        services.AddScoped<IEmailService, SmtpEmailService>();
+        services.AddScoped<IBodyMeasurementService, BodyMeasurementService>();
 
         return services;
     }

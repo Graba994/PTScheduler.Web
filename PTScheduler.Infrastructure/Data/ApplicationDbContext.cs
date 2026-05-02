@@ -21,6 +21,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<SessionSeries> SessionSeries => Set<SessionSeries>();
     public DbSet<ClientContact> ClientContacts => Set<ClientContact>();
     public DbSet<SessionInvitation> SessionInvitations => Set<SessionInvitation>();
+    public DbSet<EmailSettings> EmailSettings => Set<EmailSettings>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

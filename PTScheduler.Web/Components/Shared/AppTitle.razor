@@ -1,0 +1,26 @@
+@inject PTScheduler.Application.Interfaces.IBrandingService BrandingService
+
+<PageTitle>@_title</PageTitle>
+
+@code {
+    [Parameter] public string? Page { get; set; }
+
+    private string _appName = "PTScheduler";
+    private string _title = "PTScheduler";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var b = await BrandingService.GetAsync();
+            _appName = b.CompanyName ?? "PTScheduler";
+        }
+        catch { }
+        UpdateTitle();
+    }
+
+    protected override void OnParametersSet() => UpdateTitle();
+
+    private void UpdateTitle() =>
+        _title = string.IsNullOrEmpty(Page) ? _appName : $"{Page} — {_appName}";
+}

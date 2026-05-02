@@ -1,0 +1,363 @@
+@page "/admin/email"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@inject IEmailSettingsService SettingsService
+@inject IEmailService EmailService
+@inject AuthenticationStateProvider AuthState
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<AppTitle Page="Konfiguracja emaili" />
+
+<div class="cal-shell">
+    <div class="cal-topbar">
+        <h4 class="mb-0 fw-bold">
+            <i class="bi bi-envelope-fill me-2"></i>Konfiguracja emaili
+        </h4>
+    </div>
+
+    <div class="cal-body">
+        <div class="cal-main" style="overflow-y:auto;padding:1.5rem">
+
+            @if (_loading)
+            {
+                <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+            }
+            else
+            {
+                <!-- Enable toggle -->
+                <div class="card mb-4">
+                    <div class="card-body d-flex align-items-center gap-3">
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" id="enableEmail"
+                                   @bind="_dto.IsEnabled" style="width:2.5em;height:1.3em" />
+                            <label class="form-check-label fw-semibold fs-6" for="enableEmail">
+                                Włącz wysyłanie emaili
+                            </label>
+                        </div>
+                        <span class="text-muted small">
+                            @if (_dto.IsEnabled)
+                            {
+                                <span class="badge bg-success">Aktywne</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">Wyłączone</span>
+                            }
+                        </span>
+                    </div>
+                </div>
+
+                <!-- Provider selection -->
+                <div class="card mb-4">
+                    <div class="card-header fw-semibold">
+                        <i class="bi bi-server me-2"></i>Wybierz dostawcę poczty
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3 mb-4">
+                            @foreach (var p in _providers)
+                            {
+                                var isSelected = _dto.Provider == p.Key;
+                                <div class="col-6 col-md-3">
+                                    <div class="p-3 rounded-3 border h-100 @(isSelected ? "border-primary" : "border-2")"
+                                         style="cursor:pointer;transition:all .15s;
+                                                background:@(isSelected ? "rgba(2,132,199,.06)" : "var(--bs-body-bg)")"
+                                         @onclick="() => SelectProvider(p.Key)">
+                                        <div class="d-flex flex-column align-items-center text-center gap-2">
+                                            <div class="rounded-circle d-flex align-items-center justify-content-center"
+                                                 style="width:48px;height:48px;background:@p.Value.Color;color:white;font-size:1.3rem">
+                                                <i class="bi @p.Value.Icon"></i>
+                                            </div>
+                                            <div>
+                                                <div class="fw-semibold small">@p.Value.Name</div>
+                                                <div class="text-muted" style="font-size:.7rem">@p.Value.Tagline</div>
+                                            </div>
+                                            @if (isSelected)
+                                            {
+                                                <i class="bi bi-check-circle-fill text-primary"></i>
+                                            }
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+
+                        <!-- Setup guide for selected provider -->
+                        @if (_dto.Provider != "Custom" && _providers.TryGetValue(_dto.Provider, out var prov))
+                        {
+                            <div class="p-3 rounded-3 mb-2"
+                                 style="background:rgba(2,132,199,.05);border:1px solid rgba(2,132,199,.2)">
+                                <div class="fw-semibold mb-3">
+                                    <i class="bi bi-info-circle-fill text-primary me-2"></i>
+                                    Jak skonfigurować @prov.Name — krok po kroku
+                                </div>
+                                <ol class="mb-0 ps-3" style="font-size:.875rem;line-height:1.9">
+                                    @foreach (var step in prov.Steps)
+                                    {
+                                        <li>@((MarkupString)step)</li>
+                                    }
+                                </ol>
+                                @if (!string.IsNullOrEmpty(prov.Note))
+                                {
+                                    <div class="mt-3 small text-muted">
+                                        <i class="bi bi-lightbulb-fill text-warning me-1"></i>@((MarkupString)prov.Note)
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <!-- SMTP settings form -->
+                <div class="card mb-4">
+                    <div class="card-header fw-semibold">
+                        <i class="bi bi-sliders me-2"></i>Dane połączenia SMTP
+                    </div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-8">
+                                <label class="form-label fw-semibold small mb-1">Serwer SMTP (Host)</label>
+                                <input type="text" class="form-control" @bind="_dto.SmtpHost"
+                                       placeholder="np. smtp.gmail.com" />
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label fw-semibold small mb-1">Port</label>
+                                <select class="form-select" @bind="_dto.SmtpPort">
+                                    <option value="587">587 (TLS)</option>
+                                    <option value="465">465 (SSL)</option>
+                                    <option value="25">25 (brak)</option>
+                                </select>
+                            </div>
+                            <div class="col-md-2 d-flex align-items-end pb-1">
+                                <div class="form-check form-switch">
+                                    <input class="form-check-input" type="checkbox" id="tls" @bind="_dto.UseTls" />
+                                    <label class="form-check-label small" for="tls">Szyfrowanie TLS</label>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold small mb-1">Login (email konta SMTP)</label>
+                                <input type="email" class="form-control" @bind="_dto.Login"
+                                       placeholder="np. patryk@grabowski.app" autocomplete="username" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold small mb-1">
+                                    Hasło / App Password
+                                    <span class="text-muted fw-normal">(zostaw puste, aby nie zmieniać)</span>
+                                </label>
+                                <div class="input-group">
+                                    <input type="@(_showPassword ? "text" : "password")"
+                                           class="form-control" @bind="_dto.Password"
+                                           placeholder="••••••••••••••••" autocomplete="new-password" />
+                                    <button class="btn btn-outline-secondary" type="button"
+                                            @onclick="() => _showPassword = !_showPassword">
+                                        <i class="bi @(_showPassword ? "bi-eye-slash" : "bi-eye")"></i>
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold small mb-1">Adres nadawcy (From)</label>
+                                <input type="email" class="form-control" @bind="_dto.FromAddress"
+                                       placeholder="np. noreply@grabowski.app" />
+                                <div class="form-text">Adres widoczny w skrzynce odbiorczej klienta</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold small mb-1">Nazwa nadawcy</label>
+                                <input type="text" class="form-control" @bind="_dto.FromName"
+                                       placeholder="np. ZmotywowanaAna" />
+                                <div class="form-text">Nazwa widoczna w skrzynce odbiorczej</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Actions -->
+                <div class="card mb-4">
+                    <div class="card-body">
+                        <div class="row g-3 align-items-center">
+                            <div class="col-md-5">
+                                <label class="form-label fw-semibold small mb-1">Testowy email (wyślij na adres)</label>
+                                <div class="input-group">
+                                    <input type="email" class="form-control" @bind="_testEmail"
+                                           placeholder="twoj@email.com" />
+                                    <button class="btn btn-outline-primary" @onclick="TestEmailAsync"
+                                            disabled="@(_saving || string.IsNullOrWhiteSpace(_testEmail))">
+                                        @if (_testing)
+                                        {
+                                            <span class="spinner-border spinner-border-sm me-1"></span>
+                                        }
+                                        else
+                                        {
+                                            <i class="bi bi-send me-1"></i>
+                                        }
+                                        Wyślij test
+                                    </button>
+                                </div>
+                            </div>
+                            <div class="col-md-4 d-flex align-items-end gap-2">
+                                <button class="btn btn-primary" @onclick="SaveAsync"
+                                        disabled="@(_saving || _testing)">
+                                    @if (_saving)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-1"></span>
+                                    }
+                                    else
+                                    {
+                                        <i class="bi bi-floppy-fill me-1"></i>
+                                    }
+                                    Zapisz ustawienia
+                                </button>
+                            </div>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(_message))
+                        {
+                            <div class="alert @(_messageOk ? "alert-success" : "alert-danger") py-2 small mt-3 mb-0">
+                                <i class="bi @(_messageOk ? "bi-check-circle-fill" : "bi-x-circle-fill") me-2"></i>
+                                @_message
+                            </div>
+                        }
+                    </div>
+                </div>
+
+                <!-- Info box -->
+                <div class="card border-0" style="background:var(--bs-tertiary-bg)">
+                    <div class="card-body small text-muted">
+                        <i class="bi bi-shield-lock me-2"></i>
+                        <strong>Bezpieczeństwo:</strong> Hasło SMTP jest przechowywane w bazie danych w postaci niezaszyfrowanej.
+                        Upewnij się, że dostęp do bazy danych jest odpowiednio zabezpieczony.
+                        Zalecane jest użycie <strong>App Password</strong> (hasła aplikacji) zamiast głównego hasła do konta.
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private EmailSettingsDto _dto = new();
+    private bool _loading = true;
+    private bool _saving;
+    private bool _testing;
+    private bool _showPassword;
+    private string _testEmail = "";
+    private string _message = "";
+    private bool _messageOk;
+
+    private record ProviderInfo(string Name, string Tagline, string Icon, string Color, List<string> Steps, string Note = "");
+
+    private readonly Dictionary<string, ProviderInfo> _providers = new()
+    {
+        ["GoogleWorkspace"] = new(
+            "Google Workspace",
+            "Gmail dla firm",
+            "bi-google",
+            "#EA4335",
+            [
+                "Zaloguj się na <strong>admin.google.com</strong> → Katalog → Użytkownicy → Twoje konto → Informacje → dodaj alias <code>noreply@twojadomena.pl</code>",
+                "Na koncie Google (<strong>myaccount.google.com</strong>) włącz <strong>Weryfikację dwuetapową</strong> (jeśli jeszcze nie aktywna)",
+                "Przejdź do <strong>Bezpieczeństwo → Weryfikacja dwuetapowa → Hasła do aplikacji</strong>",
+                "Kliknij <strong>Utwórz hasło do aplikacji</strong>, wpisz nazwę np. \"PTScheduler\" → skopiuj 16-znakowy kod",
+                "W formularzu poniżej wpisz: Host <code>smtp.gmail.com</code>, Port <code>587</code>, Login = Twój główny email, Hasło = skopiowany 16-znakowy kod, From = alias <code>noreply@twojadomena.pl</code>"
+            ],
+            "Alias musi być ustawiony w Google Admin Console, bo Gmail pozwala wysyłać tylko z adresów przypisanych do konta."
+        ),
+        ["Microsoft365"] = new(
+            "Microsoft 365",
+            "Outlook dla firm",
+            "bi-microsoft",
+            "#0078D4",
+            [
+                "Zaloguj się do <strong>admin.microsoft.com</strong> → Użytkownicy → Aktywni użytkownicy → Twoje konto → Zarządzaj nazwami użytkowników",
+                "Dodaj alias np. <code>noreply@twojadomena.pl</code> jeśli chcesz inny adres nadawcy",
+                "Przejdź do <strong>portal.azure.com</strong> → Azure Active Directory → Użytkownicy → Twoje konto",
+                "Włącz <strong>uwierzytelnianie wieloskładnikowe (MFA)</strong> jeśli nie jest aktywne",
+                "Na <strong>mysignins.microsoft.com</strong> → Informacje zabezpieczające → Dodaj metodę → Hasło aplikacji → nadaj nazwę \"PTScheduler\" → skopiuj hasło",
+                "W formularzu: Host <code>smtp.office365.com</code>, Port <code>587</code>, Login = email konta Microsoft, Hasło = hasło aplikacji"
+            ],
+            "Microsoft 365 wymaga włączenia SMTP AUTH dla konta. Jeśli test się nie powiedzie, sprawdź w admin.microsoft.com → Ustawienia → Poczta → Uwierzytelnianie SMTP."
+        ),
+        ["Brevo"] = new(
+            "Brevo",
+            "300 emaili/dzień za darmo",
+            "bi-envelope-check-fill",
+            "#0B996E",
+            [
+                "Załóż bezpłatne konto na <strong>brevo.com</strong> (bez karty kredytowej)",
+                "Po zalogowaniu przejdź do <strong>Ustawienia → SMTP & API → SMTP</strong>",
+                "Skopiuj <strong>Serwer SMTP, Port, Login i Klucz SMTP</strong>",
+                "(Opcjonalnie) Zweryfikuj swoją domenę w <strong>Senders & IP → Domains</strong> — dzięki temu emaile będą wychodzić z <code>noreply@twojadomena.pl</code>",
+                "Wklej dane do formularza poniżej. Login to Twój email w Brevo, hasło to <strong>klucz SMTP</strong> (nie hasło do konta Brevo)"
+            ],
+            "Darmowy plan Brevo daje 300 emaili dziennie — w zupełności wystarczy dla małej aplikacji treningowej."
+        ),
+        ["Custom"] = new(
+            "Własny SMTP",
+            "Dowolny serwer",
+            "bi-hdd-network-fill",
+            "#6366f1",
+            [
+                "Skontaktuj się ze swoim dostawcą hostingu lub poczty, aby uzyskać dane SMTP",
+                "Typowe dane: host (np. <code>mail.twojadomena.pl</code>), port 587 lub 465, login (pełny adres email), hasło do skrzynki",
+                "Wpisz dane bezpośrednio w formularzu poniżej i przetestuj połączenie"
+            ]
+        )
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _dto = await SettingsService.GetAsync();
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _testEmail = auth.User.Identity?.Name ?? "";
+        _loading = false;
+    }
+
+    private void SelectProvider(string key)
+    {
+        _dto.Provider = key;
+        if (key == "GoogleWorkspace") { _dto.SmtpHost = "smtp.gmail.com";       _dto.SmtpPort = 587; _dto.UseTls = true; }
+        if (key == "Microsoft365")    { _dto.SmtpHost = "smtp.office365.com";   _dto.SmtpPort = 587; _dto.UseTls = true; }
+        if (key == "Brevo")           { _dto.SmtpHost = "smtp-relay.brevo.com"; _dto.SmtpPort = 587; _dto.UseTls = true; }
+        if (key == "Custom")          { _dto.SmtpHost = "";                      _dto.SmtpPort = 587; _dto.UseTls = true; }
+        _message = "";
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        _message = "";
+        try
+        {
+            await SettingsService.SaveAsync(_dto);
+            _messageOk = true;
+            _message = "Ustawienia zapisane pomyślnie.";
+        }
+        catch (Exception ex)
+        {
+            _messageOk = false;
+            _message = $"Błąd zapisu: {ex.Message}";
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task TestEmailAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_testEmail)) return;
+        _testing = true;
+        _message = "";
+        try
+        {
+            await SettingsService.SaveAsync(_dto);
+            var (success, error) = await EmailService.TestAsync(_testEmail);
+            _messageOk = success;
+            _message = success
+                ? $"✓ Testowy email wysłany na {_testEmail}. Sprawdź skrzynkę odbiorczą."
+                : $"✗ Błąd połączenia: {error}";
+        }
+        catch (Exception ex)
+        {
+            _messageOk = false;
+            _message = $"Błąd: {ex.Message}";
+        }
+        finally { _testing = false; }
+    }
+}

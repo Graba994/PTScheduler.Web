@@ -12,7 +12,8 @@ namespace PTScheduler.Infrastructure.Services;
 public class SessionService(
     ApplicationDbContext db,
     UserManager<ApplicationUser> userManager,
-    ISessionPackageService packageService) : ISessionService
+    ISessionPackageService packageService,
+    IEmailService emailService) : ISessionService
 {
     public async Task<List<SessionDto>> GetSessionsAsync(DateTime from, DateTime to, string? trainerUserId = null, int? clientId = null)
     {
@@ -111,12 +112,17 @@ public class SessionService(
         db.Sessions.Add(session);
         await db.SaveChangesAsync();
 
+        try { await SendBookingConfirmationAsync(session, sessionType); } catch { }
+
         return (await GetSessionAsync(session.Id))!;
     }
 
     public async Task UpdateStatusAsync(int id, SessionStatus status, string? cancellationReason = null)
     {
-        var session = await db.Sessions.FindAsync(id)
+        var session = await db.Sessions
+            .Include(s => s.Client)
+            .Include(s => s.SessionType)
+            .FirstOrDefaultAsync(s => s.Id == id)
             ?? throw new InvalidOperationException("Session not found.");
 
         if (status == SessionStatus.Cancelled)
@@ -130,6 +136,9 @@ public class SessionService(
 
         if ((status == SessionStatus.Completed || status == SessionStatus.NoShow) && session.PackageId.HasValue)
             await packageService.DeductCreditAsync(session.PackageId.Value);
+
+        if (status == SessionStatus.Cancelled)
+            try { await SendCancellationEmailAsync(session, cancellationReason); } catch { }
     }
 
     public async Task RescheduleAsync(int id, DateTime newStartTime)
@@ -253,6 +262,76 @@ public class SessionService(
                 u => $"{u.FirstName} {u.LastName}".Trim().NullIfEmpty() ?? u.Email ?? u.Id);
         return sessions.Select(s => MapToDto(s, trainers)).ToList();
     }
+
+    private async Task SendBookingConfirmationAsync(Session session, SessionType sessionType)
+    {
+        if (!await emailService.IsEnabledAsync()) return;
+        var client = await db.Clients.FindAsync(session.ClientId);
+        if (client is null) return;
+        var clientUser = await userManager.FindByIdAsync(client.ApplicationUserId);
+        if (clientUser?.Email is null) return;
+
+        var trainer = await userManager.FindByIdAsync(session.TrainerUserId);
+        var trainerName = $"{trainer?.FirstName} {trainer?.LastName}".Trim().NullIfEmpty() ?? trainer?.Email ?? "Trener";
+        var clientName = $"{client.FirstName} {client.LastName}".Trim().NullIfEmpty() ?? clientUser.Email;
+        var html = BuildBookingHtml(clientName, trainerName, sessionType.Name, session.StartTime, sessionType.DurationMinutes);
+        await emailService.SendAsync(clientUser.Email, clientName, "Potwierdzenie rezerwacji wizyty", html);
+    }
+
+    private async Task SendCancellationEmailAsync(Session session, string? reason)
+    {
+        if (!await emailService.IsEnabledAsync()) return;
+        var clientUser = await userManager.FindByIdAsync(session.Client.ApplicationUserId);
+        if (clientUser?.Email is null) return;
+
+        var trainer = await userManager.FindByIdAsync(session.TrainerUserId);
+        var trainerName = $"{trainer?.FirstName} {trainer?.LastName}".Trim().NullIfEmpty() ?? trainer?.Email ?? "Trener";
+        var clientName = $"{session.Client.FirstName} {session.Client.LastName}".Trim().NullIfEmpty() ?? clientUser.Email;
+        var html = BuildCancellationHtml(clientName, trainerName, session.SessionType.Name, session.StartTime, reason);
+        await emailService.SendAsync(clientUser.Email, clientName, "Anulowanie wizyty", html);
+    }
+
+    private static string BuildBookingHtml(string clientName, string trainerName, string sessionType, DateTime startTime, int durationMin) => $"""
+        <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px">
+          <div style="background:#0284C7;border-radius:8px 8px 0 0;padding:24px;text-align:center">
+            <h2 style="color:white;margin:0;font-size:20px">Potwierdzenie rezerwacji</h2>
+          </div>
+          <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:24px">
+            <p style="color:#374151;font-size:15px">Cześć <strong>{clientName}</strong>!</p>
+            <p style="color:#374151;font-size:15px">Twoja wizyta została zarezerwowana. Szczegóły:</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0">
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;width:40%">Typ wizyty</td><td style="padding:8px 0;font-size:14px;font-weight:600">{sessionType}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Data i godzina</td><td style="padding:8px 0;font-size:14px;font-weight:600">{startTime:dddd\, dd MMMM yyyy} o {startTime:HH:mm}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Czas trwania</td><td style="padding:8px 0;font-size:14px;font-weight:600">{durationMin} minut</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Trener</td><td style="padding:8px 0;font-size:14px;font-weight:600">{trainerName}</td></tr>
+            </table>
+            <p style="color:#9ca3af;font-size:12px;margin-top:24px;padding-top:16px;border-top:1px solid #f3f4f6;text-align:center">
+              Wiadomość automatyczna — nie odpowiadaj na ten email.
+            </p>
+          </div>
+        </div>
+        """;
+
+    private static string BuildCancellationHtml(string clientName, string trainerName, string sessionType, DateTime startTime, string? reason) => $"""
+        <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px">
+          <div style="background:#DC2626;border-radius:8px 8px 0 0;padding:24px;text-align:center">
+            <h2 style="color:white;margin:0;font-size:20px">Wizyta anulowana</h2>
+          </div>
+          <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:24px">
+            <p style="color:#374151;font-size:15px">Cześć <strong>{clientName}</strong>!</p>
+            <p style="color:#374151;font-size:15px">Twoja wizyta została anulowana. Szczegóły:</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0">
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;width:40%">Typ wizyty</td><td style="padding:8px 0;font-size:14px;font-weight:600">{sessionType}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Data i godzina</td><td style="padding:8px 0;font-size:14px;font-weight:600">{startTime:dddd\, dd MMMM yyyy} o {startTime:HH:mm}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Trener</td><td style="padding:8px 0;font-size:14px;font-weight:600">{trainerName}</td></tr>
+              {(reason is not null ? $"<tr><td style=\"padding:8px 0;color:#6b7280;font-size:14px\">Powód</td><td style=\"padding:8px 0;font-size:14px\">{reason}</td></tr>" : "")}
+            </table>
+            <p style="color:#9ca3af;font-size:12px;margin-top:24px;padding-top:16px;border-top:1px solid #f3f4f6;text-align:center">
+              Wiadomość automatyczna — nie odpowiadaj na ten email.
+            </p>
+          </div>
+        </div>
+        """;
 
     private static SessionDto MapToDto(Session s, Dictionary<string, string> trainers) => new()
     {

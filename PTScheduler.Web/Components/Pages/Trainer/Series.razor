@@ -1,14 +1,19 @@
 @page "/trainer/series"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
 @inject ISessionSeriesService SeriesService
+@inject IClientService ClientService
+@inject ISessionService SessionService
+@inject IAuditLogService AuditLogService
 @inject AuthenticationStateProvider AuthState
 @inject ILogger<Series> Logger
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
 @rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
 
-<PageTitle>Serie wizyt</PageTitle>
+<AppTitle Page="Serie wizyt" />
 
 <div class="cal-shell">
     <div class="cal-topbar">
@@ -20,12 +25,16 @@
                 <button class="btn @(_showAll ? "btn-outline-secondary" : "btn-primary")" @onclick="() => _showAll = false">Aktywne</button>
                 <button class="btn @(_showAll ? "btn-primary" : "btn-outline-secondary")" @onclick="() => _showAll = true">Wszystkie</button>
             </div>
+            <button class="btn btn-success btn-sm" @onclick="OpenWizard">
+                <i class="bi bi-plus-circle me-1"></i>Nowa seria
+            </button>
         </div>
     </div>
 
     <div class="cal-body">
-        <div class="cal-main" style="overflow-y:auto;padding:1.5rem">
 
+        <!-- Series list -->
+        <div class="cal-main" style="overflow-y:auto;padding:1.5rem">
             @if (_loading)
             {
                 <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
@@ -47,13 +56,18 @@
                     <div class="text-center text-muted py-5">
                         <i class="bi bi-repeat d-block fs-1 mb-3 opacity-25"></i>
                         @(_showAll ? "Brak serii wizyt." : "Brak aktywnych serii wizyt.")
+                        <div class="mt-3">
+                            <button class="btn btn-success btn-sm" @onclick="OpenWizard">
+                                <i class="bi bi-plus-circle me-1"></i>Utwórz pierwszą serię
+                            </button>
+                        </div>
                     </div>
                 }
                 else
                 {
                     <div class="card">
-                        <div class="card-header fw-semibold d-flex align-items-center justify-content-between">
-                            <span>Serie (@visible.Count)</span>
+                        <div class="card-header fw-semibold">
+                            Serie (@visible.Count)
                         </div>
                         <div class="table-responsive">
                             <table class="table table-hover align-middle mb-0">
@@ -145,11 +159,332 @@
                 }
             }
         </div>
+
+        <!-- Creation Wizard Panel -->
+        @if (_wizardOpen)
+        {
+            <div class="cal-panel">
+                <div class="cal-panel-header">
+                    <span class="fw-semibold"><i class="bi bi-calendar-range me-2"></i>Nowa seria wizyt</span>
+                    <button class="btn-close btn-sm" @onclick="CloseWizard"></button>
+                </div>
+                <div class="cal-panel-body">
+
+                    <!-- Step progress indicator -->
+                    @{
+                        var stepLabels = new[] { "Klient", "Sesja", "Harmonogram", "Potwierdź" };
+                    }
+                    <div class="d-flex align-items-center mb-4">
+                        @for (int i = 0; i < stepLabels.Length; i++)
+                        {
+                            var num = i + 1;
+                            var label = stepLabels[i];
+                            var isDone = _wizardStep > num;
+                            var isActive = _wizardStep == num;
+                            var isLast = i == stepLabels.Length - 1;
+                            <div class="d-flex align-items-center @(!isLast ? "flex-grow-1" : "")">
+                                <div class="text-center" style="min-width:44px">
+                                    <div class="rounded-circle d-inline-flex align-items-center justify-content-center fw-bold"
+                                         style="width:28px;height:28px;font-size:.7rem;
+                                                background:@(isDone || isActive ? "var(--bs-primary)" : "var(--bs-body-bg)");
+                                                color:@(isDone || isActive ? "white" : "var(--bs-secondary-color)");
+                                                border: 2px solid @(isDone || isActive ? "var(--bs-primary)" : "var(--bs-border-color)")">
+                                        @if (isDone)
+                                        {
+                                            <i class="bi bi-check-lg" style="font-size:.65rem"></i>
+                                        }
+                                        else
+                                        {
+                                            @num
+                                        }
+                                    </div>
+                                    <div class="mt-1" style="font-size:.6rem;color:@(isActive ? "var(--bs-primary)" : "var(--bs-secondary-color)")">@label</div>
+                                </div>
+                                @if (!isLast)
+                                {
+                                    <div style="height:2px;flex:1;margin-bottom:18px;
+                                                background:@(isDone ? "var(--bs-primary)" : "var(--bs-border-color)")"></div>
+                                }
+                            </div>
+                        }
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(_wizardError))
+                    {
+                        <div class="alert alert-danger py-2 small mb-3">
+                            <i class="bi bi-exclamation-triangle-fill me-1"></i>@_wizardError
+                        </div>
+                    }
+
+                    @if (_wizardStep == 1)
+                    {
+                        <div class="fw-semibold mb-1">Krok 1 z 4 — Wybierz klienta</div>
+                        <p class="small text-muted mb-3">
+                            Dla którego klienta tworzysz serię? Wszystkie sesje zostaną
+                            automatycznie przypisane do jego kalendarza.
+                        </p>
+
+                        @if (_clients.Count == 0)
+                        {
+                            <div class="alert alert-warning py-2 small">
+                                <i class="bi bi-info-circle me-1"></i>
+                                Nie masz żadnych aktywnych klientów. Najpierw dodaj klientów w sekcji Klienci.
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="mb-4">
+                                <label class="form-label small fw-semibold mb-1">Klient</label>
+                                <select class="form-select" @bind="_newClientId">
+                                    <option value="0">— wybierz klienta —</option>
+                                    @foreach (var c in _clients)
+                                    {
+                                        <option value="@c.Id">@c.FullName</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="d-grid">
+                                <button class="btn btn-primary" @onclick="WizardNext"
+                                        disabled="@(_newClientId == 0)">
+                                    Dalej <i class="bi bi-arrow-right ms-1"></i>
+                                </button>
+                            </div>
+                        }
+                    }
+                    else if (_wizardStep == 2)
+                    {
+                        <div class="fw-semibold mb-1">Krok 2 z 4 — Rodzaj sesji</div>
+                        <p class="small text-muted mb-3">
+                            Wybierz typ treningu. Długość każdej wizyty w serii wynika z wybranego rodzaju.
+                        </p>
+
+                        @if (_sessionTypes.Count == 0)
+                        {
+                            <div class="alert alert-warning py-2 small">
+                                <i class="bi bi-info-circle me-1"></i>
+                                Brak zdefiniowanych typów sesji. Skonfiguruj je w Ustawieniach.
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="mb-4">
+                                @foreach (var t in _sessionTypes)
+                                {
+                                    var isSelected = _newSessionTypeId == t.Id;
+                                    <div class="p-3 rounded border mb-2 @(isSelected ? "border-primary bg-primary bg-opacity-10" : "")"
+                                         style="cursor:pointer"
+                                         @onclick="() => _newSessionTypeId = t.Id">
+                                        <div class="d-flex align-items-center gap-3">
+                                            <div class="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0"
+                                                 style="width:36px;height:36px;
+                                                        background:@(isSelected ? "var(--bs-primary)" : "var(--bs-secondary-bg)");
+                                                        color:@(isSelected ? "white" : "var(--bs-secondary-color)")">
+                                                <i class="bi bi-lightning-fill"></i>
+                                            </div>
+                                            <div class="flex-grow-1">
+                                                <div class="fw-semibold small">@t.Name</div>
+                                                <div class="text-muted" style="font-size:.75rem">@t.DurationMinutes minut</div>
+                                            </div>
+                                            @if (isSelected)
+                                            {
+                                                <i class="bi bi-check-circle-fill text-primary"></i>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-outline-secondary flex-fill" @onclick="WizardBack">
+                                    <i class="bi bi-arrow-left me-1"></i>Wróć
+                                </button>
+                                <button class="btn btn-primary flex-fill" @onclick="WizardNext"
+                                        disabled="@(_newSessionTypeId == 0)">
+                                    Dalej <i class="bi bi-arrow-right ms-1"></i>
+                                </button>
+                            </div>
+                        }
+                    }
+                    else if (_wizardStep == 3)
+                    {
+                        <div class="fw-semibold mb-1">Krok 3 z 4 — Harmonogram</div>
+                        <p class="small text-muted mb-3">
+                            Zaznacz dni tygodnia, ustaw godzinę i zakres dat serii.
+                            Możesz wybrać kilka dni jednocześnie.
+                        </p>
+
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold mb-2">
+                                Dni tygodnia
+                                <span class="text-muted fw-normal">(zaznacz co najmniej jeden)</span>
+                            </label>
+                            <div class="d-flex flex-wrap gap-2">
+                                @foreach (DayOfWeek d in new[] {
+                                    DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday,
+                                    DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday })
+                                {
+                                    var day = d;
+                                    var sel = _newDays.Contains(day);
+                                    <button type="button"
+                                            class="btn btn-sm @(sel ? "btn-primary" : "btn-outline-secondary")"
+                                            @onclick="() => ToggleDay(day)">
+                                        @ShortDayName(day)
+                                    </button>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="row g-2 mb-3">
+                            <div class="col-6">
+                                <label class="form-label small fw-semibold mb-1">Godzina startu</label>
+                                <input type="time" class="form-control form-control-sm" @bind="_newTime" />
+                                <div class="form-text" style="font-size:.7rem">Godzina każdej sesji w serii</div>
+                            </div>
+                        </div>
+
+                        <div class="row g-2 mb-3">
+                            <div class="col-6">
+                                <label class="form-label small fw-semibold mb-1">Data pierwszej sesji</label>
+                                <input type="date" class="form-control form-control-sm" @bind="_newStartDate"
+                                       min="@DateTime.Today.ToString("yyyy-MM-dd")" />
+                            </div>
+                            <div class="col-6">
+                                <label class="form-label small fw-semibold mb-1">
+                                    Data końca
+                                    <span class="text-muted fw-normal">(opcjonalna)</span>
+                                </label>
+                                <input type="date" class="form-control form-control-sm" @bind="_newEndDate" />
+                                @if (_newEndDate.HasValue)
+                                {
+                                    <button type="button" class="btn btn-link btn-sm p-0 mt-1 text-muted"
+                                            @onclick="() => _newEndDate = null">
+                                        <i class="bi bi-x me-1"></i>Bez daty końca
+                                    </button>
+                                }
+                                else
+                                {
+                                    <div class="form-text" style="font-size:.7rem">Puste = seria bezterminowa</div>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="mb-4">
+                            <label class="form-label small fw-semibold mb-1">Notatki (opcjonalne)</label>
+                            <textarea class="form-control form-control-sm" rows="2" @bind="_newNotes"
+                                      placeholder="Dodatkowe informacje do serii..."></textarea>
+                        </div>
+
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-outline-secondary flex-fill" @onclick="WizardBack">
+                                <i class="bi bi-arrow-left me-1"></i>Wróć
+                            </button>
+                            <button class="btn btn-primary flex-fill" @onclick="WizardPreviewAsync"
+                                    disabled="@(_wizardBusy || _newDays.Count == 0)">
+                                @if (_wizardBusy)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-1"></span>
+                                }
+                                <i class="bi bi-eye me-1"></i>Podgląd
+                            </button>
+                        </div>
+                    }
+                    else if (_wizardStep == 4)
+                    {
+                        <div class="fw-semibold mb-1">Krok 4 z 4 — Potwierdzenie</div>
+                        <p class="small text-muted mb-3">Sprawdź szczegóły serii przed utworzeniem.</p>
+
+                        <!-- Summary card -->
+                        <div class="p-3 rounded border mb-3 small">
+                            <div class="d-flex gap-2 align-items-start mb-2">
+                                <i class="bi bi-person-fill text-primary mt-1 flex-shrink-0"></i>
+                                <div>
+                                    <div class="text-muted" style="font-size:.7rem">KLIENT</div>
+                                    <div class="fw-semibold">@(_clients.FirstOrDefault(c => c.Id == _newClientId)?.FullName ?? "—")</div>
+                                </div>
+                            </div>
+                            <div class="d-flex gap-2 align-items-start mb-2">
+                                <i class="bi bi-lightning-fill text-primary mt-1 flex-shrink-0"></i>
+                                <div>
+                                    <div class="text-muted" style="font-size:.7rem">RODZAJ SESJI</div>
+                                    <div class="fw-semibold">@(_sessionTypes.FirstOrDefault(t => t.Id == _newSessionTypeId)?.Name ?? "—")</div>
+                                </div>
+                            </div>
+                            <div class="d-flex gap-2 align-items-start mb-2">
+                                <i class="bi bi-calendar-week text-primary mt-1 flex-shrink-0"></i>
+                                <div>
+                                    <div class="text-muted" style="font-size:.7rem">HARMONOGRAM</div>
+                                    <div class="fw-semibold">@DaysList([.. _newDays]) o @_newTime.ToString("HH:mm")</div>
+                                </div>
+                            </div>
+                            <div class="d-flex gap-2 align-items-start">
+                                <i class="bi bi-calendar-range text-primary mt-1 flex-shrink-0"></i>
+                                <div>
+                                    <div class="text-muted" style="font-size:.7rem">ZAKRES</div>
+                                    <div class="fw-semibold">
+                                        od @_newStartDate.ToString("dd.MM.yyyy")
+                                        @(_newEndDate.HasValue ? $" do {_newEndDate.Value:dd.MM.yyyy}" : " (bezterminowo)")
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- Preview results -->
+                        @if (_seriesPreview is not null)
+                        {
+                            <div class="p-3 rounded mb-3 small" style="background:var(--bs-tertiary-bg)">
+                                <div class="fw-semibold mb-2">
+                                    <i class="bi bi-bar-chart-fill me-1 text-primary"></i>Wynik podglądu:
+                                </div>
+                                <div class="d-flex align-items-center gap-2 mb-1 text-success">
+                                    <i class="bi bi-calendar-check-fill"></i>
+                                    <span><strong>@_seriesPreview.WillBeScheduled</strong> sesji zostanie zaplanowanych</span>
+                                </div>
+                                @if (_seriesPreview.WillBeAwaitingPackage > 0)
+                                {
+                                    <div class="d-flex align-items-center gap-2 mb-1" style="color:var(--bs-warning-text-emphasis)">
+                                        <i class="bi bi-exclamation-triangle-fill"></i>
+                                        <span><strong>@_seriesPreview.WillBeAwaitingPackage</strong> sesji oczekuje na pakiet</span>
+                                    </div>
+                                }
+                                @if (_seriesPreview.ConflictDates.Count > 0)
+                                {
+                                    <div class="d-flex align-items-center gap-2 mb-1 text-danger">
+                                        <i class="bi bi-x-circle-fill"></i>
+                                        <span><strong>@_seriesPreview.ConflictDates.Count</strong> kolizji (będą pominięte)</span>
+                                    </div>
+                                }
+                                <div class="text-muted mt-1">
+                                    Dostępne kredyty pakietu: <strong>@_seriesPreview.AvailableCredits</strong>
+                                </div>
+                            </div>
+                        }
+
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-outline-secondary flex-fill" @onclick="WizardBack">
+                                <i class="bi bi-arrow-left me-1"></i>Wróć
+                            </button>
+                            <button class="btn btn-success flex-fill" @onclick="ConfirmCreateSeriesAsync"
+                                    disabled="@_wizardBusy">
+                                @if (_wizardBusy)
+                                {
+                                    <span class="spinner-border spinner-border-sm me-1"></span>
+                                }
+                                <i class="bi bi-check-circle me-1"></i>Utwórz serię
+                            </button>
+                        </div>
+                    }
+
+                </div>
+            </div>
+        }
+
     </div>
 </div>
 
 @code {
+    // ── List state ──────────────────────────────────────────────────────────
     private string _trainerUserId = string.Empty;
+    private string _userEmail = string.Empty;
+    private bool _isAdmin;
     private List<SessionSeriesDto> _series = [];
     private bool _loading = true;
     private string? _loadError;
@@ -159,10 +494,33 @@
     private bool _cancelFutureSessions = true;
     private string? _cancelError;
 
+    // ── Wizard state ─────────────────────────────────────────────────────────
+    private bool _wizardOpen;
+    private int _wizardStep = 1;
+    private string _wizardError = string.Empty;
+    private bool _wizardBusy;
+
+    private List<ClientDto> _clients = [];
+    private List<SessionTypeDto> _sessionTypes = [];
+
+    // Wizard form values
+    private int _newClientId;
+    private int _newSessionTypeId;
+    private HashSet<DayOfWeek> _newDays = [];
+    private TimeOnly _newTime = new(8, 0);
+    private DateOnly _newStartDate = DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+    private DateOnly? _newEndDate;
+    private string? _newNotes;
+    private SeriesPreviewDto? _seriesPreview;
+
+    // ── Init ─────────────────────────────────────────────────────────────────
     protected override async Task OnInitializedAsync()
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
         _trainerUserId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _userEmail = auth.User.Identity?.Name ?? _trainerUserId;
+        _isAdmin = auth.User.IsInRole(Roles.Admin);
+        await LoadWizardDataAsync();
         await LoadAsync();
     }
 
@@ -185,6 +543,118 @@
         }
     }
 
+    private async Task LoadWizardDataAsync()
+    {
+        try
+        {
+            var allClients = await ClientService.GetClientsAsync();
+            _clients = allClients
+                .Where(c => (_isAdmin || c.TrainerUserId == _trainerUserId) && c.Status == ClientStatus.Active)
+                .OrderBy(c => c.FullName)
+                .ToList();
+            _sessionTypes = await SessionService.GetSessionTypesAsync();
+        }
+        catch (Exception ex)
+        {
+            Logger.LogError(ex, "Error loading wizard data");
+        }
+    }
+
+    // ── Wizard ───────────────────────────────────────────────────────────────
+    private void OpenWizard()
+    {
+        _wizardOpen = true;
+        _wizardStep = 1;
+        _wizardError = string.Empty;
+        _newClientId = 0;
+        _newSessionTypeId = _sessionTypes.FirstOrDefault()?.Id ?? 0;
+        _newDays = [];
+        _newTime = new(8, 0);
+        _newStartDate = DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+        _newEndDate = null;
+        _newNotes = null;
+        _seriesPreview = null;
+    }
+
+    private void CloseWizard()
+    {
+        _wizardOpen = false;
+        _wizardError = string.Empty;
+        _seriesPreview = null;
+    }
+
+    private void WizardNext()
+    {
+        _wizardError = string.Empty;
+        if (_wizardStep == 1 && _newClientId == 0) { _wizardError = "Wybierz klienta."; return; }
+        if (_wizardStep == 2 && _newSessionTypeId == 0) { _wizardError = "Wybierz rodzaj sesji."; return; }
+        _wizardStep++;
+    }
+
+    private void WizardBack()
+    {
+        _wizardError = string.Empty;
+        _wizardStep--;
+    }
+
+    private void ToggleDay(DayOfWeek d)
+    {
+        if (!_newDays.Remove(d)) _newDays.Add(d);
+        _seriesPreview = null;
+    }
+
+    private async Task WizardPreviewAsync()
+    {
+        _wizardError = string.Empty;
+        if (_newDays.Count == 0) { _wizardError = "Zaznacz co najmniej jeden dzień tygodnia."; return; }
+        _wizardBusy = true;
+        try
+        {
+            _seriesPreview = await SeriesService.PreviewAsync(BuildDto());
+            _wizardStep = 4;
+        }
+        catch (Exception ex)
+        {
+            _wizardError = ex.Message;
+            Logger.LogError(ex, "Error previewing series");
+        }
+        finally { _wizardBusy = false; }
+    }
+
+    private async Task ConfirmCreateSeriesAsync()
+    {
+        _wizardBusy = true;
+        _wizardError = string.Empty;
+        try
+        {
+            var result = await SeriesService.CreateAsync(BuildDto(), skipConflicts: true);
+            await AuditLogService.LogAsync(_trainerUserId, _userEmail, "Trainer", "SeriesCreated", "SessionSeries",
+                result.Id.ToString(),
+                $"Klient: {result.ClientName}, dni: {DaysList(result.RecurrenceDays)}, sesji: {result.TotalSessionsCreated}");
+            CloseWizard();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _wizardError = ex.Message;
+            Logger.LogError(ex, "Error creating series");
+        }
+        finally { _wizardBusy = false; }
+    }
+
+    private CreateSessionSeriesDto BuildDto() => new()
+    {
+        ClientId = _newClientId,
+        TrainerUserId = _trainerUserId,
+        SessionTypeId = _newSessionTypeId,
+        RecurrenceDays = [.. _newDays],
+        StartTime = _newTime,
+        StartDate = _newStartDate,
+        EndDate = _newEndDate,
+        Notes = string.IsNullOrWhiteSpace(_newNotes) ? null : _newNotes.Trim()
+    };
+
+    // ── Cancel series ────────────────────────────────────────────────────────
     private void AskCancel(int seriesId, int futureCount)
     {
         _confirmCancelId = seriesId;
@@ -214,10 +684,25 @@
         }
     }
 
+    // ── Helpers ───────────────────────────────────────────────────────────────
+    private static string ShortDayName(DayOfWeek d) => d switch
+    {
+        DayOfWeek.Monday    => "Pon",
+        DayOfWeek.Tuesday   => "Wt",
+        DayOfWeek.Wednesday => "Śr",
+        DayOfWeek.Thursday  => "Czw",
+        DayOfWeek.Friday    => "Pt",
+        DayOfWeek.Saturday  => "Sob",
+        DayOfWeek.Sunday    => "Nd",
+        _                   => d.ToString()
+    };
+
     private static string DaysList(List<DayOfWeek> days)
     {
-        var order = new[] { DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday,
-                            DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday };
+        var order = new[] {
+            DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday,
+            DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday
+        };
         var names = new Dictionary<DayOfWeek, string>
         {
             [DayOfWeek.Monday]    = "Pon",

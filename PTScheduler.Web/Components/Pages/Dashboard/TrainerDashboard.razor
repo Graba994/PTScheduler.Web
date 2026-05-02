@@ -18,20 +18,48 @@ else
 
     @if (_awaiting.Any())
     {
-        <div class="alert alert-warning d-flex align-items-start gap-2 mb-3">
-            <i class="bi bi-exclamation-triangle-fill flex-shrink-0 mt-1"></i>
-            <div>
-                <strong>Sesje bez pakietu (@_awaiting.Count)</strong> — poniższe wizyty oczekują na przypisanie pakietu:
-                <div class="mt-2 d-flex flex-column gap-1">
-                    @foreach (var s in _awaiting)
-                    {
-                        <a href="/sessions" class="text-decoration-none text-dark d-flex align-items-center gap-2">
-                            <i class="bi bi-arrow-right-short"></i>
-                            <span class="fw-semibold">@s.ClientName</span>
-                            <span class="text-muted small">@s.StartTime.ToString("dd.MM HH:mm") · @s.SessionTypeName</span>
-                        </a>
-                    }
+        var awaitingGroups = _awaiting.GroupBy(s => s.ClientId).ToList();
+        <div class="card mb-3" style="border-left:4px solid #D97706">
+            <div class="card-header d-flex align-items-center justify-content-between py-2"
+                 style="background:rgba(217,119,6,.08)">
+                <span class="fw-semibold" style="color:#92400E">
+                    <i class="bi bi-exclamation-triangle-fill me-2" style="color:#D97706"></i>Oczekują na pakiet
+                </span>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge text-white" style="background:#D97706">@_awaiting.Count sesji</span>
+                    <a href="/sessions" class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:.75rem">
+                        Przejdź do wizyt <i class="bi bi-arrow-right ms-1"></i>
+                    </a>
                 </div>
+            </div>
+            <div class="card-body p-0">
+                @foreach (var g in awaitingGroups)
+                {
+                    var sessions = g.ToList();
+                    var first = sessions[0];
+                    var initials = string.Concat(first.ClientName.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => p[0])).ToUpper();
+                    <div class="px-3 py-2 @(g != awaitingGroups.Last() ? "border-bottom" : "")">
+                        <div class="d-flex align-items-center gap-2 mb-1">
+                            <div class="avatar-circle flex-shrink-0" style="width:28px;height:28px;font-size:.65rem">@initials</div>
+                            <span class="fw-semibold" style="font-size:.875rem">@first.ClientName</span>
+                            @if (sessions.Count > 1)
+                            {
+                                <span class="badge rounded-pill bg-warning text-dark ms-auto" style="font-size:.65rem">@sessions.Count×</span>
+                            }
+                        </div>
+                        <div class="d-flex flex-wrap gap-2 ms-1" style="padding-left:36px">
+                            @foreach (var s in sessions)
+                            {
+                                <a href="/sessions" class="text-decoration-none">
+                                    <span class="badge rounded-pill border"
+                                          style="font-size:.7rem;color:#92400E;background:rgba(217,119,6,.12);border-color:rgba(217,119,6,.3)!important">
+                                        @s.StartTime.ToString("dd.MM HH:mm") · @s.SessionTypeName
+                                    </span>
+                                </a>
+                            }
+                        </div>
+                    </div>
+                }
             </div>
         </div>
     }

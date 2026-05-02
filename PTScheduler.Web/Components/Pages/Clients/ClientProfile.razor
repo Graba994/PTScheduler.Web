@@ -4,6 +4,7 @@
 @inject ISessionService SessionService
 @inject ISessionPackageService PackageService
 @inject IUserManagementService UserManagementService
+@inject IBodyMeasurementService MeasurementService
 @inject NavigationManager Nav
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
@@ -289,7 +290,7 @@ else if (client is not null)
 
         </div>
 
-        <!-- Right column: session history -->
+        <!-- Right column: session history + measurements -->
         <div class="col-12 col-lg-8">
             <div class="card shadow-sm">
                 <div class="card-body p-4">
@@ -333,6 +334,139 @@ else if (client is not null)
                             </table>
                         </div>
                         <div class="text-muted small mt-1">Łącznie: @sessions.Count sesji</div>
+                    }
+                </div>
+            </div>
+
+            <!-- Body measurements -->
+            <div class="card shadow-sm mt-4">
+                <div class="card-body p-4">
+                    <div class="d-flex align-items-center justify-content-between mb-3">
+                        <h6 class="card-title mb-0"><i class="bi bi-rulers me-2 text-primary"></i>Pomiary ciała</h6>
+                        <button class="btn btn-outline-primary btn-sm" @onclick="() => { addMeasurementOpen = !addMeasurementOpen; measurementError = string.Empty; }">
+                            <i class="bi @(addMeasurementOpen ? "bi-x-lg" : "bi-plus-lg") me-1"></i>@(addMeasurementOpen ? "Anuluj" : "Dodaj pomiar")
+                        </button>
+                    </div>
+
+                    @if (addMeasurementOpen)
+                    {
+                        <div class="border rounded p-3 mb-3 bg-light">
+                            @if (!string.IsNullOrEmpty(measurementError))
+                            {
+                                <div class="alert alert-danger py-2 small mb-2">@measurementError</div>
+                            }
+                            <div class="row g-2">
+                                <div class="col-12 col-sm-6">
+                                    <label class="form-label form-label-sm">Data <span class="text-danger">*</span></label>
+                                    <input type="date" class="form-control form-control-sm"
+                                           value="@newMeasurement.MeasurementDate.ToString("yyyy-MM-dd")"
+                                           @onchange="e => newMeasurement.MeasurementDate = string.IsNullOrEmpty(e.Value?.ToString()) ? DateOnly.FromDateTime(DateTime.Today) : DateOnly.Parse(e.Value!.ToString()!)" />
+                                </div>
+                                <div class="col-6 col-sm-3">
+                                    <label class="form-label form-label-sm">Waga (kg)</label>
+                                    <input type="number" step="0.1" class="form-control form-control-sm" placeholder="np. 75.5"
+                                           @bind="newMeasurement.WeightKg" />
+                                </div>
+                                <div class="col-6 col-sm-3">
+                                    <label class="form-label form-label-sm">Tk. tłuszczowa (%)</label>
+                                    <input type="number" step="0.1" class="form-control form-control-sm" placeholder="np. 18.0"
+                                           @bind="newMeasurement.BodyFatPercent" />
+                                </div>
+                                <div class="col-6 col-sm-4">
+                                    <label class="form-label form-label-sm">Klatka (cm)</label>
+                                    <input type="number" step="0.5" class="form-control form-control-sm"
+                                           @bind="newMeasurement.ChestCm" />
+                                </div>
+                                <div class="col-6 col-sm-4">
+                                    <label class="form-label form-label-sm">Talia (cm)</label>
+                                    <input type="number" step="0.5" class="form-control form-control-sm"
+                                           @bind="newMeasurement.WaistCm" />
+                                </div>
+                                <div class="col-6 col-sm-4">
+                                    <label class="form-label form-label-sm">Biodra (cm)</label>
+                                    <input type="number" step="0.5" class="form-control form-control-sm"
+                                           @bind="newMeasurement.HipsCm" />
+                                </div>
+                                <div class="col-6 col-sm-4">
+                                    <label class="form-label form-label-sm">Udo (cm)</label>
+                                    <input type="number" step="0.5" class="form-control form-control-sm"
+                                           @bind="newMeasurement.ThighCm" />
+                                </div>
+                                <div class="col-6 col-sm-4">
+                                    <label class="form-label form-label-sm">Ramię (cm)</label>
+                                    <input type="number" step="0.5" class="form-control form-control-sm"
+                                           @bind="newMeasurement.ArmCm" />
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label form-label-sm">Notatki</label>
+                                    <textarea class="form-control form-control-sm" rows="2" @bind="newMeasurement.Notes"></textarea>
+                                </div>
+                            </div>
+                            <button class="btn btn-primary btn-sm mt-3 w-100" @onclick="SaveMeasurement" disabled="@isBusy">
+                                @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                <i class="bi bi-floppy me-1"></i>Zapisz pomiar
+                            </button>
+                        </div>
+                    }
+
+                    @if (measurements is null)
+                    {
+                        <div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></div>
+                    }
+                    else if (!measurements.Any())
+                    {
+                        <p class="text-muted small text-center mb-0">Brak pomiarów. Dodaj pierwszy pomiar klikając przycisk powyżej.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle" style="font-size:.85rem">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Data</th>
+                                        <th>Waga</th>
+                                        <th>Tk. tłuszcz.</th>
+                                        <th>Talia</th>
+                                        <th>Klatka</th>
+                                        <th>Biodra</th>
+                                        <th>Udo</th>
+                                        <th>Ramię</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @for (int i = 0; i < measurements.Count; i++)
+                                    {
+                                        var m = measurements[i];
+                                        var prev = i + 1 < measurements.Count ? measurements[i + 1] : null;
+                                        <tr>
+                                            <td class="text-nowrap fw-semibold">@m.MeasurementDate.ToString("dd.MM.yyyy")</td>
+                                            <td>@MeasCell(m.WeightKg, prev?.WeightKg, "kg", false)</td>
+                                            <td>@MeasCell(m.BodyFatPercent, prev?.BodyFatPercent, "%", false)</td>
+                                            <td>@MeasCell(m.WaistCm, prev?.WaistCm, "cm", false)</td>
+                                            <td>@MeasCell(m.ChestCm, prev?.ChestCm, "cm", true)</td>
+                                            <td>@MeasCell(m.HipsCm, prev?.HipsCm, "cm", true)</td>
+                                            <td>@MeasCell(m.ThighCm, prev?.ThighCm, "cm", true)</td>
+                                            <td>@MeasCell(m.ArmCm, prev?.ArmCm, "cm", true)</td>
+                                            <td>
+                                                <button class="btn btn-link btn-sm text-danger p-0"
+                                                        title="Usuń" @onclick="() => DeleteMeasurement(m.Id)">
+                                                    <i class="bi bi-trash3"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                        @if (!string.IsNullOrWhiteSpace(m.Notes))
+                                        {
+                                            <tr class="table-light">
+                                                <td colspan="9" class="py-1 px-3 text-muted small fst-italic">
+                                                    <i class="bi bi-chat-left-text me-1"></i>@m.Notes
+                                                </td>
+                                            </tr>
+                                        }
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
                     }
                 </div>
             </div>
@@ -494,6 +628,11 @@ else if (client is not null)
     private CreateSessionPackageDto newPkg = new();
     private string pkgError = string.Empty;
 
+    private List<BodyMeasurementDto>? measurements;
+    private bool addMeasurementOpen;
+    private CreateBodyMeasurementDto newMeasurement = new();
+    private string measurementError = string.Empty;
+
     protected override async Task OnInitializedAsync()
     {
         var auth = await AuthStateProvider.GetAuthenticationStateAsync();
@@ -506,6 +645,7 @@ else if (client is not null)
         await LoadSessions();
         await LoadSessionTypes();
         await LoadPackages();
+        await LoadMeasurements();
     }
 
     private async Task LoadNotes()
@@ -527,6 +667,47 @@ else if (client is not null)
     {
         packages = await PackageService.GetPackagesAsync(Id);
     }
+
+    private async Task LoadMeasurements()
+    {
+        measurements = await MeasurementService.GetAsync(Id);
+    }
+
+    private async Task SaveMeasurement()
+    {
+        newMeasurement.ClientId = Id;
+        isBusy = true;
+        measurementError = string.Empty;
+        try
+        {
+            await MeasurementService.AddAsync(newMeasurement);
+            newMeasurement = new CreateBodyMeasurementDto();
+            addMeasurementOpen = false;
+            measurements = await MeasurementService.GetAsync(Id);
+        }
+        catch (Exception ex) { measurementError = ex.Message; }
+        finally { isBusy = false; }
+    }
+
+    private async Task DeleteMeasurement(int id)
+    {
+        await MeasurementService.DeleteAsync(id);
+        measurements = await MeasurementService.GetAsync(Id);
+    }
+
+    private static RenderFragment MeasCell(decimal? val, decimal? prevVal, string unit, bool upIsGood) => builder =>
+    {
+        if (val is null) { builder.AddContent(0, "—"); return; }
+        builder.AddContent(0, $"{val:0.#} {unit}");
+        if (prevVal is null) return;
+        var diff = val.Value - prevVal.Value;
+        if (diff == 0) return;
+        var isPositive = diff > 0;
+        var isGood = upIsGood ? isPositive : !isPositive;
+        var arrow = isPositive ? "↑" : "↓";
+        var color = isGood ? "#16a34a" : "#dc2626";
+        builder.AddMarkupContent(1, $" <span style=\"color:{color};font-size:.75rem\">{arrow}</span>");
+    };
 
     private async Task ApproveClient()
     {
