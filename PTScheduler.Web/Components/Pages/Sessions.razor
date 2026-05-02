@@ -1,0 +1,921 @@
+@page "/sessions"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ISessionService SessionService
+@inject IClientService ClientService
+@inject IAuditLogService AuditLogService
+@inject ITrainerAvailabilityService AvailabilityService
+@inject ISessionSeriesService SeriesService
+@inject AuthenticationStateProvider AuthState
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
+@using System.Globalization
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Wizyty</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="mb-0 fw-bold">
+        <i class="bi bi-calendar-check me-2"></i>Wizyty
+    </h4>
+    <div class="d-flex gap-2 align-items-center flex-wrap">
+        @if (_isClientRole)
+        {
+            @if (_clientDto?.AllowSelfBooking == true)
+            {
+                <button class="btn btn-primary btn-sm" @onclick="OpenBookingPanel">
+                    <i class="bi bi-plus-circle me-1"></i>Umów wizytę
+                </button>
+            }
+            else
+            {
+                <span class="text-muted small">
+                    <i class="bi bi-info-circle me-1"></i>Rezerwacja przez trenera
+                </span>
+            }
+        }
+        @if (_canEdit && _clients.Count > 0)
+        {
+            <select class="form-select form-select-sm w-auto" value="@_filterClientId"
+                    @onchange="OnClientFilterChanged">
+                <option value="0">Wszyscy klienci</option>
+                @foreach (var c in _clients)
+                {
+                    <option value="@c.Id">@c.FullName</option>
+                }
+            </select>
+        }
+    </div>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5">
+        <span class="spinner-border text-primary"></span>
+        <div class="text-muted small mt-2">Ładowanie...</div>
+    </div>
+}
+else
+{
+    <div class="sessions-body">
+        <div class="sessions-main">
+
+            <!-- Upcoming -->
+            <div class="d-flex align-items-center gap-2 mb-2">
+                <span class="session-section-label">Nadchodzące</span>
+                @if (_upcoming.Count > 0)
+                {
+                    <span class="badge bg-primary rounded-pill">@_upcoming.Count</span>
+                }
+            </div>
+
+            @if (_upcoming.Count == 0)
+            {
+                <div class="text-muted py-3 small mb-4">Brak nadchodzących wizyt.</div>
+            }
+            else
+            {
+                <div class="session-tiles mb-5">
+                    @foreach (var s in _upcoming)
+                    {
+                        <div class="session-tile status-@s.Status.ToString().ToLower() @(_selectedSession?.Id == s.Id ? "session-tile-selected" : "")"
+                             style="cursor:pointer"
+                             @onclick="() => OpenPanel(s.Id)">
+                            <div class="session-tile-date">
+                                <div class="session-tile-day">@s.StartTime.Day</div>
+                                <div class="session-tile-month">@s.StartTime.ToString("MMM", _pl)</div>
+                                <div class="session-tile-weekday">@s.StartTime.ToString("ddd", _pl)</div>
+                            </div>
+                            <div class="session-tile-info">
+                                <div class="session-tile-client">@s.ClientName</div>
+                                <div class="session-tile-type">@s.SessionTypeName</div>
+                                <div class="session-tile-time">
+                                    <i class="bi bi-clock me-1 text-muted"></i>@s.StartTime.ToString("HH:mm") – @s.EndTime.ToString("HH:mm")
+                                </div>
+                                @if (_canEdit)
+                                {
+                                    <div class="session-tile-trainer text-muted">
+                                        <i class="bi bi-person me-1"></i>@s.TrainerName
+                                    </div>
+                                }
+                            </div>
+                            <div class="session-tile-meta">
+                                <span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span>
+                                <i class="bi bi-chevron-right text-muted" style="font-size:.75rem"></i>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+
+            <!-- Archive -->
+            <div class="d-flex align-items-center gap-2 mb-2 mt-2">
+                <span class="session-section-label" style="color:var(--bs-secondary-color)">Archiwum</span>
+                @if (_past.Count > 0)
+                {
+                    <span class="badge bg-secondary rounded-pill">@_past.Count</span>
+                }
+            </div>
+
+            @if (_past.Count == 0)
+            {
+                <div class="text-muted py-3 small">Brak archiwalnych wizyt.</div>
+            }
+            else
+            {
+                <div class="session-tiles">
+                    @foreach (var s in _past)
+                    {
+                        <div class="session-tile status-@s.Status.ToString().ToLower() @(_selectedSession?.Id == s.Id ? "session-tile-selected" : "")"
+                             style="cursor:pointer"
+                             @onclick="() => OpenPanel(s.Id)">
+                            <div class="session-tile-date">
+                                <div class="session-tile-day">@s.StartTime.Day</div>
+                                <div class="session-tile-month">@s.StartTime.ToString("MMM", _pl)</div>
+                                <div class="session-tile-weekday">@s.StartTime.ToString("ddd", _pl)</div>
+                            </div>
+                            <div class="session-tile-info">
+                                <div class="session-tile-client">@s.ClientName</div>
+                                <div class="session-tile-type">@s.SessionTypeName</div>
+                                <div class="session-tile-time">
+                                    <i class="bi bi-clock me-1 text-muted"></i>@s.StartTime.ToString("HH:mm") – @s.EndTime.ToString("HH:mm")
+                                </div>
+                                @if (_canEdit)
+                                {
+                                    <div class="session-tile-trainer text-muted">
+                                        <i class="bi bi-person me-1"></i>@s.TrainerName
+                                    </div>
+                                }
+                            </div>
+                            <div class="session-tile-meta">
+                                <span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span>
+                                <i class="bi bi-chevron-right text-muted" style="font-size:.75rem"></i>
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+
+        </div>
+
+        <!-- Booking panel (client self-booking) -->
+        @if (_bookingOpen)
+        {
+            <div class="cal-panel">
+                <div class="cal-panel-header">
+                    <span class="fw-semibold"><i class="bi bi-calendar-plus me-2"></i>Nowa wizyta</span>
+                    <button class="btn-close btn-sm" @onclick="CloseBookingPanel"></button>
+                </div>
+                <div class="cal-panel-body">
+
+                    @if (!string.IsNullOrEmpty(_bookingError))
+                    {
+                        <div class="alert alert-danger py-2 small">@_bookingError</div>
+                    }
+
+                    @if (_sessionTypes.Count == 0)
+                    {
+                        <div class="alert alert-warning py-2 small">
+                            Brak dostępnych typów sesji. Skontaktuj się z trenerem.
+                        </div>
+                    }
+                    else
+                    {
+                        <!-- Mode tabs -->
+                        <ul class="nav nav-tabs nav-sm mb-3">
+                            <li class="nav-item">
+                                <button class="nav-link py-1 @(_bookingMode == "single" ? "active" : "")"
+                                        @onclick='() => SetBookingMode("single")'>Jednorazowa</button>
+                            </li>
+                            <li class="nav-item">
+                                <button class="nav-link py-1 @(_bookingMode == "series" ? "active" : "")"
+                                        @onclick='() => SetBookingMode("series")'>Seria</button>
+                            </li>
+                        </ul>
+
+                        <!-- Session type selector (shared) -->
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold mb-1">Rodzaj sesji</label>
+                            <select class="form-select form-select-sm" @bind="_bookingSessionTypeId"
+                                    @bind:after="OnSessionTypeChangedAsync">
+                                @foreach (var t in _sessionTypes)
+                                {
+                                    <option value="@t.Id">@t.Name (@t.DurationMinutes min)</option>
+                                }
+                            </select>
+                        </div>
+
+                        @if (_bookingMode == "single")
+                        {
+                            <!-- Date picker + slot list -->
+                            <div class="mb-3">
+                                <label class="form-label small fw-semibold mb-1">Data</label>
+                                <input type="date" class="form-control form-control-sm"
+                                       @bind="_bookingDate" @bind:after="LoadSlotsAsync"
+                                       min="@DateTime.Today.ToString("yyyy-MM-dd")" />
+                            </div>
+
+                            @if (_loadingSlots)
+                            {
+                                <div class="text-center py-2"><span class="spinner-border spinner-border-sm text-primary"></span></div>
+                            }
+                            else if (_availableSlots.Count > 0)
+                            {
+                                <div class="mb-3">
+                                    <label class="form-label small fw-semibold mb-1">Dostępne terminy</label>
+                                    <div class="d-flex flex-wrap gap-2">
+                                        @foreach (var slot in _availableSlots.Where(s => s.IsAvailable))
+                                        {
+                                            <button class="btn btn-sm @(IsSelectedSlot(slot) ? "btn-primary" : "btn-outline-primary")"
+                                                    @onclick="() => SelectSlot(slot)">
+                                                @slot.Start.ToString("HH:mm")
+                                            </button>
+                                        }
+                                    </div>
+                                    @if (!_availableSlots.Any(s => s.IsAvailable))
+                                    {
+                                        <div class="text-muted small mt-1">Brak wolnych terminów w tym dniu.</div>
+                                    }
+                                </div>
+                            }
+                            else if (_bookingDate != default && !_loadingSlots)
+                            {
+                                <div class="text-muted small mb-3">Trener nie ma dostępności w tym dniu.</div>
+                            }
+
+                            <div class="mb-4">
+                                <label class="form-label small fw-semibold mb-1">Notatki (opcjonalne)</label>
+                                <textarea class="form-control form-control-sm" rows="2"
+                                          @bind="_bookingNotes" placeholder="Dodaj uwagi dla trenera..."></textarea>
+                            </div>
+
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-primary btn-sm" @onclick="ConfirmBooking"
+                                        disabled="@(_bookingBusy || _bookingDateTime == default)">
+                                    @if (_bookingBusy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                                    <i class="bi bi-check-circle me-1"></i>Potwierdź rezerwację
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="CloseBookingPanel">Anuluj</button>
+                            </div>
+                        }
+                        else
+                        {
+                            <!-- Series booking -->
+                            <div class="mb-3">
+                                <label class="form-label small fw-semibold mb-1">Dni tygodnia</label>
+                                <div class="d-flex flex-wrap gap-2">
+                                    @foreach (DayOfWeek d in new[]{ DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday, DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday })
+                                    {
+                                        var selected = _seriesDays.Contains(d);
+                                        <button type="button"
+                                                class="btn btn-sm @(selected ? "btn-primary" : "btn-outline-secondary")"
+                                                @onclick="() => ToggleSeriesDay(d)">
+                                            @ShortDayName(d)
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+                            <div class="row g-2 mb-3">
+                                <div class="col-6">
+                                    <label class="form-label small fw-semibold mb-1">Godzina</label>
+                                    <input type="time" class="form-control form-control-sm" @bind="_seriesTime" />
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small fw-semibold mb-1">Data startu</label>
+                                    <input type="date" class="form-control form-control-sm" @bind="_seriesStartDate"
+                                           min="@DateTime.Today.ToString("yyyy-MM-dd")" />
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small fw-semibold mb-1">Data końca (opcjonalna)</label>
+                                    <input type="date" class="form-control form-control-sm" @bind="_seriesEndDate" />
+                                </div>
+                            </div>
+
+                            @if (_seriesPreview is not null)
+                            {
+                                <div class="p-2 rounded border mb-3 small">
+                                    <div class="fw-semibold mb-1">Podgląd serii:</div>
+                                    <div class="text-success">✓ @_seriesPreview.WillBeScheduled zaplanowanych</div>
+                                    @if (_seriesPreview.WillBeAwaitingPackage > 0)
+                                    {
+                                        <div class="text-warning">⚠ @_seriesPreview.WillBeAwaitingPackage oczekuje na pakiet</div>
+                                    }
+                                    @if (_seriesPreview.ConflictDates.Count > 0)
+                                    {
+                                        <div class="text-danger">✗ @_seriesPreview.ConflictDates.Count kolizji (zostaną pominięte)</div>
+                                    }
+                                    <div class="text-muted">Kredytów: @_seriesPreview.AvailableCredits</div>
+                                </div>
+                            }
+
+                            <div class="d-grid gap-2">
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="PreviewSeriesAsync"
+                                        disabled="@(_bookingBusy || _seriesDays.Count == 0)">
+                                    <i class="bi bi-eye me-1"></i>Podgląd
+                                </button>
+                                <button class="btn btn-primary btn-sm" @onclick="ConfirmSeriesAsync"
+                                        disabled="@(_bookingBusy || _seriesDays.Count == 0)">
+                                    @if (_bookingBusy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                                    <i class="bi bi-calendar-range me-1"></i>Utwórz serię
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="CloseBookingPanel">Anuluj</button>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        }
+
+        <!-- Detail panel (existing session) -->
+        @if (!_bookingOpen && _panelOpen && _selectedSession is not null)
+        {
+            <div class="cal-panel">
+                <div class="cal-panel-header">
+                    <span class="fw-semibold">Szczegóły wizyty</span>
+                    <button class="btn-close btn-sm" @onclick="ClosePanel"></button>
+                </div>
+                <div class="cal-panel-body">
+
+                    <!-- Avatar + name -->
+                    <div class="d-flex align-items-center gap-3 mb-4">
+                        <div class="avatar-circle" style="width:52px;height:52px;font-size:1.1rem">
+                            @Initials(_selectedSession.ClientName)
+                        </div>
+                        <div>
+                            <div class="fw-bold fs-6">@_selectedSession.ClientName</div>
+                            <small class="text-muted">@_selectedSession.SessionTypeName</small>
+                        </div>
+                    </div>
+
+                    <!-- Detail rows -->
+                    <div class="session-detail-list">
+                        <div class="session-detail-row">
+                            <i class="bi bi-calendar-event"></i>
+                            <span>@_selectedSession.StartTime.ToString("dddd, d MMMM yyyy", _pl)</span>
+                        </div>
+                        <div class="session-detail-row">
+                            <i class="bi bi-clock"></i>
+                            <span>
+                                @_selectedSession.StartTime.ToString("HH:mm") – @_selectedSession.EndTime.ToString("HH:mm")
+                                <span class="text-muted">(@_selectedSession.DurationMinutes min)</span>
+                            </span>
+                        </div>
+                        <div class="session-detail-row">
+                            <i class="bi bi-person"></i>
+                            <span>@_selectedSession.TrainerName</span>
+                        </div>
+                        <div class="session-detail-row">
+                            <i class="bi bi-circle-fill" style="font-size:.45rem;margin-top:5px"></i>
+                            <span class="badge @StatusBadge(_selectedSession.Status)">@StatusLabel(_selectedSession.Status)</span>
+                        </div>
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(_selectedSession.Notes))
+                    {
+                        <div class="p-3 rounded mb-3" style="background:var(--bs-tertiary-bg)">
+                            <div class="small text-muted fw-semibold mb-1">Notatki</div>
+                            <div class="small">@_selectedSession.Notes</div>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(_selectedSession.CancellationReason))
+                    {
+                        <div class="p-3 rounded bg-danger bg-opacity-10 mb-3">
+                            <div class="small text-danger fw-semibold mb-1">Powód anulowania</div>
+                            <div class="small">@_selectedSession.CancellationReason</div>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrEmpty(_panelError))
+                    {
+                        <div class="alert alert-danger py-2 small">@_panelError</div>
+                    }
+
+                    <!-- AwaitingPackage warning -->
+                    @if (_selectedSession.Status == SessionStatus.AwaitingPackage)
+                    {
+                        <div class="alert alert-warning py-2 small mb-3">
+                            <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                            Termin zarezerwowany, lecz klient nie ma aktywnego pakietu. Skontaktuj się z klientem w sprawie finansów.
+                        </div>
+                    }
+
+                    <!-- Trainer/Admin actions for Scheduled or AwaitingPackage sessions -->
+                    @if (_canEdit && (_selectedSession.Status == SessionStatus.Scheduled || _selectedSession.Status == SessionStatus.AwaitingPackage))
+                    {
+                        <div class="d-grid gap-2 mt-3">
+                            <button class="btn btn-success btn-sm"
+                                    @onclick='() => ChangeStatus(SessionStatus.Completed)' disabled="@_busy">
+                                <i class="bi bi-check-circle me-1"></i>Oznacz jako ukończona
+                            </button>
+                            <button class="btn btn-warning btn-sm"
+                                    @onclick='() => ChangeStatus(SessionStatus.NoShow)' disabled="@_busy">
+                                <i class="bi bi-person-x me-1"></i>Klient nie przyszedł
+                            </button>
+
+                            @if (!_showRescheduleForm && !_showCancelForm)
+                            {
+                                <button class="btn btn-outline-primary btn-sm" @onclick="ShowRescheduleForm">
+                                    <i class="bi bi-calendar-range me-1"></i>Przeplanuj wizytę
+                                </button>
+                                <button class="btn btn-outline-danger btn-sm" @onclick="ShowCancelForm">
+                                    <i class="bi bi-x-circle me-1"></i>Anuluj wizytę
+                                </button>
+                            }
+
+                            @if (_showRescheduleForm)
+                            {
+                                <div class="p-3 rounded border border-primary-subtle">
+                                    <label class="form-label small fw-semibold mb-1">Nowy termin</label>
+                                    <input type="datetime-local" class="form-control form-control-sm mb-2"
+                                           @bind="_rescheduleDateTime" @bind:format="yyyy-MM-ddTHH:mm" />
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-primary btn-sm flex-fill"
+                                                @onclick="ConfirmReschedule" disabled="@_busy">
+                                            @if (_busy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                                            Potwierdź
+                                        </button>
+                                        <button class="btn btn-secondary btn-sm"
+                                                @onclick="() => _showRescheduleForm = false">Wróć</button>
+                                    </div>
+                                </div>
+                            }
+
+                            @if (_showCancelForm)
+                            {
+                                <div class="p-3 rounded border border-danger-subtle">
+                                    <label class="form-label small mb-1">Powód anulowania (opcjonalny)</label>
+                                    <input class="form-control form-control-sm mb-2"
+                                           @bind="_cancelReason" placeholder="..." />
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-danger btn-sm flex-fill"
+                                                @onclick="ConfirmCancel" disabled="@_busy">
+                                            @if (_busy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                                            Potwierdź
+                                        </button>
+                                        <button class="btn btn-secondary btn-sm"
+                                                @onclick="() => _showCancelForm = false">Wróć</button>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    <!-- Client: cancel own session if > 24h in advance -->
+                    @if (_isClientRole && _selectedSession.Status == SessionStatus.Scheduled
+                         && _selectedSession.StartTime > DateTime.Now.AddHours(24))
+                    {
+                        <div class="mt-3">
+                            @if (!_showCancelForm)
+                            {
+                                <button class="btn btn-outline-danger btn-sm w-100" @onclick="ShowCancelForm">
+                                    <i class="bi bi-x-circle me-1"></i>Anuluj wizytę
+                                </button>
+                            }
+                            else
+                            {
+                                <div class="p-3 rounded border border-danger-subtle">
+                                    <label class="form-label small mb-1">Powód anulowania (opcjonalny)</label>
+                                    <input class="form-control form-control-sm mb-2"
+                                           @bind="_cancelReason" placeholder="..." />
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-danger btn-sm flex-fill"
+                                                @onclick="ConfirmCancel" disabled="@_busy">
+                                            @if (_busy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                                            Potwierdź
+                                        </button>
+                                        <button class="btn btn-secondary btn-sm"
+                                                @onclick="() => _showCancelForm = false">Wróć</button>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                    <!-- Trainer/Admin: restore cancelled or no-show sessions -->
+                    @if (_canEdit && (_selectedSession.Status == SessionStatus.Cancelled
+                                   || _selectedSession.Status == SessionStatus.NoShow))
+                    {
+                        <div class="mt-3">
+                            @if (!_showRestoreConfirm)
+                            {
+                                <button class="btn btn-outline-secondary btn-sm w-100"
+                                        @onclick="ShowRestoreConfirm">
+                                    <i class="bi bi-arrow-counterclockwise me-1"></i>Przywróć wizytę
+                                </button>
+                            }
+                            else
+                            {
+                                <div class="p-3 rounded border border-warning-subtle">
+                                    <div class="small fw-semibold mb-1 text-warning-emphasis">
+                                        <i class="bi bi-exclamation-triangle me-1"></i>Czy na pewno przywrócić tę wizytę?
+                                    </div>
+                                    <div class="small text-muted mb-3">
+                                        Wizyta zostanie oznaczona jako zaplanowana. Upewnij się, że termin jest nadal aktualny.
+                                    </div>
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-warning btn-sm flex-fill"
+                                                @onclick="ConfirmRestore" disabled="@_busy">
+                                            @if (_busy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                                            Tak, przywróć
+                                        </button>
+                                        <button class="btn btn-secondary btn-sm"
+                                                @onclick="() => _showRestoreConfirm = false">Anuluj</button>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+
+                </div>
+            </div>
+        }
+
+    </div>
+}
+
+@code {
+    private static readonly CultureInfo _pl = new("pl-PL");
+
+    private List<SessionDto> _upcoming = [];
+    private List<SessionDto> _past     = [];
+    private List<ClientSummaryDto> _clients = [];
+    private bool _loading = true;
+    private bool _canEdit;
+    private bool _isAdminRole;
+    private bool _isClientRole;
+    private string _userId = string.Empty;
+    private string _userEmail = string.Empty;
+    private string _userRole = string.Empty;
+    private ClientDto? _clientDto;
+    private int? _clientNumericId;
+    private int _filterClientId = 0;
+
+    // Detail panel state
+    private bool _panelOpen;
+    private bool _busy;
+    private string _panelError = string.Empty;
+    private SessionDto? _selectedSession;
+    private bool _showCancelForm;
+    private string _cancelReason = string.Empty;
+    private bool _showRescheduleForm;
+    private DateTime _rescheduleDateTime = DateTime.Now;
+    private bool _showRestoreConfirm;
+
+    // Booking panel state
+    private bool _bookingOpen;
+    private bool _bookingBusy;
+    private string _bookingError = string.Empty;
+    private List<SessionTypeDto> _sessionTypes = [];
+    private int _bookingSessionTypeId;
+    private DateTime _bookingDateTime = default;
+    private string _bookingNotes = string.Empty;
+
+    // Slot picker
+    private string _bookingMode = "single";
+    private DateOnly _bookingDate = DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+    private List<AvailableSlotDto> _availableSlots = [];
+    private bool _loadingSlots;
+
+    // Series booking
+    private HashSet<DayOfWeek> _seriesDays = [];
+    private TimeOnly _seriesTime = new(8, 0);
+    private DateOnly _seriesStartDate = DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+    private DateOnly? _seriesEndDate;
+    private SeriesPreviewDto? _seriesPreview;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId    = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        _userEmail = auth.User.Identity?.Name ?? _userId;
+
+        _isAdminRole  = auth.User.IsInRole(Roles.Admin);
+        var isTrainer = auth.User.IsInRole(Roles.Trainer) || auth.User.IsInRole(Roles.Subordinate);
+        _isClientRole = auth.User.IsInRole(Roles.Client);
+        _canEdit      = _isAdminRole || isTrainer;
+
+        _userRole = _isAdminRole ? Roles.Admin
+                  : auth.User.IsInRole(Roles.Trainer) ? Roles.Trainer
+                  : auth.User.IsInRole(Roles.Subordinate) ? Roles.Subordinate
+                  : _isClientRole ? Roles.Client : string.Empty;
+
+        if (_canEdit)
+            _clients = await SessionService.GetClientsAsync();
+
+        if (_isClientRole)
+        {
+            _clientDto = await ClientService.GetClientByUserIdAsync(_userId);
+            _clientNumericId = _clientDto?.Id;
+        }
+
+        await LoadSessionsAsync();
+    }
+
+    private async Task OnClientFilterChanged(ChangeEventArgs e)
+    {
+        _filterClientId = int.TryParse(e.Value?.ToString(), out var id) ? id : 0;
+        await LoadSessionsAsync();
+    }
+
+    private async Task LoadSessionsAsync()
+    {
+        _loading = true;
+        try
+        {
+            string? trainerFilter = _canEdit && !_isAdminRole ? _userId : null;
+            int?    clientFilter  = _isClientRole ? _clientNumericId
+                                  : (_filterClientId > 0 ? _filterClientId : null);
+
+            _upcoming = await SessionService.GetUpcomingAsync(trainerFilter, clientFilter, count: 100);
+            _past     = await SessionService.GetPastSessionsAsync(trainerFilter, clientFilter, count: 100);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task OpenPanel(int sessionId)
+    {
+        _bookingOpen        = false;
+        _panelError         = string.Empty;
+        _showCancelForm     = false;
+        _cancelReason       = string.Empty;
+        _showRescheduleForm = false;
+        _showRestoreConfirm = false;
+        _selectedSession    = await SessionService.GetSessionAsync(sessionId);
+        if (_selectedSession is not null)
+            _rescheduleDateTime = _selectedSession.StartTime;
+        _panelOpen = true;
+    }
+
+    private void ClosePanel()
+    {
+        _panelOpen          = false;
+        _selectedSession    = null;
+        _showCancelForm     = false;
+        _showRescheduleForm = false;
+        _showRestoreConfirm = false;
+        _panelError         = string.Empty;
+    }
+
+    private async Task OpenBookingPanel()
+    {
+        ClosePanel();
+        if (_sessionTypes.Count == 0)
+            _sessionTypes = await SessionService.GetSessionTypesAsync();
+        _bookingSessionTypeId = _sessionTypes.FirstOrDefault()?.Id ?? 0;
+        _bookingMode     = "single";
+        _bookingDate     = DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+        _bookingDateTime = default;
+        _bookingNotes    = string.Empty;
+        _bookingError    = string.Empty;
+        _availableSlots  = [];
+        _seriesDays      = [];
+        _seriesPreview   = null;
+        _bookingOpen     = true;
+        if (_bookingSessionTypeId > 0)
+            await LoadSlotsAsync();
+    }
+
+    private void CloseBookingPanel()
+    {
+        _bookingOpen  = false;
+        _bookingError = string.Empty;
+        _seriesPreview = null;
+    }
+
+    private void SetBookingMode(string mode)
+    {
+        _bookingMode = mode;
+        _seriesPreview = null;
+        _bookingError = string.Empty;
+    }
+
+    private async Task OnSessionTypeChangedAsync()
+    {
+        _bookingDateTime = default;
+        await LoadSlotsAsync();
+    }
+
+    private async Task LoadSlotsAsync()
+    {
+        if (_clientDto?.TrainerUserId is null || _bookingSessionTypeId == 0) return;
+        var sessionType = _sessionTypes.FirstOrDefault(t => t.Id == _bookingSessionTypeId);
+        if (sessionType is null) return;
+
+        _loadingSlots = true;
+        _availableSlots = [];
+        _bookingDateTime = default;
+        try
+        {
+            _availableSlots = await AvailabilityService.GetAvailableSlotsAsync(
+                _clientDto.TrainerUserId, _bookingDate, sessionType.DurationMinutes);
+        }
+        finally { _loadingSlots = false; }
+    }
+
+    private void SelectSlot(AvailableSlotDto slot)
+    {
+        _bookingDateTime = slot.Start;
+    }
+
+    private bool IsSelectedSlot(AvailableSlotDto slot) =>
+        _bookingDateTime != default && slot.Start == _bookingDateTime;
+
+    private async Task ConfirmBooking()
+    {
+        if (_clientDto?.TrainerUserId is null)
+        {
+            _bookingError = "Nie masz przypisanego trenera. Skontaktuj się z administratorem.";
+            return;
+        }
+        if (_bookingSessionTypeId == 0)
+        {
+            _bookingError = "Wybierz rodzaj sesji.";
+            return;
+        }
+        if (_bookingDateTime == default)
+        {
+            _bookingError = "Wybierz termin.";
+            return;
+        }
+        _bookingBusy = true; _bookingError = string.Empty;
+        try
+        {
+            var dto = new CreateSessionDto
+            {
+                ClientId       = _clientDto.Id,
+                SessionTypeId  = _bookingSessionTypeId,
+                TrainerUserId  = _clientDto.TrainerUserId,
+                StartTime      = _bookingDateTime,
+                Notes          = string.IsNullOrWhiteSpace(_bookingNotes) ? null : _bookingNotes.Trim()
+            };
+            await SessionService.CreateSessionAsync(dto);
+            await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionBooked", "Session",
+                null, $"Termin: {_bookingDateTime:dd.MM.yyyy HH:mm}");
+            CloseBookingPanel();
+            await LoadSessionsAsync();
+        }
+        catch (Exception ex) { _bookingError = ex.Message; }
+        finally { _bookingBusy = false; }
+    }
+
+    private void ToggleSeriesDay(DayOfWeek d)
+    {
+        if (!_seriesDays.Remove(d)) _seriesDays.Add(d);
+        _seriesPreview = null;
+    }
+
+    private async Task PreviewSeriesAsync()
+    {
+        if (_clientDto?.TrainerUserId is null || _seriesDays.Count == 0) return;
+        _bookingBusy = true; _bookingError = string.Empty;
+        try
+        {
+            _seriesPreview = await SeriesService.PreviewAsync(BuildSeriesDto());
+        }
+        catch (Exception ex) { _bookingError = ex.Message; }
+        finally { _bookingBusy = false; }
+    }
+
+    private async Task ConfirmSeriesAsync()
+    {
+        if (_clientDto?.TrainerUserId is null || _seriesDays.Count == 0) return;
+        _bookingBusy = true; _bookingError = string.Empty;
+        try
+        {
+            var result = await SeriesService.CreateAsync(BuildSeriesDto(), skipConflicts: true);
+            await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SeriesCreated", "SessionSeries",
+                result.Id.ToString(), $"Klient: {_clientDto.FullName}, sesje: {result.TotalSessionsCreated}");
+            CloseBookingPanel();
+            await LoadSessionsAsync();
+        }
+        catch (Exception ex) { _bookingError = ex.Message; }
+        finally { _bookingBusy = false; }
+    }
+
+    private CreateSessionSeriesDto BuildSeriesDto() => new()
+    {
+        ClientId       = _clientDto!.Id,
+        TrainerUserId  = _clientDto.TrainerUserId!,
+        SessionTypeId  = _bookingSessionTypeId,
+        RecurrenceDays = [.. _seriesDays],
+        StartTime      = _seriesTime,
+        StartDate      = _seriesStartDate,
+        EndDate        = _seriesEndDate,
+    };
+
+    private void ShowCancelForm()    { _showCancelForm = true; _showRescheduleForm = false; }
+    private void ShowRescheduleForm() { _showRescheduleForm = true; _showCancelForm = false; }
+    private void ShowRestoreConfirm() => _showRestoreConfirm = true;
+
+    private async Task ChangeStatus(SessionStatus status)
+    {
+        if (_selectedSession is null) return;
+        _busy = true; _panelError = string.Empty;
+        try
+        {
+            await SessionService.UpdateStatusAsync(_selectedSession.Id, status);
+            var action = status == SessionStatus.Completed ? "SessionCompleted" : "SessionNoShow";
+            await AuditLogService.LogAsync(_userId, _userEmail, _userRole, action, "Session",
+                _selectedSession.Id.ToString(),
+                $"Klient: {_selectedSession.ClientName}, termin: {_selectedSession.StartTime:dd.MM.yyyy HH:mm}");
+            ClosePanel();
+            await LoadSessionsAsync();
+        }
+        catch (Exception ex) { _panelError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ConfirmCancel()
+    {
+        if (_selectedSession is null) return;
+        _busy = true; _panelError = string.Empty;
+        try
+        {
+            await SessionService.UpdateStatusAsync(_selectedSession.Id, SessionStatus.Cancelled, _cancelReason);
+            var details = $"Klient: {_selectedSession.ClientName}, termin: {_selectedSession.StartTime:dd.MM.yyyy HH:mm}" +
+                          (string.IsNullOrEmpty(_cancelReason) ? "" : $", powód: {_cancelReason}");
+            await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionCancelled", "Session",
+                _selectedSession.Id.ToString(), details);
+            ClosePanel();
+            await LoadSessionsAsync();
+        }
+        catch (Exception ex) { _panelError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ConfirmReschedule()
+    {
+        if (_selectedSession is null) return;
+        _busy = true; _panelError = string.Empty;
+        try
+        {
+            var oldTime = _selectedSession.StartTime;
+            await SessionService.RescheduleAsync(_selectedSession.Id, _rescheduleDateTime);
+            await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionRescheduled", "Session",
+                _selectedSession.Id.ToString(),
+                $"Klient: {_selectedSession.ClientName}, stary termin: {oldTime:dd.MM.yyyy HH:mm}, nowy: {_rescheduleDateTime:dd.MM.yyyy HH:mm}");
+            ClosePanel();
+            await LoadSessionsAsync();
+        }
+        catch (Exception ex) { _panelError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ConfirmRestore()
+    {
+        if (_selectedSession is null) return;
+        _busy = true; _panelError = string.Empty;
+        try
+        {
+            await SessionService.RestoreAsync(_selectedSession.Id);
+            await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionRestored", "Session",
+                _selectedSession.Id.ToString(),
+                $"Klient: {_selectedSession.ClientName}, termin: {_selectedSession.StartTime:dd.MM.yyyy HH:mm}");
+            ClosePanel();
+            await LoadSessionsAsync();
+        }
+        catch (Exception ex) { _panelError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private static string Initials(string name) =>
+        string.Concat(name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => p[0])).ToUpper();
+
+    private static string ShortDayName(DayOfWeek d) => d switch
+    {
+        DayOfWeek.Monday    => "Pon",
+        DayOfWeek.Tuesday   => "Wt",
+        DayOfWeek.Wednesday => "Śr",
+        DayOfWeek.Thursday  => "Czw",
+        DayOfWeek.Friday    => "Pt",
+        DayOfWeek.Saturday  => "Sob",
+        DayOfWeek.Sunday    => "Nd",
+        _                   => d.ToString()
+    };
+
+    private static string StatusBadge(SessionStatus s) => s switch
+    {
+        SessionStatus.Scheduled       => "bg-primary",
+        SessionStatus.Completed       => "bg-success",
+        SessionStatus.Cancelled       => "bg-danger",
+        SessionStatus.NoShow          => "bg-warning text-dark",
+        SessionStatus.AwaitingPackage => "bg-orange text-white",
+        _                             => "bg-secondary"
+    };
+
+    private static string StatusLabel(SessionStatus s) => s switch
+    {
+        SessionStatus.Scheduled       => "Zaplanowana",
+        SessionStatus.Completed       => "Ukończona",
+        SessionStatus.Cancelled       => "Anulowana",
+        SessionStatus.NoShow          => "Nieobecność",
+        SessionStatus.AwaitingPackage => "Oczekuje na pakiet",
+        _                             => s.ToString()
+    };
+}

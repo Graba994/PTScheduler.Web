@@ -1,0 +1,233 @@
+@page "/trainer/series"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@inject ISessionSeriesService SeriesService
+@inject AuthenticationStateProvider AuthState
+@inject ILogger<Series> Logger
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Serie wizyt</PageTitle>
+
+<div class="cal-shell">
+    <div class="cal-topbar">
+        <h4 class="mb-0 fw-bold">
+            <i class="bi bi-repeat me-2"></i>Serie wizyt
+        </h4>
+        <div class="d-flex gap-2 align-items-center">
+            <div class="btn-group btn-group-sm">
+                <button class="btn @(_showAll ? "btn-outline-secondary" : "btn-primary")" @onclick="() => _showAll = false">Aktywne</button>
+                <button class="btn @(_showAll ? "btn-primary" : "btn-outline-secondary")" @onclick="() => _showAll = true">Wszystkie</button>
+            </div>
+        </div>
+    </div>
+
+    <div class="cal-body">
+        <div class="cal-main" style="overflow-y:auto;padding:1.5rem">
+
+            @if (_loading)
+            {
+                <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+            }
+            else if (_loadError is not null)
+            {
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                    Błąd ładowania: @_loadError
+                    <button class="btn btn-sm btn-outline-danger ms-3" @onclick="LoadAsync">Spróbuj ponownie</button>
+                </div>
+            }
+            else
+            {
+                var visible = _showAll ? _series : _series.Where(s => s.IsActive).ToList();
+
+                @if (!visible.Any())
+                {
+                    <div class="text-center text-muted py-5">
+                        <i class="bi bi-repeat d-block fs-1 mb-3 opacity-25"></i>
+                        @(_showAll ? "Brak serii wizyt." : "Brak aktywnych serii wizyt.")
+                    </div>
+                }
+                else
+                {
+                    <div class="card">
+                        <div class="card-header fw-semibold d-flex align-items-center justify-content-between">
+                            <span>Serie (@visible.Count)</span>
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Klient</th>
+                                        <th>Typ sesji</th>
+                                        <th>Dni / godzina</th>
+                                        <th>Okres</th>
+                                        <th class="text-center">Sesji</th>
+                                        <th class="text-center">Status</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var s in visible)
+                                    {
+                                        <tr class="@(!s.IsActive ? "text-muted" : "")">
+                                            <td>
+                                                <div class="fw-semibold" style="font-size:.875rem">@s.ClientName</div>
+                                            </td>
+                                            <td style="font-size:.875rem">@s.SessionTypeName</td>
+                                            <td>
+                                                <div style="font-size:.8rem">@DaysList(s.RecurrenceDays)</div>
+                                                <div class="text-muted" style="font-size:.75rem">@s.StartTime.ToString("HH:mm")</div>
+                                            </td>
+                                            <td style="font-size:.8rem">
+                                                <div>od @s.StartDate.ToString("dd.MM.yyyy")</div>
+                                                <div class="text-muted">@(s.EndDate.HasValue ? $"do {s.EndDate.Value:dd.MM.yyyy}" : "bezterminowo")</div>
+                                            </td>
+                                            <td class="text-center">
+                                                <div class="fw-semibold" style="font-size:.875rem">@s.TotalSessionsCreated</div>
+                                                @if (s.IsActive && s.FutureSessionsCount > 0)
+                                                {
+                                                    <div class="text-muted" style="font-size:.7rem">@s.FutureSessionsCount nadchodzących</div>
+                                                }
+                                            </td>
+                                            <td class="text-center">
+                                                @if (s.IsActive)
+                                                {
+                                                    <span class="badge bg-success">Aktywna</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge bg-secondary">Anulowana</span>
+                                                }
+                                            </td>
+                                            <td class="text-end">
+                                                @if (s.IsActive)
+                                                {
+                                                    @if (_confirmCancelId == s.Id)
+                                                    {
+                                                        <div class="d-flex flex-column align-items-end gap-2" style="min-width:200px">
+                                                            <div class="form-check form-check-sm">
+                                                                <input class="form-check-input" type="checkbox" id="cancel-future-@s.Id"
+                                                                       @bind="_cancelFutureSessions" />
+                                                                <label class="form-check-label small" for="cancel-future-@s.Id">
+                                                                    Anuluj przyszłe wizyty
+                                                                </label>
+                                                            </div>
+                                                            <div class="d-flex gap-1">
+                                                                <button class="btn btn-sm btn-danger" @onclick="() => ConfirmCancelAsync(s.Id)">
+                                                                    <i class="bi bi-check-lg me-1"></i>Tak, anuluj
+                                                                </button>
+                                                                <button class="btn btn-sm btn-outline-secondary" @onclick="ClearConfirm">
+                                                                    Nie
+                                                                </button>
+                                                            </div>
+                                                            @if (_cancelError is not null)
+                                                            {
+                                                                <div class="text-danger small">@_cancelError</div>
+                                                            }
+                                                        </div>
+                                                    }
+                                                    else
+                                                    {
+                                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => AskCancel(s.Id, s.FutureSessionsCount)">
+                                                            <i class="bi bi-x-circle me-1"></i>Anuluj serię
+                                                        </button>
+                                                    }
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private string _trainerUserId = string.Empty;
+    private List<SessionSeriesDto> _series = [];
+    private bool _loading = true;
+    private string? _loadError;
+    private bool _showAll;
+
+    private int? _confirmCancelId;
+    private bool _cancelFutureSessions = true;
+    private string? _cancelError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _trainerUserId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _loadError = null;
+        try
+        {
+            _series = await SeriesService.GetSeriesForTrainerAsync(_trainerUserId);
+        }
+        catch (Exception ex)
+        {
+            _loadError = ex.Message;
+            Logger.LogError(ex, "Error loading series page");
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void AskCancel(int seriesId, int futureCount)
+    {
+        _confirmCancelId = seriesId;
+        _cancelFutureSessions = futureCount > 0;
+        _cancelError = null;
+    }
+
+    private void ClearConfirm()
+    {
+        _confirmCancelId = null;
+        _cancelError = null;
+    }
+
+    private async Task ConfirmCancelAsync(int seriesId)
+    {
+        _cancelError = null;
+        try
+        {
+            await SeriesService.CancelSeriesAsync(seriesId, _cancelFutureSessions);
+            _confirmCancelId = null;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _cancelError = ex.Message;
+            Logger.LogError(ex, "Error cancelling series {Id}", seriesId);
+        }
+    }
+
+    private static string DaysList(List<DayOfWeek> days)
+    {
+        var order = new[] { DayOfWeek.Monday, DayOfWeek.Tuesday, DayOfWeek.Wednesday,
+                            DayOfWeek.Thursday, DayOfWeek.Friday, DayOfWeek.Saturday, DayOfWeek.Sunday };
+        var names = new Dictionary<DayOfWeek, string>
+        {
+            [DayOfWeek.Monday]    = "Pon",
+            [DayOfWeek.Tuesday]   = "Wt",
+            [DayOfWeek.Wednesday] = "Śr",
+            [DayOfWeek.Thursday]  = "Czw",
+            [DayOfWeek.Friday]    = "Pt",
+            [DayOfWeek.Saturday]  = "Sob",
+            [DayOfWeek.Sunday]    = "Nd"
+        };
+        return string.Join(", ", order.Where(days.Contains).Select(d => names[d]));
+    }
+}

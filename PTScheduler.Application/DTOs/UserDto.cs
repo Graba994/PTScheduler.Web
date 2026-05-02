@@ -1,3 +1,5 @@
+using PTScheduler.Domain.Constants;
+
 namespace PTScheduler.Application.DTOs;
 
 public class UserDto
@@ -13,4 +15,14 @@ public class UserDto
     public string? SupervisorId { get; set; }
     public string? SupervisorEmail { get; set; }
     public bool IsLockedOut { get; set; }
+}
+
+public class CreateUserDto
+{
+    public string FirstName { get; set; } = string.Empty;
+    public string LastName  { get; set; } = string.Empty;
+    public string Email     { get; set; } = string.Empty;
+    public string Password  { get; set; } = string.Empty;
+    public string Role      { get; set; } = Roles.Trainer;
+    public string? SupervisorId { get; set; }
 }

@@ -31,6 +31,8 @@ public class SessionPackageSummaryDto
 {
     public int Id { get; set; }
     public string Name { get; set; } = string.Empty;
+    public int SessionTypeId { get; set; }
+    public string SessionTypeName { get; set; } = string.Empty;
     public int TotalSessions { get; set; }
     public int UsedSessions { get; set; }
     public int RemainingCredits => Math.Max(0, TotalSessions - UsedSessions);

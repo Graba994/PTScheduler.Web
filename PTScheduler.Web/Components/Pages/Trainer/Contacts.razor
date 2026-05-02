@@ -1,0 +1,220 @@
+@page "/trainer/contacts"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@inject IClientContactService ContactService
+@inject IClientService ClientService
+@inject AuthenticationStateProvider AuthState
+@inject ILogger<Contacts> Logger
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Enums
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Pary klientów</PageTitle>
+
+<div class="cal-shell">
+    <div class="cal-topbar">
+        <h4 class="mb-0 fw-bold">
+            <i class="bi bi-people-fill me-2"></i>Pary klientów
+        </h4>
+    </div>
+
+    <div class="cal-body">
+        <div class="cal-main" style="overflow-y:auto;padding:1.5rem">
+
+            @if (_loading)
+            {
+                <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+            }
+            else if (_loadError is not null)
+            {
+                <div class="alert alert-danger">
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                    Błąd ładowania danych: @_loadError
+                    <button class="btn btn-sm btn-outline-danger ms-3" @onclick="LoadAsync">Spróbuj ponownie</button>
+                </div>
+            }
+            else
+            {
+                <!-- Add pair card -->
+                <div class="card mb-4">
+                    <div class="card-header fw-semibold">Dodaj parę</div>
+                    <div class="card-body">
+                        <div class="row g-3 align-items-end">
+                            <div class="col-md-5">
+                                <label class="form-label">Klient A</label>
+                                <select class="form-select" @bind="_newClient1Id">
+                                    <option value="0">— wybierz —</option>
+                                    @foreach (var c in _clients)
+                                    {
+                                        <option value="@c.Id">@c.FullName (@c.Email)</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-md-5">
+                                <label class="form-label">Klient B</label>
+                                <select class="form-select" @bind="_newClient2Id">
+                                    <option value="0">— wybierz —</option>
+                                    @foreach (var c in _clients)
+                                    {
+                                        <option value="@c.Id">@c.FullName (@c.Email)</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-md-2">
+                                <button class="btn btn-success w-100" @onclick="AddPairAsync">
+                                    <i class="bi bi-plus-circle-fill me-1"></i>Połącz
+                                </button>
+                            </div>
+                        </div>
+                        @if (!string.IsNullOrEmpty(_addError))
+                        {
+                            <div class="alert alert-danger mt-2 mb-0 py-2">@_addError</div>
+                        }
+                    </div>
+                </div>
+
+                <!-- Pairs table -->
+                <div class="card">
+                    <div class="card-header fw-semibold">Istniejące pary (@PairGroups.Count())</div>
+                    <div class="card-body p-0">
+                        @if (_pairs.Count == 0)
+                        {
+                            <div class="text-center text-muted py-4">Brak par klientów.</div>
+                        }
+                        else
+                        {
+                            <table class="table table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Klient A</th>
+                                        <th>Klient B</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var g in PairGroups)
+                                    {
+                                        var members = g.ToList();
+                                        var a = members[0];
+                                        var b = members.Count > 1 ? members[1] : null;
+                                        <tr>
+                                            <td>
+                                                <span class="avatar-circle me-2" style="width:32px;height:32px;font-size:.75rem;display:inline-flex">
+                                                    @Initials(a.ContactClientName)
+                                                </span>
+                                                @a.ContactClientName
+                                            </td>
+                                            <td>
+                                                @if (b is not null)
+                                                {
+                                                    <span class="avatar-circle me-2" style="width:32px;height:32px;font-size:.75rem;display:inline-flex">
+                                                        @Initials(b.ContactClientName)
+                                                    </span>
+                                                    @b.ContactClientName
+                                                }
+                                            </td>
+                                            <td class="text-end">
+                                                <button class="btn btn-sm btn-outline-danger"
+                                                        @onclick="() => RemovePairAsync(g.Key)">
+                                                    <i class="bi bi-trash"></i> Usuń parę
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private string _trainerUserId = string.Empty;
+    private List<ClientContactDto> _pairs = [];
+    private List<ClientDto> _clients = [];
+    private bool _loading = true;
+    private string? _loadError;
+    private string? _addError;
+    private int _newClient1Id;
+    private int _newClient2Id;
+
+    private IEnumerable<IGrouping<int, ClientContactDto>> PairGroups =>
+        _pairs.GroupBy(p => p.Id).Where(g => g.Key != 0);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _trainerUserId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _loadError = null;
+        try
+        {
+            // Sequential — single DbContext cannot run parallel queries
+            _pairs = await ContactService.GetPairsAsync(_trainerUserId);
+            var all = await ClientService.GetClientsAsync();
+            _clients = all
+                .Where(c => c.TrainerUserId == _trainerUserId && c.Status == ClientStatus.Active)
+                .OrderBy(c => c.FullName)
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _loadError = ex.Message;
+            Logger.LogError(ex, "Error loading contacts page");
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task AddPairAsync()
+    {
+        _addError = null;
+        if (_newClient1Id == 0 || _newClient2Id == 0)
+        {
+            _addError = "Wybierz oboje klientów.";
+            return;
+        }
+        if (_newClient1Id == _newClient2Id)
+        {
+            _addError = "Klient A i B muszą być różnymi osobami.";
+            return;
+        }
+        try
+        {
+            await ContactService.AddPairAsync(_trainerUserId, _newClient1Id, _newClient2Id);
+            _newClient1Id = 0;
+            _newClient2Id = 0;
+            _pairs = await ContactService.GetPairsAsync(_trainerUserId);
+        }
+        catch (Exception ex)
+        {
+            _addError = ex.Message;
+            Logger.LogError(ex, "Error adding pair");
+        }
+    }
+
+    private async Task RemovePairAsync(int contactId)
+    {
+        await ContactService.RemovePairAsync(contactId);
+        _pairs = await ContactService.GetPairsAsync(_trainerUserId);
+    }
+
+    private static string Initials(string name)
+    {
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return parts.Length >= 2
+            ? $"{parts[0][0]}{parts[^1][0]}".ToUpper()
+            : name.Length > 0 ? name[0].ToString().ToUpper() : "?";
+    }
+}

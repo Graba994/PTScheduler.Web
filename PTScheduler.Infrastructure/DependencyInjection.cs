@@ -34,6 +34,12 @@ public static class DependencyInjection
         services.AddScoped<IIntroSessionService, IntroSessionService>();
         services.AddScoped<ISessionService, SessionService>();
         services.AddScoped<IClientService, ClientService>();
+        services.AddScoped<IAuditLogService, AuditLogService>();
+        services.AddScoped<ITrainerAvailabilityService, TrainerAvailabilityService>();
+        services.AddScoped<ISessionSeriesService, SessionSeriesService>();
+        services.AddScoped<IClientContactService, ClientContactService>();
+        services.AddScoped<IDemoDataService, DemoDataService>();
+        services.AddScoped<ISessionInvitationService, SessionInvitationService>();
 
         return services;
     }

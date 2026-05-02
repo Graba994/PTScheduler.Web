@@ -16,6 +16,26 @@ else
         <a href="/calendar" class="btn btn-sm btn-primary"><i class="bi bi-calendar3 me-1"></i>Kalendarz</a>
     </div>
 
+    @if (_awaiting.Any())
+    {
+        <div class="alert alert-warning d-flex align-items-start gap-2 mb-3">
+            <i class="bi bi-exclamation-triangle-fill flex-shrink-0 mt-1"></i>
+            <div>
+                <strong>Sesje bez pakietu (@_awaiting.Count)</strong> — poniższe wizyty oczekują na przypisanie pakietu:
+                <div class="mt-2 d-flex flex-column gap-1">
+                    @foreach (var s in _awaiting)
+                    {
+                        <a href="/sessions" class="text-decoration-none text-dark d-flex align-items-center gap-2">
+                            <i class="bi bi-arrow-right-short"></i>
+                            <span class="fw-semibold">@s.ClientName</span>
+                            <span class="text-muted small">@s.StartTime.ToString("dd.MM HH:mm") · @s.SessionTypeName</span>
+                        </a>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+
     <div class="row g-3 mb-3">
         <!-- Today -->
         <div class="col-12 col-lg-5">
@@ -38,7 +58,7 @@ else
                             {
                                 <div class="list-group-item d-flex align-items-center gap-3 px-3 py-2">
                                     <div class="text-center flex-shrink-0" style="min-width:48px">
-                                        <div class="fw-bold" style="font-size:1rem;color:var(--c-primary)">@s.StartTime.ToLocalTime().ToString("HH:mm")</div>
+                                        <div class="fw-bold" style="font-size:1rem;color:var(--c-primary)">@s.StartTime.ToString("HH:mm")</div>
                                         <div class="text-muted" style="font-size:.7rem">@s.DurationMinutes min</div>
                                     </div>
                                     <div class="flex-grow-1 overflow-hidden">
@@ -72,8 +92,8 @@ else
                             {
                                 <a href="/clients/@s.ClientId" class="list-group-item list-group-item-action d-flex align-items-center gap-3 px-3 py-2">
                                     <div class="flex-shrink-0 text-center" style="min-width:52px">
-                                        <div class="fw-semibold" style="font-size:.8rem;color:var(--c-primary)">@s.StartTime.ToLocalTime().ToString("dd.MM")</div>
-                                        <div class="text-muted" style="font-size:.7rem">@s.StartTime.ToLocalTime().ToString("HH:mm")</div>
+                                        <div class="fw-semibold" style="font-size:.8rem;color:var(--c-primary)">@s.StartTime.ToString("dd.MM")</div>
+                                        <div class="text-muted" style="font-size:.7rem">@s.StartTime.ToString("HH:mm")</div>
                                     </div>
                                     <div class="flex-grow-1 overflow-hidden">
                                         <div class="fw-semibold text-truncate" style="font-size:.875rem">@s.ClientName</div>
@@ -173,6 +193,7 @@ else
     private bool _loaded;
     private List<SessionDto> _today = [];
     private List<SessionDto> _upcoming = [];
+    private List<SessionDto> _awaiting = [];
     private List<ExpiringPackageDto> _expiring = [];
     private List<ClientDto> _pending = [];
 
@@ -180,43 +201,40 @@ else
     {
         _loaded = false;
         var now = DateTime.Now;
-        var todayUtcStart = new DateTime(now.Year, now.Month, now.Day, 0, 0, 0, DateTimeKind.Local).ToUniversalTime();
-        var todayUtcEnd   = todayUtcStart.AddDays(1);
+        var todayStart = new DateTime(now.Year, now.Month, now.Day);
+        var todayEnd   = todayStart.AddDays(1);
 
-        var todayTask    = SessionService.GetSessionsAsync(todayUtcStart, todayUtcEnd, TrainerUserId);
-        var upcomingTask = SessionService.GetUpcomingAsync(trainerUserId: TrainerUserId, count: 8);
-        var expiringTask = PackageService.GetExpiringAsync(14);
-        var pendingTask  = ClientService.GetPendingClientsAsync();
-
-        await Task.WhenAll(todayTask, upcomingTask, expiringTask, pendingTask);
-
-        _today    = todayTask.Result;
-        _upcoming = upcomingTask.Result.Where(s => s.StartTime.Date > DateTime.UtcNow.Date).ToList();
-        _expiring = expiringTask.Result;
-        _pending  = pendingTask.Result;
+        _today    = await SessionService.GetSessionsAsync(todayStart, todayEnd, TrainerUserId);
+        _upcoming = (await SessionService.GetUpcomingAsync(trainerUserId: TrainerUserId, count: 8))
+                        .Where(s => s.StartTime.Date > DateTime.Now.Date).ToList();
+        _awaiting = await SessionService.GetAwaitingPackageAsync(TrainerUserId);
+        _expiring = await PackageService.GetExpiringAsync(14);
+        _pending  = await ClientService.GetPendingClientsAsync();
         _loaded = true;
     }
 
-    private static string DaysUntil(DateTime utc)
+    private static string DaysUntil(DateTime dt)
     {
-        var diff = (utc.ToLocalTime().Date - DateTime.Now.Date).Days;
+        var diff = (dt.Date - DateTime.Now.Date).Days;
         return diff switch { 0 => "dziś", 1 => "jutro", _ => $"za {diff} dni" };
     }
 
     private static string StatusBadge(SessionStatus s) => s switch
     {
-        SessionStatus.Completed => "bg-success",
-        SessionStatus.Cancelled => "bg-danger",
-        SessionStatus.NoShow    => "bg-secondary",
-        _                       => "bg-primary"
+        SessionStatus.Completed       => "bg-success",
+        SessionStatus.Cancelled       => "bg-danger",
+        SessionStatus.NoShow          => "bg-secondary",
+        SessionStatus.AwaitingPackage => "bg-warning text-dark",
+        _                             => "bg-primary"
     };
 
     private static string StatusLabel(SessionStatus s) => s switch
     {
-        SessionStatus.Scheduled => "Zaplanowana",
-        SessionStatus.Completed => "Ukończona",
-        SessionStatus.Cancelled => "Anulowana",
-        SessionStatus.NoShow    => "Nieobecność",
-        _                       => s.ToString()
+        SessionStatus.Scheduled       => "Zaplanowana",
+        SessionStatus.Completed       => "Ukończona",
+        SessionStatus.Cancelled       => "Anulowana",
+        SessionStatus.NoShow          => "Nieobecność",
+        SessionStatus.AwaitingPackage => "Bez pakietu",
+        _                             => s.ToString()
     };
 }

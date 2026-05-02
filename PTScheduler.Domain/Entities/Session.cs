@@ -20,4 +20,9 @@ public class Session
 
     public int? PackageId { get; set; }
     public SessionPackage? Package { get; set; }
+
+    public int? SeriesId { get; set; }
+    public SessionSeries? Series { get; set; }
+
+    public ICollection<SessionInvitation> Invitations { get; set; } = [];
 }

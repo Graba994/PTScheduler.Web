@@ -1,0 +1,326 @@
+@page "/trainer/availability"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@inject ITrainerAvailabilityService AvailabilityService
+@inject AuthenticationStateProvider AuthState
+@inject ILogger<Availability> Logger
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using System.Globalization
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Dostępność trenera</PageTitle>
+
+<div class="cal-shell">
+    <div class="cal-topbar">
+        <h4 class="mb-0 fw-bold">
+            <i class="bi bi-clock-fill me-2"></i>Moja dostępność
+        </h4>
+    </div>
+
+    <div class="cal-body">
+        <div class="cal-main" style="overflow-y:auto;padding:1.5rem">
+
+            @if (_loading)
+            {
+                <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+            }
+            else
+            {
+                <!-- Config card -->
+                <div class="card mb-4">
+                    <div class="card-header fw-semibold">Ustawienia ogólne</div>
+                    <div class="card-body">
+                        <div class="row g-3">
+                            <div class="col-md-4">
+                                <label class="form-label">Przerwa techniczna po sesji (min)</label>
+                                <input type="number" class="form-control" min="0" max="120"
+                                       @bind="_cfg.BreakAfterSessionMinutes" />
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Granularność slotów (min)</label>
+                                <select class="form-select" @bind="_cfg.SlotGranularityMinutes">
+                                    <option value="15">15 min</option>
+                                    <option value="30">30 min</option>
+                                    <option value="45">45 min</option>
+                                    <option value="60">60 min</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4 d-flex align-items-end">
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" id="discoverPeers"
+                                           @bind="_cfg.AllowClientsDiscoverPeers" />
+                                    <label class="form-check-label" for="discoverPeers">
+                                        Klienci widzą listę kontaktów
+                                    </label>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="btn btn-primary mt-3" @onclick="SaveConfigAsync">
+                            <i class="bi bi-floppy-fill me-1"></i>Zapisz ustawienia
+                        </button>
+                        @if (_configSaved)
+                        {
+                            <span class="text-success ms-3"><i class="bi bi-check-circle-fill"></i> Zapisano</span>
+                        }
+                    </div>
+                </div>
+
+                <!-- Add rule -->
+                <div class="card mb-4">
+                    <div class="card-header fw-semibold">Dodaj okno dostępności</div>
+                    <div class="card-body">
+                        <div class="row g-3 align-items-end">
+                            <div class="col-md-3">
+                                <label class="form-label">Typ</label>
+                                <select class="form-select" @bind="_newIsRecurring">
+                                    <option value="true">Cykliczny (dzień tygodnia)</option>
+                                    <option value="false">Jednorazowy (data)</option>
+                                </select>
+                            </div>
+
+                            @if (_newIsRecurring)
+                            {
+                                <div class="col-md-2">
+                                    <label class="form-label">Dzień tygodnia</label>
+                                    <select class="form-select" @bind="_newDayOfWeek">
+                                        @foreach (DayOfWeek d in Enum.GetValues<DayOfWeek>())
+                                        {
+                                            <option value="@((int)d)">@DayName(d)</option>
+                                        }
+                                    </select>
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label">Ważny od</label>
+                                    <input type="date" class="form-control" @bind="_newValidFrom" />
+                                </div>
+                                <div class="col-md-2">
+                                    <label class="form-label">Ważny do</label>
+                                    <input type="date" class="form-control" @bind="_newValidUntil" />
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="col-md-3">
+                                    <label class="form-label">Data</label>
+                                    <input type="date" class="form-control" @bind="_newSpecificDate" />
+                                </div>
+                            }
+
+                            <div class="col-md-2">
+                                <label class="form-label">Od</label>
+                                <input type="time" class="form-control" @bind="_newStartTime" />
+                            </div>
+                            <div class="col-md-2">
+                                <label class="form-label">Do</label>
+                                <input type="time" class="form-control" @bind="_newEndTime" />
+                            </div>
+                            <div class="col-md-3">
+                                <label class="form-label">Etykieta (opcjonalna)</label>
+                                <input type="text" class="form-control" placeholder="np. Siłownia A"
+                                       @bind="_newLabel" />
+                            </div>
+                            <div class="col-md-2">
+                                <button class="btn btn-success w-100" @onclick="AddRuleAsync">
+                                    <i class="bi bi-plus-circle-fill me-1"></i>Dodaj
+                                </button>
+                            </div>
+                        </div>
+                        @if (!string.IsNullOrEmpty(_addError))
+                        {
+                            <div class="alert alert-danger mt-2 mb-0 py-2">@_addError</div>
+                        }
+                    </div>
+                </div>
+
+                <!-- Rules table -->
+                <div class="card">
+                    <div class="card-header fw-semibold">
+                        Okna dostępności (@_rules.Count)
+                    </div>
+                    <div class="card-body p-0">
+                        @if (_rules.Count == 0)
+                        {
+                            <div class="text-center text-muted py-4">Brak zdefiniowanej dostępności.</div>
+                        }
+                        else
+                        {
+                            <table class="table table-hover mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Typ</th>
+                                        <th>Kiedy</th>
+                                        <th>Godziny</th>
+                                        <th>Ważność</th>
+                                        <th>Etykieta</th>
+                                        <th>Aktywny</th>
+                                        <th></th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var rule in _rules)
+                                    {
+                                        <tr class="@(rule.IsActive ? "" : "text-muted")">
+                                            <td>
+                                                @if (rule.IsRecurring)
+                                                {
+                                                    <span class="badge bg-primary">Cykliczny</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="badge bg-secondary">Jednorazowy</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (rule.IsRecurring)
+                                                {
+                                                    @DayName(rule.DayOfWeek!.Value)
+                                                }
+                                                else
+                                                {
+                                                    @rule.SpecificDate?.ToString("dd.MM.yyyy")
+                                                }
+                                            </td>
+                                            <td>@rule.StartTime.ToString("HH:mm") – @rule.EndTime.ToString("HH:mm")</td>
+                                            <td>
+                                                @if (rule.ValidFrom.HasValue || rule.ValidUntil.HasValue)
+                                                {
+                                                    @($"{rule.ValidFrom?.ToString("dd.MM") ?? "∞"} – {rule.ValidUntil?.ToString("dd.MM.yyyy") ?? "∞"}")
+                                                }
+                                                else
+                                                {
+                                                    <span class="text-muted">bezterminowo</span>
+                                                }
+                                            </td>
+                                            <td>@(rule.Label ?? "-")</td>
+                                            <td>
+                                                <div class="form-check form-switch mb-0">
+                                                    <input class="form-check-input" type="checkbox"
+                                                           checked="@rule.IsActive"
+                                                           @onchange="e => ToggleActiveAsync(rule, (bool)e.Value!)" />
+                                                </div>
+                                            </td>
+                                            <td>
+                                                <button class="btn btn-sm btn-outline-danger"
+                                                        @onclick="() => DeleteRuleAsync(rule.Id)">
+                                                    <i class="bi bi-trash"></i>
+                                                </button>
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private string _trainerUserId = string.Empty;
+    private List<TrainerAvailabilityDto> _rules = [];
+    private TrainerConfigDto _cfg = new();
+    private bool _loading = true;
+    private bool _configSaved;
+    private string? _addError;
+
+    // new rule form
+    private bool _newIsRecurring = true;
+    private int _newDayOfWeek = (int)DayOfWeek.Monday;
+    private DateTime? _newSpecificDate;
+    private TimeOnly _newStartTime = new(8, 0);
+    private TimeOnly _newEndTime = new(16, 0);
+    private DateOnly? _newValidFrom;
+    private DateOnly? _newValidUntil;
+    private string? _newLabel;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _trainerUserId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _rules = await AvailabilityService.GetAvailabilityRulesAsync(_trainerUserId);
+        _cfg = await AvailabilityService.GetConfigAsync(_trainerUserId);
+        _loading = false;
+    }
+
+    private async Task SaveConfigAsync()
+    {
+        await AvailabilityService.SaveConfigAsync(_trainerUserId, _cfg);
+        _configSaved = true;
+        await Task.Delay(2000);
+        _configSaved = false;
+    }
+
+    private async Task AddRuleAsync()
+    {
+        _addError = null;
+        try
+        {
+            if (_newStartTime >= _newEndTime)
+            {
+                _addError = "Godzina końca musi być późniejsza niż godzina początku.";
+                return;
+            }
+
+            var dto = new CreateTrainerAvailabilityDto
+            {
+                TrainerUserId = _trainerUserId,
+                DayOfWeek = _newIsRecurring ? (DayOfWeek)_newDayOfWeek : null,
+                SpecificDate = !_newIsRecurring && _newSpecificDate.HasValue
+                    ? DateOnly.FromDateTime(_newSpecificDate.Value) : null,
+                StartTime = _newStartTime,
+                EndTime = _newEndTime,
+                ValidFrom = _newIsRecurring ? _newValidFrom : null,
+                ValidUntil = _newIsRecurring ? _newValidUntil : null,
+                Label = _newLabel
+            };
+
+            if (!_newIsRecurring && dto.SpecificDate is null)
+            {
+                _addError = "Wybierz datę dla jednorazowego okna.";
+                return;
+            }
+
+            await AvailabilityService.AddRuleAsync(dto);
+            _newLabel = null;
+            _rules = await AvailabilityService.GetAvailabilityRulesAsync(_trainerUserId);
+        }
+        catch (Exception ex)
+        {
+            _addError = ex.Message;
+            Logger.LogError(ex, "Error adding availability rule");
+        }
+    }
+
+    private async Task DeleteRuleAsync(int id)
+    {
+        await AvailabilityService.DeleteRuleAsync(id);
+        _rules = await AvailabilityService.GetAvailabilityRulesAsync(_trainerUserId);
+    }
+
+    private async Task ToggleActiveAsync(TrainerAvailabilityDto rule, bool isActive)
+    {
+        await AvailabilityService.SetActiveAsync(rule.Id, isActive);
+        rule.IsActive = isActive;
+    }
+
+    private static string DayName(DayOfWeek d) => d switch
+    {
+        DayOfWeek.Monday => "Poniedziałek",
+        DayOfWeek.Tuesday => "Wtorek",
+        DayOfWeek.Wednesday => "Środa",
+        DayOfWeek.Thursday => "Czwartek",
+        DayOfWeek.Friday => "Piątek",
+        DayOfWeek.Saturday => "Sobota",
+        DayOfWeek.Sunday => "Niedziela",
+        _ => d.ToString()
+    };
+}

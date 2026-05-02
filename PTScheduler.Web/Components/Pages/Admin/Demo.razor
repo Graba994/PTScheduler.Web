@@ -1,0 +1,203 @@
+@page "/admin/demo"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@inject IDemoDataService DemoService
+@inject ILogger<Demo> Logger
+@using PTScheduler.Application.Interfaces
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Demo i reset</PageTitle>
+
+<div style="max-width:760px;margin:0 auto;padding:2rem 1rem">
+
+    <h4 class="fw-bold mb-1"><i class="bi bi-database-fill-gear me-2"></i>Demo i reset danych</h4>
+    <p class="text-muted small mb-4">
+        Narzędzia do szybkiego załadowania przykładowych danych lub wyczyszczenia bazy.
+        <strong>Używaj wyłącznie na środowisku testowym.</strong>
+    </p>
+
+    <!-- SEED CARD -->
+    <div class="card mb-4 border-success-subtle">
+        <div class="card-header bg-success-subtle fw-semibold text-success-emphasis">
+            <i class="bi bi-magic me-2"></i>Załaduj dane demonstracyjne
+        </div>
+        <div class="card-body">
+            <p class="small text-muted mb-3">
+                Tworzy trenera, menadżerkę, czterech klientów, pakiety, wizyty, pomiary i notatki.
+                Jeśli dane demo już istnieją, operacja jest bezpieczna – nic nie nadpisze.
+            </p>
+
+            @if (_seedResult is not null)
+            {
+                @if (_seedResult.AlreadySeeded)
+                {
+                    <div class="alert alert-warning py-2 small mb-3">
+                        <i class="bi bi-exclamation-circle me-1"></i>
+                        Dane demonstracyjne już istnieją w bazie. Najpierw zresetuj bazę, jeśli chcesz załadować je od nowa.
+                    </div>
+                }
+                else
+                {
+                    <div class="alert alert-success py-2 small mb-3">
+                        <i class="bi bi-check-circle-fill me-1"></i>Dane demonstracyjne zostały załadowane pomyślnie!
+                    </div>
+
+                    <div class="table-responsive mb-2">
+                        <table class="table table-sm table-bordered mb-0" style="font-size:.85rem">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Rola</th>
+                                    <th>Imię i nazwisko</th>
+                                    <th>Login (e-mail)</th>
+                                    <th>Hasło</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var u in _seedResult.Users)
+                                {
+                                    <tr>
+                                        <td>
+                                            <span class="badge @RoleBadge(u.Role)">@u.Role</span>
+                                        </td>
+                                        <td>@u.FullName</td>
+                                        <td><code>@u.Email</code></td>
+                                        <td><code>@u.Password</code></td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                    <div class="small text-muted">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Konto Admin pozostaje bez zmian. Trener i klienci mają konta z potwierdzonymi e-mailami.
+                    </div>
+                }
+            }
+
+            @if (!string.IsNullOrEmpty(_seedError))
+            {
+                <div class="alert alert-danger py-2 small mb-3">@_seedError</div>
+            }
+
+            <button class="btn btn-success" @onclick="SeedAsync" disabled="@(_busy)">
+                @if (_busy && _action == "seed")
+                {
+                    <span class="spinner-border spinner-border-sm me-1"></span>
+                }
+                else
+                {
+                    <i class="bi bi-play-fill me-1"></i>
+                }
+                Załaduj dane demo
+            </button>
+        </div>
+    </div>
+
+    <!-- RESET CARD -->
+    <div class="card border-danger-subtle">
+        <div class="card-header bg-danger-subtle fw-semibold text-danger-emphasis">
+            <i class="bi bi-fire me-2"></i>Reset bazy danych
+        </div>
+        <div class="card-body">
+            <p class="small text-muted mb-3">
+                <strong class="text-danger">Usuwa wszystkie dane</strong> (klientów, wizyty, pakiety, użytkowników)
+                i tworzy wyłącznie konto administratora:
+            </p>
+            <div class="d-flex gap-4 mb-3 p-3 rounded bg-danger bg-opacity-10 small">
+                <div><span class="text-muted">Login:</span> <code class="text-danger fw-bold">root@admin.local</code></div>
+                <div><span class="text-muted">Hasło:</span> <code class="text-danger fw-bold">password</code></div>
+            </div>
+            <div class="alert alert-warning py-2 small mb-3">
+                <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                Po resecie zostaniesz wylogowany — Twoje bieżące konto zostanie usunięte.
+                Zaloguj się ponownie używając powyższych danych.
+            </div>
+
+            @if (!_showResetConfirm)
+            {
+                <button class="btn btn-outline-danger" @onclick="() => _showResetConfirm = true" disabled="@_busy">
+                    <i class="bi bi-trash3-fill me-1"></i>Resetuj bazę danych
+                </button>
+            }
+            else
+            {
+                <div class="p-3 rounded border border-danger">
+                    <div class="fw-semibold text-danger mb-2">
+                        <i class="bi bi-exclamation-octagon-fill me-1"></i>Czy na pewno chcesz usunąć WSZYSTKIE dane?
+                    </div>
+                    <div class="small text-muted mb-3">
+                        Tej operacji nie można cofnąć. Wszystkie konta użytkowników, wizyty i dane klientów zostaną bezpowrotnie usunięte.
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(_resetError))
+                    {
+                        <div class="alert alert-danger py-2 small mb-2">@_resetError</div>
+                    }
+
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-danger" @onclick="ResetAsync" disabled="@_busy">
+                            @if (_busy && _action == "reset")
+                            {
+                                <span class="spinner-border spinner-border-sm me-1"></span>
+                            }
+                            Tak, usuń wszystko i zresetuj
+                        </button>
+                        <button class="btn btn-secondary" @onclick="() => _showResetConfirm = false" disabled="@_busy">
+                            Anuluj
+                        </button>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
+</div>
+
+@code {
+    private bool _busy;
+    private string _action = "";
+    private DemoSeedResult? _seedResult;
+    private string _seedError = "";
+    private string _resetError = "";
+    private bool _showResetConfirm;
+
+    private async Task SeedAsync()
+    {
+        _busy = true; _action = "seed"; _seedError = ""; _seedResult = null;
+        try
+        {
+            _seedResult = await DemoService.SeedAsync();
+        }
+        catch (Exception ex)
+        {
+            _seedError = ex.Message;
+            Logger.LogError(ex, "Demo seed failed");
+        }
+        finally { _busy = false; _action = ""; }
+    }
+
+    private async Task ResetAsync()
+    {
+        _busy = true; _action = "reset"; _resetError = "";
+        try
+        {
+            await DemoService.ResetToAdminAsync();
+            // Redirect to login — current session is now invalid
+            // A small delay so the user sees feedback, then the auth middleware will kick them out
+        }
+        catch (Exception ex)
+        {
+            _resetError = ex.Message;
+            Logger.LogError(ex, "Demo reset failed");
+            _showResetConfirm = false;
+        }
+        finally { _busy = false; _action = ""; }
+    }
+
+    private static string RoleBadge(string role) => role switch
+    {
+        "Trener"   => "bg-primary",
+        "Menadżer" => "bg-info text-dark",
+        "Klient"   => "bg-secondary",
+        _          => "bg-dark"
+    };
+}

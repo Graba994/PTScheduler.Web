@@ -11,6 +11,9 @@
 
 <div class="d-flex justify-content-between align-items-center mb-3">
     <h2>Użytkownicy</h2>
+    <button class="btn btn-primary" @onclick="OpenCreateModal">
+        <i class="bi bi-person-plus me-1"></i> Dodaj użytkownika
+    </button>
 </div>
 <hr />
 
@@ -44,7 +47,7 @@ else
                             <small class="text-muted">@user.Email</small>
                         </td>
                         <td>
-                            <span class="badge @RoleBadge(user.Role)">@(string.IsNullOrEmpty(user.Role) ? "Brak roli" : user.Role)</span>
+                            <span class="badge @RoleBadge(user.Role)">@RoleLabel(user.Role)</span>
                         </td>
                         <td>
                             @if (user.Role == Roles.Subordinate)
@@ -77,9 +80,87 @@ else
     <small class="text-muted">Łącznie: @Filtered.Count() użytkowników</small>
 }
 
+@if (showCreateModal)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.45)">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">Nowy użytkownik</h5>
+                    <button type="button" class="btn-close" @onclick="CloseCreateModal" />
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(createError))
+                    {
+                        <div class="alert alert-danger py-2">@createError</div>
+                    }
+
+                    <div class="row g-2 mb-2">
+                        <div class="col">
+                            <label class="form-label">Imię</label>
+                            <input class="form-control" @bind="newUser.FirstName" placeholder="Imię" />
+                        </div>
+                        <div class="col">
+                            <label class="form-label">Nazwisko</label>
+                            <input class="form-control" @bind="newUser.LastName" placeholder="Nazwisko" />
+                        </div>
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label">E-mail</label>
+                        <input class="form-control" type="email" @bind="newUser.Email" placeholder="adres@email.pl" />
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label">Hasło</label>
+                        <input class="form-control" type="password" @bind="newUser.Password" placeholder="min. 6 znaków" />
+                    </div>
+
+                    <div class="mb-2">
+                        <label class="form-label">Rola</label>
+                        <select class="form-select" @bind="newUser.Role">
+                            <option value="@Roles.Admin">Administrator</option>
+                            <option value="@Roles.Trainer">Trener</option>
+                            <option value="@Roles.Subordinate">Asystent trenera</option>
+                            <option value="@Roles.Client">Klient</option>
+                        </select>
+                    </div>
+
+                    @if (newUser.Role == Roles.Subordinate)
+                    {
+                        <div class="mb-2">
+                            <label class="form-label">Przełożony (trener)</label>
+                            <select class="form-select" @bind="newUser.SupervisorId">
+                                <option value="">— brak —</option>
+                                @foreach (var t in trainers)
+                                {
+                                    <option value="@t.Id">@t.FullName (@t.Email)</option>
+                                }
+                            </select>
+                        </div>
+                    }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-secondary" @onclick="CloseCreateModal">Anuluj</button>
+                    <button class="btn btn-primary" @onclick="CreateUser" disabled="@createBusy">
+                        @if (createBusy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                        Utwórz konto
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private List<UserDto>? users;
+    private List<UserDto> trainers = [];
     private string search = string.Empty;
+
+    private bool showCreateModal;
+    private bool createBusy;
+    private string createError = string.Empty;
+    private CreateUserDto newUser = new();
 
     private IEnumerable<UserDto> Filtered => users?
         .Where(u => string.IsNullOrEmpty(search) ||
@@ -90,6 +171,47 @@ else
     protected override async Task OnInitializedAsync()
     {
         users = await UserService.GetAllUsersAsync();
+        trainers = await UserService.GetTrainersAsync();
+    }
+
+    private void OpenCreateModal()
+    {
+        newUser = new CreateUserDto { Role = Roles.Trainer };
+        createError = string.Empty;
+        showCreateModal = true;
+    }
+
+    private void CloseCreateModal() => showCreateModal = false;
+
+    private async Task CreateUser()
+    {
+        createError = string.Empty;
+
+        if (string.IsNullOrWhiteSpace(newUser.Email))   { createError = "E-mail jest wymagany."; return; }
+        if (string.IsNullOrWhiteSpace(newUser.Password)) { createError = "Hasło jest wymagane."; return; }
+
+        createBusy = true;
+        try
+        {
+            var (success, error) = await UserService.CreateUserAsync(newUser);
+            if (!success)
+            {
+                createError = error ?? "Nie udało się utworzyć konta.";
+                return;
+            }
+
+            showCreateModal = false;
+            users = await UserService.GetAllUsersAsync();
+            trainers = await UserService.GetTrainersAsync();
+        }
+        catch (Exception ex)
+        {
+            createError = $"Błąd: {ex.Message}";
+        }
+        finally
+        {
+            createBusy = false;
+        }
     }
 
     private static string RoleBadge(string role) => role switch
@@ -99,5 +221,14 @@ else
         Roles.Subordinate => "bg-info text-dark",
         Roles.Client      => "bg-secondary",
         _                 => "bg-light text-dark"
+    };
+
+    private static string RoleLabel(string role) => role switch
+    {
+        Roles.Admin       => "Administrator",
+        Roles.Trainer     => "Trener",
+        Roles.Subordinate => "Asystent trenera",
+        Roles.Client      => "Klient",
+        _                 => "Brak roli"
     };
 }

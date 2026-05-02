@@ -7,7 +7,9 @@ using PTScheduler.Infrastructure.Data;
 
 namespace PTScheduler.Infrastructure.Services;
 
-public class UserManagementService(UserManager<ApplicationUser> userManager) : IUserManagementService
+public class UserManagementService(
+    UserManager<ApplicationUser> userManager,
+    ApplicationDbContext db) : IUserManagementService
 {
     public async Task<List<UserDto>> GetAllUsersAsync()
     {
@@ -85,6 +87,62 @@ public class UserManagementService(UserManager<ApplicationUser> userManager) : I
         var user = await userManager.FindByIdAsync(userId)
             ?? throw new InvalidOperationException("User not found.");
         await userManager.DeleteAsync(user);
+    }
+
+    public async Task<(bool Success, string? Error)> CreateUserAsync(CreateUserDto dto)
+    {
+        if (await userManager.FindByEmailAsync(dto.Email) is not null)
+            return (false, $"Email '{dto.Email}' jest już zarejestrowany.");
+
+        var user = new ApplicationUser
+        {
+            UserName       = dto.Email,
+            Email          = dto.Email,
+            FirstName      = dto.FirstName,
+            LastName       = dto.LastName,
+            EmailConfirmed = true
+        };
+
+        var result = await userManager.CreateAsync(user, dto.Password);
+        if (!result.Succeeded)
+            return (false, string.Join(" ", result.Errors.Select(e => e.Description)));
+
+        if (!string.IsNullOrEmpty(dto.Role))
+            await userManager.AddToRoleAsync(user, dto.Role);
+
+        if (dto.Role == Roles.Subordinate && !string.IsNullOrEmpty(dto.SupervisorId))
+        {
+            user.SupervisorId = dto.SupervisorId;
+            await userManager.UpdateAsync(user);
+        }
+
+        if (dto.Role == Roles.Client)
+        {
+            db.Clients.Add(new Domain.Entities.Client
+            {
+                ApplicationUserId = user.Id,
+                FirstName  = dto.FirstName,
+                LastName   = dto.LastName,
+                Status     = Domain.Enums.ClientStatus.Active,
+                CreatedAt  = DateTime.UtcNow
+            });
+            await db.SaveChangesAsync();
+        }
+
+        return (true, null);
+    }
+
+    public async Task<(bool Success, string? Error)> ResetPasswordAsync(string userId, string newPassword)
+    {
+        var user = await userManager.FindByIdAsync(userId)
+            ?? throw new InvalidOperationException("User not found.");
+
+        await userManager.RemovePasswordAsync(user);
+        var result = await userManager.AddPasswordAsync(user, newPassword);
+
+        return result.Succeeded
+            ? (true, null)
+            : (false, string.Join(" ", result.Errors.Select(e => e.Description)));
     }
 
     private static UserDto MapToDto(ApplicationUser user, string role) => new()

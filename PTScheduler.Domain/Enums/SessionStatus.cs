@@ -5,5 +5,6 @@ public enum SessionStatus
     Scheduled,
     Completed,
     Cancelled,
-    NoShow
+    NoShow,
+    AwaitingPackage   // slot reserved, client has no remaining credits
 }

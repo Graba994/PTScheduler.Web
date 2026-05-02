@@ -78,11 +78,26 @@ public class ClientService(
             .Select(g => new { Total = g.Count(), LastDate = g.Max(s => (DateTime?)s.StartTime) })
             .FirstOrDefaultAsync();
 
-        var activePackage = await db.SessionPackages
+        var packages = await db.SessionPackages
             .Include(p => p.SessionType)
-            .Where(p => p.ClientId == id && p.Status == PackageStatus.Active)
+            .Where(p => p.ClientId == id)
             .OrderByDescending(p => p.PurchasedAt)
-            .FirstOrDefaultAsync();
+            .ToListAsync();
+
+        var activePackage = packages.FirstOrDefault(p => p.Status == PackageStatus.Active);
+
+        static SessionPackageSummaryDto MapPkg(SessionPackage p) => new()
+        {
+            Id = p.Id,
+            Name = p.Name,
+            SessionTypeId = p.SessionTypeId,
+            SessionTypeName = p.SessionType?.Name ?? string.Empty,
+            TotalSessions = p.TotalSessions,
+            UsedSessions = p.UsedSessions,
+            ExpiresAt = p.ExpiresAt,
+            Status = p.Status,
+            IsPaid = p.IsPaid
+        };
 
         return new ClientDto
         {
@@ -101,16 +116,8 @@ public class ClientService(
             Status = c.Status,
             AllowSelfBooking = c.AllowSelfBooking,
             TrainerUserId = c.TrainerUserId,
-            ActivePackage = activePackage is null ? null : new SessionPackageSummaryDto
-            {
-                Id = activePackage.Id,
-                Name = activePackage.Name,
-                TotalSessions = activePackage.TotalSessions,
-                UsedSessions = activePackage.UsedSessions,
-                ExpiresAt = activePackage.ExpiresAt,
-                Status = activePackage.Status,
-                IsPaid = activePackage.IsPaid
-            }
+            ActivePackage = activePackage is null ? null : MapPkg(activePackage),
+            AllPackages = packages.Select(MapPkg).ToList()
         };
     }
 

@@ -1,17 +1,78 @@
-﻿@inherits LayoutComponentBase
+@inherits LayoutComponentBase
 @layout PTScheduler.Web.Components.Layout.MainLayout
+@using Microsoft.AspNetCore.Identity
+@inject UserManager<ApplicationUser> UserManager
 
-<h1>Manage your account</h1>
+<div class="manage-shell">
 
-<div>
-    <h2>Change your account settings</h2>
-    <hr />
-    <div class="row">
-        <div class="col-lg-3">
+    <!-- User header -->
+    <div class="manage-header">
+        <div class="manage-avatar">@_initials</div>
+        <div class="flex-grow-1">
+            <div class="manage-user-name">@_fullName</div>
+            <div class="manage-user-email">@_email</div>
+            @if (!string.IsNullOrEmpty(_role))
+            {
+                <span class="badge @RoleBadge(_role) mt-1">@RoleLabel(_role)</span>
+            }
+        </div>
+    </div>
+
+    <div class="manage-body">
+        <!-- Sidebar nav -->
+        <div class="manage-sidebar">
             <ManageNavMenu />
         </div>
-        <div class="col-lg-9">
+        <!-- Content -->
+        <div class="manage-content">
             @Body
         </div>
     </div>
 </div>
+
+@code {
+    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+
+    private string _fullName = string.Empty;
+    private string _email   = string.Empty;
+    private string _initials = "?";
+    private string _role    = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (HttpContext is null) return;
+        var user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null) return;
+
+        var fn = user.FirstName ?? "";
+        var ln = user.LastName ?? "";
+        _fullName = $"{fn} {ln}".Trim() is { Length: > 0 } n ? n : user.Email ?? "";
+        _email    = user.Email ?? "";
+        _initials = string.Concat(
+            _fullName.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => p[0])
+        ).ToUpper();
+        if (string.IsNullOrEmpty(_initials) && _email.Length > 0)
+            _initials = _email[0].ToString().ToUpper();
+
+        var roles = await UserManager.GetRolesAsync(user);
+        _role = roles.FirstOrDefault() ?? "";
+    }
+
+    private static string RoleBadge(string r) => r switch
+    {
+        "Admin"       => "bg-danger",
+        "Trainer"     => "bg-primary",
+        "Subordinate" => "bg-info text-dark",
+        "Client"      => "bg-secondary",
+        _             => "bg-light text-dark"
+    };
+
+    private static string RoleLabel(string r) => r switch
+    {
+        "Admin"       => "Administrator",
+        "Trainer"     => "Trener",
+        "Subordinate" => "Asystent trenera",
+        "Client"      => "Klient",
+        _             => r
+    };
+}

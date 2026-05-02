@@ -1,0 +1,136 @@
+@page "/admin/audit-logs"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@inject IAuditLogService AuditLogService
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using System.Globalization
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Logi systemowe</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+    <h4 class="mb-0 fw-bold">
+        <i class="bi bi-journal-text me-2"></i>Logi systemowe
+    </h4>
+    <button class="btn btn-sm btn-outline-secondary" @onclick="LoadLogsAsync" disabled="@_loading">
+        <i class="bi bi-arrow-clockwise me-1"></i>Odśwież
+    </button>
+</div>
+
+<!-- Filters -->
+<div class="d-flex gap-2 mb-3 flex-wrap align-items-center">
+    <input class="form-control form-control-sm" style="max-width:240px"
+           placeholder="Szukaj (email, akcja, szczegóły...)"
+           value="@_search"
+           @oninput="OnSearchInput" />
+    <select class="form-select form-select-sm w-auto" @bind="_entityTypeFilter" @bind:after="LoadLogsAsync">
+        <option value="">Wszystkie typy</option>
+        <option value="Session">Sesja</option>
+        <option value="Client">Klient</option>
+        <option value="User">Użytkownik</option>
+    </select>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5">
+        <span class="spinner-border text-primary"></span>
+    </div>
+}
+else if (_logs.Count == 0)
+{
+    <div class="text-muted py-4 text-center small">Brak wpisów spełniających kryteria.</div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-sm table-hover align-middle">
+            <thead class="table-light">
+                <tr>
+                    <th style="width:160px">Czas</th>
+                    <th>Użytkownik</th>
+                    <th style="width:100px">Rola</th>
+                    <th style="width:160px">Akcja</th>
+                    <th style="width:80px">Typ</th>
+                    <th style="width:50px">ID</th>
+                    <th>Szczegóły</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var log in _logs)
+                {
+                    <tr>
+                        <td class="text-muted small text-nowrap">
+                            @log.Timestamp.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss", _pl)
+                        </td>
+                        <td class="small">@log.UserEmail</td>
+                        <td><span class="badge @RoleBadge(log.UserRole)">@log.UserRole</span></td>
+                        <td><span class="badge @ActionBadge(log.Action)">@ActionLabel(log.Action)</span></td>
+                        <td class="small text-muted">@log.EntityType</td>
+                        <td class="small text-muted">@log.EntityId</td>
+                        <td class="small text-muted" style="max-width:280px;word-break:break-word">@log.Details</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+    <div class="text-muted small mt-1">Wyświetlono @_logs.Count wpisów (max 500)</div>
+}
+
+@code {
+    private static readonly CultureInfo _pl = new("pl-PL");
+    private List<AuditLogDto> _logs = [];
+    private bool _loading = true;
+    private string _search = string.Empty;
+    private string _entityTypeFilter = string.Empty;
+
+    protected override async Task OnInitializedAsync() => await LoadLogsAsync();
+
+    private async Task LoadLogsAsync()
+    {
+        _loading = true;
+        try
+        {
+            _logs = await AuditLogService.GetLogsAsync(500, _search, _entityTypeFilter);
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task OnSearchInput(ChangeEventArgs e)
+    {
+        _search = e.Value?.ToString() ?? string.Empty;
+        await LoadLogsAsync();
+    }
+
+    private static string RoleBadge(string role) => role switch
+    {
+        "Admin"      => "bg-danger",
+        "Trainer"    => "bg-primary",
+        "Subordinate"=> "bg-info text-dark",
+        "Client"     => "bg-secondary",
+        _            => "bg-light text-dark border"
+    };
+
+    private static string ActionBadge(string action) => action switch
+    {
+        "SessionCompleted"   => "bg-success",
+        "SessionCancelled"   => "bg-danger",
+        "SessionNoShow"      => "bg-warning text-dark",
+        "SessionRescheduled" => "bg-primary",
+        "SessionRestored"    => "bg-info text-dark",
+        _                    => "bg-secondary"
+    };
+
+    private static string ActionLabel(string action) => action switch
+    {
+        "SessionCompleted"   => "Ukończono",
+        "SessionCancelled"   => "Anulowano",
+        "SessionNoShow"      => "Nieobecność",
+        "SessionRescheduled" => "Przeplanowano",
+        "SessionRestored"    => "Przywrócono",
+        _                    => action
+    };
+}

@@ -3,10 +3,15 @@
 @using PTScheduler.Domain.Enums
 @inject ISessionService SessionService
 @inject IClientService ClientService
+@inject ISessionInvitationService InvitationService
 
 @if (!_loaded)
 {
     <div class="text-center py-4"><div class="spinner-border text-primary" style="width:1.5rem;height:1.5rem"></div></div>
+}
+else if (_errorMsg is not null)
+{
+    <div class="alert alert-danger small"><i class="bi bi-exclamation-circle me-1"></i>@_errorMsg</div>
 }
 else if (_client is null)
 {
@@ -25,6 +30,62 @@ else
             <div>
                 <strong>Konto oczekuje na zatwierdzenie</strong><br />
                 <span class="small">Twój trener musi zatwierdzić Twoje konto, zanim będziesz mógł korzystać z pełnej funkcjonalności.</span>
+            </div>
+        </div>
+    }
+
+    @if (_invitations.Any())
+    {
+        <div class="card mb-4 border-warning">
+            <div class="card-header d-flex align-items-center justify-content-between" style="background:#fef3c7">
+                <span class="fw-semibold"><i class="bi bi-envelope-fill me-2" style="color:#d97706"></i>Zaproszenia na sesje (@_invitations.Count)</span>
+            </div>
+            <div class="card-body p-0">
+                <div class="list-group list-group-flush">
+                    @foreach (var inv in _invitations)
+                    {
+                        <div class="list-group-item px-3 py-3">
+                            <div class="d-flex align-items-start gap-3">
+                                <div class="flex-shrink-0 text-center" style="min-width:52px">
+                                    <div class="fw-semibold" style="font-size:.85rem;color:var(--c-primary)">@inv.SessionStartTime.ToString("dd.MM")</div>
+                                    <div class="text-muted" style="font-size:.75rem">@inv.SessionStartTime.ToString("HH:mm")</div>
+                                </div>
+                                <div class="flex-grow-1">
+                                    <div class="fw-semibold" style="font-size:.875rem">@inv.SessionTypeName · @inv.DurationMinutes min</div>
+                                    <div class="text-muted small"><i class="bi bi-person me-1"></i>@inv.TrainerName</div>
+                                </div>
+                            </div>
+
+                            @if (_respondingId == inv.Id)
+                            {
+                                <div class="mt-2">
+                                    <input class="form-control form-control-sm mb-2" placeholder="Opcjonalna notatka..." @bind="_respondNote" />
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-sm btn-success" @onclick="() => RespondAsync(inv.Id, true)">
+                                            <i class="bi bi-check-lg me-1"></i>Akceptuj
+                                        </button>
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => RespondAsync(inv.Id, false)">
+                                            <i class="bi bi-x-lg me-1"></i>Odrzuć
+                                        </button>
+                                        <button class="btn btn-sm btn-link text-muted p-0" @onclick="() => _respondingId = null">Anuluj</button>
+                                    </div>
+                                    @if (_respondError is not null)
+                                    {
+                                        <div class="text-danger small mt-1">@_respondError</div>
+                                    }
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="mt-2 d-flex gap-2">
+                                    <button class="btn btn-sm btn-success" @onclick="() => StartRespond(inv.Id)">
+                                        <i class="bi bi-check-lg me-1"></i>Odpowiedz
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
             </div>
         </div>
     }
@@ -50,10 +111,10 @@ else
                             </div>
                             <div>
                                 <div class="fw-bold" style="font-size:1.25rem;color:var(--c-primary)">
-                                    @_nextSession.StartTime.ToLocalTime().ToString("HH:mm")
+                                    @_nextSession.StartTime.ToString("HH:mm")
                                 </div>
                                 <div class="fw-semibold" style="font-size:.9rem">
-                                    @_nextSession.StartTime.ToLocalTime().ToString("dddd, dd MMMM")
+                                    @_nextSession.StartTime.ToString("dddd, dd MMMM")
                                 </div>
                             </div>
                         </div>
@@ -74,48 +135,59 @@ else
             </div>
         </div>
 
-        <!-- Active package -->
+        <!-- Packages -->
         <div class="col-12 col-md-6">
             <div class="card h-100" style="border-left:3px solid var(--c-primary)">
-                <div class="card-header"><i class="bi bi-ticket-perforated me-2"></i>Aktywny pakiet</div>
-                <div class="card-body">
-                    @if (_client.ActivePackage is null)
+                <div class="card-header d-flex align-items-center justify-content-between">
+                    <span><i class="bi bi-ticket-perforated me-2"></i>Pakiety</span>
+                    @if (_client.AllPackages.Count > 0)
                     {
-                        <div class="text-center text-muted py-3">
+                        <span class="badge bg-secondary rounded-pill">@_client.AllPackages.Count</span>
+                    }
+                </div>
+                <div class="card-body p-0">
+                    @if (_client.AllPackages.Count == 0)
+                    {
+                        <div class="text-center text-muted py-3 px-3">
                             <i class="bi bi-ticket-x d-block fs-2 mb-2"></i>
-                            <span class="small">Brak aktywnego pakietu</span>
+                            <span class="small">Brak pakietów</span>
                         </div>
                     }
                     else
                     {
-                        var pkg = _client.ActivePackage;
-                        var pct = pkg.TotalSessions > 0 ? (int)((double)pkg.UsedSessions / pkg.TotalSessions * 100) : 0;
-                        var remaining = pkg.RemainingCredits;
-                        <div class="fw-semibold mb-1">@pkg.Name</div>
-                        <div class="d-flex justify-content-between align-items-baseline mb-1">
-                            <span class="small text-muted">@pkg.UsedSessions / @pkg.TotalSessions sesji</span>
-                            <span class="fw-bold" style="font-size:1.25rem;color:var(--c-primary)">@remaining</span>
-                        </div>
-                        <div class="text-muted small mb-2" style="text-align:right;margin-top:-4px">pozostałych</div>
-                        <div class="progress mb-3" style="height:8px">
-                            <div class="progress-bar" style="width:@(pct)%"></div>
-                        </div>
-                        @if (pkg.ExpiresAt.HasValue)
-                        {
-                            var daysLeft = (int)(pkg.ExpiresAt.Value - DateTime.UtcNow).TotalDays;
-                            <div class="d-flex align-items-center gap-2">
-                                <i class="bi bi-calendar-x @(daysLeft <= 7 ? "text-danger" : daysLeft <= 14 ? "text-warning" : "text-muted")"></i>
-                                <span class="small @(daysLeft <= 7 ? "text-danger fw-semibold" : daysLeft <= 14 ? "text-warning fw-semibold" : "text-muted")">
-                                    Wygasa @pkg.ExpiresAt.Value.ToString("dd.MM.yyyy")
-                                    (@(daysLeft <= 0 ? "dziś!" : $"za {daysLeft} dni"))
-                                </span>
-                            </div>
-                        }
-                        <div class="mt-2">
-                            <span class="badge @(pkg.IsPaid ? "bg-success" : "bg-warning text-dark")" style="font-size:.7rem">
-                                <i class="bi @(pkg.IsPaid ? "bi-check-circle" : "bi-clock") me-1"></i>
-                                @(pkg.IsPaid ? "Opłacony" : "Oczekuje na płatność")
-                            </span>
+                        <div class="list-group list-group-flush">
+                            @foreach (var pkg in _client.AllPackages)
+                            {
+                                var pct = pkg.TotalSessions > 0 ? (int)((double)pkg.UsedSessions / pkg.TotalSessions * 100) : 0;
+                                var isActive = pkg.Status == PackageStatus.Active;
+                                <div class="list-group-item px-3 py-2 @(!isActive ? "opacity-75" : "")">
+                                    <div class="d-flex justify-content-between align-items-start mb-1">
+                                        <span class="fw-semibold small">@pkg.Name</span>
+                                        <span class="badge @(isActive ? "bg-success" : "bg-secondary") ms-2" style="font-size:.65rem">
+                                            @(isActive ? "Aktywny" : pkg.Status.ToString())
+                                        </span>
+                                    </div>
+                                    <div class="d-flex justify-content-between align-items-baseline mb-1">
+                                        <span class="text-muted" style="font-size:.75rem">@pkg.UsedSessions / @pkg.TotalSessions sesji</span>
+                                        <span class="fw-bold" style="color:var(--c-primary)">@pkg.RemainingCredits pozostałych</span>
+                                    </div>
+                                    <div class="progress mb-1" style="height:5px">
+                                        <div class="progress-bar @(!isActive ? "bg-secondary" : "")" style="width:@(pct)%"></div>
+                                    </div>
+                                    <div class="d-flex gap-2 mt-1 flex-wrap">
+                                        @if (pkg.ExpiresAt.HasValue)
+                                        {
+                                            var daysLeft = (int)(pkg.ExpiresAt.Value - DateTime.Now).TotalDays;
+                                            <span class="@(daysLeft <= 7 ? "text-danger" : daysLeft <= 14 ? "text-warning" : "text-muted")" style="font-size:.7rem">
+                                                <i class="bi bi-calendar-x me-1"></i>@(daysLeft <= 0 ? "Wygasł" : $"Wygasa za {daysLeft} dni")
+                                            </span>
+                                        }
+                                        <span class="badge @(pkg.IsPaid ? "bg-success-subtle text-success" : "bg-warning-subtle text-warning")" style="font-size:.65rem">
+                                            <i class="bi @(pkg.IsPaid ? "bi-check-circle" : "bi-clock") me-1"></i>@(pkg.IsPaid ? "Opłacony" : "Oczekuje")
+                                        </span>
+                                    </div>
+                                </div>
+                            }
                         </div>
                     }
                 </div>
@@ -136,14 +208,14 @@ else
             else
             {
                 <div class="list-group list-group-flush">
-                    @foreach (var s in _recent.Where(x => x.StartTime < DateTime.UtcNow).Take(5))
+                    @foreach (var s in _recent.Where(x => x.StartTime < DateTime.Now).Take(5))
                     {
                         <div class="list-group-item d-flex align-items-center gap-3 px-3 py-2">
                             <div class="flex-shrink-0 text-center" style="min-width:52px">
                                 <div class="fw-semibold" style="font-size:.8rem;color:var(--c-primary)">
-                                    @s.StartTime.ToLocalTime().ToString("dd.MM")
+                                    @s.StartTime.ToString("dd.MM")
                                 </div>
-                                <div class="text-muted" style="font-size:.7rem">@s.StartTime.ToLocalTime().ToString("HH:mm")</div>
+                                <div class="text-muted" style="font-size:.7rem">@s.StartTime.ToString("HH:mm")</div>
                             </div>
                             <div class="flex-grow-1 overflow-hidden">
                                 <div class="fw-semibold text-truncate" style="font-size:.875rem">@s.SessionTypeName</div>
@@ -166,49 +238,85 @@ else
     private ClientDto? _client;
     private SessionDto? _nextSession;
     private List<SessionDto> _recent = [];
+    private List<SessionInvitationDto> _invitations = [];
+    private string? _errorMsg;
+
+    private int? _respondingId;
+    private string? _respondNote;
+    private string? _respondError;
 
     protected override async Task OnParametersSetAsync()
     {
         _loaded = false;
         _client = null;
-
-        if (ClientIdOverride.HasValue)
-            _client = await ClientService.GetClientAsync(ClientIdOverride.Value);
-        else if (!string.IsNullOrEmpty(UserId))
-            _client = await ClientService.GetClientByUserIdAsync(UserId);
-
-        if (_client is not null)
+        _errorMsg = null;
+        try
         {
-            var upcomingTask = SessionService.GetUpcomingAsync(clientId: _client.Id, count: 1);
-            var recentTask   = SessionService.GetClientSessionsAsync(_client.Id, 10);
-            await Task.WhenAll(upcomingTask, recentTask);
-            _nextSession = upcomingTask.Result.FirstOrDefault();
-            _recent      = recentTask.Result;
-        }
+            if (ClientIdOverride.HasValue)
+                _client = await ClientService.GetClientAsync(ClientIdOverride.Value);
+            else if (!string.IsNullOrEmpty(UserId))
+                _client = await ClientService.GetClientByUserIdAsync(UserId);
 
+            if (_client is not null)
+            {
+                var upcoming = await SessionService.GetUpcomingAsync(clientId: _client.Id, count: 1);
+                _nextSession  = upcoming.FirstOrDefault();
+                _recent       = await SessionService.GetClientSessionsAsync(_client.Id, 10);
+                _invitations  = await InvitationService.GetPendingForClientAsync(_client.Id);
+            }
+        }
+        catch (Exception ex)
+        {
+            _errorMsg = $"Błąd ładowania danych: {ex.Message}";
+        }
         _loaded = true;
     }
 
-    private static string DaysUntil(DateTime utc)
+    private void StartRespond(int invitationId)
     {
-        var diff = (utc.ToLocalTime().Date - DateTime.Now.Date).Days;
+        _respondingId = invitationId;
+        _respondNote  = null;
+        _respondError = null;
+    }
+
+    private async Task RespondAsync(int invitationId, bool accept)
+    {
+        _respondError = null;
+        try
+        {
+            await InvitationService.RespondAsync(invitationId, accept, _respondNote);
+            _respondingId = null;
+            if (_client is not null)
+                _invitations = await InvitationService.GetPendingForClientAsync(_client.Id);
+        }
+        catch (Exception ex)
+        {
+            _respondError = ex.Message;
+        }
+    }
+
+    private static string DaysUntil(DateTime dt)
+    {
+        var diff = (dt.Date - DateTime.Now.Date).Days;
         return diff switch { 0 => "dziś", 1 => "jutro", _ => $"za {diff} dni" };
     }
 
     private static string StatusBadge(SessionStatus s) => s switch
     {
-        SessionStatus.Completed => "bg-success",
-        SessionStatus.Cancelled => "bg-danger",
-        SessionStatus.NoShow    => "bg-secondary",
-        _                       => "bg-primary"
+        SessionStatus.Completed       => "bg-success",
+        SessionStatus.Cancelled       => "bg-danger",
+        SessionStatus.NoShow          => "bg-secondary",
+        SessionStatus.AwaitingPackage => "bg-warning text-dark",
+        _                             => "bg-primary"
     };
 
     private static string StatusLabel(SessionStatus s) => s switch
     {
-        SessionStatus.Scheduled => "Zaplanowana",
-        SessionStatus.Completed => "Ukończona",
-        SessionStatus.Cancelled => "Anulowana",
-        SessionStatus.NoShow    => "Nieobecność",
-        _                       => s.ToString()
+        SessionStatus.Scheduled       => "Zaplanowana",
+        SessionStatus.Completed       => "Ukończona",
+        SessionStatus.Cancelled       => "Anulowana",
+        SessionStatus.NoShow          => "Nieobecność",
+        SessionStatus.AwaitingPackage => "Bez pakietu",
+        _                             => s.ToString()
     };
 }

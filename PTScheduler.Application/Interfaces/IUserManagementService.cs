@@ -11,4 +11,6 @@ public interface IUserManagementService
     Task SetSupervisorAsync(string userId, string? supervisorId);
     Task SetLockoutAsync(string userId, bool locked);
     Task DeleteUserAsync(string userId);
+    Task<(bool Success, string? Error)> CreateUserAsync(CreateUserDto dto);
+    Task<(bool Success, string? Error)> ResetPasswordAsync(string userId, string newPassword);
 }

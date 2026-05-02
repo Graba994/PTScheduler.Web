@@ -14,7 +14,7 @@ public class SessionService(
     UserManager<ApplicationUser> userManager,
     ISessionPackageService packageService) : ISessionService
 {
-    public async Task<List<SessionDto>> GetSessionsAsync(DateTime from, DateTime to, string? trainerUserId = null)
+    public async Task<List<SessionDto>> GetSessionsAsync(DateTime from, DateTime to, string? trainerUserId = null, int? clientId = null)
     {
         var query = db.Sessions
             .Include(s => s.Client)
@@ -36,12 +36,45 @@ public class SessionService(
             }
         }
 
+        if (clientId.HasValue)
+            query = query.Where(s => s.ClientId == clientId.Value);
+
         var sessions = await query.OrderBy(s => s.StartTime).ToListAsync();
         var trainerIds = sessions.Select(s => s.TrainerUserId).Distinct().ToList();
         var trainers = await userManager.Users
             .Where(u => trainerIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id, u => $"{u.FirstName} {u.LastName}".Trim().NullIfEmpty() ?? u.Email ?? u.Id);
 
+        return sessions.Select(s => MapToDto(s, trainers)).ToList();
+    }
+
+    public async Task<List<SessionDto>> GetPastSessionsAsync(string? trainerUserId = null, int? clientId = null, int count = 50)
+    {
+        var now = DateTime.Now;
+        var query = db.Sessions
+            .Include(s => s.Client)
+            .Include(s => s.SessionType)
+            .Where(s => s.StartTime < now || s.Status != SessionStatus.Scheduled);
+
+        if (trainerUserId is not null)
+        {
+            var subordinateIds = await userManager.Users
+                .Where(u => u.SupervisorId == trainerUserId)
+                .Select(u => u.Id)
+                .ToListAsync();
+            var visibleIds = subordinateIds.Append(trainerUserId).ToList();
+            query = query.Where(s => visibleIds.Contains(s.TrainerUserId));
+        }
+
+        if (clientId.HasValue)
+            query = query.Where(s => s.ClientId == clientId.Value);
+
+        var sessions = await query.OrderByDescending(s => s.StartTime).Take(count).ToListAsync();
+        var trainerIds = sessions.Select(s => s.TrainerUserId).Distinct().ToList();
+        var trainers = await userManager.Users
+            .Where(u => trainerIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id,
+                u => $"{u.FirstName} {u.LastName}".Trim().NullIfEmpty() ?? u.Email ?? u.Id);
         return sessions.Select(s => MapToDto(s, trainers)).ToList();
     }
 
@@ -88,18 +121,35 @@ public class SessionService(
 
         if (status == SessionStatus.Cancelled)
         {
-            if (session.StartTime <= DateTime.Now.AddHours(24))
-                throw new InvalidOperationException("Nie można anulować wizyty na mniej niż 24h przed jej rozpoczęciem.");
-
-            session.CancelledAt = DateTime.UtcNow;
+            session.CancelledAt = DateTime.Now;
             session.CancellationReason = cancellationReason;
         }
 
         session.Status = status;
         await db.SaveChangesAsync();
 
-        if (status == SessionStatus.Completed && session.PackageId.HasValue)
+        if ((status == SessionStatus.Completed || status == SessionStatus.NoShow) && session.PackageId.HasValue)
             await packageService.DeductCreditAsync(session.PackageId.Value);
+    }
+
+    public async Task RescheduleAsync(int id, DateTime newStartTime)
+    {
+        var session = await db.Sessions.FindAsync(id)
+            ?? throw new InvalidOperationException("Sesja nie została znaleziona.");
+        session.StartTime = newStartTime;
+        await db.SaveChangesAsync();
+    }
+
+    public async Task RestoreAsync(int id)
+    {
+        var session = await db.Sessions.FindAsync(id)
+            ?? throw new InvalidOperationException("Sesja nie została znaleziona.");
+        if (session.Status != SessionStatus.Cancelled && session.Status != SessionStatus.NoShow)
+            throw new InvalidOperationException("Można przywrócić tylko anulowane lub nieobecne wizyty.");
+        session.Status = SessionStatus.Scheduled;
+        session.CancelledAt = null;
+        session.CancellationReason = null;
+        await db.SaveChangesAsync();
     }
 
     public async Task<List<SessionTypeDto>> GetSessionTypesAsync() =>
@@ -160,11 +210,12 @@ public class SessionService(
 
     public async Task<List<SessionDto>> GetUpcomingAsync(string? trainerUserId = null, int? clientId = null, int count = 10)
     {
-        var now = DateTime.UtcNow;
+        var now = DateTime.Now;
         var query = db.Sessions
             .Include(s => s.Client)
             .Include(s => s.SessionType)
-            .Where(s => s.StartTime >= now && s.Status == SessionStatus.Scheduled);
+            .Where(s => s.StartTime >= now
+                        && (s.Status == SessionStatus.Scheduled || s.Status == SessionStatus.AwaitingPackage));
 
         if (trainerUserId is not null)
             query = query.Where(s => s.TrainerUserId == trainerUserId);
@@ -180,6 +231,26 @@ public class SessionService(
             .ToDictionaryAsync(u => u.Id,
                 u => $"{u.FirstName} {u.LastName}".Trim() is { Length: > 0 } n ? n : u.Email ?? u.Id);
 
+        return sessions.Select(s => MapToDto(s, trainers)).ToList();
+    }
+
+    public async Task<List<SessionDto>> GetAwaitingPackageAsync(string? trainerUserId = null)
+    {
+        var now = DateTime.Now;
+        var query = db.Sessions
+            .Include(s => s.Client)
+            .Include(s => s.SessionType)
+            .Where(s => s.Status == SessionStatus.AwaitingPackage && s.StartTime >= now);
+
+        if (trainerUserId is not null)
+            query = query.Where(s => s.TrainerUserId == trainerUserId);
+
+        var sessions = await query.OrderBy(s => s.StartTime).ToListAsync();
+        var trainerIds = sessions.Select(s => s.TrainerUserId).Distinct().ToList();
+        var trainers = await userManager.Users
+            .Where(u => trainerIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id,
+                u => $"{u.FirstName} {u.LastName}".Trim().NullIfEmpty() ?? u.Email ?? u.Id);
         return sessions.Select(s => MapToDto(s, trainers)).ToList();
     }
 

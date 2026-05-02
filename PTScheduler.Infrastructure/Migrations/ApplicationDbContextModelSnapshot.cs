@@ -181,6 +181,48 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.ToTable("AppBrandings");
                 });
 
+            modelBuilder.Entity("PTScheduler.Domain.Entities.AuditLog", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Action")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Details")
+                        .HasColumnType("text");
+
+                    b.Property<string>("EntityId")
+                        .HasColumnType("text");
+
+                    b.Property<string>("EntityType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("Timestamp")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("UserEmail")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("UserRole")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("AuditLogs");
+                });
+
             modelBuilder.Entity("PTScheduler.Domain.Entities.BodyMeasurement", b =>
                 {
                     b.Property<int>("Id")
@@ -275,6 +317,37 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.ToTable("Clients");
                 });
 
+            modelBuilder.Entity("PTScheduler.Domain.Entities.ClientContact", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("Client1Id")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Client2Id")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TrainerUserId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Client2Id");
+
+                    b.HasIndex("Client1Id", "Client2Id")
+                        .IsUnique();
+
+                    b.ToTable("ClientContacts");
+                });
+
             modelBuilder.Entity("PTScheduler.Domain.Entities.IntroSessionConfig", b =>
                 {
                     b.Property<int>("Id")
@@ -339,6 +412,9 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Property<int?>("PackageId")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("SeriesId")
+                        .HasColumnType("integer");
+
                     b.Property<int>("SessionTypeId")
                         .HasColumnType("integer");
 
@@ -358,9 +434,50 @@ namespace PTScheduler.Infrastructure.Migrations
 
                     b.HasIndex("PackageId");
 
+                    b.HasIndex("SeriesId");
+
                     b.HasIndex("SessionTypeId");
 
                     b.ToTable("Sessions");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.SessionInvitation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedByUserId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("InvitedClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("RespondedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("ResponseNote")
+                        .HasColumnType("text");
+
+                    b.Property<int>("SessionId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Status")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("InvitedClientId");
+
+                    b.HasIndex("SessionId");
+
+                    b.ToTable("SessionInvitations");
                 });
 
             modelBuilder.Entity("PTScheduler.Domain.Entities.SessionPackage", b =>
@@ -425,6 +542,59 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.ToTable("SessionPackages");
                 });
 
+            modelBuilder.Entity("PTScheduler.Domain.Entities.SessionSeries", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("CreatedByUserId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateOnly?>("EndDate")
+                        .HasColumnType("date");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Notes")
+                        .HasColumnType("text");
+
+                    b.Property<string>("RecurrenceDays")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("SessionTypeId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly>("StartDate")
+                        .HasColumnType("date");
+
+                    b.Property<TimeOnly>("StartTime")
+                        .HasColumnType("time without time zone");
+
+                    b.Property<string>("TrainerUserId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId");
+
+                    b.HasIndex("SessionTypeId");
+
+                    b.ToTable("SessionSeries");
+                });
+
             modelBuilder.Entity("PTScheduler.Domain.Entities.SessionType", b =>
                 {
                     b.Property<int>("Id")
@@ -452,6 +622,79 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("SessionTypes");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.TrainerAvailability", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("DayOfWeek")
+                        .HasColumnType("integer");
+
+                    b.Property<TimeOnly>("EndTime")
+                        .HasColumnType("time without time zone");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Label")
+                        .HasColumnType("text");
+
+                    b.Property<DateOnly?>("SpecificDate")
+                        .HasColumnType("date");
+
+                    b.Property<TimeOnly>("StartTime")
+                        .HasColumnType("time without time zone");
+
+                    b.Property<string>("TrainerUserId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateOnly?>("ValidFrom")
+                        .HasColumnType("date");
+
+                    b.Property<DateOnly?>("ValidUntil")
+                        .HasColumnType("date");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("TrainerAvailabilities");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.TrainerConfig", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("AllowClientsDiscoverPeers")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("BreakAfterSessionMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("SlotGranularityMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TrainerUserId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TrainerUserId")
+                        .IsUnique();
+
+                    b.ToTable("TrainerConfigs");
                 });
 
             modelBuilder.Entity("PTScheduler.Domain.Entities.TrainerNote", b =>
@@ -623,6 +866,25 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Navigation("Client");
                 });
 
+            modelBuilder.Entity("PTScheduler.Domain.Entities.ClientContact", b =>
+                {
+                    b.HasOne("PTScheduler.Domain.Entities.Client", "Client1")
+                        .WithMany()
+                        .HasForeignKey("Client1Id")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PTScheduler.Domain.Entities.Client", "Client2")
+                        .WithMany()
+                        .HasForeignKey("Client2Id")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.Navigation("Client1");
+
+                    b.Navigation("Client2");
+                });
+
             modelBuilder.Entity("PTScheduler.Domain.Entities.Session", b =>
                 {
                     b.HasOne("PTScheduler.Domain.Entities.Client", "Client")
@@ -636,6 +898,11 @@ namespace PTScheduler.Infrastructure.Migrations
                         .HasForeignKey("PackageId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PTScheduler.Domain.Entities.SessionSeries", "Series")
+                        .WithMany("Sessions")
+                        .HasForeignKey("SeriesId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PTScheduler.Domain.Entities.SessionType", "SessionType")
                         .WithMany("Sessions")
                         .HasForeignKey("SessionTypeId")
@@ -646,13 +913,53 @@ namespace PTScheduler.Infrastructure.Migrations
 
                     b.Navigation("Package");
 
+                    b.Navigation("Series");
+
                     b.Navigation("SessionType");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.SessionInvitation", b =>
+                {
+                    b.HasOne("PTScheduler.Domain.Entities.Client", "InvitedClient")
+                        .WithMany()
+                        .HasForeignKey("InvitedClientId")
+                        .OnDelete(DeleteBehavior.Restrict)
+                        .IsRequired();
+
+                    b.HasOne("PTScheduler.Domain.Entities.Session", "Session")
+                        .WithMany("Invitations")
+                        .HasForeignKey("SessionId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("InvitedClient");
+
+                    b.Navigation("Session");
                 });
 
             modelBuilder.Entity("PTScheduler.Domain.Entities.SessionPackage", b =>
                 {
                     b.HasOne("PTScheduler.Domain.Entities.Client", "Client")
                         .WithMany("Packages")
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PTScheduler.Domain.Entities.SessionType", "SessionType")
+                        .WithMany()
+                        .HasForeignKey("SessionTypeId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Client");
+
+                    b.Navigation("SessionType");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.SessionSeries", b =>
+                {
+                    b.HasOne("PTScheduler.Domain.Entities.Client", "Client")
+                        .WithMany()
                         .HasForeignKey("ClientId")
                         .OnDelete(DeleteBehavior.Cascade)
                         .IsRequired();
@@ -700,7 +1007,17 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Navigation("TrainerNotes");
                 });
 
+            modelBuilder.Entity("PTScheduler.Domain.Entities.Session", b =>
+                {
+                    b.Navigation("Invitations");
+                });
+
             modelBuilder.Entity("PTScheduler.Domain.Entities.SessionPackage", b =>
+                {
+                    b.Navigation("Sessions");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.SessionSeries", b =>
                 {
                     b.Navigation("Sessions");
                 });

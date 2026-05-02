@@ -1,0 +1,38 @@
+@inherits LayoutComponentBase
+@inject PTScheduler.Application.Interfaces.IBrandingService BrandingService
+
+<div class="auth-shell">
+    <div class="auth-brand">
+        @if (!string.IsNullOrEmpty(_logoPath))
+        {
+            <img src="@_logoPath" alt="@_companyName" class="auth-logo" />
+        }
+        else
+        {
+            <div class="auth-icon"><i class="bi bi-calendar-heart"></i></div>
+        }
+        <span class="auth-company">@_companyName</span>
+    </div>
+
+    <div class="auth-card-wrap">
+        @Body
+    </div>
+
+    <div class="auth-footer">© @DateTime.Now.Year @_companyName</div>
+</div>
+
+@code {
+    private string _companyName = "PTScheduler";
+    private string? _logoPath;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var b = await BrandingService.GetAsync();
+            _companyName = b.CompanyName ?? "PTScheduler";
+            _logoPath    = b.LogoPath;
+        }
+        catch { }
+    }
+}

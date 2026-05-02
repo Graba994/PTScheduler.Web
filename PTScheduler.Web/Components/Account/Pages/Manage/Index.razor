@@ -1,39 +1,55 @@
-﻿@page "/Account/Manage"
-
+@page "/Account/Manage"
 @using System.ComponentModel.DataAnnotations
 @using Microsoft.AspNetCore.Identity
-
 @inject UserManager<ApplicationUser> UserManager
 @inject SignInManager<ApplicationUser> SignInManager
 @inject IdentityRedirectManager RedirectManager
 
-<PageTitle>Profile</PageTitle>
+<PageTitle>Dane konta</PageTitle>
 
-<h3>Profile</h3>
-<StatusMessage />
+<div class="manage-card">
+    <h5 class="fw-bold mb-1">Dane konta</h5>
+    <p class="text-muted small mb-4">Podstawowe informacje widoczne w systemie.</p>
 
-<div class="row">
-    <div class="col-xl-6">
-        <EditForm Model="Input" FormName="profile" OnValidSubmit="OnValidSubmitAsync" method="post">
-            <DataAnnotationsValidator />
-            <ValidationSummary class="text-danger" role="alert" />
-            <div class="form-floating mb-3">
-                <input type="text" value="@username" id="username" class="form-control" placeholder="Choose your username." disabled />
-                <label for="username" class="form-label">Username</label>
+    <StatusMessage />
+
+    <EditForm Model="Input" FormName="profile" OnValidSubmit="OnValidSubmitAsync" method="post">
+        <DataAnnotationsValidator />
+
+        <div class="row g-3 mb-3">
+            <div class="col-sm-6">
+                <label class="form-label fw-semibold">Imię</label>
+                <InputText @bind-Value="Input.FirstName" class="form-control" placeholder="Imię" />
+                <ValidationMessage For="() => Input.FirstName" class="text-danger small" />
             </div>
-            <div class="form-floating mb-3">
-                <InputText @bind-Value="Input.PhoneNumber" id="Input.PhoneNumber" class="form-control" placeholder="Enter your phone number" />
-                <label for="Input.PhoneNumber" class="form-label">Phone number</label>
-                <ValidationMessage For="() => Input.PhoneNumber" class="text-danger" />
+            <div class="col-sm-6">
+                <label class="form-label fw-semibold">Nazwisko</label>
+                <InputText @bind-Value="Input.LastName" class="form-control" placeholder="Nazwisko" />
+                <ValidationMessage For="() => Input.LastName" class="text-danger small" />
             </div>
-            <button type="submit" class="w-100 btn btn-lg btn-primary">Save</button>
-        </EditForm>
-    </div>
+        </div>
+
+        <div class="mb-3">
+            <label class="form-label fw-semibold">E-mail</label>
+            <input type="text" value="@_email" class="form-control" disabled />
+            <div class="form-text">Adres e-mail służy do logowania i nie może być zmieniony tutaj.</div>
+        </div>
+
+        <div class="mb-4">
+            <label class="form-label fw-semibold">Numer telefonu</label>
+            <InputText @bind-Value="Input.PhoneNumber" class="form-control" placeholder="+48 000 000 000" />
+            <ValidationMessage For="() => Input.PhoneNumber" class="text-danger small" />
+        </div>
+
+        <button type="submit" class="btn btn-primary">
+            <i class="bi bi-check-lg me-1"></i>Zapisz zmiany
+        </button>
+    </EditForm>
 </div>
 
 @code {
     private ApplicationUser? user;
-    private string? username;
+    private string _email = string.Empty;
     private string? phoneNumber;
 
     [CascadingParameter]
@@ -53,9 +69,11 @@
             return;
         }
 
-        username = await UserManager.GetUserNameAsync(user);
+        _email    = user.Email ?? string.Empty;
         phoneNumber = await UserManager.GetPhoneNumberAsync(user);
 
+        Input.FirstName  ??= user.FirstName ?? string.Empty;
+        Input.LastName   ??= user.LastName  ?? string.Empty;
         Input.PhoneNumber ??= phoneNumber;
     }
 
@@ -67,23 +85,40 @@
             return;
         }
 
+        user.FirstName = Input.FirstName?.Trim();
+        user.LastName  = Input.LastName?.Trim();
+        var updateResult = await UserManager.UpdateAsync(user);
+        if (!updateResult.Succeeded)
+        {
+            RedirectManager.RedirectToCurrentPageWithStatus(
+                "Błąd: " + string.Join(" ", updateResult.Errors.Select(e => e.Description)), HttpContext);
+            return;
+        }
+
         if (Input.PhoneNumber != phoneNumber)
         {
-            var setPhoneResult = await UserManager.SetPhoneNumberAsync(user, Input.PhoneNumber);
-            if (!setPhoneResult.Succeeded)
+            var phoneResult = await UserManager.SetPhoneNumberAsync(user, Input.PhoneNumber);
+            if (!phoneResult.Succeeded)
             {
-                RedirectManager.RedirectToCurrentPageWithStatus("Error: Failed to set phone number.", HttpContext);
+                RedirectManager.RedirectToCurrentPageWithStatus(
+                    "Błąd: Nie udało się zapisać numeru telefonu.", HttpContext);
                 return;
             }
         }
 
         await SignInManager.RefreshSignInAsync(user);
-        RedirectManager.RedirectToCurrentPageWithStatus("Your profile has been updated", HttpContext);
+        RedirectManager.RedirectToCurrentPageWithStatus("Dane zostały zaktualizowane.", HttpContext);
     }
 
     private sealed class InputModel
     {
-        [Phone]
+        [MaxLength(50)]
+        public string? FirstName { get; set; }
+
+        [MaxLength(50)]
+        public string? LastName { get; set; }
+
+        [Phone(ErrorMessage = "Nieprawidłowy numer telefonu.")]
         [Display(Name = "Phone number")]
         public string? PhoneNumber { get; set; }
     }

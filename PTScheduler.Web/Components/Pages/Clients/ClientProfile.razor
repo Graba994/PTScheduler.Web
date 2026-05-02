@@ -3,9 +3,11 @@
 @inject IClientService ClientService
 @inject ISessionService SessionService
 @inject ISessionPackageService PackageService
+@inject IUserManagementService UserManagementService
 @inject NavigationManager Nav
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
 @using PTScheduler.Domain.Enums
 @using Microsoft.AspNetCore.Components.Authorization
 @inject AuthenticationStateProvider AuthStateProvider
@@ -262,6 +264,29 @@ else if (client is not null)
                     }
                 </div>
             </div>
+            <!-- Password reset card -->
+            <div class="card shadow-sm mt-4">
+                <div class="card-body p-4">
+                    <h6 class="card-title mb-3">
+                        <i class="bi bi-lock me-2 text-warning"></i>Zmień hasło klienta
+                    </h6>
+
+                    @if (!string.IsNullOrEmpty(pwMsg))
+                    {
+                        <div class="alert @(pwError ? "alert-danger" : "alert-success") py-2 small mb-2">@pwMsg</div>
+                    }
+
+                    <div class="mb-2">
+                        <input class="form-control form-control-sm" type="password"
+                               @bind="newPw" placeholder="Nowe hasło (min. 6 znaków)" autocomplete="new-password" />
+                    </div>
+                    <button class="btn btn-warning btn-sm w-100" @onclick="ResetClientPassword" disabled="@isBusy">
+                        @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        <i class="bi bi-arrow-clockwise me-1"></i>Ustaw nowe hasło
+                    </button>
+                </div>
+            </div>
+
         </div>
 
         <!-- Right column: session history -->
@@ -453,6 +478,10 @@ else if (client is not null)
     private string newNote = string.Empty;
     private string currentUserId = string.Empty;
 
+    private string newPw  = string.Empty;
+    private string pwMsg  = string.Empty;
+    private bool pwError;
+
     private bool bookingOpen;
     private CreateSessionDto bookingDto = new();
     private string bookingDate = string.Empty;
@@ -473,7 +502,10 @@ else if (client is not null)
         client = await ClientService.GetClientAsync(Id);
         if (client is null) { notFound = true; return; }
 
-        await Task.WhenAll(LoadNotes(), LoadSessions(), LoadSessionTypes(), LoadPackages());
+        await LoadNotes();
+        await LoadSessions();
+        await LoadSessionTypes();
+        await LoadPackages();
     }
 
     private async Task LoadNotes()
@@ -664,6 +696,21 @@ else if (client is not null)
     {
         await ClientService.DeleteNoteAsync(noteId);
         notes = await ClientService.GetNotesAsync(Id);
+    }
+
+    private async Task ResetClientPassword()
+    {
+        if (string.IsNullOrWhiteSpace(newPw)) { pwMsg = "Podaj nowe hasło."; pwError = true; return; }
+        if (client is null) return;
+        isBusy = true; pwMsg = string.Empty;
+        try
+        {
+            var (success, error) = await UserManagementService.ResetPasswordAsync(client.ApplicationUserId, newPw);
+            if (success) { pwMsg = "Hasło klienta zostało zmienione."; pwError = false; newPw = string.Empty; }
+            else         { pwMsg = error ?? "Błąd zmiany hasła."; pwError = true; }
+        }
+        catch (Exception ex) { pwMsg = ex.Message; pwError = true; }
+        finally { isBusy = false; }
     }
 
     private static string StatusBadge(PTScheduler.Domain.Enums.SessionStatus s) => s switch
