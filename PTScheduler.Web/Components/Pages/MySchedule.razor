@@ -1,7 +1,8 @@
-﻿@page "/my"
+@page "/my"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Client")]
 @inject IClientService ClientService
 @inject ISessionService SessionService
+@inject ITrainerAvailabilityService AvailabilityService
 @inject NavigationManager Nav
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
@@ -36,21 +37,29 @@ else if (client.Status == ClientStatus.Pending)
 }
 else
 {
-    <div class="d-flex align-items-center gap-3 mb-3">
-        <div class="avatar-circle">
-            @if (!string.IsNullOrEmpty(client.ProfilePictureUrl))
-            {
-                <img src="@client.ProfilePictureUrl" class="rounded-circle" width="52" height="52" style="object-fit:cover" alt="@client.FullName" />
-            }
-            else
-            {
-                <span>@(string.IsNullOrEmpty(client.Initials) ? "?" : client.Initials)</span>
-            }
+    <div class="d-flex align-items-center justify-content-between gap-3 mb-3 flex-wrap">
+        <div class="d-flex align-items-center gap-3">
+            <div class="avatar-circle">
+                @if (!string.IsNullOrEmpty(client.ProfilePictureUrl))
+                {
+                    <img src="@client.ProfilePictureUrl" class="rounded-circle" width="52" height="52" style="object-fit:cover" alt="@client.FullName" />
+                }
+                else
+                {
+                    <span>@(string.IsNullOrEmpty(client.Initials) ? "?" : client.Initials)</span>
+                }
+            </div>
+            <div>
+                <h5 class="mb-0">Cześć, @client.FirstName!</h5>
+                <div class="text-muted small">@client.Email</div>
+            </div>
         </div>
-        <div>
-            <h5 class="mb-0">Cześć, @client.FirstName!</h5>
-            <div class="text-muted small">@client.Email</div>
-        </div>
+        @if (client.AllowSelfBooking && !string.IsNullOrEmpty(client.TrainerUserId))
+        {
+            <button class="btn btn-primary" @onclick="OpenBooking">
+                <i class="bi bi-calendar-plus me-1"></i>Zarezerwuj wizytę
+            </button>
+        }
     </div>
 
     @if (client.ActivePackage is not null)
@@ -80,7 +89,6 @@ else
         </div>
     }
 
-    <!-- Upcoming sessions -->
     <h6 class="mb-3 text-uppercase text-muted fw-semibold" style="font-size:.7rem;letter-spacing:.05em">
         <i class="bi bi-calendar-week me-1"></i>Nadchodzące treningi
     </h6>
@@ -90,6 +98,12 @@ else
         <div class="card border-0 bg-body-secondary rounded-3 p-4 text-center mb-4">
             <i class="bi bi-calendar-x fs-2 text-muted d-block mb-2"></i>
             <p class="mb-0 text-muted small">Brak zaplanowanych treningów.</p>
+            @if (client.AllowSelfBooking && !string.IsNullOrEmpty(client.TrainerUserId))
+            {
+                <button class="btn btn-primary btn-sm mt-3" @onclick="OpenBooking">
+                    <i class="bi bi-calendar-plus me-1"></i>Zarezerwuj pierwszy trening
+                </button>
+            }
         </div>
     }
     else
@@ -132,7 +146,6 @@ else
         </div>
     }
 
-    <!-- Past sessions -->
     <h6 class="mb-3 text-uppercase text-muted fw-semibold" style="font-size:.7rem;letter-spacing:.05em">
         <i class="bi bi-clock-history me-1"></i>Historia treningów
     </h6>
@@ -196,15 +209,238 @@ else
     </div>
 }
 
+<!-- Self-booking wizard modal -->
+@if (bookingOpen)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.5)">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header border-0 pb-0">
+                    <h5 class="modal-title"><i class="bi bi-calendar-plus me-2 text-primary"></i>Zarezerwuj wizytę</h5>
+                    <button type="button" class="btn-close" @onclick="CloseBooking"></button>
+                </div>
+                <div class="modal-body p-4">
+
+                    <!-- Step indicator -->
+                    <div class="d-flex align-items-center mb-4">
+                        @for (int i = 1; i <= 3; i++)
+                        {
+                            var step = i;
+                            var done = bookingStep > step;
+                            var active = bookingStep == step;
+                            <div class="d-flex align-items-center flex-grow-1 @(step == 3 ? "flex-grow-0" : "")">
+                                <div class="d-flex flex-column align-items-center" style="min-width:32px">
+                                    <div style="width:32px;height:32px;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:.8rem;font-weight:700;
+                                                background:@(done ? "#16a34a" : active ? "#0284C7" : "#e5e7eb");
+                                                color:@(done || active ? "white" : "#6b7280")">
+                                        @if (done) { <i class="bi bi-check-lg"></i> } else { @step }
+                                    </div>
+                                    <div style="font-size:.68rem;color:@(active ? "#0284C7" : done ? "#16a34a" : "#9ca3af");margin-top:4px;white-space:nowrap">
+                                        @(step == 1 ? "Typ wizyty" : step == 2 ? "Termin" : "Potwierdzenie")
+                                    </div>
+                                </div>
+                                @if (step < 3)
+                                {
+                                    <div class="flex-grow-1 mx-2" style="height:2px;background:@(done ? "#16a34a" : "#e5e7eb");border-radius:2px"></div>
+                                }
+                            </div>
+                        }
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(bookingError))
+                    {
+                        <div class="alert alert-danger py-2 small mb-3">
+                            <i class="bi bi-exclamation-triangle-fill me-1"></i>@bookingError
+                        </div>
+                    }
+
+                    <!-- Step 1: Choose session type -->
+                    @if (bookingStep == 1)
+                    {
+                        <p class="text-muted small mb-3">Wybierz typ wizyty, który chcesz zarezerwować.</p>
+                        @if (!sessionTypes.Any())
+                        {
+                            <div class="text-center text-muted py-4">
+                                <i class="bi bi-calendar-x fs-2 d-block mb-2"></i>
+                                Brak dostępnych typów wizyt. Skontaktuj się z trenerem.
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="row g-3">
+                                @foreach (var t in sessionTypes)
+                                {
+                                    var isSelected = selectedType?.Id == t.Id;
+                                    <div class="col-12 col-sm-6">
+                                        <div class="border rounded-3 p-3 h-100 @(isSelected ? "border-primary bg-primary-subtle" : "border-2")"
+                                             style="cursor:pointer;transition:all .15s"
+                                             @onclick="() => { selectedType = t; bookingError = string.Empty; }">
+                                            <div class="d-flex align-items-start gap-2">
+                                                <div class="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0"
+                                                     style="width:36px;height:36px;background:@(isSelected ? "#0284C7" : "#f3f4f6")">
+                                                    <i class="bi @(t.IsGroup ? "bi-people-fill" : "bi-person-fill")"
+                                                       style="color:@(isSelected ? "white" : "#6b7280");font-size:.9rem"></i>
+                                                </div>
+                                                <div>
+                                                    <div class="fw-semibold small">@t.Name</div>
+                                                    <div class="text-muted small">@t.DurationMinutes min · @(t.IsGroup ? "grupowa" : "indywidualna")</div>
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                            <div class="text-end mt-4">
+                                <button class="btn btn-primary" @onclick="GoToStep2" disabled="@(selectedType is null)">
+                                    Dalej <i class="bi bi-arrow-right ms-1"></i>
+                                </button>
+                            </div>
+                        }
+                    }
+
+                    <!-- Step 2: Choose date and slot -->
+                    @if (bookingStep == 2)
+                    {
+                        <p class="text-muted small mb-3">
+                            Wybierz datę i dostępny termin dla wizyty <strong>@selectedType!.Name</strong> (@selectedType.DurationMinutes min).
+                        </p>
+
+                        <div class="row g-3">
+                            <div class="col-12 col-sm-5">
+                                <label class="form-label form-label-sm fw-semibold">Data</label>
+                                <input type="date" class="form-control"
+                                       value="@selectedDate.ToString("yyyy-MM-dd")"
+                                       min="@DateTime.Today.ToString("yyyy-MM-dd")"
+                                       max="@DateTime.Today.AddDays(60).ToString("yyyy-MM-dd")"
+                                       @onchange="OnDateChanged" />
+                            </div>
+                        </div>
+
+                        <div class="mt-3">
+                            @if (loadingSlots)
+                            {
+                                <div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></div>
+                            }
+                            else if (!availableSlots.Any())
+                            {
+                                <div class="alert alert-warning py-2 small mt-2">
+                                    <i class="bi bi-calendar-x me-1"></i>
+                                    Brak wolnych terminów w wybranym dniu. Wybierz inną datę.
+                                </div>
+                            }
+                            else
+                            {
+                                <label class="form-label form-label-sm fw-semibold mt-2">Dostępne terminy</label>
+                                <div class="d-flex flex-wrap gap-2">
+                                    @foreach (var slot in availableSlots)
+                                    {
+                                        var isSelected = selectedSlot?.Start == slot.Start;
+                                        <button class="btn btn-sm @(isSelected ? "btn-primary" : "btn-outline-primary")"
+                                                style="min-width:80px"
+                                                @onclick="() => { selectedSlot = slot; bookingError = string.Empty; }">
+                                            @slot.Start.ToString("HH:mm")
+                                        </button>
+                                    }
+                                </div>
+                            }
+                        </div>
+
+                        <div class="d-flex justify-content-between mt-4">
+                            <button class="btn btn-outline-secondary" @onclick="() => { bookingStep = 1; selectedSlot = null; }">
+                                <i class="bi bi-arrow-left me-1"></i>Wróć
+                            </button>
+                            <button class="btn btn-primary" @onclick="GoToStep3" disabled="@(selectedSlot is null)">
+                                Dalej <i class="bi bi-arrow-right ms-1"></i>
+                            </button>
+                        </div>
+                    }
+
+                    <!-- Step 3: Confirm -->
+                    @if (bookingStep == 3)
+                    {
+                        <p class="text-muted small mb-3">Sprawdź szczegóły i zatwierdź rezerwację.</p>
+
+                        <div class="border rounded-3 p-4 bg-light mb-3">
+                            <table class="table table-sm table-borderless mb-0 align-middle">
+                                <tr>
+                                    <td class="text-muted small fw-semibold" style="width:40%">Typ wizyty</td>
+                                    <td class="fw-semibold">@selectedType!.Name</td>
+                                </tr>
+                                <tr>
+                                    <td class="text-muted small fw-semibold">Czas trwania</td>
+                                    <td>@selectedType!.DurationMinutes minut</td>
+                                </tr>
+                                <tr>
+                                    <td class="text-muted small fw-semibold">Data</td>
+                                    <td class="fw-semibold">@selectedSlot!.Start.ToString("dddd, dd MMMM yyyy")</td>
+                                </tr>
+                                <tr>
+                                    <td class="text-muted small fw-semibold">Godzina</td>
+                                    <td class="fw-semibold">@selectedSlot!.Start.ToString("HH:mm") — @selectedSlot!.End.ToString("HH:mm")</td>
+                                </tr>
+                            </table>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label form-label-sm fw-semibold">Notatki (opcjonalnie)</label>
+                            <textarea class="form-control form-control-sm" rows="2" placeholder="Dodaj notatkę do wizyty..." @bind="bookingNotes"></textarea>
+                        </div>
+
+                        <div class="d-flex justify-content-between mt-2">
+                            <button class="btn btn-outline-secondary" @onclick="() => { bookingStep = 2; }">
+                                <i class="bi bi-arrow-left me-1"></i>Wróć
+                            </button>
+                            <button class="btn btn-primary" @onclick="ConfirmBooking" disabled="@isBusy">
+                                @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                <i class="bi bi-check-lg me-1"></i>Zarezerwuj
+                            </button>
+                        </div>
+                    }
+
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<!-- Booking success toast -->
+@if (showSuccess)
+{
+    <div class="position-fixed bottom-0 end-0 p-3" style="z-index:9999">
+        <div class="toast show align-items-center text-bg-success border-0" role="alert">
+            <div class="d-flex">
+                <div class="toast-body">
+                    <i class="bi bi-check-circle-fill me-2"></i>
+                    Wizyta zarezerwowana! Sprawdź email z potwierdzeniem.
+                </div>
+                <button type="button" class="btn-close btn-close-white me-2 m-auto" @onclick="() => showSuccess = false"></button>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private bool loading = true;
     private bool isBusy;
+    private bool showSuccess;
     private ClientDto? client;
     private List<SessionDto> upcoming = [];
     private List<SessionDto> past = [];
 
     private SessionDto? cancelTarget;
     private string cancelReason = string.Empty;
+
+    // Booking wizard state
+    private bool bookingOpen;
+    private int bookingStep = 1;
+    private string bookingError = string.Empty;
+    private string bookingNotes = string.Empty;
+    private List<SessionTypeDto> sessionTypes = [];
+    private SessionTypeDto? selectedType;
+    private DateOnly selectedDate = DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+    private List<AvailableSlotDto> availableSlots = [];
+    private AvailableSlotDto? selectedSlot;
+    private bool loadingSlots;
 
     protected override async Task OnInitializedAsync()
     {
@@ -214,16 +450,126 @@ else
         {
             client = await ClientService.GetClientByUserIdAsync(userId);
             if (client is not null)
-            {
-                var all = await SessionService.GetClientSessionsAsync(client.Id, 500);
-                var now = DateTime.Now;
-                upcoming = all.Where(s => s.Status == SessionStatus.Scheduled && s.StartTime >= now)
-                              .OrderBy(s => s.StartTime).ToList();
-                past = all.Where(s => s.StartTime < now || s.Status != SessionStatus.Scheduled)
-                          .OrderByDescending(s => s.StartTime).ToList();
-            }
+                await RefreshSessions();
         }
         loading = false;
+    }
+
+    private async Task RefreshSessions()
+    {
+        var all = await SessionService.GetClientSessionsAsync(client!.Id, 500);
+        var now = DateTime.Now;
+        upcoming = all.Where(s => s.Status == SessionStatus.Scheduled && s.StartTime >= now)
+                      .OrderBy(s => s.StartTime).ToList();
+        past = all.Where(s => s.StartTime < now || s.Status != SessionStatus.Scheduled)
+                  .OrderByDescending(s => s.StartTime).ToList();
+    }
+
+    private async Task OpenBooking()
+    {
+        bookingStep = 1;
+        selectedType = null;
+        selectedSlot = null;
+        bookingNotes = string.Empty;
+        bookingError = string.Empty;
+        availableSlots = [];
+        selectedDate = DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+
+        if (!sessionTypes.Any())
+            sessionTypes = await SessionService.GetSessionTypesAsync();
+
+        bookingOpen = true;
+    }
+
+    private void CloseBooking() => bookingOpen = false;
+
+    private async Task GoToStep2()
+    {
+        if (selectedType is null) return;
+        bookingStep = 2;
+        selectedSlot = null;
+        await LoadSlots();
+    }
+
+    private async Task GoToStep3()
+    {
+        if (selectedSlot is null) return;
+
+        // Re-validate slot is still free before moving on
+        var free = await AvailabilityService.IsSlotFreeAsync(
+            client!.TrainerUserId!, selectedSlot.Start, selectedType!.DurationMinutes);
+        if (!free)
+        {
+            bookingError = "Ten termin właśnie został zajęty. Wybierz inny.";
+            await LoadSlots();
+            return;
+        }
+
+        bookingError = string.Empty;
+        bookingStep = 3;
+    }
+
+    private async Task OnDateChanged(ChangeEventArgs e)
+    {
+        if (DateOnly.TryParse(e.Value?.ToString(), out var d))
+        {
+            selectedDate = d;
+            selectedSlot = null;
+            await LoadSlots();
+        }
+    }
+
+    private async Task LoadSlots()
+    {
+        if (client?.TrainerUserId is null || selectedType is null) return;
+        loadingSlots = true;
+        try
+        {
+            var all = await AvailabilityService.GetAvailableSlotsAsync(
+                client.TrainerUserId, selectedDate, selectedType.DurationMinutes);
+            availableSlots = all.Where(s => s.IsAvailable && s.Start > DateTime.Now).ToList();
+        }
+        finally { loadingSlots = false; }
+    }
+
+    private async Task ConfirmBooking()
+    {
+        if (selectedType is null || selectedSlot is null || client?.TrainerUserId is null) return;
+
+        isBusy = true;
+        bookingError = string.Empty;
+        try
+        {
+            // Final free-slot check
+            var free = await AvailabilityService.IsSlotFreeAsync(
+                client.TrainerUserId, selectedSlot.Start, selectedType.DurationMinutes);
+            if (!free)
+            {
+                bookingError = "Ten termin właśnie został zajęty przez innego klienta. Wybierz inny termin.";
+                bookingStep = 2;
+                await LoadSlots();
+                return;
+            }
+
+            var dto = new CreateSessionDto
+            {
+                ClientId = client.Id,
+                SessionTypeId = selectedType.Id,
+                TrainerUserId = client.TrainerUserId,
+                StartTime = selectedSlot.Start,
+                Notes = string.IsNullOrWhiteSpace(bookingNotes) ? null : bookingNotes.Trim()
+            };
+            await SessionService.CreateSessionAsync(dto);
+
+            bookingOpen = false;
+            showSuccess = true;
+            await RefreshSessions();
+        }
+        catch (Exception ex)
+        {
+            bookingError = ex.Message;
+        }
+        finally { isBusy = false; }
     }
 
     private void ConfirmCancel(SessionDto s)
@@ -240,13 +586,8 @@ else
         {
             var reason = string.IsNullOrWhiteSpace(cancelReason) ? null : cancelReason.Trim();
             await SessionService.UpdateStatusAsync(cancelTarget.Id, SessionStatus.Cancelled, reason);
-            var all = await SessionService.GetClientSessionsAsync(client!.Id, 500);
-            var now = DateTime.Now;
-            upcoming = all.Where(s => s.Status == SessionStatus.Scheduled && s.StartTime >= now)
-                          .OrderBy(s => s.StartTime).ToList();
-            past = all.Where(s => s.StartTime < now || s.Status != SessionStatus.Scheduled)
-                      .OrderByDescending(s => s.StartTime).ToList();
             cancelTarget = null;
+            await RefreshSessions();
         }
         catch (Exception ex)
         {
@@ -274,5 +615,3 @@ else
         _ => s.ToString()
     };
 }
-
-
