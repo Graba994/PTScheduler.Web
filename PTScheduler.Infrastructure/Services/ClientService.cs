@@ -17,6 +17,7 @@ public class ClientService(
     {
         await using var db = dbFactory.CreateDbContext();
         var clients = await db.Clients
+            .AsNoTracking()
             .Where(c => trainerUserId == null || c.TrainerUserId == trainerUserId)
             .OrderBy(c => c.LastName).ThenBy(c => c.FirstName)
             .ToListAsync();
@@ -65,7 +66,7 @@ public class ClientService(
     public async Task<ClientDto?> GetClientByUserIdAsync(string userId)
     {
         await using var db = dbFactory.CreateDbContext();
-        var c = await db.Clients.FirstOrDefaultAsync(c => c.ApplicationUserId == userId);
+        var c = await db.Clients.AsNoTracking().FirstOrDefaultAsync(c => c.ApplicationUserId == userId);
         return c is null ? null : await GetClientAsync(c.Id);
     }
 
@@ -77,12 +78,14 @@ public class ClientService(
 
         var user = await userManager.FindByIdAsync(c.ApplicationUserId);
         var stats = await db.Sessions
+            .AsNoTracking()
             .Where(s => s.ClientId == id)
             .GroupBy(_ => 1)
             .Select(g => new { Total = g.Count(), LastDate = g.Max(s => (DateTime?)s.StartTime) })
             .FirstOrDefaultAsync();
 
         var packages = await db.SessionPackages
+            .AsNoTracking()
             .Include(p => p.SessionType)
             .Where(p => p.ClientId == id)
             .OrderByDescending(p => p.PurchasedAt)
@@ -128,7 +131,7 @@ public class ClientService(
     public async Task<ClientDto> CreateClientAsync(CreateClientDto dto)
     {
         if (await userManager.FindByEmailAsync(dto.Email) is not null)
-            throw new InvalidOperationException($"Użytkownik z emailem '{dto.Email}' już istnieje.");
+            throw new InvalidOperationException("Podany adres email jest już zajęty.");
 
         var user = new ApplicationUser
         {
@@ -199,6 +202,7 @@ public class ClientService(
     {
         await using var db = dbFactory.CreateDbContext();
         var notes = await db.TrainerNotes
+            .AsNoTracking()
             .Where(n => n.ClientId == clientId)
             .OrderByDescending(n => n.CreatedAt)
             .ToListAsync();
@@ -255,6 +259,7 @@ public class ClientService(
     {
         await using var db = dbFactory.CreateDbContext();
         var clients = await db.Clients
+            .AsNoTracking()
             .Where(c => c.Status == ClientStatus.Pending
                      && (trainerUserId == null || c.TrainerUserId == trainerUserId))
             .OrderBy(c => c.CreatedAt)

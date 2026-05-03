@@ -1,0 +1,299 @@
+@page "/my/profile"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Client")]
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@inject IClientService ClientService
+@inject ISessionPackageService PackageService
+@inject ISessionService SessionService
+@inject AuthenticationStateProvider AuthStateProvider
+@inject UserManager<ApplicationUser> UserManager
+@inject IJSRuntime JS
+@using Microsoft.AspNetCore.Identity
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Domain.Enums
+@using PTScheduler.Domain.Constants
+@using System.Globalization
+
+<AppTitle Page="Mój profil" />
+
+@if (_loading)
+{
+    <div class="text-center py-5">
+        <div class="spinner-border text-primary"></div>
+    </div>
+}
+else if (_client is null)
+{
+    <div class="alert alert-warning">Nie znaleziono profilu klienta.</div>
+}
+else
+{
+    <div class="page-header mb-3">
+        <h4 class="page-title"><i class="bi bi-person-circle me-2" style="color:var(--c-primary)"></i>Mój profil</h4>
+    </div>
+
+    <!-- Stat bar -->
+    <div class="row g-2 mb-4">
+        <div class="col-6 col-xl-3">
+            <div class="card border-0 shadow-sm text-center py-2 px-3">
+                <div class="fw-bold" style="font-size:1.5rem;color:var(--c-primary)">@_completedCount</div>
+                <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em">Ukończone treningi</div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="card border-0 shadow-sm text-center py-2 px-3">
+                <div class="fw-bold" style="font-size:1.5rem;color:var(--c-primary)">@_activeCredits</div>
+                <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em">Aktywne kredyty</div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="card border-0 shadow-sm text-center py-2 px-3">
+                <div class="fw-bold" style="font-size:1.5rem">@_totalPackageValue.ToString("N0") zł</div>
+                <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em">Łączna wartość pakietów</div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="card border-0 shadow-sm text-center py-2 px-3">
+                <div class="fw-bold" style="font-size:1.5rem">@_client.CreatedAt.ToString("MM.yyyy")</div>
+                <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em">Klient od</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Main content: two columns -->
+    <div class="row g-4 mb-4">
+
+        <!-- Left: My data -->
+        <div class="col-12 col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body p-4">
+                    <h6 class="card-title mb-3"><i class="bi bi-person me-2 text-primary"></i>Moje dane</h6>
+
+                    <!-- Avatar + name -->
+                    <div class="d-flex align-items-center gap-3 mb-4">
+                        <div class="avatar-circle-lg">
+                            @if (!string.IsNullOrEmpty(_client.ProfilePictureUrl))
+                            {
+                                <img src="@_client.ProfilePictureUrl" class="rounded-circle" width="72" height="72" style="object-fit:cover" alt="@_client.FullName" />
+                            }
+                            else
+                            {
+                                <span>@(string.IsNullOrEmpty(_client.Initials) ? "?" : _client.Initials)</span>
+                            }
+                        </div>
+                        <div>
+                            <div class="fw-bold fs-5">@_client.FullName</div>
+                            <div class="text-muted small">@_client.Email</div>
+                        </div>
+                    </div>
+
+                    <dl class="row mb-0 small">
+                        @if (!string.IsNullOrEmpty(_client.Phone))
+                        {
+                            <dt class="col-5 text-muted">Telefon</dt>
+                            <dd class="col-7">@_client.Phone</dd>
+                        }
+                        @if (_client.DateOfBirth.HasValue)
+                        {
+                            <dt class="col-5 text-muted">Data urodzenia</dt>
+                            <dd class="col-7">
+                                @_client.DateOfBirth.Value.ToString("dd.MM.yyyy")
+                                <span class="text-muted ms-1">(@_age lat)</span>
+                            </dd>
+                        }
+                        @if (!string.IsNullOrEmpty(_client.TrainingGoal))
+                        {
+                            <dt class="col-5 text-muted">Cel treningowy</dt>
+                            <dd class="col-7">@_client.TrainingGoal</dd>
+                        }
+                        <dt class="col-5 text-muted">Klient od</dt>
+                        <dd class="col-7">@_client.CreatedAt.ToString("dd.MM.yyyy")</dd>
+                    </dl>
+
+                    <div class="mt-4">
+                        <a href="/Account/Manage" class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-pencil me-1"></i>Edytuj dane
+                        </a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right: My trainer -->
+        <div class="col-12 col-md-6">
+            <div class="card shadow-sm h-100">
+                <div class="card-body p-4">
+                    <h6 class="card-title mb-3"><i class="bi bi-person-badge me-2 text-primary"></i>Mój trener</h6>
+
+                    @if (_trainer is null)
+                    {
+                        <div class="text-muted small text-center py-3">
+                            <i class="bi bi-person-x d-block fs-2 mb-2 opacity-50"></i>
+                            Brak przypisanego trenera.
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="d-flex align-items-center gap-3 mb-4">
+                            <div class="avatar-circle-lg">
+                                <span>@_trainerInitials</span>
+                            </div>
+                            <div>
+                                <div class="fw-bold fs-5">@_trainerFullName</div>
+                                <div class="text-muted small">@_trainer.Email</div>
+                            </div>
+                        </div>
+
+                        <dl class="row mb-0 small">
+                            <dt class="col-5 text-muted">Email</dt>
+                            <dd class="col-7">
+                                <a href="mailto:@_trainer.Email">@_trainer.Email</a>
+                            </dd>
+                            @if (!string.IsNullOrEmpty(_trainer.PhoneNumber))
+                            {
+                                <dt class="col-5 text-muted">Telefon</dt>
+                                <dd class="col-7">
+                                    <a href="tel:@_trainer.PhoneNumber">@_trainer.PhoneNumber</a>
+                                </dd>
+                            }
+                        </dl>
+                    }
+
+                    <!-- Quick actions -->
+                    <div class="mt-4 pt-3 border-top">
+                        <div class="text-muted small fw-semibold mb-2 text-uppercase" style="letter-spacing:.06em;font-size:.7rem">Szybkie akcje</div>
+                        <div class="d-flex flex-column gap-1">
+                            <a href="/my" class="btn btn-outline-secondary btn-sm text-start">
+                                <i class="bi bi-calendar-week me-2"></i>Mój grafik
+                            </a>
+                            <a href="/my/measurements" class="btn btn-outline-secondary btn-sm text-start">
+                                <i class="bi bi-rulers me-2"></i>Moje pomiary
+                            </a>
+                            <a href="/my/packages" class="btn btn-outline-secondary btn-sm text-start">
+                                <i class="bi bi-box-seam me-2"></i>Moje pakiety
+                            </a>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Active package card -->
+    @if (_activePackage is not null)
+    {
+        var pct = _activePackage.TotalSessions > 0
+            ? (int)Math.Round((double)_activePackage.UsedSessions / _activePackage.TotalSessions * 100)
+            : 0;
+        var barColor = pct >= 80 ? "#DC2626" : pct >= 50 ? "#D97706" : "#16A34A";
+
+        <div class="card border-0 shadow-sm" style="border-left:4px solid var(--c-primary) !important">
+            <div class="card-header bg-transparent fw-semibold d-flex align-items-center justify-content-between">
+                <span><i class="bi bi-ticket-perforated me-2 text-primary"></i>Aktywny pakiet</span>
+                <a href="/my/packages" class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:.75rem">
+                    Wszystkie <i class="bi bi-arrow-right ms-1"></i>
+                </a>
+            </div>
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start mb-2">
+                    <div>
+                        <div class="fw-bold" style="font-size:1rem">@_activePackage.Name</div>
+                        <div class="text-muted small">@_activePackage.SessionTypeName · @_activePackage.DurationMinutes min</div>
+                    </div>
+                    <span class="badge @(_activePackage.IsPaid ? "bg-success" : "bg-warning text-dark")">
+                        @(_activePackage.IsPaid ? "Opłacony" : "Nieopłacony")
+                    </span>
+                </div>
+
+                <div class="mb-1 d-flex justify-content-between" style="font-size:.8rem">
+                    <span class="text-muted">Wykorzystane treningi</span>
+                    <span class="fw-semibold">@_activePackage.UsedSessions / @_activePackage.TotalSessions</span>
+                </div>
+                <div class="progress mb-2" style="height:10px;border-radius:5px">
+                    <div class="progress-bar" role="progressbar"
+                         style="width:@(pct)%;background:@barColor;border-radius:5px"
+                         aria-valuenow="@pct" aria-valuemin="0" aria-valuemax="100"></div>
+                </div>
+                <div style="font-size:.8rem;color:@barColor;font-weight:600">
+                    Pozostało: @_activePackage.RemainingCredits @(_activePackage.RemainingCredits == 1 ? "trening" : _activePackage.RemainingCredits is >= 2 and <= 4 ? "treningi" : "treningów")
+                </div>
+
+                @if (_activePackage.ExpiresAt.HasValue)
+                {
+                    var daysLeft = (int)(_activePackage.ExpiresAt.Value.ToLocalTime() - DateTime.Now).TotalDays;
+                    <div class="mt-2 small @(daysLeft <= 7 ? "text-danger fw-semibold" : "text-muted")">
+                        <i class="bi bi-hourglass-split me-1"></i>
+                        Ważny do @_activePackage.ExpiresAt.Value.ToLocalTime().ToString("dd.MM.yyyy")
+                        @if (daysLeft <= 14) { <text> (@daysLeft dni)</text> }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private ClientDto? _client;
+    private ApplicationUser? _trainer;
+    private string _trainerFullName = string.Empty;
+    private string _trainerInitials = "?";
+    private List<SessionPackageDto> _packages = [];
+    private List<SessionDto> _sessions = [];
+    private SessionPackageDto? _activePackage;
+
+    private int _completedCount;
+    private int _activeCredits;
+    private decimal _totalPackageValue;
+    private int _age;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            var userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+
+            _client = await ClientService.GetClientByUserIdAsync(userId);
+            if (_client is null) { _loading = false; return; }
+
+            var sessionsTask = SessionService.GetClientSessionsAsync(_client.Id, 200);
+            var packagesTask = PackageService.GetPackagesAsync(_client.Id);
+            await Task.WhenAll(sessionsTask, packagesTask);
+
+            _sessions = sessionsTask.Result;
+            _packages = packagesTask.Result;
+            _activePackage = _packages.FirstOrDefault(p => p.Status == PackageStatus.Active);
+
+            // Trainer info
+            if (!string.IsNullOrEmpty(_client.TrainerUserId))
+            {
+                _trainer = await UserManager.FindByIdAsync(_client.TrainerUserId);
+                if (_trainer is not null)
+                {
+                    var firstName = _trainer.FirstName ?? string.Empty;
+                    var lastName  = _trainer.LastName  ?? string.Empty;
+                    _trainerFullName = $"{firstName} {lastName}".Trim() is { Length: > 0 } n ? n : _trainer.Email ?? string.Empty;
+                    _trainerInitials = $"{firstName.FirstOrDefault()}{lastName.FirstOrDefault()}".ToUpperInvariant().Trim() is { Length: > 0 } i ? i : "T";
+                }
+            }
+
+            // Compute stats
+            _completedCount    = _sessions.Count(s => s.Status == SessionStatus.Completed);
+            _activeCredits     = _packages.Where(p => p.Status == PackageStatus.Active).Sum(p => p.RemainingCredits);
+            _totalPackageValue = _packages.Where(p => p.Status != PackageStatus.Cancelled).Sum(p => p.TotalPrice);
+
+            if (_client.DateOfBirth.HasValue)
+            {
+                var today = DateOnly.FromDateTime(DateTime.Today);
+                var dob   = _client.DateOfBirth.Value;
+                _age = today.Year - dob.Year;
+                if (today < dob.AddYears(_age)) _age--;
+            }
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+}

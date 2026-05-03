@@ -32,7 +32,7 @@ public class SessionInvitationService(
             InvitedClientId = invitedClientId,
             Status          = InvitationStatus.Pending,
             CreatedByUserId = sentByUserId,
-            CreatedAt       = DateTime.Now
+            CreatedAt       = DateTime.UtcNow
         };
 
         db.SessionInvitations.Add(invitation);
@@ -86,7 +86,7 @@ public class SessionInvitationService(
             throw new InvalidOperationException("To zaproszenie zostało już rozpatrzone.");
 
         invitation.Status      = accept ? InvitationStatus.Accepted : InvitationStatus.Declined;
-        invitation.RespondedAt = DateTime.Now;
+        invitation.RespondedAt = DateTime.UtcNow;
         invitation.ResponseNote = note;
         await db.SaveChangesAsync();
     }

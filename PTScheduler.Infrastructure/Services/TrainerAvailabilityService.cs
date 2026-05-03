@@ -13,6 +13,7 @@ public class TrainerAvailabilityService(IDbContextFactory<ApplicationDbContext> 
     {
         await using var db = dbFactory.CreateDbContext();
         var rules = await db.TrainerAvailabilities
+            .AsNoTracking()
             .Where(a => a.TrainerUserId == trainerUserId)
             .OrderBy(a => a.DayOfWeek)
             .ThenBy(a => a.SpecificDate)
@@ -100,6 +101,7 @@ public class TrainerAvailabilityService(IDbContextFactory<ApplicationDbContext> 
 
         // Load existing sessions for that day (including AwaitingPackage — slot is still taken)
         var sessions = await db.Sessions
+            .AsNoTracking()
             .Where(s => s.TrainerUserId == trainerUserId
                         && s.StartTime < dayEnd
                         && s.StartTime >= dayStart
@@ -109,6 +111,7 @@ public class TrainerAvailabilityService(IDbContextFactory<ApplicationDbContext> 
 
         // Also load actual session types to get duration
         var sessionDetails = await db.Sessions
+            .AsNoTracking()
             .Include(s => s.SessionType)
             .Where(s => s.TrainerUserId == trainerUserId
                         && s.StartTime < dayEnd
@@ -148,6 +151,7 @@ public class TrainerAvailabilityService(IDbContextFactory<ApplicationDbContext> 
         var slotEnd = start.AddMinutes(durationMinutes);
 
         return !await db.Sessions
+            .AsNoTracking()
             .Include(s => s.SessionType)
             .Where(s => s.TrainerUserId == trainerUserId
                         && s.Status != SessionStatus.Cancelled
@@ -159,7 +163,7 @@ public class TrainerAvailabilityService(IDbContextFactory<ApplicationDbContext> 
     // Internal overload used within methods that already have an open db context
     private static async Task<TrainerConfigDto> GetConfigAsync(ApplicationDbContext db, string trainerUserId)
     {
-        var cfg = await db.TrainerConfigs.FirstOrDefaultAsync(c => c.TrainerUserId == trainerUserId);
+        var cfg = await db.TrainerConfigs.AsNoTracking().FirstOrDefaultAsync(c => c.TrainerUserId == trainerUserId);
         return cfg is null
             ? new TrainerConfigDto { BreakAfterSessionMinutes = 0, SlotGranularityMinutes = 30 }
             : new TrainerConfigDto
@@ -179,6 +183,7 @@ public class TrainerAvailabilityService(IDbContextFactory<ApplicationDbContext> 
         var today = date;
 
         var rules = await db.TrainerAvailabilities
+            .AsNoTracking()
             .Where(a => a.TrainerUserId == trainerUserId && a.IsActive)
             .ToListAsync();
 

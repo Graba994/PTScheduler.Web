@@ -1,0 +1,147 @@
+@rendermode InteractiveServer
+@inject ISessionPackageService PackageService
+@inject IClientService ClientService
+@inject ISessionService SessionService
+@inject AuthenticationStateProvider AuthState
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Domain.Enums
+@using PTScheduler.Domain.Constants
+
+@if (_loaded)
+{
+    <div class="position-relative" style="padding:0 .5rem .25rem">
+        <button class="btn btn-link p-0 border-0 sidebar-link w-100 text-start"
+                style="text-decoration:none;color:inherit;position:relative"
+                @onclick="ToggleOpen">
+            <i class="bi bi-bell@(_open ? "-fill" : "")"></i>
+            <span>Powiadomienia</span>
+            @if (_items.Count > 0)
+            {
+                <span class="badge bg-danger rounded-pill ms-1" style="font-size:.6rem;vertical-align:middle">@_items.Count</span>
+            }
+        </button>
+
+        @if (_open && _items.Count > 0)
+        {
+            <div class="card shadow border-0 position-absolute start-0 end-0 z-3"
+                 style="top:calc(100% + 4px);min-width:260px;max-height:320px;overflow-y:auto">
+                <div class="list-group list-group-flush">
+                    @foreach (var item in _items)
+                    {
+                        <a href="@item.Url" class="list-group-item list-group-item-action py-2 px-3"
+                           style="font-size:.8rem" @onclick="() => _open = false">
+                            <div class="d-flex align-items-start gap-2">
+                                <i class="bi @item.Icon mt-1 flex-shrink-0" style="color:@item.Color"></i>
+                                <div>
+                                    <div class="fw-semibold">@item.Title</div>
+                                    <div class="text-muted">@item.Body</div>
+                                </div>
+                            </div>
+                        </a>
+                    }
+                </div>
+            </div>
+        }
+        @if (_open && _items.Count == 0)
+        {
+            <div class="card shadow border-0 position-absolute start-0 end-0 z-3 p-3 text-center"
+                 style="top:calc(100% + 4px);font-size:.8rem;color:var(--bs-secondary-color)">
+                <i class="bi bi-check-circle-fill d-block fs-4 mb-1" style="color:#16A34A"></i>
+                Wszystko w porządku!
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private bool _loaded;
+    private bool _open;
+    private List<NotifItem> _items = [];
+    private string? _role;
+    private string? _userId;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        _role = auth.User.IsInRole(Roles.Admin) ? Roles.Admin
+              : auth.User.IsInRole(Roles.Trainer) ? Roles.Trainer
+              : auth.User.IsInRole(Roles.Subordinate) ? Roles.Trainer
+              : Roles.Client;
+        await LoadAsync();
+        _loaded = true;
+        StateHasChanged();
+    }
+
+    private async Task LoadAsync()
+    {
+        _items.Clear();
+        try
+        {
+            if (_role == Roles.Admin || _role == Roles.Trainer)
+            {
+                var trainerFilter = _role == Roles.Admin ? null : _userId;
+
+                // Pending clients awaiting approval
+                var pending = await ClientService.GetPendingClientsAsync(trainerFilter);
+                if (pending.Count > 0)
+                    _items.Add(new("Klienci oczekujący", $"{pending.Count} {Pl(pending.Count, "klient czeka", "klientów czeka", "klientów czeka")} na zatwierdzenie",
+                        "bi-person-fill-exclamation", "#D97706", "/clients"));
+
+                // Expiring packages (7 days)
+                var expiring = await PackageService.GetExpiringAsync(7, trainerFilter);
+                if (expiring.Count > 0)
+                    _items.Add(new("Wygasające pakiety", $"{expiring.Count} {Pl(expiring.Count, "pakiet wygasa", "pakiety wygasają", "pakietów wygasa")} w ciągu 7 dni",
+                        "bi-box-seam-fill", "#DC2626", "/finance"));
+
+                // Sessions today not yet completed
+                var todayStart = DateTime.Today;
+                var todayEnd = todayStart.AddDays(1);
+                var todaySessions = await SessionService.GetSessionsAsync(todayStart, todayEnd, trainerFilter);
+                var notDone = todaySessions.Count(s => s.Status == SessionStatus.Scheduled && s.StartTime < DateTime.Now);
+                if (notDone > 0)
+                    _items.Add(new("Nieoznaczone sesje", $"{notDone} sesji dzisiaj bez statusu — oznacz wynik",
+                        "bi-calendar-check-fill", "#3B82F6", "/sessions"));
+            }
+            else if (_role == Roles.Client)
+            {
+                // Upcoming session tomorrow
+                var upcoming = await SessionService.GetUpcomingAsync(clientId: null, count: 5);
+                var tomorrow = upcoming.FirstOrDefault(s =>
+                    s.StartTime.Date == DateTime.Today.AddDays(1).Date);
+                if (tomorrow is not null)
+                    _items.Add(new("Trening jutro!", $"{tomorrow.StartTime:HH:mm} — {tomorrow.SessionTypeName}",
+                        "bi-calendar-event-fill", "#16A34A", "/my"));
+
+                // Expiring package
+                var client = await ClientService.GetClientByUserIdAsync(_userId ?? "");
+                if (client is not null)
+                {
+                    var pkgs = await PackageService.GetPackagesAsync(client.Id);
+                    var nearExpiry = pkgs.Where(p => p.Status == PackageStatus.Active
+                        && p.ExpiresAt.HasValue
+                        && (p.ExpiresAt.Value - DateTime.Now).TotalDays <= 7).ToList();
+                    if (nearExpiry.Count > 0)
+                        _items.Add(new("Pakiet wygasa", $"Pakiet \"{nearExpiry[0].Name}\" wygasa wkrótce",
+                            "bi-exclamation-triangle-fill", "#D97706", "/my/packages"));
+
+                    var lowCredits = pkgs.FirstOrDefault(p => p.Status == PackageStatus.Active && p.RemainingCredits <= 2);
+                    if (lowCredits is not null)
+                        _items.Add(new("Mało kredytów", $"Zostały tylko {lowCredits.RemainingCredits} sesje w pakiecie",
+                            "bi-ticket-perforated-fill", "#DC2626", "/my/packages"));
+                }
+            }
+        }
+        catch { }
+    }
+
+    private void ToggleOpen() => _open = !_open;
+
+    private static string Pl(int n, string one, string few, string many) =>
+        n == 1 ? one : n is >= 2 and <= 4 ? few : many;
+
+    private sealed record NotifItem(string Title, string Body, string Icon, string Color, string Url);
+}

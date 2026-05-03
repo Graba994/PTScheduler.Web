@@ -14,14 +14,29 @@
             var h = document.documentElement;
             var a = h.getAttribute('data-theme') || 'ocean';
             var m = h.getAttribute('data-mode') || 'light';
-            function set(dark) { h.setAttribute('data-theme', dark ? a + '-dark' : a); }
-            if (m === 'dark') {
+            function set(dark) {
+                h.setAttribute('data-theme', dark ? a + '-dark' : a);
+                h.setAttribute('data-effective-mode', dark ? 'dark' : 'light');
+            }
+            var userPref = localStorage.getItem('ptscheduler-dark');
+            if (userPref !== null) {
+                set(userPref === '1');
+            } else if (m === 'dark') {
                 set(true);
             } else if (m === 'system') {
                 var mq = window.matchMedia('(prefers-color-scheme: dark)');
                 set(mq.matches);
                 mq.addEventListener('change', function (e) { set(e.matches); });
             }
+            window.PTTheme = {
+                isDark: function () { return h.getAttribute('data-effective-mode') === 'dark'; },
+                toggle: function () {
+                    var dark = !window.PTTheme.isDark();
+                    set(dark);
+                    localStorage.setItem('ptscheduler-dark', dark ? '1' : '0');
+                    return dark;
+                }
+            };
         })();
     </script>
 
@@ -58,6 +73,15 @@
     <!-- Chart.js -->
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
     <script src="/js/charts.js"></script>
+    <!-- UserMenu position helper -->
+    <script>
+        window.PTMenu = {
+            getRect: function (el) {
+                var r = el.getBoundingClientRect();
+                return { top: r.top, bottom: r.bottom, left: r.left, right: r.right, width: r.width, vw: window.innerWidth, vh: window.innerHeight };
+            }
+        };
+    </script>
     <!-- PWA: Service Worker + Install Prompt -->
     <script>
         if ('serviceWorker' in navigator) {

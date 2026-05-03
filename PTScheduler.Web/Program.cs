@@ -39,8 +39,8 @@ builder.Services.AddIdentityCore<ApplicationUser>(options =>
         options.Stores.SchemaVersion = IdentitySchemaVersions.Version3;
         options.Password.RequireNonAlphanumeric = false;
         options.Password.RequireUppercase = false;
-        options.Password.RequireDigit = false;
-        options.Password.RequiredLength = 6;
+        options.Password.RequireDigit = true;
+        options.Password.RequiredLength = 8;
     })
     .AddRoles<IdentityRole>()
     .AddEntityFrameworkStores<ApplicationDbContext>()

@@ -1,0 +1,378 @@
+@rendermode InteractiveServer
+@inject IJSRuntime JS
+@inject ISessionPackageService PackageService
+@inject IClientService ClientService
+@inject ISessionService SessionService
+@inject AuthenticationStateProvider AuthState
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Domain.Enums
+@using PTScheduler.Domain.Constants
+@using System.Security.Claims
+
+@if (_ready)
+{
+    <div class="um-wrap @(Direction == "up" ? "um-up" : "um-down")">
+
+        <button class="um-trigger" @ref="_triggerBtn" @onclick="Toggle" title="Menu użytkownika">
+            <div class="um-avatar">
+                @_initials
+                @if (_badge > 0)
+                {
+                    <span class="um-badge">@(_badge > 9 ? "9+" : _badge.ToString())</span>
+                }
+            </div>
+            @if (ShowName)
+            {
+                <span class="um-name">@_name</span>
+            }
+        </button>
+
+        @if (_open)
+        {
+            <div class="um-backdrop" @onclick="Close"></div>
+            <div class="um-dropdown" style="@_dropStyle">
+
+                <!-- User header -->
+                <div class="um-header">
+                    <div class="um-avatar um-avatar-lg">@_initials</div>
+                    <div style="min-width:0">
+                        <div class="fw-semibold text-truncate">@_name</div>
+                        <div class="text-muted text-truncate" style="font-size:.72rem">@_email</div>
+                    </div>
+                </div>
+
+                <div class="um-sep"></div>
+
+                <!-- Notifications -->
+                @if (_notifs.Count == 0)
+                {
+                    <div class="um-item um-item-muted">
+                        <i class="bi bi-check-circle-fill" style="color:#16A34A;font-size:1rem;flex-shrink:0"></i>
+                        <span>Brak powiadomień</span>
+                    </div>
+                }
+                else
+                {
+                    @foreach (var n in _notifs)
+                    {
+                        <a href="@n.Url" class="um-item" @onclick="Close">
+                            <i class="bi @n.Icon" style="color:@n.Color;font-size:1rem;flex-shrink:0"></i>
+                            <div style="min-width:0">
+                                <div class="fw-semibold" style="font-size:.8rem;line-height:1.2">@n.Title</div>
+                                <div class="text-muted text-truncate" style="font-size:.73rem">@n.Body</div>
+                            </div>
+                        </a>
+                    }
+                }
+
+                <div class="um-sep"></div>
+
+                <!-- Dark mode toggle -->
+                <button class="um-item um-item-btn" @onclick="ToggleDarkAsync">
+                    <i class="bi @(_dark ? "bi-sun-fill" : "bi-moon-stars-fill")"
+                       style="color:var(--c-primary);font-size:1rem;flex-shrink:0"></i>
+                    <span>@(_dark ? "Tryb jasny" : "Tryb ciemny")</span>
+                    <div class="um-pill-track ms-auto @(_dark ? "um-pill-active" : "")">
+                        <div class="um-pill-thumb"></div>
+                    </div>
+                </button>
+
+                <div class="um-sep"></div>
+
+                <!-- Account settings -->
+                <a href="/Account/Manage" class="um-item" @onclick="Close">
+                    <i class="bi bi-gear-fill" style="font-size:1rem;flex-shrink:0"></i>
+                    <span>Ustawienia konta</span>
+                </a>
+
+                <!-- Logout -->
+                <form action="Account/Logout" method="post" style="margin:0">
+                    <AntiforgeryToken />
+                    <input type="hidden" name="ReturnUrl" value="/" />
+                    <button type="submit" class="um-item um-item-btn um-item-danger w-100">
+                        <i class="bi bi-box-arrow-left" style="font-size:1rem;flex-shrink:0"></i>
+                        <span>Wyloguj</span>
+                    </button>
+                </form>
+
+            </div>
+        }
+    </div>
+}
+
+<style>
+    .um-wrap { position: relative; }
+
+    .um-trigger {
+        display: flex;
+        align-items: center;
+        gap: .6rem;
+        background: none;
+        border: none;
+        padding: 0;
+        cursor: pointer;
+        color: inherit;
+        width: 100%;
+        text-align: left;
+    }
+    .um-trigger:focus-visible { outline: 2px solid var(--c-primary); border-radius: 8px; }
+
+    .um-avatar {
+        position: relative;
+        width: 36px;
+        height: 36px;
+        border-radius: 50%;
+        background: var(--c-primary);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: .8rem;
+        font-weight: 700;
+        flex-shrink: 0;
+        letter-spacing: .03em;
+    }
+    .um-avatar-lg { width: 42px; height: 42px; font-size: .95rem; }
+
+    .um-badge {
+        position: absolute;
+        top: -4px;
+        right: -4px;
+        background: #DC2626;
+        color: #fff;
+        font-size: .58rem;
+        font-weight: 700;
+        border-radius: 99px;
+        min-width: 16px;
+        height: 16px;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 0 3px;
+        border: 2px solid var(--bs-body-bg, #fff);
+        line-height: 1;
+    }
+
+    .um-name {
+        font-size: .875rem;
+        font-weight: 500;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        flex: 1;
+    }
+
+    .um-backdrop {
+        position: fixed;
+        inset: 0;
+        z-index: 1999;
+    }
+
+    .um-dropdown {
+        position: fixed;
+        min-width: 240px;
+        background: var(--bs-body-bg, #fff);
+        color: var(--bs-body-color, inherit);
+        border: 1px solid var(--bs-border-color, rgba(0,0,0,.1));
+        border-radius: .875rem;
+        box-shadow: 0 8px 32px rgba(0,0,0,.18);
+        z-index: 2000;
+        overflow: hidden;
+        animation: um-pop .15s ease;
+    }
+
+    @@keyframes um-pop {
+        from { opacity: 0; transform: scale(.96) translateY(4px); }
+        to   { opacity: 1; transform: scale(1) translateY(0); }
+    }
+
+    .um-header {
+        display: flex;
+        align-items: center;
+        gap: .75rem;
+        padding: .875rem 1rem;
+        background: var(--bs-secondary-bg, rgba(0,0,0,.03));
+    }
+
+    .um-sep {
+        height: 1px;
+        background: var(--bs-border-color, rgba(0,0,0,.08));
+        margin: 0;
+    }
+
+    .um-item {
+        display: flex;
+        align-items: center;
+        gap: .65rem;
+        padding: .6rem 1rem;
+        font-size: .85rem;
+        color: inherit;
+        text-decoration: none;
+        transition: background .12s;
+    }
+    .um-item:hover { background: var(--bs-secondary-bg, rgba(0,0,0,.04)); color: inherit; }
+    .um-item-btn { border: none; background: none; width: 100%; text-align: left; cursor: pointer; }
+    .um-item-muted { color: var(--bs-secondary-color, #6c757d); font-size: .83rem; }
+    .um-item-danger { color: #DC2626; }
+    .um-item-danger:hover { background: rgba(220,38,38,.06); }
+
+    /* Mini pill indicator for dark mode */
+    .um-pill-track {
+        width: 32px;
+        height: 18px;
+        border-radius: 99px;
+        background: var(--bs-border-color, #cbd5e1);
+        position: relative;
+        flex-shrink: 0;
+        transition: background .2s;
+    }
+    .um-pill-track.um-pill-active { background: var(--c-primary, #0284c7); }
+    .um-pill-thumb {
+        position: absolute;
+        top: 3px;
+        left: 3px;
+        width: 12px;
+        height: 12px;
+        border-radius: 50%;
+        background: #fff;
+        box-shadow: 0 1px 3px rgba(0,0,0,.2);
+        transition: left .2s;
+    }
+    .um-pill-active .um-pill-thumb { left: 17px; }
+</style>
+
+@code {
+    [Parameter] public string Direction { get; set; } = "up";
+    [Parameter] public bool ShowName { get; set; } = true;
+
+    private ElementReference _triggerBtn;
+    private string _dropStyle = "";
+    private bool _ready;
+    private bool _open;
+    private bool _dark;
+    private string _initials = "?";
+    private string _name = string.Empty;
+    private string _email = string.Empty;
+    private int _badge;
+    private string? _userId;
+    private string? _role;
+    private List<NotifItem> _notifs = [];
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var user = auth.User;
+        _userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        _name   = user.Identity?.Name ?? string.Empty;
+        _email  = user.FindFirst(ClaimTypes.Email)?.Value ?? _name;
+
+        var parts = _name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        _initials = parts.Length >= 2
+            ? $"{parts[0][0]}{parts[^1][0]}".ToUpper()
+            : _name.Length > 0 ? _name[0].ToString().ToUpper() : "?";
+
+        _role = user.IsInRole(Roles.Admin) ? Roles.Admin
+              : user.IsInRole(Roles.Trainer) ? Roles.Trainer
+              : user.IsInRole(Roles.Subordinate) ? Roles.Trainer
+              : Roles.Client;
+
+        try { _dark = await JS.InvokeAsync<bool>("PTTheme.isDark"); } catch { }
+
+        await LoadNotifsAsync();
+        _ready = true;
+        StateHasChanged();
+    }
+
+    private async Task LoadNotifsAsync()
+    {
+        _notifs.Clear();
+        try
+        {
+            var trainerFilter = _role == Roles.Admin ? null : _userId;
+
+            if (_role is Roles.Admin or Roles.Trainer)
+            {
+                var pending = await ClientService.GetPendingClientsAsync(trainerFilter);
+                if (pending.Count > 0)
+                    _notifs.Add(new("Klienci oczekujący",
+                        $"{pending.Count} {Pl(pending.Count, "klient czeka", "klientów czeka")} na zatwierdzenie",
+                        "bi-person-fill-exclamation", "#D97706", "/clients"));
+
+                var expiring = await PackageService.GetExpiringAsync(7, trainerFilter);
+                if (expiring.Count > 0)
+                    _notifs.Add(new("Wygasające pakiety",
+                        $"{expiring.Count} {Pl(expiring.Count, "pakiet wygasa", "pakietów wygasa")} w ciągu 7 dni",
+                        "bi-box-seam-fill", "#DC2626", "/finance"));
+
+                var todaySessions = await SessionService.GetSessionsAsync(DateTime.Today, DateTime.Today.AddDays(1), trainerFilter);
+                var unfinished = todaySessions.Count(s => s.Status == SessionStatus.Scheduled && s.StartTime < DateTime.Now);
+                if (unfinished > 0)
+                    _notifs.Add(new("Nieoznaczone sesje",
+                        $"{unfinished} sesji dzisiaj bez statusu",
+                        "bi-calendar-check-fill", "#3B82F6", "/sessions"));
+            }
+            else if (_role == Roles.Client)
+            {
+                var upcoming = await SessionService.GetUpcomingAsync(count: 5);
+                var tomorrow = upcoming.FirstOrDefault(s => s.StartTime.Date == DateTime.Today.AddDays(1).Date);
+                if (tomorrow is not null)
+                    _notifs.Add(new("Trening jutro!",
+                        $"{tomorrow.StartTime:HH:mm} — {tomorrow.SessionTypeName}",
+                        "bi-calendar-event-fill", "#16A34A", "/my"));
+
+                var client = await ClientService.GetClientByUserIdAsync(_userId ?? "");
+                if (client is not null)
+                {
+                    var pkgs = await PackageService.GetPackagesAsync(client.Id);
+                    var nearExpiry = pkgs.FirstOrDefault(p =>
+                        p.Status == PackageStatus.Active && p.ExpiresAt.HasValue &&
+                        (p.ExpiresAt.Value - DateTime.Now).TotalDays <= 7);
+                    if (nearExpiry is not null)
+                        _notifs.Add(new("Pakiet wygasa wkrótce",
+                            $"\"{nearExpiry.Name}\"",
+                            "bi-exclamation-triangle-fill", "#D97706", "/my/packages"));
+
+                    var low = pkgs.FirstOrDefault(p => p.Status == PackageStatus.Active && p.RemainingCredits <= 2);
+                    if (low is not null && low != nearExpiry)
+                        _notifs.Add(new("Mało kredytów",
+                            $"Zostały {low.RemainingCredits} sesje w pakiecie",
+                            "bi-ticket-perforated-fill", "#DC2626", "/my/packages"));
+                }
+            }
+        }
+        catch { }
+
+        _badge = _notifs.Count;
+    }
+
+    private async Task Toggle()
+    {
+        if (_open) { _open = false; return; }
+        try
+        {
+            var r = await JS.InvokeAsync<MenuRect>("PTMenu.getRect", _triggerBtn);
+            _dropStyle = Direction == "up"
+                ? $"bottom:{r.Vh - r.Top + 8}px;left:{r.Left}px;width:{Math.Max(240, (int)r.Width)}px"
+                : $"top:{r.Bottom + 8}px;right:{r.Vw - r.Right}px";
+        }
+        catch { }
+        _open = true;
+    }
+
+    private void Close() => _open = false;
+
+    private async Task ToggleDarkAsync()
+    {
+        try { _dark = await JS.InvokeAsync<bool>("PTTheme.toggle"); }
+        catch { }
+    }
+
+    private static string Pl(int n, string one, string many) => n == 1 ? one : many;
+
+    private sealed record NotifItem(string Title, string Body, string Icon, string Color, string Url);
+    private sealed record MenuRect(double Top, double Bottom, double Left, double Right, double Width, double Vw, double Vh);
+}

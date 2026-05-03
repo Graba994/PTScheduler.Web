@@ -84,6 +84,36 @@
             opacity: 0.4;
             color: var(--c-muted);
         }
+        .trainer-card {
+            margin-top: 1.75rem;
+            padding: 1rem 1.5rem;
+            border-radius: .875rem;
+            background: color-mix(in srgb, var(--c-primary) 8%, transparent);
+            border: 1px solid color-mix(in srgb, var(--c-primary) 20%, transparent);
+            max-width: 320px;
+            width: 100%;
+        }
+        .trainer-label {
+            font-size: .7rem;
+            font-weight: 700;
+            letter-spacing: .08em;
+            text-transform: uppercase;
+            color: var(--c-primary);
+            margin-bottom: .35rem;
+        }
+        .trainer-name {
+            font-size: 1rem;
+            font-weight: 700;
+            margin-bottom: .25rem;
+        }
+        .trainer-phone {
+            font-size: 1.1rem;
+            font-weight: 800;
+            color: var(--c-primary);
+            text-decoration: none;
+            letter-spacing: .02em;
+        }
+        .trainer-phone:hover { opacity: .8; }
     </style>
 </head>
 <body>
@@ -101,6 +131,63 @@
         &#8635; Odśwież
     </button>
 
+    <!-- Client: show trainer contact -->
+    <div class="trainer-card" id="trainer-card" style="display:none">
+        <div class="trainer-label">Twój trener</div>
+        <div class="trainer-name" id="trainer-name"></div>
+        <a class="trainer-phone" id="trainer-phone" href="#"></a>
+    </div>
+
+    <!-- Trainer: show fix-it steps + admin contact -->
+    <div id="trainer-msg" style="display:none;max-width:360px;width:100%">
+        <p class="small" style="margin-top:1.5rem">
+            Sprawdź co możesz zrobić:
+        </p>
+        <ol style="text-align:left;color:var(--c-muted);font-size:.875rem;padding-left:1.25rem;line-height:2">
+            <li>Włącz i wyłącz Wi-Fi lub dane mobilne</li>
+            <li>Zrestartuj router (odłącz na 10 sekund)</li>
+            <li>Sprawdź czy inne strony działają</li>
+            <li>Zrestartuj urządzenie</li>
+        </ol>
+        <p class="small">Jeśli nic nie pomaga — zadzwoń do administratora:</p>
+        <div class="trainer-card" id="admin-card" style="display:none;margin-top:.75rem">
+            <div class="trainer-label">Administrator</div>
+            <div class="trainer-name" id="admin-name"></div>
+            <a class="trainer-phone" id="admin-phone" href="#"></a>
+        </div>
+    </div>
+
     <p class="tip">Pro tip: trening możesz zaplanować z głowy, ale zapisać dopiero z połączeniem.</p>
+
+    <script>
+        var role = localStorage.getItem('user-role') || '';
+
+        if (role === 'Client') {
+            var name = localStorage.getItem('trainer-name');
+            var phone = localStorage.getItem('trainer-phone');
+            if (name || phone) {
+                document.getElementById('trainer-card').style.display = '';
+                if (name) document.getElementById('trainer-name').textContent = name;
+                if (phone) {
+                    var el = document.getElementById('trainer-phone');
+                    el.textContent = phone;
+                    el.href = 'tel:' + phone.replace(/\s/g, '');
+                }
+            }
+        } else if (role === 'Trainer') {
+            document.getElementById('trainer-msg').style.display = '';
+            var adminName = localStorage.getItem('admin-name');
+            var adminPhone = localStorage.getItem('admin-phone');
+            if (adminName || adminPhone) {
+                document.getElementById('admin-card').style.display = '';
+                if (adminName) document.getElementById('admin-name').textContent = adminName;
+                if (adminPhone) {
+                    var el2 = document.getElementById('admin-phone');
+                    el2.textContent = adminPhone;
+                    el2.href = 'tel:' + adminPhone.replace(/\s/g, '');
+                }
+            }
+        }
+    </script>
 </body>
 </html>

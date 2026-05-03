@@ -438,10 +438,29 @@ else
                     @if (_canEdit && (_selectedSession.Status == SessionStatus.Scheduled || _selectedSession.Status == SessionStatus.AwaitingPackage))
                     {
                         <div class="d-grid gap-2 mt-3">
-                            <button class="btn btn-success btn-sm"
-                                    @onclick='() => ChangeStatus(SessionStatus.Completed)' disabled="@_busy">
-                                <i class="bi bi-check-circle me-1"></i>Oznacz jako ukończona
-                            </button>
+                            @if (!_showCompleteForm)
+                            {
+                                <button class="btn btn-success btn-sm" @onclick="() => _showCompleteForm = true">
+                                    <i class="bi bi-check-circle me-1"></i>Oznacz jako ukończona
+                                </button>
+                            }
+                            else
+                            {
+                                <div class="p-3 rounded border border-success-subtle">
+                                    <label class="form-label small fw-semibold mb-1">Notatka po treningu (opcjonalna)</label>
+                                    <textarea class="form-control form-control-sm mb-2" rows="2"
+                                              @bind="_completionNote" placeholder="Np. świetna forma, zwiększamy ciężar..."></textarea>
+                                    <div class="d-flex gap-2">
+                                        <button class="btn btn-success btn-sm flex-fill"
+                                                @onclick="ConfirmComplete" disabled="@_busy">
+                                            @if (_busy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                                            Potwierdź
+                                        </button>
+                                        <button class="btn btn-secondary btn-sm"
+                                                @onclick="() => { _showCompleteForm = false; _completionNote = string.Empty; }">Wróć</button>
+                                    </div>
+                                </div>
+                            }
                             <button class="btn btn-warning btn-sm"
                                     @onclick='() => ChangeStatus(SessionStatus.NoShow)' disabled="@_busy">
                                 <i class="bi bi-person-x me-1"></i>Klient nie przyszedł
@@ -596,6 +615,8 @@ else
     private bool _showRescheduleForm;
     private DateTime _rescheduleDateTime = DateTime.Now;
     private bool _showRestoreConfirm;
+    private bool _showCompleteForm;
+    private string _completionNote = string.Empty;
 
     // Booking panel state
     private bool _bookingOpen;
@@ -684,6 +705,8 @@ else
         _cancelReason       = string.Empty;
         _showRescheduleForm = false;
         _showRestoreConfirm = false;
+        _showCompleteForm   = false;
+        _completionNote     = string.Empty;
         _selectedSession    = await SessionService.GetSessionAsync(sessionId);
         if (_selectedSession is not null)
         {
@@ -704,6 +727,8 @@ else
         _showCancelForm     = false;
         _showRescheduleForm = false;
         _showRestoreConfirm = false;
+        _showCompleteForm   = false;
+        _completionNote     = string.Empty;
         _panelError         = string.Empty;
     }
 
@@ -892,6 +917,24 @@ else
                 $"Klient: {_selectedSession.ClientName}, termin: {_selectedSession.StartTime:dd.MM.yyyy HH:mm}");
             ClosePanel();
             await LoadSessionsAsync();
+        }
+        catch (Exception ex) { _panelError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ConfirmComplete()
+    {
+        if (_selectedSession is null) return;
+        _busy = true;
+        _panelError = string.Empty;
+        try
+        {
+            await SessionService.UpdateStatusAsync(_selectedSession.Id, SessionStatus.Completed,
+                completionNotes: string.IsNullOrWhiteSpace(_completionNote) ? null : _completionNote.Trim());
+            _showCompleteForm = false;
+            _completionNote = string.Empty;
+            await LoadSessionsAsync();
+            _selectedSession = null;
         }
         catch (Exception ex) { _panelError = ex.Message; }
         finally { _busy = false; }

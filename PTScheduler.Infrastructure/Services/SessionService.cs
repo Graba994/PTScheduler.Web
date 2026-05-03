@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using PTScheduler.Application.DTOs;
 using PTScheduler.Application.Interfaces;
 using PTScheduler.Domain.Constants;
@@ -11,12 +12,14 @@ namespace PTScheduler.Infrastructure.Services;
 public class SessionService(
     IDbContextFactory<ApplicationDbContext> dbFactory,
     IEmailService emailService,
-    INotificationPreferencesService notificationPrefs) : ISessionService
+    INotificationPreferencesService notificationPrefs,
+    ILogger<SessionService> logger) : ISessionService
 {
     public async Task<List<SessionDto>> GetSessionsAsync(DateTime from, DateTime to, string? trainerUserId = null, int? clientId = null)
     {
         await using var db = dbFactory.CreateDbContext();
         var query = db.Sessions
+            .AsNoTracking()
             .Include(s => s.Client)
             .Include(s => s.SessionType)
             .Where(s => s.StartTime >= from && s.StartTime < to);
@@ -47,8 +50,9 @@ public class SessionService(
     public async Task<List<SessionDto>> GetPastSessionsAsync(string? trainerUserId = null, int? clientId = null, int count = 50)
     {
         await using var db = dbFactory.CreateDbContext();
-        var now = DateTime.Now;
+        var now = DateTime.UtcNow;
         var query = db.Sessions
+            .AsNoTracking()
             .Include(s => s.Client)
             .Include(s => s.SessionType)
             .Where(s => s.StartTime < now || s.Status != SessionStatus.Scheduled);
@@ -79,6 +83,7 @@ public class SessionService(
     {
         await using var db = dbFactory.CreateDbContext();
         var session = await db.Sessions
+            .AsNoTracking()
             .Include(s => s.Client)
             .Include(s => s.SessionType)
             .FirstOrDefaultAsync(s => s.Id == id);
@@ -129,11 +134,12 @@ public class SessionService(
         }
 
         await db.SaveChangesAsync();
-        try { await SendBookingConfirmationAsync(session, sessionType); } catch { }
+        try { await SendBookingConfirmationAsync(session, sessionType); }
+        catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila potwierdzającego rezerwację (SessionId={Id})", session.Id); }
         return (await GetSessionAsync(session.Id))!;
     }
 
-    public async Task UpdateStatusAsync(int id, SessionStatus status, string? cancellationReason = null)
+    public async Task UpdateStatusAsync(int id, SessionStatus status, string? cancellationReason = null, string? completionNotes = null)
     {
         await using var db = dbFactory.CreateDbContext();
         var session = await db.Sessions
@@ -144,7 +150,7 @@ public class SessionService(
 
         if (status == SessionStatus.Cancelled)
         {
-            session.CancelledAt = DateTime.Now;
+            session.CancelledAt = DateTime.UtcNow;
             session.CancellationReason = cancellationReason;
 
             if (session.PackageId.HasValue)
@@ -159,11 +165,17 @@ public class SessionService(
             }
         }
 
+        if (status == SessionStatus.Completed && completionNotes is not null)
+            session.Notes = completionNotes;
+
         session.Status = status;
         await db.SaveChangesAsync();
 
         if (status == SessionStatus.Cancelled)
-            try { await SendCancellationEmailAsync(session, cancellationReason); } catch { }
+        {
+            try { await SendCancellationEmailAsync(session, cancellationReason); }
+            catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila o anulowaniu (SessionId={Id})", session.Id); }
+        }
     }
 
     public async Task RescheduleAsync(int id, DateTime newStartTime)
@@ -177,7 +189,8 @@ public class SessionService(
         var oldTime = session.StartTime;
         session.StartTime = newStartTime;
         await db.SaveChangesAsync();
-        try { await SendRescheduleEmailAsync(session, oldTime); } catch { }
+        try { await SendRescheduleEmailAsync(session, oldTime); }
+        catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila o zmianie terminu (SessionId={Id})", session.Id); }
     }
 
     public async Task RestoreAsync(int id)
@@ -228,7 +241,7 @@ public class SessionService(
             ?? throw new InvalidOperationException("Sesja nie została znaleziona.");
 
         session.Status = SessionStatus.Cancelled;
-        session.CancelledAt = DateTime.Now;
+        session.CancelledAt = DateTime.UtcNow;
         session.CancellationReason = reason;
 
         if (session.PackageId.HasValue)
@@ -244,13 +257,15 @@ public class SessionService(
 
         await db.SaveChangesAsync();
 
-        try { await SendClientCancelledToTrainerAsync(session, reason); } catch { }
+        try { await SendClientCancelledToTrainerAsync(session, reason); }
+        catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila o anulowaniu przez klienta (SessionId={Id})", session.Id); }
     }
 
     public async Task<List<SessionTypeDto>> GetSessionTypesAsync()
     {
         await using var db = dbFactory.CreateDbContext();
         return await db.SessionTypes
+            .AsNoTracking()
             .Where(t => t.IsActive)
             .OrderBy(t => t.DurationMinutes)
             .Select(t => new SessionTypeDto
@@ -269,6 +284,7 @@ public class SessionService(
     {
         await using var db = dbFactory.CreateDbContext();
         var clients = await db.Clients
+            .AsNoTracking()
             .Where(c => trainerUserId == null || c.TrainerUserId == trainerUserId)
             .ToListAsync();
 
@@ -295,6 +311,7 @@ public class SessionService(
     {
         await using var db = dbFactory.CreateDbContext();
         var sessions = await db.Sessions
+            .AsNoTracking()
             .Include(s => s.Client)
             .Include(s => s.SessionType)
             .Where(s => s.ClientId == clientId)
@@ -314,8 +331,9 @@ public class SessionService(
     public async Task<List<SessionDto>> GetUpcomingAsync(string? trainerUserId = null, int? clientId = null, int count = 10)
     {
         await using var db = dbFactory.CreateDbContext();
-        var now = DateTime.Now;
+        var now = DateTime.UtcNow;
         var query = db.Sessions
+            .AsNoTracking()
             .Include(s => s.Client)
             .Include(s => s.SessionType)
             .Where(s => s.StartTime >= now
@@ -341,8 +359,9 @@ public class SessionService(
     public async Task<List<SessionDto>> GetAwaitingPackageAsync(string? trainerUserId = null)
     {
         await using var db = dbFactory.CreateDbContext();
-        var now = DateTime.Now;
+        var now = DateTime.UtcNow;
         var query = db.Sessions
+            .AsNoTracking()
             .Include(s => s.Client)
             .Include(s => s.SessionType)
             .Where(s => s.Status == SessionStatus.AwaitingPackage && s.StartTime >= now);

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using PTScheduler.Application.DTOs;
 using PTScheduler.Application.Interfaces;
 using PTScheduler.Domain.Constants;
@@ -11,13 +12,15 @@ namespace PTScheduler.Infrastructure.Services;
 public class SessionPackageService(
     IDbContextFactory<ApplicationDbContext> dbFactory,
     IEmailService emailService,
-    INotificationPreferencesService notificationPrefs) : ISessionPackageService
+    INotificationPreferencesService notificationPrefs,
+    ILogger<SessionPackageService> logger) : ISessionPackageService
 {
     public async Task<List<SessionPackageDto>> GetPackagesAsync(int clientId)
     {
         await ExpireOldPackagesAsync();
         await using var db = dbFactory.CreateDbContext();
         var list = await db.SessionPackages
+            .AsNoTracking()
             .Include(p => p.SessionType)
             .Include(p => p.Client)
             .Where(p => p.ClientId == clientId)
@@ -31,6 +34,7 @@ public class SessionPackageService(
         await ExpireOldPackagesAsync();
         await using var db = dbFactory.CreateDbContext();
         var list = await db.SessionPackages
+            .AsNoTracking()
             .Include(p => p.SessionType)
             .Include(p => p.Client)
             .Where(p => trainerUserId == null || p.Client.TrainerUserId == trainerUserId)
@@ -43,6 +47,7 @@ public class SessionPackageService(
     {
         await using var db = dbFactory.CreateDbContext();
         var p = await db.SessionPackages
+            .AsNoTracking()
             .Include(p => p.SessionType)
             .Include(p => p.Client)
             .FirstOrDefaultAsync(p => p.Id == id);
@@ -95,7 +100,8 @@ public class SessionPackageService(
         if (awaitingSessions.Count > 0)
             await db.SaveChangesAsync();
 
-        try { await SendPackageAssignedEmailAsync(dto.ClientId, package); } catch { }
+        try { await SendPackageAssignedEmailAsync(dto.ClientId, package); }
+        catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila o przypisaniu pakietu (PackageId={Id})", package.Id); }
 
         return (await GetPackageAsync(package.Id))!;
     }
@@ -202,6 +208,7 @@ public class SessionPackageService(
         var cutoff = now.AddDays(daysAhead);
 
         var packages = await db.SessionPackages
+            .AsNoTracking()
             .Include(p => p.Client)
             .Where(p => p.Status == PackageStatus.Active
                      && p.ExpiresAt.HasValue

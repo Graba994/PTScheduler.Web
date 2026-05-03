@@ -12,6 +12,7 @@ public class BodyMeasurementService(IDbContextFactory<ApplicationDbContext> dbFa
     {
         await using var db = dbFactory.CreateDbContext();
         return await db.BodyMeasurements
+            .AsNoTracking()
             .Where(m => m.ClientId == clientId)
             .OrderByDescending(m => m.MeasurementDate)
             .Select(m => Map(m))

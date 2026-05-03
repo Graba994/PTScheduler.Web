@@ -52,6 +52,38 @@ else if (client is not null)
         </div>
     }
 
+    <!-- Stat summary -->
+    <div class="row g-2 mb-3">
+        <div class="col-6 col-xl-3">
+            <div class="card border-0 shadow-sm text-center py-2 px-3">
+                <div class="fw-bold" style="font-size:1.5rem;color:var(--c-primary)">@_activeCredits</div>
+                <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em">Kredyty</div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="card border-0 shadow-sm text-center py-2 px-3">
+                <div class="fw-bold" style="font-size:1.5rem">@_completedCount</div>
+                <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em">Ukończonych</div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="card border-0 shadow-sm text-center py-2 px-3">
+                <div class="fw-bold" style="font-size:1.5rem;color:@(_unpaidBalance > 0 ? "#DC2626" : "#16A34A")">
+                    @(_unpaidBalance > 0 ? _unpaidBalance.ToString("N0") + " zł" : "✓")
+                </div>
+                <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em">Należność</div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="card border-0 shadow-sm text-center py-2 px-3">
+                <div class="fw-bold" style="font-size:1.5rem">
+                    @(_lastMeasDate.HasValue ? _lastMeasDate.Value.ToString("dd.MM.yy") : "—")
+                </div>
+                <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em">Ostatni pomiar</div>
+            </div>
+        </div>
+    </div>
+
     <div class="row g-4">
 
         <!-- Left column: profile card + notes -->
@@ -200,84 +232,6 @@ else if (client is not null)
                 </div>
             </div>
 
-            <!-- Packages card -->
-            <div class="card shadow-sm">
-                <div class="card-body p-4">
-                    <div class="d-flex align-items-center justify-content-between mb-3">
-                        <h6 class="card-title mb-0"><i class="bi bi-box-seam me-2 text-primary"></i>Pakiety</h6>
-                        <button class="btn btn-outline-primary btn-sm" @onclick="OpenAddPackage">
-                            <i class="bi bi-plus-lg me-1"></i>Dodaj
-                        </button>
-                    </div>
-
-                    @if (packages is null)
-                    {
-                        <div class="text-center"><div class="spinner-border spinner-border-sm text-primary"></div></div>
-                    }
-                    else if (!packages.Any())
-                    {
-                        <p class="text-muted small text-center mb-0">Brak pakietów.</p>
-                    }
-                    else
-                    {
-                        @foreach (var pkg in packages)
-                        {
-                            <div class="border rounded p-3 mb-2 @(pkg.Status == PackageStatus.Active ? "" : "opacity-75")">
-                                <div class="d-flex justify-content-between align-items-start mb-1">
-                                    <div class="fw-semibold small">@pkg.Name</div>
-                                    <div class="d-flex gap-1 align-items-center">
-                                        <span class="badge @PackageBadge(pkg.Status)">@PackageLabel(pkg.Status)</span>
-                                        @if (pkg.IsPaid)
-                                        {
-                                            <span class="badge bg-success-subtle text-success">Opłacony</span>
-                                        }
-                                        else
-                                        {
-                                            <button class="badge bg-warning-subtle text-warning border-0"
-                                                    style="cursor:pointer" @onclick="() => MarkPaid(pkg.Id)">
-                                                Nieopłacony ✓
-                                            </button>
-                                        }
-                                        <button class="btn btn-sm btn-link text-muted p-0 ms-1" title="Edytuj pakiet"
-                                                @onclick="() => OpenEditPackage(pkg)">
-                                            <i class="bi bi-pencil" style="font-size:.75rem"></i>
-                                        </button>
-                                        @if (pkg.Status != PackageStatus.Cancelled)
-                                        {
-                                            <button class="btn btn-sm btn-link text-danger p-0" title="Anuluj pakiet"
-                                                    @onclick="() => CancelPkg(pkg.Id)">
-                                                <i class="bi bi-x-circle" style="font-size:.75rem"></i>
-                                            </button>
-                                        }
-                                    </div>
-                                </div>
-                                <div class="progress mb-1" style="height:6px">
-                                    <div class="progress-bar @(pkg.Status == PackageStatus.Depleted ? "bg-secondary" : "bg-primary")"
-                                         style="width:@(pkg.TotalSessions > 0 ? pkg.UsedSessions * 100 / pkg.TotalSessions : 0)%"></div>
-                                </div>
-                                <div class="d-flex justify-content-between small text-muted">
-                                    <span>@pkg.RemainingCredits / @pkg.TotalSessions sesji pozostało</span>
-                                    <span>@pkg.TotalPrice.ToString("N2") zł</span>
-                                </div>
-                                @if (pkg.ExpiresAt.HasValue)
-                                {
-                                    <div class="small @(pkg.Status == PackageStatus.Expired ? "text-danger" : "text-muted") mt-1">
-                                        <i class="bi bi-calendar-x me-1"></i>
-                                        @if (pkg.Status == PackageStatus.Expired)
-                                        {
-                                            <span>Przepadł @pkg.ExpiresAt.Value.ToString("dd.MM.yyyy")</span>
-                                        }
-                                        else
-                                        {
-                                            <span>Ważny do @pkg.ExpiresAt.Value.ToString("dd.MM.yyyy")</span>
-                                        }
-                                    </div>
-                                }
-                            </div>
-                        }
-                    }
-                </div>
-            </div>
             <!-- Password reset card -->
             <div class="card shadow-sm mt-4">
                 <div class="card-body p-4">
@@ -303,56 +257,163 @@ else if (client is not null)
 
         </div>
 
-        <!-- Right column: session history + measurements -->
+        <!-- Right column: tabbed -->
         <div class="col-12 col-lg-8">
-            <div class="card shadow-sm">
-                <div class="card-body p-4">
-                    <h6 class="card-title mb-3"><i class="bi bi-clock-history me-2 text-primary"></i>Historia treningów</h6>
 
-                    @if (sessions is null)
-                    {
-                        <div class="text-center py-3"><div class="spinner-border text-primary"></div></div>
-                    }
-                    else if (!sessions.Any())
-                    {
-                        <p class="text-muted text-center py-3 mb-0">Brak treningów.</p>
-                    }
-                    else
-                    {
-                        <div class="table-responsive">
-                            <table class="table table-sm table-hover align-middle">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th>Data</th>
-                                        <th>Typ</th>
-                                        <th>Trener</th>
-                                        <th>Status</th>
-                                        <th>Notatki</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @foreach (var s in sessions)
-                                    {
+            <!-- Tab nav -->
+            <ul class="nav nav-tabs mb-3">
+                <li class="nav-item">
+                    <button class="nav-link @(_tab == "sessions" ? "active" : "")" @onclick='() => SelectTab("sessions")'>
+                        <i class="bi bi-clock-history me-1"></i>Treningi
+                        @if (sessions?.Count > 0) { <span class="badge bg-secondary ms-1 rounded-pill" style="font-size:.65rem">@sessions.Count</span> }
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link @(_tab == "measurements" ? "active" : "")" @onclick='() => SelectTab("measurements")'>
+                        <i class="bi bi-rulers me-1"></i>Pomiary
+                        @if (measurements?.Count > 0) { <span class="badge bg-secondary ms-1 rounded-pill" style="font-size:.65rem">@measurements.Count</span> }
+                    </button>
+                </li>
+                <li class="nav-item">
+                    <button class="nav-link @(_tab == "packages" ? "active" : "")" @onclick='() => SelectTab("packages")'>
+                        <i class="bi bi-box-seam me-1"></i>Pakiety
+                        @if (packages?.Count > 0) { <span class="badge bg-secondary ms-1 rounded-pill" style="font-size:.65rem">@packages.Count</span> }
+                    </button>
+                </li>
+            </ul>
+
+            @if (_tab == "sessions")
+            {
+                <div class="card shadow-sm">
+                    <div class="card-body p-4">
+                        <h6 class="card-title mb-3"><i class="bi bi-clock-history me-2 text-primary"></i>Historia treningów</h6>
+
+                        @if (sessions is null)
+                        {
+                            <div class="text-center py-3"><div class="spinner-border text-primary"></div></div>
+                        }
+                        else if (!sessions.Any())
+                        {
+                            <p class="text-muted text-center py-3 mb-0">Brak treningów.</p>
+                        }
+                        else
+                        {
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover align-middle">
+                                    <thead class="table-light">
                                         <tr>
-                                            <td class="text-nowrap">@s.StartTime.ToString("dd.MM.yy HH:mm")</td>
-                                            <td>@s.SessionTypeName <span class="text-muted small">(@s.DurationMinutes min)</span></td>
-                                            <td class="text-muted small">@s.TrainerName</td>
-                                            <td>
-                                                <span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span>
-                                            </td>
-                                            <td class="text-muted small text-truncate" style="max-width:180px" title="@s.Notes">@s.Notes</td>
+                                            <th>Data</th>
+                                            <th>Typ</th>
+                                            <th>Trener</th>
+                                            <th>Status</th>
+                                            <th>Notatki</th>
                                         </tr>
-                                    }
-                                </tbody>
-                            </table>
-                        </div>
-                        <div class="text-muted small mt-1">Łącznie: @sessions.Count sesji</div>
-                    }
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var s in sessions)
+                                        {
+                                            <tr>
+                                                <td class="text-nowrap">@s.StartTime.ToString("dd.MM.yy HH:mm")</td>
+                                                <td>@s.SessionTypeName <span class="text-muted small">(@s.DurationMinutes min)</span></td>
+                                                <td class="text-muted small">@s.TrainerName</td>
+                                                <td><span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span></td>
+                                                <td class="text-muted small text-truncate" style="max-width:180px" title="@s.Notes">@s.Notes</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                            <div class="text-muted small mt-1">Łącznie: @sessions.Count sesji</div>
+                        }
+                    </div>
                 </div>
-            </div>
+            }
 
+            @if (_tab == "packages")
+            {
+                <div class="card shadow-sm">
+                    <div class="card-body p-4">
+                        <div class="d-flex align-items-center justify-content-between mb-3">
+                            <h6 class="card-title mb-0"><i class="bi bi-box-seam me-2 text-primary"></i>Pakiety</h6>
+                            <button class="btn btn-outline-primary btn-sm" @onclick="OpenAddPackage">
+                                <i class="bi bi-plus-lg me-1"></i>Dodaj
+                            </button>
+                        </div>
+
+                        @if (packages is null)
+                        {
+                            <div class="text-center"><div class="spinner-border spinner-border-sm text-primary"></div></div>
+                        }
+                        else if (!packages.Any())
+                        {
+                            <p class="text-muted small text-center mb-0">Brak pakietów.</p>
+                        }
+                        else
+                        {
+                            @foreach (var pkg in packages)
+                            {
+                                <div class="border rounded p-3 mb-2 @(pkg.Status == PackageStatus.Active ? "" : "opacity-75")">
+                                    <div class="d-flex justify-content-between align-items-start mb-1">
+                                        <div class="fw-semibold small">@pkg.Name</div>
+                                        <div class="d-flex gap-1 align-items-center">
+                                            <span class="badge @PackageBadge(pkg.Status)">@PackageLabel(pkg.Status)</span>
+                                            @if (pkg.IsPaid)
+                                            {
+                                                <span class="badge bg-success-subtle text-success">Opłacony</span>
+                                            }
+                                            else
+                                            {
+                                                <button class="badge bg-warning-subtle text-warning border-0"
+                                                        style="cursor:pointer" @onclick="() => MarkPaid(pkg.Id)">
+                                                    Nieopłacony ✓
+                                                </button>
+                                            }
+                                            <button class="btn btn-sm btn-link text-muted p-0 ms-1" title="Edytuj pakiet"
+                                                    @onclick="() => OpenEditPackage(pkg)">
+                                                <i class="bi bi-pencil" style="font-size:.75rem"></i>
+                                            </button>
+                                            @if (pkg.Status != PackageStatus.Cancelled)
+                                            {
+                                                <button class="btn btn-sm btn-link text-danger p-0" title="Anuluj pakiet"
+                                                        @onclick="() => CancelPkg(pkg.Id)">
+                                                    <i class="bi bi-x-circle" style="font-size:.75rem"></i>
+                                                </button>
+                                            }
+                                        </div>
+                                    </div>
+                                    <div class="progress mb-1" style="height:6px">
+                                        <div class="progress-bar @(pkg.Status == PackageStatus.Depleted ? "bg-secondary" : "bg-primary")"
+                                             style="width:@(pkg.TotalSessions > 0 ? pkg.UsedSessions * 100 / pkg.TotalSessions : 0)%"></div>
+                                    </div>
+                                    <div class="d-flex justify-content-between small text-muted">
+                                        <span>@pkg.RemainingCredits / @pkg.TotalSessions sesji pozostało</span>
+                                        <span>@pkg.TotalPrice.ToString("N2") zł</span>
+                                    </div>
+                                    @if (pkg.ExpiresAt.HasValue)
+                                    {
+                                        <div class="small @(pkg.Status == PackageStatus.Expired ? "text-danger" : "text-muted") mt-1">
+                                            <i class="bi bi-calendar-x me-1"></i>
+                                            @if (pkg.Status == PackageStatus.Expired)
+                                            {
+                                                <span>Przepadł @pkg.ExpiresAt.Value.ToString("dd.MM.yyyy")</span>
+                                            }
+                                            else
+                                            {
+                                                <span>Ważny do @pkg.ExpiresAt.Value.ToString("dd.MM.yyyy")</span>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
+            }
+
+            @if (_tab == "measurements")
+            {
             <!-- Body measurements -->
-            <div class="card shadow-sm mt-4">
+            <div class="card shadow-sm mt-0">
                 <div class="card-body p-4">
                     <div class="d-flex align-items-center justify-content-between mb-3">
                         <h6 class="card-title mb-0"><i class="bi bi-rulers me-2 text-primary"></i>Pomiary ciała</h6>
@@ -502,6 +563,8 @@ else if (client is not null)
                     }
                 </div>
             </div>
+            }
+
         </div>
     </div>
 }
@@ -724,6 +787,12 @@ else if (client is not null)
     private CreateBodyMeasurementDto newMeasurement = new();
     private string measurementError = string.Empty;
 
+    private string _tab = "sessions";
+    private int _activeCredits;
+    private int _completedCount;
+    private decimal _unpaidBalance;
+    private DateOnly? _lastMeasDate;
+
     private readonly Dictionary<string, (string Label, string Unit)> _chartMetrics = new()
     {
         ["weight"] = ("Waga",       "kg"),
@@ -757,6 +826,7 @@ else if (client is not null)
         await LoadSessionTypes();
         await LoadPackages();
         await LoadMeasurements();
+        ComputeStats();
     }
 
     private async Task LoadNotes()
@@ -783,6 +853,21 @@ else if (client is not null)
     {
         measurements = await MeasurementService.GetAsync(Id);
         _chartNeedsRender = true;
+    }
+
+    private void ComputeStats()
+    {
+        _activeCredits  = packages?.Where(p => p.Status == PackageStatus.Active).Sum(p => p.RemainingCredits) ?? 0;
+        _completedCount = sessions?.Count(s => s.Status == PTScheduler.Domain.Enums.SessionStatus.Completed) ?? 0;
+        _unpaidBalance  = packages?.Where(p => !p.IsPaid && p.Status != PackageStatus.Cancelled).Sum(p => p.TotalPrice) ?? 0m;
+        _lastMeasDate   = measurements?.OrderByDescending(m => m.MeasurementDate).FirstOrDefault()?.MeasurementDate;
+    }
+
+    private void SelectTab(string tab)
+    {
+        _tab = tab;
+        if (tab == "measurements" && measurements is { Count: >= 2 })
+            _chartNeedsRender = true;
     }
 
     private async Task SaveMeasurement()

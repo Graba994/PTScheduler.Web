@@ -1,0 +1,65 @@
+@* Renders nothing — caches role + contact info in localStorage for the offline page *@
+@rendermode InteractiveServer
+@inject IClientService ClientService
+@inject UserManager<ApplicationUser> UserManager
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthState
+@using Microsoft.AspNetCore.Identity
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@using System.Security.Claims
+@using System.Text.Json
+
+@code {
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            var user = auth.User;
+            var userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            if (userId is null) return;
+
+            var role = user.IsInRole(Roles.Admin) ? Roles.Admin
+                     : user.IsInRole(Roles.Trainer) ? Roles.Trainer
+                     : user.IsInRole(Roles.Subordinate) ? Roles.Trainer
+                     : user.IsInRole(Roles.Client) ? Roles.Client : string.Empty;
+
+            await Save("user-role", role);
+
+            if (role == Roles.Client)
+            {
+                var client = await ClientService.GetClientByUserIdAsync(userId);
+                if (client?.TrainerUserId is not null)
+                {
+                    var trainer = await UserManager.FindByIdAsync(client.TrainerUserId);
+                    if (trainer is not null)
+                    {
+                        var name = $"{trainer.FirstName} {trainer.LastName}".Trim();
+                        if (string.IsNullOrWhiteSpace(name)) name = trainer.Email ?? string.Empty;
+                        await Save("trainer-name", name);
+                        await Save("trainer-phone", trainer.PhoneNumber ?? string.Empty);
+                    }
+                }
+            }
+            else if (role == Roles.Trainer)
+            {
+                var admins = await UserManager.GetUsersInRoleAsync(Roles.Admin);
+                var admin = admins.FirstOrDefault();
+                if (admin is not null)
+                {
+                    var name = $"{admin.FirstName} {admin.LastName}".Trim();
+                    if (string.IsNullOrWhiteSpace(name)) name = admin.Email ?? string.Empty;
+                    await Save("admin-name", name);
+                    await Save("admin-phone", admin.PhoneNumber ?? string.Empty);
+                }
+            }
+        }
+        catch { }
+    }
+
+    private Task Save(string key, string value) =>
+        JS.InvokeVoidAsync("eval",
+            $"localStorage.setItem({JsonSerializer.Serialize(key)},{JsonSerializer.Serialize(value)})").AsTask();
+}

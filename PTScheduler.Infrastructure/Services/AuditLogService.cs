@@ -28,7 +28,7 @@ public class AuditLogService(IDbContextFactory<ApplicationDbContext> dbFactory) 
     public async Task<List<AuditLogDto>> GetLogsAsync(int count = 500, string? search = null, string? entityTypeFilter = null)
     {
         await using var db = dbFactory.CreateDbContext();
-        var query = db.AuditLogs.AsQueryable();
+        var query = db.AuditLogs.AsNoTracking().AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(entityTypeFilter))
             query = query.Where(l => l.EntityType == entityTypeFilter);

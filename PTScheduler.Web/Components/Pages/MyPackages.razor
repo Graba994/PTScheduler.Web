@@ -1,0 +1,224 @@
+@page "/my/packages"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Client")]
+@rendermode InteractiveServer
+@inject ISessionPackageService PackageService
+@inject IClientService ClientService
+@inject AuthenticationStateProvider AuthState
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Enums
+@using System.Globalization
+
+<AppTitle Page="Moje pakiety" />
+
+<h4 class="fw-bold mb-4"><i class="bi bi-box-seam me-2"></i>Moje pakiety</h4>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><span class="spinner-border text-primary"></span></div>
+}
+else if (_packages.Count == 0)
+{
+    <div class="text-center py-5 text-muted">
+        <i class="bi bi-box-seam" style="font-size:2.5rem;opacity:.25;display:block;margin-bottom:.75rem"></i>
+        <div class="mt-3 small">Nie masz jeszcze żadnych pakietów. Skontaktuj się z trenerem.</div>
+    </div>
+}
+else
+{
+    <!-- Active packages -->
+    @if (_active.Any())
+    {
+        <h6 class="text-uppercase fw-bold mb-3" style="font-size:.7rem;letter-spacing:.08em;color:var(--c-primary)">
+            Aktywne pakiety
+        </h6>
+        <div class="row g-3 mb-4">
+            @foreach (var p in _active)
+            {
+                var pct = p.TotalSessions > 0 ? (int)Math.Round((double)p.UsedSessions / p.TotalSessions * 100) : 0;
+                var barColor = pct >= 80 ? "#DC2626" : pct >= 50 ? "#D97706" : "#16A34A";
+                <div class="col-12 col-md-6">
+                    <div class="card border-0 shadow-sm h-100" style="border-left:4px solid var(--c-primary) !important">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <div>
+                                    <div class="fw-bold" style="font-size:1rem">@p.Name</div>
+                                    <div class="text-muted small">@p.SessionTypeName · @p.DurationMinutes min</div>
+                                </div>
+                                <span class="badge @(p.IsPaid ? "bg-success" : "bg-warning text-dark")">
+                                    @(p.IsPaid ? "Opłacony" : "Nieopłacony")
+                                </span>
+                            </div>
+
+                            <!-- Credits progress bar -->
+                            <div class="mb-2">
+                                <div class="d-flex justify-content-between mb-1" style="font-size:.8rem">
+                                    <span class="text-muted">Wykorzystane treningi</span>
+                                    <span class="fw-semibold">@p.UsedSessions / @p.TotalSessions</span>
+                                </div>
+                                <div class="progress" style="height:8px;border-radius:4px">
+                                    <div class="progress-bar" role="progressbar"
+                                         style="width:@(pct)%;background:@barColor;border-radius:4px"
+                                         aria-valuenow="@pct" aria-valuemin="0" aria-valuemax="100"></div>
+                                </div>
+                                <div class="mt-1" style="font-size:.75rem;color:@barColor;font-weight:600">
+                                    Pozostało: @p.RemainingCredits @(p.RemainingCredits == 1 ? "trening" : p.RemainingCredits < 5 ? "treningi" : "treningów")
+                                </div>
+                            </div>
+
+                            <div class="d-flex gap-3 mt-3" style="font-size:.8rem;color:var(--c-muted, #6c757d)">
+                                <span><i class="bi bi-calendar me-1"></i>Zakup: @p.PurchasedAt.ToLocalTime().ToString("dd.MM.yyyy")</span>
+                                @if (p.ExpiresAt.HasValue)
+                                {
+                                    var daysLeft = (int)(p.ExpiresAt.Value.ToLocalTime() - DateTime.Now).TotalDays;
+                                    <span style="@(daysLeft <= 7 ? "color:#DC2626;font-weight:600" : "")">
+                                        <i class="bi bi-hourglass-split me-1"></i>Ważny do: @p.ExpiresAt.Value.ToLocalTime().ToString("dd.MM.yyyy")
+                                        @if (daysLeft <= 14) { <text>(@daysLeft dni)</text> }
+                                    </span>
+                                }
+                                <span><i class="bi bi-cash me-1"></i>@p.TotalPrice.ToString("N0") zł</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    <!-- Summary stats -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm text-center py-3">
+                <div class="fw-bold" style="font-size:1.6rem;color:var(--c-primary)">@_packages.Count</div>
+                <div class="text-muted small">Wszystkich pakietów</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm text-center py-3">
+                <div class="fw-bold" style="font-size:1.6rem;color:#16A34A">@_packages.Sum(p => p.TotalSessions)</div>
+                <div class="text-muted small">Łącznie treningów</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm text-center py-3">
+                <div class="fw-bold" style="font-size:1.6rem">@_packages.Sum(p => p.TotalPrice).ToString("N0") zł</div>
+                <div class="text-muted small">Łączna wartość</div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm text-center py-3">
+                <div class="fw-bold" style="font-size:1.6rem;color:@(_unpaidTotal > 0 ? "#DC2626" : "#16A34A")">
+                    @(_unpaidTotal > 0 ? _unpaidTotal.ToString("N0") + " zł" : "✓")
+                </div>
+                <div class="text-muted small">@(_unpaidTotal > 0 ? "Do zapłaty" : "Wszystko opłacone")</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Full history -->
+    <div class="card border-0 shadow-sm">
+        <div class="card-header bg-transparent fw-semibold d-flex align-items-center justify-content-between">
+            <span><i class="bi bi-clock-history me-2"></i>Historia pakietów</span>
+            <span class="badge bg-secondary">@_packages.Count</span>
+        </div>
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0" style="font-size:.875rem">
+                <thead class="table-light">
+                    <tr>
+                        <th>Pakiet</th>
+                        <th class="text-center">Sesje</th>
+                        <th class="text-end">Cena/szt.</th>
+                        <th class="text-end">Wartość</th>
+                        <th>Zakupiony</th>
+                        <th>Ważny do</th>
+                        <th>Płatność</th>
+                        <th>Status</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var p in _packages.OrderByDescending(p => p.PurchasedAt))
+                    {
+                        <tr>
+                            <td>
+                                <div class="fw-semibold">@p.Name</div>
+                                <div class="text-muted" style="font-size:.75rem">@p.SessionTypeName · @p.DurationMinutes min</div>
+                            </td>
+                            <td class="text-center">
+                                <span class="fw-semibold">@p.UsedSessions/@p.TotalSessions</span>
+                                @if (p.Status == PackageStatus.Active)
+                                {
+                                    <div class="progress mt-1" style="height:4px;width:60px;margin:0 auto">
+                                        <div class="progress-bar bg-primary" style="width:@(p.TotalSessions > 0 ? (int)((double)p.UsedSessions/p.TotalSessions*100) : 0)%"></div>
+                                    </div>
+                                }
+                            </td>
+                            <td class="text-end text-muted">@p.PricePerSession.ToString("N0") zł</td>
+                            <td class="text-end fw-semibold">@p.TotalPrice.ToString("N0") zł</td>
+                            <td class="text-nowrap text-muted">@p.PurchasedAt.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                            <td class="text-nowrap text-muted">
+                                @(p.ExpiresAt.HasValue ? p.ExpiresAt.Value.ToLocalTime().ToString("dd.MM.yyyy") : "—")
+                            </td>
+                            <td>
+                                @if (p.IsPaid)
+                                {
+                                    <span class="badge bg-success"><i class="bi bi-check me-1"></i>Opłacony</span>
+                                }
+                                else if (p.Status != PackageStatus.Cancelled)
+                                {
+                                    <span class="badge bg-warning text-dark"><i class="bi bi-clock me-1"></i>Oczekuje</span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted">—</span>
+                                }
+                            </td>
+                            <td><span class="badge @StatusCss(p.Status)">@StatusLabel(p.Status)</span></td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private List<SessionPackageDto> _packages = [];
+    private List<SessionPackageDto> _active = [];
+    private decimal _unpaidTotal;
+    private bool _loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth   = await AuthState.GetAuthenticationStateAsync();
+        var uid    = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        var client = await ClientService.GetClientByUserIdAsync(uid);
+        if (client is not null)
+        {
+            _packages = await PackageService.GetPackagesAsync(client.Id);
+            _active   = _packages.Where(p => p.Status == PackageStatus.Active).ToList();
+            _unpaidTotal = _packages
+                .Where(p => !p.IsPaid && p.Status != PackageStatus.Cancelled)
+                .Sum(p => p.TotalPrice);
+        }
+        _loading = false;
+    }
+
+    private static string StatusCss(PackageStatus s) => s switch
+    {
+        PackageStatus.Active    => "bg-primary",
+        PackageStatus.Depleted  => "bg-success",
+        PackageStatus.Expired   => "bg-warning text-dark",
+        PackageStatus.Cancelled => "bg-secondary",
+        _                       => "bg-secondary"
+    };
+
+    private static string StatusLabel(PackageStatus s) => s switch
+    {
+        PackageStatus.Active    => "Aktywny",
+        PackageStatus.Depleted  => "Wyczerpany",
+        PackageStatus.Expired   => "Wygasły",
+        PackageStatus.Cancelled => "Anulowany",
+        _                       => s.ToString()
+    };
+}

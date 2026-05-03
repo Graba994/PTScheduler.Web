@@ -61,7 +61,7 @@ public class SessionSeriesService(
             EndDate        = dto.EndDate,
             Notes          = dto.Notes,
             CreatedByUserId = dto.TrainerUserId,
-            CreatedAt      = DateTime.Now
+            CreatedAt      = DateTime.UtcNow
         };
         db.SessionSeries.Add(series);
         await db.SaveChangesAsync();
@@ -115,7 +115,7 @@ public class SessionSeriesService(
                 PackageId     = linkedPackageId,
                 SeriesId      = series.Id,
                 Notes         = dto.Notes,
-                CreatedAt     = DateTime.Now
+                CreatedAt     = DateTime.UtcNow
             });
         }
 
@@ -161,7 +161,7 @@ public class SessionSeriesService(
 
         if (cancelFutureSessions)
         {
-            var now = DateTime.Now;
+            var now = DateTime.UtcNow;
             var futureSessions = await db.Sessions
                 .Where(s => s.SeriesId == seriesId
                             && s.StartTime >= now
@@ -180,7 +180,7 @@ public class SessionSeriesService(
                     }
                 }
                 s.Status = SessionStatus.Cancelled;
-                s.CancelledAt = DateTime.Now;
+                s.CancelledAt = DateTime.UtcNow;
             }
         }
 
@@ -222,7 +222,7 @@ public class SessionSeriesService(
 
     private static async Task<SessionSeriesDto> BuildDtoAsync(ApplicationDbContext db, SessionSeries s)
     {
-        var now = DateTime.Now;
+        var now = DateTime.UtcNow;
         var sessionsCount = await db.Sessions.CountAsync(x => x.SeriesId == s.Id);
         var futureCount   = await db.Sessions.CountAsync(x => x.SeriesId == s.Id && x.StartTime >= now
                                 && (x.Status == SessionStatus.Scheduled || x.Status == SessionStatus.AwaitingPackage));
