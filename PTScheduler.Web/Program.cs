@@ -9,8 +9,6 @@ using PTScheduler.Web.Components;
 using PTScheduler.Web.Components.Account;
 using PTScheduler.Web.Services;
 
-AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
-
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Configuration.AddJsonFile("connections.json", optional: true, reloadOnChange: true);
@@ -58,10 +56,12 @@ var app = builder.Build();
 // Seed roles on startup
 using (var scope = app.Services.CreateScope())
 {
-    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
-    await PTScheduler.Infrastructure.Data.DbInitializer.SeedRolesAsync(roleManager);
     var db = scope.ServiceProvider.GetRequiredService<PTScheduler.Infrastructure.Data.ApplicationDbContext>();
     await Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions.MigrateAsync(db.Database);
+    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+    await PTScheduler.Infrastructure.Data.DbInitializer.SeedRolesAsync(roleManager);
+    var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+    await PTScheduler.Infrastructure.Data.DbInitializer.SeedAdminAsync(userManager);
     await PTScheduler.Infrastructure.Data.DbInitializer.SeedSessionTypesAsync(db);
 }
 

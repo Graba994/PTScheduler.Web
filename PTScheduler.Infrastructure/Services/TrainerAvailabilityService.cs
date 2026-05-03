@@ -146,6 +146,7 @@ public class TrainerAvailabilityService(IDbContextFactory<ApplicationDbContext> 
 
     public async Task<bool> IsSlotFreeAsync(string trainerUserId, DateTime start, int durationMinutes)
     {
+        start = DateTime.SpecifyKind(start, DateTimeKind.Utc);
         await using var db = dbFactory.CreateDbContext();
         var cfg = await GetConfigAsync(db, trainerUserId);
         var slotEnd = start.AddMinutes(durationMinutes);

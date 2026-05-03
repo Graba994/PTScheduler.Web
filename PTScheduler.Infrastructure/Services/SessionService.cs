@@ -17,6 +17,8 @@ public class SessionService(
 {
     public async Task<List<SessionDto>> GetSessionsAsync(DateTime from, DateTime to, string? trainerUserId = null, int? clientId = null)
     {
+        from = DateTime.SpecifyKind(from, DateTimeKind.Utc);
+        to   = DateTime.SpecifyKind(to,   DateTimeKind.Utc);
         await using var db = dbFactory.CreateDbContext();
         var query = db.Sessions
             .AsNoTracking()
@@ -97,6 +99,7 @@ public class SessionService(
 
     public async Task<SessionDto> CreateSessionAsync(CreateSessionDto dto, bool allowAwaitingPackage = true)
     {
+        dto.StartTime = DateTime.SpecifyKind(dto.StartTime, DateTimeKind.Utc);
         await using var db = dbFactory.CreateDbContext();
         var sessionType = await db.SessionTypes.FindAsync(dto.SessionTypeId)
             ?? throw new InvalidOperationException("Typ sesji nie istnieje.");
@@ -180,6 +183,7 @@ public class SessionService(
 
     public async Task RescheduleAsync(int id, DateTime newStartTime)
     {
+        newStartTime = DateTime.SpecifyKind(newStartTime, DateTimeKind.Utc);
         await using var db = dbFactory.CreateDbContext();
         var session = await db.Sessions
             .Include(s => s.Client)

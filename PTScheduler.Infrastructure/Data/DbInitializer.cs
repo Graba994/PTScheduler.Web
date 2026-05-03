@@ -17,6 +17,28 @@ public static class DbInitializer
         }
     }
 
+    public static async Task SeedAdminAsync(UserManager<ApplicationUser> userManager)
+    {
+        const string email = "root@admin.local";
+        if (await userManager.FindByEmailAsync(email) is not null) return;
+
+        var admin = new ApplicationUser
+        {
+            UserName = email,
+            Email = email,
+            NormalizedEmail = email.ToUpperInvariant(),
+            NormalizedUserName = email.ToUpperInvariant(),
+            EmailConfirmed = true,
+            FirstName = "Admin",
+            LastName = "System",
+            SecurityStamp = Guid.NewGuid().ToString()
+        };
+        await userManager.CreateAsync(admin);
+        admin.PasswordHash = userManager.PasswordHasher.HashPassword(admin, "password");
+        await userManager.UpdateAsync(admin);
+        await userManager.AddToRoleAsync(admin, Roles.Admin);
+    }
+
     public static async Task SeedSessionTypesAsync(ApplicationDbContext db)
     {
         if (await db.SessionTypes.AnyAsync()) return;
