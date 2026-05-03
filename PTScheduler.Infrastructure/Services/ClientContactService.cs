@@ -9,11 +9,12 @@ using PTScheduler.Infrastructure.Data;
 namespace PTScheduler.Infrastructure.Services;
 
 public class ClientContactService(
-    ApplicationDbContext db,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
     UserManager<ApplicationUser> userManager) : IClientContactService
 {
     public async Task<List<ClientContactDto>> GetContactsForClientAsync(int clientId)
     {
+        await using var db = dbFactory.CreateDbContext();
         var client = await db.Clients.FindAsync(clientId);
         if (client is null) return [];
 
@@ -55,6 +56,7 @@ public class ClientContactService(
 
     public async Task<List<ClientContactDto>> GetPairsAsync(string trainerUserId)
     {
+        await using var db = dbFactory.CreateDbContext();
         var pairs = await db.ClientContacts
             .Include(cc => cc.Client1)
             .Include(cc => cc.Client2)
@@ -72,6 +74,7 @@ public class ClientContactService(
 
     public async Task AddPairAsync(string trainerUserId, int client1Id, int client2Id)
     {
+        await using var db = dbFactory.CreateDbContext();
         var a = Math.Min(client1Id, client2Id);
         var b = Math.Max(client1Id, client2Id);
 
@@ -90,6 +93,7 @@ public class ClientContactService(
 
     public async Task RemovePairAsync(int contactId)
     {
+        await using var db = dbFactory.CreateDbContext();
         var pair = await db.ClientContacts.FindAsync(contactId);
         if (pair is not null)
         {
@@ -100,6 +104,7 @@ public class ClientContactService(
 
     public async Task<List<SessionInvitationDto>> GetPendingInvitationsAsync(int clientId)
     {
+        await using var db = dbFactory.CreateDbContext();
         var invitations = await db.SessionInvitations
             .Include(i => i.Session).ThenInclude(s => s.SessionType)
             .Where(i => i.InvitedClientId == clientId && i.Status == InvitationStatus.Pending)
@@ -129,6 +134,7 @@ public class ClientContactService(
 
     public async Task CreateInvitationAsync(int sessionId, int invitedClientId, string createdByUserId)
     {
+        await using var db = dbFactory.CreateDbContext();
         var exists = await db.SessionInvitations
             .AnyAsync(i => i.SessionId == sessionId && i.InvitedClientId == invitedClientId);
         if (exists) return;
@@ -146,6 +152,7 @@ public class ClientContactService(
 
     public async Task RespondToInvitationAsync(int invitationId, bool accept, string? note = null)
     {
+        await using var db = dbFactory.CreateDbContext();
         var inv = await db.SessionInvitations.FindAsync(invitationId)
             ?? throw new InvalidOperationException("Zaproszenie nie istnieje.");
         inv.Status = accept ? InvitationStatus.Accepted : InvitationStatus.Declined;

@@ -1,0 +1,182 @@
+@page "/my/measurements"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Client")]
+@inject IBodyMeasurementService MeasurementService
+@inject IClientService ClientService
+@inject AuthenticationStateProvider AuthState
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using System.Globalization
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<AppTitle Page="Moje pomiary" />
+
+<h4 class="mb-0 fw-bold mb-4">
+    <i class="bi bi-rulers me-2"></i>Moje pomiary
+</h4>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><span class="spinner-border text-primary"></span></div>
+}
+else if (_measurements.Count == 0)
+{
+    <div class="text-center py-5 text-muted">
+        <i class="bi bi-rulers" style="font-size:2.5rem;opacity:.25"></i>
+        <div class="mt-3 small">Twój trener jeszcze nie wprowadził żadnych pomiarów.</div>
+    </div>
+}
+else
+{
+    <!-- Stat cards: latest + trend -->
+    <div class="row g-3 mb-4">
+        @foreach (var card in _cards)
+        {
+            <div class="col-6 col-md-3">
+                <div class="card h-100 border-0 shadow-sm">
+                    <div class="card-body py-3 px-3">
+                        <div class="text-muted small text-uppercase fw-semibold mb-1" style="font-size:.65rem;letter-spacing:.06em">
+                            @card.Label
+                        </div>
+                        <div class="fw-bold" style="font-size:1.5rem;line-height:1.1">
+                            @card.Latest <span class="text-muted" style="font-size:.85rem;font-weight:400">@card.Unit</span>
+                        </div>
+                        <div class="mt-1 small @card.TrendClass" style="font-size:.78rem">
+                            @if (card.Delta is not null)
+                            {
+                                @((card.Delta > 0 ? "↑ +" : "↓ ") + card.Delta?.ToString("0.#", _pl) + " " + card.Unit)
+                                <span class="text-muted ms-1">vs poprzedni</span>
+                            }
+                            else
+                            {
+                                <span class="text-muted">pierwszy pomiar</span>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+
+    <!-- Last measurement date -->
+    <div class="text-muted small mb-4">
+        <i class="bi bi-calendar-check me-1"></i>
+        Ostatni pomiar: <strong>@_measurements[0].MeasurementDate.ToString("d MMMM yyyy", _pl)</strong>
+        · Łącznie pomiarów: <strong>@_measurements.Count</strong>
+    </div>
+
+    <!-- History table -->
+    <div class="card border-0 shadow-sm">
+        <div class="card-header fw-semibold bg-transparent border-bottom">
+            Historia pomiarów
+        </div>
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Data</th>
+                        @if (_hasWeight)     { <th class="text-end">Waga (kg)</th> }
+                        @if (_hasFat)        { <th class="text-end">Tk. tł. (%)</th> }
+                        @if (_hasChest)      { <th class="text-end">Klatka (cm)</th> }
+                        @if (_hasWaist)      { <th class="text-end">Talia (cm)</th> }
+                        @if (_hasHips)       { <th class="text-end">Biodra (cm)</th> }
+                        @if (_hasThigh)      { <th class="text-end">Udo (cm)</th> }
+                        @if (_hasArm)        { <th class="text-end">Ramię (cm)</th> }
+                        @if (_hasNotes)      { <th>Notatki</th> }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var m in _measurements)
+                    {
+                        <tr>
+                            <td class="text-nowrap small">@m.MeasurementDate.ToString("dd.MM.yyyy")</td>
+                            @if (_hasWeight)  { <td class="text-end small">@Fmt(m.WeightKg)</td> }
+                            @if (_hasFat)     { <td class="text-end small">@Fmt(m.BodyFatPercent)</td> }
+                            @if (_hasChest)   { <td class="text-end small">@Fmt(m.ChestCm)</td> }
+                            @if (_hasWaist)   { <td class="text-end small">@Fmt(m.WaistCm)</td> }
+                            @if (_hasHips)    { <td class="text-end small">@Fmt(m.HipsCm)</td> }
+                            @if (_hasThigh)   { <td class="text-end small">@Fmt(m.ThighCm)</td> }
+                            @if (_hasArm)     { <td class="text-end small">@Fmt(m.ArmCm)</td> }
+                            @if (_hasNotes)   { <td class="small text-muted">@(m.Notes ?? "—")</td> }
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly CultureInfo _pl = new("pl-PL");
+
+    private List<BodyMeasurementDto> _measurements = [];
+    private List<StatCard> _cards = [];
+    private bool _loading = true;
+
+    private bool _hasWeight, _hasFat, _hasChest, _hasWaist, _hasHips, _hasThigh, _hasArm, _hasNotes;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth  = await AuthState.GetAuthenticationStateAsync();
+        var uid   = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        var client = await ClientService.GetClientByUserIdAsync(uid);
+        if (client is not null)
+        {
+            _measurements = await MeasurementService.GetAsync(client.Id);
+            _measurements = [.. _measurements.OrderByDescending(m => m.MeasurementDate)];
+            DetectColumns();
+            BuildCards();
+        }
+        _loading = false;
+    }
+
+    private void DetectColumns()
+    {
+        _hasWeight = _measurements.Any(m => m.WeightKg.HasValue);
+        _hasFat    = _measurements.Any(m => m.BodyFatPercent.HasValue);
+        _hasChest  = _measurements.Any(m => m.ChestCm.HasValue);
+        _hasWaist  = _measurements.Any(m => m.WaistCm.HasValue);
+        _hasHips   = _measurements.Any(m => m.HipsCm.HasValue);
+        _hasThigh  = _measurements.Any(m => m.ThighCm.HasValue);
+        _hasArm    = _measurements.Any(m => m.ArmCm.HasValue);
+        _hasNotes  = _measurements.Any(m => !string.IsNullOrEmpty(m.Notes));
+    }
+
+    private void BuildCards()
+    {
+        var latest = _measurements[0];
+        var prev   = _measurements.Count > 1 ? _measurements[1] : null;
+
+        if (_hasWeight) _cards.Add(Card("Waga",              "kg",  latest.WeightKg,        prev?.WeightKg));
+        if (_hasFat)    _cards.Add(Card("Tkanka tłuszczowa", "%",   latest.BodyFatPercent,   prev?.BodyFatPercent));
+        if (_hasChest)  _cards.Add(Card("Klatka piersiowa",  "cm",  latest.ChestCm,          prev?.ChestCm));
+        if (_hasWaist)  _cards.Add(Card("Talia",             "cm",  latest.WaistCm,          prev?.WaistCm));
+        if (_hasHips)   _cards.Add(Card("Biodra",            "cm",  latest.HipsCm,           prev?.HipsCm));
+        if (_hasThigh)  _cards.Add(Card("Udo",               "cm",  latest.ThighCm,          prev?.ThighCm));
+        if (_hasArm)    _cards.Add(Card("Ramię",             "cm",  latest.ArmCm,            prev?.ArmCm));
+    }
+
+    private static StatCard Card(string label, string unit, decimal? latest, decimal? prev)
+    {
+        decimal? delta = (latest.HasValue && prev.HasValue) ? latest.Value - prev.Value : null;
+        return new StatCard
+        {
+            Label      = label,
+            Unit       = unit,
+            Latest     = latest?.ToString("0.#", CultureInfo.InvariantCulture) ?? "—",
+            Delta      = delta,
+            TrendClass = delta is null ? "" : (delta < 0 ? "text-success" : delta > 0 ? "text-body-secondary" : "text-muted")
+        };
+    }
+
+    private static string Fmt(decimal? v) => v?.ToString("0.#", CultureInfo.InvariantCulture) ?? "—";
+
+    private sealed class StatCard
+    {
+        public string Label { get; set; } = string.Empty;
+        public string Unit { get; set; } = string.Empty;
+        public string Latest { get; set; } = string.Empty;
+        public decimal? Delta { get; set; }
+        public string TrendClass { get; set; } = string.Empty;
+    }
+}

@@ -1,0 +1,102 @@
+@page "/Account/Manage/Hints"
+@inject INotificationPreferencesService NotifService
+@inject AuthenticationStateProvider AuthState
+@inject IAuditLogService AuditLogService
+@inject PTScheduler.Web.Services.HintStateService HintState
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<AppTitle Page="Podpowiedzi" />
+
+<div class="manage-card">
+    <h5 class="fw-bold mb-1">Podpowiedzi w aplikacji</h5>
+    <p class="text-muted small mb-4">
+        Małe przyciski <strong class="hint-btn" style="pointer-events:none;display:inline-flex;width:1rem;height:1rem;font-size:.6rem;border-radius:50%;border:1.5px solid var(--bs-border-color);align-items:center;justify-content:center">?</strong>
+        pojawiają się przy funkcjach, których działanie może być niejasne. Kliknięcie pokazuje krótkie wyjaśnienie.
+        Gdy już znasz aplikację, możesz je wyłączyć.
+    </p>
+
+    @if (_loading)
+    {
+        <div class="text-center py-4"><span class="spinner-border text-primary"></span></div>
+    }
+    else
+    {
+        <div class="d-flex justify-content-between align-items-center p-3 rounded border mb-4">
+            <div>
+                <div class="fw-semibold small">Pokazuj podpowiedzi</div>
+                <div class="text-muted" style="font-size:.8rem">Przyciski <strong>?</strong> przy funkcjach z krótkim opisem działania</div>
+            </div>
+            <div class="form-check form-switch mb-0 ms-3">
+                <input class="form-check-input" type="checkbox" role="switch"
+                       checked="@_showHints"
+                       @onchange="OnToggle" />
+            </div>
+        </div>
+
+        <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">
+            @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
+            <i class="bi bi-floppy-fill me-1"></i>Zapisz
+        </button>
+        @if (_saved)
+        {
+            <span class="text-success ms-3 small"><i class="bi bi-check-circle-fill"></i> Zapisano</span>
+        }
+    }
+</div>
+
+@code {
+    private string _userId = string.Empty;
+    private string _userEmail = string.Empty;
+    private string _userRole = string.Empty;
+    private bool _loading = true;
+    private bool _saving;
+    private bool _saved;
+    private bool _showHints = true;
+    private NotificationPreferencesDto _prefs = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId    = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _userEmail = auth.User.Identity?.Name ?? _userId;
+        var isAdmin = auth.User.IsInRole(Roles.Admin);
+        _userRole  = isAdmin ? Roles.Admin
+                   : auth.User.IsInRole(Roles.Trainer) ? Roles.Trainer
+                   : auth.User.IsInRole(Roles.Subordinate) ? Roles.Subordinate
+                   : Roles.Client;
+
+        if (!string.IsNullOrEmpty(_userId))
+        {
+            _prefs = await NotifService.GetAsync(_userId);
+            _showHints = _prefs.ShowHints;
+            HintState.Set(_showHints);
+        }
+        _loading = false;
+    }
+
+    private void OnToggle(ChangeEventArgs e)
+    {
+        _showHints = (bool)(e.Value ?? true);
+        HintState.Set(_showHints);
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        try
+        {
+            _prefs.ShowHints = _showHints;
+            await NotifService.SaveAsync(_userId, _prefs);
+            await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "HintPreferenceSaved",
+                "NotificationPreferences", null, $"Podpowiedzi: {(_showHints ? "włączone" : "wyłączone")}");
+            _saved = true;
+            await Task.Delay(2000);
+            _saved = false;
+        }
+        finally { _saving = false; }
+    }
+}

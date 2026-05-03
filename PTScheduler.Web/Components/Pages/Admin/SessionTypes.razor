@@ -1,0 +1,228 @@
+@page "/admin/session-types"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = PTScheduler.Domain.Constants.Roles.Admin)]
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@inject ISessionTypeService TypeService
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<AppTitle Page="Typy sesji" />
+
+<div class="page-header">
+    <h4 class="page-title"><i class="bi bi-clock-fill me-2" style="color:var(--c-primary)"></i>Typy sesji</h4>
+    <button class="btn btn-primary btn-sm" @onclick="OpenAdd">
+        <i class="bi bi-plus-lg me-1"></i>Dodaj typ
+    </button>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <div class="card">
+        <div class="card-body p-0">
+            @if (!_types.Any())
+            {
+                <div class="text-center text-muted py-5 small">
+                    <i class="bi bi-clock d-block fs-2 mb-2"></i>Brak typów sesji.
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle mb-0">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Nazwa</th>
+                                <th class="text-center">Czas (min)</th>
+                                <th class="text-center">Grupowa</th>
+                                <th class="text-center">Maks. osób</th>
+                                <th class="text-center">Sesji</th>
+                                <th class="text-center">Status</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var t in _types)
+                            {
+                                <tr class="@(!t.IsActive ? "opacity-50" : "")">
+                                    <td class="fw-semibold">@t.Name</td>
+                                    <td class="text-center">@t.DurationMinutes</td>
+                                    <td class="text-center">
+                                        @if (t.IsGroup)
+                                        {
+                                            <span class="badge bg-info text-dark">Tak</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted small">—</span>
+                                        }
+                                    </td>
+                                    <td class="text-center text-muted small">@(t.MaxParticipants?.ToString() ?? "—")</td>
+                                    <td class="text-center text-muted small">@t.SessionCount</td>
+                                    <td class="text-center">
+                                        @if (t.IsActive)
+                                        {
+                                            <span class="badge bg-success-subtle text-success">Aktywny</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-secondary-subtle text-secondary">Nieaktywny</span>
+                                        }
+                                    </td>
+                                    <td class="text-end pe-3">
+                                        <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => OpenEdit(t)">
+                                            <i class="bi bi-pencil"></i>
+                                        </button>
+                                        @if (t.IsActive)
+                                        {
+                                            <button class="btn btn-sm btn-outline-secondary" title="Dezaktywuj"
+                                                    @onclick="() => ToggleActive(t, false)">
+                                                <i class="bi bi-eye-slash"></i>
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-sm btn-outline-success" title="Aktywuj"
+                                                    @onclick="() => ToggleActive(t, true)">
+                                                <i class="bi bi-eye"></i>
+                                            </button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+    <div class="alert alert-info mt-3 small">
+        <i class="bi bi-info-circle me-1"></i>
+        Dezaktywowane typy sesji nie są widoczne przy rezerwacjach, ale zachowują historię.
+    </div>
+}
+
+@if (_modalOpen)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.45)">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-clock me-2 text-primary"></i>
+                        @(_editId is null ? "Nowy typ sesji" : "Edytuj typ sesji")
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(_error))
+                    {
+                        <div class="alert alert-danger py-2 small">@_error</div>
+                    }
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label">Nazwa <span class="text-danger">*</span></label>
+                            <input class="form-control" @bind="_form.Name" placeholder="np. 60 min – Personal Training" maxlength="80" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Czas trwania (min) <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" min="5" max="480" @bind="_form.DurationMinutes" />
+                        </div>
+                        <div class="col-6 d-flex align-items-center gap-2 pt-4">
+                            <input type="checkbox" class="form-check-input" id="isGroup" @bind="_form.IsGroup" />
+                            <label class="form-check-label" for="isGroup">Sesja grupowa</label>
+                        </div>
+                        @if (_form.IsGroup)
+                        {
+                            <div class="col-12">
+                                <label class="form-label">Maks. uczestników</label>
+                                <input type="number" class="form-control" min="2" max="100"
+                                       value="@(_form.MaxParticipants?.ToString() ?? "")"
+                                       @onchange="e => _form.MaxParticipants = string.IsNullOrEmpty(e.Value?.ToString()) ? null : int.Parse(e.Value!.ToString()!)" />
+                            </div>
+                        }
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="CloseModal">Anuluj</button>
+                    <button class="btn btn-primary" @onclick="Save" disabled="@_busy">
+                        @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        Zapisz
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<SessionTypeDto> _types = [];
+    private bool _loading = true;
+    private bool _modalOpen;
+    private bool _busy;
+    private string _error = string.Empty;
+    private int? _editId;
+    private CreateSessionTypeDto _form = new();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try { _types = await TypeService.GetAllAsync(includeInactive: true); }
+        finally { _loading = false; }
+    }
+
+    private void OpenAdd()
+    {
+        _editId = null;
+        _form = new CreateSessionTypeDto();
+        _error = string.Empty;
+        _modalOpen = true;
+    }
+
+    private void OpenEdit(SessionTypeDto t)
+    {
+        _editId = t.Id;
+        _form = new CreateSessionTypeDto
+        {
+            Name = t.Name,
+            DurationMinutes = t.DurationMinutes,
+            IsGroup = t.IsGroup,
+            MaxParticipants = t.MaxParticipants
+        };
+        _error = string.Empty;
+        _modalOpen = true;
+    }
+
+    private void CloseModal() => _modalOpen = false;
+
+    private async Task Save()
+    {
+        if (string.IsNullOrWhiteSpace(_form.Name)) { _error = "Nazwa jest wymagana."; return; }
+        if (_form.DurationMinutes < 5) { _error = "Czas musi wynosić co najmniej 5 minut."; return; }
+        _busy = true; _error = string.Empty;
+        try
+        {
+            if (_editId is null) await TypeService.CreateAsync(_form);
+            else await TypeService.UpdateAsync(_editId.Value, _form);
+            _modalOpen = false;
+            await LoadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ToggleActive(SessionTypeDto t, bool active)
+    {
+        try
+        {
+            await TypeService.SetActiveAsync(t.Id, active);
+            await LoadAsync();
+        }
+        catch { }
+    }
+}

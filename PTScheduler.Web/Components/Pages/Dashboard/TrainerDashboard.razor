@@ -1,6 +1,7 @@
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Enums
+@using PTScheduler.Domain.Constants
 @inject ISessionService SessionService
 @inject IClientService ClientService
 @inject ISessionPackageService PackageService
@@ -14,6 +15,52 @@ else
     <div class="page-header">
         <h4 class="page-title"><i class="bi bi-calendar3 me-2" style="color:var(--c-primary)"></i>Mój dzień</h4>
         <a href="/calendar" class="btn btn-sm btn-primary"><i class="bi bi-calendar3 me-1"></i>Kalendarz</a>
+    </div>
+
+    <!-- KPI stat cards -->
+    <div class="row g-3 mb-3">
+        <div class="col-6 col-xl-3">
+            <div class="stat-card">
+                <div class="stat-icon"><i class="bi bi-calendar-week-fill"></i></div>
+                <div>
+                    <div class="stat-value">@_thisWeekCount</div>
+                    <div class="stat-label">Sesje w tym tygodniu</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="stat-card">
+                <div class="stat-icon" style="background:#F0FDF4;color:#16A34A">
+                    <i class="bi bi-check-circle-fill"></i>
+                </div>
+                <div>
+                    <div class="stat-value">@_thisMonthCompleted</div>
+                    <div class="stat-label">Ukończone w @MonthLocative(DateTime.Now.Month)</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="stat-card">
+                <div class="stat-icon" style="background:#EFF6FF;color:#3B82F6">
+                    <i class="bi bi-people-fill"></i>
+                </div>
+                <div>
+                    <div class="stat-value">@_activeClientsCount</div>
+                    <div class="stat-label">Aktywnych klientów</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="stat-card">
+                <div class="stat-icon" style="background:#FEF3C7;color:#D97706">
+                    <i class="bi bi-box-seam-fill"></i>
+                </div>
+                <div>
+                    <div class="stat-value">@_expiring.Count</div>
+                    <div class="stat-label">Pakiety wygasają</div>
+                </div>
+            </div>
+        </div>
     </div>
 
     @if (_awaiting.Any())
@@ -225,21 +272,64 @@ else
     private List<ExpiringPackageDto> _expiring = [];
     private List<ClientDto> _pending = [];
 
+    private int _thisWeekCount;
+    private int _thisMonthCompleted;
+    private int _activeClientsCount;
+    private bool _loading;
+
     protected override async Task OnParametersSetAsync()
     {
-        _loaded = false;
-        var now = DateTime.Now;
-        var todayStart = new DateTime(now.Year, now.Month, now.Day);
-        var todayEnd   = todayStart.AddDays(1);
+        if (_loading) return;
+        _loading = true;
+        try
+        {
+            _loaded = false;
+            var now = DateTime.Now;
+            var todayStart = new DateTime(now.Year, now.Month, now.Day);
+            var todayEnd   = todayStart.AddDays(1);
 
-        _today    = await SessionService.GetSessionsAsync(todayStart, todayEnd, TrainerUserId);
-        _upcoming = (await SessionService.GetUpcomingAsync(trainerUserId: TrainerUserId, count: 8))
-                        .Where(s => s.StartTime.Date > DateTime.Now.Date).ToList();
-        _awaiting = await SessionService.GetAwaitingPackageAsync(TrainerUserId);
-        _expiring = await PackageService.GetExpiringAsync(14);
-        _pending  = await ClientService.GetPendingClientsAsync();
-        _loaded = true;
+            _today    = await SessionService.GetSessionsAsync(todayStart, todayEnd, TrainerUserId);
+            _upcoming = (await SessionService.GetUpcomingAsync(trainerUserId: TrainerUserId, count: 8))
+                            .Where(s => s.StartTime.Date > DateTime.Now.Date).ToList();
+            _awaiting = await SessionService.GetAwaitingPackageAsync(TrainerUserId);
+            _expiring = await PackageService.GetExpiringAsync(14, TrainerUserId);
+            _pending  = await ClientService.GetPendingClientsAsync(TrainerUserId);
+
+            // Stats
+            var weekDay = (int)now.DayOfWeek;
+            var mondayOffset = weekDay == 0 ? -6 : 1 - weekDay;
+            var weekStart = todayStart.AddDays(mondayOffset);
+            var weekEnd = weekStart.AddDays(7);
+            var monthStart = new DateTime(now.Year, now.Month, 1);
+            var statsFrom = weekStart.AddDays(-7 * 7);
+
+            var statsSessions = await SessionService.GetSessionsAsync(statsFrom, weekEnd, TrainerUserId);
+            _thisWeekCount = statsSessions.Count(s =>
+                s.StartTime >= weekStart &&
+                s.Status != SessionStatus.Cancelled &&
+                s.Status != SessionStatus.NoShow);
+
+            _thisMonthCompleted = (await SessionService.GetSessionsAsync(monthStart, now.AddDays(1), TrainerUserId))
+                .Count(s => s.Status == SessionStatus.Completed);
+
+            _activeClientsCount = (await ClientService.GetClientsAsync(TrainerUserId))
+                .Count(c => c.Status == ClientStatus.Active);
+
+            _loaded = true;
+        }
+        finally
+        {
+            _loading = false;
+        }
     }
+
+    private static string MonthLocative(int m) => m switch
+    {
+        1 => "styczniu", 2 => "lutym",     3 => "marcu",      4 => "kwietniu",
+        5 => "maju",     6 => "czerwcu",   7 => "lipcu",      8 => "sierpniu",
+        9 => "wrześniu", 10 => "październiku", 11 => "listopadzie", 12 => "grudniu",
+        _ => ""
+    };
 
     private static string DaysUntil(DateTime dt)
     {

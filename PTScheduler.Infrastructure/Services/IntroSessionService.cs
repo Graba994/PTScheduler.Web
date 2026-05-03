@@ -7,16 +7,18 @@ using PTScheduler.Infrastructure.Data;
 
 namespace PTScheduler.Infrastructure.Services;
 
-public class IntroSessionService(ApplicationDbContext db) : IIntroSessionService
+public class IntroSessionService(IDbContextFactory<ApplicationDbContext> dbFactory) : IIntroSessionService
 {
     public async Task<IntroSessionConfigDto?> GetConfigAsync(string trainerUserId)
     {
+        await using var db = dbFactory.CreateDbContext();
         var cfg = await db.IntroSessionConfigs.FirstOrDefaultAsync(c => c.TrainerUserId == trainerUserId);
         return cfg is null ? null : MapToDto(cfg);
     }
 
     public async Task SaveConfigAsync(string trainerUserId, SaveIntroConfigDto dto)
     {
+        await using var db = dbFactory.CreateDbContext();
         var cfg = await db.IntroSessionConfigs.FirstOrDefaultAsync(c => c.TrainerUserId == trainerUserId);
         if (cfg is null)
         {
@@ -37,6 +39,7 @@ public class IntroSessionService(ApplicationDbContext db) : IIntroSessionService
 
     public async Task<bool> HasBookedIntroAsync(int clientId)
     {
+        await using var db = dbFactory.CreateDbContext();
         return await db.Sessions.AnyAsync(s =>
             s.ClientId == clientId &&
             s.Status != SessionStatus.Cancelled);

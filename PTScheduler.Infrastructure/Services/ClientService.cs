@@ -10,12 +10,14 @@ using PTScheduler.Infrastructure.Data;
 namespace PTScheduler.Infrastructure.Services;
 
 public class ClientService(
-    ApplicationDbContext db,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
     UserManager<ApplicationUser> userManager) : IClientService
 {
-    public async Task<List<ClientDto>> GetClientsAsync()
+    public async Task<List<ClientDto>> GetClientsAsync(string? trainerUserId = null)
     {
+        await using var db = dbFactory.CreateDbContext();
         var clients = await db.Clients
+            .Where(c => trainerUserId == null || c.TrainerUserId == trainerUserId)
             .OrderBy(c => c.LastName).ThenBy(c => c.FirstName)
             .ToListAsync();
 
@@ -62,12 +64,14 @@ public class ClientService(
 
     public async Task<ClientDto?> GetClientByUserIdAsync(string userId)
     {
+        await using var db = dbFactory.CreateDbContext();
         var c = await db.Clients.FirstOrDefaultAsync(c => c.ApplicationUserId == userId);
         return c is null ? null : await GetClientAsync(c.Id);
     }
 
     public async Task<ClientDto?> GetClientAsync(int id)
     {
+        await using var db = dbFactory.CreateDbContext();
         var c = await db.Clients.FindAsync(id);
         if (c is null) return null;
 
@@ -152,6 +156,7 @@ public class ClientService(
             CreatedAt = DateTime.UtcNow
         };
 
+        await using var db = dbFactory.CreateDbContext();
         db.Clients.Add(client);
         await db.SaveChangesAsync();
 
@@ -160,6 +165,7 @@ public class ClientService(
 
     public async Task UpdateClientAsync(int id, UpdateClientDto dto)
     {
+        await using var db = dbFactory.CreateDbContext();
         var client = await db.Clients.FindAsync(id)
             ?? throw new InvalidOperationException("Klient nie znaleziony.");
 
@@ -182,6 +188,7 @@ public class ClientService(
 
     public async Task UpdateProfilePictureAsync(int id, string pictureUrl)
     {
+        await using var db = dbFactory.CreateDbContext();
         var client = await db.Clients.FindAsync(id)
             ?? throw new InvalidOperationException("Klient nie znaleziony.");
         client.ProfilePictureUrl = pictureUrl;
@@ -190,6 +197,7 @@ public class ClientService(
 
     public async Task<List<TrainerNoteDto>> GetNotesAsync(int clientId)
     {
+        await using var db = dbFactory.CreateDbContext();
         var notes = await db.TrainerNotes
             .Where(n => n.ClientId == clientId)
             .OrderByDescending(n => n.CreatedAt)
@@ -212,6 +220,7 @@ public class ClientService(
 
     public async Task AddNoteAsync(int clientId, string trainerUserId, string content)
     {
+        await using var db = dbFactory.CreateDbContext();
         db.TrainerNotes.Add(new TrainerNote
         {
             ClientId = clientId,
@@ -224,6 +233,7 @@ public class ClientService(
 
     public async Task DeleteNoteAsync(int noteId)
     {
+        await using var db = dbFactory.CreateDbContext();
         var note = await db.TrainerNotes.FindAsync(noteId);
         if (note is not null)
         {
@@ -234,16 +244,19 @@ public class ClientService(
 
     public async Task ApproveClientAsync(int clientId)
     {
+        await using var db = dbFactory.CreateDbContext();
         var client = await db.Clients.FindAsync(clientId)
             ?? throw new InvalidOperationException("Klient nie istnieje.");
         client.Status = ClientStatus.Active;
         await db.SaveChangesAsync();
     }
 
-    public async Task<List<ClientDto>> GetPendingClientsAsync()
+    public async Task<List<ClientDto>> GetPendingClientsAsync(string? trainerUserId = null)
     {
+        await using var db = dbFactory.CreateDbContext();
         var clients = await db.Clients
-            .Where(c => c.Status == ClientStatus.Pending)
+            .Where(c => c.Status == ClientStatus.Pending
+                     && (trainerUserId == null || c.TrainerUserId == trainerUserId))
             .OrderBy(c => c.CreatedAt)
             .ToListAsync();
 
@@ -271,6 +284,7 @@ public class ClientService(
 
     public async Task SetAllowSelfBookingAsync(int clientId, bool allow)
     {
+        await using var db = dbFactory.CreateDbContext();
         var client = await db.Clients.FindAsync(clientId)
             ?? throw new InvalidOperationException("Klient nie istnieje.");
         client.AllowSelfBooking = allow;

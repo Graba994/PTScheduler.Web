@@ -3,6 +3,7 @@
 @inject IClientService ClientService
 @inject ISessionService SessionService
 @inject ITrainerAvailabilityService AvailabilityService
+@inject ITrainerConfigService TrainerConfigService
 @inject IAuditLogService AuditLogService
 @inject NavigationManager Nav
 @using PTScheduler.Application.DTOs
@@ -130,7 +131,7 @@ else
                             }
                         </div>
                         <div class="flex-shrink-0 text-end">
-                            @if (s.StartTime > DateTime.Now.AddHours(24))
+                            @if (_cancellationWindowHours == 0 || s.StartTime > DateTime.Now.AddHours(_cancellationWindowHours))
                             {
                                 <button class="btn btn-outline-danger btn-sm" @onclick="() => ConfirmCancel(s)">
                                     <i class="bi bi-x-circle me-1"></i>Odwołaj
@@ -429,6 +430,7 @@ else
     private List<SessionDto> past = [];
     private string _userId = string.Empty;
     private string _userEmail = string.Empty;
+    private int _cancellationWindowHours = 24;
 
     private SessionDto? cancelTarget;
     private string cancelReason = string.Empty;
@@ -454,7 +456,18 @@ else
         {
             client = await ClientService.GetClientByUserIdAsync(_userId);
             if (client is not null)
+            {
                 await RefreshSessions();
+                if (!string.IsNullOrEmpty(client.TrainerUserId))
+                {
+                    try
+                    {
+                        var config = await TrainerConfigService.GetAsync(client.TrainerUserId);
+                        _cancellationWindowHours = config.CancellationWindowHours;
+                    }
+                    catch { }
+                }
+            }
         }
         loading = false;
     }
@@ -593,10 +606,7 @@ else
         {
             var reason = string.IsNullOrWhiteSpace(cancelReason) ? null : cancelReason.Trim();
             var target = cancelTarget;
-            await SessionService.UpdateStatusAsync(target.Id, SessionStatus.Cancelled, reason);
-            await AuditLogService.LogAsync(_userId, _userEmail, "Client", "ClientCancelledSession", "Session",
-                target.Id.ToString(), $"Typ: {target.SessionTypeName}, termin: {target.StartTime:dd.MM.yyyy HH:mm}" +
-                (reason is null ? "" : $", powód: {reason}"));
+            await SessionService.ClientCancelSessionAsync(target.Id, _userId, reason);
             cancelTarget = null;
             await RefreshSessions();
         }

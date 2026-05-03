@@ -9,7 +9,7 @@ using PTScheduler.Infrastructure.Data;
 namespace PTScheduler.Infrastructure.Services;
 
 public class DemoDataService(
-    ApplicationDbContext db,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
     UserManager<ApplicationUser> userManager) : IDemoDataService
 {
     private const string TrainerEmail = "jan.kowalski@demo.pl";
@@ -22,6 +22,7 @@ public class DemoDataService(
         if (await userManager.FindByEmailAsync(TrainerEmail) is not null)
             return new DemoSeedResult { AlreadySeeded = true };
 
+        await using var db = dbFactory.CreateDbContext();
         var result = new DemoSeedResult();
 
         // 1. Users
@@ -34,17 +35,17 @@ public class DemoDataService(
         result.Users.Add(new() { Role = "Menadżer", FullName = "Anna Wiśniewska", Email = "anna@demo.pl", Password = "menedzer1" });
 
         // 2. Session types (get existing or create)
-        var st1 = await GetOrCreateSessionTypeAsync("Trening personalny", 60);
-        var st2 = await GetOrCreateSessionTypeAsync("Pilates", 45);
-        var st3 = await GetOrCreateSessionTypeAsync("Stretching", 30);
+        var st1 = await GetOrCreateSessionTypeAsync(db, "Trening personalny", 60);
+        var st2 = await GetOrCreateSessionTypeAsync(db, "Pilates", 45);
+        var st3 = await GetOrCreateSessionTypeAsync(db, "Stretching", 30);
 
         // 3. Trainer availability
-        AddAvailability(trainer.Id, DayOfWeek.Monday,    new TimeOnly(8, 0), new TimeOnly(18, 0));
-        AddAvailability(trainer.Id, DayOfWeek.Tuesday,   new TimeOnly(8, 0), new TimeOnly(18, 0));
-        AddAvailability(trainer.Id, DayOfWeek.Wednesday, new TimeOnly(8, 0), new TimeOnly(18, 0));
-        AddAvailability(trainer.Id, DayOfWeek.Thursday,  new TimeOnly(8, 0), new TimeOnly(18, 0));
-        AddAvailability(trainer.Id, DayOfWeek.Friday,    new TimeOnly(8, 0), new TimeOnly(18, 0));
-        AddAvailability(trainer.Id, DayOfWeek.Saturday,  new TimeOnly(9, 0), new TimeOnly(13, 0));
+        AddAvailability(db, trainer.Id, DayOfWeek.Monday,    new TimeOnly(8, 0), new TimeOnly(18, 0));
+        AddAvailability(db, trainer.Id, DayOfWeek.Tuesday,   new TimeOnly(8, 0), new TimeOnly(18, 0));
+        AddAvailability(db, trainer.Id, DayOfWeek.Wednesday, new TimeOnly(8, 0), new TimeOnly(18, 0));
+        AddAvailability(db, trainer.Id, DayOfWeek.Thursday,  new TimeOnly(8, 0), new TimeOnly(18, 0));
+        AddAvailability(db, trainer.Id, DayOfWeek.Friday,    new TimeOnly(8, 0), new TimeOnly(18, 0));
+        AddAvailability(db, trainer.Id, DayOfWeek.Saturday,  new TimeOnly(9, 0), new TimeOnly(13, 0));
         db.TrainerConfigs.Add(new TrainerConfig
         {
             TrainerUserId = trainer.Id,
@@ -55,10 +56,10 @@ public class DemoDataService(
         await db.SaveChangesAsync();
 
         // 4. Clients
-        var (c1, u1) = await CreateClientAsync("Marek",     "Nowak",      "marek@demo.pl",      "klient1", trainer.Id, allowSelfBooking: true);
-        var (c2, u2) = await CreateClientAsync("Katarzyna", "Zielińska",  "katarzyna@demo.pl",  "klient1", trainer.Id, allowSelfBooking: true);
-        var (c3, u3) = await CreateClientAsync("Piotr",     "Wiśniewski", "piotr@demo.pl",      "klient1", trainer.Id, allowSelfBooking: false);
-        var (c4, u4) = await CreateClientAsync("Alicja",    "Kowalska",   "alicja@demo.pl",     "klient1", trainer.Id, allowSelfBooking: false);
+        var (c1, u1) = await CreateClientAsync(db, "Marek",     "Nowak",      "marek@demo.pl",      "klient1", trainer.Id, allowSelfBooking: true);
+        var (c2, u2) = await CreateClientAsync(db, "Katarzyna", "Zielińska",  "katarzyna@demo.pl",  "klient1", trainer.Id, allowSelfBooking: true);
+        var (c3, u3) = await CreateClientAsync(db, "Piotr",     "Wiśniewski", "piotr@demo.pl",      "klient1", trainer.Id, allowSelfBooking: false);
+        var (c4, u4) = await CreateClientAsync(db, "Alicja",    "Kowalska",   "alicja@demo.pl",     "klient1", trainer.Id, allowSelfBooking: false);
 
         result.Users.Add(new() { Role = "Klient", FullName = "Marek Nowak",       Email = "marek@demo.pl",      Password = "klient1" });
         result.Users.Add(new() { Role = "Klient", FullName = "Katarzyna Zielińska", Email = "katarzyna@demo.pl", Password = "klient1" });
@@ -101,33 +102,33 @@ public class DemoDataService(
         await db.SaveChangesAsync();
 
         // 6. Sessions — Marek (Trening personalny, co poniedziałek)
-        AddSession(c1.Id, trainer.Id, st1.Id, Past(DayOfWeek.Monday, 6), SessionStatus.Completed, pkg1.Id);
-        AddSession(c1.Id, trainer.Id, st1.Id, Past(DayOfWeek.Monday, 5), SessionStatus.Completed, pkg1.Id);
-        AddSession(c1.Id, trainer.Id, st1.Id, Past(DayOfWeek.Monday, 4), SessionStatus.Completed, pkg1.Id);
-        AddSession(c1.Id, trainer.Id, st1.Id, Past(DayOfWeek.Monday, 3), SessionStatus.NoShow,    pkg1.Id,
+        AddSession(db, c1.Id, trainer.Id, st1.Id, Past(DayOfWeek.Monday, 6), SessionStatus.Completed, pkg1.Id);
+        AddSession(db, c1.Id, trainer.Id, st1.Id, Past(DayOfWeek.Monday, 5), SessionStatus.Completed, pkg1.Id);
+        AddSession(db, c1.Id, trainer.Id, st1.Id, Past(DayOfWeek.Monday, 4), SessionStatus.Completed, pkg1.Id);
+        AddSession(db, c1.Id, trainer.Id, st1.Id, Past(DayOfWeek.Monday, 3), SessionStatus.NoShow,    pkg1.Id,
             cancellationReason: "Klient nie dał znaku życia");
-        AddSession(c1.Id, trainer.Id, st1.Id, Future(DayOfWeek.Monday, 1), SessionStatus.Scheduled, pkg1.Id);
-        AddSession(c1.Id, trainer.Id, st1.Id, Future(DayOfWeek.Monday, 2), SessionStatus.Scheduled, pkg1.Id);
+        AddSession(db, c1.Id, trainer.Id, st1.Id, Future(DayOfWeek.Monday, 1), SessionStatus.Scheduled, pkg1.Id);
+        AddSession(db, c1.Id, trainer.Id, st1.Id, Future(DayOfWeek.Monday, 2), SessionStatus.Scheduled, pkg1.Id);
 
         // Sessions — Katarzyna (Pilates, co wtorek)
-        AddSession(c2.Id, trainer.Id, st2.Id, Past(DayOfWeek.Tuesday, 5), SessionStatus.Completed, pkg2.Id);
-        AddSession(c2.Id, trainer.Id, st2.Id, Past(DayOfWeek.Tuesday, 4), SessionStatus.Completed, pkg2.Id);
-        AddSession(c2.Id, trainer.Id, st2.Id, Past(DayOfWeek.Tuesday, 3), SessionStatus.Completed, pkg2.Id);
-        AddSession(c2.Id, trainer.Id, st2.Id, Past(DayOfWeek.Tuesday, 2), SessionStatus.Completed, pkg2.Id);
-        AddSession(c2.Id, trainer.Id, st2.Id, Past(DayOfWeek.Tuesday, 1), SessionStatus.Cancelled, pkg2.Id,
+        AddSession(db, c2.Id, trainer.Id, st2.Id, Past(DayOfWeek.Tuesday, 5), SessionStatus.Completed, pkg2.Id);
+        AddSession(db, c2.Id, trainer.Id, st2.Id, Past(DayOfWeek.Tuesday, 4), SessionStatus.Completed, pkg2.Id);
+        AddSession(db, c2.Id, trainer.Id, st2.Id, Past(DayOfWeek.Tuesday, 3), SessionStatus.Completed, pkg2.Id);
+        AddSession(db, c2.Id, trainer.Id, st2.Id, Past(DayOfWeek.Tuesday, 2), SessionStatus.Completed, pkg2.Id);
+        AddSession(db, c2.Id, trainer.Id, st2.Id, Past(DayOfWeek.Tuesday, 1), SessionStatus.Cancelled, pkg2.Id,
             cancellationReason: "Choroba trenera");
-        AddSession(c2.Id, trainer.Id, st2.Id, Future(DayOfWeek.Tuesday, 1), SessionStatus.Scheduled, pkg2.Id);
-        AddSession(c2.Id, trainer.Id, st2.Id, Future(DayOfWeek.Tuesday, 2), SessionStatus.Scheduled, pkg2.Id);
-        AddSession(c2.Id, trainer.Id, st2.Id, Future(DayOfWeek.Tuesday, 3), SessionStatus.Scheduled, pkg2.Id);
+        AddSession(db, c2.Id, trainer.Id, st2.Id, Future(DayOfWeek.Tuesday, 1), SessionStatus.Scheduled, pkg2.Id);
+        AddSession(db, c2.Id, trainer.Id, st2.Id, Future(DayOfWeek.Tuesday, 2), SessionStatus.Scheduled, pkg2.Id);
+        AddSession(db, c2.Id, trainer.Id, st2.Id, Future(DayOfWeek.Tuesday, 3), SessionStatus.Scheduled, pkg2.Id);
 
         // Sessions — Piotr (Trening, pakiet wyczerpany)
-        AddSession(c3.Id, trainer.Id, st1.Id, Past(DayOfWeek.Wednesday, 4), SessionStatus.Completed, pkg3.Id);
-        AddSession(c3.Id, trainer.Id, st1.Id, Past(DayOfWeek.Wednesday, 2), SessionStatus.Completed, pkg3.Id);
-        AddSession(c3.Id, trainer.Id, st1.Id, Future(DayOfWeek.Wednesday, 1), SessionStatus.AwaitingPackage);
-        AddSession(c3.Id, trainer.Id, st1.Id, Future(DayOfWeek.Wednesday, 2), SessionStatus.AwaitingPackage);
+        AddSession(db, c3.Id, trainer.Id, st1.Id, Past(DayOfWeek.Wednesday, 4), SessionStatus.Completed, pkg3.Id);
+        AddSession(db, c3.Id, trainer.Id, st1.Id, Past(DayOfWeek.Wednesday, 2), SessionStatus.Completed, pkg3.Id);
+        AddSession(db, c3.Id, trainer.Id, st1.Id, Future(DayOfWeek.Wednesday, 1), SessionStatus.AwaitingPackage);
+        AddSession(db, c3.Id, trainer.Id, st1.Id, Future(DayOfWeek.Wednesday, 2), SessionStatus.AwaitingPackage);
 
         // Sessions — Alicja (intro, stretching)
-        AddSession(c4.Id, trainer.Id, st3.Id, Future(DayOfWeek.Thursday, 1).AddHours(2), SessionStatus.Scheduled,
+        AddSession(db, c4.Id, trainer.Id, st3.Id, Future(DayOfWeek.Thursday, 1).AddHours(2), SessionStatus.Scheduled,
             notes: "Pierwsza wizyta – wywiad wstępny");
 
         await db.SaveChangesAsync();
@@ -165,6 +166,7 @@ public class DemoDataService(
 
     public async Task ResetToAdminAsync()
     {
+        await using var db = dbFactory.CreateDbContext();
         // Delete in FK-safe order
         await db.AuditLogs.ExecuteDeleteAsync();
         await db.SessionInvitations.ExecuteDeleteAsync();
@@ -241,7 +243,7 @@ public class DemoDataService(
     }
 
     private async Task<(Client client, ApplicationUser user)> CreateClientAsync(
-        string firstName, string lastName, string email, string password,
+        ApplicationDbContext db, string firstName, string lastName, string email, string password,
         string trainerUserId, bool allowSelfBooking)
     {
         var user = await CreateUserAsync(firstName, lastName, email, password, Roles.Client);
@@ -276,7 +278,7 @@ public class DemoDataService(
         return (client, user);
     }
 
-    private async Task<SessionType> GetOrCreateSessionTypeAsync(string name, int durationMinutes)
+    private static async Task<SessionType> GetOrCreateSessionTypeAsync(ApplicationDbContext db, string name, int durationMinutes)
     {
         var existing = await db.SessionTypes.FirstOrDefaultAsync(t => t.Name == name);
         if (existing is not null) return existing;
@@ -287,7 +289,7 @@ public class DemoDataService(
         return st;
     }
 
-    private void AddAvailability(string trainerUserId, DayOfWeek day, TimeOnly start, TimeOnly end)
+    private static void AddAvailability(ApplicationDbContext db, string trainerUserId, DayOfWeek day, TimeOnly start, TimeOnly end)
     {
         db.TrainerAvailabilities.Add(new TrainerAvailability
         {
@@ -300,8 +302,8 @@ public class DemoDataService(
         });
     }
 
-    private void AddSession(
-        int clientId, string trainerUserId, int sessionTypeId, DateTime startTime,
+    private static void AddSession(
+        ApplicationDbContext db, int clientId, string trainerUserId, int sessionTypeId, DateTime startTime,
         SessionStatus status, int? packageId = null, string? cancellationReason = null, string? notes = null)
     {
         db.Sessions.Add(new Session

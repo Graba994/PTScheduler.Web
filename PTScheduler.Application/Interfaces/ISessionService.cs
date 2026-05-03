@@ -7,14 +7,15 @@ public interface ISessionService
 {
     Task<List<SessionDto>> GetSessionsAsync(DateTime from, DateTime to, string? trainerUserId = null, int? clientId = null);
     Task<SessionDto?> GetSessionAsync(int id);
-    Task<SessionDto> CreateSessionAsync(CreateSessionDto dto);
+    Task<SessionDto> CreateSessionAsync(CreateSessionDto dto, bool allowAwaitingPackage = true);
     Task UpdateStatusAsync(int id, SessionStatus status, string? cancellationReason = null);
     Task<List<SessionTypeDto>> GetSessionTypesAsync();
-    Task<List<ClientSummaryDto>> GetClientsAsync();
+    Task<List<ClientSummaryDto>> GetClientsAsync(string? trainerUserId = null);
     Task<List<SessionDto>> GetClientSessionsAsync(int clientId, int count = 20);
     Task<List<SessionDto>> GetUpcomingAsync(string? trainerUserId = null, int? clientId = null, int count = 10);
     Task<List<SessionDto>> GetPastSessionsAsync(string? trainerUserId = null, int? clientId = null, int count = 50);
     Task<List<SessionDto>> GetAwaitingPackageAsync(string? trainerUserId = null);
     Task RescheduleAsync(int id, DateTime newStartTime);
     Task RestoreAsync(int id);
+    Task ClientCancelSessionAsync(int id, string clientUserId, string? reason = null);
 }

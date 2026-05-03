@@ -6,10 +6,11 @@ using PTScheduler.Infrastructure.Data;
 
 namespace PTScheduler.Infrastructure.Services;
 
-public class BrandingService(ApplicationDbContext db, IWebRootPathProvider webRoot) : IBrandingService
+public class BrandingService(IDbContextFactory<ApplicationDbContext> dbFactory, IWebRootPathProvider webRoot) : IBrandingService
 {
     public async Task<AppBrandingDto> GetAsync()
     {
+        await using var db = dbFactory.CreateDbContext();
         var b = await db.AppBrandings.FirstOrDefaultAsync();
         if (b is null)
         {
@@ -22,30 +23,38 @@ public class BrandingService(ApplicationDbContext db, IWebRootPathProvider webRo
 
     public async Task SaveAsync(SaveBrandingDto dto)
     {
+        await using var db = dbFactory.CreateDbContext();
         var b = await db.AppBrandings.FirstOrDefaultAsync() ?? new AppBranding();
-        b.ThemeName = dto.ThemeName;
+        b.ThemeName = NormalizeAccent(dto.ThemeName);
+        b.ThemeMode = dto.ThemeMode is "light" or "dark" or "system" ? dto.ThemeMode : "light";
         b.CompanyName = dto.CompanyName;
         if (!db.AppBrandings.Local.Contains(b))
             db.AppBrandings.Add(b);
         await db.SaveChangesAsync();
     }
 
+    private static string NormalizeAccent(string name) =>
+        name.EndsWith("-dark") ? name[..^5] : name;
+
     public async Task<string> UploadLogoAsync(Stream stream, string fileName)
     {
         var path = await SaveFileAsync(stream, fileName, "logo");
-        await UpdatePath(b => b.LogoPath = path);
+        await using var db = dbFactory.CreateDbContext();
+        await UpdatePath(db, b => b.LogoPath = path);
         return path;
     }
 
     public async Task<string> UploadFaviconAsync(Stream stream, string fileName)
     {
         var path = await SaveFileAsync(stream, fileName, "favicon");
-        await UpdatePath(b => b.FaviconPath = path);
+        await using var db = dbFactory.CreateDbContext();
+        await UpdatePath(db, b => b.FaviconPath = path);
         return path;
     }
 
     public async Task DeleteLogoAsync()
     {
+        await using var db = dbFactory.CreateDbContext();
         var b = await db.AppBrandings.FirstOrDefaultAsync();
         if (b is null) return;
         DeleteFile(b.LogoPath);
@@ -55,6 +64,7 @@ public class BrandingService(ApplicationDbContext db, IWebRootPathProvider webRo
 
     public async Task DeleteFaviconAsync()
     {
+        await using var db = dbFactory.CreateDbContext();
         var b = await db.AppBrandings.FirstOrDefaultAsync();
         if (b is null) return;
         DeleteFile(b.FaviconPath);
@@ -62,7 +72,7 @@ public class BrandingService(ApplicationDbContext db, IWebRootPathProvider webRo
         await db.SaveChangesAsync();
     }
 
-    private async Task UpdatePath(Action<AppBranding> update)
+    private static async Task UpdatePath(ApplicationDbContext db, Action<AppBranding> update)
     {
         var b = await db.AppBrandings.FirstOrDefaultAsync() ?? new AppBranding();
         update(b);
@@ -93,6 +103,7 @@ public class BrandingService(ApplicationDbContext db, IWebRootPathProvider webRo
     private static AppBrandingDto Map(AppBranding b) => new()
     {
         ThemeName = b.ThemeName,
+        ThemeMode = b.ThemeMode,
         CompanyName = b.CompanyName,
         LogoPath = b.LogoPath,
         FaviconPath = b.FaviconPath

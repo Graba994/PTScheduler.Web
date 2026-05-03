@@ -35,12 +35,12 @@
                     <div class="card-body">
                         <div class="row g-3">
                             <div class="col-md-4">
-                                <label class="form-label">Przerwa techniczna po sesji (min)</label>
+                                <label class="form-label">Przerwa techniczna po sesji (min) <HintButton Title="Przerwa techniczna" Text="Czas wolny automatycznie dodawany po każdej sesji. Klient nie może zarezerwować kolejnego treningu bezpośrednio po poprzednim. Przydatne na dojazd, sprzątanie sali lub chwilę odpoczynku między klientami." /></label>
                                 <input type="number" class="form-control" min="0" max="120"
                                        @bind="_cfg.BreakAfterSessionMinutes" />
                             </div>
                             <div class="col-md-4">
-                                <label class="form-label">Granularność slotów (min)</label>
+                                <label class="form-label">Granularność slotów (min) <HintButton Title="Granularność slotów" Text="Minimalna jednostka czasu dostępnych rezerwacji. Przy 30 min klient widzi terminy co 30 minut: 8:00, 8:30, 9:00 itd. Mniejsza wartość = więcej opcji godzinowych do wyboru." /></label>
                                 <select class="form-select" @bind="_cfg.SlotGranularityMinutes">
                                     <option value="15">15 min</option>
                                     <option value="30">30 min</option>
@@ -48,12 +48,18 @@
                                     <option value="60">60 min</option>
                                 </select>
                             </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Okno anulowania przez klienta (godz.) <HintButton Title="Okno anulowania" Text="Klient może samodzielnie anulować wizytę tylko jeśli pozostało więcej niż X godzin do jej rozpoczęcia. Wpisz 0, aby zezwolić na anulowanie w dowolnym momencie bez ograniczeń." /></label>
+                                <input type="number" class="form-control" min="0" max="168"
+                                       @bind="_cfg.CancellationWindowHours" />
+                                <div class="form-text">0 = brak ograniczeń. Klient może anulować do X godz. przed treningiem.</div>
+                            </div>
                             <div class="col-md-4 d-flex align-items-end">
                                 <div class="form-check form-switch mb-2">
                                     <input class="form-check-input" type="checkbox" id="discoverPeers"
                                            @bind="_cfg.AllowClientsDiscoverPeers" />
                                     <label class="form-check-label" for="discoverPeers">
-                                        Klienci widzą listę kontaktów
+                                        Klienci widzą listę kontaktów <HintButton Text="Gdy włączone, klient może zobaczyć innych klientów przypisanych do tego trenera. Przydatne gdy trener pracuje z parami lub grupami ćwiczącymi wspólnie." />
                                     </label>
                                 </div>
                             </div>
@@ -74,7 +80,7 @@
                     <div class="card-body">
                         <div class="row g-3 align-items-end">
                             <div class="col-md-3">
-                                <label class="form-label">Typ</label>
+                                <label class="form-label">Typ okna <HintButton Title="Cykliczny vs jednorazowy" Text="Cykliczny powtarza się co tydzień w wybranym dniu — idealny dla stałego grafiku. Jednorazowy obowiązuje tylko konkretnego dnia, np. wyjątkowy termin w wakacje lub zastępstwo za inny dzień." /></label>
                                 <select class="form-select" @bind="_newIsRecurring">
                                     <option value="true">Cykliczny (dzień tygodnia)</option>
                                     <option value="false">Jednorazowy (data)</option>
@@ -93,7 +99,7 @@
                                     </select>
                                 </div>
                                 <div class="col-md-2">
-                                    <label class="form-label">Ważny od</label>
+                                    <label class="form-label">Ważny od <HintButton Title="Zakres ważności" Text="Opcjonalne daty określające kiedy ta cykliczna dostępność zaczyna i kończy obowiązywać. Puste = bezterminowe. Np. grafik od września do czerwca." /></label>
                                     <input type="date" class="form-control" @bind="_newValidFrom" />
                                 </div>
                                 <div class="col-md-2">
@@ -262,7 +268,7 @@
     {
         await AvailabilityService.SaveConfigAsync(_trainerUserId, _cfg);
         await AuditLogService.LogAsync(_trainerUserId, _trainerEmail, _trainerRole, "AvailabilityConfigSaved", "TrainerConfig",
-            null, $"Przerwa: {_cfg.BreakAfterSessionMinutes}min, granularność: {_cfg.SlotGranularityMinutes}min");
+            null, $"Przerwa: {_cfg.BreakAfterSessionMinutes}min, granularność: {_cfg.SlotGranularityMinutes}min, okno anulowania: {_cfg.CancellationWindowHours}h");
         _configSaved = true;
         await Task.Delay(2000);
         _configSaved = false;

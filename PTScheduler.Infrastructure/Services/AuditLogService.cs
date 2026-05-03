@@ -6,10 +6,11 @@ using PTScheduler.Infrastructure.Data;
 
 namespace PTScheduler.Infrastructure.Services;
 
-public class AuditLogService(ApplicationDbContext db) : IAuditLogService
+public class AuditLogService(IDbContextFactory<ApplicationDbContext> dbFactory) : IAuditLogService
 {
     public async Task LogAsync(string userId, string userEmail, string userRole, string action, string entityType, string? entityId = null, string? details = null)
     {
+        await using var db = dbFactory.CreateDbContext();
         db.AuditLogs.Add(new AuditLog
         {
             Timestamp = DateTime.UtcNow,
@@ -26,6 +27,7 @@ public class AuditLogService(ApplicationDbContext db) : IAuditLogService
 
     public async Task<List<AuditLogDto>> GetLogsAsync(int count = 500, string? search = null, string? entityTypeFilter = null)
     {
+        await using var db = dbFactory.CreateDbContext();
         var query = db.AuditLogs.AsQueryable();
 
         if (!string.IsNullOrWhiteSpace(entityTypeFilter))

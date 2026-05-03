@@ -7,10 +7,11 @@ using PTScheduler.Infrastructure.Data;
 
 namespace PTScheduler.Infrastructure.Services;
 
-public class TrainerAvailabilityService(ApplicationDbContext db) : ITrainerAvailabilityService
+public class TrainerAvailabilityService(IDbContextFactory<ApplicationDbContext> dbFactory) : ITrainerAvailabilityService
 {
     public async Task<List<TrainerAvailabilityDto>> GetAvailabilityRulesAsync(string trainerUserId)
     {
+        await using var db = dbFactory.CreateDbContext();
         var rules = await db.TrainerAvailabilities
             .Where(a => a.TrainerUserId == trainerUserId)
             .OrderBy(a => a.DayOfWeek)
@@ -23,6 +24,7 @@ public class TrainerAvailabilityService(ApplicationDbContext db) : ITrainerAvail
 
     public async Task<TrainerAvailabilityDto> AddRuleAsync(CreateTrainerAvailabilityDto dto)
     {
+        await using var db = dbFactory.CreateDbContext();
         var rule = new TrainerAvailability
         {
             TrainerUserId = dto.TrainerUserId,
@@ -43,6 +45,7 @@ public class TrainerAvailabilityService(ApplicationDbContext db) : ITrainerAvail
 
     public async Task DeleteRuleAsync(int id)
     {
+        await using var db = dbFactory.CreateDbContext();
         var rule = await db.TrainerAvailabilities.FindAsync(id);
         if (rule is not null)
         {
@@ -53,6 +56,7 @@ public class TrainerAvailabilityService(ApplicationDbContext db) : ITrainerAvail
 
     public async Task SetActiveAsync(int id, bool isActive)
     {
+        await using var db = dbFactory.CreateDbContext();
         var rule = await db.TrainerAvailabilities.FindAsync(id);
         if (rule is not null)
         {
@@ -63,19 +67,13 @@ public class TrainerAvailabilityService(ApplicationDbContext db) : ITrainerAvail
 
     public async Task<TrainerConfigDto> GetConfigAsync(string trainerUserId)
     {
-        var cfg = await db.TrainerConfigs.FirstOrDefaultAsync(c => c.TrainerUserId == trainerUserId);
-        return cfg is null
-            ? new TrainerConfigDto { BreakAfterSessionMinutes = 0, SlotGranularityMinutes = 30 }
-            : new TrainerConfigDto
-            {
-                BreakAfterSessionMinutes = cfg.BreakAfterSessionMinutes,
-                SlotGranularityMinutes = cfg.SlotGranularityMinutes,
-                AllowClientsDiscoverPeers = cfg.AllowClientsDiscoverPeers
-            };
+        await using var db = dbFactory.CreateDbContext();
+        return await GetConfigAsync(db, trainerUserId);
     }
 
     public async Task SaveConfigAsync(string trainerUserId, TrainerConfigDto dto)
     {
+        await using var db = dbFactory.CreateDbContext();
         var cfg = await db.TrainerConfigs.FirstOrDefaultAsync(c => c.TrainerUserId == trainerUserId);
         if (cfg is null)
         {
@@ -85,14 +83,16 @@ public class TrainerAvailabilityService(ApplicationDbContext db) : ITrainerAvail
         cfg.BreakAfterSessionMinutes = dto.BreakAfterSessionMinutes;
         cfg.SlotGranularityMinutes = Math.Max(15, dto.SlotGranularityMinutes);
         cfg.AllowClientsDiscoverPeers = dto.AllowClientsDiscoverPeers;
+        cfg.CancellationWindowHours = dto.CancellationWindowHours;
         await db.SaveChangesAsync();
     }
 
     public async Task<List<AvailableSlotDto>> GetAvailableSlotsAsync(
         string trainerUserId, DateOnly date, int sessionDurationMinutes)
     {
-        var cfg = await GetConfigAsync(trainerUserId);
-        var windows = await GetWindowsForDateAsync(trainerUserId, date);
+        await using var db = dbFactory.CreateDbContext();
+        var cfg = await GetConfigAsync(db, trainerUserId);
+        var windows = await GetWindowsForDateAsync(db, trainerUserId, date);
         if (windows.Count == 0) return [];
 
         var dayStart = date.ToDateTime(TimeOnly.MinValue);
@@ -143,7 +143,8 @@ public class TrainerAvailabilityService(ApplicationDbContext db) : ITrainerAvail
 
     public async Task<bool> IsSlotFreeAsync(string trainerUserId, DateTime start, int durationMinutes)
     {
-        var cfg = await GetConfigAsync(trainerUserId);
+        await using var db = dbFactory.CreateDbContext();
+        var cfg = await GetConfigAsync(db, trainerUserId);
         var slotEnd = start.AddMinutes(durationMinutes);
 
         return !await db.Sessions
@@ -155,9 +156,24 @@ public class TrainerAvailabilityService(ApplicationDbContext db) : ITrainerAvail
             .AnyAsync();
     }
 
+    // Internal overload used within methods that already have an open db context
+    private static async Task<TrainerConfigDto> GetConfigAsync(ApplicationDbContext db, string trainerUserId)
+    {
+        var cfg = await db.TrainerConfigs.FirstOrDefaultAsync(c => c.TrainerUserId == trainerUserId);
+        return cfg is null
+            ? new TrainerConfigDto { BreakAfterSessionMinutes = 0, SlotGranularityMinutes = 30 }
+            : new TrainerConfigDto
+            {
+                BreakAfterSessionMinutes = cfg.BreakAfterSessionMinutes,
+                SlotGranularityMinutes = cfg.SlotGranularityMinutes,
+                AllowClientsDiscoverPeers = cfg.AllowClientsDiscoverPeers,
+                CancellationWindowHours = cfg.CancellationWindowHours
+            };
+    }
+
     // Returns (windowStart, windowEnd) in DateTime for the given date
-    private async Task<List<(DateTime Start, DateTime End)>> GetWindowsForDateAsync(
-        string trainerUserId, DateOnly date)
+    private static async Task<List<(DateTime Start, DateTime End)>> GetWindowsForDateAsync(
+        ApplicationDbContext db, string trainerUserId, DateOnly date)
     {
         var dow = date.DayOfWeek;
         var today = date;

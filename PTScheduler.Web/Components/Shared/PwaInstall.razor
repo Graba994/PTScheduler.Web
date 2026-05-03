@@ -1,0 +1,75 @@
+@rendermode InteractiveServer
+@inject IJSRuntime JS
+
+@if (_showInstallButton)
+{
+    <button class="btn btn-primary w-100 d-flex align-items-center justify-content-center gap-2 mb-3"
+            @onclick="InstallAsync">
+        <i class="bi bi-download"></i>
+        Zainstaluj aplikację
+    </button>
+}
+
+@if (_showIosHint && !_iosHintDismissed)
+{
+    <div class="alert alert-info d-flex align-items-start gap-2 mb-3 p-3" style="font-size:.875rem;border-radius:.75rem">
+        <i class="bi bi-phone" style="font-size:1.25rem;flex-shrink:0;margin-top:.1rem"></i>
+        <div class="flex-grow-1">
+            <div class="fw-semibold mb-1">Dodaj do ekranu głównego</div>
+            <div>
+                Naciśnij <strong>
+                    <i class="bi bi-box-arrow-up"></i> Udostępnij
+                </strong> w Safari, a następnie <strong>Dodaj do ekranu głównego</strong>.
+            </div>
+        </div>
+        <button type="button" class="btn-close btn-close-sm ms-1" style="flex-shrink:0"
+                @onclick="DismissIosHint" aria-label="Zamknij"></button>
+    </div>
+}
+
+@code {
+    private bool _showInstallButton;
+    private bool _showIosHint;
+    private bool _iosHintDismissed;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        var isStandalone = await JS.InvokeAsync<bool>("eval",
+            "window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true");
+
+        if (isStandalone) return;
+
+        var isIos = await JS.InvokeAsync<bool>("eval",
+            "/iPhone|iPad|iPod/.test(navigator.userAgent) && !(navigator.userAgent.includes('CriOS') || navigator.userAgent.includes('FxiOS'))");
+
+        if (isIos)
+        {
+            _iosHintDismissed = await JS.InvokeAsync<bool>("eval",
+                "localStorage.getItem('pwa-ios-hint-dismissed') === '1'");
+            _showIosHint = true;
+            StateHasChanged();
+            return;
+        }
+
+        var canInstall = await JS.InvokeAsync<bool>("eval", "!!window._installPrompt");
+        if (canInstall)
+        {
+            _showInstallButton = true;
+            StateHasChanged();
+        }
+    }
+
+    private async Task InstallAsync()
+    {
+        var accepted = await JS.InvokeAsync<bool>("triggerPwaInstall");
+        if (accepted) _showInstallButton = false;
+    }
+
+    private async Task DismissIosHint()
+    {
+        _iosHintDismissed = true;
+        await JS.InvokeVoidAsync("eval", "localStorage.setItem('pwa-ios-hint-dismissed','1')");
+    }
+}

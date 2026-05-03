@@ -9,11 +9,12 @@ using PTScheduler.Infrastructure.Data;
 namespace PTScheduler.Infrastructure.Services;
 
 public class SessionInvitationService(
-    ApplicationDbContext db,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
     UserManager<ApplicationUser> userManager) : ISessionInvitationService
 {
     public async Task<SessionInvitationDto> SendAsync(int sessionId, int invitedClientId, string sentByUserId)
     {
+        await using var db = dbFactory.CreateDbContext();
         var session = await db.Sessions
             .Include(s => s.SessionType)
             .FirstOrDefaultAsync(s => s.Id == sessionId)
@@ -37,11 +38,12 @@ public class SessionInvitationService(
         db.SessionInvitations.Add(invitation);
         await db.SaveChangesAsync();
 
-        return await BuildDtoAsync(invitation, session);
+        return await BuildDtoAsync(db, invitation, session);
     }
 
     public async Task<List<SessionInvitationDto>> GetForSessionAsync(int sessionId)
     {
+        await using var db = dbFactory.CreateDbContext();
         var session = await db.Sessions
             .Include(s => s.SessionType)
             .FirstOrDefaultAsync(s => s.Id == sessionId);
@@ -55,12 +57,13 @@ public class SessionInvitationService(
 
         var result = new List<SessionInvitationDto>();
         foreach (var inv in invitations)
-            result.Add(await BuildDtoAsync(inv, session));
+            result.Add(await BuildDtoAsync(db, inv, session));
         return result;
     }
 
     public async Task<List<SessionInvitationDto>> GetPendingForClientAsync(int clientId)
     {
+        await using var db = dbFactory.CreateDbContext();
         var invitations = await db.SessionInvitations
             .Include(i => i.Session).ThenInclude(s => s.SessionType)
             .Include(i => i.InvitedClient)
@@ -70,12 +73,13 @@ public class SessionInvitationService(
 
         var result = new List<SessionInvitationDto>();
         foreach (var inv in invitations)
-            result.Add(await BuildDtoAsync(inv, inv.Session));
+            result.Add(await BuildDtoAsync(db, inv, inv.Session));
         return result;
     }
 
     public async Task RespondAsync(int invitationId, bool accept, string? note = null)
     {
+        await using var db = dbFactory.CreateDbContext();
         var invitation = await db.SessionInvitations.FindAsync(invitationId)
             ?? throw new InvalidOperationException("Zaproszenie nie istnieje.");
         if (invitation.Status != InvitationStatus.Pending)
@@ -89,13 +93,14 @@ public class SessionInvitationService(
 
     public async Task RevokeAsync(int invitationId)
     {
+        await using var db = dbFactory.CreateDbContext();
         var invitation = await db.SessionInvitations.FindAsync(invitationId)
             ?? throw new InvalidOperationException("Zaproszenie nie istnieje.");
         db.SessionInvitations.Remove(invitation);
         await db.SaveChangesAsync();
     }
 
-    private async Task<SessionInvitationDto> BuildDtoAsync(SessionInvitation inv, Session session)
+    private async Task<SessionInvitationDto> BuildDtoAsync(ApplicationDbContext db, SessionInvitation inv, Session session)
     {
         var trainer = await userManager.FindByIdAsync(session.TrainerUserId);
         var trainerName = $"{trainer?.FirstName} {trainer?.LastName}".Trim()

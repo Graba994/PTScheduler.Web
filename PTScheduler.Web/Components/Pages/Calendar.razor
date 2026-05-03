@@ -6,6 +6,7 @@
 @inject IClientService ClientService
 @inject IAuditLogService AuditLogService
 @inject ISessionInvitationService InvitationService
+@inject ITrainerConfigService TrainerConfigService
 @inject AuthenticationStateProvider AuthState
 @inject ILogger<Calendar> Logger
 @using Microsoft.AspNetCore.Components.Authorization
@@ -287,7 +288,7 @@
 
                     <!-- Client: cancel own session -->
                     @if (_isClientRole && _selectedSession.Status == SessionStatus.Scheduled
-                         && _selectedSession.StartTime > DateTime.Now.AddHours(24))
+                         && (_cancellationWindowHours == 0 || _selectedSession.StartTime > DateTime.Now.AddHours(_cancellationWindowHours)))
                     {
                         <div class="mt-3">
                             @if (!_showCancelForm)
@@ -423,6 +424,8 @@
     private string _userEmail = string.Empty;
     private string _userRole = string.Empty;
     private int? _clientNumericId;
+    private string? _clientTrainerUserId;
+    private int _cancellationWindowHours = 24;
     private bool _isAdminRole;
     private bool _isTrainerRole;
     private bool _isClientRole;
@@ -449,11 +452,22 @@
         {
             var client = await ClientService.GetClientByUserIdAsync(_userId);
             _clientNumericId = client?.Id;
+            _clientTrainerUserId = client?.TrainerUserId;
+            if (!string.IsNullOrEmpty(_clientTrainerUserId))
+            {
+                try
+                {
+                    var cfg = await TrainerConfigService.GetAsync(_clientTrainerUserId);
+                    _cancellationWindowHours = cfg.CancellationWindowHours;
+                }
+                catch { }
+            }
         }
 
         if (_canEdit)
         {
-            _allClients  = await SessionService.GetClientsAsync();
+            var calTrainerFilter = _isAdminRole ? null : _userId;
+            _allClients  = await SessionService.GetClientsAsync(calTrainerFilter);
             _sessionTypes = await SessionService.GetSessionTypesAsync();
         }
     }
@@ -601,11 +615,20 @@
         _busy = true; _panelError = string.Empty;
         try
         {
-            await SessionService.UpdateStatusAsync(_selectedSession.Id, SessionStatus.Cancelled, _cancelReason);
             var details = $"Klient: {_selectedSession.ClientName}, termin: {_selectedSession.StartTime:dd.MM.yyyy HH:mm}" +
                           (string.IsNullOrEmpty(_cancelReason) ? "" : $", powód: {_cancelReason}");
-            await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionCancelled", "Session",
-                _selectedSession.Id.ToString(), details);
+            if (_isClientRole)
+            {
+                await SessionService.ClientCancelSessionAsync(_selectedSession.Id, _userId, _cancelReason);
+                await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionCancelledByClient", "Session",
+                    _selectedSession.Id.ToString(), details);
+            }
+            else
+            {
+                await SessionService.UpdateStatusAsync(_selectedSession.Id, SessionStatus.Cancelled, _cancelReason);
+                await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionCancelled", "Session",
+                    _selectedSession.Id.ToString(), details);
+            }
             ClosePanel();
             if (_module is not null) await _module.InvokeVoidAsync("refetchEvents");
         }

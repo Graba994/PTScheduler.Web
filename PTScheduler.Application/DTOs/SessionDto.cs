@@ -35,6 +35,17 @@ public class SessionTypeDto
     public string Name { get; set; } = string.Empty;
     public int DurationMinutes { get; set; }
     public bool IsGroup { get; set; }
+    public int? MaxParticipants { get; set; }
+    public bool IsActive { get; set; } = true;
+    public int SessionCount { get; set; }
+}
+
+public class CreateSessionTypeDto
+{
+    public string Name { get; set; } = string.Empty;
+    public int DurationMinutes { get; set; } = 60;
+    public bool IsGroup { get; set; }
+    public int? MaxParticipants { get; set; }
 }
 
 public class ClientSummaryDto

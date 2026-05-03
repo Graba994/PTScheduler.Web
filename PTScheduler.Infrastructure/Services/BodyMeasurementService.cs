@@ -6,17 +6,21 @@ using PTScheduler.Infrastructure.Data;
 
 namespace PTScheduler.Infrastructure.Services;
 
-public class BodyMeasurementService(ApplicationDbContext db) : IBodyMeasurementService
+public class BodyMeasurementService(IDbContextFactory<ApplicationDbContext> dbFactory) : IBodyMeasurementService
 {
-    public async Task<List<BodyMeasurementDto>> GetAsync(int clientId) =>
-        await db.BodyMeasurements
+    public async Task<List<BodyMeasurementDto>> GetAsync(int clientId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        return await db.BodyMeasurements
             .Where(m => m.ClientId == clientId)
             .OrderByDescending(m => m.MeasurementDate)
             .Select(m => Map(m))
             .ToListAsync();
+    }
 
     public async Task<BodyMeasurementDto> AddAsync(CreateBodyMeasurementDto dto)
     {
+        await using var db = dbFactory.CreateDbContext();
         var entity = new BodyMeasurement
         {
             ClientId = dto.ClientId,
@@ -37,6 +41,7 @@ public class BodyMeasurementService(ApplicationDbContext db) : IBodyMeasurementS
 
     public async Task DeleteAsync(int id)
     {
+        await using var db = dbFactory.CreateDbContext();
         var entity = await db.BodyMeasurements.FindAsync(id);
         if (entity is null) return;
         db.BodyMeasurements.Remove(entity);

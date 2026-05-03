@@ -9,7 +9,7 @@ namespace PTScheduler.Infrastructure.Services;
 
 public class UserManagementService(
     UserManager<ApplicationUser> userManager,
-    ApplicationDbContext db) : IUserManagementService
+    IDbContextFactory<ApplicationDbContext> dbFactory) : IUserManagementService
 {
     public async Task<List<UserDto>> GetAllUsersAsync()
     {
@@ -118,6 +118,7 @@ public class UserManagementService(
 
         if (dto.Role == Roles.Client)
         {
+            await using var db = dbFactory.CreateDbContext();
             db.Clients.Add(new Domain.Entities.Client
             {
                 ApplicationUserId = user.Id,

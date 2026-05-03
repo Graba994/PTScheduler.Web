@@ -5,6 +5,7 @@
 @inject IAuditLogService AuditLogService
 @inject ITrainerAvailabilityService AvailabilityService
 @inject ISessionSeriesService SeriesService
+@inject ITrainerConfigService TrainerConfigService
 @inject AuthenticationStateProvider AuthState
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
@@ -187,7 +188,16 @@ else
                         <div class="alert alert-danger py-2 small">@_bookingError</div>
                     }
 
-                    @if (_sessionTypes.Count == 0)
+                    @if (_isClientRole && !_clientHasActivePackage)
+                    {
+                        <div class="alert alert-warning py-3 small">
+                            <i class="bi bi-ticket-x me-2 fs-5 d-block mb-2"></i>
+                            <strong>Brak aktywnego pakietu</strong><br />
+                            Nie masz pakietu z dostępnymi sesjami. Skontaktuj się z trenerem, aby zarezerwować wizytę.
+                        </div>
+                        <button class="btn btn-outline-secondary btn-sm w-100" @onclick="CloseBookingPanel">Zamknij</button>
+                    }
+                    else if (_sessionTypes.Count == 0)
                     {
                         <div class="alert alert-warning py-2 small">
                             Brak dostępnych typów sesji. Skontaktuj się z trenerem.
@@ -203,20 +213,30 @@ else
                             </li>
                             <li class="nav-item">
                                 <button class="nav-link py-1 @(_bookingMode == "series" ? "active" : "")"
-                                        @onclick='() => SetBookingMode("series")'>Seria</button>
+                                        @onclick='() => SetBookingMode("series")'>Seria <HintButton Title="Seria wizyt" Text="Rezerwacja cyklu regularnych treningów naraz — np. każdy wtorek i czwartek o 18:00. System rezerwuje wszystkie pasujące terminy w wybranym przedziale dat i dopasowuje do dostępnych pakietów." PopClass="hint-pop-right" /></button>
                             </li>
                         </ul>
 
                         <!-- Session type selector (shared) -->
                         <div class="mb-3">
-                            <label class="form-label small fw-semibold mb-1">Rodzaj sesji</label>
-                            <select class="form-select form-select-sm" @bind="_bookingSessionTypeId"
-                                    @bind:after="OnSessionTypeChangedAsync">
-                                @foreach (var t in _sessionTypes)
-                                {
-                                    <option value="@t.Id">@t.Name (@t.DurationMinutes min)</option>
-                                }
-                            </select>
+                            <label class="form-label small fw-semibold mb-1">Rodzaj sesji <HintButton Text="Wybierz typ treningu. Każdy typ ma własny czas trwania. Jeśli masz aktywny pakiet, możesz rezerwować tylko typy sesji objęte tym pakietem." /></label>
+                            @foreach (var t in _sessionTypes)
+                            {
+                                var isCovered = !_isClientRole || _clientCoveredTypeIds.Contains(t.Id);
+                                var isSelected = _bookingSessionTypeId == t.Id;
+                                <button type="button"
+                                        class="btn btn-sm w-100 mb-1 d-flex justify-content-between align-items-center
+                                               @(isSelected && isCovered ? "btn-primary" : isCovered ? "btn-outline-primary" : "btn-outline-secondary")"
+                                        style="@(!isCovered ? "opacity:.45;cursor:not-allowed" : "")"
+                                        disabled="@(!isCovered)"
+                                        @onclick="@(async () => { if (isCovered) { _bookingSessionTypeId = t.Id; await OnSessionTypeChangedAsync(); } })">
+                                    <span>@t.Name · @t.DurationMinutes min</span>
+                                    @if (!isCovered)
+                                    {
+                                        <span class="badge bg-secondary ms-2" style="font-size:.6rem">Brak w pakiecie</span>
+                                    }
+                                </button>
+                            }
                         </div>
 
                         @if (_bookingMode == "single")
@@ -475,9 +495,9 @@ else
                         </div>
                     }
 
-                    <!-- Client: cancel own session if > 24h in advance -->
+                    <!-- Client: cancel own session within trainer-configured window -->
                     @if (_isClientRole && _selectedSession.Status == SessionStatus.Scheduled
-                         && _selectedSession.StartTime > DateTime.Now.AddHours(24))
+                         && (_cancellationWindowHours == 0 || _selectedSession.StartTime > DateTime.Now.AddHours(_cancellationWindowHours)))
                     {
                         <div class="mt-3">
                             @if (!_showCancelForm)
@@ -568,6 +588,7 @@ else
     // Detail panel state
     private bool _panelOpen;
     private bool _busy;
+    private int _cancellationWindowHours = 24;
     private string _panelError = string.Empty;
     private SessionDto? _selectedSession;
     private bool _showCancelForm;
@@ -584,6 +605,8 @@ else
     private int _bookingSessionTypeId;
     private DateTime _bookingDateTime = default;
     private string _bookingNotes = string.Empty;
+    private HashSet<int> _clientCoveredTypeIds = [];
+    private bool _clientHasActivePackage;
 
     // Slot picker
     private string _bookingMode = "single";
@@ -615,7 +638,10 @@ else
                   : _isClientRole ? Roles.Client : string.Empty;
 
         if (_canEdit)
-            _clients = await SessionService.GetClientsAsync();
+        {
+            var sessionsTrainerFilter = _isAdminRole ? null : _userId;
+            _clients = await SessionService.GetClientsAsync(sessionsTrainerFilter);
+        }
 
         if (_isClientRole)
         {
@@ -660,7 +686,14 @@ else
         _showRestoreConfirm = false;
         _selectedSession    = await SessionService.GetSessionAsync(sessionId);
         if (_selectedSession is not null)
+        {
             _rescheduleDateTime = _selectedSession.StartTime;
+            if (_isClientRole)
+            {
+                var cfg = await TrainerConfigService.GetAsync(_selectedSession.TrainerUserId);
+                _cancellationWindowHours = cfg.CancellationWindowHours;
+            }
+        }
         _panelOpen = true;
     }
 
@@ -679,7 +712,28 @@ else
         ClosePanel();
         if (_sessionTypes.Count == 0)
             _sessionTypes = await SessionService.GetSessionTypesAsync();
-        _bookingSessionTypeId = _sessionTypes.FirstOrDefault()?.Id ?? 0;
+
+        // Refresh client packages to enforce booking restrictions
+        if (_isClientRole && !string.IsNullOrEmpty(_userId))
+        {
+            _clientDto = await ClientService.GetClientByUserIdAsync(_userId);
+            var activePkgs = _clientDto?.AllPackages
+                .Where(p => p.Status == PTScheduler.Domain.Enums.PackageStatus.Active && p.RemainingCredits > 0)
+                .ToList() ?? [];
+            _clientCoveredTypeIds = activePkgs.Select(p => p.SessionTypeId).ToHashSet();
+            _clientHasActivePackage = _clientCoveredTypeIds.Count > 0;
+        }
+        else
+        {
+            _clientCoveredTypeIds = [];
+            _clientHasActivePackage = true;
+        }
+
+        // Auto-select first covered type (or any type for trainers)
+        _bookingSessionTypeId = _isClientRole
+            ? (_sessionTypes.FirstOrDefault(t => _clientCoveredTypeIds.Contains(t.Id))?.Id ?? 0)
+            : (_sessionTypes.FirstOrDefault()?.Id ?? 0);
+
         _bookingMode     = "single";
         _bookingDate     = DateOnly.FromDateTime(DateTime.Today.AddDays(1));
         _bookingDateTime = default;
@@ -766,7 +820,7 @@ else
                 StartTime      = _bookingDateTime,
                 Notes          = string.IsNullOrWhiteSpace(_bookingNotes) ? null : _bookingNotes.Trim()
             };
-            await SessionService.CreateSessionAsync(dto);
+            await SessionService.CreateSessionAsync(dto, allowAwaitingPackage: false);
             await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionBooked", "Session",
                 null, $"Termin: {_bookingDateTime:dd.MM.yyyy HH:mm}");
             CloseBookingPanel();
@@ -849,11 +903,20 @@ else
         _busy = true; _panelError = string.Empty;
         try
         {
-            await SessionService.UpdateStatusAsync(_selectedSession.Id, SessionStatus.Cancelled, _cancelReason);
-            var details = $"Klient: {_selectedSession.ClientName}, termin: {_selectedSession.StartTime:dd.MM.yyyy HH:mm}" +
-                          (string.IsNullOrEmpty(_cancelReason) ? "" : $", powód: {_cancelReason}");
-            await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionCancelled", "Session",
-                _selectedSession.Id.ToString(), details);
+            var suffix = string.IsNullOrEmpty(_cancelReason) ? "" : $", powód: {_cancelReason}";
+            var baseDetails = $"Klient: {_selectedSession.ClientName}, termin: {_selectedSession.StartTime:dd.MM.yyyy HH:mm}";
+            if (_isClientRole)
+            {
+                await SessionService.ClientCancelSessionAsync(_selectedSession.Id, _userId, _cancelReason);
+                await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionCancelledByClient", "Session",
+                    _selectedSession.Id.ToString(), baseDetails + suffix);
+            }
+            else
+            {
+                await SessionService.UpdateStatusAsync(_selectedSession.Id, SessionStatus.Cancelled, _cancelReason);
+                await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionCancelled", "Session",
+                    _selectedSession.Id.ToString(), baseDetails + suffix);
+            }
             ClosePanel();
             await LoadSessionsAsync();
         }

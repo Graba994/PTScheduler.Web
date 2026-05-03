@@ -32,6 +32,7 @@ public class TrainerConfigDto
     public int BreakAfterSessionMinutes { get; set; }
     public int SlotGranularityMinutes { get; set; } = 30;
     public bool AllowClientsDiscoverPeers { get; set; }
+    public int CancellationWindowHours { get; set; } = 24;
 }
 
 public class AvailableSlotDto

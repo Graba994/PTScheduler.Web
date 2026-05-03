@@ -6,6 +6,7 @@ public class SessionPackageDto
 {
     public int Id { get; set; }
     public int ClientId { get; set; }
+    public string ClientName { get; set; } = string.Empty;
     public string CreatedByUserId { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Notes { get; set; }
@@ -58,6 +59,15 @@ public class CreateSessionPackageDto
     public string CreatedByUserId { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public int SessionTypeId { get; set; }
+    public int TotalSessions { get; set; }
+    public decimal PricePerSession { get; set; }
+    public DateTime? ExpiresAt { get; set; }
+    public string? Notes { get; set; }
+}
+
+public class UpdateSessionPackageDto
+{
+    public string Name { get; set; } = string.Empty;
     public int TotalSessions { get; set; }
     public decimal PricePerSession { get; set; }
     public DateTime? ExpiresAt { get; set; }

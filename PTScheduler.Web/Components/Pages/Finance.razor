@@ -1,0 +1,241 @@
+@page "/finance"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Enums
+@using PTScheduler.Domain.Constants
+@inject ISessionPackageService PackageService
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthState
+@attribute [Authorize(Roles = $"{Roles.Admin},{Roles.Trainer},{Roles.Subordinate}")]
+
+@if (!_loaded)
+{
+    <div class="text-center py-4"><div class="spinner-border text-primary" style="width:1.5rem;height:1.5rem"></div></div>
+}
+else
+{
+    <div class="page-header">
+        <h4 class="page-title"><i class="bi bi-currency-dollar me-2" style="color:var(--c-primary)"></i>Finanse</h4>
+        <div class="btn-group btn-group-sm">
+            <button type="button" class="btn @(_months == 6 ? "btn-primary" : "btn-outline-secondary")" @onclick="() => ChangeRange(6)">6M</button>
+            <button type="button" class="btn @(_months == 12 ? "btn-primary" : "btn-outline-secondary")" @onclick="() => ChangeRange(12)">12M</button>
+            <button type="button" class="btn @(_months == 24 ? "btn-primary" : "btn-outline-secondary")" @onclick="() => ChangeRange(24)">2 lata</button>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-6 col-xl-3">
+            <div class="stat-card">
+                <div class="stat-icon"><i class="bi bi-cash-stack"></i></div>
+                <div>
+                    <div class="stat-value">@_packages.Sum(p => p.TotalPrice).ToString("N0") zł</div>
+                    <div class="stat-label">Łączna wartość</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="stat-card">
+                <div class="stat-icon" style="background:#F0FDF4;color:#16A34A"><i class="bi bi-check-circle-fill"></i></div>
+                <div>
+                    <div class="stat-value">@_packages.Where(p => p.IsPaid).Sum(p => p.TotalPrice).ToString("N0") zł</div>
+                    <div class="stat-label">Opłacone</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="stat-card">
+                <div class="stat-icon" style="background:#FEF2F2;color:#DC2626"><i class="bi bi-exclamation-circle-fill"></i></div>
+                <div>
+                    <div class="stat-value">@_unpaid.Sum(p => p.TotalPrice).ToString("N0") zł</div>
+                    <div class="stat-label">Nieopłacone</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="stat-card">
+                <div class="stat-icon" style="background:#EFF6FF;color:#3B82F6"><i class="bi bi-box-seam-fill"></i></div>
+                <div>
+                    <div class="stat-value">@_packages.Count(p => p.Status == PackageStatus.Active)</div>
+                    <div class="stat-label">Aktywnych pakietów</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-lg-8">
+            <div class="card h-100">
+                <div class="card-header py-2 fw-semibold" style="font-size:.875rem">
+                    <i class="bi bi-bar-chart-fill me-2" style="color:var(--c-primary)"></i>Przychody miesięcznie — opłacone pakiety (zł)
+                </div>
+                <div class="card-body" style="height:220px;position:relative">
+                    <canvas id="finance-bar"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-lg-4">
+            <div class="card h-100">
+                <div class="card-header py-2 fw-semibold" style="font-size:.875rem">
+                    <i class="bi bi-pie-chart-fill me-2" style="color:var(--c-primary)"></i>Status pakietów
+                </div>
+                <div class="card-body" style="height:220px;position:relative">
+                    <canvas id="finance-donut"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header py-2 d-flex align-items-center justify-content-between">
+            <span class="fw-semibold" style="font-size:.875rem">
+                <i class="bi bi-exclamation-triangle-fill me-2" style="color:#D97706"></i>Nieopłacone pakiety
+            </span>
+            @if (_unpaid.Any())
+            {
+                <span class="badge bg-warning text-dark">@_unpaid.Count</span>
+            }
+        </div>
+        <div class="card-body p-0">
+            @if (!_unpaid.Any())
+            {
+                <div class="text-center text-muted py-4 small">
+                    <i class="bi bi-check-circle d-block fs-3 mb-2" style="color:#16A34A"></i>Wszystkie pakiety w tym okresie są opłacone
+                </div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0" style="font-size:.875rem">
+                        <thead>
+                            <tr>
+                                <th>Klient</th>
+                                <th>Pakiet</th>
+                                <th class="text-center">Sesje</th>
+                                <th class="text-end">Wartość</th>
+                                <th>Zakup</th>
+                                <th>Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var p in _unpaid.OrderByDescending(p => p.TotalPrice))
+                            {
+                                <tr>
+                                    <td>
+                                        <a href="/clients/@p.ClientId" class="text-decoration-none fw-semibold">@p.ClientName</a>
+                                    </td>
+                                    <td>@p.Name</td>
+                                    <td class="text-center">@p.TotalSessions</td>
+                                    <td class="text-end fw-semibold" style="color:#DC2626">@p.TotalPrice.ToString("N0") zł</td>
+                                    <td class="text-muted">@p.PurchasedAt.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                                    <td><span class="badge @StatusCss(p.Status)">@StatusLabel(p.Status)</span></td>
+                                </tr>
+                            }
+                        </tbody>
+                        <tfoot>
+                            <tr class="fw-bold table-light">
+                                <td colspan="3">Razem nieopłacone</td>
+                                <td class="text-end" style="color:#DC2626">@_unpaid.Sum(p => p.TotalPrice).ToString("N0") zł</td>
+                                <td colspan="2"></td>
+                            </tr>
+                        </tfoot>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loaded;
+    private int _months = 6;
+    private string? _trainerUserId;
+    private List<SessionPackageDto> _packages = [];
+    private List<SessionPackageDto> _unpaid = [];
+    private bool _chartNeedsRender;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var isAdmin = auth.User.IsInRole(Roles.Admin);
+        _trainerUserId = isAdmin ? null : auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        await LoadDataAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_chartNeedsRender)
+        {
+            _chartNeedsRender = false;
+            await RenderChartsAsync();
+        }
+    }
+
+    private async Task ChangeRange(int months)
+    {
+        _months = months;
+        _loaded = false;
+        StateHasChanged();
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        var from = DateTime.UtcNow.AddMonths(-_months);
+        var all = await PackageService.GetAllPackagesAsync(_trainerUserId);
+        _packages = all.Where(p => p.PurchasedAt >= from).ToList();
+        _unpaid = _packages.Where(p => !p.IsPaid && p.Status != PackageStatus.Cancelled).ToList();
+        _loaded = true;
+        _chartNeedsRender = true;
+    }
+
+    private async Task RenderChartsAsync()
+    {
+        var monthSlots = Enumerable.Range(0, _months)
+            .Select(i => DateTime.Now.AddMonths(-(_months - 1 - i)))
+            .Select(d => (Label: d.ToString("MM.yy"), Year: d.Year, Month: d.Month))
+            .ToList();
+
+        var barLabels = monthSlots.Select(m => m.Label).ToArray();
+        var barRevenue = monthSlots
+            .Select(m => (double)_packages
+                .Where(p => p.IsPaid
+                    && p.PurchasedAt.ToLocalTime().Year == m.Year
+                    && p.PurchasedAt.ToLocalTime().Month == m.Month)
+                .Sum(p => p.TotalPrice))
+            .ToArray();
+
+        await JS.InvokeVoidAsync("PTChart.renderBar", "finance-bar", barLabels,
+            new object[] { new { label = "Przychód (zł)", data = barRevenue } });
+
+        var active = _packages.Count(p => p.Status == PackageStatus.Active);
+        var depleted = _packages.Count(p => p.Status == PackageStatus.Depleted);
+        var expired = _packages.Count(p => p.Status == PackageStatus.Expired);
+        var cancelled = _packages.Count(p => p.Status == PackageStatus.Cancelled);
+
+        await JS.InvokeVoidAsync("PTChart.renderDoughnut", "finance-donut",
+            new[] { "Aktywne", "Wyczerpane", "Wygasłe", "Anulowane" },
+            new double[] { active, depleted, expired, cancelled },
+            new[] { "#3B82F6", "#16A34A", "#D97706", "#9CA3AF" });
+    }
+
+    private static string StatusCss(PackageStatus s) => s switch
+    {
+        PackageStatus.Active    => "bg-primary",
+        PackageStatus.Depleted  => "bg-success",
+        PackageStatus.Expired   => "bg-warning text-dark",
+        PackageStatus.Cancelled => "bg-secondary",
+        _                       => "bg-secondary"
+    };
+
+    private static string StatusLabel(PackageStatus s) => s switch
+    {
+        PackageStatus.Active    => "Aktywny",
+        PackageStatus.Depleted  => "Wyczerpany",
+        PackageStatus.Expired   => "Wygasły",
+        PackageStatus.Cancelled => "Anulowany",
+        _                       => s.ToString()
+    };
+}

@@ -1,7 +1,8 @@
 @inherits LayoutComponentBase
 @layout PTScheduler.Web.Components.Layout.MainLayout
 @using Microsoft.AspNetCore.Identity
-@inject UserManager<ApplicationUser> UserManager
+@using Microsoft.Extensions.DependencyInjection
+@inject IServiceScopeFactory ScopeFactory
 
 <div class="manage-shell">
 
@@ -41,7 +42,10 @@
     protected override async Task OnInitializedAsync()
     {
         if (HttpContext is null) return;
-        var user = await UserManager.GetUserAsync(HttpContext.User);
+        await using var scope = ScopeFactory.CreateAsyncScope();
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+
+        var user = await userManager.GetUserAsync(HttpContext.User);
         if (user is null) return;
 
         var fn = user.FirstName ?? "";
@@ -54,7 +58,7 @@
         if (string.IsNullOrEmpty(_initials) && _email.Length > 0)
             _initials = _email[0].ToString().ToUpper();
 
-        var roles = await UserManager.GetRolesAsync(user);
+        var roles = await userManager.GetRolesAsync(user);
         _role = roles.FirstOrDefault() ?? "";
     }
 

@@ -27,7 +27,8 @@ else
             <div class="card h-100">
                 <div class="card-header"><i class="bi bi-palette me-2"></i>Motyw kolorystyczny</div>
                 <div class="card-body">
-                    <div class="theme-grid">
+                    <p class="text-muted small mb-2 fw-semibold">Akcent kolorystyczny</p>
+                    <div class="theme-grid mb-4">
                         @foreach (var t in _themes)
                         {
                             <button type="button"
@@ -37,6 +38,25 @@ else
                                 <span>@t.Value.Label</span>
                             </button>
                         }
+                    </div>
+
+                    <p class="text-muted small mb-2 fw-semibold">Tryb wyświetlania</p>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button type="button"
+                                class="btn btn-sm @(_branding.ThemeMode == "light" ? "btn-primary" : "btn-outline-secondary")"
+                                @onclick='() => _branding.ThemeMode = "light"'>
+                            <i class="bi bi-sun-fill me-1"></i>Jasny
+                        </button>
+                        <button type="button"
+                                class="btn btn-sm @(_branding.ThemeMode == "dark" ? "btn-primary" : "btn-outline-secondary")"
+                                @onclick='() => _branding.ThemeMode = "dark"'>
+                            <i class="bi bi-moon-stars-fill me-1"></i>Ciemny
+                        </button>
+                        <button type="button"
+                                class="btn btn-sm @(_branding.ThemeMode == "system" ? "btn-primary" : "btn-outline-secondary")"
+                                @onclick='() => _branding.ThemeMode = "system"'>
+                            <i class="bi bi-circle-half me-1"></i>Systemowy
+                        </button>
                     </div>
                 </div>
             </div>
@@ -61,7 +81,7 @@ else
                         @if (!string.IsNullOrEmpty(_logoPath))
                         {
                             <div class="d-flex align-items-center gap-2 mb-2">
-                                <img src="@_logoPath?v=@_logoVer" alt="Logo"
+                                <img src="@_logoPath" alt="Logo"
                                      style="height:40px;max-width:140px;object-fit:contain;border-radius:4px;border:1px solid #E5E7EB;padding:4px" />
                                 <button class="btn btn-sm btn-outline-danger" @onclick="DeleteLogo">
                                     <i class="bi bi-trash me-1"></i>Usuń
@@ -82,7 +102,7 @@ else
                         @if (!string.IsNullOrEmpty(_faviconPath))
                         {
                             <div class="d-flex align-items-center gap-2 mb-2">
-                                <img src="@_faviconPath?v=@_faviconVer" alt="Favicon"
+                                <img src="@_faviconPath" alt="Favicon"
                                      style="height:32px;width:32px;object-fit:contain;border-radius:4px;border:1px solid #E5E7EB;padding:2px" />
                                 <button class="btn btn-sm btn-outline-danger" @onclick="DeleteFavicon">
                                     <i class="bi bi-trash me-1"></i>Usuń
@@ -136,8 +156,6 @@ else
     private SaveBrandingDto? _branding;
     private string? _logoPath;
     private string? _faviconPath;
-    private int _logoVer;
-    private int _faviconVer;
     private bool _saving;
     private string _message = string.Empty;
     private string _error   = string.Empty;
@@ -164,6 +182,7 @@ else
         _branding = new SaveBrandingDto
         {
             ThemeName   = dto.ThemeName,
+            ThemeMode   = dto.ThemeMode ?? "light",
             CompanyName = dto.CompanyName,
         };
         _logoPath    = dto.LogoPath;
@@ -196,24 +215,28 @@ else
 
     private async Task UploadLogo(InputFileChangeEventArgs e)
     {
+        if (_branding is null) return;
         _error = string.Empty;
         try
         {
             await using var stream = e.File.OpenReadStream(2 * 1024 * 1024);
-            _logoPath = await BrandingService.UploadLogoAsync(stream, e.File.Name);
-            _logoVer++;
+            await BrandingService.UploadLogoAsync(stream, e.File.Name);
+            await BrandingService.SaveAsync(_branding);
+            Nav.NavigateTo(Nav.Uri, forceLoad: true);
         }
         catch (Exception ex) { _error = $"Błąd logo: {ex.Message}"; }
     }
 
     private async Task UploadFavicon(InputFileChangeEventArgs e)
     {
+        if (_branding is null) return;
         _error = string.Empty;
         try
         {
             await using var stream = e.File.OpenReadStream(512 * 1024);
-            _faviconPath = await BrandingService.UploadFaviconAsync(stream, e.File.Name);
-            _faviconVer++;
+            await BrandingService.UploadFaviconAsync(stream, e.File.Name);
+            await BrandingService.SaveAsync(_branding);
+            Nav.NavigateTo(Nav.Uri, forceLoad: true);
         }
         catch (Exception ex) { _error = $"Błąd favicon: {ex.Message}"; }
     }

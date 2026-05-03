@@ -1,0 +1,77 @@
+@page "/admin/payments"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@using PTScheduler.Domain.Constants
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<AppTitle Page="Płatności online" />
+
+<div class="manage-card">
+    <h5 class="fw-bold mb-1"><i class="bi bi-credit-card-fill me-2"></i>Płatności online</h5>
+    <p class="text-muted small mb-4">Włącz lub wyłącz moduł płatności online oraz zarządzaj dostępnymi operatorami.</p>
+
+    <div class="d-flex align-items-center justify-content-between mb-3 p-3 border rounded">
+        <div>
+            <div class="fw-semibold">Płatności online</div>
+            <div class="text-muted small">Master switch — włącza moduł płatności dla klientów</div>
+        </div>
+        <div class="form-check form-switch mb-0">
+            <input class="form-check-input" type="checkbox" role="switch"
+                   checked="@_enabled"
+                   @onchange="e => _enabled = (bool)(e.Value ?? false)" />
+        </div>
+    </div>
+
+    <label class="form-label fw-semibold small text-uppercase text-muted mb-2">Dostępne operatory</label>
+    <div class="d-flex flex-column gap-0 border rounded overflow-hidden mb-4">
+        @foreach (var provider in _providers)
+        {
+            <div class="d-flex align-items-center justify-content-between px-3 py-2 border-bottom">
+                <div class="d-flex align-items-center gap-2">
+                    <i class="bi bi-bank text-primary"></i>
+                    <span class="small fw-semibold">@provider.Name</span>
+                </div>
+                <div class="form-check form-switch mb-0">
+                    <input class="form-check-input" type="checkbox" role="switch"
+                           checked="@provider.IsEnabled"
+                           disabled="@(!_enabled)"
+                           @onchange="e => provider.IsEnabled = (bool)(e.Value ?? false)" />
+                </div>
+            </div>
+        }
+    </div>
+
+    @if (!string.IsNullOrEmpty(_saveMsg))
+    {
+        <div class="alert alert-info py-2 small mb-3">@_saveMsg</div>
+    }
+
+    <button class="btn btn-primary btn-sm" @onclick="Save">
+        <i class="bi bi-floppy-fill me-1"></i>Zapisz ustawienia
+    </button>
+    <p class="text-muted small mt-3 mb-0">
+        <i class="bi bi-info-circle me-1"></i>Integracja z API operatorów płatności zostanie uruchomiona w kolejnej wersji.
+    </p>
+</div>
+
+@code {
+    private bool _enabled;
+    private string _saveMsg = string.Empty;
+    private List<ProviderItem> _providers =
+    [
+        new("Przelewy24"),
+        new("PayU"),
+        new("PayPo"),
+        new("Klarna")
+    ];
+
+    private void Save()
+    {
+        _saveMsg = "Ustawienia płatności zapisane (infrastruktura gotowa — integracja API w przygotowaniu).";
+    }
+
+    private sealed class ProviderItem(string name)
+    {
+        public string Name { get; } = name;
+        public bool IsEnabled { get; set; }
+    }
+}

@@ -172,6 +172,10 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Property<string>("LogoPath")
                         .HasColumnType("text");
 
+                    b.Property<string>("ThemeMode")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<string>("ThemeName")
                         .IsRequired()
                         .HasColumnType("text");
@@ -430,6 +434,50 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("IntroSessionConfigs");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.NotificationPreferences", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("ClientCancelledSession")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("ExpiringPackages")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("NewClientPending")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("PackageAssigned")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("SessionBooked")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("SessionCancelledByTrainer")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("SessionRescheduled")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("ShowHints")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId")
+                        .IsUnique();
+
+                    b.ToTable("NotificationPreferences");
                 });
 
             modelBuilder.Entity("PTScheduler.Domain.Entities.Session", b =>
@@ -726,6 +774,9 @@ namespace PTScheduler.Infrastructure.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<int>("BreakAfterSessionMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("CancellationWindowHours")
                         .HasColumnType("integer");
 
                     b.Property<int>("SlotGranularityMinutes")

@@ -8,11 +8,12 @@ using PTScheduler.Infrastructure.Data;
 namespace PTScheduler.Infrastructure.Services;
 
 public class SessionSeriesService(
-    ApplicationDbContext db,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
     ITrainerAvailabilityService availabilityService) : ISessionSeriesService
 {
     public async Task<SeriesPreviewDto> PreviewAsync(CreateSessionSeriesDto dto)
     {
+        await using var db = dbFactory.CreateDbContext();
         var dates = GenerateDates(dto);
         var sessionType = await db.SessionTypes.FindAsync(dto.SessionTypeId)
             ?? throw new InvalidOperationException("Typ sesji nie istnieje.");
@@ -27,7 +28,7 @@ public class SessionSeriesService(
             else conflictDates.Add(d);
         }
 
-        var credits = await GetAvailableCreditsAsync(dto.ClientId, dto.SessionTypeId, dto.PackageId);
+        var credits = await GetAvailableCreditsAsync(db, dto.ClientId, dto.SessionTypeId, dto.PackageId);
         var willScheduled = Math.Min(scheduledDates.Count, credits);
         var willAwaiting  = scheduledDates.Count - willScheduled;
 
@@ -43,11 +44,11 @@ public class SessionSeriesService(
 
     public async Task<SessionSeriesDto> CreateAsync(CreateSessionSeriesDto dto, bool skipConflicts = true)
     {
+        await using var db = dbFactory.CreateDbContext();
         var sessionType = await db.SessionTypes.FindAsync(dto.SessionTypeId)
             ?? throw new InvalidOperationException("Typ sesji nie istnieje.");
 
         var dates = GenerateDates(dto);
-        var credits = await GetAvailableCreditsAsync(dto.ClientId, dto.SessionTypeId, dto.PackageId);
 
         var series = new SessionSeries
         {
@@ -65,7 +66,18 @@ public class SessionSeriesService(
         db.SessionSeries.Add(series);
         await db.SaveChangesAsync();
 
-        int creditsUsed = 0;
+        // Load matching packages ordered by soonest expiry
+        var packages = await db.SessionPackages
+            .Where(p => p.ClientId == dto.ClientId
+                     && p.SessionTypeId == dto.SessionTypeId
+                     && p.Status == PackageStatus.Active
+                     && p.UsedSessions < p.TotalSessions)
+            .OrderBy(p => p.ExpiresAt ?? DateTime.MaxValue)
+            .ToListAsync();
+
+        // Use package pointer so we exhaust one before moving to next
+        int pkgIdx = 0;
+
         foreach (var start in dates)
         {
             var free = await availabilityService.IsSlotFreeAsync(dto.TrainerUserId, start, sessionType.DurationMinutes);
@@ -76,8 +88,22 @@ public class SessionSeriesService(
                 continue;
             }
 
-            var status = creditsUsed < credits ? SessionStatus.Scheduled : SessionStatus.AwaitingPackage;
-            creditsUsed++;
+            // Advance to a package that still has credits
+            while (pkgIdx < packages.Count && packages[pkgIdx].UsedSessions >= packages[pkgIdx].TotalSessions)
+                pkgIdx++;
+
+            int? linkedPackageId = null;
+            var status = SessionStatus.AwaitingPackage;
+
+            if (pkgIdx < packages.Count)
+            {
+                var pkg = packages[pkgIdx];
+                linkedPackageId = pkg.Id;
+                pkg.UsedSessions++;
+                if (pkg.UsedSessions >= pkg.TotalSessions)
+                    pkg.Status = PackageStatus.Depleted;
+                status = SessionStatus.Scheduled;
+            }
 
             db.Sessions.Add(new Session
             {
@@ -86,20 +112,21 @@ public class SessionSeriesService(
                 SessionTypeId = dto.SessionTypeId,
                 StartTime     = start,
                 Status        = status,
-                Notes         = dto.Notes,
-                PackageId     = dto.PackageId,
+                PackageId     = linkedPackageId,
                 SeriesId      = series.Id,
+                Notes         = dto.Notes,
                 CreatedAt     = DateTime.Now
             });
         }
 
         await db.SaveChangesAsync();
 
-        return await BuildDtoAsync(series);
+        return await BuildDtoAsync(db, series);
     }
 
     public async Task<List<SessionSeriesDto>> GetSeriesForClientAsync(int clientId)
     {
+        await using var db = dbFactory.CreateDbContext();
         var list = await db.SessionSeries
             .Include(s => s.SessionType)
             .Where(s => s.ClientId == clientId)
@@ -107,12 +134,13 @@ public class SessionSeriesService(
             .ToListAsync();
 
         var result = new List<SessionSeriesDto>();
-        foreach (var s in list) result.Add(await BuildDtoAsync(s));
+        foreach (var s in list) result.Add(await BuildDtoAsync(db, s));
         return result;
     }
 
     public async Task<List<SessionSeriesDto>> GetSeriesForTrainerAsync(string trainerUserId)
     {
+        await using var db = dbFactory.CreateDbContext();
         var list = await db.SessionSeries
             .Include(s => s.SessionType)
             .Where(s => s.TrainerUserId == trainerUserId)
@@ -120,12 +148,13 @@ public class SessionSeriesService(
             .ToListAsync();
 
         var result = new List<SessionSeriesDto>();
-        foreach (var s in list) result.Add(await BuildDtoAsync(s));
+        foreach (var s in list) result.Add(await BuildDtoAsync(db, s));
         return result;
     }
 
     public async Task CancelSeriesAsync(int seriesId, bool cancelFutureSessions = true)
     {
+        await using var db = dbFactory.CreateDbContext();
         var series = await db.SessionSeries.FindAsync(seriesId)
             ?? throw new InvalidOperationException("Seria nie istnieje.");
         series.IsActive = false;
@@ -140,6 +169,16 @@ public class SessionSeriesService(
                 .ToListAsync();
             foreach (var s in futureSessions)
             {
+                if (s.PackageId.HasValue)
+                {
+                    var pkg = await db.SessionPackages.FindAsync(s.PackageId.Value);
+                    if (pkg is not null && pkg.Status != PackageStatus.Cancelled)
+                    {
+                        if (pkg.UsedSessions > 0) pkg.UsedSessions--;
+                        if (pkg.Status == PackageStatus.Depleted && pkg.UsedSessions < pkg.TotalSessions)
+                            pkg.Status = PackageStatus.Active;
+                    }
+                }
                 s.Status = SessionStatus.Cancelled;
                 s.CancelledAt = DateTime.Now;
             }
@@ -166,7 +205,7 @@ public class SessionSeriesService(
         return dates;
     }
 
-    private async Task<int> GetAvailableCreditsAsync(int clientId, int sessionTypeId, int? packageId)
+    private static async Task<int> GetAvailableCreditsAsync(ApplicationDbContext db, int clientId, int sessionTypeId, int? packageId)
     {
         var query = db.SessionPackages
             .Where(p => p.ClientId == clientId
@@ -181,7 +220,7 @@ public class SessionSeriesService(
         return packages.Sum(p => p.TotalSessions - p.UsedSessions);
     }
 
-    private async Task<SessionSeriesDto> BuildDtoAsync(SessionSeries s)
+    private static async Task<SessionSeriesDto> BuildDtoAsync(ApplicationDbContext db, SessionSeries s)
     {
         var now = DateTime.Now;
         var sessionsCount = await db.Sessions.CountAsync(x => x.SeriesId == s.Id);

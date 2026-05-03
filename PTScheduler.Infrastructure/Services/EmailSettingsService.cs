@@ -6,10 +6,11 @@ using PTScheduler.Infrastructure.Data;
 
 namespace PTScheduler.Infrastructure.Services;
 
-public class EmailSettingsService(ApplicationDbContext db) : IEmailSettingsService
+public class EmailSettingsService(IDbContextFactory<ApplicationDbContext> dbFactory) : IEmailSettingsService
 {
     public async Task<EmailSettingsDto> GetAsync()
     {
+        await using var db = dbFactory.CreateDbContext();
         var e = await db.EmailSettings.FirstOrDefaultAsync();
         if (e is null) return new EmailSettingsDto();
         return new EmailSettingsDto
@@ -28,6 +29,7 @@ public class EmailSettingsService(ApplicationDbContext db) : IEmailSettingsServi
 
     public async Task SaveAsync(EmailSettingsDto dto)
     {
+        await using var db = dbFactory.CreateDbContext();
         var e = await db.EmailSettings.FirstOrDefaultAsync();
         if (e is null)
         {

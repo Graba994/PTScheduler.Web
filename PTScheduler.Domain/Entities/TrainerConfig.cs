@@ -17,4 +17,5 @@ public class TrainerConfig
 
     // If true: every client of this trainer can see every other client in contacts
     public bool AllowClientsDiscoverPeers { get; set; } = false;
+    public int CancellationWindowHours { get; set; } = 24;
 }

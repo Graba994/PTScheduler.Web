@@ -15,13 +15,17 @@ public static class DependencyInjection
         IConfiguration configuration,
         string contentRootPath)
     {
-        services.AddDbContext<ApplicationDbContext>((sp, options) =>
+        services.AddDbContextFactory<ApplicationDbContext>(options =>
         {
-            var connStr = sp.GetRequiredService<IConfiguration>().GetConnectionString("DefaultConnection")
+            var connStr = configuration.GetConnectionString("DefaultConnection")
                 ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
             options.UseNpgsql(connStr)
                    .ConfigureWarnings(w => w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
         });
+
+        // Scoped ApplicationDbContext for Identity (derived from the Singleton factory)
+        services.AddScoped(sp =>
+            sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
 
         var settingsFilePath = Path.Combine(contentRootPath, "connections.json");
         services.AddScoped<IDatabaseSettingsService>(sp =>
@@ -32,6 +36,7 @@ public static class DependencyInjection
         services.AddScoped<IDatabaseMaintenanceService, DatabaseMaintenanceService>();
         services.AddScoped<IUserManagementService, UserManagementService>();
         services.AddScoped<ISessionPackageService, SessionPackageService>();
+        services.AddScoped<ISessionTypeService, SessionTypeService>();
         services.AddScoped<IIntroSessionService, IntroSessionService>();
         services.AddScoped<ISessionService, SessionService>();
         services.AddScoped<IClientService, ClientService>();
@@ -44,6 +49,8 @@ public static class DependencyInjection
         services.AddScoped<IEmailSettingsService, EmailSettingsService>();
         services.AddScoped<IEmailService, SmtpEmailService>();
         services.AddScoped<IBodyMeasurementService, BodyMeasurementService>();
+        services.AddScoped<ITrainerConfigService, TrainerConfigService>();
+        services.AddScoped<INotificationPreferencesService, NotificationPreferencesService>();
 
         return services;
     }

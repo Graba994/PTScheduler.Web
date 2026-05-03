@@ -1,0 +1,39 @@
+@inject PTScheduler.Web.Services.HintStateService HintState
+@inject PTScheduler.Application.Interfaces.INotificationPreferencesService NotifService
+@inject Microsoft.AspNetCore.Components.Authorization.AuthenticationStateProvider AuthState
+@using System.Security.Claims
+
+@if (HintState.ShowHints)
+{
+    <span class="hint-wrap">
+        <button type="button" class="hint-btn @(_open ? "hint-btn-active" : "")"
+                @onclick="Toggle" title="Pomoc">?</button>
+        @if (_open)
+        {
+            <div class="hint-pop @PopClass">
+                @if (!string.IsNullOrEmpty(Title))
+                {
+                    <div class="hint-pop-title">@Title</div>
+                }
+                <div class="hint-pop-body">@Text</div>
+            </div>
+        }
+    </span>
+}
+
+@code {
+    [Parameter] public string Text { get; set; } = string.Empty;
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public string PopClass { get; set; } = string.Empty;
+
+    private bool _open;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var userId = auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        await HintState.EnsureLoadedAsync(userId, NotifService);
+    }
+
+    private void Toggle() => _open = !_open;
+}

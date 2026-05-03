@@ -50,6 +50,7 @@ builder.Services.AddIdentityCore<ApplicationUser>(options =>
 
 builder.Services.AddScoped<IEmailSender<ApplicationUser>, PTScheduler.Web.Components.Account.IdentityEmailSender>();
 builder.Services.AddSingleton<IWebRootPathProvider, WebRootPathProvider>();
+builder.Services.AddScoped<PTScheduler.Web.Services.HintStateService>();
 builder.Services.AddHostedService<SessionReminderService>();
 
 var app = builder.Build();

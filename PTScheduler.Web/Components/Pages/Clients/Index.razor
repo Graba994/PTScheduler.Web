@@ -2,8 +2,11 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
 @inject IClientService ClientService
 @inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
+@using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
 @using PTScheduler.Domain.Enums
 @rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
 
@@ -111,7 +114,10 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        clients = await ClientService.GetClientsAsync();
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var isAdmin = auth.User.IsInRole(Roles.Admin);
+        var trainerUserId = isAdmin ? null : auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        clients = await ClientService.GetClientsAsync(trainerUserId);
     }
 }
 

@@ -1,22 +1,21 @@
-using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using PTScheduler.Application.DTOs;
 using PTScheduler.Application.Interfaces;
+using PTScheduler.Domain.Constants;
 using PTScheduler.Domain.Entities;
 using PTScheduler.Domain.Enums;
 using PTScheduler.Infrastructure.Data;
-using PTScheduler.Infrastructure.Services;
 
 namespace PTScheduler.Infrastructure.Services;
 
 public class SessionService(
-    ApplicationDbContext db,
-    UserManager<ApplicationUser> userManager,
-    ISessionPackageService packageService,
-    IEmailService emailService) : ISessionService
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    IEmailService emailService,
+    INotificationPreferencesService notificationPrefs) : ISessionService
 {
     public async Task<List<SessionDto>> GetSessionsAsync(DateTime from, DateTime to, string? trainerUserId = null, int? clientId = null)
     {
+        await using var db = dbFactory.CreateDbContext();
         var query = db.Sessions
             .Include(s => s.Client)
             .Include(s => s.SessionType)
@@ -24,17 +23,13 @@ public class SessionService(
 
         if (trainerUserId is not null)
         {
-            var trainer = await userManager.FindByIdAsync(trainerUserId);
-            if (trainer is not null)
-            {
-                var subordinateIds = await userManager.Users
-                    .Where(u => u.SupervisorId == trainerUserId)
-                    .Select(u => u.Id)
-                    .ToListAsync();
+            var subordinateIds = await db.Users
+                .Where(u => u.SupervisorId == trainerUserId)
+                .Select(u => u.Id)
+                .ToListAsync();
 
-                var visibleTrainerIds = subordinateIds.Append(trainerUserId).ToList();
-                query = query.Where(s => visibleTrainerIds.Contains(s.TrainerUserId));
-            }
+            var visibleTrainerIds = subordinateIds.Append(trainerUserId).ToList();
+            query = query.Where(s => visibleTrainerIds.Contains(s.TrainerUserId));
         }
 
         if (clientId.HasValue)
@@ -42,7 +37,7 @@ public class SessionService(
 
         var sessions = await query.OrderBy(s => s.StartTime).ToListAsync();
         var trainerIds = sessions.Select(s => s.TrainerUserId).Distinct().ToList();
-        var trainers = await userManager.Users
+        var trainers = await db.Users
             .Where(u => trainerIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id, u => $"{u.FirstName} {u.LastName}".Trim().NullIfEmpty() ?? u.Email ?? u.Id);
 
@@ -51,6 +46,7 @@ public class SessionService(
 
     public async Task<List<SessionDto>> GetPastSessionsAsync(string? trainerUserId = null, int? clientId = null, int count = 50)
     {
+        await using var db = dbFactory.CreateDbContext();
         var now = DateTime.Now;
         var query = db.Sessions
             .Include(s => s.Client)
@@ -59,7 +55,7 @@ public class SessionService(
 
         if (trainerUserId is not null)
         {
-            var subordinateIds = await userManager.Users
+            var subordinateIds = await db.Users
                 .Where(u => u.SupervisorId == trainerUserId)
                 .Select(u => u.Id)
                 .ToListAsync();
@@ -72,7 +68,7 @@ public class SessionService(
 
         var sessions = await query.OrderByDescending(s => s.StartTime).Take(count).ToListAsync();
         var trainerIds = sessions.Select(s => s.TrainerUserId).Distinct().ToList();
-        var trainers = await userManager.Users
+        var trainers = await db.Users
             .Where(u => trainerIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id,
                 u => $"{u.FirstName} {u.LastName}".Trim().NullIfEmpty() ?? u.Email ?? u.Id);
@@ -81,6 +77,7 @@ public class SessionService(
 
     public async Task<SessionDto?> GetSessionAsync(int id)
     {
+        await using var db = dbFactory.CreateDbContext();
         var session = await db.Sessions
             .Include(s => s.Client)
             .Include(s => s.SessionType)
@@ -88,37 +85,57 @@ public class SessionService(
 
         if (session is null) return null;
 
-        var trainer = await userManager.FindByIdAsync(session.TrainerUserId);
+        var trainer = await db.Users.FirstOrDefaultAsync(u => u.Id == session.TrainerUserId);
         var trainerName = $"{trainer?.FirstName} {trainer?.LastName}".Trim().NullIfEmpty() ?? trainer?.Email ?? session.TrainerUserId;
         return MapToDto(session, new Dictionary<string, string> { [session.TrainerUserId] = trainerName });
     }
 
-    public async Task<SessionDto> CreateSessionAsync(CreateSessionDto dto)
+    public async Task<SessionDto> CreateSessionAsync(CreateSessionDto dto, bool allowAwaitingPackage = true)
     {
+        await using var db = dbFactory.CreateDbContext();
         var sessionType = await db.SessionTypes.FindAsync(dto.SessionTypeId)
-            ?? throw new InvalidOperationException("Session type not found.");
+            ?? throw new InvalidOperationException("Typ sesji nie istnieje.");
+
+        var package = await db.SessionPackages
+            .Where(p => p.ClientId == dto.ClientId
+                     && p.SessionTypeId == dto.SessionTypeId
+                     && p.Status == PackageStatus.Active
+                     && p.UsedSessions < p.TotalSessions)
+            .OrderBy(p => p.ExpiresAt ?? DateTime.MaxValue)
+            .FirstOrDefaultAsync();
+
+        if (package is null && !allowAwaitingPackage)
+            throw new InvalidOperationException("Nie masz aktywnego pakietu dla tego rodzaju sesji.");
 
         var session = new Session
         {
-            ClientId = dto.ClientId,
+            ClientId      = dto.ClientId,
             SessionTypeId = dto.SessionTypeId,
             TrainerUserId = dto.TrainerUserId,
-            StartTime = dto.StartTime,
-            Status = SessionStatus.Scheduled,
-            Notes = dto.Notes,
-            CreatedAt = DateTime.UtcNow
+            StartTime     = dto.StartTime,
+            Status        = package is not null ? SessionStatus.Scheduled : SessionStatus.AwaitingPackage,
+            PackageId     = package?.Id,
+            Notes         = dto.Notes,
+            CreatedAt     = DateTime.UtcNow
         };
 
         db.Sessions.Add(session);
+
+        if (package is not null)
+        {
+            package.UsedSessions++;
+            if (package.UsedSessions >= package.TotalSessions)
+                package.Status = PackageStatus.Depleted;
+        }
+
         await db.SaveChangesAsync();
-
         try { await SendBookingConfirmationAsync(session, sessionType); } catch { }
-
         return (await GetSessionAsync(session.Id))!;
     }
 
     public async Task UpdateStatusAsync(int id, SessionStatus status, string? cancellationReason = null)
     {
+        await using var db = dbFactory.CreateDbContext();
         var session = await db.Sessions
             .Include(s => s.Client)
             .Include(s => s.SessionType)
@@ -129,13 +146,21 @@ public class SessionService(
         {
             session.CancelledAt = DateTime.Now;
             session.CancellationReason = cancellationReason;
+
+            if (session.PackageId.HasValue)
+            {
+                var pkg = await db.SessionPackages.FindAsync(session.PackageId.Value);
+                if (pkg is not null && pkg.Status != PackageStatus.Cancelled)
+                {
+                    if (pkg.UsedSessions > 0) pkg.UsedSessions--;
+                    if (pkg.Status == PackageStatus.Depleted && pkg.UsedSessions < pkg.TotalSessions)
+                        pkg.Status = PackageStatus.Active;
+                }
+            }
         }
 
         session.Status = status;
         await db.SaveChangesAsync();
-
-        if ((status == SessionStatus.Completed || status == SessionStatus.NoShow) && session.PackageId.HasValue)
-            await packageService.DeductCreditAsync(session.PackageId.Value);
 
         if (status == SessionStatus.Cancelled)
             try { await SendCancellationEmailAsync(session, cancellationReason); } catch { }
@@ -143,26 +168,89 @@ public class SessionService(
 
     public async Task RescheduleAsync(int id, DateTime newStartTime)
     {
-        var session = await db.Sessions.FindAsync(id)
+        await using var db = dbFactory.CreateDbContext();
+        var session = await db.Sessions
+            .Include(s => s.Client)
+            .Include(s => s.SessionType)
+            .FirstOrDefaultAsync(s => s.Id == id)
             ?? throw new InvalidOperationException("Sesja nie została znaleziona.");
+        var oldTime = session.StartTime;
         session.StartTime = newStartTime;
         await db.SaveChangesAsync();
+        try { await SendRescheduleEmailAsync(session, oldTime); } catch { }
     }
 
     public async Task RestoreAsync(int id)
     {
+        await using var db = dbFactory.CreateDbContext();
         var session = await db.Sessions.FindAsync(id)
             ?? throw new InvalidOperationException("Sesja nie została znaleziona.");
-        if (session.Status != SessionStatus.Cancelled && session.Status != SessionStatus.NoShow)
+
+        var wasStatus = session.Status;
+        if (wasStatus != SessionStatus.Cancelled && wasStatus != SessionStatus.NoShow)
             throw new InvalidOperationException("Można przywrócić tylko anulowane lub nieobecne wizyty.");
-        session.Status = SessionStatus.Scheduled;
+
         session.CancelledAt = null;
         session.CancellationReason = null;
+
+        if (wasStatus == SessionStatus.Cancelled && session.PackageId.HasValue)
+        {
+            var pkg = await db.SessionPackages.FindAsync(session.PackageId.Value);
+            if (pkg is not null && pkg.Status != PackageStatus.Cancelled
+                && (pkg.Status == PackageStatus.Active || pkg.Status == PackageStatus.Depleted))
+            {
+                pkg.UsedSessions++;
+                if (pkg.UsedSessions >= pkg.TotalSessions && pkg.Status == PackageStatus.Active)
+                    pkg.Status = PackageStatus.Depleted;
+                session.Status = SessionStatus.Scheduled;
+            }
+            else
+            {
+                session.PackageId = null;
+                session.Status = SessionStatus.AwaitingPackage;
+            }
+        }
+        else
+        {
+            session.Status = session.PackageId.HasValue ? SessionStatus.Scheduled : SessionStatus.AwaitingPackage;
+        }
+
         await db.SaveChangesAsync();
     }
 
-    public async Task<List<SessionTypeDto>> GetSessionTypesAsync() =>
-        await db.SessionTypes
+    public async Task ClientCancelSessionAsync(int id, string clientUserId, string? reason = null)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var session = await db.Sessions
+            .Include(s => s.Client)
+            .Include(s => s.SessionType)
+            .FirstOrDefaultAsync(s => s.Id == id)
+            ?? throw new InvalidOperationException("Sesja nie została znaleziona.");
+
+        session.Status = SessionStatus.Cancelled;
+        session.CancelledAt = DateTime.Now;
+        session.CancellationReason = reason;
+
+        if (session.PackageId.HasValue)
+        {
+            var pkg = await db.SessionPackages.FindAsync(session.PackageId.Value);
+            if (pkg is not null && pkg.Status != PackageStatus.Cancelled)
+            {
+                if (pkg.UsedSessions > 0) pkg.UsedSessions--;
+                if (pkg.Status == PackageStatus.Depleted && pkg.UsedSessions < pkg.TotalSessions)
+                    pkg.Status = PackageStatus.Active;
+            }
+        }
+
+        await db.SaveChangesAsync();
+
+        try { await SendClientCancelledToTrainerAsync(session, reason); } catch { }
+    }
+
+    public async Task<List<SessionTypeDto>> GetSessionTypesAsync()
+    {
+        await using var db = dbFactory.CreateDbContext();
+        return await db.SessionTypes
             .Where(t => t.IsActive)
             .OrderBy(t => t.DurationMinutes)
             .Select(t => new SessionTypeDto
@@ -170,17 +258,22 @@ public class SessionService(
                 Id = t.Id,
                 Name = t.Name,
                 DurationMinutes = t.DurationMinutes,
-                IsGroup = t.IsGroup
+                IsGroup = t.IsGroup,
+                MaxParticipants = t.MaxParticipants,
+                IsActive = t.IsActive
             })
             .ToListAsync();
+    }
 
-    public async Task<List<ClientSummaryDto>> GetClientsAsync()
+    public async Task<List<ClientSummaryDto>> GetClientsAsync(string? trainerUserId = null)
     {
+        await using var db = dbFactory.CreateDbContext();
         var clients = await db.Clients
+            .Where(c => trainerUserId == null || c.TrainerUserId == trainerUserId)
             .ToListAsync();
 
         var userIds = clients.Select(c => c.ApplicationUserId).ToList();
-        var users = await userManager.Users
+        var users = await db.Users
             .Where(u => userIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id);
 
@@ -200,6 +293,7 @@ public class SessionService(
 
     public async Task<List<SessionDto>> GetClientSessionsAsync(int clientId, int count = 20)
     {
+        await using var db = dbFactory.CreateDbContext();
         var sessions = await db.Sessions
             .Include(s => s.Client)
             .Include(s => s.SessionType)
@@ -209,7 +303,7 @@ public class SessionService(
             .ToListAsync();
 
         var trainerIds = sessions.Select(s => s.TrainerUserId).Distinct().ToList();
-        var trainers = await userManager.Users
+        var trainers = await db.Users
             .Where(u => trainerIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id,
                 u => $"{u.FirstName} {u.LastName}".Trim() is { Length: > 0 } n ? n : u.Email ?? u.Id);
@@ -219,6 +313,7 @@ public class SessionService(
 
     public async Task<List<SessionDto>> GetUpcomingAsync(string? trainerUserId = null, int? clientId = null, int count = 10)
     {
+        await using var db = dbFactory.CreateDbContext();
         var now = DateTime.Now;
         var query = db.Sessions
             .Include(s => s.Client)
@@ -235,7 +330,7 @@ public class SessionService(
         var sessions = await query.OrderBy(s => s.StartTime).Take(count).ToListAsync();
 
         var trainerIds = sessions.Select(s => s.TrainerUserId).Distinct().ToList();
-        var trainers = await userManager.Users
+        var trainers = await db.Users
             .Where(u => trainerIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id,
                 u => $"{u.FirstName} {u.LastName}".Trim() is { Length: > 0 } n ? n : u.Email ?? u.Id);
@@ -245,6 +340,7 @@ public class SessionService(
 
     public async Task<List<SessionDto>> GetAwaitingPackageAsync(string? trainerUserId = null)
     {
+        await using var db = dbFactory.CreateDbContext();
         var now = DateTime.Now;
         var query = db.Sessions
             .Include(s => s.Client)
@@ -256,7 +352,7 @@ public class SessionService(
 
         var sessions = await query.OrderBy(s => s.StartTime).ToListAsync();
         var trainerIds = sessions.Select(s => s.TrainerUserId).Distinct().ToList();
-        var trainers = await userManager.Users
+        var trainers = await db.Users
             .Where(u => trainerIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id,
                 u => $"{u.FirstName} {u.LastName}".Trim().NullIfEmpty() ?? u.Email ?? u.Id);
@@ -266,12 +362,14 @@ public class SessionService(
     private async Task SendBookingConfirmationAsync(Session session, SessionType sessionType)
     {
         if (!await emailService.IsEnabledAsync()) return;
+        await using var db = dbFactory.CreateDbContext();
         var client = await db.Clients.FindAsync(session.ClientId);
         if (client is null) return;
-        var clientUser = await userManager.FindByIdAsync(client.ApplicationUserId);
+        if (!await notificationPrefs.IsEnabledAsync(client.ApplicationUserId, NotificationTypes.SessionBooked)) return;
+        var clientUser = await db.Users.FirstOrDefaultAsync(u => u.Id == client.ApplicationUserId);
         if (clientUser?.Email is null) return;
 
-        var trainer = await userManager.FindByIdAsync(session.TrainerUserId);
+        var trainer = await db.Users.FirstOrDefaultAsync(u => u.Id == session.TrainerUserId);
         var trainerName = $"{trainer?.FirstName} {trainer?.LastName}".Trim().NullIfEmpty() ?? trainer?.Email ?? "Trener";
         var clientName = $"{client.FirstName} {client.LastName}".Trim().NullIfEmpty() ?? clientUser.Email;
         var html = BuildBookingHtml(clientName, trainerName, sessionType.Name, session.StartTime, sessionType.DurationMinutes);
@@ -281,14 +379,49 @@ public class SessionService(
     private async Task SendCancellationEmailAsync(Session session, string? reason)
     {
         if (!await emailService.IsEnabledAsync()) return;
-        var clientUser = await userManager.FindByIdAsync(session.Client.ApplicationUserId);
+        await using var db = dbFactory.CreateDbContext();
+        var client = await db.Clients.FindAsync(session.ClientId);
+        if (client is null) return;
+        if (!await notificationPrefs.IsEnabledAsync(client.ApplicationUserId, NotificationTypes.SessionCancelledByTrainer)) return;
+        var clientUser = await db.Users.FirstOrDefaultAsync(u => u.Id == session.Client.ApplicationUserId);
         if (clientUser?.Email is null) return;
 
-        var trainer = await userManager.FindByIdAsync(session.TrainerUserId);
+        var trainer = await db.Users.FirstOrDefaultAsync(u => u.Id == session.TrainerUserId);
         var trainerName = $"{trainer?.FirstName} {trainer?.LastName}".Trim().NullIfEmpty() ?? trainer?.Email ?? "Trener";
         var clientName = $"{session.Client.FirstName} {session.Client.LastName}".Trim().NullIfEmpty() ?? clientUser.Email;
         var html = BuildCancellationHtml(clientName, trainerName, session.SessionType.Name, session.StartTime, reason);
         await emailService.SendAsync(clientUser.Email, clientName, "Anulowanie wizyty", html);
+    }
+
+    private async Task SendClientCancelledToTrainerAsync(Session session, string? reason)
+    {
+        if (!await emailService.IsEnabledAsync()) return;
+        if (!await notificationPrefs.IsEnabledAsync(session.TrainerUserId, NotificationTypes.ClientCancelledSession)) return;
+        await using var db = dbFactory.CreateDbContext();
+        var trainer = await db.Users.FirstOrDefaultAsync(u => u.Id == session.TrainerUserId);
+        if (trainer?.Email is null) return;
+        var client = await db.Clients.FindAsync(session.ClientId);
+        var clientName = client is not null ? $"{client.FirstName} {client.LastName}".Trim() : "Klient";
+        var trainerName = $"{trainer.FirstName} {trainer.LastName}".Trim() is { Length: > 0 } n ? n : trainer.Email;
+        var html = BuildClientCancelledHtml(clientName, trainerName, session.SessionType.Name, session.StartTime, reason);
+        await emailService.SendAsync(trainer.Email, trainerName, $"Klient anulował wizytę — {session.StartTime:dd.MM.yyyy HH:mm}", html);
+    }
+
+    private async Task SendRescheduleEmailAsync(Session session, DateTime oldTime)
+    {
+        if (!await emailService.IsEnabledAsync()) return;
+        await using var db = dbFactory.CreateDbContext();
+        var client = await db.Clients.FindAsync(session.ClientId);
+        if (client is null) return;
+        if (!await notificationPrefs.IsEnabledAsync(client.ApplicationUserId, NotificationTypes.SessionRescheduled)) return;
+        var clientUser = await db.Users.FirstOrDefaultAsync(u => u.Id == client.ApplicationUserId);
+        if (clientUser?.Email is null) return;
+        var trainer = await db.Users.FirstOrDefaultAsync(u => u.Id == session.TrainerUserId);
+        var trainerName = $"{trainer?.FirstName} {trainer?.LastName}".Trim() is { Length: > 0 } tn ? tn : trainer?.Email ?? "Trener";
+        var clientName = $"{client.FirstName} {client.LastName}".Trim() is { Length: > 0 } cn ? cn : clientUser.Email;
+        var sessionType = await db.SessionTypes.FindAsync(session.SessionTypeId);
+        var html = BuildRescheduleHtml(clientName, trainerName, sessionType?.Name ?? "", oldTime, session.StartTime);
+        await emailService.SendAsync(clientUser.Email, clientName, "Zmiana terminu wizyty", html);
     }
 
     private static string BuildBookingHtml(string clientName, string trainerName, string sessionType, DateTime startTime, int durationMin) => $"""
@@ -329,6 +462,41 @@ public class SessionService(
             <p style="color:#9ca3af;font-size:12px;margin-top:24px;padding-top:16px;border-top:1px solid #f3f4f6;text-align:center">
               Wiadomość automatyczna — nie odpowiadaj na ten email.
             </p>
+          </div>
+        </div>
+        """;
+
+    private static string BuildClientCancelledHtml(string clientName, string trainerName, string sessionType, DateTime startTime, string? reason) => $"""
+        <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px">
+          <div style="background:#9333EA;border-radius:8px 8px 0 0;padding:24px;text-align:center">
+            <h2 style="color:white;margin:0;font-size:20px">Klient anulował wizytę</h2>
+          </div>
+          <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:24px">
+            <p style="color:#374151;font-size:15px">Cześć <strong>{trainerName}</strong>!</p>
+            <p style="color:#374151;font-size:15px">Klient <strong>{clientName}</strong> anulował wizytę:</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0">
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;width:40%">Typ wizyty</td><td style="padding:8px 0;font-size:14px;font-weight:600">{sessionType}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Data i godzina</td><td style="padding:8px 0;font-size:14px;font-weight:600">{startTime:dddd\, dd MMMM yyyy} o {startTime:HH:mm}</td></tr>
+              {(reason is not null ? $"<tr><td style=\"padding:8px 0;color:#6b7280;font-size:14px\">Powód</td><td style=\"padding:8px 0;font-size:14px\">{reason}</td></tr>" : "")}
+            </table>
+          </div>
+        </div>
+        """;
+
+    private static string BuildRescheduleHtml(string clientName, string trainerName, string sessionType, DateTime oldTime, DateTime newTime) => $"""
+        <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px">
+          <div style="background:#0284C7;border-radius:8px 8px 0 0;padding:24px;text-align:center">
+            <h2 style="color:white;margin:0;font-size:20px">Zmiana terminu wizyty</h2>
+          </div>
+          <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:24px">
+            <p style="color:#374151;font-size:15px">Cześć <strong>{clientName}</strong>!</p>
+            <p style="color:#374151;font-size:15px">Twój trener <strong>{trainerName}</strong> zmienił termin wizyty:</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0">
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;width:40%">Typ wizyty</td><td style="padding:8px 0;font-size:14px;font-weight:600">{sessionType}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Stary termin</td><td style="padding:8px 0;font-size:14px;text-decoration:line-through;color:#9ca3af">{oldTime:dd.MM.yyyy HH:mm}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Nowy termin</td><td style="padding:8px 0;font-size:14px;font-weight:600;color:#16A34A">{newTime:dddd\, dd MMMM yyyy} o {newTime:HH:mm}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Trener</td><td style="padding:8px 0;font-size:14px;font-weight:600">{trainerName}</td></tr>
+            </table>
           </div>
         </div>
         """;

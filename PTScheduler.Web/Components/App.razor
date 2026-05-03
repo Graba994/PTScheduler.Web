@@ -1,12 +1,29 @@
 @inject PTScheduler.Application.Interfaces.IBrandingService BrandingService
 
 <!DOCTYPE html>
-<html lang="pl" data-theme="@_theme">
+<html lang="pl" data-theme="@_accent" data-mode="@_mode">
 
 <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <base href="/" />
+
+    <!-- Theme init: runs synchronously before paint to avoid flash -->
+    <script>
+        (function () {
+            var h = document.documentElement;
+            var a = h.getAttribute('data-theme') || 'ocean';
+            var m = h.getAttribute('data-mode') || 'light';
+            function set(dark) { h.setAttribute('data-theme', dark ? a + '-dark' : a); }
+            if (m === 'dark') {
+                set(true);
+            } else if (m === 'system') {
+                var mq = window.matchMedia('(prefers-color-scheme: dark)');
+                set(mq.matches);
+                mq.addEventListener('change', function (e) { set(e.matches); });
+            }
+        })();
+    </script>
 
     <!-- PWA -->
     <link rel="manifest" href="/manifest.json" />
@@ -14,7 +31,8 @@
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <meta name="apple-mobile-web-app-title" content="@_companyName" />
-    <link rel="apple-touch-icon" href="@(_faviconPath ?? "/favicon.png")" />
+    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180.png" />
+    <link rel="apple-touch-icon" href="@(_faviconPath ?? "/icons/icon-192.png")" />
 
     <ResourcePreloader />
     <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]" />
@@ -37,22 +55,25 @@
     <!-- FullCalendar global bundle -->
     <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
     <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/locales/pl.global.min.js"></script>
+    <!-- Chart.js -->
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
+    <script src="/js/charts.js"></script>
     <!-- PWA: Service Worker + Install Prompt -->
     <script>
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
         }
-        let _installPrompt = null;
+        window._installPrompt = null;
         window.addEventListener('beforeinstallprompt', e => {
             e.preventDefault();
-            _installPrompt = e;
+            window._installPrompt = e;
             window.dispatchEvent(new CustomEvent('pwa-installable'));
         });
         window.triggerPwaInstall = async () => {
-            if (!_installPrompt) return false;
-            _installPrompt.prompt();
-            const { outcome } = await _installPrompt.userChoice;
-            _installPrompt = null;
+            if (!window._installPrompt) return false;
+            window._installPrompt.prompt();
+            const { outcome } = await window._installPrompt.userChoice;
+            window._installPrompt = null;
             return outcome === 'accepted';
         };
     </script>
@@ -61,7 +82,8 @@
 </html>
 
 @code {
-    private string _theme = "ocean";
+    private string _accent = "ocean";
+    private string _mode = "light";
     private string _companyName = "PTScheduler";
     private string? _faviconPath;
 
@@ -70,7 +92,8 @@
         try
         {
             var branding = await BrandingService.GetAsync();
-            _theme = branding.ThemeName ?? "ocean";
+            _accent = branding.ThemeName ?? "ocean";
+            _mode = branding.ThemeMode ?? "light";
             _companyName = branding.CompanyName ?? "PTScheduler";
             _faviconPath = branding.FaviconPath;
         }

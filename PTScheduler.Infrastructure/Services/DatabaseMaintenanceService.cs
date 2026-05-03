@@ -7,11 +7,12 @@ using PTScheduler.Infrastructure.Data;
 namespace PTScheduler.Infrastructure.Services;
 
 public class DatabaseMaintenanceService(
-    ApplicationDbContext db,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
     UserManager<ApplicationUser> userManager) : IDatabaseMaintenanceService
 {
     public async Task<ClearDataResult> ClearAllDataAsync()
     {
+        await using var db = dbFactory.CreateDbContext();
         var result = new ClearDataResult();
 
         // Collect client user IDs before deleting clients

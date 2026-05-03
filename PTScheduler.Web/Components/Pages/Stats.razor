@@ -1,0 +1,230 @@
+@page "/stats"
+@rendermode InteractiveServer
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Enums
+@using PTScheduler.Domain.Constants
+@inject ISessionService SessionService
+@inject IClientService ClientService
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthState
+@attribute [Authorize(Roles = $"{Roles.Admin},{Roles.Trainer},{Roles.Subordinate}")]
+
+@if (!_loaded)
+{
+    <div class="text-center py-4"><div class="spinner-border text-primary" style="width:1.5rem;height:1.5rem"></div></div>
+}
+else
+{
+    <div class="page-header">
+        <h4 class="page-title"><i class="bi bi-bar-chart-line-fill me-2" style="color:var(--c-primary)"></i>Statystyki</h4>
+        <div class="btn-group btn-group-sm">
+            <button type="button" class="btn @(_months == 3 ? "btn-primary" : "btn-outline-secondary")" @onclick="() => ChangeRange(3)">3M</button>
+            <button type="button" class="btn @(_months == 6 ? "btn-primary" : "btn-outline-secondary")" @onclick="() => ChangeRange(6)">6M</button>
+            <button type="button" class="btn @(_months == 12 ? "btn-primary" : "btn-outline-secondary")" @onclick="() => ChangeRange(12)">12M</button>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-6 col-xl-3">
+            <div class="stat-card">
+                <div class="stat-icon"><i class="bi bi-calendar3"></i></div>
+                <div>
+                    <div class="stat-value">@_sessions.Count</div>
+                    <div class="stat-label">Sesji łącznie</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="stat-card">
+                <div class="stat-icon" style="background:#F0FDF4;color:#16A34A"><i class="bi bi-check-circle-fill"></i></div>
+                <div>
+                    <div class="stat-value">@_sessions.Count(s => s.Status == SessionStatus.Completed)</div>
+                    <div class="stat-label">Ukończone</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="stat-card">
+                <div class="stat-icon" style="background:#FEF2F2;color:#DC2626"><i class="bi bi-x-circle-fill"></i></div>
+                <div>
+                    <div class="stat-value">@_sessions.Count(s => s.Status == SessionStatus.Cancelled)</div>
+                    <div class="stat-label">Anulowane</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="stat-card">
+                <div class="stat-icon" style="background:#FEF3C7;color:#D97706"><i class="bi bi-person-dash-fill"></i></div>
+                <div>
+                    <div class="stat-value">@_sessions.Count(s => s.Status == SessionStatus.NoShow)</div>
+                    <div class="stat-label">Nieobecności</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-lg-8">
+            <div class="card h-100">
+                <div class="card-header py-2 fw-semibold" style="font-size:.875rem">
+                    <i class="bi bi-bar-chart-fill me-2" style="color:var(--c-primary)"></i>Sesje — miesięcznie
+                </div>
+                <div class="card-body" style="height:220px;position:relative">
+                    <canvas id="stats-bar"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-lg-4">
+            <div class="card h-100">
+                <div class="card-header py-2 fw-semibold" style="font-size:.875rem">
+                    <i class="bi bi-pie-chart-fill me-2" style="color:var(--c-primary)"></i>Statusy
+                </div>
+                <div class="card-body" style="height:220px;position:relative">
+                    <canvas id="stats-donut"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header py-2 fw-semibold" style="font-size:.875rem">
+            <i class="bi bi-trophy-fill me-2" style="color:var(--c-primary)"></i>Top klienci — liczba sesji
+        </div>
+        <div class="card-body p-0">
+            @if (!_topClients.Any())
+            {
+                <div class="text-center text-muted py-4 small">Brak danych za wybrany okres</div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0" style="font-size:.875rem">
+                        <thead>
+                            <tr>
+                                <th>#</th>
+                                <th>Klient</th>
+                                <th class="text-center">Ukończone</th>
+                                <th class="text-center">Łącznie</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @{
+                                var rank = 1;
+                            }
+                            @foreach (var (name, completed, total, clientId) in _topClients)
+                            {
+                                <tr>
+                                    <td class="text-muted" style="width:40px">@(rank++)</td>
+                                    <td><a href="/clients/@clientId" class="text-decoration-none fw-semibold">@name</a></td>
+                                    <td class="text-center"><span class="badge bg-success">@completed</span></td>
+                                    <td class="text-center text-muted">@total</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loaded;
+    private int _months = 3;
+    private string? _trainerUserId;
+    private List<SessionDto> _sessions = [];
+    private List<(string Name, int Completed, int Total, int ClientId)> _topClients = [];
+    private bool _chartNeedsRender;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var isAdmin = auth.User.IsInRole(Roles.Admin);
+        _trainerUserId = isAdmin ? null : auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        await LoadDataAsync();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_chartNeedsRender)
+        {
+            _chartNeedsRender = false;
+            await RenderChartsAsync();
+        }
+    }
+
+    private async Task ChangeRange(int months)
+    {
+        _months = months;
+        _loaded = false;
+        StateHasChanged();
+        await LoadDataAsync();
+    }
+
+    private async Task LoadDataAsync()
+    {
+        var from = DateTime.Now.AddMonths(-_months);
+        var to = DateTime.Now.AddDays(1);
+        _sessions = await SessionService.GetSessionsAsync(from, to, _trainerUserId);
+
+        var clients = await ClientService.GetClientsAsync(_trainerUserId);
+        _topClients = _sessions
+            .GroupBy(s => s.ClientId)
+            .Select(g =>
+            {
+                var c = clients.FirstOrDefault(x => x.Id == g.Key);
+                return (
+                    Name: c?.FullName ?? "Nieznany",
+                    Completed: g.Count(s => s.Status == SessionStatus.Completed),
+                    Total: g.Count(),
+                    ClientId: g.Key
+                );
+            })
+            .OrderByDescending(x => x.Completed)
+            .Take(10)
+            .ToList();
+
+        _loaded = true;
+        _chartNeedsRender = true;
+    }
+
+    private async Task RenderChartsAsync()
+    {
+        var monthSlots = Enumerable.Range(0, _months)
+            .Select(i => DateTime.Now.AddMonths(-(_months - 1 - i)))
+            .Select(d => (Label: d.ToString("MM.yy"), Year: d.Year, Month: d.Month))
+            .ToList();
+
+        var barLabels = monthSlots.Select(m => m.Label).ToArray();
+        var barCompleted = monthSlots
+            .Select(m => (double)_sessions.Count(s =>
+                s.StartTime.Year == m.Year && s.StartTime.Month == m.Month &&
+                s.Status == SessionStatus.Completed))
+            .ToArray();
+        var barAll = monthSlots
+            .Select(m => (double)_sessions.Count(s =>
+                s.StartTime.Year == m.Year && s.StartTime.Month == m.Month))
+            .ToArray();
+
+        await JS.InvokeVoidAsync("PTChart.renderBar", "stats-bar", barLabels,
+            new object[]
+            {
+                new { label = "Ukończone", data = barCompleted },
+                new { label = "Wszystkie", data = barAll }
+            });
+
+        var completed = _sessions.Count(s => s.Status == SessionStatus.Completed);
+        var cancelled = _sessions.Count(s => s.Status == SessionStatus.Cancelled);
+        var noShow = _sessions.Count(s => s.Status == SessionStatus.NoShow);
+        var scheduled = _sessions.Count(s => s.Status == SessionStatus.Scheduled);
+        var awaiting = _sessions.Count(s => s.Status == SessionStatus.AwaitingPackage);
+
+        await JS.InvokeVoidAsync("PTChart.renderDoughnut", "stats-donut",
+            new[] { "Ukończone", "Anulowane", "Nieobecność", "Zaplanowane", "Bez pakietu" },
+            new double[] { completed, cancelled, noShow, scheduled, awaiting },
+            new[] { "#16A34A", "#DC2626", "#D97706", "#3B82F6", "#9CA3AF" });
+    }
+}

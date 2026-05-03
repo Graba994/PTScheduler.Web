@@ -1,9 +1,11 @@
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Enums
+@using System.Globalization
 @inject ISessionService SessionService
 @inject IClientService ClientService
 @inject ISessionInvitationService InvitationService
+@inject IBodyMeasurementService MeasurementService
 
 @if (!_loaded)
 {
@@ -195,6 +197,61 @@ else
         </div>
     </div>
 
+    <!-- Latest measurement -->
+    @if (_latestMeasurement is not null)
+    {
+        <div class="card mb-4" style="border-left:3px solid var(--c-primary)">
+            <div class="card-header d-flex align-items-center justify-content-between">
+                <span><i class="bi bi-rulers me-2"></i>Ostatni pomiar</span>
+                <a href="/my/measurements" class="btn btn-sm btn-outline-secondary py-0 px-2" style="font-size:.75rem">
+                    Historia <i class="bi bi-arrow-right ms-1"></i>
+                </a>
+            </div>
+            <div class="card-body py-2">
+                <div class="text-muted small mb-2">
+                    <i class="bi bi-calendar-check me-1"></i>@_latestMeasurement.MeasurementDate.ToString("d MMMM yyyy", _pl)
+                </div>
+                <div class="d-flex flex-wrap gap-3">
+                    @if (_latestMeasurement.WeightKg.HasValue)
+                    {
+                        <div class="text-center">
+                            <div class="fw-bold" style="font-size:1.1rem;color:var(--c-primary)">@_latestMeasurement.WeightKg.Value.ToString("0.#", CultureInfo.InvariantCulture) <span class="text-muted fw-normal" style="font-size:.75rem">kg</span></div>
+                            <div class="text-muted" style="font-size:.7rem">Waga</div>
+                        </div>
+                    }
+                    @if (_latestMeasurement.BodyFatPercent.HasValue)
+                    {
+                        <div class="text-center">
+                            <div class="fw-bold" style="font-size:1.1rem;color:var(--c-primary)">@_latestMeasurement.BodyFatPercent.Value.ToString("0.#", CultureInfo.InvariantCulture) <span class="text-muted fw-normal" style="font-size:.75rem">%</span></div>
+                            <div class="text-muted" style="font-size:.7rem">Tkanka tł.</div>
+                        </div>
+                    }
+                    @if (_latestMeasurement.WaistCm.HasValue)
+                    {
+                        <div class="text-center">
+                            <div class="fw-bold" style="font-size:1.1rem;color:var(--c-primary)">@_latestMeasurement.WaistCm.Value.ToString("0.#", CultureInfo.InvariantCulture) <span class="text-muted fw-normal" style="font-size:.75rem">cm</span></div>
+                            <div class="text-muted" style="font-size:.7rem">Talia</div>
+                        </div>
+                    }
+                    @if (_latestMeasurement.ChestCm.HasValue)
+                    {
+                        <div class="text-center">
+                            <div class="fw-bold" style="font-size:1.1rem;color:var(--c-primary)">@_latestMeasurement.ChestCm.Value.ToString("0.#", CultureInfo.InvariantCulture) <span class="text-muted fw-normal" style="font-size:.75rem">cm</span></div>
+                            <div class="text-muted" style="font-size:.7rem">Klatka</div>
+                        </div>
+                    }
+                    @if (_latestMeasurement.HipsCm.HasValue)
+                    {
+                        <div class="text-center">
+                            <div class="fw-bold" style="font-size:1.1rem;color:var(--c-primary)">@_latestMeasurement.HipsCm.Value.ToString("0.#", CultureInfo.InvariantCulture) <span class="text-muted fw-normal" style="font-size:.75rem">cm</span></div>
+                            <div class="text-muted" style="font-size:.7rem">Biodra</div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+
     <!-- Recent sessions -->
     <div class="card">
         <div class="card-header"><i class="bi bi-clock-history me-2"></i>Ostatnie treningi</div>
@@ -231,6 +288,8 @@ else
 }
 
 @code {
+    private static readonly CultureInfo _pl = new("pl-PL");
+
     [Parameter] public string? UserId { get; set; }
     [Parameter] public int? ClientIdOverride { get; set; }
 
@@ -239,37 +298,50 @@ else
     private SessionDto? _nextSession;
     private List<SessionDto> _recent = [];
     private List<SessionInvitationDto> _invitations = [];
+    private BodyMeasurementDto? _latestMeasurement;
     private string? _errorMsg;
 
     private int? _respondingId;
     private string? _respondNote;
     private string? _respondError;
+    private bool _loading;
 
     protected override async Task OnParametersSetAsync()
     {
-        _loaded = false;
-        _client = null;
-        _errorMsg = null;
+        if (_loading) return;
+        _loading = true;
         try
         {
-            if (ClientIdOverride.HasValue)
-                _client = await ClientService.GetClientAsync(ClientIdOverride.Value);
-            else if (!string.IsNullOrEmpty(UserId))
-                _client = await ClientService.GetClientByUserIdAsync(UserId);
-
-            if (_client is not null)
+            _loaded = false;
+            _client = null;
+            _errorMsg = null;
+            try
             {
-                var upcoming = await SessionService.GetUpcomingAsync(clientId: _client.Id, count: 1);
-                _nextSession  = upcoming.FirstOrDefault();
-                _recent       = await SessionService.GetClientSessionsAsync(_client.Id, 10);
-                _invitations  = await InvitationService.GetPendingForClientAsync(_client.Id);
+                if (ClientIdOverride.HasValue)
+                    _client = await ClientService.GetClientAsync(ClientIdOverride.Value);
+                else if (!string.IsNullOrEmpty(UserId))
+                    _client = await ClientService.GetClientByUserIdAsync(UserId);
+
+                if (_client is not null)
+                {
+                    var upcoming = await SessionService.GetUpcomingAsync(clientId: _client.Id, count: 1);
+                    _nextSession  = upcoming.FirstOrDefault();
+                    _recent       = await SessionService.GetClientSessionsAsync(_client.Id, 10);
+                    _invitations  = await InvitationService.GetPendingForClientAsync(_client.Id);
+                    var measurements = await MeasurementService.GetAsync(_client.Id);
+                    _latestMeasurement = measurements.OrderByDescending(m => m.MeasurementDate).FirstOrDefault();
+                }
             }
+            catch (Exception ex)
+            {
+                _errorMsg = $"Błąd ładowania danych: {ex.Message}";
+            }
+            _loaded = true;
         }
-        catch (Exception ex)
+        finally
         {
-            _errorMsg = $"Błąd ładowania danych: {ex.Message}";
+            _loading = false;
         }
-        _loaded = true;
     }
 
     private void StartRespond(int invitationId)

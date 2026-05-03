@@ -13,6 +13,7 @@
 @using PTScheduler.Domain.Enums
 @using Microsoft.AspNetCore.Components.Authorization
 @inject AuthenticationStateProvider AuthStateProvider
+@inject IJSRuntime JS
 @rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
 
 <PageTitle>@(client?.FullName ?? "Profil klienta")</PageTitle>
@@ -224,7 +225,7 @@ else if (client is not null)
                             <div class="border rounded p-3 mb-2 @(pkg.Status == PackageStatus.Active ? "" : "opacity-75")">
                                 <div class="d-flex justify-content-between align-items-start mb-1">
                                     <div class="fw-semibold small">@pkg.Name</div>
-                                    <div class="d-flex gap-1">
+                                    <div class="d-flex gap-1 align-items-center">
                                         <span class="badge @PackageBadge(pkg.Status)">@PackageLabel(pkg.Status)</span>
                                         @if (pkg.IsPaid)
                                         {
@@ -235,6 +236,17 @@ else if (client is not null)
                                             <button class="badge bg-warning-subtle text-warning border-0"
                                                     style="cursor:pointer" @onclick="() => MarkPaid(pkg.Id)">
                                                 Nieopłacony ✓
+                                            </button>
+                                        }
+                                        <button class="btn btn-sm btn-link text-muted p-0 ms-1" title="Edytuj pakiet"
+                                                @onclick="() => OpenEditPackage(pkg)">
+                                            <i class="bi bi-pencil" style="font-size:.75rem"></i>
+                                        </button>
+                                        @if (pkg.Status != PackageStatus.Cancelled)
+                                        {
+                                            <button class="btn btn-sm btn-link text-danger p-0" title="Anuluj pakiet"
+                                                    @onclick="() => CancelPkg(pkg.Id)">
+                                                <i class="bi bi-x-circle" style="font-size:.75rem"></i>
                                             </button>
                                         }
                                     </div>
@@ -420,6 +432,25 @@ else if (client is not null)
                     }
                     else
                     {
+                        @if (measurements!.Count >= 2)
+                        {
+                            <div class="mb-4">
+                                <div class="d-flex flex-wrap gap-1 mb-3">
+                                    @foreach (var entry in _chartMetrics)
+                                    {
+                                        <button type="button"
+                                                class="btn btn-sm @(_chartMetric == entry.Key ? "btn-primary" : "btn-outline-secondary")"
+                                                @onclick="() => SelectMetric(entry.Key)">
+                                            @entry.Value.Label
+                                        </button>
+                                    }
+                                </div>
+                                <div style="height:200px;position:relative">
+                                    <canvas id="meas-chart-@Id"></canvas>
+                                </div>
+                            </div>
+                        }
+
                         <div class="table-responsive">
                             <table class="table table-sm align-middle" style="font-size:.85rem">
                                 <thead class="table-light">
@@ -541,6 +572,58 @@ else if (client is not null)
     </div>
 }
 
+<!-- Edit package modal -->
+@if (editPackageOpen)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.45)">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-box-seam me-2 text-primary"></i>Edytuj pakiet</h5>
+                    <button type="button" class="btn-close" @onclick="() => editPackageOpen = false"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(editPkgError))
+                    {
+                        <div class="alert alert-danger py-2 small">@editPkgError</div>
+                    }
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label">Nazwa pakietu</label>
+                            <input class="form-control" @bind="editPkg.Name" maxlength="120" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Liczba sesji <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" min="1" @bind="editPkg.TotalSessions" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label">Cena / sesję (zł)</label>
+                            <input type="number" class="form-control" min="0" step="0.01" @bind="editPkg.PricePerSession" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Data ważności (opcjonalnie)</label>
+                            <input type="date" class="form-control"
+                                   value="@(editPkg.ExpiresAt?.ToString("yyyy-MM-dd") ?? "")"
+                                   @onchange="e => editPkg.ExpiresAt = string.IsNullOrEmpty(e.Value?.ToString()) ? null : DateTime.Parse(e.Value!.ToString()!)" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Notatki</label>
+                            <textarea class="form-control" rows="2" @bind="editPkg.Notes"></textarea>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="() => editPackageOpen = false">Anuluj</button>
+                    <button class="btn btn-primary" @onclick="SaveEditPackage" disabled="@isBusy">
+                        @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        Zapisz zmiany
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 <!-- Booking modal -->
 @if (bookingOpen)
 {
@@ -631,10 +714,28 @@ else if (client is not null)
     private CreateSessionPackageDto newPkg = new();
     private string pkgError = string.Empty;
 
+    private bool editPackageOpen;
+    private int editPackageId;
+    private UpdateSessionPackageDto editPkg = new();
+    private string editPkgError = string.Empty;
+
     private List<BodyMeasurementDto>? measurements;
     private bool addMeasurementOpen;
     private CreateBodyMeasurementDto newMeasurement = new();
     private string measurementError = string.Empty;
+
+    private readonly Dictionary<string, (string Label, string Unit)> _chartMetrics = new()
+    {
+        ["weight"] = ("Waga",       "kg"),
+        ["fat"]    = ("% tłuszczu", "%"),
+        ["waist"]  = ("Talia",      "cm"),
+        ["chest"]  = ("Klatka",     "cm"),
+        ["hips"]   = ("Biodra",     "cm"),
+        ["thigh"]  = ("Udo",        "cm"),
+        ["arm"]    = ("Ramię",      "cm"),
+    };
+    private string _chartMetric = "weight";
+    private bool _chartNeedsRender;
 
     protected override async Task OnInitializedAsync()
     {
@@ -647,6 +748,9 @@ else if (client is not null)
 
         client = await ClientService.GetClientAsync(Id);
         if (client is null) { notFound = true; return; }
+
+        var isAdmin = auth.User.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+        if (!isAdmin && client.TrainerUserId != currentUserId) { notFound = true; return; }
 
         await LoadNotes();
         await LoadSessions();
@@ -678,6 +782,7 @@ else if (client is not null)
     private async Task LoadMeasurements()
     {
         measurements = await MeasurementService.GetAsync(Id);
+        _chartNeedsRender = true;
     }
 
     private async Task SaveMeasurement()
@@ -693,6 +798,7 @@ else if (client is not null)
             newMeasurement = new CreateBodyMeasurementDto();
             addMeasurementOpen = false;
             measurements = await MeasurementService.GetAsync(Id);
+            _chartNeedsRender = true;
         }
         catch (Exception ex) { measurementError = ex.Message; }
         finally { isBusy = false; }
@@ -704,6 +810,56 @@ else if (client is not null)
         await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "MeasurementDeleted", "BodyMeasurement",
             id.ToString(), $"Klient: {client?.FullName}");
         measurements = await MeasurementService.GetAsync(Id);
+        _chartNeedsRender = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_chartNeedsRender && measurements is { Count: >= 2 })
+        {
+            _chartNeedsRender = false;
+            await RenderChart();
+        }
+    }
+
+    private async Task SelectMetric(string key)
+    {
+        _chartMetric = key;
+        await RenderChart();
+    }
+
+    private async Task RenderChart()
+    {
+        if (measurements is not { Count: >= 2 }) return;
+
+        var sorted = measurements.OrderBy(m => m.MeasurementDate).ToList();
+        var meta = _chartMetrics[_chartMetric];
+
+        var points = sorted
+            .Select(m => (
+                Date: m.MeasurementDate.ToString("dd.MM.yy"),
+                Value: _chartMetric switch
+                {
+                    "weight" => m.WeightKg,
+                    "fat"    => m.BodyFatPercent,
+                    "waist"  => m.WaistCm,
+                    "chest"  => m.ChestCm,
+                    "hips"   => m.HipsCm,
+                    "thigh"  => m.ThighCm,
+                    "arm"    => m.ArmCm,
+                    _        => (decimal?)null
+                }))
+            .Where(p => p.Value.HasValue)
+            .ToList();
+
+        if (points.Count < 2) return;
+
+        await JS.InvokeVoidAsync("PTChart.renderLine",
+            $"meas-chart-{Id}",
+            points.Select(p => p.Date).ToArray(),
+            points.Select(p => (double)p.Value!.Value).ToArray(),
+            meta.Label,
+            meta.Unit);
     }
 
     private static RenderFragment MeasCell(decimal? val, decimal? prevVal, string unit, bool upIsGood) => builder =>
@@ -787,6 +943,48 @@ else if (client is not null)
         await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "PackageMarkedPaid", "SessionPackage",
             packageId.ToString(), $"Klient: {client?.FullName}");
         packages = await PackageService.GetPackagesAsync(Id);
+    }
+
+    private void OpenEditPackage(SessionPackageDto pkg)
+    {
+        editPackageId = pkg.Id;
+        editPkg = new UpdateSessionPackageDto
+        {
+            Name = pkg.Name,
+            TotalSessions = pkg.TotalSessions,
+            PricePerSession = pkg.PricePerSession,
+            ExpiresAt = pkg.ExpiresAt,
+            Notes = pkg.Notes
+        };
+        editPkgError = string.Empty;
+        editPackageOpen = true;
+    }
+
+    private async Task SaveEditPackage()
+    {
+        if (string.IsNullOrWhiteSpace(editPkg.Name)) { editPkgError = "Nazwa jest wymagana."; return; }
+        if (editPkg.TotalSessions < 1) { editPkgError = "Liczba sesji musi być co najmniej 1."; return; }
+        isBusy = true; editPkgError = string.Empty;
+        try
+        {
+            await PackageService.UpdatePackageAsync(editPackageId, editPkg);
+            await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "PackageUpdated", "SessionPackage",
+                editPackageId.ToString(), $"Klient: {client?.FullName}, pakiet: {editPkg.Name}");
+            editPackageOpen = false;
+            packages = await PackageService.GetPackagesAsync(Id);
+            client = await ClientService.GetClientAsync(Id);
+        }
+        catch (Exception ex) { editPkgError = ex.Message; }
+        finally { isBusy = false; }
+    }
+
+    private async Task CancelPkg(int packageId)
+    {
+        await PackageService.CancelPackageAsync(packageId);
+        await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "PackageCancelled", "SessionPackage",
+            packageId.ToString(), $"Klient: {client?.FullName}");
+        packages = await PackageService.GetPackagesAsync(Id);
+        client = await ClientService.GetClientAsync(Id);
     }
 
     private static string PackageBadge(PackageStatus s) => s switch
