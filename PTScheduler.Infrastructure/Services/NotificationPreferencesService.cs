@@ -20,6 +20,7 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
             SessionCancelledByTrainer = prefs.SessionCancelledByTrainer,
             SessionRescheduled = prefs.SessionRescheduled,
             PackageAssigned = prefs.PackageAssigned,
+            SessionReminders = prefs.SessionReminders,
             ClientCancelledSession = prefs.ClientCancelledSession,
             NewClientPending = prefs.NewClientPending,
             ExpiringPackages = prefs.ExpiringPackages,
@@ -39,6 +40,7 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
         prefs.SessionCancelledByTrainer = dto.SessionCancelledByTrainer;
         prefs.SessionRescheduled = dto.SessionRescheduled;
         prefs.PackageAssigned = dto.PackageAssigned;
+        prefs.SessionReminders = dto.SessionReminders;
         prefs.ClientCancelledSession = dto.ClientCancelledSession;
         prefs.NewClientPending = dto.NewClientPending;
         prefs.ExpiringPackages = dto.ExpiringPackages;
@@ -57,6 +59,7 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
             NotificationTypes.ClientCancelledSession => prefs.ClientCancelledSession,
             NotificationTypes.NewClientPending => prefs.NewClientPending,
             NotificationTypes.ExpiringPackages => prefs.ExpiringPackages,
+            NotificationTypes.SessionReminders => prefs.SessionReminders,
             _ => true
         };
     }
