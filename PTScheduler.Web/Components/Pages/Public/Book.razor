@@ -1,0 +1,323 @@
+@page "/book"
+@layout AuthLayout
+@using System.Globalization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@inject IPublicBookingService BookingService
+@inject NavigationManager Nav
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Umów sesję wstępną</PageTitle>
+
+<div class="book-page">
+
+    @if (_loading)
+    {
+        <div class="text-center py-5">
+            <div class="spinner-border text-primary"></div>
+        </div>
+    }
+    else if (_offer is null || !_offer.IsAvailable)
+    {
+        <div class="book-card text-center">
+            <div class="book-icon-soft">📅</div>
+            <h2 class="book-h">Rezerwacja chwilowo niedostępna</h2>
+            <p class="book-lead">Trener nie udostępnił obecnie sesji wstępnej. Zajrzyj za chwilę albo skontaktuj się bezpośrednio.</p>
+        </div>
+    }
+    else if (_step == Step.Offer)
+    {
+        <div class="book-card">
+            <div class="book-icon-soft">💪</div>
+            <h2 class="book-h">Umów się na sesję wstępną</h2>
+            <p class="book-lead">Pierwsze spotkanie z trenerem <strong>@_offer.TrainerName</strong> — porozmawiamy o Twoich celach i sprawdzimy jak możemy Ci pomóc.</p>
+
+            <div class="offer-grid">
+                <div class="offer-tile">
+                    <div class="offer-label">Czas trwania</div>
+                    <div class="offer-value">@_offer.DurationMinutes <span class="offer-unit">min</span></div>
+                </div>
+                <div class="offer-tile">
+                    <div class="offer-label">Cena</div>
+                    <div class="offer-value">
+                        @if (_offer.IsFree)
+                        {
+                            <span class="text-success">Bezpłatnie</span>
+                        }
+                        else if (_offer.HasActivePromo)
+                        {
+                            <span class="offer-old">@_offer.Price.ToString("N0", _pl) zł</span>
+                            <span class="text-danger">@_offer.PromoPrice!.Value.ToString("N0", _pl) zł</span>
+                        }
+                        else
+                        {
+                            <span>@_offer.Price.ToString("N0", _pl) zł</span>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            @if (!string.IsNullOrWhiteSpace(_offer.Description))
+            {
+                <div class="offer-desc">@_offer.Description</div>
+            }
+
+            <button class="book-btn book-btn-primary" @onclick="GoToSlots">
+                Wybierz termin <i class="bi bi-arrow-right ms-1"></i>
+            </button>
+        </div>
+    }
+    else if (_step == Step.Slot)
+    {
+        <div class="book-card">
+            <button class="book-back" @onclick="() => _step = Step.Offer">
+                <i class="bi bi-chevron-left"></i> Wstecz
+            </button>
+            <h2 class="book-h">Wybierz termin</h2>
+            <p class="book-lead">@_offer.DurationMinutes-min spotkanie · trener @_offer.TrainerName</p>
+
+            @if (_loadingSlots)
+            {
+                <div class="text-center py-4"><div class="spinner-border text-primary"></div></div>
+            }
+            else if (_days is null || _days.Count == 0)
+            {
+                <div class="alert alert-warning">
+                    Brak dostępnych terminów w najbliższych 14 dniach. Skontaktuj się z trenerem bezpośrednio.
+                </div>
+            }
+            else
+            {
+                <div class="day-list">
+                    @foreach (var day in _days)
+                    {
+                        <div class="day-block">
+                            <div class="day-header">@day.DayLabel</div>
+                            <div class="slot-grid">
+                                @foreach (var slot in day.Slots)
+                                {
+                                    var isSelected = _selectedSlot == slot.Start;
+                                    <button type="button"
+                                            class="slot-btn @(isSelected ? "slot-selected" : "")"
+                                            @onclick="() => SelectSlot(slot.Start)">
+                                        @slot.Label
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+            }
+
+            @if (_selectedSlot.HasValue)
+            {
+                <button class="book-btn book-btn-primary mt-3" @onclick="GoToForm">
+                    Dalej <i class="bi bi-arrow-right ms-1"></i>
+                </button>
+            }
+        </div>
+    }
+    else if (_step == Step.Form)
+    {
+        <div class="book-card">
+            <button class="book-back" @onclick="() => _step = Step.Slot">
+                <i class="bi bi-chevron-left"></i> Wstecz
+            </button>
+            <h2 class="book-h">Twoje dane</h2>
+            <p class="book-lead">
+                <strong>@FormatSelectedSlot()</strong> · trener @_offer.TrainerName
+            </p>
+
+            @if (!string.IsNullOrEmpty(_formError))
+            {
+                <div class="alert alert-danger">@_formError</div>
+            }
+
+            <div class="form-stack">
+                <div class="form-row">
+                    <div class="form-field">
+                        <label>Imię <span class="text-danger">*</span></label>
+                        <input class="form-control" maxlength="60" @bind="_form.FirstName" />
+                    </div>
+                    <div class="form-field">
+                        <label>Nazwisko <span class="text-danger">*</span></label>
+                        <input class="form-control" maxlength="60" @bind="_form.LastName" />
+                    </div>
+                </div>
+                <div class="form-field">
+                    <label>Email <span class="text-danger">*</span></label>
+                    <input type="email" class="form-control" maxlength="120" @bind="_form.Email" />
+                    <div class="form-hint">Wyślemy tu potwierdzenie i link do ustawienia hasła.</div>
+                </div>
+                <div class="form-field">
+                    <label>Telefon</label>
+                    <input type="tel" class="form-control" maxlength="20" @bind="_form.Phone" />
+                </div>
+                <div class="form-field">
+                    <label>Cel treningowy <span class="text-muted small">(opcjonalnie)</span></label>
+                    <textarea class="form-control" rows="3" maxlength="500" @bind="_form.TrainingGoal"
+                              placeholder="Np. zrzucić 5 kg, poprawić sylwetkę, przygotować się do biegu..."></textarea>
+                </div>
+                <div class="form-field">
+                    <label class="form-check">
+                        <input type="checkbox" class="form-check-input" @bind="_form.AcceptedTerms" />
+                        <span class="form-check-label">
+                            Akceptuję kontakt mailowy i telefoniczny w sprawie sesji.
+                        </span>
+                    </label>
+                </div>
+            </div>
+
+            <button class="book-btn book-btn-primary mt-3" @onclick="Submit" disabled="@_submitting">
+                @if (_submitting)
+                {
+                    <span class="spinner-border spinner-border-sm me-2"></span>
+                    <span>Rezerwuję...</span>
+                }
+                else
+                {
+                    <span>Zarezerwuj sesję</span>
+                }
+            </button>
+        </div>
+    }
+    else if (_step == Step.Done)
+    {
+        <div class="book-card text-center">
+            <div class="book-icon-soft success">🎉</div>
+            <h2 class="book-h">Gotowe!</h2>
+            <p class="book-lead">Twoja sesja jest umówiona.</p>
+
+            <div class="confirm-box">
+                <div class="confirm-row"><span>📅 Termin</span><strong>@FormatSelectedSlot()</strong></div>
+                <div class="confirm-row"><span>⏱️ Czas</span><strong>@_offer.DurationMinutes min</strong></div>
+                <div class="confirm-row"><span>💪 Trener</span><strong>@_offer.TrainerName</strong></div>
+            </div>
+
+            @if (_result?.EmailSent == true)
+            {
+                <p class="book-lead small">
+                    <i class="bi bi-envelope-check text-success"></i>
+                    Potwierdzenie wysłaliśmy na <strong>@_result.ClientEmail</strong>. Sprawdź też folder Spam.
+                </p>
+            }
+            else
+            {
+                <p class="book-lead small text-warning">
+                    <i class="bi bi-envelope-exclamation"></i>
+                    Rezerwacja zapisana, ale email z potwierdzeniem mógł nie dotrzeć. Skontaktuj się z trenerem.
+                </p>
+            }
+
+            <a href="/" class="book-btn book-btn-ghost">Strona główna</a>
+        </div>
+    }
+
+</div>
+
+@code {
+    private enum Step { Offer, Slot, Form, Done }
+
+    private static readonly CultureInfo _pl = CultureInfo.GetCultureInfo("pl-PL");
+
+    private bool _loading = true;
+    private bool _loadingSlots;
+    private bool _submitting;
+    private Step _step = Step.Offer;
+
+    private PublicIntroOfferDto? _offer;
+    private List<BookingDayDto>? _days;
+    private DateTime? _selectedSlot;
+
+    private CreatePublicBookingDto _form = new();
+    private string? _formError;
+    private BookingResultDto? _result;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _offer = await BookingService.GetActiveOfferAsync();
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task GoToSlots()
+    {
+        if (_offer is null || !_offer.IsAvailable) return;
+        _step = Step.Slot;
+        if (_days is null)
+        {
+            _loadingSlots = true;
+            try
+            {
+                _days = await BookingService.GetUpcomingSlotsAsync(_offer.TrainerUserId, _offer.DurationMinutes);
+            }
+            finally
+            {
+                _loadingSlots = false;
+            }
+        }
+    }
+
+    private void SelectSlot(DateTime start)
+    {
+        _selectedSlot = start;
+    }
+
+    private void GoToForm()
+    {
+        if (_selectedSlot.HasValue) _step = Step.Form;
+    }
+
+    private async Task Submit()
+    {
+        if (_offer is null || !_selectedSlot.HasValue) return;
+
+        _formError = null;
+
+        if (string.IsNullOrWhiteSpace(_form.FirstName) || string.IsNullOrWhiteSpace(_form.LastName))
+        { _formError = "Podaj imię i nazwisko."; return; }
+        if (string.IsNullOrWhiteSpace(_form.Email) || !_form.Email.Contains('@'))
+        { _formError = "Podaj prawidłowy adres email."; return; }
+        if (!_form.AcceptedTerms)
+        { _formError = "Zaakceptuj zgodę na kontakt, by zarezerwować."; return; }
+
+        _form.SlotStart = _selectedSlot.Value;
+        _form.TrainerUserId = _offer.TrainerUserId;
+
+        _submitting = true;
+        try
+        {
+            var baseUrl = Nav.BaseUri;
+            _result = await BookingService.CreateBookingAsync(_form, baseUrl);
+            if (_result.Success)
+            {
+                _step = Step.Done;
+            }
+            else
+            {
+                _formError = _result.ErrorMessage ?? "Nie udało się zarezerwować. Spróbuj ponownie.";
+            }
+        }
+        catch (Exception ex)
+        {
+            _formError = "Coś poszło nie tak: " + ex.Message;
+        }
+        finally
+        {
+            _submitting = false;
+        }
+    }
+
+    private string FormatSelectedSlot()
+    {
+        if (!_selectedSlot.HasValue) return "—";
+        var s = _selectedSlot.Value;
+        var label = s.ToString("dddd, d MMMM, HH:mm", _pl);
+        return char.ToUpper(label[0], _pl) + label[1..];
+    }
+}
