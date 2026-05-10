@@ -29,7 +29,10 @@ public class ClientReportService(
         var user = await userManager.FindByIdAsync(client.ApplicationUserId);
         var branding = await brandingService.GetAsync();
 
-        var monthStart = new DateTime(year, month, 1);
+        // Kind=Local matches the DateTime.Now convention used throughout the app.
+        // Even with EnableLegacyTimestampBehavior, an explicit Kind avoids any future
+        // surprises if the legacy switch is ever removed.
+        var monthStart = new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Local);
         var monthEnd = monthStart.AddMonths(1);
 
         var sessions = await db.Sessions
@@ -404,7 +407,7 @@ public class ClientReportService(
 
     private static string MonthYearLabel(int year, int month)
     {
-        var label = new DateTime(year, month, 1).ToString("LLLL yyyy", Pl);
+        var label = new DateTime(year, month, 1).ToString("MMMM yyyy", Pl);
         return char.ToUpper(label[0], Pl) + label[1..];
     }
 

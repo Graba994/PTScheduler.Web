@@ -9,6 +9,12 @@ using PTScheduler.Web.Components;
 using PTScheduler.Web.Components.Account;
 using PTScheduler.Web.Services;
 
+// Npgsql 6+ requires DateTime parameters for timestamptz columns to be Kind=Utc by default.
+// This app stores LOCAL time (DateTime.Now is the convention; CreatedAt/StartTime/etc).
+// The legacy switch lets Npgsql accept any DateTime kind, treating Unspecified/Local as local time.
+// Must be set BEFORE the data source is built, hence the very top of Program.cs.
+AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Configuration.AddJsonFile("connections.json", optional: true, reloadOnChange: true);
