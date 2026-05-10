@@ -51,6 +51,12 @@ public static class DependencyInjection
         services.AddScoped<IBodyMeasurementService, BodyMeasurementService>();
         services.AddScoped<ITrainerConfigService, TrainerConfigService>();
         services.AddScoped<INotificationPreferencesService, NotificationPreferencesService>();
+        services.AddScoped<IPublicBookingService, PublicBookingService>();
+        services.AddScoped<IClientReportService, ClientReportService>();
+
+        // QuestPDF community license — free for orgs <$1M annual revenue.
+        // Set globally; safe to call multiple times in tests.
+        QuestPDF.Settings.License = QuestPDF.Infrastructure.LicenseType.Community;
 
         return services;
     }
