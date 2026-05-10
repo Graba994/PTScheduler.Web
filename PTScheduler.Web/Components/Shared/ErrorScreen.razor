@@ -1,0 +1,51 @@
+@* Reusable friendly error screen — used by /Error, /not-found, /Account/AccessDenied
+   to share one warm, plain-language style. Inline-CSS-free; all styles in scoped .razor.css.
+   Tone changes only the badge gradient color (warm/cold/danger/neutral). *@
+
+<div class="es-page">
+    <div class="es-card">
+        <div class="es-badge tone-@Tone">@Emoji</div>
+        <h1 class="es-h">@Title</h1>
+        @if (!string.IsNullOrEmpty(Lead))
+        {
+            <p class="es-lead">@Lead</p>
+        }
+        @if (Body is not null)
+        {
+            <div class="es-body">@Body</div>
+        }
+        @if (Actions is not null)
+        {
+            <div class="es-actions">@Actions</div>
+        }
+        @if (AdminInfo is not null)
+        {
+            <details class="es-admin">
+                <summary>Informacje dla administratora</summary>
+                <div class="es-tech">@AdminInfo</div>
+            </details>
+        }
+    </div>
+</div>
+
+@code {
+    /// <summary>Single emoji or short text shown in the round badge above the title.</summary>
+    [Parameter] public string Emoji { get; set; } = "☕";
+
+    /// <summary>Badge color: <c>warm</c> (amber), <c>cold</c> (sky blue), <c>danger</c> (red), <c>neutral</c> (slate).</summary>
+    [Parameter] public string Tone { get; set; } = "warm";
+
+    [Parameter, EditorRequired] public string Title { get; set; } = "Coś poszło nie tak";
+
+    /// <summary>One-line subtitle. Plain text; no HTML.</summary>
+    [Parameter] public string? Lead { get; set; }
+
+    /// <summary>Optional richer content slot (e.g. tip list).</summary>
+    [Parameter] public RenderFragment? Body { get; set; }
+
+    /// <summary>Action buttons / links — typically primary + ghost.</summary>
+    [Parameter] public RenderFragment? Actions { get; set; }
+
+    /// <summary>Optional collapsible "for administrator" section with technical detail.</summary>
+    [Parameter] public RenderFragment? AdminInfo { get; set; }
+}
