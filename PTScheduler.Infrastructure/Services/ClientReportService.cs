@@ -29,9 +29,8 @@ public class ClientReportService(
         var user = await userManager.FindByIdAsync(client.ApplicationUserId);
         var branding = await brandingService.GetAsync();
 
-        // Kind=Local matches the DateTime.Now convention used throughout the app.
-        // Even with EnableLegacyTimestampBehavior, an explicit Kind avoids any future
-        // surprises if the legacy switch is ever removed.
+        // Kind=Local matches the DateTime.Now convention used throughout the app —
+        // Npgsql refuses Kind=Unspecified for timestamptz columns.
         var monthStart = new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Local);
         var monthEnd = monthStart.AddMonths(1);
 
@@ -93,7 +92,8 @@ public class ClientReportService(
             TrainerNames: trainers,
             Measurements: measurements,
             PreviousMeasurement: prevMeasurement,
-            Notes: notes
+            Notes: notes,
+            Theme: ThemePalette.For(branding.ThemeName)
         );
 
         var pdfBytes = Document.Create(c => Compose(c, data)).GeneratePdf();
@@ -116,7 +116,34 @@ public class ClientReportService(
         Dictionary<string, string> TrainerNames,
         List<BodyMeasurement> Measurements,
         BodyMeasurement? PreviousMeasurement,
-        List<TrainerNote> Notes);
+        List<TrainerNote> Notes,
+        ThemePalette Theme);
+
+    /// <summary>
+    /// Hex palette pulled from the active branding theme (mirrors --c-primary tokens
+    /// from app.css). Only "light" variants are used since a PDF is always a light surface.
+    /// </summary>
+    private record ThemePalette(string Primary, string PrimaryDark, string PrimaryLight)
+    {
+        public static ThemePalette For(string? themeName)
+        {
+            // Strip "-dark" suffix if present — PDF doesn't have a dark mode
+            var key = (themeName ?? "ocean").Replace("-dark", "").ToLowerInvariant();
+            return key switch
+            {
+                "forest"   => new("#16A34A", "#15803D", "#DCFCE7"),
+                "sunset"   => new("#EA580C", "#C2410C", "#FFEDD5"),
+                "crimson"  => new("#DC2626", "#B91C1C", "#FEE2E2"),
+                "lavender" => new("#9333EA", "#7E22CE", "#F3E8FF"),
+                "slate"    => new("#475569", "#334155", "#F1F5F9"),
+                "rose"     => new("#E11D48", "#BE123C", "#FFE4E6"),
+                "teal"     => new("#0D9488", "#0F766E", "#CCFBF1"),
+                "amber"    => new("#D97706", "#B45309", "#FEF3C7"),
+                "indigo"   => new("#4F46E5", "#4338CA", "#E0E7FF"),
+                _          => new("#0284C7", "#0369A1", "#E0F2FE"),  // ocean (default)
+            };
+        }
+    }
 
     private static void Compose(IDocumentContainer container, ReportData d)
     {
@@ -135,29 +162,40 @@ public class ClientReportService(
 
     private static void Header(IContainer c, ReportData d)
     {
-        c.Row(row =>
+        c.PaddingBottom(10).BorderBottom(1.5f).BorderColor(d.Theme.Primary).PaddingBottom(10).Row(row =>
         {
             row.RelativeItem().Column(col =>
             {
                 if (d.LogoBytes is not null)
                 {
-                    col.Item().Height(40).Image(d.LogoBytes).FitArea();
-                    col.Item().PaddingTop(4).Text(d.CompanyName).FontSize(11).SemiBold();
+                    col.Item().Height(36).AlignLeft().Image(d.LogoBytes).FitArea();
+                    col.Item().PaddingTop(3).Text(d.CompanyName).FontSize(10).FontColor(Colors.Grey.Darken2);
                 }
                 else
                 {
-                    col.Item().Text(d.CompanyName).FontSize(16).SemiBold().FontColor(Colors.Blue.Darken2);
+                    col.Item().Text(d.CompanyName).FontSize(14).SemiBold().FontColor(d.Theme.PrimaryDark);
                 }
             });
 
-            row.ConstantItem(220).AlignRight().Column(col =>
+            row.ConstantItem(240).AlignRight().Column(col =>
             {
-                col.Item().Text("RAPORT MIESIĘCZNY").FontSize(9).LetterSpacing(0.1f).FontColor(Colors.Grey.Darken1);
-                col.Item().PaddingTop(2).Text(MonthYearLabel(d.Year, d.Month)).FontSize(20).Bold();
+                col.Item().Text("Raport miesięczny").FontSize(9.5f).FontColor(Colors.Grey.Darken1);
+                col.Item().PaddingTop(2).Text(MonthYearLabel(d.Year, d.Month)).FontSize(24).Bold().FontColor(d.Theme.Primary);
                 col.Item().PaddingTop(2).Text(d.ClientFullName).FontSize(11).FontColor(Colors.Grey.Darken2);
             });
         });
     }
+
+    /// <summary>
+    /// Reusable section title — semibold, larger, with bottom margin and a subtle
+    /// theme-colored accent bar on the left so titles read as branded headings.
+    /// </summary>
+    private static void SectionTitle(IContainer c, string title, ThemePalette theme) =>
+        c.PaddingBottom(10).Row(row =>
+        {
+            row.AutoItem().Width(3).Background(theme.Primary);
+            row.AutoItem().PaddingLeft(8).Text(title).FontSize(13).SemiBold().FontColor(Colors.Grey.Darken4);
+        });
 
     private static void Body(IContainer c, ReportData d)
     {
@@ -185,22 +223,22 @@ public class ClientReportService(
     }
 
     private static void ClientCard(IContainer c, ReportData d) =>
-        c.Background(Colors.Grey.Lighten4).Padding(12).Column(col =>
+        c.Background(Colors.Grey.Lighten5).Padding(14).Column(col =>
         {
-            col.Item().Text(d.ClientFullName).FontSize(14).SemiBold();
+            col.Item().Text(d.ClientFullName).FontSize(14).SemiBold().FontColor(Colors.Grey.Darken4);
 
-            col.Item().PaddingTop(2).Row(row =>
+            col.Item().PaddingTop(3).Row(row =>
             {
                 if (!string.IsNullOrEmpty(d.ClientEmail))
-                    row.AutoItem().PaddingRight(12).Text(t =>
+                    row.AutoItem().PaddingRight(14).Text(t =>
                     {
-                        t.Span("✉ ").FontColor(Colors.Grey.Darken1);
+                        t.Span("Email: ").FontSize(9).FontColor(Colors.Grey.Darken1);
                         t.Span(d.ClientEmail).FontSize(9.5f);
                     });
                 if (!string.IsNullOrEmpty(d.ClientPhone))
                     row.AutoItem().Text(t =>
                     {
-                        t.Span("☎ ").FontColor(Colors.Grey.Darken1);
+                        t.Span("Tel.: ").FontSize(9).FontColor(Colors.Grey.Darken1);
                         t.Span(d.ClientPhone!).FontSize(9.5f);
                     });
                 row.RelativeItem();
@@ -208,9 +246,9 @@ public class ClientReportService(
 
             if (!string.IsNullOrWhiteSpace(d.ClientGoal))
             {
-                col.Item().PaddingTop(4).Text(t =>
+                col.Item().PaddingTop(5).Text(t =>
                 {
-                    t.Span("Cel: ").FontColor(Colors.Grey.Darken1).SemiBold();
+                    t.Span("Cel: ").FontSize(9).FontColor(Colors.Grey.Darken1);
                     t.Span(d.ClientGoal!).FontSize(9.5f);
                 });
             }
@@ -225,29 +263,29 @@ public class ClientReportService(
 
         c.Row(row =>
         {
-            row.RelativeItem().Element(c => StatBox(c, total.ToString(), "Wszystkich", Colors.Blue.Darken2));
-            row.RelativeItem().PaddingLeft(8).Element(c => StatBox(c, completed.ToString(), "Ukończone", Colors.Green.Darken1));
-            row.RelativeItem().PaddingLeft(8).Element(c => StatBox(c, cancelled.ToString(), "Anulowane / NoShow", Colors.Red.Darken1));
-            row.RelativeItem().PaddingLeft(8).Element(c => StatBox(c, totalMinutes.ToString(), "Min. treningu", Colors.Grey.Darken3));
+            row.RelativeItem().Element(c => StatBox(c, total.ToString(),         "Treningów",       d.Theme.PrimaryLight,  d.Theme.Primary));
+            row.RelativeItem().PaddingLeft(8).Element(c => StatBox(c, completed.ToString(),     "Ukończonych",     Colors.Green.Lighten5, Colors.Green.Darken2));
+            row.RelativeItem().PaddingLeft(8).Element(c => StatBox(c, cancelled.ToString(),     "Anulowanych",     Colors.Red.Lighten5,   Colors.Red.Darken2));
+            row.RelativeItem().PaddingLeft(8).Element(c => StatBox(c, totalMinutes.ToString(),  "Minut treningu",  Colors.Grey.Lighten4,  Colors.Grey.Darken4));
         });
     }
 
-    private static void StatBox(IContainer c, string value, string label, string accentColor) =>
-        c.Border(0.6f).BorderColor(Colors.Grey.Lighten2).Background(Colors.White).Padding(10).Column(col =>
+    private static void StatBox(IContainer c, string value, string label, string bg, string accent) =>
+        c.Background(bg).Padding(14).Column(col =>
         {
-            col.Item().AlignCenter().Text(value).FontSize(22).Bold().FontColor(accentColor);
-            col.Item().AlignCenter().Text(label).FontSize(8).FontColor(Colors.Grey.Darken1).LetterSpacing(0.06f);
+            col.Item().AlignCenter().Text(value).FontSize(26).Bold().FontColor(accent);
+            col.Item().PaddingTop(2).AlignCenter().Text(label).FontSize(9).FontColor(Colors.Grey.Darken2);
         });
 
     private static void SessionsSection(IContainer c, ReportData d) =>
         c.Column(col =>
         {
-            col.Item().PaddingBottom(6).Text("TRENINGI W TYM MIESIĄCU").FontSize(10).SemiBold().LetterSpacing(0.08f).FontColor(Colors.Grey.Darken2);
+            col.Item().Element(c => SectionTitle(c, "Treningi", d.Theme));
 
             if (d.Sessions.Count == 0)
             {
-                col.Item().Background(Colors.Grey.Lighten4).Padding(12).AlignCenter()
-                    .Text("Brak treningów w tym miesiącu.").FontColor(Colors.Grey.Darken1).Italic();
+                col.Item().Background(Colors.Grey.Lighten5).Padding(20).AlignCenter()
+                    .Text("Brak treningów w tym okresie.").FontSize(10).FontColor(Colors.Grey.Darken1);
                 return;
             }
 
@@ -255,10 +293,10 @@ public class ClientReportService(
             {
                 table.ColumnsDefinition(c =>
                 {
-                    c.ConstantColumn(60);  // date
+                    c.ConstantColumn(64);  // date
                     c.RelativeColumn(2);   // type
-                    c.ConstantColumn(50);  // duration
-                    c.ConstantColumn(70);  // status
+                    c.ConstantColumn(45);  // duration
+                    c.ConstantColumn(80);  // status
                     c.RelativeColumn(2);   // trainer
                 });
 
@@ -275,17 +313,22 @@ public class ClientReportService(
                 {
                     table.Cell().Element(BodyCell).Text(s.StartTime.ToString("dd.MM HH:mm")).FontSize(9.5f);
                     table.Cell().Element(BodyCell).Text(s.SessionType?.Name ?? "—").FontSize(9.5f);
-                    table.Cell().Element(BodyCell).AlignRight().Text($"{s.SessionType?.DurationMinutes ?? 0}'").FontSize(9.5f);
-                    table.Cell().Element(BodyCell).Text(StatusLabel(s.Status)).FontSize(9.5f).FontColor(StatusColor(s.Status));
+                    table.Cell().Element(BodyCell).AlignRight().Text($"{s.SessionType?.DurationMinutes ?? 0} min").FontSize(9.5f);
+
+                    // Status as a coloured pill instead of plain text
+                    table.Cell().Element(BodyCell).AlignLeft().Element(c =>
+                        c.Background(StatusBg(s.Status)).PaddingVertical(2).PaddingHorizontal(7)
+                         .Text(StatusLabel(s.Status)).FontSize(8.5f).FontColor(StatusColor(s.Status)).SemiBold());
+
                     table.Cell().Element(BodyCell).Text(d.TrainerNames.GetValueOrDefault(s.TrainerUserId, "—")).FontSize(9.5f);
                 }
 
                 static IContainer HeaderCell(IContainer c) =>
-                    c.DefaultTextStyle(x => x.SemiBold().FontSize(8).FontColor(Colors.Grey.Darken1).LetterSpacing(0.04f))
-                     .BorderBottom(0.6f).BorderColor(Colors.Grey.Lighten1).PaddingVertical(5).PaddingHorizontal(2);
+                    c.DefaultTextStyle(x => x.SemiBold().FontSize(8.5f).FontColor(Colors.Grey.Darken2))
+                     .BorderBottom(0.8f).BorderColor(Colors.Grey.Lighten1).PaddingVertical(6).PaddingHorizontal(3);
 
                 static IContainer BodyCell(IContainer c) =>
-                    c.BorderBottom(0.4f).BorderColor(Colors.Grey.Lighten3).PaddingVertical(5).PaddingHorizontal(2);
+                    c.BorderBottom(0.4f).BorderColor(Colors.Grey.Lighten3).PaddingVertical(6).PaddingHorizontal(3);
             });
         });
 
@@ -297,20 +340,24 @@ public class ClientReportService(
 
         c.Column(col =>
         {
-            col.Item().PaddingBottom(6).Text("POMIARY CIAŁA").FontSize(10).SemiBold().LetterSpacing(0.08f).FontColor(Colors.Grey.Darken2);
+            col.Item().Element(c => SectionTitle(c, "Pomiary", d.Theme));
 
-            // Comparison line of "Pierwsze (data) → Ostatnie (data)"
-            var firstLabel = first.MeasurementDate.ToString("dd.MM.yyyy");
-            var lastLabel = last.MeasurementDate.ToString("dd.MM.yyyy");
+            // Subtitle: "Porównanie 03.04.2026 → 28.04.2026"
+            var firstLabel = first.MeasurementDate.ToString("d MMMM yyyy", Pl);
+            var lastLabel = last.MeasurementDate.ToString("d MMMM yyyy", Pl);
             col.Item().PaddingBottom(8).Text(t =>
             {
-                t.Span("Porównanie ").FontColor(Colors.Grey.Darken1);
-                t.Span(firstLabel).SemiBold();
-                t.Span(" → ").FontColor(Colors.Grey.Darken1);
-                t.Span(lastLabel).SemiBold();
-                if (d.PreviousMeasurement is not null)
-                    t.Span("  (poprzedni pomiar przed okresem raportu)").FontSize(8).FontColor(Colors.Grey.Darken1).Italic();
+                t.Span("Porównanie pomiarów: ").FontSize(10).FontColor(Colors.Grey.Darken1);
+                t.Span(firstLabel).FontSize(10).SemiBold().FontColor(Colors.Grey.Darken3);
+                t.Span("  →  ").FontSize(10).FontColor(Colors.Grey.Darken1);
+                t.Span(lastLabel).FontSize(10).SemiBold().FontColor(Colors.Grey.Darken3);
             });
+
+            if (d.PreviousMeasurement is not null)
+            {
+                col.Item().PaddingBottom(6).Text("Pierwszy pomiar pochodzi sprzed bieżącego okresu — porównujemy z najnowszym dostępnym.")
+                    .FontSize(8.5f).FontColor(Colors.Grey.Darken1).Italic();
+            }
 
             col.Item().Table(table =>
             {
@@ -339,47 +386,48 @@ public class ClientReportService(
                 MeasRow(table, "Ramię", first.ArmCm, last.ArmCm, "cm", upIsGood: true);
 
                 static IContainer HeaderCell(IContainer c) =>
-                    c.DefaultTextStyle(x => x.SemiBold().FontSize(8).FontColor(Colors.Grey.Darken1).LetterSpacing(0.04f))
-                     .BorderBottom(0.6f).BorderColor(Colors.Grey.Lighten1).PaddingVertical(5).PaddingHorizontal(2);
+                    c.DefaultTextStyle(x => x.SemiBold().FontSize(8.5f).FontColor(Colors.Grey.Darken2))
+                     .BorderBottom(0.8f).BorderColor(Colors.Grey.Lighten1).PaddingVertical(6).PaddingHorizontal(3);
             });
         });
     }
 
     private static void MeasRow(QuestPDF.Fluent.TableDescriptor t, string label, decimal? a, decimal? b, string unit, bool upIsGood)
     {
-        IContainer Cell(IContainer c) => c.BorderBottom(0.4f).BorderColor(Colors.Grey.Lighten3).PaddingVertical(5).PaddingHorizontal(2);
+        IContainer Cell(IContainer c) => c.BorderBottom(0.4f).BorderColor(Colors.Grey.Lighten3).PaddingVertical(6).PaddingHorizontal(3);
 
-        t.Cell().Element(Cell).Text(label).FontSize(9.5f);
-        t.Cell().Element(Cell).AlignRight().Text(a is null ? "—" : $"{a:0.##} {unit}").FontSize(9.5f);
-        t.Cell().Element(Cell).AlignRight().Text(b is null ? "—" : $"{b:0.##} {unit}").FontSize(9.5f);
+        t.Cell().Element(Cell).Text(label).FontSize(10);
+        t.Cell().Element(Cell).AlignRight().Text(a is null ? "—" : $"{a:0.##} {unit}").FontSize(10);
+        t.Cell().Element(Cell).AlignRight().Text(b is null ? "—" : $"{b:0.##} {unit}").FontSize(10);
 
         if (a is null || b is null || a == b)
         {
-            t.Cell().Element(Cell).AlignRight().Text("—").FontSize(9.5f).FontColor(Colors.Grey.Darken1);
+            t.Cell().Element(Cell).AlignRight().Text("—").FontSize(10).FontColor(Colors.Grey.Darken1);
         }
         else
         {
             var delta = b.Value - a.Value;
             var positive = delta > 0;
             var isGood = upIsGood ? positive : !positive;
-            var color = isGood ? Colors.Green.Darken1 : Colors.Red.Darken1;
+            var color = isGood ? Colors.Green.Darken2 : Colors.Red.Darken2;
             var arrow = positive ? "↑" : "↓";
             var sign = positive ? "+" : "";
-            t.Cell().Element(Cell).AlignRight().Text($"{arrow} {sign}{delta:0.##} {unit}").FontSize(9.5f).FontColor(color).SemiBold();
+            t.Cell().Element(Cell).AlignRight().Text($"{arrow} {sign}{delta:0.##} {unit}").FontSize(10).FontColor(color).SemiBold();
         }
     }
 
     private static void NotesSection(IContainer c, ReportData d) =>
         c.Column(col =>
         {
-            col.Item().PaddingBottom(6).Text("NOTATKI TRENERA").FontSize(10).SemiBold().LetterSpacing(0.08f).FontColor(Colors.Grey.Darken2);
+            col.Item().Element(c => SectionTitle(c, "Notatki trenera", d.Theme));
 
             foreach (var n in d.Notes)
             {
-                col.Item().PaddingBottom(6).Row(row =>
+                col.Item().PaddingBottom(8).Background(Colors.Grey.Lighten5).Padding(12).Column(inner =>
                 {
-                    row.ConstantItem(70).Text(n.CreatedAt.ToString("dd.MM.yyyy")).FontSize(9).FontColor(Colors.Grey.Darken1).SemiBold();
-                    row.RelativeItem().Text(n.Content).FontSize(9.5f);
+                    inner.Item().Text(Capitalize(n.CreatedAt.ToString("d MMMM yyyy", Pl)))
+                        .FontSize(9).FontColor(Colors.Grey.Darken2).SemiBold();
+                    inner.Item().PaddingTop(3).Text(n.Content).FontSize(10).FontColor(Colors.Grey.Darken4);
                 });
             }
         });
@@ -389,27 +437,32 @@ public class ClientReportService(
         {
             row.RelativeItem().Text(t =>
             {
-                t.Span("Wygenerowano ").FontSize(8).FontColor(Colors.Grey.Darken1);
-                t.Span(DateTime.Now.ToString("dd.MM.yyyy HH:mm", Pl)).FontSize(8).SemiBold().FontColor(Colors.Grey.Darken2);
-                t.Span(" · ").FontSize(8).FontColor(Colors.Grey.Lighten1);
-                t.Span(d.CompanyName).FontSize(8).FontColor(Colors.Grey.Darken1);
+                t.Span("Wygenerowano: ").FontSize(8.5f).FontColor(Colors.Grey.Darken1);
+                t.Span(Capitalize(DateTime.Now.ToString("d MMMM yyyy 'o' HH:mm", Pl)))
+                    .FontSize(8.5f).SemiBold().FontColor(Colors.Grey.Darken3);
+                t.Span("   ·   ").FontSize(8.5f).FontColor(Colors.Grey.Lighten1);
+                t.Span(d.CompanyName).FontSize(8.5f).FontColor(Colors.Grey.Darken1);
             });
             row.AutoItem().Text(t =>
             {
-                t.Span("Strona ").FontSize(8).FontColor(Colors.Grey.Darken1);
-                t.CurrentPageNumber().FontSize(8).SemiBold();
-                t.Span(" / ").FontSize(8).FontColor(Colors.Grey.Lighten1);
-                t.TotalPages().FontSize(8).SemiBold();
+                t.Span("Strona ").FontSize(8.5f).FontColor(Colors.Grey.Darken1);
+                t.CurrentPageNumber().FontSize(8.5f).SemiBold().FontColor(Colors.Grey.Darken3);
+                t.Span(" z ").FontSize(8.5f).FontColor(Colors.Grey.Darken1);
+                t.TotalPages().FontSize(8.5f).SemiBold().FontColor(Colors.Grey.Darken3);
             });
         });
 
     // ---- helpers ----
 
-    private static string MonthYearLabel(int year, int month)
-    {
-        var label = new DateTime(year, month, 1).ToString("MMMM yyyy", Pl);
-        return char.ToUpper(label[0], Pl) + label[1..];
-    }
+    private static string MonthYearLabel(int year, int month) =>
+        Capitalize(new DateTime(year, month, 1).ToString("MMMM yyyy", Pl));
+
+    /// <summary>
+    /// Polish month/day names from <c>MMMM</c>/<c>dddd</c> are lowercased — capitalize
+    /// the first character so they read like a proper title.
+    /// </summary>
+    private static string Capitalize(string s) =>
+        string.IsNullOrEmpty(s) ? s : char.ToUpper(s[0], Pl) + s[1..];
 
     private static string StatusLabel(SessionStatus s) => s switch
     {
@@ -424,10 +477,20 @@ public class ClientReportService(
     private static string StatusColor(SessionStatus s) => s switch
     {
         SessionStatus.Completed       => Colors.Green.Darken2,
-        SessionStatus.Cancelled       => Colors.Red.Darken1,
-        SessionStatus.NoShow          => Colors.Orange.Darken1,
-        SessionStatus.AwaitingPackage => Colors.Amber.Darken3,
-        _                             => Colors.Blue.Darken1
+        SessionStatus.Cancelled       => Colors.Red.Darken2,
+        SessionStatus.NoShow          => Colors.Orange.Darken3,
+        SessionStatus.AwaitingPackage => Colors.Amber.Darken4,
+        _                             => Colors.Blue.Darken2
+    };
+
+    /// <summary>Soft pastel background to pair with <see cref="StatusColor"/> for pill-style labels.</summary>
+    private static string StatusBg(SessionStatus s) => s switch
+    {
+        SessionStatus.Completed       => Colors.Green.Lighten5,
+        SessionStatus.Cancelled       => Colors.Red.Lighten5,
+        SessionStatus.NoShow          => Colors.Orange.Lighten5,
+        SessionStatus.AwaitingPackage => Colors.Amber.Lighten5,
+        _                             => Colors.Blue.Lighten5
     };
 
     private static string ResolveName(ApplicationUser u)
