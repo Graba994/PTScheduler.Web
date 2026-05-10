@@ -9,6 +9,12 @@ using PTScheduler.Web.Components;
 using PTScheduler.Web.Components.Account;
 using PTScheduler.Web.Services;
 
+// Npgsql 6+ requires DateTime parameters for timestamptz columns to be Kind=Utc by default.
+// This app stores LOCAL time (DateTime.Now is the convention; CreatedAt/StartTime/etc).
+// The legacy switch lets Npgsql accept any DateTime kind, treating Unspecified/Local as local time.
+// Must be set BEFORE the data source is built, hence the very top of Program.cs.
+AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Configuration.AddJsonFile("connections.json", optional: true, reloadOnChange: true);
@@ -51,19 +57,32 @@ builder.Services.AddSingleton<IWebRootPathProvider, WebRootPathProvider>();
 builder.Services.AddScoped<PTScheduler.Web.Services.HintStateService>();
 builder.Services.AddHostedService<SessionReminderService>();
 
+// Tracks whether DB is reachable. Mutated at startup and via /db-error/retry.
+builder.Services.AddSingleton<StartupHealth>();
+
 var app = builder.Build();
 
-// Seed roles on startup
-using (var scope = app.Services.CreateScope())
+// Run migrations + seed. On failure: log and flag the app as DB-degraded — DO NOT crash.
+var startupHealth = app.Services.GetRequiredService<StartupHealth>();
+var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
+await TryInitializeDatabaseAsync(app.Services, startupHealth, startupLogger, isStartup: true);
+
+// First-line middleware: when DB is unreachable, redirect every request to /db-error
+// (except the error page itself and static assets). This must come BEFORE auth, because
+// Identity reads users from the DB and would otherwise blow up before our page is reached.
+app.Use(async (ctx, next) =>
 {
-    var db = scope.ServiceProvider.GetRequiredService<PTScheduler.Infrastructure.Data.ApplicationDbContext>();
-    await Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions.MigrateAsync(db.Database);
-    var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
-    await PTScheduler.Infrastructure.Data.DbInitializer.SeedRolesAsync(roleManager);
-    var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
-    await PTScheduler.Infrastructure.Data.DbInitializer.SeedAdminAsync(userManager);
-    await PTScheduler.Infrastructure.Data.DbInitializer.SeedSessionTypesAsync(db);
-}
+    if (!startupHealth.DatabaseAvailable)
+    {
+        var path = ctx.Request.Path.Value ?? "/";
+        if (!IsAllowedWhenDbDown(path))
+        {
+            ctx.Response.Redirect("/db-error");
+            return;
+        }
+    }
+    await next();
+});
 
 if (app.Environment.IsDevelopment())
 {
@@ -82,6 +101,18 @@ if (Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") != "true")
 
 app.UseAntiforgery();
 
+// DB-error landing page — pure HTML, no Blazor / Identity / DB dependencies, so it
+// works even when half the stack is broken.
+app.MapGet("/db-error", (StartupHealth h, IHostEnvironment env) =>
+    Results.Content(RenderDbErrorPage(h, env.IsDevelopment()), "text/html; charset=utf-8"));
+
+// Manual retry — re-runs migrations + seed. On success flips the flag and redirects to /.
+app.MapGet("/db-error/retry", async (StartupHealth h, IServiceProvider sp, ILogger<Program> log) =>
+{
+    await TryInitializeDatabaseAsync(sp, h, log, isStartup: false);
+    return h.DatabaseAvailable ? Results.Redirect("/") : Results.Redirect("/db-error");
+});
+
 // Backup download endpoint (admin only)
 app.MapGet("/admin/backup/download", async (
     PTScheduler.Application.Interfaces.IBackupService backupService,
@@ -95,6 +126,34 @@ app.MapGet("/admin/backup/download", async (
         $"ptscheduler_backup_{DateTime.Now:yyyyMMdd_HHmmss}.sql");
 }).RequireAuthorization();
 
+// Monthly client report (PDF) — Admin / Trainer / Subordinate
+app.MapGet("/reports/client/{clientId:int}/monthly", async (
+    int clientId,
+    int year,
+    int month,
+    PTScheduler.Application.Interfaces.IClientReportService reportService,
+    HttpContext ctx) =>
+{
+    var u = ctx.User;
+    if (!(u.IsInRole(PTScheduler.Domain.Constants.Roles.Admin)
+       || u.IsInRole(PTScheduler.Domain.Constants.Roles.Trainer)
+       || u.IsInRole(PTScheduler.Domain.Constants.Roles.Subordinate)))
+        return Results.Forbid();
+
+    if (year < 2000 || year > 2100 || month < 1 || month > 12)
+        return Results.BadRequest("Nieprawidłowy rok lub miesiąc.");
+
+    try
+    {
+        var (bytes, fileName) = await reportService.GenerateMonthlyReportAsync(clientId, year, month);
+        return Results.File(bytes, "application/pdf", fileName);
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.NotFound(ex.Message);
+    }
+}).RequireAuthorization();
+
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
@@ -102,3 +161,165 @@ app.MapRazorComponents<App>()
 app.MapAdditionalIdentityEndpoints();
 
 app.Run();
+
+// ---- helpers ----
+
+static bool IsAllowedWhenDbDown(string path) =>
+       path.StartsWith("/db-error", StringComparison.OrdinalIgnoreCase)
+    || path.StartsWith("/_framework", StringComparison.OrdinalIgnoreCase)
+    || path.StartsWith("/_content", StringComparison.OrdinalIgnoreCase)
+    || path.StartsWith("/css", StringComparison.OrdinalIgnoreCase)
+    || path.StartsWith("/js", StringComparison.OrdinalIgnoreCase)
+    || path.StartsWith("/lib", StringComparison.OrdinalIgnoreCase)
+    || path.StartsWith("/images", StringComparison.OrdinalIgnoreCase)
+    || path.StartsWith("/favicon", StringComparison.OrdinalIgnoreCase)
+    || path.Equals("/manifest.webmanifest", StringComparison.OrdinalIgnoreCase)
+    || path.Equals("/sw.js", StringComparison.OrdinalIgnoreCase);
+
+static async Task TryInitializeDatabaseAsync(IServiceProvider services, StartupHealth health, ILogger logger, bool isStartup)
+{
+    try
+    {
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+        await Microsoft.EntityFrameworkCore.RelationalDatabaseFacadeExtensions.MigrateAsync(db.Database);
+
+        var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
+        await DbInitializer.SeedRolesAsync(roleManager);
+
+        var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
+        await DbInitializer.SeedAdminAsync(userManager);
+
+        await DbInitializer.SeedSessionTypesAsync(db);
+
+        var wasDown = !health.DatabaseAvailable;
+        health.DatabaseAvailable = true;
+        health.DatabaseError = null;
+        health.DatabaseErrorDetail = null;
+        if (wasDown) logger.LogInformation("Database is reachable again — degraded mode lifted.");
+    }
+    catch (Exception ex)
+    {
+        health.DatabaseAvailable = false;
+        health.DatabaseError = ex.GetBaseException().Message;
+        health.DatabaseErrorDetail = ex.ToString();
+        health.FailedAt = DateTime.Now;
+        if (isStartup)
+            logger.LogCritical(ex, "Database initialization failed at startup. App will start in degraded mode (only /db-error reachable).");
+        else
+            logger.LogError(ex, "Database retry failed.");
+    }
+}
+
+static string RenderDbErrorPage(StartupHealth h, bool isDev)
+{
+    var msg = System.Net.WebUtility.HtmlEncode(h.DatabaseError ?? "Brak szczegółów błędu.");
+    var stack = !string.IsNullOrEmpty(h.DatabaseErrorDetail)
+        ? System.Net.WebUtility.HtmlEncode(h.DatabaseErrorDetail)
+        : "";
+    var stackBlock = isDev && !string.IsNullOrEmpty(stack)
+        ? $@"<div class=""tech-row""><div class=""tech-label"">Stack trace</div><pre>{stack}</pre></div>"
+        : "";
+    var failedAt = h.FailedAt == default ? "—" : h.FailedAt.ToString("dd.MM.yyyy HH:mm:ss");
+
+    return $@"<!doctype html>
+<html lang=""pl"">
+<head>
+    <meta charset=""utf-8"" />
+    <meta name=""viewport"" content=""width=device-width, initial-scale=1"" />
+    <title>Chwilowy problem techniczny — PTScheduler</title>
+    <style>
+        :root {{ color-scheme: light; }}
+        * {{ box-sizing: border-box; }}
+        body {{ font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background: linear-gradient(180deg, #fef9f6 0%, #fef3eb 100%);
+            margin: 0; min-height: 100vh; display: flex; align-items: center; justify-content: center;
+            padding: 1rem; color: #1f2937; line-height: 1.5; }}
+        .card {{ background: #fff; max-width: 560px; width: 100%; border-radius: 16px;
+            box-shadow: 0 10px 32px rgba(0,0,0,.06), 0 2px 6px rgba(0,0,0,.04);
+            padding: 2.5rem 2rem; animation: fadeUp .35s ease-out; }}
+        @keyframes fadeUp {{ from {{ opacity: 0; transform: translateY(8px); }} to {{ opacity: 1; transform: none; }} }}
+        .badge {{ width: 72px; height: 72px; border-radius: 50%; margin: 0 auto 1.25rem;
+            background: linear-gradient(135deg, #fde68a 0%, #fbbf24 100%);
+            display: flex; align-items: center; justify-content: center;
+            box-shadow: 0 4px 14px rgba(251, 191, 36, .35); font-size: 2rem; }}
+        h1 {{ font-size: 1.5rem; margin: 0 0 .75rem; text-align: center; font-weight: 600; }}
+        .lead {{ color: #4b5563; text-align: center; margin: 0 0 1.75rem; font-size: 1rem; }}
+        .tips {{ background: #f9fafb; border-radius: 12px; padding: 1.1rem 1.25rem; margin-bottom: 1.5rem; }}
+        .tips-title {{ font-weight: 600; color: #374151; font-size: .9rem; margin-bottom: .5rem; }}
+        .tips ul {{ margin: 0; padding-left: 1.2rem; color: #4b5563; font-size: .9rem; }}
+        .tips li {{ margin: .3rem 0; }}
+        .actions {{ display: flex; gap: .6rem; justify-content: center; flex-wrap: wrap; margin-bottom: 1rem; }}
+        .btn {{ background: #f59e0b; color: #fff; border: none; padding: .7rem 1.5rem; border-radius: 10px;
+            font: inherit; font-weight: 500; cursor: pointer; text-decoration: none;
+            transition: background-color .15s, transform .15s; }}
+        .btn:hover {{ background: #d97706; }}
+        .btn:active {{ transform: scale(0.97); }}
+        .btn-ghost {{ background: transparent; color: #6b7280; border: 1px solid #e5e7eb; }}
+        .btn-ghost:hover {{ background: #f9fafb; color: #111827; }}
+        .admin {{ margin-top: 1.75rem; padding-top: 1rem; border-top: 1px solid #f3f4f6; }}
+        .admin summary {{ cursor: pointer; color: #9ca3af; font-size: .8rem; user-select: none;
+            list-style: none; display: inline-flex; align-items: center; gap: .35rem; transition: color .15s; }}
+        .admin summary:hover {{ color: #6b7280; }}
+        .admin summary::-webkit-details-marker {{ display: none; }}
+        .admin summary::before {{ content: '▸'; transition: transform .15s; display: inline-block; font-size: .7rem; }}
+        .admin[open] summary::before {{ transform: rotate(90deg); }}
+        .admin[open] summary {{ color: #4b5563; margin-bottom: 1rem; }}
+        .tech {{ background: #f9fafb; border-radius: 10px; padding: 1rem; font-size: .82rem; }}
+        .tech-row {{ margin-bottom: .85rem; }}
+        .tech-row:last-child {{ margin-bottom: 0; }}
+        .tech-label {{ color: #6b7280; font-weight: 500; margin-bottom: .2rem; font-size: .75rem;
+            text-transform: uppercase; letter-spacing: .04em; }}
+        .tech-value {{ color: #111827; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+            word-break: break-word; }}
+        .tech pre {{ background: #fff; border: 1px solid #e5e7eb; padding: .75rem; border-radius: 6px;
+            overflow-x: auto; font-size: .72rem; max-height: 260px; margin: 0;
+            font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; line-height: 1.45; }}
+    </style>
+</head>
+<body>
+    <div class=""card"">
+        <div class=""badge"">☕</div>
+        <h1>Chwilowy problem techniczny</h1>
+        <p class=""lead"">Aplikacja jest w tej chwili niedostępna. Już to naprawiamy — spróbuj za moment.</p>
+
+        <div class=""tips"">
+            <div class=""tips-title"">Co możesz zrobić:</div>
+            <ul>
+                <li>Odczekaj chwilę i kliknij <strong>Spróbuj ponownie</strong>.</li>
+                <li>Jeśli problem się utrzymuje — skontaktuj się ze swoim trenerem.</li>
+                <li>Twoje dane są bezpieczne, nic nie zostało utracone.</li>
+            </ul>
+        </div>
+
+        <div class=""actions"">
+            <a href=""/db-error/retry"" class=""btn"">Spróbuj ponownie</a>
+            <a href=""/"" class=""btn btn-ghost"">Strona główna</a>
+        </div>
+
+        <details class=""admin"">
+            <summary>Informacje dla administratora</summary>
+            <div class=""tech"">
+                <div class=""tech-row"">
+                    <div class=""tech-label"">Komunikat błędu</div>
+                    <div class=""tech-value"">{msg}</div>
+                </div>
+                <div class=""tech-row"">
+                    <div class=""tech-label"">Czas wystąpienia</div>
+                    <div class=""tech-value"">{failedAt}</div>
+                </div>
+                {stackBlock}
+            </div>
+        </details>
+    </div>
+</body>
+</html>";
+}
+
+public sealed class StartupHealth
+{
+    public bool DatabaseAvailable { get; set; } = true;
+    public string? DatabaseError { get; set; }
+    public string? DatabaseErrorDetail { get; set; }
+    public DateTime FailedAt { get; set; }
+}

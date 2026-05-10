@@ -9,6 +9,8 @@ public class NotificationPreferences
     public bool SessionCancelledByTrainer { get; set; } = true;
     public bool SessionRescheduled { get; set; } = true;
     public bool PackageAssigned { get; set; } = true;
+    /// <summary>Client opt-in for the 24h-before-session reminder email.</summary>
+    public bool SessionReminders { get; set; } = true;
 
     public bool ClientCancelledSession { get; set; } = true;
     public bool NewClientPending { get; set; } = true;

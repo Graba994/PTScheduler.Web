@@ -1,4 +1,5 @@
 @page "/clients/{Id:int}"
+@implements IAsyncDisposable
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
 @inject IClientService ClientService
 @inject ISessionService SessionService
@@ -30,12 +31,32 @@ else if (notFound)
 }
 else if (client is not null)
 {
-    <nav aria-label="breadcrumb" class="mb-3">
-        <ol class="breadcrumb">
-            <li class="breadcrumb-item"><a href="/clients">Klienci</a></li>
-            <li class="breadcrumb-item active">@client.FullName</li>
-        </ol>
-    </nav>
+    <div class="d-flex flex-column flex-sm-row align-items-sm-center justify-content-sm-between gap-2 mb-3">
+        <nav aria-label="breadcrumb" class="m-0 flex-grow-1 min-w-0">
+            <ol class="breadcrumb m-0 flex-nowrap">
+                <li class="breadcrumb-item"><a href="/clients">Klienci</a></li>
+                <li class="breadcrumb-item active text-truncate" style="min-width:0">@client.FullName</li>
+            </ol>
+        </nav>
+        @if (_clientIds.Count > 1)
+        {
+            <div class="client-paginator d-inline-flex align-items-center align-self-end align-self-sm-center flex-shrink-0">
+                <button type="button" class="client-paginator-btn" @onclick="GoPrev"
+                        disabled="@(_prevId is null)"
+                        title="@(_prevId is null ? "Brak poprzedniego klienta" : $"Poprzedni: {_prevName} (←)")">
+                    <i class="bi bi-chevron-left"></i>
+                </button>
+                <span class="client-paginator-counter" title="Użyj ← i → aby przełączać klientów">
+                    <span class="pc-current">@(_clientIds.IndexOf(Id) + 1)</span><span class="pc-sep"> / </span><span class="pc-total">@_clientIds.Count</span>
+                </span>
+                <button type="button" class="client-paginator-btn" @onclick="GoNext"
+                        disabled="@(_nextId is null)"
+                        title="@(_nextId is null ? "Brak następnego klienta" : $"Następny: {_nextName} (→)")">
+                    <i class="bi bi-chevron-right"></i>
+                </button>
+            </div>
+        }
+    </div>
 
     @if (client.Status == ClientStatus.Pending)
     {
@@ -139,6 +160,21 @@ else if (client is not null)
                             <button class="btn btn-outline-secondary btn-sm flex-grow-1" @onclick="StartEdit">
                                 <i class="bi bi-pencil me-1"></i>Edytuj
                             </button>
+                        </div>
+                        <div class="d-flex gap-1 mt-2 align-items-center">
+                            <select class="form-select form-select-sm" style="max-width:130px" @bind="_reportMonth">
+                                @for (var m = 0; m < 12; m++)
+                                {
+                                    var d = DateTime.Now.AddMonths(-m);
+                                    var v = $"{d:yyyy-MM}";
+                                    <option value="@v">@d.ToString("LLLL yyyy", _plCulture)</option>
+                                }
+                            </select>
+                            <a class="btn btn-outline-primary btn-sm flex-grow-1"
+                               href="@ReportUrl()" target="_blank" rel="noopener"
+                               title="Pobierz raport PDF za wybrany miesiąc">
+                                <i class="bi bi-file-earmark-pdf me-1"></i>Raport PDF
+                            </a>
                         </div>
                         <div class="d-flex align-items-center justify-content-between mt-3 pt-2 border-top">
                             <span class="small text-muted">Samodzielna rezerwacja</span>
@@ -806,27 +842,98 @@ else if (client is not null)
     private string _chartMetric = "weight";
     private bool _chartNeedsRender;
 
-    protected override async Task OnInitializedAsync()
+    private static readonly System.Globalization.CultureInfo _plCulture = new("pl-PL");
+    private string _reportMonth = DateTime.Now.ToString("yyyy-MM");
+
+    private string ReportUrl()
     {
-        var auth = await AuthStateProvider.GetAuthenticationStateAsync();
-        currentUserId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
-        currentUserEmail = auth.User.Identity?.Name ?? currentUserId;
-        currentUserRole = auth.User.IsInRole(PTScheduler.Domain.Constants.Roles.Admin) ? PTScheduler.Domain.Constants.Roles.Admin
-                        : auth.User.IsInRole(PTScheduler.Domain.Constants.Roles.Trainer) ? PTScheduler.Domain.Constants.Roles.Trainer
-                        : PTScheduler.Domain.Constants.Roles.Subordinate;
+        if (!DateTime.TryParseExact($"{_reportMonth}-01", "yyyy-MM-dd",
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var dt))
+            dt = DateTime.Now;
+        return $"/reports/client/{Id}/monthly?year={dt.Year}&month={dt.Month}";
+    }
+
+    private List<(int Id, string FullName)> _clientNav = [];
+    private List<int> _clientIds = [];
+    private int? _prevId;
+    private int? _nextId;
+    private string _prevName = string.Empty;
+    private string _nextName = string.Empty;
+    private int _lastLoadedId;
+    private bool _isAdmin;
+    private bool _initialized;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!_initialized)
+        {
+            var auth = await AuthStateProvider.GetAuthenticationStateAsync();
+            currentUserId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+            currentUserEmail = auth.User.Identity?.Name ?? currentUserId;
+            _isAdmin = auth.User.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+            currentUserRole = _isAdmin ? PTScheduler.Domain.Constants.Roles.Admin
+                            : auth.User.IsInRole(PTScheduler.Domain.Constants.Roles.Trainer) ? PTScheduler.Domain.Constants.Roles.Trainer
+                            : PTScheduler.Domain.Constants.Roles.Subordinate;
+
+            var trainerUserId = _isAdmin ? null : currentUserId;
+            var navList = await ClientService.GetClientsAsync(trainerUserId);
+            _clientNav = navList.Select(c => (c.Id, c.FullName)).ToList();
+            _clientIds = _clientNav.Select(n => n.Id).ToList();
+
+            _initialized = true;
+        }
+
+        if (_lastLoadedId == Id) return;
+
+        // Reset state for new client
+        notFound = false;
+        client = null;
+        notes = null;
+        sessions = null;
+        packages = null;
+        measurements = null;
+        editMode = false;
+        addPackageOpen = false;
+        editPackageOpen = false;
+        bookingOpen = false;
+        addMeasurementOpen = false;
+        pwMsg = string.Empty;
+        editError = string.Empty;
+
+        UpdateNavIds();
+        _lastLoadedId = Id;
 
         client = await ClientService.GetClientAsync(Id);
         if (client is null) { notFound = true; return; }
 
-        var isAdmin = auth.User.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
-        if (!isAdmin && client.TrainerUserId != currentUserId) { notFound = true; return; }
+        if (!_isAdmin && client.TrainerUserId != currentUserId) { notFound = true; client = null; return; }
 
         await LoadNotes();
         await LoadSessions();
-        await LoadSessionTypes();
+        if (sessionTypes.Count == 0) await LoadSessionTypes();
         await LoadPackages();
         await LoadMeasurements();
         ComputeStats();
+    }
+
+    private void UpdateNavIds()
+    {
+        var idx = _clientIds.IndexOf(Id);
+        _prevId = idx > 0 ? _clientIds[idx - 1] : null;
+        _nextId = idx >= 0 && idx < _clientIds.Count - 1 ? _clientIds[idx + 1] : null;
+        _prevName = _prevId.HasValue ? _clientNav[idx - 1].FullName : string.Empty;
+        _nextName = _nextId.HasValue ? _clientNav[idx + 1].FullName : string.Empty;
+    }
+
+    private void GoPrev()
+    {
+        if (_prevId.HasValue) Nav.NavigateTo($"/clients/{_prevId.Value}");
+    }
+
+    private void GoNext()
+    {
+        if (_nextId.HasValue) Nav.NavigateTo($"/clients/{_nextId.Value}");
     }
 
     private async Task LoadNotes()
@@ -898,13 +1005,65 @@ else if (client is not null)
         _chartNeedsRender = true;
     }
 
+    private DotNetObjectReference<ClientProfile>? _kbRef;
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (firstRender)
+        {
+            _kbRef = DotNetObjectReference.Create(this);
+            try { await JS.InvokeVoidAsync("PTKeyboard.listen", _kbRef, nameof(HandleKeyAsync)); }
+            catch { /* JS not yet available — ignore */ }
+        }
+
         if (_chartNeedsRender && measurements is { Count: >= 2 })
         {
             _chartNeedsRender = false;
             await RenderChart();
         }
+    }
+
+    /// <summary>
+    /// Invoked from JS for ArrowLeft / ArrowRight / Escape (when user is NOT typing
+    /// in an input). Esc closes any open modal first; arrows otherwise navigate
+    /// between clients in the order shown in <c>/clients</c>.
+    /// </summary>
+    [JSInvokable]
+    public Task HandleKeyAsync(string key)
+    {
+        // Escape: close modals or cancel edit/booking flows
+        if (key == "Escape")
+        {
+            var anyClosed = false;
+            if (addPackageOpen)       { addPackageOpen = false;       anyClosed = true; }
+            if (editPackageOpen)      { editPackageOpen = false;      anyClosed = true; }
+            if (bookingOpen)          { bookingOpen = false;          anyClosed = true; }
+            if (addMeasurementOpen)   { addMeasurementOpen = false;   anyClosed = true; }
+            if (editMode)             { editMode = false;             anyClosed = true; }
+            if (anyClosed) StateHasChanged();
+            return Task.CompletedTask;
+        }
+
+        // Don't navigate while a modal is open — would feel jarring.
+        if (addPackageOpen || editPackageOpen || bookingOpen || addMeasurementOpen) return Task.CompletedTask;
+
+        switch (key)
+        {
+            case "ArrowLeft":
+                if (_prevId.HasValue) GoPrev();
+                break;
+            case "ArrowRight":
+                if (_nextId.HasValue) GoNext();
+                break;
+        }
+        return Task.CompletedTask;
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        try { await JS.InvokeVoidAsync("PTKeyboard.unlisten"); }
+        catch { /* circuit may already be torn down */ }
+        _kbRef?.Dispose();
     }
 
     private async Task SelectMetric(string key)
