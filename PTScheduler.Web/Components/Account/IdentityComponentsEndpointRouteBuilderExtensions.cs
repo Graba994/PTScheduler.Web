@@ -47,7 +47,8 @@ namespace Microsoft.AspNetCore.Routing
                 [FromForm] string returnUrl) =>
             {
                 await signInManager.SignOutAsync();
-                return TypedResults.LocalRedirect($"~/{returnUrl}");
+                var safeReturn = string.IsNullOrEmpty(returnUrl) ? "/" : returnUrl;
+                return TypedResults.LocalRedirect($"~/{safeReturn.TrimStart('/')}");
             });
 
             accountGroup.MapPost("/PasskeyCreationOptions", async (

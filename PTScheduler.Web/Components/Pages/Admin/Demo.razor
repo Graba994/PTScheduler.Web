@@ -1,4 +1,4 @@
-﻿@page "/admin/demo"
+@page "/admin/demo"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
 @inject IDemoDataService DemoService
 @inject ILogger<Demo> Logger
@@ -15,6 +15,56 @@
         <strong>Używaj wyłącznie na środowisku testowym.</strong>
     </p>
 
+    <!-- COMBO CARD: reset + seed -->
+    <div class="card mb-4 border-primary-subtle">
+        <div class="card-header bg-primary-subtle fw-semibold text-primary-emphasis">
+            <i class="bi bi-stars me-2"></i>Reset i załaduj świeże demo
+        </div>
+        <div class="card-body">
+            <p class="small text-muted mb-3">
+                Najszybsza opcja: kasuje całą bazę i ładuje pełen zestaw demo (8 klientów,
+                pakiety, serie, treningi wspólne, pomiary, notatki — jakby aplikacja chodziła ~3 miesiące).
+                <strong>Po wykonaniu zostaniesz wylogowany</strong> — zaloguj się danymi trenera lub admina.
+            </p>
+
+            @if (!_showComboConfirm)
+            {
+                <button class="btn btn-primary" @onclick="() => _showComboConfirm = true" disabled="@_busy">
+                    <i class="bi bi-arrow-clockwise me-1"></i>Reset i załaduj świeże demo
+                </button>
+            }
+            else
+            {
+                <div class="p-3 rounded border border-primary">
+                    <div class="fw-semibold text-primary-emphasis mb-2">
+                        <i class="bi bi-exclamation-octagon me-1"></i>Czy na pewno chcesz wyczyścić bazę i załadować demo od nowa?
+                    </div>
+                    <div class="small text-muted mb-3">
+                        Wszystkie istniejące dane zostaną bezpowrotnie usunięte.
+                    </div>
+
+                    @if (!string.IsNullOrEmpty(_comboError))
+                    {
+                        <div class="alert alert-danger py-2 small mb-2">@_comboError</div>
+                    }
+
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary" @onclick="ResetAndSeedAsync" disabled="@_busy">
+                            @if (_busy && _action == "combo")
+                            {
+                                <span class="spinner-border spinner-border-sm me-1"></span>
+                            }
+                            Tak, wyczyść i załaduj demo
+                        </button>
+                        <button class="btn btn-secondary" @onclick="() => _showComboConfirm = false" disabled="@_busy">
+                            Anuluj
+                        </button>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+
     <!-- SEED CARD -->
     <div class="card mb-4 border-success-subtle">
         <div class="card-header bg-success-subtle fw-semibold text-success-emphasis">
@@ -22,7 +72,8 @@
         </div>
         <div class="card-body">
             <p class="small text-muted mb-3">
-                Tworzy trenera, menadżerkę, czterech klientów, pakiety, wizyty, pomiary i notatki.
+                Tworzy trenera, menadżerkę, klientów, pakiety, serie cykliczne, treningi wspólne (duety / trio),
+                pomiary, notatki i wpisy w audit logu — symulacja ~3 miesięcy aktywności.
                 Jeśli dane demo już istnieją, operacja jest bezpieczna – nic nie nadpisze.
             </p>
 
@@ -158,7 +209,9 @@
     private DemoSeedResult? _seedResult;
     private string _seedError = "";
     private string _resetError = "";
+    private string _comboError = "";
     private bool _showResetConfirm;
+    private bool _showComboConfirm;
 
     private async Task SeedAsync()
     {
@@ -169,7 +222,9 @@
         }
         catch (Exception ex)
         {
-            _seedError = ex.Message;
+            _seedError = ex.InnerException?.Message is { } inner
+                ? $"{ex.Message} → {inner}"
+                : ex.Message;
             Logger.LogError(ex, "Demo seed failed");
         }
         finally { _busy = false; _action = ""; }
@@ -181,8 +236,6 @@
         try
         {
             await DemoService.ResetToAdminAsync();
-            // Redirect to login — current session is now invalid
-            // A small delay so the user sees feedback, then the auth middleware will kick them out
         }
         catch (Exception ex)
         {
@@ -193,12 +246,31 @@
         finally { _busy = false; _action = ""; }
     }
 
+    private async Task ResetAndSeedAsync()
+    {
+        _busy = true; _action = "combo"; _comboError = ""; _seedError = ""; _seedResult = null;
+        try
+        {
+            _seedResult = await DemoService.ResetAndSeedAsync();
+            _showComboConfirm = false;
+        }
+        catch (Exception ex)
+        {
+            _comboError = ex.InnerException?.Message is { } inner
+                ? $"{ex.Message} → {inner}"
+                : ex.Message;
+            Logger.LogError(ex, "Reset+seed failed");
+        }
+        finally { _busy = false; _action = ""; }
+    }
+
     private static string RoleBadge(string role) => role switch
     {
-        "Trener"   => "bg-primary",
-        "Menadżer" => "bg-info text-dark",
-        "Klient"   => "bg-secondary",
-        _          => "bg-dark"
+        "Trener"              => "bg-primary",
+        "Menadżer"            => "bg-info text-dark",
+        "Klient"              => "bg-secondary",
+        "Klient (oczekujący)" => "bg-warning text-dark",
+        "Klient (archiwum)"   => "bg-light text-dark border",
+        _                      => "bg-dark"
     };
 }
-

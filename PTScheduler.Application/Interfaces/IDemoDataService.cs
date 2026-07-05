@@ -4,6 +4,7 @@ public interface IDemoDataService
 {
     Task<DemoSeedResult> SeedAsync();
     Task ResetToAdminAsync();
+    Task<DemoSeedResult> ResetAndSeedAsync();
 }
 
 public class DemoSeedResult

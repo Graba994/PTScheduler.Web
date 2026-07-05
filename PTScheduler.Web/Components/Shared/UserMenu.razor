@@ -262,29 +262,43 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (!firstRender) return;
+        if (firstRender)
+        {
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            var user = auth.User;
+            _userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+            _name   = user.Identity?.Name ?? string.Empty;
+            _email  = user.FindFirst(ClaimTypes.Email)?.Value ?? _name;
 
-        var auth = await AuthState.GetAuthenticationStateAsync();
-        var user = auth.User;
-        _userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
-        _name   = user.Identity?.Name ?? string.Empty;
-        _email  = user.FindFirst(ClaimTypes.Email)?.Value ?? _name;
+            var parts = _name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            _initials = parts.Length >= 2
+                ? $"{parts[0][0]}{parts[^1][0]}".ToUpper()
+                : _name.Length > 0 ? _name[0].ToString().ToUpper() : "?";
 
-        var parts = _name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-        _initials = parts.Length >= 2
-            ? $"{parts[0][0]}{parts[^1][0]}".ToUpper()
-            : _name.Length > 0 ? _name[0].ToString().ToUpper() : "?";
+            _role = user.IsInRole(Roles.Admin) ? Roles.Admin
+                  : user.IsInRole(Roles.Trainer) ? Roles.Trainer
+                  : user.IsInRole(Roles.Subordinate) ? Roles.Trainer
+                  : Roles.Client;
 
-        _role = user.IsInRole(Roles.Admin) ? Roles.Admin
-              : user.IsInRole(Roles.Trainer) ? Roles.Trainer
-              : user.IsInRole(Roles.Subordinate) ? Roles.Trainer
-              : Roles.Client;
+            try { _dark = await JS.InvokeAsync<bool>("PTTheme.isDark"); } catch { }
 
-        try { _dark = await JS.InvokeAsync<bool>("PTTheme.isDark"); } catch { }
+            await LoadNotifsAsync();
+            _ready = true;
+            StateHasChanged();
+            return;
+        }
 
-        await LoadNotifsAsync();
-        _ready = true;
-        StateHasChanged();
+        // Re-sync dark state on subsequent renders (handles enhanced navigation)
+        try
+        {
+            var dark = await JS.InvokeAsync<bool>("PTTheme.isDark");
+            if (dark != _dark)
+            {
+                _dark = dark;
+                StateHasChanged();
+            }
+        }
+        catch { }
     }
 
     private async Task LoadNotifsAsync()

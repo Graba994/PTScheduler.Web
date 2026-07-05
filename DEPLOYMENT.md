@@ -113,9 +113,9 @@ W Unraid → Docker → Add Container:
 
 > Jeśli kontenery są w tej samej sieci Docker, użyj nazwy kontenera jako hosta (`ptscheduler-db`). Jeśli korzystasz z sieci `br0`, użyj IP kontenera bazy.
 
-**Volume (upload plików):**
+**Volume (branding — logo, favicon):**
 ```
-/mnt/user/appdata/ptscheduler/uploads → /app/wwwroot/branding
+/mnt/user/appdata/ptscheduler/branding → /app/wwwroot/branding
 ```
 
 ### 4. Reverse proxy na Unraid
