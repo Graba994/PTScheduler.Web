@@ -28,6 +28,11 @@ public class BrandingService(IDbContextFactory<ApplicationDbContext> dbFactory, 
         b.ThemeName = NormalizeAccent(dto.ThemeName);
         b.ThemeMode = dto.ThemeMode is "light" or "dark" or "system" ? dto.ThemeMode : "light";
         b.CompanyName = dto.CompanyName;
+        b.PwaShortName = string.IsNullOrWhiteSpace(dto.PwaShortName) ? null : dto.PwaShortName.Trim();
+        b.PwaBannerEnabled = dto.PwaBannerEnabled;
+        b.PwaBannerTitle = string.IsNullOrWhiteSpace(dto.PwaBannerTitle) ? null : dto.PwaBannerTitle.Trim();
+        b.PwaBannerBody = string.IsNullOrWhiteSpace(dto.PwaBannerBody) ? null : dto.PwaBannerBody.Trim();
+        b.PwaBannerButton = string.IsNullOrWhiteSpace(dto.PwaBannerButton) ? null : dto.PwaBannerButton.Trim();
         if (!db.AppBrandings.Local.Contains(b))
             db.AppBrandings.Add(b);
         await db.SaveChangesAsync();
@@ -106,6 +111,11 @@ public class BrandingService(IDbContextFactory<ApplicationDbContext> dbFactory, 
         ThemeMode = b.ThemeMode,
         CompanyName = b.CompanyName,
         LogoPath = b.LogoPath,
-        FaviconPath = b.FaviconPath
+        FaviconPath = b.FaviconPath,
+        PwaShortName = b.PwaShortName,
+        PwaBannerEnabled = b.PwaBannerEnabled,
+        PwaBannerTitle = b.PwaBannerTitle,
+        PwaBannerBody = b.PwaBannerBody,
+        PwaBannerButton = b.PwaBannerButton
     };
 }

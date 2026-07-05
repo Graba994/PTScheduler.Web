@@ -67,7 +67,7 @@
     </script>
 
     <!-- PWA -->
-    <link rel="manifest" href="/manifest.json" />
+    <link rel="manifest" href="/manifest.webmanifest" />
     <meta name="theme-color" content="#0284C7" />
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
@@ -123,18 +123,36 @@
         if ('serviceWorker' in navigator) {
             window.addEventListener('load', () => navigator.serviceWorker.register('/sw.js'));
         }
+
         window._installPrompt = null;
+        window._bannerRef = null;
+
         window.addEventListener('beforeinstallprompt', e => {
             e.preventDefault();
             window._installPrompt = e;
-            window.dispatchEvent(new CustomEvent('pwa-installable'));
+            // Notify the Blazor banner component if it's already listening
+            if (window._bannerRef) {
+                window._bannerRef.invokeMethodAsync('OnInstallAvailable');
+            }
         });
+
         window.triggerPwaInstall = async () => {
             if (!window._installPrompt) return false;
             window._installPrompt.prompt();
             const { outcome } = await window._installPrompt.userChoice;
             window._installPrompt = null;
             return outcome === 'accepted';
+        };
+
+        // Called by PwaInstallBanner.razor to register its DotNet ref
+        window.PTBanner = {
+            listen: (dotnetRef) => {
+                window._bannerRef = dotnetRef;
+                // If the install prompt already fired before the banner mounted, notify immediately
+                if (window._installPrompt) {
+                    dotnetRef.invokeMethodAsync('OnInstallAvailable');
+                }
+            }
         };
     </script>
 </body>

@@ -108,6 +108,85 @@ else
 
     </div>
 
+    <!-- PWA Install Banner configurator -->
+    <div class="row g-4 mt-0">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header d-flex align-items-center justify-content-between">
+                    <span><i class="bi bi-phone-fill me-2"></i>Baner instalacji PWA</span>
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" id="pwaEnabled"
+                               checked="@_branding!.PwaBannerEnabled"
+                               @onchange="e => _branding.PwaBannerEnabled = (bool)e.Value!" />
+                        <label class="form-check-label small" for="pwaEnabled">
+                            @(_branding!.PwaBannerEnabled ? "Włączony" : "Wyłączony")
+                        </label>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <p class="text-muted small mb-3">
+                        Baner pojawia się automatycznie na urządzeniach mobilnych gdy aplikacja może zostać zainstalowana
+                        jako PWA. Na iOS pokazuje instrukcję — <em>Udostępnij → Dodaj do ekranu głównego</em>.
+                    </p>
+                    <div class="row g-3">
+                        <div class="col-12 col-md-6">
+                            <label class="form-label">Krótka nazwa (do 16 znaków)</label>
+                            <input class="form-control" @bind="_branding.PwaShortName" maxlength="16"
+                                   placeholder="@(_branding.CompanyName.Length <= 16 ? _branding.CompanyName : _branding.CompanyName[..12] + "…")" />
+                            <div class="form-text">Widoczna pod ikoną na ekranie głównym urządzenia.</div>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label">Tekst przycisku</label>
+                            <input class="form-control" @bind="_branding.PwaBannerButton" maxlength="24"
+                                   placeholder="Zainstaluj" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Tytuł banera</label>
+                            <input class="form-control" @bind="_branding.PwaBannerTitle" maxlength="60"
+                                   placeholder="@($"Zainstaluj {_branding.CompanyName}")" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Treść banera</label>
+                            <textarea class="form-control" rows="2" @bind="_branding.PwaBannerBody" maxlength="160"
+                                      placeholder="Dodaj do ekranu głównego — działa jak natywna, bez przeglądarki."></textarea>
+                        </div>
+                    </div>
+
+                    <!-- Preview -->
+                    @if (_branding.PwaBannerEnabled)
+                    {
+                        <div class="mt-4">
+                            <p class="text-muted small fw-semibold mb-2">Podgląd banera</p>
+                            <div class="pwa-banner position-relative" style="position:static!important;transform:none!important;box-shadow:0 2px 12px rgba(0,0,0,.1);max-width:420px">
+                                <img class="pwa-banner-icon" src="/icons/icon-96.png" alt="" width="48" height="48" />
+                                <div class="pwa-banner-text">
+                                    <div class="pwa-banner-title">
+                                        @(string.IsNullOrWhiteSpace(_branding.PwaBannerTitle)
+                                            ? $"Zainstaluj {_branding.CompanyName}"
+                                            : _branding.PwaBannerTitle)
+                                    </div>
+                                    <div class="pwa-banner-body">
+                                        @(string.IsNullOrWhiteSpace(_branding.PwaBannerBody)
+                                            ? "Dodaj do ekranu głównego — działa jak natywna, bez przeglądarki."
+                                            : _branding.PwaBannerBody)
+                                    </div>
+                                </div>
+                                <div class="pwa-banner-actions">
+                                    <button class="btn btn-primary btn-sm">
+                                        @(string.IsNullOrWhiteSpace(_branding.PwaBannerButton) ? "Zainstaluj" : _branding.PwaBannerButton)
+                                    </button>
+                                    <button class="btn btn-link btn-sm pwa-banner-close" disabled>
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Save bar -->
     <div class="mt-4 d-flex align-items-center gap-2 flex-wrap">
         <button class="btn btn-primary" @onclick="Save" disabled="@_saving">
@@ -166,9 +245,14 @@ else
         var dto = await BrandingService.GetAsync();
         _branding = new SaveBrandingDto
         {
-            ThemeName   = dto.ThemeName,
-            ThemeMode   = "light", // tryb jasny/ciemny dobierany per-użytkownik z menu
-            CompanyName = dto.CompanyName,
+            ThemeName      = dto.ThemeName,
+            ThemeMode      = "light",
+            CompanyName    = dto.CompanyName,
+            PwaShortName   = dto.PwaShortName,
+            PwaBannerEnabled = dto.PwaBannerEnabled,
+            PwaBannerTitle = dto.PwaBannerTitle,
+            PwaBannerBody  = dto.PwaBannerBody,
+            PwaBannerButton = dto.PwaBannerButton,
         };
         _logoPath    = dto.LogoPath;
         _faviconPath = dto.FaviconPath;

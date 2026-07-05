@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Identity;
 using PTScheduler.Application;
+using PTScheduler.Application.DTOs;
 using PTScheduler.Application.Interfaces;
 using PTScheduler.Infrastructure;
 using PTScheduler.Infrastructure.Data;
@@ -154,6 +155,56 @@ app.MapGet("/reports/client/{clientId:int}/monthly", async (
     }
 }).RequireAuthorization();
 
+// Dynamic PWA manifest — reads branding from DB so name/theme follow admin settings.
+// Served as application/manifest+json; browsers prefer .webmanifest over .json.
+app.MapGet("/manifest.webmanifest", async (PTScheduler.Application.Interfaces.IBrandingService branding) =>
+{
+    AppBrandingDto? b = null;
+    try { b = await branding.GetAsync(); } catch { /* DB down — use safe defaults */ }
+
+    var name   = b?.CompanyName ?? "PTScheduler";
+    var short_ = string.IsNullOrWhiteSpace(b?.PwaShortName) ? name : b.PwaShortName;
+    var color  = ThemeColor(b?.ThemeName);
+
+    var manifest = new
+    {
+        id     = "/",
+        name,
+        short_name = short_,
+        description = "System rezerwacji dla trenera personalnego",
+        lang    = "pl",
+        start_url = "/",
+        scope   = "/",
+        display = "standalone",
+        background_color = color,
+        theme_color = color,
+        orientation = "any",
+        prefer_related_applications = false,
+        icons = new object[]
+        {
+            new { src = "/icons/icon-72.png",  sizes = "72x72",   type = "image/png" },
+            new { src = "/icons/icon-96.png",  sizes = "96x96",   type = "image/png" },
+            new { src = "/icons/icon-128.png", sizes = "128x128", type = "image/png" },
+            new { src = "/icons/icon-144.png", sizes = "144x144", type = "image/png" },
+            new { src = "/icons/icon-152.png", sizes = "152x152", type = "image/png" },
+            new { src = "/icons/icon-192.png", sizes = "192x192", type = "image/png" },
+            new { src = "/icons/icon-384.png", sizes = "384x384", type = "image/png" },
+            new { src = "/icons/icon-512.png", sizes = "512x512", type = "image/png" },
+            new { src = "/icons/icon-512-maskable.png", sizes = "512x512", type = "image/png", purpose = "maskable" },
+        },
+        shortcuts = new object[]
+        {
+            new { name = "Kalendarz", short_name = "Kalendarz", url = "/calendar",
+                  icons = new[]{ new { src = "/icons/icon-96.png", sizes = "96x96" } } },
+            new { name = "Wizyty",    short_name = "Wizyty",    url = "/sessions",
+                  icons = new[]{ new { src = "/icons/icon-96.png", sizes = "96x96" } } },
+            new { name = "Klienci",   short_name = "Klienci",   url = "/clients",
+                  icons = new[]{ new { src = "/icons/icon-96.png", sizes = "96x96" } } },
+        }
+    };
+    return Results.Json(manifest, contentType: "application/manifest+json");
+});
+
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
@@ -172,8 +223,10 @@ static bool IsAllowedWhenDbDown(string path) =>
     || path.StartsWith("/js", StringComparison.OrdinalIgnoreCase)
     || path.StartsWith("/lib", StringComparison.OrdinalIgnoreCase)
     || path.StartsWith("/images", StringComparison.OrdinalIgnoreCase)
+    || path.StartsWith("/icons", StringComparison.OrdinalIgnoreCase)
     || path.StartsWith("/favicon", StringComparison.OrdinalIgnoreCase)
     || path.Equals("/manifest.webmanifest", StringComparison.OrdinalIgnoreCase)
+    || path.Equals("/manifest.json", StringComparison.OrdinalIgnoreCase)
     || path.Equals("/sw.js", StringComparison.OrdinalIgnoreCase);
 
 static async Task TryInitializeDatabaseAsync(IServiceProvider services, StartupHealth health, ILogger logger, bool isStartup)
@@ -314,6 +367,25 @@ static string RenderDbErrorPage(StartupHealth h, bool isDev)
     </div>
 </body>
 </html>";
+}
+
+static string ThemeColor(string? theme)
+{
+    var t = theme ?? "ocean";
+    if (t.EndsWith("-dark", StringComparison.Ordinal)) t = t[..^5];
+    return t switch
+    {
+        "forest"   => "#16A34A",
+        "sunset"   => "#EA580C",
+        "crimson"  => "#DC2626",
+        "lavender" => "#9333EA",
+        "slate"    => "#475569",
+        "rose"     => "#E11D48",
+        "teal"     => "#0D9488",
+        "amber"    => "#D97706",
+        "indigo"   => "#4F46E5",
+        _          => "#0284C7",
+    };
 }
 
 public sealed class StartupHealth

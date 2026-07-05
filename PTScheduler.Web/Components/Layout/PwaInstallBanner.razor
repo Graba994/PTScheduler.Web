@@ -1,0 +1,124 @@
+@inject PTScheduler.Application.Interfaces.IBrandingService BrandingService
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+@if (_show && _bannerEnabled)
+{
+    <div class="pwa-banner @(_ios ? "pwa-banner--ios" : "")" role="dialog" aria-label="Zainstaluj aplikację">
+        <img class="pwa-banner-icon" src="/icons/icon-96.png" alt="" width="48" height="48" />
+        <div class="pwa-banner-text">
+            <div class="pwa-banner-title">@_title</div>
+            @if (_ios)
+            {
+                <div class="pwa-banner-body">
+                    Naciśnij <span class="pwa-share-icon" title="Udostępnij">&#8679;</span>
+                    i wybierz <strong>Dodaj do ekranu głównego</strong>
+                </div>
+            }
+            else
+            {
+                <div class="pwa-banner-body">@_body</div>
+            }
+        </div>
+        <div class="pwa-banner-actions">
+            @if (!_ios)
+            {
+                <button class="btn btn-primary btn-sm" @onclick="InstallAsync">@_button</button>
+            }
+            <button class="btn btn-link btn-sm pwa-banner-close" @onclick="Dismiss" aria-label="Zamknij">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _show;
+    private bool _ios;
+    private bool _bannerEnabled = true;
+    private string _title  = "Zainstaluj aplikację";
+    private string _body   = "Dodaj do ekranu głównego — działa jak natywna, bez przeglądarki.";
+    private string _button = "Zainstaluj";
+
+    private DotNetObjectReference<PwaInstallBanner>? _ref;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var b = await BrandingService.GetAsync();
+            _bannerEnabled = b.PwaBannerEnabled;
+            var appName = b.CompanyName ?? "PTScheduler";
+            _title  = !string.IsNullOrWhiteSpace(b.PwaBannerTitle)  ? b.PwaBannerTitle  : $"Zainstaluj {appName}";
+            _body   = !string.IsNullOrWhiteSpace(b.PwaBannerBody)   ? b.PwaBannerBody   : _body;
+            _button = !string.IsNullOrWhiteSpace(b.PwaBannerButton) ? b.PwaBannerButton : _button;
+        }
+        catch { }
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || !_bannerEnabled) return;
+
+        // Skip if user already dismissed
+        var dismissed = await JS.InvokeAsync<bool>("eval",
+            "!!localStorage.getItem('pwa-banner-dismissed')");
+        if (dismissed) return;
+
+        var isStandalone = await JS.InvokeAsync<bool>("eval",
+            "window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches");
+        if (isStandalone) return;
+
+        var isIos = await JS.InvokeAsync<bool>("eval",
+            "/iphone|ipad|ipod/i.test(navigator.userAgent.toLowerCase())");
+
+        if (isIos)
+        {
+            // iOS: show instructions (once per session, not localStorage so it shows fresh installs)
+            var shownThisSession = await JS.InvokeAsync<bool>("eval",
+                "!!sessionStorage.getItem('pwa-ios-shown')");
+            if (shownThisSession) return;
+            await JS.InvokeVoidAsync("eval", "sessionStorage.setItem('pwa-ios-shown','1')");
+            _ios = true;
+            _show = true;
+            StateHasChanged();
+            return;
+        }
+
+        // Android/Chrome: listen for the pwa-installable event dispatched by App.razor
+        _ref = DotNetObjectReference.Create(this);
+        await JS.InvokeVoidAsync("PTBanner.listen", _ref);
+    }
+
+    [JSInvokable]
+    public void OnInstallAvailable()
+    {
+        _show = true;
+        InvokeAsync(StateHasChanged);
+    }
+
+    private async Task InstallAsync()
+    {
+        var accepted = await JS.InvokeAsync<bool>("triggerPwaInstall");
+        if (accepted)
+        {
+            _show = false;
+            await JS.InvokeVoidAsync("eval",
+                "localStorage.setItem('pwa-banner-dismissed','1')");
+        }
+    }
+
+    private async Task Dismiss()
+    {
+        _show = false;
+        await JS.InvokeVoidAsync("eval",
+            "localStorage.setItem('pwa-banner-dismissed','1')");
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _ref?.Dispose();
+        await Task.CompletedTask;
+    }
+}
