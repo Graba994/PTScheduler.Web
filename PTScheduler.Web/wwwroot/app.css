@@ -570,34 +570,40 @@ h5 { font-size: 0.95rem; }
 }
 
 /* ============================================================
+   LAYOUT — Mobile Bottom Sheet
+   ============================================================ */
+
+.mobile-sheet-backdrop,
+.mobile-sheet {
+    display: none;
+}
+
+/* ============================================================
    RESPONSIVE — Mobile
    ============================================================ */
 
 @media (max-width: 767.98px) {
     .app-sidebar  { display: none !important; }
     .app-topbar   { display: none !important; }
-    /* Safe area bottom = nav bar (60px) + iOS home indicator */
     .app-content  {
         padding: 1rem;
         padding-bottom: calc(4.5rem + env(safe-area-inset-bottom, 0px));
     }
-    /* Top safe area — only matters in iOS standalone with black-translucent bar */
     .app-main { padding-top: env(safe-area-inset-top, 0px); }
 
+    /* --- Bottom nav bar --- */
     .mobile-bottom-nav {
         display: flex;
         position: fixed;
         bottom: 0;
         left: 0;
         right: 0;
-        /* 60px nav + iOS home indicator */
-        height: calc(60px + env(safe-area-inset-bottom, 0px));
+        height: calc(64px + env(safe-area-inset-bottom, 0px));
         padding-bottom: env(safe-area-inset-bottom, 0px);
         background: #ffffff;
         border-top: 1px solid #E5E7EB;
         z-index: 200;
-        box-shadow: 0 -2px 8px rgba(0,0,0,0.06);
-        /* Prevent horizontal scroll on very small phones */
+        box-shadow: 0 -2px 12px rgba(0,0,0,0.06);
         overflow-x: hidden;
     }
 
@@ -607,22 +613,193 @@ h5 { font-size: 0.95rem; }
         flex-direction: column;
         align-items: center;
         justify-content: center;
-        /* Minimum touch target per Apple/Google guidelines */
         min-width: 44px;
-        gap: 2px;
+        gap: 3px;
         color: #9CA3AF;
         text-decoration: none !important;
-        font-size: 0.6rem;
-        font-weight: 500;
-        transition: color 0.1s;
-        padding: 4px 0;
+        font-size: 0.62rem;
+        font-weight: 600;
+        letter-spacing: .01em;
+        transition: color .15s;
+        padding: 6px 0 4px;
+        position: relative;
+        background: none;
+        border: none;
+        cursor: pointer;
     }
 
-    .mobile-nav-item i { font-size: 1.3rem; line-height: 1; }
-    .mobile-nav-item span { line-height: 1; }
+    .mobile-nav-item i { font-size: 1.35rem; line-height: 1; }
+    .mobile-nav-item span:not(.mobile-nav-indicator) { line-height: 1; }
 
-    .mobile-nav-item:hover,
+    .mobile-nav-indicator {
+        position: absolute;
+        top: 0;
+        width: 0;
+        height: 2.5px;
+        border-radius: 0 0 4px 4px;
+        background: var(--c-primary);
+        transition: width .2s ease;
+    }
+
     .mobile-nav-item.active { color: var(--c-primary); }
+    .mobile-nav-item.active .mobile-nav-indicator { width: 28px; }
+
+    /* --- Bottom sheet --- */
+    .mobile-sheet-backdrop {
+        display: block;
+        position: fixed;
+        inset: 0;
+        background: rgba(0,0,0,.45);
+        z-index: 299;
+        animation: sheetFadeIn .2s ease;
+    }
+
+    .mobile-sheet {
+        display: block;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        right: 0;
+        max-height: 85vh;
+        background: var(--bs-body-bg, #fff);
+        border-radius: 20px 20px 0 0;
+        z-index: 300;
+        overflow-y: auto;
+        overscroll-behavior: contain;
+        -webkit-overflow-scrolling: touch;
+        padding-bottom: calc(80px + env(safe-area-inset-bottom, 0px));
+        transform: translateY(100%);
+        transition: transform .3s cubic-bezier(.32,.72,0,1);
+        box-shadow: 0 -8px 40px rgba(0,0,0,.15);
+    }
+    .mobile-sheet.mobile-sheet-open {
+        transform: translateY(0);
+    }
+
+    @keyframes sheetFadeIn {
+        from { opacity: 0; }
+        to { opacity: 1; }
+    }
+
+    .mobile-sheet-handle {
+        display: flex;
+        justify-content: center;
+        padding: 12px 0 4px;
+        cursor: pointer;
+    }
+    .mobile-sheet-handle span {
+        width: 36px;
+        height: 4px;
+        border-radius: 4px;
+        background: var(--bs-border-color, #D1D5DB);
+    }
+
+    .mobile-sheet-user {
+        display: flex;
+        align-items: center;
+        gap: .75rem;
+        padding: .75rem 1.25rem 1rem;
+    }
+
+    .mobile-sheet-avatar {
+        width: 44px;
+        height: 44px;
+        border-radius: 50%;
+        background: var(--c-primary);
+        color: #fff;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: .95rem;
+        font-weight: 700;
+        flex-shrink: 0;
+        letter-spacing: .03em;
+    }
+
+    .mobile-sheet-theme-btn {
+        width: 40px;
+        height: 40px;
+        border-radius: 50%;
+        border: 1px solid var(--bs-border-color, #E5E7EB);
+        background: var(--bs-secondary-bg, #F3F4F6);
+        color: var(--c-primary);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.1rem;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: background .15s;
+    }
+    .mobile-sheet-theme-btn:hover { background: var(--c-primary-light); }
+
+    .mobile-sheet-section {
+        padding: 0 1.25rem .75rem;
+    }
+
+    .mobile-sheet-label {
+        font-size: .68rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: .08em;
+        color: var(--bs-secondary-color, #6B7280);
+        padding: .5rem 0 .5rem;
+    }
+
+    .mobile-sheet-grid {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 8px;
+    }
+
+    .mobile-sheet-tile {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 6px;
+        padding: 14px 4px 12px;
+        border-radius: 14px;
+        background: var(--bs-secondary-bg, #F3F4F6);
+        color: var(--bs-body-color, #1F2937);
+        text-decoration: none !important;
+        font-size: .7rem;
+        font-weight: 600;
+        text-align: center;
+        transition: background .12s, transform .1s;
+        line-height: 1.2;
+    }
+    .mobile-sheet-tile i {
+        font-size: 1.35rem;
+        color: var(--c-primary);
+    }
+    .mobile-sheet-tile:hover {
+        background: var(--c-primary-light);
+        color: var(--bs-body-color, #1F2937);
+    }
+    .mobile-sheet-tile:active { transform: scale(.96); }
+
+    .mobile-sheet-link {
+        display: flex;
+        align-items: center;
+        gap: .65rem;
+        padding: .7rem .5rem;
+        font-size: .85rem;
+        font-weight: 500;
+        color: var(--bs-body-color, inherit);
+        text-decoration: none !important;
+        border-radius: 10px;
+        transition: background .12s;
+        border: none;
+        background: none;
+        width: 100%;
+        text-align: left;
+        cursor: pointer;
+    }
+    .mobile-sheet-link i:first-child { font-size: 1.05rem; color: var(--bs-secondary-color, #6B7280); flex-shrink: 0; }
+    .mobile-sheet-link:hover { background: var(--bs-secondary-bg, rgba(0,0,0,.04)); color: var(--bs-body-color, inherit); }
+    .mobile-sheet-link-danger { color: #DC2626 !important; }
+    .mobile-sheet-link-danger i { color: #DC2626 !important; }
 }
 
 /* ============================================================
@@ -1669,6 +1846,12 @@ a.nav-link.active { /* kept for compat */ }
 /* --- Mobile bottom nav --- */
 [data-theme$="-dark"] .mobile-bottom-nav { background: #1E293B; border-top-color: #334155; }
 [data-theme$="-dark"] .mobile-nav-item   { color: #475569; }
+
+/* --- Mobile bottom sheet --- */
+[data-theme$="-dark"] .mobile-sheet { background: #1E293B; box-shadow: 0 -8px 40px rgba(0,0,0,.4); }
+[data-theme$="-dark"] .mobile-sheet-tile { background: #0F172A; }
+[data-theme$="-dark"] .mobile-sheet-tile:hover { background: var(--c-primary-light); }
+[data-theme$="-dark"] .mobile-sheet-theme-btn { background: #0F172A; border-color: #334155; }
 
 /* --- Dropdowns --- */
 [data-theme$="-dark"] .dropdown-menu    { background: #1E293B; border-color: #334155; }
