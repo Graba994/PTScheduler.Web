@@ -57,6 +57,14 @@ public class BrandingService(IDbContextFactory<ApplicationDbContext> dbFactory, 
         return path;
     }
 
+    public async Task<string> UploadPwaIconAsync(Stream stream, string fileName)
+    {
+        var path = await SaveFileAsync(stream, fileName, "pwa-icon");
+        await using var db = dbFactory.CreateDbContext();
+        await UpdatePath(db, b => b.PwaIconPath = path);
+        return path;
+    }
+
     public async Task DeleteLogoAsync()
     {
         await using var db = dbFactory.CreateDbContext();
@@ -74,6 +82,16 @@ public class BrandingService(IDbContextFactory<ApplicationDbContext> dbFactory, 
         if (b is null) return;
         DeleteFile(b.FaviconPath);
         b.FaviconPath = null;
+        await db.SaveChangesAsync();
+    }
+
+    public async Task DeletePwaIconAsync()
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var b = await db.AppBrandings.FirstOrDefaultAsync();
+        if (b is null) return;
+        DeleteFile(b.PwaIconPath);
+        b.PwaIconPath = null;
         await db.SaveChangesAsync();
     }
 
@@ -116,6 +134,7 @@ public class BrandingService(IDbContextFactory<ApplicationDbContext> dbFactory, 
         PwaBannerEnabled = b.PwaBannerEnabled,
         PwaBannerTitle = b.PwaBannerTitle,
         PwaBannerBody = b.PwaBannerBody,
-        PwaBannerButton = b.PwaBannerButton
+        PwaBannerButton = b.PwaBannerButton,
+        PwaIconPath = b.PwaIconPath
     };
 }

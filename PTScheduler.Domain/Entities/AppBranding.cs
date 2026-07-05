@@ -15,4 +15,5 @@ public class AppBranding
     public string? PwaBannerTitle { get; set; }
     public string? PwaBannerBody { get; set; }
     public string? PwaBannerButton { get; set; }
+    public string? PwaIconPath { get; set; }
 }

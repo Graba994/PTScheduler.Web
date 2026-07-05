@@ -76,13 +76,20 @@
     <meta name="application-name" content="@_companyName" />
     <meta name="msapplication-TileColor" content="#0284C7" />
     <meta name="msapplication-TileImage" content="/icons/icon-144.png" />
-    <!-- Apple touch icons (largest first — Safari picks biggest that fits) -->
-    <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180.png" />
-    <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152.png" />
-    <link rel="apple-touch-icon" sizes="144x144" href="/icons/icon-144.png" />
-    <link rel="apple-touch-icon" sizes="128x128" href="/icons/icon-128.png" />
-    <link rel="apple-touch-icon" sizes="96x96"   href="/icons/icon-96.png" />
-    <link rel="apple-touch-icon"                  href="@(_faviconPath ?? "/icons/icon-192.png")" />
+    <!-- Apple touch icons — custom first, then built-in sizes as fallback -->
+    @if (!string.IsNullOrEmpty(_pwaIconPath))
+    {
+        <link rel="apple-touch-icon" href="@_pwaIconPath" />
+    }
+    else
+    {
+        <link rel="apple-touch-icon" sizes="180x180" href="/icons/icon-180.png" />
+        <link rel="apple-touch-icon" sizes="152x152" href="/icons/icon-152.png" />
+        <link rel="apple-touch-icon" sizes="144x144" href="/icons/icon-144.png" />
+        <link rel="apple-touch-icon" sizes="128x128" href="/icons/icon-128.png" />
+        <link rel="apple-touch-icon" sizes="96x96"   href="/icons/icon-96.png" />
+        <link rel="apple-touch-icon"                  href="@(_faviconPath ?? "/icons/icon-192.png")" />
+    }
 
     <ResourcePreloader />
     <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]" />
@@ -163,6 +170,7 @@
     private string _accent = "ocean";
     private string _companyName = "PTScheduler";
     private string? _faviconPath;
+    private string? _pwaIconPath;
 
     protected override async Task OnInitializedAsync()
     {
@@ -172,6 +180,7 @@
             _accent = branding.ThemeName ?? "ocean";
             _companyName = branding.CompanyName ?? "PTScheduler";
             _faviconPath = branding.FaviconPath;
+            _pwaIconPath = branding.PwaIconPath;
         }
         catch { }
     }

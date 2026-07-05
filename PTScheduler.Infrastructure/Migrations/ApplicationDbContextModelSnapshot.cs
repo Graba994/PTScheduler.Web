@@ -184,6 +184,9 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Property<string>("PwaBannerTitle")
                         .HasColumnType("text");
 
+                    b.Property<string>("PwaIconPath")
+                        .HasColumnType("text");
+
                     b.Property<string>("PwaShortName")
                         .HasColumnType("text");
 

@@ -8,6 +8,8 @@ public interface IBrandingService
     Task SaveAsync(SaveBrandingDto dto);
     Task<string> UploadLogoAsync(Stream stream, string fileName);
     Task<string> UploadFaviconAsync(Stream stream, string fileName);
+    Task<string> UploadPwaIconAsync(Stream stream, string fileName);
     Task DeleteLogoAsync();
     Task DeleteFaviconAsync();
+    Task DeletePwaIconAsync();
 }

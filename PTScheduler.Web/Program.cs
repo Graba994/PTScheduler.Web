@@ -162,9 +162,29 @@ app.MapGet("/manifest.webmanifest", async (PTScheduler.Application.Interfaces.IB
     AppBrandingDto? b = null;
     try { b = await branding.GetAsync(); } catch { /* DB down — use safe defaults */ }
 
-    var name   = b?.CompanyName ?? "PTScheduler";
-    var short_ = string.IsNullOrWhiteSpace(b?.PwaShortName) ? name : b.PwaShortName;
-    var color  = ThemeColor(b?.ThemeName);
+    var name      = b?.CompanyName ?? "PTScheduler";
+    var short_    = string.IsNullOrWhiteSpace(b?.PwaShortName) ? name : b.PwaShortName;
+    var color     = ThemeColor(b?.ThemeName);
+    var customIcon = b?.PwaIconPath;
+
+    // Custom icon goes first (browser picks the best-fit); fall back to built-in set.
+    var defaultIcons = new object[]
+    {
+        new { src = "/icons/icon-72.png",  sizes = "72x72",   type = "image/png" },
+        new { src = "/icons/icon-96.png",  sizes = "96x96",   type = "image/png" },
+        new { src = "/icons/icon-128.png", sizes = "128x128", type = "image/png" },
+        new { src = "/icons/icon-144.png", sizes = "144x144", type = "image/png" },
+        new { src = "/icons/icon-152.png", sizes = "152x152", type = "image/png" },
+        new { src = "/icons/icon-192.png", sizes = "192x192", type = "image/png" },
+        new { src = "/icons/icon-384.png", sizes = "384x384", type = "image/png" },
+        new { src = "/icons/icon-512.png", sizes = "512x512", type = "image/png" },
+        new { src = "/icons/icon-512-maskable.png", sizes = "512x512", type = "image/png", purpose = "maskable" },
+    };
+    var icons = string.IsNullOrEmpty(customIcon)
+        ? defaultIcons
+        : (object[])[ new { src = customIcon, sizes = "512x512", type = "image/png", purpose = "any maskable" }, ..defaultIcons ];
+
+    var shortcutIcon = string.IsNullOrEmpty(customIcon) ? "/icons/icon-96.png" : customIcon;
 
     var manifest = new
     {
@@ -180,26 +200,15 @@ app.MapGet("/manifest.webmanifest", async (PTScheduler.Application.Interfaces.IB
         theme_color = color,
         orientation = "any",
         prefer_related_applications = false,
-        icons = new object[]
-        {
-            new { src = "/icons/icon-72.png",  sizes = "72x72",   type = "image/png" },
-            new { src = "/icons/icon-96.png",  sizes = "96x96",   type = "image/png" },
-            new { src = "/icons/icon-128.png", sizes = "128x128", type = "image/png" },
-            new { src = "/icons/icon-144.png", sizes = "144x144", type = "image/png" },
-            new { src = "/icons/icon-152.png", sizes = "152x152", type = "image/png" },
-            new { src = "/icons/icon-192.png", sizes = "192x192", type = "image/png" },
-            new { src = "/icons/icon-384.png", sizes = "384x384", type = "image/png" },
-            new { src = "/icons/icon-512.png", sizes = "512x512", type = "image/png" },
-            new { src = "/icons/icon-512-maskable.png", sizes = "512x512", type = "image/png", purpose = "maskable" },
-        },
+        icons,
         shortcuts = new object[]
         {
             new { name = "Kalendarz", short_name = "Kalendarz", url = "/calendar",
-                  icons = new[]{ new { src = "/icons/icon-96.png", sizes = "96x96" } } },
+                  icons = new[]{ new { src = shortcutIcon, sizes = "96x96" } } },
             new { name = "Wizyty",    short_name = "Wizyty",    url = "/sessions",
-                  icons = new[]{ new { src = "/icons/icon-96.png", sizes = "96x96" } } },
+                  icons = new[]{ new { src = shortcutIcon, sizes = "96x96" } } },
             new { name = "Klienci",   short_name = "Klienci",   url = "/clients",
-                  icons = new[]{ new { src = "/icons/icon-96.png", sizes = "96x96" } } },
+                  icons = new[]{ new { src = shortcutIcon, sizes = "96x96" } } },
         }
     };
     return Results.Json(manifest, contentType: "application/manifest+json");
@@ -224,6 +233,7 @@ static bool IsAllowedWhenDbDown(string path) =>
     || path.StartsWith("/lib", StringComparison.OrdinalIgnoreCase)
     || path.StartsWith("/images", StringComparison.OrdinalIgnoreCase)
     || path.StartsWith("/icons", StringComparison.OrdinalIgnoreCase)
+    || path.StartsWith("/branding", StringComparison.OrdinalIgnoreCase)
     || path.StartsWith("/favicon", StringComparison.OrdinalIgnoreCase)
     || path.Equals("/manifest.webmanifest", StringComparison.OrdinalIgnoreCase)
     || path.Equals("/manifest.json", StringComparison.OrdinalIgnoreCase)

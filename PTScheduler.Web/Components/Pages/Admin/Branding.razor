@@ -152,13 +152,39 @@ else
                         </div>
                     </div>
 
+                    <!-- PWA Icon upload -->
+                    <div class="col-12 mt-2">
+                        <label class="form-label">Ikona PWA <span class="text-muted fw-normal">(PNG, JPG, WebP — kwadrat, maks. 2 MB)</span></label>
+                        @if (!string.IsNullOrEmpty(_pwaIconPath))
+                        {
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <img src="@_pwaIconPath" alt="Ikona PWA"
+                                     style="height:64px;width:64px;object-fit:cover;border-radius:12px;border:1px solid #E5E7EB" />
+                                <div class="small text-muted">Twoja ikona · pojawi się na ekranie urządzenia i w banerze instalacji</div>
+                                <button class="btn btn-sm btn-outline-danger ms-auto" @onclick="DeletePwaIcon">
+                                    <i class="bi bi-trash me-1"></i>Usuń
+                                </button>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="small text-muted mb-2">Brak — używana jest domyślna ikona PTScheduler</div>
+                        }
+                        <label class="upload-zone d-block" for="pwaIconFile">
+                            <i class="bi bi-image fs-4 text-muted d-block mb-1"></i>
+                            <span class="text-muted small">Kliknij aby wybrać plik (zalecane: 512×512 px)</span>
+                        </label>
+                        <InputFile id="pwaIconFile" style="display:none" accept="image/png,image/jpeg,image/webp"
+                                   OnChange="UploadPwaIcon" />
+                    </div>
+
                     <!-- Preview -->
                     @if (_branding.PwaBannerEnabled)
                     {
                         <div class="mt-4">
                             <p class="text-muted small fw-semibold mb-2">Podgląd banera</p>
                             <div class="pwa-banner position-relative" style="position:static!important;transform:none!important;box-shadow:0 2px 12px rgba(0,0,0,.1);max-width:420px">
-                                <img class="pwa-banner-icon" src="/icons/icon-96.png" alt="" width="48" height="48" />
+                                <img class="pwa-banner-icon" src="@(_pwaIconPath ?? "/icons/icon-96.png")" alt="" width="48" height="48" />
                                 <div class="pwa-banner-text">
                                     <div class="pwa-banner-title">
                                         @(string.IsNullOrWhiteSpace(_branding.PwaBannerTitle)
@@ -220,6 +246,7 @@ else
     private SaveBrandingDto? _branding;
     private string? _logoPath;
     private string? _faviconPath;
+    private string? _pwaIconPath;
     private bool _saving;
     private string _message = string.Empty;
     private string _error   = string.Empty;
@@ -256,6 +283,7 @@ else
         };
         _logoPath    = dto.LogoPath;
         _faviconPath = dto.FaviconPath;
+        _pwaIconPath = dto.PwaIconPath;
     }
 
     private void SelectTheme(string key)
@@ -320,6 +348,26 @@ else
     {
         await BrandingService.DeleteFaviconAsync();
         _faviconPath = null;
+    }
+
+    private async Task UploadPwaIcon(InputFileChangeEventArgs e)
+    {
+        if (_branding is null) return;
+        _error = string.Empty;
+        try
+        {
+            await using var stream = e.File.OpenReadStream(2 * 1024 * 1024);
+            _pwaIconPath = await BrandingService.UploadPwaIconAsync(stream, e.File.Name);
+            await BrandingService.SaveAsync(_branding);
+            StateHasChanged();
+        }
+        catch (Exception ex) { _error = $"Błąd ikony: {ex.Message}"; }
+    }
+
+    private async Task DeletePwaIcon()
+    {
+        await BrandingService.DeletePwaIconAsync();
+        _pwaIconPath = null;
     }
 }
 

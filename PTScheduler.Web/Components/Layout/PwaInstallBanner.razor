@@ -6,7 +6,7 @@
 @if (_show && _bannerEnabled)
 {
     <div class="pwa-banner @(_ios ? "pwa-banner--ios" : "")" role="dialog" aria-label="Zainstaluj aplikację">
-        <img class="pwa-banner-icon" src="/icons/icon-96.png" alt="" width="48" height="48" />
+        <img class="pwa-banner-icon" src="@(_iconPath ?? "/icons/icon-96.png")" alt="" width="48" height="48" />
         <div class="pwa-banner-text">
             <div class="pwa-banner-title">@_title</div>
             @if (_ios)
@@ -37,9 +37,10 @@
     private bool _show;
     private bool _ios;
     private bool _bannerEnabled = true;
-    private string _title  = "Zainstaluj aplikację";
-    private string _body   = "Dodaj do ekranu głównego — działa jak natywna, bez przeglądarki.";
-    private string _button = "Zainstaluj";
+    private string _title   = "Zainstaluj aplikację";
+    private string _body    = "Dodaj do ekranu głównego — działa jak natywna, bez przeglądarki.";
+    private string _button  = "Zainstaluj";
+    private string? _iconPath;
 
     private DotNetObjectReference<PwaInstallBanner>? _ref;
 
@@ -50,9 +51,10 @@
             var b = await BrandingService.GetAsync();
             _bannerEnabled = b.PwaBannerEnabled;
             var appName = b.CompanyName ?? "PTScheduler";
-            _title  = !string.IsNullOrWhiteSpace(b.PwaBannerTitle)  ? b.PwaBannerTitle  : $"Zainstaluj {appName}";
-            _body   = !string.IsNullOrWhiteSpace(b.PwaBannerBody)   ? b.PwaBannerBody   : _body;
-            _button = !string.IsNullOrWhiteSpace(b.PwaBannerButton) ? b.PwaBannerButton : _button;
+            _title    = !string.IsNullOrWhiteSpace(b.PwaBannerTitle)  ? b.PwaBannerTitle  : $"Zainstaluj {appName}";
+            _body     = !string.IsNullOrWhiteSpace(b.PwaBannerBody)   ? b.PwaBannerBody   : _body;
+            _button   = !string.IsNullOrWhiteSpace(b.PwaBannerButton) ? b.PwaBannerButton : _button;
+            _iconPath = b.PwaIconPath;
         }
         catch { }
     }
