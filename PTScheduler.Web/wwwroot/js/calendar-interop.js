@@ -57,14 +57,15 @@ function renderEventContent(arg) {
     const initials = ep.initials || '?';
     const clientName = ep.clientName || '';
     const sessionType = ep.sessionType || '';
+    const duration = ep.duration ? `${ep.duration} min` : '';
 
     if (isList) {
         return {
-            html: `<div class="fc-event-card ${statusCls}" style="height:auto;padding:.3rem .5rem">
+            html: `<div class="fc-event-card ${statusCls}" style="height:auto;padding:.4rem .6rem">
                 <div class="fc-event-avatar">${initials}</div>
                 <div class="fc-event-info">
                     <div class="fc-event-client">${clientName}</div>
-                    <div class="fc-event-type">${sessionType}</div>
+                    <div class="fc-event-type">${sessionType}${duration ? ' · ' + duration : ''}</div>
                 </div>
             </div>`
         };
@@ -86,7 +87,7 @@ function renderEventContent(arg) {
             <div class="fc-event-avatar">${initials}</div>
             <div class="fc-event-info">
                 <div class="fc-event-client">${clientName}</div>
-                <div class="fc-event-type">${sessionType}</div>
+                <div class="fc-event-type">${sessionType}${duration ? ' · ' + duration : ''}</div>
             </div>
         </div>`
     };
