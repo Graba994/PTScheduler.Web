@@ -44,7 +44,7 @@ public class SessionService(
         var trainerIds = sessions.Select(s => s.TrainerUserId).Distinct().ToList();
         var trainers = await db.Users
             .Where(u => trainerIds.Contains(u.Id))
-            .ToDictionaryAsync(u => u.Id, u => $"{u.FirstName} {u.LastName}".Trim().NullIfEmpty() ?? u.Email ?? u.Id);
+            .ToDictionaryAsync(u => u.Id, u => $"{u.FirstName} {u.LastName}".Trim().NullIfEmpty() ?? u.Email ?? "Trener");
 
         return sessions.Select(s => MapToDto(s, trainers)).ToList();
     }
@@ -77,7 +77,7 @@ public class SessionService(
         var trainers = await db.Users
             .Where(u => trainerIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id,
-                u => $"{u.FirstName} {u.LastName}".Trim().NullIfEmpty() ?? u.Email ?? u.Id);
+                u => $"{u.FirstName} {u.LastName}".Trim().NullIfEmpty() ?? u.Email ?? "Trener");
         return sessions.Select(s => MapToDto(s, trainers)).ToList();
     }
 
@@ -327,7 +327,7 @@ public class SessionService(
         var trainers = await db.Users
             .Where(u => trainerIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id,
-                u => $"{u.FirstName} {u.LastName}".Trim() is { Length: > 0 } n ? n : u.Email ?? u.Id);
+                u => $"{u.FirstName} {u.LastName}".Trim() is { Length: > 0 } n ? n : u.Email ?? "Trener");
 
         return sessions.Select(s => MapToDto(s, trainers)).ToList();
     }
@@ -355,7 +355,7 @@ public class SessionService(
         var trainers = await db.Users
             .Where(u => trainerIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id,
-                u => $"{u.FirstName} {u.LastName}".Trim() is { Length: > 0 } n ? n : u.Email ?? u.Id);
+                u => $"{u.FirstName} {u.LastName}".Trim() is { Length: > 0 } n ? n : u.Email ?? "Trener");
 
         return sessions.Select(s => MapToDto(s, trainers)).ToList();
     }
@@ -378,7 +378,7 @@ public class SessionService(
         var trainers = await db.Users
             .Where(u => trainerIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id,
-                u => $"{u.FirstName} {u.LastName}".Trim().NullIfEmpty() ?? u.Email ?? u.Id);
+                u => $"{u.FirstName} {u.LastName}".Trim().NullIfEmpty() ?? u.Email ?? "Trener");
         return sessions.Select(s => MapToDto(s, trainers)).ToList();
     }
 
@@ -534,7 +534,7 @@ public class SessionService(
         SessionTypeName = s.SessionType.Name,
         DurationMinutes = s.SessionType.DurationMinutes,
         TrainerUserId = s.TrainerUserId,
-        TrainerName = trainers.GetValueOrDefault(s.TrainerUserId, s.TrainerUserId),
+        TrainerName = trainers.GetValueOrDefault(s.TrainerUserId, "Trener"),
         StartTime = s.StartTime,
         Status = s.Status,
         Notes = s.Notes,

@@ -8,10 +8,61 @@
 
 @if (!_loaded)
 {
-    <div class="text-center py-4"><div class="spinner-border text-primary" style="width:1.5rem;height:1.5rem"></div></div>
+    <!-- Skeleton loader -->
+    <div class="page-header mb-3">
+        <div class="skeleton skeleton-line w-40" style="height:24px;margin-bottom:0"></div>
+        <div class="skeleton" style="width:100px;height:32px;border-radius:8px"></div>
+    </div>
+    <div class="row g-3 mb-3">
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="col-6 col-xl-3">
+                <div class="skeleton-stat">
+                    <div class="skeleton skeleton-circle" style="width:40px;height:40px"></div>
+                    <div style="flex:1">
+                        <div class="skeleton skeleton-line w-40" style="height:20px"></div>
+                        <div class="skeleton skeleton-line w-75" style="height:10px;margin-bottom:0"></div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+    <div class="row g-3">
+        <div class="col-12 col-lg-5">
+            <div class="skeleton-card">
+                <div class="skeleton skeleton-line w-50" style="height:16px;margin-bottom:16px"></div>
+                @for (var i = 0; i < 3; i++)
+                {
+                    <div class="skeleton-row">
+                        <div class="skeleton" style="width:48px;height:36px"></div>
+                        <div style="flex:1">
+                            <div class="skeleton skeleton-line w-75" style="height:12px"></div>
+                            <div class="skeleton skeleton-line w-50" style="height:10px;margin-bottom:0"></div>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+        <div class="col-12 col-lg-7">
+            <div class="skeleton-card">
+                <div class="skeleton skeleton-line w-40" style="height:16px;margin-bottom:16px"></div>
+                @for (var i = 0; i < 4; i++)
+                {
+                    <div class="skeleton-row">
+                        <div class="skeleton" style="width:52px;height:32px"></div>
+                        <div style="flex:1">
+                            <div class="skeleton skeleton-line w-75" style="height:12px"></div>
+                            <div class="skeleton skeleton-line w-50" style="height:10px;margin-bottom:0"></div>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
 }
 else
 {
+    <PullToRefresh OnRefresh="RefreshAsync">
     <div class="page-header">
         <h4 class="page-title"><i class="bi bi-calendar3 me-2" style="color:var(--c-primary)"></i>Mój dzień</h4>
         <a href="/calendar" class="btn btn-sm btn-primary"><i class="bi bi-calendar3 me-1"></i>Kalendarz</a>
@@ -122,8 +173,11 @@ else
                 <div class="card-body p-0">
                     @if (!_today.Any())
                     {
-                        <div class="text-center text-muted py-4 small">
-                            <i class="bi bi-calendar-x d-block fs-3 mb-2"></i>Brak sesji na dziś
+                        <div class="empty-state">
+                            <div class="empty-state-icon">🏖️</div>
+                            <div class="empty-state-title">Brak sesji na dziś</div>
+                            <div class="empty-state-desc">Wolny dzień! Skorzystaj z czasu na planowanie kolejnych treningów.</div>
+                            <a href="/calendar" class="empty-state-cta"><i class="bi bi-calendar-plus"></i>Otwórz kalendarz</a>
                         </div>
                     }
                     else
@@ -156,8 +210,11 @@ else
                 <div class="card-body p-0">
                     @if (!_upcoming.Any())
                     {
-                        <div class="text-center text-muted py-4 small">
-                            <i class="bi bi-calendar-check d-block fs-3 mb-2"></i>Brak zaplanowanych wizyt
+                        <div class="empty-state">
+                            <div class="empty-state-icon">📋</div>
+                            <div class="empty-state-title">Brak zaplanowanych wizyt</div>
+                            <div class="empty-state-desc">Nie masz nadchodzących sesji. Dodaj nową wizytę w kalendarzu.</div>
+                            <a href="/calendar" class="empty-state-cta"><i class="bi bi-plus-lg"></i>Zaplanuj wizytę</a>
                         </div>
                     }
                     else
@@ -198,8 +255,10 @@ else
                 <div class="card-body p-0">
                     @if (!_expiring.Any())
                     {
-                        <div class="text-center text-muted py-4 small">
-                            <i class="bi bi-check-circle d-block fs-3 mb-2" style="color:#16A34A"></i>Brak pakietów wygasających w ciągu 14 dni
+                        <div class="empty-state">
+                            <div class="empty-state-icon">✅</div>
+                            <div class="empty-state-title">Wszystko w porządku</div>
+                            <div class="empty-state-desc">Żaden pakiet nie wygasa w ciągu najbliższych 14 dni.</div>
                         </div>
                     }
                     else
@@ -236,8 +295,10 @@ else
                 <div class="card-body p-0">
                     @if (!_pending.Any())
                     {
-                        <div class="text-center text-muted py-4 small">
-                            <i class="bi bi-check-all d-block fs-3 mb-2" style="color:#16A34A"></i>Brak oczekujących
+                        <div class="empty-state">
+                            <div class="empty-state-icon">👋</div>
+                            <div class="empty-state-title">Brak oczekujących</div>
+                            <div class="empty-state-desc">Wszyscy klienci zostali zatwierdzeni. Nowi pojawią się po rejestracji.</div>
                         </div>
                     }
                     else
@@ -260,6 +321,7 @@ else
             </div>
         </div>
     </div>
+    </PullToRefresh>
 }
 
 @code {
@@ -276,6 +338,12 @@ else
     private int _thisMonthCompleted;
     private int _activeClientsCount;
     private bool _loading;
+
+    private async Task RefreshAsync()
+    {
+        _loading = false;
+        await OnParametersSetAsync();
+    }
 
     protected override async Task OnParametersSetAsync()
     {

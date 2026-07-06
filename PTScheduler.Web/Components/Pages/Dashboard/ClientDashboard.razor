@@ -11,7 +11,30 @@
 
 @if (!_loaded)
 {
-    <div class="text-center py-4"><div class="spinner-border text-primary"></div></div>
+    <div class="cd-page">
+        <!-- Hero skeleton -->
+        <div class="skeleton-card" style="padding:2rem;text-align:center">
+            <div class="skeleton skeleton-line w-40 mx-auto" style="height:14px"></div>
+            <div class="skeleton skeleton-line w-50 mx-auto" style="height:28px"></div>
+            <div class="skeleton skeleton-line w-75 mx-auto" style="height:12px"></div>
+        </div>
+        <!-- Stats skeleton -->
+        <div class="d-flex gap-2 mb-3">
+            @for (var i = 0; i < 4; i++)
+            {
+                <div class="skeleton-card flex-fill" style="padding:14px;text-align:center">
+                    <div class="skeleton skeleton-line w-50 mx-auto" style="height:20px"></div>
+                    <div class="skeleton skeleton-line w-75 mx-auto" style="height:10px;margin-bottom:0"></div>
+                </div>
+            }
+        </div>
+        <!-- Package skeleton -->
+        <div class="skeleton-card">
+            <div class="skeleton skeleton-line w-50" style="height:14px"></div>
+            <div class="skeleton skeleton-line w-75" style="height:10px"></div>
+            <div class="skeleton" style="width:100%;height:8px;border-radius:4px;margin-bottom:0"></div>
+        </div>
+    </div>
 }
 else if (_errorMsg is not null)
 {
@@ -23,6 +46,7 @@ else if (_client is null)
 }
 else
 {
+    <PullToRefresh OnRefresh="RefreshAsync">
     <div class="cd-page">
 
         @if (_client.Status == ClientStatus.Pending)
@@ -273,6 +297,7 @@ else
             </div>
         }
     </div>
+    </PullToRefresh>
 }
 
 @code {
@@ -305,6 +330,12 @@ else
 
     // Chart re-render trigger
     private bool _chartNeedsRender;
+
+    private async Task RefreshAsync()
+    {
+        _loading = false;
+        await OnParametersSetAsync();
+    }
 
     protected override async Task OnParametersSetAsync()
     {

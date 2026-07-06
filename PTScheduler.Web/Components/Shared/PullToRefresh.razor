@@ -1,0 +1,58 @@
+@inject IJSRuntime JS
+@implements IAsyncDisposable
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<div @ref="_el" class="ptr-wrapper">
+    <div class="ptr-indicator @(_state)">
+        @if (_state == "refreshing")
+        {
+            <div class="ptr-spinner"></div>
+        }
+        else
+        {
+            <i class="bi bi-arrow-down ptr-arrow"></i>
+        }
+    </div>
+    @ChildContent
+</div>
+
+@code {
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public EventCallback OnRefresh { get; set; }
+
+    private ElementReference _el;
+    private string _state = "";
+    private DotNetObjectReference<PullToRefresh>? _objRef;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _objRef = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("PTR.init", _el, _objRef);
+        }
+    }
+
+    [JSInvokable]
+    public async Task TriggerRefresh()
+    {
+        _state = "refreshing";
+        StateHasChanged();
+        await OnRefresh.InvokeAsync();
+        _state = "";
+        StateHasChanged();
+    }
+
+    [JSInvokable]
+    public void SetPulling(bool pulling)
+    {
+        _state = pulling ? "pulling active" : "";
+        StateHasChanged();
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        _objRef?.Dispose();
+        try { await JS.InvokeVoidAsync("PTR.destroy", _el); } catch { }
+    }
+}
