@@ -1,0 +1,153 @@
+@rendermode InteractiveServer
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthState
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Domain.Constants
+@using System.Security.Claims
+
+@if (_ready)
+{
+    <button class="mobile-nav-item @(_sheetOpen ? "active" : "")" @onclick="ToggleSheet">
+        <span class="mobile-nav-indicator"></span>
+        <i class="bi bi-grid-fill"></i>
+        <span>Więcej</span>
+    </button>
+
+    @if (_sheetOpen)
+    {
+        <div class="mobile-sheet-backdrop" @onclick="CloseSheet"></div>
+    }
+    <div class="mobile-sheet @(_sheetOpen ? "mobile-sheet-open" : "")">
+        <div class="mobile-sheet-handle" @onclick="CloseSheet"><span></span></div>
+
+        <div class="mobile-sheet-user">
+            <div class="mobile-sheet-avatar">@_initials</div>
+            <div style="min-width:0;flex:1">
+                <div class="fw-semibold text-truncate">@_name</div>
+                <div class="text-muted text-truncate" style="font-size:.75rem">@_email</div>
+            </div>
+            <button class="mobile-sheet-theme-btn" @onclick="ToggleDarkAsync" title="@(_dark ? "Tryb jasny" : "Tryb ciemny")">
+                <i class="bi @(_dark ? "bi-sun-fill" : "bi-moon-stars-fill")"></i>
+            </button>
+        </div>
+
+        <AuthorizeView Roles="Admin,Trainer,Subordinate">
+            <Authorized>
+                <div class="mobile-sheet-section">
+                    <div class="mobile-sheet-label">Nawigacja</div>
+                    <div class="mobile-sheet-grid">
+                        <a href="/stats" class="mobile-sheet-tile" @onclick="CloseSheet">
+                            <i class="bi bi-bar-chart-line-fill"></i>
+                            <span>Statystyki</span>
+                        </a>
+                        <a href="/finance" class="mobile-sheet-tile" @onclick="CloseSheet">
+                            <i class="bi bi-currency-dollar"></i>
+                            <span>Finanse</span>
+                        </a>
+                    </div>
+                </div>
+                <div class="mobile-sheet-section">
+                    <div class="mobile-sheet-label">Zarządzanie</div>
+                    <div class="mobile-sheet-grid">
+                        <a href="/trainer/availability" class="mobile-sheet-tile" @onclick="CloseSheet">
+                            <i class="bi bi-clock-fill"></i>
+                            <span>Dostępność</span>
+                        </a>
+                        <a href="/trainer/series" class="mobile-sheet-tile" @onclick="CloseSheet">
+                            <i class="bi bi-repeat"></i>
+                            <span>Serie wizyt</span>
+                        </a>
+                        <a href="/trainer/contacts" class="mobile-sheet-tile" @onclick="CloseSheet">
+                            <i class="bi bi-people-fill"></i>
+                            <span>Pary klientów</span>
+                        </a>
+                        <a href="/trainer/intro-config" class="mobile-sheet-tile" @onclick="CloseSheet">
+                            <i class="bi bi-person-lines-fill"></i>
+                            <span>Pierwsza wizyta</span>
+                        </a>
+                    </div>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+
+        <AuthorizeView Roles="Admin">
+            <Authorized>
+                <div class="mobile-sheet-section">
+                    <div class="mobile-sheet-label">Administracja</div>
+                    <div class="mobile-sheet-grid">
+                        <a href="/admin/users" class="mobile-sheet-tile" @onclick="CloseSheet">
+                            <i class="bi bi-shield-fill-check"></i>
+                            <span>Panel admina</span>
+                        </a>
+                    </div>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+
+        <AuthorizeView Roles="Client">
+            <Authorized>
+                <div class="mobile-sheet-section">
+                    <div class="mobile-sheet-label">Moje</div>
+                    <div class="mobile-sheet-grid">
+                        <a href="/my/packages" class="mobile-sheet-tile" @onclick="CloseSheet">
+                            <i class="bi bi-box-seam"></i>
+                            <span>Pakiety</span>
+                        </a>
+                    </div>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+
+        <div class="mobile-sheet-section">
+            <div class="mobile-sheet-label">Konto</div>
+            <a href="/Account/Manage" class="mobile-sheet-link" @onclick="CloseSheet">
+                <i class="bi bi-gear-fill"></i>
+                <span>Ustawienia konta</span>
+                <i class="bi bi-chevron-right ms-auto" style="font-size:.7rem;opacity:.4"></i>
+            </a>
+            <form action="Account/Logout" method="post" style="margin:0">
+                <AntiforgeryToken />
+                <input type="hidden" name="ReturnUrl" value="/" />
+                <button type="submit" class="mobile-sheet-link mobile-sheet-link-danger">
+                    <i class="bi bi-box-arrow-left"></i>
+                    <span>Wyloguj</span>
+                </button>
+            </form>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _ready;
+    private bool _sheetOpen;
+    private bool _dark;
+    private string _initials = "";
+    private string _name = "";
+    private string _email = "";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            var user = auth.User;
+            _name = user.Identity?.Name ?? "";
+            _email = user.FindFirst(ClaimTypes.Email)?.Value ?? _name;
+            var parts = _name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            _initials = parts.Length >= 2
+                ? $"{parts[0][0]}{parts[^1][0]}".ToUpper()
+                : _name.Length > 0 ? _name[0].ToString().ToUpper() : "?";
+            try { _dark = await JS.InvokeAsync<bool>("PTTheme.isDark"); } catch { }
+            _ready = true;
+            StateHasChanged();
+        }
+    }
+
+    private void ToggleSheet() => _sheetOpen = !_sheetOpen;
+    private void CloseSheet() => _sheetOpen = false;
+
+    private async Task ToggleDarkAsync()
+    {
+        try { _dark = await JS.InvokeAsync<bool>("PTTheme.toggle"); } catch { }
+    }
+}
