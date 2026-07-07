@@ -1,0 +1,184 @@
+@page "/admin/permissions"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Entities
+@inject IPermissionService PermissionService
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<AppTitle Page="Uprawnienia" />
+
+<div class="page-header mb-3">
+    <h4 class="page-title"><i class="bi bi-shield-lock me-2" style="color:var(--c-primary)"></i>Uprawnienia ról</h4>
+    <button class="btn btn-sm btn-outline-secondary" @onclick="ResetToDefaults" disabled="@_busy">
+        <i class="bi bi-arrow-counterclockwise me-1"></i>Przywróć domyślne
+    </button>
+</div>
+
+@if (!string.IsNullOrEmpty(_message))
+{
+    <div class="alert @(_isError ? "alert-danger" : "alert-success") py-2 small mb-3">
+        <i class="bi @(_isError ? "bi-exclamation-triangle" : "bi-check-circle") me-1"></i>@_message
+    </div>
+}
+
+@if (!_loaded)
+{
+    <div class="card">
+        <div class="card-body">
+            <div class="skeleton-card" style="border:none;box-shadow:none;padding:0">
+                <div class="skeleton skeleton-line w-50" style="height:16px;margin-bottom:16px"></div>
+                @for (var i = 0; i < 8; i++)
+                {
+                    <div class="skeleton-row">
+                        <div style="flex:1">
+                            <div class="skeleton skeleton-line w-75" style="height:12px;margin-bottom:0"></div>
+                        </div>
+                        <div class="d-flex gap-3">
+                            <div class="skeleton" style="width:40px;height:20px;border-radius:10px"></div>
+                            <div class="skeleton" style="width:40px;height:20px;border-radius:10px"></div>
+                            <div class="skeleton" style="width:40px;height:20px;border-radius:10px"></div>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+else
+{
+    <div class="card">
+        <div class="card-body p-0">
+            <div class="table-responsive">
+                <table class="table table-sm mb-0 align-middle permission-table">
+                    <thead>
+                        <tr>
+                            <th class="ps-3" style="min-width:200px">Funkcja</th>
+                            @foreach (var role in _roles)
+                            {
+                                <th class="text-center" style="min-width:100px">
+                                    <span class="badge rounded-pill @RoleBadge(role)">@RoleLabel(role)</span>
+                                </th>
+                            }
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var perm in Permissions.All)
+                        {
+                            <tr>
+                                <td class="ps-3">
+                                    <div class="fw-semibold" style="font-size:.875rem">@perm.Label</div>
+                                    <div class="text-muted" style="font-size:.75rem">@perm.Description</div>
+                                </td>
+                                @foreach (var role in _roles)
+                                {
+                                    var r = role;
+                                    var p = perm.Key;
+                                    var isGranted = IsGranted(r, p);
+                                    var isAdmin = r == Roles.Admin;
+                                    <td class="text-center">
+                                        <div class="form-check form-switch d-inline-block mb-0">
+                                            <input class="form-check-input" type="checkbox"
+                                                   checked="@isGranted" disabled="@(isAdmin || _busy)"
+                                                   @onchange="e => TogglePermission(r, p, (bool)(e.Value ?? false))" />
+                                        </div>
+                                    </td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <div class="mt-3 small text-muted">
+        <i class="bi bi-info-circle me-1"></i>Administrator ma zawsze pełne uprawnienia. Klient ma dostęp tylko do panelu klienta.
+    </div>
+}
+
+@code {
+    private bool _loaded;
+    private bool _busy;
+    private string _message = string.Empty;
+    private bool _isError;
+    private List<RolePermission> _permissions = [];
+    private readonly string[] _roles = [Roles.Admin, Roles.Trainer, Roles.Subordinate];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _permissions = await PermissionService.GetAllAsync();
+        _loaded = true;
+    }
+
+    private bool IsGranted(string role, string permission)
+    {
+        if (role == Roles.Admin) return true;
+        var rp = _permissions.FirstOrDefault(p => p.Role == role && p.Permission == permission);
+        if (rp is not null) return rp.IsGranted;
+        return Permissions.Defaults.TryGetValue(role, out var defaults) && defaults.Contains(permission);
+    }
+
+    private async Task TogglePermission(string role, string permission, bool granted)
+    {
+        _busy = true;
+        _message = string.Empty;
+        try
+        {
+            await PermissionService.SetPermissionAsync(role, permission, granted);
+            _permissions = await PermissionService.GetAllAsync();
+            _message = $"Zapisano: {PermLabel(permission)} dla {RoleLabel(role)} — {(granted ? "włączone" : "wyłączone")}";
+            _isError = false;
+        }
+        catch (Exception ex)
+        {
+            _message = $"Błąd: {ex.Message}";
+            _isError = true;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task ResetToDefaults()
+    {
+        _busy = true;
+        _message = string.Empty;
+        try
+        {
+            await PermissionService.SeedDefaultsAsync();
+            _permissions = await PermissionService.GetAllAsync();
+            _message = "Przywrócono domyślne uprawnienia.";
+            _isError = false;
+        }
+        catch (Exception ex)
+        {
+            _message = $"Błąd: {ex.Message}";
+            _isError = true;
+        }
+        finally { _busy = false; }
+    }
+
+    private static string RoleLabel(string role) => role switch
+    {
+        Roles.Admin       => "Admin",
+        Roles.Trainer     => "Trener",
+        Roles.Subordinate => "Pomocnik",
+        Roles.Client      => "Klient",
+        _                 => role
+    };
+
+    private static string RoleBadge(string role) => role switch
+    {
+        Roles.Admin       => "bg-danger",
+        Roles.Trainer     => "bg-primary",
+        Roles.Subordinate => "bg-secondary",
+        _                 => "bg-dark"
+    };
+
+    private static string PermLabel(string key) =>
+        Permissions.All.FirstOrDefault(p => p.Key == key).Label ?? key;
+}

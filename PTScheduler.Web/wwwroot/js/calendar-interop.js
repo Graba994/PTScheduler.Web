@@ -1,4 +1,5 @@
 let calendar = null;
+let summaryEl = null;
 
 export function initCalendar(dotnetRef, el, canEdit) {
     const isMobile = window.innerWidth < 768;
@@ -41,10 +42,53 @@ export function initCalendar(dotnetRef, el, canEdit) {
             info.el.style.cursor = 'pointer';
             const ep = info.event.extendedProps;
             info.el.title = `${ep.clientName} — ${ep.sessionType}`;
-        }
+        },
+        eventsSet: updateDaySummary
     });
 
+    summaryEl = document.createElement('div');
+    summaryEl.className = 'cal-day-summary';
+    summaryEl.style.display = 'none';
+    const toolbar = el.querySelector('.fc-header-toolbar');
+    if (toolbar && toolbar.parentNode) {
+        toolbar.parentNode.insertBefore(summaryEl, toolbar.nextSibling);
+    }
+
     calendar.render();
+}
+
+function updateDaySummary(events) {
+    if (!summaryEl) return;
+    if (!events || events.length === 0) { summaryEl.style.display = 'none'; return; }
+
+    const view = calendar.view;
+    let start, end;
+    if (view.type === 'timeGridDay' || view.type === 'listDay') {
+        start = view.currentStart;
+        end = new Date(start); end.setDate(end.getDate() + 1);
+    } else {
+        start = view.currentStart;
+        end = view.currentEnd;
+    }
+
+    const visible = events.filter(e => {
+        const s = e.start;
+        return s >= start && s < end;
+    });
+
+    if (visible.length === 0) { summaryEl.style.display = 'none'; return; }
+
+    const totalMin = visible.reduce((sum, e) => sum + (e.extendedProps.duration || 0), 0);
+    const clients = new Set(visible.map(e => e.extendedProps.clientName)).size;
+    const h = Math.floor(totalMin / 60);
+    const m = totalMin % 60;
+    const timeStr = h > 0 ? (m > 0 ? `${h}h ${m}min` : `${h}h`) : `${m}min`;
+
+    summaryEl.innerHTML =
+        `<span class="summary-pill">${visible.length} ${visible.length === 1 ? 'sesja' : visible.length < 5 ? 'sesje' : 'sesji'}</span>` +
+        `<span class="summary-pill">${timeStr}</span>` +
+        `<span class="summary-pill">${clients} ${clients === 1 ? 'klient' : clients < 5 ? 'klientów' : 'klientów'}</span>`;
+    summaryEl.style.display = 'flex';
 }
 
 function renderEventContent(arg) {
@@ -59,9 +103,12 @@ function renderEventContent(arg) {
     const sessionType = ep.sessionType || '';
     const duration = ep.duration ? `${ep.duration} min` : '';
 
+    const dotCls = 'dot-' + (ep.status || 'scheduled').toLowerCase();
+
     if (isList) {
         return {
             html: `<div class="fc-event-card ${statusCls}" style="height:auto;padding:.4rem .6rem">
+                <div class="fc-event-status-dot ${dotCls}"></div>
                 <div class="fc-event-avatar">${initials}</div>
                 <div class="fc-event-info">
                     <div class="fc-event-client">${clientName}</div>
@@ -98,6 +145,7 @@ export function refetchEvents() {
 }
 
 export function destroyCalendar() {
+    if (summaryEl) { summaryEl.remove(); summaryEl = null; }
     calendar?.destroy();
     calendar = null;
 }

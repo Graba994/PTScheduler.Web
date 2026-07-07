@@ -637,6 +637,7 @@ public class DemoDataService(
         await db.TrainerConfigs.ExecuteDeleteAsync();
         await db.IntroSessionConfigs.ExecuteDeleteAsync();
         await db.NotificationPreferences.ExecuteDeleteAsync();
+        await db.RolePermissions.ExecuteDeleteAsync();
 
         // Delete all identity users
         var allUsers = await userManager.Users.ToListAsync();

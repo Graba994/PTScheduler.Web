@@ -254,6 +254,7 @@ static async Task TryInitializeDatabaseAsync(IServiceProvider services, StartupH
         await DbInitializer.SeedAdminAsync(userManager);
 
         await DbInitializer.SeedSessionTypesAsync(db);
+        await DbInitializer.SeedPermissionsAsync(db);
 
         var wasDown = !health.DatabaseAvailable;
         health.DatabaseAvailable = true;

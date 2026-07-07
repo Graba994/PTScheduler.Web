@@ -501,6 +501,33 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.ToTable("NotificationPreferences");
                 });
 
+            modelBuilder.Entity("PTScheduler.Domain.Entities.RolePermission", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("IsGranted")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("Permission")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Role")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Role", "Permission")
+                        .IsUnique();
+
+                    b.ToTable("RolePermissions");
+                });
+
             modelBuilder.Entity("PTScheduler.Domain.Entities.Session", b =>
                 {
                     b.Property<int>("Id")

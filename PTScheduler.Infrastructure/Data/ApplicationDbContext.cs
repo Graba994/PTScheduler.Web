@@ -23,6 +23,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<SessionInvitation> SessionInvitations => Set<SessionInvitation>();
     public DbSet<EmailSettings> EmailSettings => Set<EmailSettings>();
     public DbSet<NotificationPreferences> NotificationPreferences => Set<NotificationPreferences>();
+    public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -84,6 +85,10 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
         builder.Entity<NotificationPreferences>()
             .HasIndex(n => n.UserId)
+            .IsUnique();
+
+        builder.Entity<RolePermission>()
+            .HasIndex(rp => new { rp.Role, rp.Permission })
             .IsUnique();
     }
 }

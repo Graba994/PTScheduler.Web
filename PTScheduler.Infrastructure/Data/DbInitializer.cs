@@ -7,6 +7,26 @@ namespace PTScheduler.Infrastructure.Data;
 
 public static class DbInitializer
 {
+    public static async Task SeedPermissionsAsync(ApplicationDbContext db)
+    {
+        if (await db.RolePermissions.AnyAsync()) return;
+
+        foreach (var (role, permissions) in Permissions.Defaults)
+        {
+            foreach (var perm in Permissions.All)
+            {
+                db.RolePermissions.Add(new RolePermission
+                {
+                    Role = role,
+                    Permission = perm.Key,
+                    IsGranted = permissions.Contains(perm.Key)
+                });
+            }
+        }
+
+        await db.SaveChangesAsync();
+    }
+
     public static async Task SeedRolesAsync(RoleManager<IdentityRole> roleManager)
     {
         string[] roles = [Roles.Admin, Roles.Trainer, Roles.Subordinate, Roles.Client];
