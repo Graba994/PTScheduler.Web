@@ -3,6 +3,7 @@
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
 @using PTScheduler.Domain.Entities
+@using PermConst = PTScheduler.Domain.Constants.Permissions
 @inject IPermissionService PermissionService
 @rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
 
@@ -63,7 +64,7 @@ else
                         </tr>
                     </thead>
                     <tbody>
-                        @foreach (var perm in Permissions.All)
+                        @foreach (var perm in PermConst.All)
                         {
                             <tr>
                                 <td class="ps-3">
@@ -121,7 +122,7 @@ else
         if (role == Roles.Admin) return true;
         var rp = _permissions.FirstOrDefault(p => p.Role == role && p.Permission == permission);
         if (rp is not null) return rp.IsGranted;
-        return Permissions.Defaults.TryGetValue(role, out var defaults) && defaults.Contains(permission);
+        return PermConst.Defaults.TryGetValue(role, out var defaults) && defaults.Contains(permission);
     }
 
     private async Task TogglePermission(string role, string permission, bool granted)
@@ -180,5 +181,5 @@ else
     };
 
     private static string PermLabel(string key) =>
-        Permissions.All.FirstOrDefault(p => p.Key == key).Label ?? key;
+        PermConst.All.FirstOrDefault(p => p.Key == key).Label ?? key;
 }
