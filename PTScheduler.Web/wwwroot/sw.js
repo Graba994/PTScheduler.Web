@@ -3,7 +3,7 @@ const PRECACHE = [
     '/',
     '/offline.html',
     '/favicon.png',
-    '/manifest.json',
+    '/manifest.webmanifest',
     '/icons/icon-192.png',
     '/icons/icon-512.png',
 ];

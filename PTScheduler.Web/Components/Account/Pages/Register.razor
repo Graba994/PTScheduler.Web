@@ -32,12 +32,14 @@
 
             <div class="row g-2 mb-3">
                 <div class="col-6">
-                    <label class="form-label">Imię</label>
-                    <input class="form-control" @bind="Input.FirstName" placeholder="Jan" />
+                    <label class="form-label" for="Input.FirstName">Imię</label>
+                    <InputText @bind-Value="Input.FirstName" id="Input.FirstName" class="form-control" placeholder="Jan" />
+                    <ValidationMessage For="() => Input.FirstName" class="text-danger small" />
                 </div>
                 <div class="col-6">
-                    <label class="form-label">Nazwisko</label>
-                    <input class="form-control" @bind="Input.LastName" placeholder="Kowalski" />
+                    <label class="form-label" for="Input.LastName">Nazwisko</label>
+                    <InputText @bind-Value="Input.LastName" id="Input.LastName" class="form-control" placeholder="Kowalski" />
+                    <ValidationMessage For="() => Input.LastName" class="text-danger small" />
                 </div>
             </div>
 
@@ -99,8 +101,15 @@
                 </div>
             }
 
-            <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold">
-                <i class="bi bi-person-plus-fill me-1"></i>Zarejestruj się
+            <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold" disabled="@_registering">
+                @if (_registering)
+                {
+                    <span class="spinner-border spinner-border-sm me-1"></span> <span>Rejestruję...</span>
+                }
+                else
+                {
+                    <i class="bi bi-person-plus-fill me-1"></i> <span>Zarejestruj się</span>
+                }
             </button>
         </EditForm>
     </div>
@@ -114,6 +123,7 @@
     private IEnumerable<IdentityError>? identityErrors;
     private List<TrainerItem> trainers = [];
     private string selectedTrainerId = string.Empty;
+    private bool _registering;
 
     [SupplyParameterFromForm]
     private InputModel Input { get; set; } = default!;
@@ -143,6 +153,12 @@
     }
 
     public async Task RegisterUser(EditContext editContext)
+    {
+        _registering = true;
+        try { await DoRegister(); } finally { _registering = false; }
+    }
+
+    private async Task DoRegister()
     {
         if (trainers.Count > 1 && string.IsNullOrEmpty(selectedTrainerId))
         {
@@ -202,7 +218,12 @@
 
     private sealed class InputModel
     {
+        [Required(ErrorMessage = "Imię jest wymagane.")]
+        [StringLength(60, ErrorMessage = "Imię może mieć maksymalnie 60 znaków.")]
         public string FirstName { get; set; } = string.Empty;
+
+        [Required(ErrorMessage = "Nazwisko jest wymagane.")]
+        [StringLength(60, ErrorMessage = "Nazwisko może mieć maksymalnie 60 znaków.")]
         public string LastName { get; set; } = string.Empty;
 
         [Required(ErrorMessage = "Email jest wymagany.")]

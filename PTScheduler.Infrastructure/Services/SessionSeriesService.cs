@@ -121,7 +121,7 @@ public class SessionSeriesService(
 
         await db.SaveChangesAsync();
 
-        return await BuildDtoAsync(db, series);
+        return (await BuildDtosAsync(db, [series])).First();
     }
 
     public async Task<List<SessionSeriesDto>> GetSeriesForClientAsync(int clientId)
@@ -133,9 +133,7 @@ public class SessionSeriesService(
             .OrderByDescending(s => s.CreatedAt)
             .ToListAsync();
 
-        var result = new List<SessionSeriesDto>();
-        foreach (var s in list) result.Add(await BuildDtoAsync(db, s));
-        return result;
+        return await BuildDtosAsync(db, list);
     }
 
     public async Task<List<SessionSeriesDto>> GetSeriesForTrainerAsync(string trainerUserId)
@@ -147,9 +145,7 @@ public class SessionSeriesService(
             .OrderByDescending(s => s.CreatedAt)
             .ToListAsync();
 
-        var result = new List<SessionSeriesDto>();
-        foreach (var s in list) result.Add(await BuildDtoAsync(db, s));
-        return result;
+        return await BuildDtosAsync(db, list);
     }
 
     public async Task CancelSeriesAsync(int seriesId, bool cancelFutureSessions = true)
@@ -220,36 +216,53 @@ public class SessionSeriesService(
         return packages.Sum(p => p.TotalSessions - p.UsedSessions);
     }
 
-    private static async Task<SessionSeriesDto> BuildDtoAsync(ApplicationDbContext db, SessionSeries s)
+    private static async Task<List<SessionSeriesDto>> BuildDtosAsync(ApplicationDbContext db, List<SessionSeries> seriesList)
     {
+        if (seriesList.Count == 0) return [];
+
         var now = DateTime.UtcNow;
-        var sessionsCount = await db.Sessions.CountAsync(x => x.SeriesId == s.Id);
-        var futureCount   = await db.Sessions.CountAsync(x => x.SeriesId == s.Id && x.StartTime >= now
-                                && (x.Status == SessionStatus.Scheduled || x.Status == SessionStatus.AwaitingPackage));
-        var client = await db.Clients.FindAsync(s.ClientId);
-        var clientName = client is null ? "" : $"{client.FirstName} {client.LastName}".Trim();
+        var seriesIds = seriesList.Select(s => s.Id).ToList();
+        var clientIds = seriesList.Select(s => s.ClientId).Distinct().ToList();
 
-        var days = s.RecurrenceDays
-            .Split(',', StringSplitOptions.RemoveEmptyEntries)
-            .Select(x => (DayOfWeek)int.Parse(x))
-            .ToList();
+        var sessionCounts = await db.Sessions
+            .Where(x => seriesIds.Contains(x.SeriesId ?? 0))
+            .GroupBy(x => x.SeriesId)
+            .Select(g => new { SeriesId = g.Key, Total = g.Count(),
+                Future = g.Count(x => x.StartTime >= now && (x.Status == SessionStatus.Scheduled || x.Status == SessionStatus.AwaitingPackage)) })
+            .ToDictionaryAsync(x => x.SeriesId ?? 0, x => (x.Total, x.Future));
 
-        return new SessionSeriesDto
+        var clients = await db.Clients
+            .Where(c => clientIds.Contains(c.Id))
+            .Select(c => new { c.Id, c.FirstName, c.LastName })
+            .ToDictionaryAsync(c => c.Id, c => $"{c.FirstName} {c.LastName}".Trim());
+
+        return seriesList.Select(s =>
         {
-            Id = s.Id,
-            ClientId = s.ClientId,
-            ClientName = clientName,
-            TrainerUserId = s.TrainerUserId,
-            SessionTypeId = s.SessionTypeId,
-            SessionTypeName = s.SessionType?.Name ?? "",
-            RecurrenceDays = days,
-            StartTime = s.StartTime,
-            StartDate = s.StartDate,
-            EndDate = s.EndDate,
-            Notes = s.Notes,
-            IsActive = s.IsActive,
-            TotalSessionsCreated = sessionsCount,
-            FutureSessionsCount  = futureCount
-        };
+            sessionCounts.TryGetValue(s.Id, out var counts);
+            clients.TryGetValue(s.ClientId, out var clientName);
+
+            var days = s.RecurrenceDays
+                .Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => (DayOfWeek)int.Parse(x))
+                .ToList();
+
+            return new SessionSeriesDto
+            {
+                Id = s.Id,
+                ClientId = s.ClientId,
+                ClientName = clientName ?? "",
+                TrainerUserId = s.TrainerUserId,
+                SessionTypeId = s.SessionTypeId,
+                SessionTypeName = s.SessionType?.Name ?? "",
+                RecurrenceDays = days,
+                StartTime = s.StartTime,
+                StartDate = s.StartDate,
+                EndDate = s.EndDate,
+                Notes = s.Notes,
+                IsActive = s.IsActive,
+                TotalSessionsCreated = counts.Total,
+                FutureSessionsCount  = counts.Future
+            };
+        }).ToList();
     }
 }

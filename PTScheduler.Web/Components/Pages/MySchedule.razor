@@ -207,6 +207,10 @@ else
                     <div class="mb-2">
                         <input class="form-control form-control-sm" placeholder="Powód (opcjonalnie)" @bind="cancelReason" />
                     </div>
+                    @if (!string.IsNullOrEmpty(cancelError))
+                    {
+                        <div class="alert alert-danger py-1 small mb-0 mt-2">@cancelError</div>
+                    }
                 </div>
                 <div class="modal-footer justify-content-center gap-2 border-0 pb-4">
                     <button class="btn btn-outline-secondary btn-sm" @onclick="() => cancelTarget = null">Nie</button>
@@ -443,6 +447,7 @@ else
 
     private SessionDto? cancelTarget;
     private string cancelReason = string.Empty;
+    private string cancelError = string.Empty;
 
     // Booking wizard state
     private bool bookingOpen;
@@ -605,6 +610,7 @@ else
     {
         cancelTarget = s;
         cancelReason = string.Empty;
+        cancelError = string.Empty;
     }
 
     private async Task DoCancel()
@@ -619,10 +625,10 @@ else
             cancelTarget = null;
             await RefreshSessions();
         }
-        catch (Exception ex)
+        catch (Exception)
         {
             cancelTarget = null;
-            Console.WriteLine(ex.Message);
+            cancelError = "Nie udało się anulować sesji. Spróbuj ponownie.";
         }
         finally { isBusy = false; }
     }
