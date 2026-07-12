@@ -370,6 +370,49 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.ToTable("ClientContacts");
                 });
 
+            modelBuilder.Entity("PTScheduler.Domain.Entities.EmailTemplate", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("AccentColor")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("FooterText")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("HeaderTitle")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("HtmlBody")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Key")
+                        .IsUnique();
+
+                    b.ToTable("EmailTemplates");
+                });
+
             modelBuilder.Entity("PTScheduler.Domain.Entities.EmailSettings", b =>
                 {
                     b.Property<int>("Id")

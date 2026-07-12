@@ -54,6 +54,7 @@ public static class DependencyInjection
         services.AddScoped<IPublicBookingService, PublicBookingService>();
         services.AddScoped<IClientReportService, ClientReportService>();
         services.AddScoped<IPermissionService, PermissionService>();
+        services.AddScoped<IEmailTemplateService, EmailTemplateService>();
 
         // QuestPDF community license — free for orgs <$1M annual revenue.
         // Set globally; safe to call multiple times in tests.

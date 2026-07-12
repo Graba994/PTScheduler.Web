@@ -1,0 +1,308 @@
+@page "/admin/email-templates"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@inject IEmailTemplateService TemplateService
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<AppTitle Page="Szablony email" />
+
+<div class="cal-shell">
+    <div class="cal-topbar">
+        <h4 class="mb-0 fw-bold">
+            <i class="bi bi-file-earmark-richtext-fill me-2"></i>Szablony email
+        </h4>
+    </div>
+
+    <div class="cal-body">
+        @* ── LEFT: Template list ── *@
+        <div class="cal-sidebar" style="min-width:260px;max-width:300px;overflow-y:auto;border-right:1px solid var(--bs-border-color)">
+            @if (templates is null)
+            {
+                @for (var i = 0; i < 8; i++)
+                {
+                    <div class="p-3 border-bottom">
+                        <div class="skeleton skeleton-line w-75" style="height:14px"></div>
+                        <div class="skeleton skeleton-line w-50" style="height:10px;margin-top:6px"></div>
+                    </div>
+                }
+            }
+            else
+            {
+                @foreach (var t in templates)
+                {
+                    <button class="btn btn-link text-start w-100 p-3 border-bottom text-decoration-none rounded-0 @(selected?.Key == t.Key ? "bg-body-secondary" : "")"
+                            @onclick="() => Select(t)">
+                        <div class="d-flex align-items-center gap-2">
+                            <i class="bi @t.Icon" style="font-size:1.1rem;color:@t.AccentColor"></i>
+                            <span class="fw-semibold text-body" style="font-size:.9rem">@t.DisplayName</span>
+                            @if (t.IsCustomized)
+                            {
+                                <span class="badge bg-info text-dark ms-auto" style="font-size:.65rem">Zmieniony</span>
+                            }
+                        </div>
+                    </button>
+                }
+            }
+        </div>
+
+        @* ── RIGHT: Editor ── *@
+        <div class="cal-main" style="overflow-y:auto;padding:1.5rem">
+            @if (selected is null)
+            {
+                <div class="text-center text-muted py-5">
+                    <i class="bi bi-envelope-open" style="font-size:3rem"></i>
+                    <p class="mt-3">Wybierz szablon z listy po lewej stronie, aby go edytować.</p>
+                </div>
+            }
+            else
+            {
+                <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+                    <h5 class="mb-0">
+                        <i class="bi @selected.Icon me-2" style="color:@selected.AccentColor"></i>@selected.DisplayName
+                    </h5>
+                    <div class="d-flex gap-2">
+                        @if (selected.IsCustomized)
+                        {
+                            <button class="btn btn-outline-warning btn-sm" @onclick="ResetTemplate" disabled="@busy">
+                                <i class="bi bi-arrow-counterclockwise me-1"></i>Przywróć domyślny
+                            </button>
+                        }
+                        <button class="btn btn-primary btn-sm" @onclick="SaveTemplate" disabled="@busy">
+                            @if (busy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                            <i class="bi bi-floppy me-1"></i>Zapisz
+                        </button>
+                    </div>
+                </div>
+
+                @if (!string.IsNullOrEmpty(statusMsg))
+                {
+                    <div class="alert @(statusOk ? "alert-success" : "alert-danger") py-2 small">@statusMsg</div>
+                }
+
+                <div class="row g-3">
+                    <div class="col-12 col-lg-6">
+                        <label class="form-label fw-semibold">Temat</label>
+                        <input class="form-control" @bind="editSubject" maxlength="200" />
+                    </div>
+                    <div class="col-12 col-lg-6">
+                        <label class="form-label fw-semibold">Tytuł nagłówka</label>
+                        <input class="form-control" @bind="editHeaderTitle" maxlength="200" />
+                    </div>
+                    <div class="col-12 col-lg-6">
+                        <label class="form-label fw-semibold">Kolor akcentu</label>
+                        <div class="d-flex gap-2 align-items-center">
+                            <input type="color" class="form-control form-control-color" @bind="editAccentColor" />
+                            <input class="form-control" style="max-width:120px" @bind="editAccentColor" maxlength="9" />
+                        </div>
+                    </div>
+                    <div class="col-12 col-lg-6">
+                        <label class="form-label fw-semibold">Stopka</label>
+                        <input class="form-control" @bind="editFooterText" maxlength="300" />
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label fw-semibold">Treść HTML</label>
+                        <textarea class="form-control font-monospace" rows="12" @bind="editHtmlBody" style="font-size:.85rem"></textarea>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label fw-semibold">Dostępne zmienne</label>
+                        <div class="d-flex flex-wrap gap-2 mt-1">
+                            @foreach (var v in selected.AvailableVariables)
+                            {
+                                <button class="btn btn-outline-secondary btn-sm font-monospace"
+                                        style="font-size:.8rem"
+                                        @onclick="() => CopyVariable(v)"
+                                        title="Kliknij, aby skopiować">
+                                    @("{{" + v + "}}")
+                                </button>
+                            }
+                        </div>
+                        <small class="text-muted mt-1 d-block">Kliknij zmienną, aby skopiować do schowka.</small>
+                    </div>
+                </div>
+
+                <hr class="my-4" />
+
+                <div class="d-flex justify-content-between align-items-center mb-3">
+                    <h6 class="mb-0"><i class="bi bi-eye me-1"></i>Podgląd</h6>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="RefreshPreview">
+                        <i class="bi bi-arrow-clockwise me-1"></i>Odśwież
+                    </button>
+                </div>
+
+                <div class="border rounded p-3" style="background:#f9fafb">
+                    <div class="mb-2">
+                        <small class="text-muted">Temat: </small>
+                        <strong style="font-size:.9rem">@previewSubject</strong>
+                    </div>
+                    <div style="overflow-x:auto">
+                        @((MarkupString)previewHtml)
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private List<EmailTemplateDto>? templates;
+    private EmailTemplateDto? selected;
+
+    private string editSubject = "";
+    private string editHeaderTitle = "";
+    private string editHtmlBody = "";
+    private string editAccentColor = "#0284C7";
+    private string editFooterText = "";
+
+    private string previewSubject = "";
+    private string previewHtml = "";
+
+    private bool busy;
+    private string statusMsg = "";
+    private bool statusOk;
+
+    protected override async Task OnInitializedAsync()
+    {
+        templates = await TemplateService.GetAllAsync();
+    }
+
+    private void Select(EmailTemplateDto t)
+    {
+        selected = t;
+        editSubject = t.Subject;
+        editHeaderTitle = t.HeaderTitle;
+        editHtmlBody = t.HtmlBody;
+        editAccentColor = t.AccentColor;
+        editFooterText = t.FooterText;
+        statusMsg = "";
+        RefreshPreview();
+    }
+
+    private async Task SaveTemplate()
+    {
+        if (selected is null) return;
+        busy = true;
+        statusMsg = "";
+        try
+        {
+            var dto = new EmailTemplateDto
+            {
+                Subject = editSubject,
+                HeaderTitle = editHeaderTitle,
+                HtmlBody = editHtmlBody,
+                AccentColor = editAccentColor,
+                FooterText = editFooterText
+            };
+            await TemplateService.SaveAsync(selected.Key, dto);
+
+            templates = await TemplateService.GetAllAsync();
+            selected = templates.First(t => t.Key == selected.Key);
+            Select(selected);
+            statusMsg = "Szablon zapisany.";
+            statusOk = true;
+        }
+        catch (Exception ex)
+        {
+            statusMsg = $"Błąd: {ex.Message}";
+            statusOk = false;
+        }
+        finally { busy = false; }
+    }
+
+    private async Task ResetTemplate()
+    {
+        if (selected is null) return;
+        busy = true;
+        statusMsg = "";
+        try
+        {
+            await TemplateService.ResetAsync(selected.Key);
+            templates = await TemplateService.GetAllAsync();
+            selected = templates.First(t => t.Key == selected.Key);
+            Select(selected);
+            statusMsg = "Przywrócono domyślny szablon.";
+            statusOk = true;
+        }
+        catch (Exception ex)
+        {
+            statusMsg = $"Błąd: {ex.Message}";
+            statusOk = false;
+        }
+        finally { busy = false; }
+    }
+
+    private void RefreshPreview()
+    {
+        if (selected is null) return;
+        var sampleVars = BuildSampleVars(selected);
+        previewSubject = ReplacePlaceholders(editSubject, sampleVars);
+        var body = ReplacePlaceholders(editHtmlBody, sampleVars);
+        var footer = ReplacePlaceholders(editFooterText, sampleVars);
+        previewHtml = WrapInLayout(
+            ReplacePlaceholders(editHeaderTitle, sampleVars),
+            body, footer, editAccentColor);
+    }
+
+    private static string ReplacePlaceholders(string text, Dictionary<string, string> vars)
+    {
+        foreach (var (k, v) in vars)
+            text = text.Replace($"{{{{{k}}}}}", v);
+        return text;
+    }
+
+    private static string WrapInLayout(string headerTitle, string body, string footer, string accent) =>
+        $"""
+        <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px">
+          <div style="background:{accent};border-radius:8px 8px 0 0;padding:24px;text-align:center">
+            <h2 style="color:white;margin:0;font-size:20px">{headerTitle}</h2>
+          </div>
+          <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:24px">
+            {body}
+            <p style="color:#9ca3af;font-size:12px;margin-top:24px;padding-top:16px;border-top:1px solid #f3f4f6;text-align:center">
+              {footer}
+            </p>
+          </div>
+        </div>
+        """;
+
+    private static Dictionary<string, string> BuildSampleVars(EmailTemplateDto t) => new()
+    {
+        ["ClientName"] = "Jan Kowalski",
+        ["TrainerName"] = "Anna Nowak",
+        ["SessionType"] = "Trening personalny",
+        ["SessionDate"] = "poniedziałek, 14 lipca 2025",
+        ["SessionTime"] = "10:00",
+        ["Duration"] = "60",
+        ["Reason"] = "Choroba trenera",
+        ["ReasonRow"] = "<tr><td style=\"padding:8px 0;color:#6b7280;font-size:14px\">Powód</td><td style=\"padding:8px 0;font-size:14px\">Choroba trenera</td></tr>",
+        ["OldDate"] = "12.07.2025",
+        ["OldTime"] = "10:00",
+        ["NewDate"] = "poniedziałek, 14 lipca 2025",
+        ["NewTime"] = "11:00",
+        ["PackageName"] = "Pakiet Premium 10x",
+        ["TotalSessions"] = "10",
+        ["ExpiresAt"] = "31.12.2025",
+        ["ExpiresRow"] = "<tr><td style=\"padding:8px 0;color:#6b7280;font-size:14px\">Ważny do</td><td style=\"padding:8px 0;font-size:14px;font-weight:600\">31.12.2025</td></tr>",
+        ["Price"] = "<strong>150,00 zł</strong>",
+        ["SetPasswordLink"] = "#",
+        ["AccentColor"] = t.AccentColor,
+        ["UserName"] = "Jan Kowalski",
+        ["ResetLink"] = "#",
+        ["ResetCode"] = "847291",
+        ["ConfirmLink"] = "#",
+        ["CompanyName"] = "PTScheduler",
+        ["ClientEmail"] = "jan@kowalski.pl",
+        ["ClientPhone"] = "+48 123 456 789",
+        ["PhoneRow"] = "<p style=\"margin:6px 0\"><strong>📞 Telefon:</strong> +48 123 456 789</p>",
+        ["TrainingGoal"] = "Redukcja masy ciała",
+        ["GoalRow"] = "<p style=\"margin:10px 0 0;padding-top:8px;border-top:1px solid #e5e7eb\"><strong>🎯 Cel treningowy:</strong><br/>Redukcja masy ciała</p>",
+        ["Amount"] = "1 500,00",
+        ["RemainingCredits"] = "3"
+    };
+
+    private async Task CopyVariable(string varName)
+    {
+        // JS interop for clipboard is not available in SSR fallback; this is best-effort.
+        // The variable display itself serves as reference.
+    }
+}

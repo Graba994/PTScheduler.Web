@@ -18,6 +18,7 @@ public class PublicBookingService(
     UserManager<ApplicationUser> userManager,
     ITrainerAvailabilityService availabilityService,
     IEmailService emailService,
+    IEmailTemplateService emailTemplateService,
     ILogger<PublicBookingService> logger) : IPublicBookingService
 {
     private const string IntroSessionTypeName = "Sesja wstępna";
@@ -180,15 +181,44 @@ public class PublicBookingService(
         try
         {
             var setPwLink = await BuildSetPasswordLinkAsync(user, appBaseUrl);
-            var clientHtml = ClientWelcomeEmail(user.FirstName ?? "", trainerName, dto.SlotStart, cfg, setPwLink);
+            var when = Capitalize(dto.SlotStart.ToString("dddd, d MMMM, HH:mm", PlCulture));
+            var price = cfg.IsFree
+                ? "<strong style=\"color:#16a34a\">bezpłatnie</strong>"
+                : $"<strong>{cfg.Price.ToString("N2", PlCulture)} zł</strong>";
+            var clientVars = new Dictionary<string, string>
+            {
+                ["ClientName"] = user.FirstName ?? "",
+                ["TrainerName"] = trainerName,
+                ["SessionDate"] = when,
+                ["Duration"] = cfg.DurationMinutes.ToString(),
+                ["Price"] = price,
+                ["SetPasswordLink"] = setPwLink,
+                ["AccentColor"] = "#0284C7"
+            };
+            var (clientSubject, clientHtml) = await emailTemplateService.RenderAsync("client-welcome", clientVars);
             await emailService.SendAsync(emailNorm, $"{user.FirstName} {user.LastName}".Trim(),
-                "Twoja sesja wstępna jest umówiona", clientHtml);
+                clientSubject, clientHtml);
 
             if (!string.IsNullOrEmpty(trainer?.Email))
             {
-                var trainerHtml = TrainerNotifyEmail(trainerName, client, dto, cfg);
-                await emailService.SendAsync(trainer.Email, trainerName,
-                    $"Nowy zapis: {client.FirstName} {client.LastName}", trainerHtml);
+                var phoneRow = string.IsNullOrEmpty(dto.Phone) ? "" :
+                    $"<p style=\"margin:6px 0\"><strong>📞 Telefon:</strong> {dto.Phone}</p>";
+                var goalRow = string.IsNullOrEmpty(dto.TrainingGoal) ? "" :
+                    $"<p style=\"margin:10px 0 0;padding-top:8px;border-top:1px solid #e5e7eb\"><strong>🎯 Cel treningowy:</strong><br/>{dto.TrainingGoal}</p>";
+                var trainerVars = new Dictionary<string, string>
+                {
+                    ["TrainerName"] = trainerName,
+                    ["ClientName"] = $"{client.FirstName} {client.LastName}",
+                    ["ClientEmail"] = dto.Email,
+                    ["ClientPhone"] = dto.Phone ?? "",
+                    ["PhoneRow"] = phoneRow,
+                    ["SessionDate"] = when,
+                    ["Duration"] = cfg.DurationMinutes.ToString(),
+                    ["TrainingGoal"] = dto.TrainingGoal ?? "",
+                    ["GoalRow"] = goalRow
+                };
+                var (trainerSubject, trainerHtml) = await emailTemplateService.RenderAsync("trainer-new-booking", trainerVars);
+                await emailService.SendAsync(trainer.Email, trainerName, trainerSubject, trainerHtml);
             }
 
             emailSent = true;
@@ -246,72 +276,4 @@ public class PublicBookingService(
         return sb.ToString();
     }
 
-    // ---- email templates ----
-
-    private static string ClientWelcomeEmail(string firstName, string trainerName, DateTime slotStart, IntroSessionConfig cfg, string setPwLink)
-    {
-        var when = Capitalize(slotStart.ToString("dddd, d MMMM, HH:mm", PlCulture));
-        var price = cfg.IsFree
-            ? "<strong style=\"color:#16a34a\">bezpłatnie</strong>"
-            : $"<strong>{cfg.Price.ToString("N2", PlCulture)} zł</strong>";
-
-        return $@"<div style=""font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px"">
-  <div style=""background:#0284C7;border-radius:8px 8px 0 0;padding:24px;text-align:center"">
-    <h2 style=""color:white;margin:0;font-size:20px"">Twoja sesja wstępna jest umówiona ✅</h2>
-  </div>
-  <div style=""border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:24px"">
-    <p style=""color:#374151;font-size:15px"">Cześć <strong>{firstName}</strong>!</p>
-    <p style=""color:#374151;font-size:15px"">Dziękujemy za rezerwację. Czekamy na Ciebie:</p>
-
-    <div style=""background:#f3f4f6;border-radius:8px;padding:16px;margin:20px 0"">
-      <p style=""margin:6px 0""><strong>📅 Termin:</strong> {when}</p>
-      <p style=""margin:6px 0""><strong>⏱️ Czas trwania:</strong> {cfg.DurationMinutes} min</p>
-      <p style=""margin:6px 0""><strong>💪 Trener:</strong> {trainerName}</p>
-      <p style=""margin:6px 0""><strong>💵 Koszt:</strong> {price}</p>
-    </div>
-
-    <p style=""color:#374151;font-size:15px""><strong>Aby zalogować się i zobaczyć grafik</strong>, ustaw hasło klikając poniższy przycisk:</p>
-    <div style=""text-align:center;margin:24px 0"">
-      <a href=""{setPwLink}"" style=""background:#0284C7;color:white;text-decoration:none;padding:12px 32px;border-radius:6px;font-weight:600;font-size:15px;display:inline-block"">Ustaw hasło</a>
-    </div>
-    <p style=""color:#6b7280;font-size:13px"">Po ustawieniu hasła zalogujesz się swoim adresem email.</p>
-
-    <p style=""color:#9ca3af;font-size:12px;margin-top:24px;padding-top:16px;border-top:1px solid #f3f4f6;text-align:center"">
-      Wiadomość automatyczna — w razie pytań odpisz na ten email.
-    </p>
-  </div>
-</div>";
-    }
-
-    private static string TrainerNotifyEmail(string trainerName, Client client, CreatePublicBookingDto dto, IntroSessionConfig cfg)
-    {
-        var when = Capitalize(dto.SlotStart.ToString("dddd, d MMMM, HH:mm", PlCulture));
-        var phoneRow = string.IsNullOrEmpty(dto.Phone) ? "" :
-            $@"<p style=""margin:6px 0""><strong>📞 Telefon:</strong> {dto.Phone}</p>";
-        var goalRow = string.IsNullOrEmpty(dto.TrainingGoal) ? "" :
-            $@"<p style=""margin:10px 0 0;padding-top:8px;border-top:1px solid #e5e7eb""><strong>🎯 Cel treningowy:</strong><br/>{dto.TrainingGoal}</p>";
-
-        return $@"<div style=""font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px"">
-  <div style=""background:#16a34a;border-radius:8px 8px 0 0;padding:24px;text-align:center"">
-    <h2 style=""color:white;margin:0;font-size:20px"">Nowy klient ze strony rezerwacji 🎉</h2>
-  </div>
-  <div style=""border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:24px"">
-    <p style=""color:#374151;font-size:15px"">Cześć {trainerName}, masz nowy zapis:</p>
-
-    <div style=""background:#f3f4f6;border-radius:8px;padding:16px;margin:20px 0"">
-      <p style=""margin:6px 0""><strong>👤 Imię i nazwisko:</strong> {client.FirstName} {client.LastName}</p>
-      <p style=""margin:6px 0""><strong>📧 Email:</strong> {dto.Email}</p>
-      {phoneRow}
-      <p style=""margin:6px 0""><strong>📅 Termin:</strong> {when} ({cfg.DurationMinutes} min)</p>
-      {goalRow}
-    </div>
-
-    <p style=""color:#6b7280;font-size:14px"">Klient ma status <strong>Oczekuje</strong>. Zatwierdź go w panelu <em>Klienci</em>, żeby uzyskał pełny dostęp do aplikacji.</p>
-
-    <p style=""color:#9ca3af;font-size:12px;margin-top:24px;padding-top:16px;border-top:1px solid #f3f4f6;text-align:center"">
-      Wiadomość automatyczna z PTScheduler.
-    </p>
-  </div>
-</div>";
-    }
 }

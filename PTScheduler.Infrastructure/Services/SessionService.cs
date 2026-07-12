@@ -12,6 +12,7 @@ namespace PTScheduler.Infrastructure.Services;
 public class SessionService(
     IDbContextFactory<ApplicationDbContext> dbFactory,
     IEmailService emailService,
+    IEmailTemplateService emailTemplateService,
     INotificationPreferencesService notificationPrefs,
     ILogger<SessionService> logger) : ISessionService
 {
@@ -395,8 +396,17 @@ public class SessionService(
         var trainer = await db.Users.FirstOrDefaultAsync(u => u.Id == session.TrainerUserId);
         var trainerName = $"{trainer?.FirstName} {trainer?.LastName}".Trim().NullIfEmpty() ?? trainer?.Email ?? "Trener";
         var clientName = $"{client.FirstName} {client.LastName}".Trim().NullIfEmpty() ?? clientUser.Email;
-        var html = BuildBookingHtml(clientName, trainerName, sessionType.Name, session.StartTime, sessionType.DurationMinutes);
-        await emailService.SendAsync(clientUser.Email, clientName, "Potwierdzenie rezerwacji wizyty", html);
+        var vars = new Dictionary<string, string>
+        {
+            ["ClientName"] = clientName,
+            ["TrainerName"] = trainerName,
+            ["SessionType"] = sessionType.Name,
+            ["SessionDate"] = session.StartTime.ToString("dddd, dd MMMM yyyy"),
+            ["SessionTime"] = session.StartTime.ToString("HH:mm"),
+            ["Duration"] = sessionType.DurationMinutes.ToString()
+        };
+        var (subject, html) = await emailTemplateService.RenderAsync("session-booked", vars);
+        await emailService.SendAsync(clientUser.Email, clientName, subject, html);
     }
 
     private async Task SendCancellationEmailAsync(Session session, string? reason)
@@ -412,8 +422,21 @@ public class SessionService(
         var trainer = await db.Users.FirstOrDefaultAsync(u => u.Id == session.TrainerUserId);
         var trainerName = $"{trainer?.FirstName} {trainer?.LastName}".Trim().NullIfEmpty() ?? trainer?.Email ?? "Trener";
         var clientName = $"{session.Client.FirstName} {session.Client.LastName}".Trim().NullIfEmpty() ?? clientUser.Email;
-        var html = BuildCancellationHtml(clientName, trainerName, session.SessionType.Name, session.StartTime, reason);
-        await emailService.SendAsync(clientUser.Email, clientName, "Anulowanie wizyty", html);
+        var reasonRow = reason is not null
+            ? $"<tr><td style=\"padding:8px 0;color:#6b7280;font-size:14px\">Powód</td><td style=\"padding:8px 0;font-size:14px\">{reason}</td></tr>"
+            : "";
+        var vars = new Dictionary<string, string>
+        {
+            ["ClientName"] = clientName,
+            ["TrainerName"] = trainerName,
+            ["SessionType"] = session.SessionType.Name,
+            ["SessionDate"] = session.StartTime.ToString("dddd, dd MMMM yyyy"),
+            ["SessionTime"] = session.StartTime.ToString("HH:mm"),
+            ["Reason"] = reason ?? "",
+            ["ReasonRow"] = reasonRow
+        };
+        var (subject, html) = await emailTemplateService.RenderAsync("session-cancelled", vars);
+        await emailService.SendAsync(clientUser.Email, clientName, subject, html);
     }
 
     private async Task SendClientCancelledToTrainerAsync(Session session, string? reason)
@@ -426,8 +449,21 @@ public class SessionService(
         var client = await db.Clients.FindAsync(session.ClientId);
         var clientName = client is not null ? $"{client.FirstName} {client.LastName}".Trim() : "Klient";
         var trainerName = $"{trainer.FirstName} {trainer.LastName}".Trim() is { Length: > 0 } n ? n : trainer.Email;
-        var html = BuildClientCancelledHtml(clientName, trainerName, session.SessionType.Name, session.StartTime, reason);
-        await emailService.SendAsync(trainer.Email, trainerName, $"Klient anulował wizytę — {session.StartTime:dd.MM.yyyy HH:mm}", html);
+        var reasonRow = reason is not null
+            ? $"<tr><td style=\"padding:8px 0;color:#6b7280;font-size:14px\">Powód</td><td style=\"padding:8px 0;font-size:14px\">{reason}</td></tr>"
+            : "";
+        var vars = new Dictionary<string, string>
+        {
+            ["ClientName"] = clientName,
+            ["TrainerName"] = trainerName,
+            ["SessionType"] = session.SessionType.Name,
+            ["SessionDate"] = session.StartTime.ToString("dd.MM.yyyy"),
+            ["SessionTime"] = session.StartTime.ToString("HH:mm"),
+            ["Reason"] = reason ?? "",
+            ["ReasonRow"] = reasonRow
+        };
+        var (subject, html) = await emailTemplateService.RenderAsync("session-cancelled-by-client", vars);
+        await emailService.SendAsync(trainer.Email, trainerName, subject, html);
     }
 
     private async Task SendRescheduleEmailAsync(Session session, DateTime oldTime)
@@ -443,86 +479,19 @@ public class SessionService(
         var trainerName = $"{trainer?.FirstName} {trainer?.LastName}".Trim() is { Length: > 0 } tn ? tn : trainer?.Email ?? "Trener";
         var clientName = $"{client.FirstName} {client.LastName}".Trim() is { Length: > 0 } cn ? cn : clientUser.Email;
         var sessionType = await db.SessionTypes.FindAsync(session.SessionTypeId);
-        var html = BuildRescheduleHtml(clientName, trainerName, sessionType?.Name ?? "", oldTime, session.StartTime);
-        await emailService.SendAsync(clientUser.Email, clientName, "Zmiana terminu wizyty", html);
+        var vars = new Dictionary<string, string>
+        {
+            ["ClientName"] = clientName,
+            ["TrainerName"] = trainerName,
+            ["SessionType"] = sessionType?.Name ?? "",
+            ["OldDate"] = oldTime.ToString("dd.MM.yyyy"),
+            ["OldTime"] = oldTime.ToString("HH:mm"),
+            ["NewDate"] = session.StartTime.ToString("dddd, dd MMMM yyyy"),
+            ["NewTime"] = session.StartTime.ToString("HH:mm")
+        };
+        var (subject, html) = await emailTemplateService.RenderAsync("session-rescheduled", vars);
+        await emailService.SendAsync(clientUser.Email, clientName, subject, html);
     }
-
-    private static string BuildBookingHtml(string clientName, string trainerName, string sessionType, DateTime startTime, int durationMin) => $"""
-        <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px">
-          <div style="background:#0284C7;border-radius:8px 8px 0 0;padding:24px;text-align:center">
-            <h2 style="color:white;margin:0;font-size:20px">Potwierdzenie rezerwacji</h2>
-          </div>
-          <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:24px">
-            <p style="color:#374151;font-size:15px">Cześć <strong>{clientName}</strong>!</p>
-            <p style="color:#374151;font-size:15px">Twoja wizyta została zarezerwowana. Szczegóły:</p>
-            <table style="width:100%;border-collapse:collapse;margin:16px 0">
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;width:40%">Typ wizyty</td><td style="padding:8px 0;font-size:14px;font-weight:600">{sessionType}</td></tr>
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Data i godzina</td><td style="padding:8px 0;font-size:14px;font-weight:600">{startTime:dddd\, dd MMMM yyyy} o {startTime:HH:mm}</td></tr>
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Czas trwania</td><td style="padding:8px 0;font-size:14px;font-weight:600">{durationMin} minut</td></tr>
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Trener</td><td style="padding:8px 0;font-size:14px;font-weight:600">{trainerName}</td></tr>
-            </table>
-            <p style="color:#9ca3af;font-size:12px;margin-top:24px;padding-top:16px;border-top:1px solid #f3f4f6;text-align:center">
-              Wiadomość automatyczna — nie odpowiadaj na ten email.
-            </p>
-          </div>
-        </div>
-        """;
-
-    private static string BuildCancellationHtml(string clientName, string trainerName, string sessionType, DateTime startTime, string? reason) => $"""
-        <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px">
-          <div style="background:#DC2626;border-radius:8px 8px 0 0;padding:24px;text-align:center">
-            <h2 style="color:white;margin:0;font-size:20px">Wizyta anulowana</h2>
-          </div>
-          <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:24px">
-            <p style="color:#374151;font-size:15px">Cześć <strong>{clientName}</strong>!</p>
-            <p style="color:#374151;font-size:15px">Twoja wizyta została anulowana. Szczegóły:</p>
-            <table style="width:100%;border-collapse:collapse;margin:16px 0">
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;width:40%">Typ wizyty</td><td style="padding:8px 0;font-size:14px;font-weight:600">{sessionType}</td></tr>
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Data i godzina</td><td style="padding:8px 0;font-size:14px;font-weight:600">{startTime:dddd\, dd MMMM yyyy} o {startTime:HH:mm}</td></tr>
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Trener</td><td style="padding:8px 0;font-size:14px;font-weight:600">{trainerName}</td></tr>
-              {(reason is not null ? $"<tr><td style=\"padding:8px 0;color:#6b7280;font-size:14px\">Powód</td><td style=\"padding:8px 0;font-size:14px\">{reason}</td></tr>" : "")}
-            </table>
-            <p style="color:#9ca3af;font-size:12px;margin-top:24px;padding-top:16px;border-top:1px solid #f3f4f6;text-align:center">
-              Wiadomość automatyczna — nie odpowiadaj na ten email.
-            </p>
-          </div>
-        </div>
-        """;
-
-    private static string BuildClientCancelledHtml(string clientName, string trainerName, string sessionType, DateTime startTime, string? reason) => $"""
-        <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px">
-          <div style="background:#9333EA;border-radius:8px 8px 0 0;padding:24px;text-align:center">
-            <h2 style="color:white;margin:0;font-size:20px">Klient anulował wizytę</h2>
-          </div>
-          <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:24px">
-            <p style="color:#374151;font-size:15px">Cześć <strong>{trainerName}</strong>!</p>
-            <p style="color:#374151;font-size:15px">Klient <strong>{clientName}</strong> anulował wizytę:</p>
-            <table style="width:100%;border-collapse:collapse;margin:16px 0">
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;width:40%">Typ wizyty</td><td style="padding:8px 0;font-size:14px;font-weight:600">{sessionType}</td></tr>
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Data i godzina</td><td style="padding:8px 0;font-size:14px;font-weight:600">{startTime:dddd\, dd MMMM yyyy} o {startTime:HH:mm}</td></tr>
-              {(reason is not null ? $"<tr><td style=\"padding:8px 0;color:#6b7280;font-size:14px\">Powód</td><td style=\"padding:8px 0;font-size:14px\">{reason}</td></tr>" : "")}
-            </table>
-          </div>
-        </div>
-        """;
-
-    private static string BuildRescheduleHtml(string clientName, string trainerName, string sessionType, DateTime oldTime, DateTime newTime) => $"""
-        <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px">
-          <div style="background:#0284C7;border-radius:8px 8px 0 0;padding:24px;text-align:center">
-            <h2 style="color:white;margin:0;font-size:20px">Zmiana terminu wizyty</h2>
-          </div>
-          <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:24px">
-            <p style="color:#374151;font-size:15px">Cześć <strong>{clientName}</strong>!</p>
-            <p style="color:#374151;font-size:15px">Twój trener <strong>{trainerName}</strong> zmienił termin wizyty:</p>
-            <table style="width:100%;border-collapse:collapse;margin:16px 0">
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;width:40%">Typ wizyty</td><td style="padding:8px 0;font-size:14px;font-weight:600">{sessionType}</td></tr>
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Stary termin</td><td style="padding:8px 0;font-size:14px;text-decoration:line-through;color:#9ca3af">{oldTime:dd.MM.yyyy HH:mm}</td></tr>
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Nowy termin</td><td style="padding:8px 0;font-size:14px;font-weight:600;color:#16A34A">{newTime:dddd\, dd MMMM yyyy} o {newTime:HH:mm}</td></tr>
-              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Trener</td><td style="padding:8px 0;font-size:14px;font-weight:600">{trainerName}</td></tr>
-            </table>
-          </div>
-        </div>
-        """;
 
     private static SessionDto MapToDto(Session s, Dictionary<string, string> trainers) => new()
     {

@@ -24,10 +24,15 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<EmailSettings> EmailSettings => Set<EmailSettings>();
     public DbSet<NotificationPreferences> NotificationPreferences => Set<NotificationPreferences>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
+    public DbSet<EmailTemplate> EmailTemplates => Set<EmailTemplate>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
+
+        builder.Entity<EmailTemplate>()
+            .HasIndex(e => e.Key)
+            .IsUnique();
 
         builder.Entity<ApplicationUser>()
             .HasOne(u => u.Supervisor)

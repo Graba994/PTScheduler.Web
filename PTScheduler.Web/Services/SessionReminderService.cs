@@ -1,4 +1,3 @@
-using System.Globalization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using PTScheduler.Application.Interfaces;
@@ -15,7 +14,6 @@ namespace PTScheduler.Web.Services;
 /// </summary>
 public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<SessionReminderService> logger) : BackgroundService
 {
-    private static readonly CultureInfo Pl = CultureInfo.GetCultureInfo("pl-PL");
 
     protected override async Task ExecuteAsync(CancellationToken ct)
     {
@@ -88,14 +86,21 @@ public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<S
                 var clientName = $"{session.Client.FirstName} {session.Client.LastName}".Trim();
                 if (string.IsNullOrWhiteSpace(clientName)) clientName = clientUser.Email!;
 
-                var html = BuildReminderHtml(
-                    clientName: clientName,
-                    trainerName: trainerName,
-                    sessionType: session.SessionType.Name,
-                    startTime: session.StartTime,
-                    durationMin: session.SessionType.DurationMinutes);
+                var templateService = scope.ServiceProvider.GetRequiredService<IEmailTemplateService>();
+                var dateLabel = session.StartTime.ToString("dddd, d MMMM yyyy");
+                if (dateLabel.Length > 0) dateLabel = char.ToUpper(dateLabel[0]) + dateLabel[1..];
+                var vars = new Dictionary<string, string>
+                {
+                    ["ClientName"] = clientName,
+                    ["TrainerName"] = trainerName,
+                    ["SessionType"] = session.SessionType.Name,
+                    ["SessionDate"] = dateLabel,
+                    ["SessionTime"] = session.StartTime.ToString("HH:mm"),
+                    ["Duration"] = session.SessionType.DurationMinutes.ToString()
+                };
+                var (subject, html) = await templateService.RenderAsync("session-reminder", vars);
 
-                await emailService.SendAsync(clientUser.Email, clientName, "Przypomnienie — jutro masz trening", html);
+                await emailService.SendAsync(clientUser.Email, clientName, subject, html);
 
                 session.ReminderSentAt = DateTime.UtcNow;
                 logger.LogInformation("Sent 24h reminder for session {Id} to {Email}", session.Id, clientUser.Email);
@@ -116,40 +121,5 @@ public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<S
         if (u is null) return "Trener";
         var n = $"{u.FirstName} {u.LastName}".Trim();
         return string.IsNullOrEmpty(n) ? (u.Email ?? "Trener") : n;
-    }
-
-    private static string Capitalize(string s) =>
-        string.IsNullOrEmpty(s) ? s : char.ToUpper(s[0], Pl) + s[1..];
-
-    private static string BuildReminderHtml(string clientName, string trainerName, string sessionType, DateTime startTime, int durationMin)
-    {
-        var dateLabel = Capitalize(startTime.ToString("dddd, d MMMM yyyy", Pl));
-        var timeLabel = startTime.ToString("HH:mm", Pl);
-
-        return $@"<div style=""font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px"">
-  <div style=""background:#0284C7;border-radius:8px 8px 0 0;padding:24px;text-align:center"">
-    <h2 style=""color:white;margin:0;font-size:20px"">Przypomnienie — jutro trening 💪</h2>
-  </div>
-  <div style=""border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:24px"">
-    <p style=""color:#374151;font-size:15px"">Cześć <strong>{clientName}</strong>!</p>
-    <p style=""color:#374151;font-size:15px"">Przypominamy o jutrzejszym treningu. Do zobaczenia!</p>
-
-    <div style=""background:#f3f4f6;border-radius:8px;padding:16px;margin:20px 0"">
-      <p style=""margin:6px 0""><strong>📅 Data:</strong> {dateLabel}</p>
-      <p style=""margin:6px 0""><strong>🕒 Godzina:</strong> {timeLabel}</p>
-      <p style=""margin:6px 0""><strong>⏱️ Czas trwania:</strong> {durationMin} min</p>
-      <p style=""margin:6px 0""><strong>💪 Trener:</strong> {trainerName}</p>
-      <p style=""margin:6px 0""><strong>🏋️ Typ:</strong> {sessionType}</p>
-    </div>
-
-    <p style=""color:#6b7280;font-size:13px"">
-      Jeśli nie możesz dotrzeć — <strong>daj znać trenerowi</strong> lub anuluj sesję w aplikacji.
-    </p>
-
-    <p style=""color:#9ca3af;font-size:11px;margin-top:24px;padding-top:16px;border-top:1px solid #f3f4f6;text-align:center"">
-      Wiadomość automatyczna. Możesz wyłączyć przypomnienia w ustawieniach konta.
-    </p>
-  </div>
-</div>";
     }
 }
