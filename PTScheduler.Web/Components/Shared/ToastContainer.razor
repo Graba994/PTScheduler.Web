@@ -1,0 +1,72 @@
+@using PTScheduler.Web.Services
+@inject ToastService Toast
+@implements IDisposable
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<div class="toast-container-fixed">
+    @foreach (var item in _toasts)
+    {
+        <div class="toast-item toast-@item.Level.ToString().ToLower() @(item.Hiding ? "toast-hiding" : "")">
+            <i class="bi @IconFor(item.Level) me-2"></i>
+            <span class="toast-msg">@item.Message</span>
+            <button class="toast-close" @onclick="() => Remove(item)" aria-label="Zamknij">&times;</button>
+        </div>
+    }
+</div>
+
+@code {
+    private readonly List<ToastEntry> _toasts = [];
+
+    protected override void OnInitialized()
+    {
+        Toast.OnShow += HandleToast;
+    }
+
+    private async void HandleToast(ToastItem item)
+    {
+        var entry = new ToastEntry(item.Level, item.Message);
+        await InvokeAsync(() =>
+        {
+            _toasts.Add(entry);
+            StateHasChanged();
+        });
+
+        await Task.Delay(4000);
+
+        await InvokeAsync(() =>
+        {
+            entry.Hiding = true;
+            StateHasChanged();
+        });
+
+        await Task.Delay(300);
+        await InvokeAsync(() =>
+        {
+            _toasts.Remove(entry);
+            StateHasChanged();
+        });
+    }
+
+    private void Remove(ToastEntry entry)
+    {
+        _toasts.Remove(entry);
+    }
+
+    private static string IconFor(ToastLevel level) => level switch
+    {
+        ToastLevel.Success => "bi-check-circle-fill",
+        ToastLevel.Error   => "bi-exclamation-triangle-fill",
+        ToastLevel.Warning => "bi-exclamation-circle-fill",
+        ToastLevel.Info    => "bi-info-circle-fill",
+        _                  => "bi-info-circle"
+    };
+
+    public void Dispose() => Toast.OnShow -= HandleToast;
+
+    private sealed class ToastEntry(ToastLevel level, string message)
+    {
+        public ToastLevel Level { get; } = level;
+        public string Message { get; } = message;
+        public bool Hiding { get; set; }
+    }
+}
