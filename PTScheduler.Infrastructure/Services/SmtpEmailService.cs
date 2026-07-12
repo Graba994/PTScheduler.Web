@@ -6,7 +6,7 @@ using PTScheduler.Application.Interfaces;
 
 namespace PTScheduler.Infrastructure.Services;
 
-public class SmtpEmailService(IEmailSettingsService settingsService, ILogger<SmtpEmailService> logger) : IEmailService
+public class SmtpEmailService(IEmailSettingsService settingsService, IBrandingService brandingService, ILogger<SmtpEmailService> logger) : IEmailService
 {
     public async Task<bool> IsEnabledAsync()
     {
@@ -37,7 +37,9 @@ public class SmtpEmailService(IEmailSettingsService settingsService, ILogger<Smt
             message.From.Add(new MailboxAddress(s.FromName, s.FromAddress));
             message.To.Add(new MailboxAddress(testAddress, testAddress));
             message.Subject = "Test połączenia — PTScheduler";
-            message.Body = new TextPart("html") { Text = TestEmailHtml(s.FromName) };
+            var branding = await brandingService.GetAsync();
+            var accent = ThemeColor(branding.ThemeName);
+            message.Body = new TextPart("html") { Text = TestEmailHtml(s.FromName, accent) };
 
             await SendMessageAsync(s, message);
             return (true, null);
@@ -60,9 +62,17 @@ public class SmtpEmailService(IEmailSettingsService settingsService, ILogger<Smt
         await client.DisconnectAsync(true);
     }
 
-    private static string TestEmailHtml(string fromName) => $"""
+    private static string ThemeColor(string theme) => theme switch
+    {
+        "forest"   => "#16A34A", "sunset"  => "#EA580C", "crimson" => "#DC2626",
+        "lavender" => "#9333EA", "slate"   => "#475569", "rose"    => "#E11D48",
+        "teal"     => "#0D9488", "amber"   => "#D97706", "indigo"  => "#4F46E5",
+        _          => "#0284C7"
+    };
+
+    private static string TestEmailHtml(string fromName, string accent) => $"""
         <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px">
-          <div style="background:#0284C7;border-radius:8px 8px 0 0;padding:24px;text-align:center">
+          <div style="background:{accent};border-radius:8px 8px 0 0;padding:24px;text-align:center">
             <h2 style="color:white;margin:0;font-size:20px">✓ Połączenie działa poprawnie</h2>
           </div>
           <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:24px">
