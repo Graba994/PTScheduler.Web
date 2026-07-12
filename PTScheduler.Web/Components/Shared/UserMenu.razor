@@ -49,7 +49,7 @@
                 @if (_notifs.Count == 0)
                 {
                     <div class="um-item um-item-muted">
-                        <i class="bi bi-check-circle-fill" style="color:#16A34A;font-size:1rem;flex-shrink:0"></i>
+                        <i class="bi bi-check-circle-fill" style="color:var(--c-success);font-size:1rem;flex-shrink:0"></i>
                         <span>Brak powiadomień</span>
                     </div>
                 }
@@ -280,7 +280,7 @@
                   : user.IsInRole(Roles.Subordinate) ? Roles.Trainer
                   : Roles.Client;
 
-            try { _dark = await JS.InvokeAsync<bool>("PTTheme.isDark"); } catch { }
+            try { _dark = await JS.InvokeAsync<bool>("PTTheme.isDark"); } catch { } // JS interop may fail during prerender
 
             await LoadNotifsAsync();
             _ready = true;
@@ -298,7 +298,7 @@
                 StateHasChanged();
             }
         }
-        catch { }
+        catch { } // JS interop may fail during prerender or enhanced navigation
     }
 
     private async Task LoadNotifsAsync()
@@ -314,20 +314,20 @@
                 if (pending.Count > 0)
                     _notifs.Add(new("Klienci oczekujący",
                         $"{pending.Count} {Pl(pending.Count, "klient czeka", "klientów czeka")} na zatwierdzenie",
-                        "bi-person-fill-exclamation", "#D97706", "/clients"));
+                        "bi-person-fill-exclamation", "var(--c-warning)", "/clients"));
 
                 var expiring = await PackageService.GetExpiringAsync(7, trainerFilter);
                 if (expiring.Count > 0)
                     _notifs.Add(new("Wygasające pakiety",
                         $"{expiring.Count} {Pl(expiring.Count, "pakiet wygasa", "pakietów wygasa")} w ciągu 7 dni",
-                        "bi-box-seam-fill", "#DC2626", "/finance"));
+                        "bi-box-seam-fill", "var(--c-danger)", "/finance"));
 
                 var todaySessions = await SessionService.GetSessionsAsync(DateTime.Today, DateTime.Today.AddDays(1), trainerFilter);
                 var unfinished = todaySessions.Count(s => s.Status == SessionStatus.Scheduled && s.StartTime < DateTime.Now);
                 if (unfinished > 0)
                     _notifs.Add(new("Nieoznaczone sesje",
                         $"{unfinished} sesji dzisiaj bez statusu",
-                        "bi-calendar-check-fill", "#3B82F6", "/sessions"));
+                        "bi-calendar-check-fill", "var(--c-info)", "/sessions"));
             }
             else if (_role == Roles.Client)
             {
@@ -336,7 +336,7 @@
                 if (tomorrow is not null)
                     _notifs.Add(new("Trening jutro!",
                         $"{tomorrow.StartTime:HH:mm} — {tomorrow.SessionTypeName}",
-                        "bi-calendar-event-fill", "#16A34A", "/my"));
+                        "bi-calendar-event-fill", "var(--c-success)", "/my"));
 
                 var client = await ClientService.GetClientByUserIdAsync(_userId ?? "");
                 if (client is not null)
@@ -348,17 +348,17 @@
                     if (nearExpiry is not null)
                         _notifs.Add(new("Pakiet wygasa wkrótce",
                             $"\"{nearExpiry.Name}\"",
-                            "bi-exclamation-triangle-fill", "#D97706", "/my/packages"));
+                            "bi-exclamation-triangle-fill", "var(--c-warning)", "/my/packages"));
 
                     var low = pkgs.FirstOrDefault(p => p.Status == PackageStatus.Active && p.RemainingCredits <= 2);
                     if (low is not null && low != nearExpiry)
                         _notifs.Add(new("Mało kredytów",
                             $"Zostały {low.RemainingCredits} sesje w pakiecie",
-                            "bi-ticket-perforated-fill", "#DC2626", "/my/packages"));
+                            "bi-ticket-perforated-fill", "var(--c-danger)", "/my/packages"));
                 }
             }
         }
-        catch { }
+        catch { } // Best-effort: notifications are non-critical
 
         _badge = _notifs.Count;
     }
@@ -373,7 +373,7 @@
                 ? $"bottom:{r.Vh - r.Top + 8}px;left:{r.Left}px;width:{Math.Max(240, (int)r.Width)}px"
                 : $"top:{r.Bottom + 8}px;right:{r.Vw - r.Right}px";
         }
-        catch { }
+        catch { } // JS interop for positioning may fail; menu opens at default position
         _open = true;
     }
 
@@ -382,7 +382,7 @@
     private async Task ToggleDarkAsync()
     {
         try { _dark = await JS.InvokeAsync<bool>("PTTheme.toggle"); }
-        catch { }
+        catch { } // JS interop may fail during prerender
     }
 
     private static string Pl(int n, string one, string many) => n == 1 ? one : many;

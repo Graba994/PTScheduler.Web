@@ -90,13 +90,13 @@
                 var pending = await ClientService.GetPendingClientsAsync(trainerFilter);
                 if (pending.Count > 0)
                     _items.Add(new("Klienci oczekujący", $"{pending.Count} {Pl(pending.Count, "klient czeka", "klientów czeka", "klientów czeka")} na zatwierdzenie",
-                        "bi-person-fill-exclamation", "#D97706", "/clients"));
+                        "bi-person-fill-exclamation", "var(--c-warning)", "/clients"));
 
                 // Expiring packages (7 days)
                 var expiring = await PackageService.GetExpiringAsync(7, trainerFilter);
                 if (expiring.Count > 0)
                     _items.Add(new("Wygasające pakiety", $"{expiring.Count} {Pl(expiring.Count, "pakiet wygasa", "pakiety wygasają", "pakietów wygasa")} w ciągu 7 dni",
-                        "bi-box-seam-fill", "#DC2626", "/finance"));
+                        "bi-box-seam-fill", "var(--c-danger)", "/finance"));
 
                 // Sessions today not yet completed
                 var todayStart = DateTime.Today;
@@ -105,7 +105,7 @@
                 var notDone = todaySessions.Count(s => s.Status == SessionStatus.Scheduled && s.StartTime < DateTime.Now);
                 if (notDone > 0)
                     _items.Add(new("Nieoznaczone sesje", $"{notDone} sesji dzisiaj bez statusu — oznacz wynik",
-                        "bi-calendar-check-fill", "#3B82F6", "/sessions"));
+                        "bi-calendar-check-fill", "var(--c-info)", "/sessions"));
             }
             else if (_role == Roles.Client)
             {
@@ -115,7 +115,7 @@
                     s.StartTime.Date == DateTime.Today.AddDays(1).Date);
                 if (tomorrow is not null)
                     _items.Add(new("Trening jutro!", $"{tomorrow.StartTime:HH:mm} — {tomorrow.SessionTypeName}",
-                        "bi-calendar-event-fill", "#16A34A", "/my"));
+                        "bi-calendar-event-fill", "var(--c-success)", "/my"));
 
                 // Expiring package
                 var client = await ClientService.GetClientByUserIdAsync(_userId ?? "");
@@ -127,16 +127,16 @@
                         && (p.ExpiresAt.Value - DateTime.Now).TotalDays <= 7).ToList();
                     if (nearExpiry.Count > 0)
                         _items.Add(new("Pakiet wygasa", $"Pakiet \"{nearExpiry[0].Name}\" wygasa wkrótce",
-                            "bi-exclamation-triangle-fill", "#D97706", "/my/packages"));
+                            "bi-exclamation-triangle-fill", "var(--c-warning)", "/my/packages"));
 
                     var lowCredits = pkgs.FirstOrDefault(p => p.Status == PackageStatus.Active && p.RemainingCredits <= 2);
                     if (lowCredits is not null)
                         _items.Add(new("Mało kredytów", $"Zostały tylko {lowCredits.RemainingCredits} sesje w pakiecie",
-                            "bi-ticket-perforated-fill", "#DC2626", "/my/packages"));
+                            "bi-ticket-perforated-fill", "var(--c-danger)", "/my/packages"));
                 }
             }
         }
-        catch { }
+        catch { } // Best-effort: notifications are non-critical
     }
 
     private void ToggleOpen() => _open = !_open;
