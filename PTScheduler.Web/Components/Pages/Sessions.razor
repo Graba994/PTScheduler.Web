@@ -113,7 +113,7 @@ else
                         <div class="session-tile status-@s.Status.ToString().ToLower() @(_selectedSession?.Id == s.Id ? "session-tile-selected" : "")"
                              role="button" tabindex="0" style="cursor:pointer"
                              @onclick="() => OpenPanel(s.Id)"
-                             @onkeydown="e => { if (e.Key is \"Enter\" or \" \") OpenPanel(s.Id); }">
+                             @onkeydown="e => HandleTileKeyDown(e, s.Id)">
                             <div class="session-tile-date">
                                 <div class="session-tile-day">@s.StartTime.Day</div>
                                 <div class="session-tile-month">@s.StartTime.ToString("MMM", _pl)</div>
@@ -168,7 +168,7 @@ else
                         <div class="session-tile status-@s.Status.ToString().ToLower() @(_selectedSession?.Id == s.Id ? "session-tile-selected" : "")"
                              role="button" tabindex="0" style="cursor:pointer"
                              @onclick="() => OpenPanel(s.Id)"
-                             @onkeydown="e => { if (e.Key is \"Enter\" or \" \") OpenPanel(s.Id); }">
+                             @onkeydown="e => HandleTileKeyDown(e, s.Id)">
                             <div class="session-tile-date">
                                 <div class="session-tile-day">@s.StartTime.Day</div>
                                 <div class="session-tile-month">@s.StartTime.ToString("MMM", _pl)</div>
@@ -639,6 +639,11 @@ else
 
 @code {
     private static readonly CultureInfo _pl = new("pl-PL");
+
+    private void HandleTileKeyDown(KeyboardEventArgs e, int sessionId)
+    {
+        if (e.Key is "Enter" or " ") OpenPanel(sessionId);
+    }
 
     private List<SessionDto> _upcoming = [];
     private List<SessionDto> _past     = [];

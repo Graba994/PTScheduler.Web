@@ -68,7 +68,7 @@ else
             <div class="col-12 col-sm-6 col-xl-4">
                 <div class="card client-card h-100 position-relative" role="button" tabindex="0"
                      @onclick="@(() => Nav.NavigateTo($"/clients/{c.Id}"))"
-                     @onkeydown="e => { if (e.Key is \"Enter\" or \" \") Nav.NavigateTo($\"/clients/{c.Id}\"); }">
+                     @onkeydown="e => HandleCardKeyDown(e, c.Id)">
                     @if (c.Status == ClientStatus.Pending)
                     {
                         <span class="position-absolute top-0 end-0 m-2 badge bg-warning text-dark" style="font-size:.65rem">Oczekuje</span>
@@ -121,6 +121,11 @@ else
 @code {
     private List<ClientDto>? clients;
     private string search = string.Empty;
+
+    private void HandleCardKeyDown(KeyboardEventArgs e, int clientId)
+    {
+        if (e.Key is "Enter" or " ") Nav.NavigateTo($"/clients/{clientId}");
+    }
 
     private IEnumerable<ClientDto> Filtered => clients?
         .Where(c => string.IsNullOrEmpty(search) ||
