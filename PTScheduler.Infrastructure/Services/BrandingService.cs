@@ -123,18 +123,25 @@ public class BrandingService(IDbContextFactory<ApplicationDbContext> dbFactory, 
         if (File.Exists(full)) File.Delete(full);
     }
 
-    private static AppBrandingDto Map(AppBranding b) => new()
+    private AppBrandingDto Map(AppBranding b) => new()
     {
         ThemeName = b.ThemeName,
         ThemeMode = b.ThemeMode,
         CompanyName = b.CompanyName,
-        LogoPath = b.LogoPath,
-        FaviconPath = b.FaviconPath,
+        LogoPath = ResolveFilePath(b.LogoPath),
+        FaviconPath = ResolveFilePath(b.FaviconPath),
         PwaShortName = b.PwaShortName,
         PwaBannerEnabled = b.PwaBannerEnabled,
         PwaBannerTitle = b.PwaBannerTitle,
         PwaBannerBody = b.PwaBannerBody,
         PwaBannerButton = b.PwaBannerButton,
-        PwaIconPath = b.PwaIconPath
+        PwaIconPath = ResolveFilePath(b.PwaIconPath)
     };
+
+    private string? ResolveFilePath(string? relativePath)
+    {
+        if (string.IsNullOrEmpty(relativePath)) return null;
+        var full = Path.Combine(webRoot.WebRootPath, relativePath.TrimStart('/').Replace('/', Path.DirectorySeparatorChar));
+        return File.Exists(full) ? relativePath : null;
+    }
 }
