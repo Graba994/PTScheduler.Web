@@ -215,6 +215,9 @@ app.MapGet("/manifest.webmanifest", async (PTScheduler.Application.Interfaces.IB
     return Results.Json(manifest, contentType: "application/manifest+json");
 });
 
+// MapStaticAssets handles build-time assets with fingerprinting/caching;
+// UseStaticFiles is a fallback for runtime-uploaded files (branding logos, icons).
+app.UseStaticFiles();
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
