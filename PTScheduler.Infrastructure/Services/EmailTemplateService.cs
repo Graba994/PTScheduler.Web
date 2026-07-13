@@ -83,7 +83,7 @@ public class EmailTemplateService(
         if (!string.IsNullOrEmpty(branding.LogoPath))
         {
             variables["Logo"] = branding.LogoPath;
-            logoHtml = $"""<img src="{{{{Logo}}}}" alt="{companyName}" style="max-height:48px;max-width:180px;display:block;margin:0 auto 12px" />""";
+            logoHtml = "<img src=\"{{Logo}}\" alt=\"" + companyName + "\" style=\"max-height:48px;max-width:180px;display:block;margin:0 auto 12px\" />";
         }
 
         var subject = ReplacePlaceholders(template.Subject, variables);
