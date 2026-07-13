@@ -77,13 +77,22 @@ public class EmailTemplateService(
         var accentColor = template.AccentColor;
 
         variables["CompanyName"] = companyName;
+        variables["AccentColor"] = accentColor;
+
+        string? logoHtml = null;
+        if (!string.IsNullOrEmpty(branding.LogoPath))
+        {
+            variables["Logo"] = branding.LogoPath;
+            logoHtml = $"""<img src="{{{{Logo}}}}" alt="{companyName}" style="max-height:48px;max-width:180px;display:block;margin:0 auto 12px" />""";
+        }
 
         var subject = ReplacePlaceholders(template.Subject, variables);
         var headerTitle = ReplacePlaceholders(template.HeaderTitle, variables);
         var body = ReplacePlaceholders(template.HtmlBody, variables);
         var footer = ReplacePlaceholders(template.FooterText, variables);
+        var logoRendered = logoHtml is not null ? ReplacePlaceholders(logoHtml, variables) : null;
 
-        var html = WrapInLayout(headerTitle, body, footer, accentColor);
+        var html = WrapInLayout(headerTitle, body, footer, accentColor, logoRendered);
         return (subject, html);
     }
 
@@ -94,9 +103,10 @@ public class EmailTemplateService(
         return text;
     }
 
-    private static string WrapInLayout(string headerTitle, string body, string footer, string accent) => $"""
+    private static string WrapInLayout(string headerTitle, string body, string footer, string accent, string? logoHtml = null) => $"""
         <div style="font-family:Arial,sans-serif;max-width:560px;margin:0 auto;padding:32px 24px">
           <div style="background:{accent};border-radius:8px 8px 0 0;padding:24px;text-align:center">
+            {(logoHtml is not null ? logoHtml : "")}
             <h2 style="color:white;margin:0;font-size:20px">{headerTitle}</h2>
           </div>
           <div style="border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;padding:24px">
