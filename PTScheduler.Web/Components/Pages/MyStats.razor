@@ -1,0 +1,369 @@
+@page "/my/stats"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Client")]
+@inject ISessionService SessionService
+@inject IBodyMeasurementService MeasurementService
+@inject ISessionPackageService PackageService
+@inject IClientService ClientService
+@inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Enums
+@using System.Globalization
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<AppTitle Page="Moje statystyki" />
+
+@if (!_loaded)
+{
+    <div class="page-header mb-3">
+        <div class="skeleton skeleton-line w-40" style="height:24px;margin-bottom:0"></div>
+        <div class="skeleton" style="width:120px;height:32px;border-radius:8px"></div>
+    </div>
+    <div class="row g-3 mb-3">
+        @for (var i = 0; i < 4; i++)
+        {
+            <div class="col-6 col-xl-3">
+                <div class="skeleton-stat">
+                    <div class="skeleton skeleton-circle" style="width:40px;height:40px"></div>
+                    <div style="flex:1">
+                        <div class="skeleton skeleton-line w-40" style="height:20px"></div>
+                        <div class="skeleton skeleton-line w-75" style="height:10px;margin-bottom:0"></div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+    <div class="skeleton-card" style="height:200px"></div>
+}
+else if (_clientId == 0)
+{
+    <div class="empty-state py-5">
+        <div class="empty-state-icon" style="font-size:2rem">📊</div>
+        <div class="empty-state-title">Brak profilu klienta</div>
+        <div class="empty-state-desc">Nie znaleziono profilu klienta powiązanego z Twoim kontem.</div>
+    </div>
+}
+else
+{
+    <div class="page-header">
+        <h4 class="page-title"><i class="bi bi-graph-up me-2" style="color:var(--c-primary)"></i>Moje statystyki</h4>
+        <div class="btn-group btn-group-sm">
+            <button type="button" class="btn @(_months == 3 ? "btn-primary" : "btn-outline-secondary")" @onclick="() => ChangeRange(3)">3M</button>
+            <button type="button" class="btn @(_months == 6 ? "btn-primary" : "btn-outline-secondary")" @onclick="() => ChangeRange(6)">6M</button>
+            <button type="button" class="btn @(_months == 12 ? "btn-primary" : "btn-outline-secondary")" @onclick="() => ChangeRange(12)">12M</button>
+        </div>
+    </div>
+
+    <!-- Summary cards -->
+    <div class="row g-3 mb-3">
+        <div class="col-6 col-xl-3">
+            <div class="stat-card">
+                <div class="stat-icon"><i class="bi bi-calendar3"></i></div>
+                <div>
+                    <div class="stat-value">@_totalSessions</div>
+                    <div class="stat-label">Sesji łącznie</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="stat-card">
+                <div class="stat-icon stat-icon-green"><i class="bi bi-check-circle-fill"></i></div>
+                <div>
+                    <div class="stat-value">@_completedSessions</div>
+                    <div class="stat-label">Ukończone</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="stat-card">
+                <div class="stat-icon stat-icon-amber"><i class="bi bi-box-seam"></i></div>
+                <div>
+                    <div class="stat-value">@_remainingCredits</div>
+                    <div class="stat-label">Pozostałe sesje</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-xl-3">
+            <div class="stat-card">
+                <div class="stat-icon" style="color:var(--c-primary)"><i class="bi bi-percent"></i></div>
+                <div>
+                    <div class="stat-value">@(_totalSessions > 0 ? Math.Round(100.0 * _completedSessions / _totalSessions) : 0)%</div>
+                    <div class="stat-label">Frekwencja</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Charts row -->
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-lg-8">
+            <div class="card h-100">
+                <div class="card-header py-2 fw-semibold" style="font-size:.875rem">
+                    <i class="bi bi-bar-chart-fill me-2" style="color:var(--c-primary)"></i>Sesje — miesięcznie
+                </div>
+                <div class="card-body" style="height:220px;position:relative">
+                    <canvas id="my-stats-bar"></canvas>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-lg-4">
+            <div class="card h-100">
+                <div class="card-header py-2 fw-semibold" style="font-size:.875rem">
+                    <i class="bi bi-pie-chart-fill me-2" style="color:var(--c-primary)"></i>Statusy
+                </div>
+                <div class="card-body" style="height:220px;position:relative">
+                    <canvas id="my-stats-donut"></canvas>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Measurement trends -->
+    @if (_measurements.Count > 0 && _chartMetrics.Count > 0)
+    {
+        <div class="card mb-3">
+            <div class="card-header py-2 fw-semibold" style="font-size:.875rem">
+                <i class="bi bi-graph-up me-2" style="color:var(--c-primary)"></i>Trend pomiarów
+            </div>
+            <div class="card-body">
+                <div class="d-flex flex-wrap gap-2 mb-3">
+                    @foreach (var m in _chartMetrics)
+                    {
+                        <button class="btn btn-sm @(_activeMetric == m.Key ? "btn-primary" : "btn-outline-secondary")"
+                                @onclick="() => SelectMetricAsync(m.Key)">
+                            @m.Label
+                        </button>
+                    }
+                </div>
+                <div style="height:220px;position:relative">
+                    <canvas id="my-stats-measurements"></canvas>
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- Recent sessions -->
+    <div class="card">
+        <div class="card-header py-2 fw-semibold" style="font-size:.875rem">
+            <i class="bi bi-clock-history me-2" style="color:var(--c-primary)"></i>Ostatnie wizyty
+        </div>
+        <div class="card-body p-0">
+            @if (_recentSessions.Count == 0)
+            {
+                <div class="text-center text-muted py-4 small">Brak wizyt w wybranym okresie</div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover mb-0" style="font-size:.875rem">
+                        <thead>
+                            <tr>
+                                <th>Data</th>
+                                <th>Typ</th>
+                                <th class="text-center">Czas</th>
+                                <th class="text-center">Status</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var s in _recentSessions.Take(15))
+                            {
+                                <tr>
+                                    <td class="text-nowrap small">@s.StartTime.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                    <td class="small">@s.SessionTypeName</td>
+                                    <td class="text-center small">@s.DurationMinutes min</td>
+                                    <td class="text-center">
+                                        <span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span>
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private static readonly CultureInfo _pl = new("pl-PL");
+
+    private bool _loaded;
+    private int _clientId;
+    private int _months = 3;
+
+    private List<SessionDto> _sessions = [];
+    private List<SessionDto> _recentSessions = [];
+    private List<BodyMeasurementDto> _measurements = [];
+    private List<SessionPackageDto> _packages = [];
+
+    private int _totalSessions;
+    private int _completedSessions;
+    private int _remainingCredits;
+
+    private List<ChartMetric> _chartMetrics = [];
+    private string _activeMetric = string.Empty;
+    private bool _chartNeedsRender;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var uid = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        var client = await ClientService.GetClientByUserIdAsync(uid);
+        if (client is not null)
+        {
+            _clientId = client.Id;
+            _measurements = (await MeasurementService.GetAsync(_clientId))
+                .OrderByDescending(m => m.MeasurementDate).ToList();
+            _packages = await PackageService.GetPackagesAsync(_clientId);
+            _remainingCredits = _packages
+                .Where(p => p.Status == PackageStatus.Active)
+                .Sum(p => p.RemainingCredits);
+            BuildChartMetrics();
+            await LoadSessionsAsync();
+        }
+        _loaded = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_chartNeedsRender)
+        {
+            _chartNeedsRender = false;
+            await RenderChartsAsync();
+        }
+    }
+
+    private async Task ChangeRange(int months)
+    {
+        _months = months;
+        _loaded = false;
+        StateHasChanged();
+        await LoadSessionsAsync();
+        _loaded = true;
+    }
+
+    private async Task LoadSessionsAsync()
+    {
+        if (_clientId == 0) return;
+        var from = DateTime.UtcNow.AddMonths(-_months);
+        var to = DateTime.UtcNow.AddDays(1);
+        _sessions = await SessionService.GetSessionsAsync(from, to, null, _clientId);
+        _recentSessions = _sessions.OrderByDescending(s => s.StartTime).ToList();
+        _totalSessions = _sessions.Count;
+        _completedSessions = _sessions.Count(s => s.Status == SessionStatus.Completed);
+        _chartNeedsRender = true;
+    }
+
+    private async Task RenderChartsAsync()
+    {
+        var monthSlots = Enumerable.Range(0, _months)
+            .Select(i => DateTime.Now.AddMonths(-(_months - 1 - i)))
+            .Select(d => (Label: d.ToString("MM.yy"), Year: d.Year, Month: d.Month))
+            .ToList();
+
+        var barLabels = monthSlots.Select(m => m.Label).ToArray();
+        var barCompleted = monthSlots
+            .Select(m => (double)_sessions.Count(s =>
+                s.StartTime.Year == m.Year && s.StartTime.Month == m.Month &&
+                s.Status == SessionStatus.Completed))
+            .ToArray();
+        var barAll = monthSlots
+            .Select(m => (double)_sessions.Count(s =>
+                s.StartTime.Year == m.Year && s.StartTime.Month == m.Month))
+            .ToArray();
+
+        await JS.InvokeVoidAsync("PTChart.renderBar", "my-stats-bar", barLabels,
+            new object[]
+            {
+                new { label = "Ukończone", data = barCompleted },
+                new { label = "Wszystkie", data = barAll }
+            });
+
+        var completed = _sessions.Count(s => s.Status == SessionStatus.Completed);
+        var cancelled = _sessions.Count(s => s.Status == SessionStatus.Cancelled);
+        var noShow = _sessions.Count(s => s.Status == SessionStatus.NoShow);
+        var scheduled = _sessions.Count(s => s.Status == SessionStatus.Scheduled);
+
+        await JS.InvokeVoidAsync("PTChart.renderDoughnut", "my-stats-donut",
+            new[] { "Ukończone", "Anulowane", "Nieobecność", "Zaplanowane" },
+            new double[] { completed, cancelled, noShow, scheduled },
+            new[] { "#16A34A", "#DC2626", "#D97706", "#3B82F6" });
+
+        if (_chartMetrics.Count > 0)
+            await RenderMeasurementChartAsync();
+    }
+
+    private void BuildChartMetrics()
+    {
+        if (_measurements.Any(m => m.WeightKg.HasValue))
+            _chartMetrics.Add(new("weight", "Waga", "kg", m => m.WeightKg));
+        if (_measurements.Any(m => m.BodyFatPercent.HasValue))
+            _chartMetrics.Add(new("fat", "Tk. tłuszcz.", "%", m => m.BodyFatPercent));
+        if (_measurements.Any(m => m.ChestCm.HasValue))
+            _chartMetrics.Add(new("chest", "Klatka", "cm", m => m.ChestCm));
+        if (_measurements.Any(m => m.WaistCm.HasValue))
+            _chartMetrics.Add(new("waist", "Talia", "cm", m => m.WaistCm));
+        if (_measurements.Any(m => m.HipsCm.HasValue))
+            _chartMetrics.Add(new("hips", "Biodra", "cm", m => m.HipsCm));
+        if (_measurements.Any(m => m.ThighCm.HasValue))
+            _chartMetrics.Add(new("thigh", "Udo", "cm", m => m.ThighCm));
+        if (_measurements.Any(m => m.ArmCm.HasValue))
+            _chartMetrics.Add(new("arm", "Ramię", "cm", m => m.ArmCm));
+
+        if (_chartMetrics.Count > 0)
+            _activeMetric = _chartMetrics[0].Key;
+    }
+
+    private async Task SelectMetricAsync(string key)
+    {
+        _activeMetric = key;
+        await RenderMeasurementChartAsync();
+    }
+
+    private async Task RenderMeasurementChartAsync()
+    {
+        var metric = _chartMetrics.FirstOrDefault(m => m.Key == _activeMetric);
+        if (metric is null) return;
+
+        var ordered = _measurements
+            .Where(m => metric.Selector(m).HasValue)
+            .OrderBy(m => m.MeasurementDate)
+            .ToList();
+
+        var labels = ordered.Select(m => m.MeasurementDate.ToString("dd.MM.yy")).ToArray();
+        var data = ordered.Select(m => (double)metric.Selector(m)!.Value).ToArray();
+
+        await JS.InvokeVoidAsync("PTChart.renderLine",
+            "my-stats-measurements", labels, data, metric.Label, metric.Unit);
+    }
+
+    private static string StatusBadge(SessionStatus s) => s switch
+    {
+        SessionStatus.Completed => "bg-success",
+        SessionStatus.Cancelled => "bg-danger",
+        SessionStatus.NoShow => "bg-warning text-dark",
+        SessionStatus.Scheduled => "bg-primary",
+        SessionStatus.AwaitingPackage => "bg-secondary",
+        _ => "bg-secondary"
+    };
+
+    private static string StatusLabel(SessionStatus s) => s switch
+    {
+        SessionStatus.Completed => "Ukończona",
+        SessionStatus.Cancelled => "Anulowana",
+        SessionStatus.NoShow => "Nieobecność",
+        SessionStatus.Scheduled => "Zaplanowana",
+        SessionStatus.AwaitingPackage => "Bez pakietu",
+        _ => s.ToString()
+    };
+
+    private sealed class ChartMetric(string key, string label, string unit, Func<BodyMeasurementDto, decimal?> selector)
+    {
+        public string Key { get; } = key;
+        public string Label { get; } = label;
+        public string Unit { get; } = unit;
+        public Func<BodyMeasurementDto, decimal?> Selector { get; } = selector;
+    }
+}

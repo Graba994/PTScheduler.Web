@@ -25,6 +25,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<NotificationPreferences> NotificationPreferences => Set<NotificationPreferences>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<EmailTemplate> EmailTemplates => Set<EmailTemplate>();
+    public DbSet<WebPushSettings> WebPushSettings => Set<WebPushSettings>();
+    public DbSet<PushSubscription> PushSubscriptions => Set<PushSubscription>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -94,6 +96,10 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
         builder.Entity<RolePermission>()
             .HasIndex(rp => new { rp.Role, rp.Permission })
+            .IsUnique();
+
+        builder.Entity<PushSubscription>()
+            .HasIndex(ps => new { ps.UserId, ps.Endpoint })
             .IsUnique();
     }
 }

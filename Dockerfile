@@ -30,4 +30,6 @@ ENV ASPNETCORE_ENVIRONMENT=Production
 
 EXPOSE 8080
 
+VOLUME /app/wwwroot/branding
+
 ENTRYPOINT ["dotnet", "PTScheduler.Web.dll"]

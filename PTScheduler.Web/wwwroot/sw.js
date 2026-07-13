@@ -1,4 +1,4 @@
-const CACHE = 'ptscheduler-v3';
+const CACHE = 'ptscheduler-v4';
 const PRECACHE = [
     '/',
     '/offline.html',
@@ -98,6 +98,36 @@ self.addEventListener('fetch', e => {
                 return res;
             })
             .catch(() => caches.match(request))
+    );
+});
+
+// Web Push notifications
+self.addEventListener('push', e => {
+    let data = { title: 'PTScheduler', body: '' };
+    try { data = e.data.json(); } catch (_) {}
+    e.waitUntil(
+        self.registration.showNotification(data.title || 'PTScheduler', {
+            body: data.body || '',
+            icon: data.icon || '/icons/icon-192.png',
+            badge: '/icons/icon-96.png',
+            data: { url: data.url || '/' }
+        })
+    );
+});
+
+self.addEventListener('notificationclick', e => {
+    e.notification.close();
+    const url = e.notification.data?.url || '/';
+    e.waitUntil(
+        clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
+            for (const client of list) {
+                if (client.url.includes(self.location.origin) && 'focus' in client) {
+                    client.navigate(url);
+                    return client.focus();
+                }
+            }
+            return clients.openWindow(url);
+        })
     );
 });
 

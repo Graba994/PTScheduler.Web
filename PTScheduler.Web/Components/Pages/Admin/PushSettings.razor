@@ -1,0 +1,180 @@
+@page "/admin/push"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@inject IWebPushService PushService
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<AppTitle Page="Powiadomienia push" />
+
+<div class="cal-shell">
+    <div class="cal-topbar">
+        <h4 class="mb-0 fw-bold">
+            <i class="bi bi-bell-fill me-2"></i>Powiadomienia push (Web Push)
+        </h4>
+    </div>
+
+    <div class="cal-body">
+        <div class="cal-main" style="overflow-y:auto;padding:1.5rem">
+
+            @if (_loading)
+            {
+                <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+            }
+            else
+            {
+                <div class="card mb-4">
+                    <div class="card-header fw-semibold">
+                        <i class="bi bi-key-fill me-2"></i>Klucze VAPID
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small mb-3">
+                            Klucze VAPID są wymagane do wysyłania powiadomień push. Wygeneruj je jednorazowo — zmiana kluczy unieważni istniejące subskrypcje.
+                        </p>
+
+                        @if (!_dto.IsConfigured)
+                        {
+                            <div class="alert alert-warning small">
+                                <i class="bi bi-exclamation-triangle me-1"></i>
+                                Klucze VAPID nie zostały jeszcze skonfigurowane. Wygeneruj klucze, aby włączyć powiadomienia push.
+                            </div>
+                        }
+
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold">Klucz publiczny</label>
+                            <input type="text" class="form-control form-control-sm font-monospace" @bind="_dto.PublicKey" readonly="@_dto.IsConfigured" />
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold">Klucz prywatny</label>
+                            <div class="input-group input-group-sm">
+                                <input type="@(_showPrivateKey ? "text" : "password")" class="form-control font-monospace" @bind="_dto.PrivateKey" readonly="@_dto.IsConfigured" />
+                                <button class="btn btn-outline-secondary" type="button" @onclick="() => _showPrivateKey = !_showPrivateKey">
+                                    <i class="bi @(_showPrivateKey ? "bi-eye-slash" : "bi-eye")"></i>
+                                </button>
+                            </div>
+                        </div>
+
+                        <div class="mb-3">
+                            <label class="form-label small fw-semibold">Subject (kontakt)</label>
+                            <input type="text" class="form-control form-control-sm" @bind="_dto.Subject"
+                                   placeholder="mailto:admin@example.com" />
+                            <div class="form-text">Adres e-mail kontaktowy w formacie mailto: — wymagany przez standard VAPID.</div>
+                        </div>
+
+                        <div class="d-flex gap-2">
+                            @if (!_dto.IsConfigured)
+                            {
+                                <button class="btn btn-outline-primary btn-sm" @onclick="GenerateKeys" disabled="@_saving">
+                                    <i class="bi bi-shuffle me-1"></i>Generuj klucze
+                                </button>
+                            }
+                            <button class="btn btn-primary btn-sm" @onclick="SaveAsync" disabled="@_saving">
+                                @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                <i class="bi bi-floppy-fill me-1"></i>Zapisz
+                            </button>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="card mb-4">
+                    <div class="card-header fw-semibold">
+                        <i class="bi bi-send-fill me-2"></i>Wyślij testowe powiadomienie
+                    </div>
+                    <div class="card-body">
+                        <p class="text-muted small mb-3">
+                            Wyślij powiadomienie push do wszystkich subskrybentów, aby sprawdzić czy konfiguracja działa.
+                        </p>
+                        <div class="row g-3 mb-3">
+                            <div class="col-md-4">
+                                <label class="form-label small fw-semibold">Tytuł</label>
+                                <input type="text" class="form-control form-control-sm" @bind="_testTitle" />
+                            </div>
+                            <div class="col-md-8">
+                                <label class="form-label small fw-semibold">Treść</label>
+                                <input type="text" class="form-control form-control-sm" @bind="_testBody" />
+                            </div>
+                        </div>
+                        <button class="btn btn-outline-primary btn-sm" @onclick="SendTestAsync" disabled="@(!_dto.IsConfigured || _sendingTest)">
+                            @if (_sendingTest) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            <i class="bi bi-send me-1"></i>Wyślij test
+                        </button>
+                    </div>
+                </div>
+
+                @if (_message is not null)
+                {
+                    <div class="alert @(_messageSuccess ? "alert-success" : "alert-danger") small">
+                        @_message
+                    </div>
+                }
+            }
+        </div>
+    </div>
+</div>
+
+@code {
+    private bool _loading = true;
+    private bool _saving;
+    private bool _sendingTest;
+    private bool _showPrivateKey;
+    private WebPushSettingsDto _dto = new();
+    private string _testTitle = "Test PTScheduler";
+    private string _testBody = "Powiadomienia push działają poprawnie!";
+    private string? _message;
+    private bool _messageSuccess;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _dto = await PushService.GetSettingsAsync();
+        _loading = false;
+    }
+
+    private void GenerateKeys()
+    {
+        var (pub, priv) = PushService.GenerateVapidKeys();
+        _dto.PublicKey = pub;
+        _dto.PrivateKey = priv;
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        _message = null;
+        try
+        {
+            await PushService.SaveSettingsAsync(_dto);
+            _message = "Ustawienia zapisane.";
+            _messageSuccess = true;
+        }
+        catch (Exception ex)
+        {
+            _message = $"Błąd: {ex.Message}";
+            _messageSuccess = false;
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task SendTestAsync()
+    {
+        _sendingTest = true;
+        _message = null;
+        try
+        {
+            await PushService.SendToAllAsync(new PushMessageDto
+            {
+                Title = _testTitle,
+                Body = _testBody,
+                Url = "/"
+            });
+            _message = "Powiadomienie testowe wysłane.";
+            _messageSuccess = true;
+        }
+        catch (Exception ex)
+        {
+            _message = $"Błąd: {ex.Message}";
+            _messageSuccess = false;
+        }
+        finally { _sendingTest = false; }
+    }
+}

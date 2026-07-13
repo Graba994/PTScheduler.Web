@@ -162,6 +162,38 @@
                 }
             }
         };
+
+        // Web Push subscription helpers
+        window.PTPush = {
+            isSupported: () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window,
+            getPermission: () => Notification.permission,
+            subscribe: async (vapidPublicKey) => {
+                const reg = await navigator.serviceWorker.ready;
+                const sub = await reg.pushManager.subscribe({
+                    userVisibleOnly: true,
+                    applicationServerKey: PTPush._urlBase64ToUint8Array(vapidPublicKey)
+                });
+                const json = sub.toJSON();
+                return { endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth };
+            },
+            unsubscribe: async () => {
+                const reg = await navigator.serviceWorker.ready;
+                const sub = await reg.pushManager.getSubscription();
+                if (sub) { await sub.unsubscribe(); return sub.endpoint; }
+                return null;
+            },
+            getSubscription: async () => {
+                const reg = await navigator.serviceWorker.ready;
+                const sub = await reg.pushManager.getSubscription();
+                return sub ? sub.endpoint : null;
+            },
+            _urlBase64ToUint8Array: (base64String) => {
+                const padding = '='.repeat((4 - base64String.length % 4) % 4);
+                const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
+                const raw = atob(base64);
+                return Uint8Array.from([...raw].map(c => c.charCodeAt(0)));
+            }
+        };
     </script>
 </body>
 
