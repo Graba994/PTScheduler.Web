@@ -57,7 +57,6 @@ builder.Services.AddScoped<IEmailSender<ApplicationUser>, PTScheduler.Web.Compon
 builder.Services.AddSingleton<IWebRootPathProvider, WebRootPathProvider>();
 builder.Services.AddScoped<PTScheduler.Web.Services.HintStateService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.ToastService>();
-builder.Services.AddHttpClient();
 builder.Services.AddHostedService<SessionReminderService>();
 
 // Tracks whether DB is reachable. Mutated at startup and via /db-error/retry.

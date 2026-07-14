@@ -13,7 +13,6 @@ namespace PTScheduler.Infrastructure.Services;
 
 public class WebPushService(
     IDbContextFactory<ApplicationDbContext> dbFactory,
-    IHttpClientFactory httpClientFactory,
     ILogger<WebPushService> logger) : IWebPushService
 {
     public async Task<WebPushSettingsDto> GetSettingsAsync()
@@ -135,7 +134,7 @@ public class WebPushService(
             var vapidHeaders = GenerateVapidHeaders(audience, settings.Subject, settings.PublicKey, settings.PrivateKey);
             var encryptedPayload = EncryptPayload(sub.P256dh, sub.Auth, Encoding.UTF8.GetBytes(payload));
 
-            using var client = httpClientFactory.CreateClient();
+            using var client = new HttpClient();
             using var request = new HttpRequestMessage(HttpMethod.Post, sub.Endpoint);
             request.Headers.Add("TTL", "86400");
             request.Headers.Authorization = new AuthenticationHeaderValue("vapid", $"t={vapidHeaders.Token},k={vapidHeaders.PublicKey}");
