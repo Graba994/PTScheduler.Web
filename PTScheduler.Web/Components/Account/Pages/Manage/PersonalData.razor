@@ -1,28 +1,71 @@
-﻿@page "/Account/Manage/PersonalData"
+@page "/Account/Manage/PersonalData"
 
 @using Microsoft.AspNetCore.Identity
 
 @inject UserManager<ApplicationUser> UserManager
 @inject IdentityRedirectManager RedirectManager
 
-<PageTitle>Personal Data</PageTitle>
+<PageTitle>Dane osobowe</PageTitle>
 
 <StatusMessage />
-<h3>Personal Data</h3>
 
-<div class="row">
-    <div class="col-md-6">
-        <p>Your account contains personal data that you have given us. This page allows you to download or delete that data.</p>
-        <p>
-            <strong>Deleting this data will permanently remove your account, and this cannot be recovered.</strong>
-        </p>
-        <form action="Account/Manage/DownloadPersonalData" method="post">
-            <AntiforgeryToken />
-            <button class="btn btn-primary" type="submit">Download</button>
-        </form>
-        <p>
-            <a href="Account/Manage/DeletePersonalData" class="btn btn-danger">Delete</a>
-        </p>
+<h5 class="fw-bold mb-1">Dane osobowe</h5>
+<p class="text-muted small mb-4">Zarządzaj swoimi danymi zgodnie z RODO (art. 15, 17, 20).</p>
+
+<div class="row g-3">
+    <div class="col-12 col-md-6">
+        <div class="card h-100" style="border-radius:12px">
+            <div class="card-body">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <i class="bi bi-download" style="font-size:1.2rem;color:var(--c-primary)"></i>
+                    <h6 class="mb-0 fw-semibold">Pobierz dane</h6>
+                </div>
+                <p class="text-muted small mb-3">Pobierz kopię swoich danych osobowych w formacie JSON (art. 20 RODO — prawo do przenoszenia danych).</p>
+                <form action="Account/Manage/DownloadPersonalData" method="post">
+                    <AntiforgeryToken />
+                    <button class="btn btn-primary btn-sm" type="submit">
+                        <i class="bi bi-file-earmark-arrow-down me-1"></i>Pobierz dane
+                    </button>
+                </form>
+            </div>
+        </div>
+    </div>
+    <div class="col-12 col-md-6">
+        <div class="card h-100" style="border-radius:12px;border-color:var(--c-danger,#dc2626)">
+            <div class="card-body">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    <i class="bi bi-trash3" style="font-size:1.2rem;color:var(--c-danger,#dc2626)"></i>
+                    <h6 class="mb-0 fw-semibold" style="color:var(--c-danger,#dc2626)">Usuń konto</h6>
+                </div>
+                <p class="text-muted small mb-3">Trwale usuń swoje konto i wszystkie powiązane dane. Tej operacji nie można cofnąć (art. 17 RODO — prawo do bycia zapomnianym).</p>
+                <a href="Account/Manage/DeletePersonalData" class="btn btn-outline-danger btn-sm">
+                    <i class="bi bi-exclamation-triangle me-1"></i>Usuń konto
+                </a>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="mt-4">
+    <div class="card" style="border-radius:12px">
+        <div class="card-body">
+            <div class="d-flex align-items-center gap-2 mb-2">
+                <i class="bi bi-info-circle" style="font-size:1.2rem;color:var(--c-info,#0284c7)"></i>
+                <h6 class="mb-0 fw-semibold">Twoje prawa</h6>
+            </div>
+            <p class="text-muted small mb-2">Na podstawie RODO przysługują Ci m.in.:</p>
+            <ul class="small text-muted mb-0" style="padding-left:1.2rem">
+                <li>Prawo dostępu do danych (art. 15)</li>
+                <li>Prawo do sprostowania danych (art. 16)</li>
+                <li>Prawo do usunięcia danych (art. 17)</li>
+                <li>Prawo do ograniczenia przetwarzania (art. 18)</li>
+                <li>Prawo do przenoszenia danych (art. 20)</li>
+                <li>Prawo do sprzeciwu (art. 21)</li>
+            </ul>
+            <p class="small text-muted mt-2 mb-0">
+                Szczegóły znajdziesz w naszej <a href="/legal/privacy">Polityce prywatności</a>.
+            </p>
+        </div>
     </div>
 </div>
 
@@ -32,7 +75,7 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var user  = await UserManager.GetUserAsync(HttpContext.User);
+        var user = await UserManager.GetUserAsync(HttpContext.User);
         if (user is null)
         {
             RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);

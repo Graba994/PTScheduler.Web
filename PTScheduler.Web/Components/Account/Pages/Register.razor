@@ -101,6 +101,15 @@
                 </div>
             }
 
+            <div class="form-check mb-3">
+                <InputCheckbox @bind-Value="Input.AcceptTerms" class="form-check-input" id="acceptTerms" />
+                <label class="form-check-label small" for="acceptTerms">
+                    Akceptuję <a href="/legal/terms" target="_blank">Regulamin</a> oraz
+                    <a href="/legal/privacy" target="_blank">Politykę prywatności</a> <span class="text-danger">*</span>
+                </label>
+                <ValidationMessage For="() => Input.AcceptTerms" class="text-danger small" />
+            </div>
+
             <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold" disabled="@_registering">
                 @if (_registering)
                 {
@@ -194,7 +203,8 @@
             LastName = Input.LastName,
             TrainerUserId = string.IsNullOrEmpty(trainerId) ? null : trainerId,
             Status = PTScheduler.Domain.Enums.ClientStatus.Pending,
-            CreatedAt = DateTime.UtcNow
+            CreatedAt = DateTime.UtcNow,
+            TermsAcceptedAt = DateTime.UtcNow
         });
         await DbContext.SaveChangesAsync();
 
@@ -238,5 +248,8 @@
         [DataType(DataType.Password)]
         [Compare("Password", ErrorMessage = "Hasła nie są identyczne.")]
         public string ConfirmPassword { get; set; } = "";
+
+        [Range(typeof(bool), "true", "true", ErrorMessage = "Musisz zaakceptować regulamin.")]
+        public bool AcceptTerms { get; set; }
     }
 }

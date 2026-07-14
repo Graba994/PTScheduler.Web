@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Http.Extensions;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Primitives;
+using Microsoft.EntityFrameworkCore;
 using PTScheduler.Web.Components.Account.Pages;
 using PTScheduler.Web.Components.Account.Pages.Manage;
 using PTScheduler.Infrastructure.Data;
@@ -115,7 +116,8 @@ namespace Microsoft.AspNetCore.Routing
             manageGroup.MapPost("/DownloadPersonalData", async (
                 HttpContext context,
                 [FromServices] UserManager<ApplicationUser> userManager,
-                [FromServices] AuthenticationStateProvider authenticationStateProvider) =>
+                [FromServices] AuthenticationStateProvider authenticationStateProvider,
+                [FromServices] ApplicationDbContext db) =>
             {
                 var user = await userManager.GetUserAsync(context.User);
                 if (user is null)
@@ -126,26 +128,73 @@ namespace Microsoft.AspNetCore.Routing
                 var userId = await userManager.GetUserIdAsync(user);
                 downloadLogger.LogInformation("User with ID '{UserId}' asked for their personal data.", userId);
 
-                // Only include personal data for download
-                var personalData = new Dictionary<string, string>();
-                var personalDataProps = typeof(ApplicationUser).GetProperties().Where(
-                    prop => Attribute.IsDefined(prop, typeof(PersonalDataAttribute)));
-                foreach (var p in personalDataProps)
+                var export = new Dictionary<string, object?>
                 {
-                    personalData.Add(p.Name, p.GetValue(user)?.ToString() ?? "null");
+                    ["ExportDate"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                    ["Account"] = new
+                    {
+                        user.FirstName,
+                        user.LastName,
+                        user.Email,
+                        user.PhoneNumber,
+                        user.TwoFactorEnabled,
+                        user.EmailConfirmed
+                    }
+                };
+
+                var client = await db.Clients
+                    .AsNoTracking()
+                    .FirstOrDefaultAsync(c => c.ApplicationUserId == userId);
+
+                if (client != null)
+                {
+                    export["Profile"] = new
+                    {
+                        client.Phone,
+                        client.TrainingGoal,
+                        client.DateOfBirth,
+                        client.CreatedAt,
+                        client.TermsAcceptedAt
+                    };
+
+                    var sessions = await db.Sessions
+                        .AsNoTracking()
+                        .Include(s => s.SessionType)
+                        .Where(s => s.ClientId == client.Id)
+                        .Select(s => new { s.StartTime, s.Status, SessionType = s.SessionType.Name, s.Notes })
+                        .ToListAsync();
+                    export["Sessions"] = sessions;
+
+                    var measurements = await db.BodyMeasurements
+                        .AsNoTracking()
+                        .Where(m => m.ClientId == client.Id)
+                        .OrderByDescending(m => m.MeasurementDate)
+                        .Select(m => new { m.MeasurementDate, m.WeightKg, m.BodyFatPercent, m.ChestCm, m.WaistCm, m.HipsCm, m.ThighCm, m.ArmCm, m.Notes })
+                        .ToListAsync();
+                    export["BodyMeasurements"] = measurements;
+
+                    var packages = await db.SessionPackages
+                        .AsNoTracking()
+                        .Where(p => p.ClientId == client.Id)
+                        .Select(p => new { p.Name, p.TotalSessions, p.UsedSessions, p.PricePerSession, p.PurchasedAt, p.ExpiresAt, p.Status })
+                        .ToListAsync();
+                    export["Packages"] = packages;
                 }
 
-                var logins = await userManager.GetLoginsAsync(user);
-                foreach (var l in logins)
-                {
-                    personalData.Add($"{l.LoginProvider} external login provider key", l.ProviderKey);
-                }
+                var loginLogs = await db.LoginLogs
+                    .AsNoTracking()
+                    .Where(l => l.UserId == userId)
+                    .OrderByDescending(l => l.LoginTime)
+                    .Take(100)
+                    .Select(l => new { l.LoginTime, l.IpAddress, l.Success })
+                    .ToListAsync();
+                export["LoginHistory"] = loginLogs;
 
-                personalData.Add("Authenticator Key", (await userManager.GetAuthenticatorKeyAsync(user))!);
-                var fileBytes = JsonSerializer.SerializeToUtf8Bytes(personalData);
+                var options = new JsonSerializerOptions { WriteIndented = true };
+                var fileBytes = JsonSerializer.SerializeToUtf8Bytes(export, options);
 
-                context.Response.Headers.TryAdd("Content-Disposition", "attachment; filename=PersonalData.json");
-                return TypedResults.File(fileBytes, contentType: "application/json", fileDownloadName: "PersonalData.json");
+                context.Response.Headers.TryAdd("Content-Disposition", "attachment; filename=MojeDane.json");
+                return TypedResults.File(fileBytes, contentType: "application/json", fileDownloadName: "MojeDane.json");
             });
 
             return accountGroup;

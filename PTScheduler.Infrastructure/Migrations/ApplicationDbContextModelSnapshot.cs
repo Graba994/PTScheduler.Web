@@ -328,6 +328,9 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Property<int>("Status")
                         .HasColumnType("integer");
 
+                    b.Property<DateTime?>("TermsAcceptedAt")
+                        .HasColumnType("timestamp without time zone");
+
                     b.Property<string>("TrainerUserId")
                         .HasColumnType("text");
 
@@ -616,6 +619,37 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.ToTable("EmailSettings");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.LoginLog", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("IpAddress")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("LoginTime")
+                        .HasColumnType("timestamp without time zone");
+
+                    b.Property<bool>("Success")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("UserAgent")
+                        .HasColumnType("text");
+
+                    b.Property<string>("UserId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("UserId");
+
+                    b.ToTable("LoginLogs");
                 });
 
             modelBuilder.Entity("PTScheduler.Domain.Entities.IntroSessionConfig", b =>

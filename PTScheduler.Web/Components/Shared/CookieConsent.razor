@@ -1,0 +1,45 @@
+@rendermode InteractiveServer
+@inject IJSRuntime JS
+
+@if (_visible)
+{
+    <div class="cookie-banner">
+        <div class="cookie-banner-inner">
+            <div class="cookie-banner-text">
+                <i class="bi bi-cookie"></i>
+                <div>
+                    <strong>Pliki cookies</strong>
+                    <p>Używamy niezbędnych plików cookies do działania serwisu. Szczegóły w <a href="/legal/cookies">Polityce cookies</a>.</p>
+                </div>
+            </div>
+            <button class="btn btn-primary btn-sm cookie-banner-btn" @onclick="Accept">Rozumiem</button>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _visible;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            try
+            {
+                var accepted = await JS.InvokeAsync<string?>("localStorage.getItem", "cookie-consent");
+                if (accepted != "1")
+                {
+                    _visible = true;
+                    StateHasChanged();
+                }
+            }
+            catch { }
+        }
+    }
+
+    private async Task Accept()
+    {
+        try { await JS.InvokeVoidAsync("localStorage.setItem", "cookie-consent", "1"); } catch { }
+        _visible = false;
+    }
+}

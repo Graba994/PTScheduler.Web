@@ -1,6 +1,7 @@
 @page "/legal/privacy"
 @using PTScheduler.Application.Interfaces
 @inject IBrandingService BrandingService
+@inject IEmailSettingsService EmailSettingsService
 
 <PageTitle>Polityka prywatności</PageTitle>
 
@@ -253,13 +254,26 @@
     </section>
 
     <section>
-        <h5>9. Zmiany Polityki Prywatności</h5>
+        <h5>9. Kontakt w sprawach danych osobowych</h5>
+        @if (!string.IsNullOrEmpty(_contactEmail))
+        {
+            <p>W celu realizacji swoich praw lub w razie pytań dotyczących przetwarzania danych, prosimy o kontakt: <a href="mailto:@_contactEmail">@_contactEmail</a>.</p>
+        }
+        else
+        {
+            <p>W celu realizacji swoich praw prosimy o kontakt z Administratorem za pośrednictwem adresu e-mail podanego w Serwisie lub funkcji „Dane osobowe" w ustawieniach konta.</p>
+        }
+    </section>
+
+    <section>
+        <h5>10. Zmiany Polityki Prywatności</h5>
         <p>Administrator zastrzega sobie prawo do zmiany niniejszej Polityki Prywatności. O wszelkich zmianach Użytkownicy zostaną poinformowani za pośrednictwem Serwisu. Korzystanie z Serwisu po wprowadzeniu zmian oznacza ich akceptację.</p>
     </section>
 </div>
 
 @code {
     private string _companyName = "PTScheduler";
+    private string _contactEmail = "";
 
     protected override async Task OnInitializedAsync()
     {
@@ -267,6 +281,12 @@
         {
             var branding = await BrandingService.GetAsync();
             _companyName = branding.CompanyName ?? "PTScheduler";
+        }
+        catch { }
+        try
+        {
+            var settings = await EmailSettingsService.GetAsync();
+            _contactEmail = settings?.FromAddress ?? "";
         }
         catch { }
     }

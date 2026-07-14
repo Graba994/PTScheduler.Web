@@ -1,0 +1,99 @@
+@page "/Account/Manage/LoginHistory"
+@rendermode InteractiveServer
+
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.EntityFrameworkCore
+@using PTScheduler.Domain.Entities
+@using PTScheduler.Infrastructure.Data
+@using System.Security.Claims
+
+@inject AuthenticationStateProvider AuthState
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+
+<PageTitle>Historia logowań</PageTitle>
+
+<h5 class="fw-bold mb-1">Historia logowań</h5>
+<p class="text-muted small mb-4">Ostatnie 30 logowań na Twoje konto.</p>
+
+@if (_logs == null)
+{
+    <div class="text-center py-4">
+        <div class="spinner-border spinner-border-sm text-primary"></div>
+        <span class="ms-2 text-muted small">Ładowanie...</span>
+    </div>
+}
+else if (_logs.Count == 0)
+{
+    <div class="text-center py-4 text-muted">
+        <i class="bi bi-clock-history" style="font-size:2rem;opacity:.4"></i>
+        <p class="mt-2 small">Brak zarejestrowanych logowań.</p>
+    </div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-sm" style="font-size:.85rem">
+            <thead>
+                <tr>
+                    <th>Data i czas</th>
+                    <th>Adres IP</th>
+                    <th>Przeglądarka</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var log in _logs)
+                {
+                    <tr>
+                        <td>@log.LoginTime.ToString("dd.MM.yyyy HH:mm")</td>
+                        <td><code style="font-size:.8rem">@(log.IpAddress ?? "—")</code></td>
+                        <td class="text-truncate" style="max-width:220px" title="@log.UserAgent">@ParseBrowser(log.UserAgent)</td>
+                        <td>
+                            @if (log.Success)
+                            {
+                                <span class="badge" style="background:var(--c-success-bg,#dcfce7);color:var(--c-success,#16a34a)">OK</span>
+                            }
+                            else
+                            {
+                                <span class="badge" style="background:var(--c-danger-bg,#fee2e2);color:var(--c-danger,#dc2626)">Nieudane</span>
+                            }
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private List<LoginLog>? _logs;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var userId = auth.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+        if (string.IsNullOrEmpty(userId)) return;
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _logs = await db.LoginLogs
+            .Where(l => l.UserId == userId)
+            .OrderByDescending(l => l.LoginTime)
+            .Take(30)
+            .ToListAsync();
+
+        StateHasChanged();
+    }
+
+    private static string ParseBrowser(string? ua)
+    {
+        if (string.IsNullOrEmpty(ua)) return "—";
+        if (ua.Contains("Edg/")) return "Edge";
+        if (ua.Contains("Chrome/")) return "Chrome";
+        if (ua.Contains("Firefox/")) return "Firefox";
+        if (ua.Contains("Safari/") && !ua.Contains("Chrome")) return "Safari";
+        if (ua.Length > 60) return ua[..57] + "...";
+        return ua;
+    }
+}

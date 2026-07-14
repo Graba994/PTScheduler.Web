@@ -29,6 +29,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<PushSubscription> PushSubscriptions => Set<PushSubscription>();
     public DbSet<FinancePin> FinancePins => Set<FinancePin>();
     public DbSet<FinanceTaxConfig> FinanceTaxConfigs => Set<FinanceTaxConfig>();
+    public DbSet<LoginLog> LoginLogs => Set<LoginLog>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -103,6 +104,9 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         builder.Entity<PushSubscription>()
             .HasIndex(ps => new { ps.UserId, ps.Endpoint })
             .IsUnique();
+
+        builder.Entity<LoginLog>()
+            .HasIndex(l => l.UserId);
 
         builder.Entity<FinanceTaxConfig>()
             .HasIndex(f => f.Module)

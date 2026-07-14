@@ -18,6 +18,7 @@ public class Client
     public string? TrainerUserId { get; set; }
     public ClientStatus Status { get; set; } = ClientStatus.Active;
     public bool AllowSelfBooking { get; set; } = false;
+    public DateTime? TermsAcceptedAt { get; set; }
 
     public ICollection<Session> Sessions { get; set; } = [];
     public ICollection<BodyMeasurement> BodyMeasurements { get; set; } = [];

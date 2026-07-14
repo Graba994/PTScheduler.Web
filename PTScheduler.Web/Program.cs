@@ -1,5 +1,7 @@
+using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.AspNetCore.RateLimiting;
 using PTScheduler.Application;
 using PTScheduler.Application.DTOs;
 using PTScheduler.Application.Interfaces;
@@ -62,6 +64,27 @@ builder.Services.AddHostedService<SessionReminderService>();
 // Tracks whether DB is reachable. Mutated at startup and via /db-error/retry.
 builder.Services.AddSingleton<StartupHealth>();
 
+builder.Services.AddRateLimiter(options =>
+{
+    options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+    {
+        var path = ctx.Request.Path.Value ?? "";
+        if (ctx.Request.Method == "POST" &&
+            (path.StartsWith("/Account/Login", StringComparison.OrdinalIgnoreCase) ||
+             path.StartsWith("/Account/Register", StringComparison.OrdinalIgnoreCase)))
+        {
+            var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+            return RateLimitPartition.GetFixedWindowLimiter(ip, _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 10,
+                Window = TimeSpan.FromMinutes(1)
+            });
+        }
+        return RateLimitPartition.GetNoLimiter("unlimited");
+    });
+});
+
 var app = builder.Build();
 
 // Run migrations + seed. On failure: log and flag the app as DB-degraded — DO NOT crash.
@@ -101,6 +124,7 @@ app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages:
 if (Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") != "true")
     app.UseHttpsRedirection();
 
+app.UseRateLimiter();
 app.UseAntiforgery();
 
 // DB-error landing page — pure HTML, no Blazor / Identity / DB dependencies, so it
@@ -223,6 +247,13 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.MapAdditionalIdentityEndpoints();
+
+app.MapGet("/health", (StartupHealth h) => Results.Json(new
+{
+    status = h.DatabaseAvailable ? "healthy" : "degraded",
+    database = h.DatabaseAvailable,
+    timestamp = DateTime.Now.ToString("o")
+}));
 
 app.Run();
 

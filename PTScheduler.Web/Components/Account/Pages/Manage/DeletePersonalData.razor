@@ -1,40 +1,62 @@
-﻿@page "/Account/Manage/DeletePersonalData"
+@page "/Account/Manage/DeletePersonalData"
 
 @using System.ComponentModel.DataAnnotations
 @using Microsoft.AspNetCore.Identity
+@using Microsoft.EntityFrameworkCore
 
 @inject UserManager<ApplicationUser> UserManager
 @inject SignInManager<ApplicationUser> SignInManager
 @inject IdentityRedirectManager RedirectManager
 @inject ILogger<DeletePersonalData> Logger
+@inject PTScheduler.Infrastructure.Data.ApplicationDbContext DbContext
 
-<PageTitle>Delete Personal Data</PageTitle>
+<PageTitle>Usuń konto</PageTitle>
 
 <StatusMessage Message="@message" />
 
-<h3>Delete Personal Data</h3>
+<h5 class="fw-bold mb-1" style="color:var(--c-danger,#dc2626)">Usuń konto</h5>
+<p class="text-muted small mb-4">Ta operacja jest nieodwracalna.</p>
 
-<div class="alert alert-warning" role="alert">
-    <p>
-        <strong>Deleting this data will permanently remove your account, and this cannot be recovered.</strong>
-    </p>
+<div class="alert alert-danger py-3" role="alert" style="border-radius:12px">
+    <div class="d-flex align-items-start gap-2">
+        <i class="bi bi-exclamation-triangle-fill" style="font-size:1.2rem;flex-shrink:0"></i>
+        <div>
+            <strong>Uwaga!</strong> Usunięcie konta spowoduje trwałe usunięcie:
+            <ul class="mb-0 mt-1 small">
+                <li>Twoich danych osobowych i profilu</li>
+                <li>Historii sesji treningowych</li>
+                <li>Pomiarów ciała</li>
+                <li>Pakietów i danych finansowych</li>
+                <li>Subskrypcji powiadomień</li>
+            </ul>
+        </div>
+    </div>
 </div>
 
-<div>
-    <EditForm Model="Input" FormName="delete-user" OnValidSubmit="OnValidSubmitAsync" method="post">
-        <DataAnnotationsValidator />
-        <ValidationSummary class="text-danger" role="alert" />
-        @if (requirePassword)
-        {
-            <div class="form-floating mb-3">
-                <InputText type="password" @bind-Value="Input.Password" id="Input.Password" class="form-control" autocomplete="current-password" aria-required="true" placeholder="Please enter your password." />
-                <label for="Input.Password" class="form-label">Password</label>
-                <ValidationMessage For="() => Input.Password" class="text-danger" />
-            </div>
-        }
-        <button class="w-100 btn btn-lg btn-danger" type="submit">Delete data and close my account</button>
-    </EditForm>
+<div class="card" style="border-radius:12px;max-width:420px">
+    <div class="card-body">
+        <EditForm Model="Input" FormName="delete-user" OnValidSubmit="OnValidSubmitAsync" method="post">
+            <DataAnnotationsValidator />
+            <ValidationSummary class="text-danger small" role="alert" />
+            @if (requirePassword)
+            {
+                <div class="mb-3">
+                    <label class="form-label small" for="Input.Password">Potwierdź hasłem</label>
+                    <InputText type="password" @bind-Value="Input.Password" id="Input.Password"
+                               class="form-control" autocomplete="current-password" placeholder="Twoje hasło" />
+                    <ValidationMessage For="() => Input.Password" class="text-danger small" />
+                </div>
+            }
+            <button class="w-100 btn btn-danger" type="submit">
+                <i class="bi bi-trash3 me-1"></i>Trwale usuń moje konto
+            </button>
+        </EditForm>
+    </div>
 </div>
+
+<a href="Account/Manage/PersonalData" class="btn btn-link btn-sm text-muted mt-2">
+    <i class="bi bi-arrow-left me-1"></i>Wróć
+</a>
 
 @code {
     private string? message;
@@ -70,22 +92,59 @@
 
         if (requirePassword && !await UserManager.CheckPasswordAsync(user, Input.Password))
         {
-            message = "Error: Incorrect password.";
+            message = "Błąd: Nieprawidłowe hasło.";
             return;
         }
+
+        var userId = user.Id;
+
+        var client = await DbContext.Clients
+            .FirstOrDefaultAsync(c => c.ApplicationUserId == userId);
+
+        if (client != null)
+        {
+            var contactsAsClient2 = await DbContext.ClientContacts
+                .Where(cc => cc.Client2Id == client.Id).ToListAsync();
+            if (contactsAsClient2.Count > 0)
+                DbContext.ClientContacts.RemoveRange(contactsAsClient2);
+
+            var invitations = await DbContext.SessionInvitations
+                .Where(i => i.InvitedClientId == client.Id).ToListAsync();
+            if (invitations.Count > 0)
+                DbContext.SessionInvitations.RemoveRange(invitations);
+
+            await DbContext.SaveChangesAsync();
+
+            DbContext.Clients.Remove(client);
+            await DbContext.SaveChangesAsync();
+        }
+
+        var pushSubs = await DbContext.PushSubscriptions
+            .Where(p => p.UserId == userId).ToListAsync();
+        if (pushSubs.Count > 0)
+            DbContext.PushSubscriptions.RemoveRange(pushSubs);
+
+        var notifPrefs = await DbContext.NotificationPreferences
+            .Where(n => n.UserId == userId).ToListAsync();
+        if (notifPrefs.Count > 0)
+            DbContext.NotificationPreferences.RemoveRange(notifPrefs);
+
+        var loginLogs = await DbContext.LoginLogs
+            .Where(l => l.UserId == userId).ToListAsync();
+        if (loginLogs.Count > 0)
+            DbContext.LoginLogs.RemoveRange(loginLogs);
+
+        await DbContext.SaveChangesAsync();
 
         var result = await UserManager.DeleteAsync(user);
         if (!result.Succeeded)
         {
-            throw new InvalidOperationException("Unexpected error occurred deleting user.");
+            throw new InvalidOperationException("Nieoczekiwany błąd podczas usuwania konta.");
         }
 
         await SignInManager.SignOutAsync();
-
-        var userId = await UserManager.GetUserIdAsync(user);
         Logger.LogInformation("User with ID '{UserId}' deleted themselves.", userId);
-
-        RedirectManager.RedirectToCurrentPage();
+        RedirectManager.RedirectTo("/");
     }
 
     private sealed class InputModel
