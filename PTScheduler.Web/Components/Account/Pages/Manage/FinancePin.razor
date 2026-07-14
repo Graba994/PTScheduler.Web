@@ -1,0 +1,123 @@
+@page "/Account/Manage/FinancePin"
+@using System.ComponentModel.DataAnnotations
+@using Microsoft.AspNetCore.Identity
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@inject UserManager<ApplicationUser> UserManager
+@inject IFinanceService FinanceService
+@inject IPermissionService PermissionService
+@inject IdentityRedirectManager RedirectManager
+
+<PageTitle>PIN finansów</PageTitle>
+
+@if (!_hasPermission)
+{
+    <div class="manage-card text-center">
+        <i class="bi bi-shield-lock-fill d-block mb-3" style="font-size:2.5rem;color:var(--c-primary)"></i>
+        <h5>Brak dostępu</h5>
+        <p class="text-muted small">Nie masz uprawnień do zarządzania PIN-em ukrytych finansów.</p>
+    </div>
+}
+else
+{
+    <div class="manage-card">
+        <h5 class="fw-bold mb-1"><i class="bi bi-shield-lock me-2"></i>PIN ukrytych finansów</h5>
+        <p class="text-muted small mb-4">
+            @if (_pinSet)
+            {
+                <span>PIN jest ustawiony. Możesz go zmienić poniżej.</span>
+            }
+            else
+            {
+                <span>PIN nie jest jeszcze ustawiony. Ustaw go, aby zabezpieczyć dostęp do ukrytego modułu finansów.</span>
+            }
+        </p>
+
+        <StatusMessage Message="@_message" />
+
+        <EditForm Model="Input" FormName="finance-pin" OnValidSubmit="OnValidSubmitAsync" method="post">
+            <DataAnnotationsValidator />
+
+            <div class="mb-3">
+                <label class="form-label fw-semibold">@(_pinSet ? "Nowy PIN" : "PIN") (4-8 cyfr)</label>
+                <InputText type="password" @bind-Value="Input.Pin"
+                           class="form-control" style="max-width:200px;letter-spacing:.3em"
+                           inputmode="numeric" maxlength="8" placeholder="••••" />
+                <ValidationMessage For="() => Input.Pin" class="text-danger small" />
+            </div>
+
+            <div class="mb-4">
+                <label class="form-label fw-semibold">Potwierdź PIN</label>
+                <InputText type="password" @bind-Value="Input.ConfirmPin"
+                           class="form-control" style="max-width:200px;letter-spacing:.3em"
+                           inputmode="numeric" maxlength="8" placeholder="••••" />
+                <ValidationMessage For="() => Input.ConfirmPin" class="text-danger small" />
+            </div>
+
+            <button type="submit" class="btn btn-primary">
+                <i class="bi bi-shield-lock me-1"></i>@(_pinSet ? "Zmień PIN" : "Ustaw PIN")
+            </button>
+        </EditForm>
+    </div>
+}
+
+@code {
+    private string? _message;
+    private bool _hasPermission;
+    private bool _pinSet;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
+    [SupplyParameterFromForm]
+    private InputModel Input { get; set; } = default!;
+
+    protected override async Task OnInitializedAsync()
+    {
+        Input ??= new();
+
+        var user = await UserManager.GetUserAsync(HttpContext.User);
+        if (user is null)
+        {
+            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
+            return;
+        }
+
+        var roles = await UserManager.GetRolesAsync(user);
+        var role = roles.Contains(Roles.Admin) ? Roles.Admin
+            : roles.Contains(Roles.Trainer) ? Roles.Trainer
+            : roles.Contains(Roles.Subordinate) ? Roles.Subordinate
+            : "";
+
+        _hasPermission = await PermissionService.HasPermissionAsync(role, Permissions.ViewHiddenFinance);
+        if (_hasPermission)
+            _pinSet = await FinanceService.IsPinSetAsync();
+    }
+
+    private async Task OnValidSubmitAsync()
+    {
+        if (!_hasPermission) return;
+
+        if (Input.Pin.Length < 4 || Input.Pin.Length > 8 || !Input.Pin.All(char.IsDigit))
+        {
+            _message = "Błąd: PIN musi mieć 4-8 cyfr.";
+            return;
+        }
+
+        await FinanceService.SetPinAsync(Input.Pin);
+        _pinSet = true;
+        RedirectManager.RedirectToCurrentPageWithStatus("PIN został zapisany.", HttpContext);
+    }
+
+    private sealed class InputModel
+    {
+        [Required(ErrorMessage = "PIN jest wymagany.")]
+        [StringLength(8, ErrorMessage = "PIN musi mieć od 4 do 8 cyfr.", MinimumLength = 4)]
+        [RegularExpression(@"^\d{4,8}$", ErrorMessage = "PIN musi składać się wyłącznie z cyfr.")]
+        public string Pin { get; set; } = "";
+
+        [Required(ErrorMessage = "Potwierdzenie PIN-u jest wymagane.")]
+        [Compare("Pin", ErrorMessage = "PIN-y nie są zgodne.")]
+        public string ConfirmPin { get; set; } = "";
+    }
+}

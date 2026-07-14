@@ -479,44 +479,6 @@ else
         </div>
     </div>
 
-    <!-- PIN management -->
-    <div class="card mt-3">
-        <div class="card-header py-2 fw-semibold" style="font-size:.875rem">
-            <i class="bi bi-key me-2"></i>Zarządzanie PIN-em
-        </div>
-        <div class="card-body">
-            <div class="row g-3 align-items-end">
-                <div class="col-auto">
-                    <label class="form-label small">Nowy PIN (4-8 cyfr)</label>
-                    <input type="password" class="form-control form-control-sm" maxlength="8" @bind="_changePinValue"
-                           inputmode="numeric" style="width:140px;letter-spacing:.3em" />
-                </div>
-                <div class="col-auto">
-                    <label class="form-label small">Powtórz</label>
-                    <input type="password" class="form-control form-control-sm" maxlength="8" @bind="_changePinConfirm"
-                           inputmode="numeric" style="width:140px;letter-spacing:.3em" />
-                </div>
-                <div class="col-auto">
-                    <button class="btn btn-sm btn-outline-primary" @onclick="ChangePinAsync" disabled="@_settingPin">
-                        @if (_settingPin) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                        Zmień PIN
-                    </button>
-                </div>
-                @if (!string.IsNullOrEmpty(_changePinError))
-                {
-                    <div class="col-12">
-                        <div class="text-danger small">@_changePinError</div>
-                    </div>
-                }
-                @if (_changePinSuccess)
-                {
-                    <div class="col-12">
-                        <div class="text-success small"><i class="bi bi-check-circle me-1"></i>PIN został zmieniony.</div>
-                    </div>
-                }
-            </div>
-        </div>
-    </div>
 }
 
 @code {
@@ -533,10 +495,6 @@ else
     private bool _settingPin;
     private bool _verifyingPin;
 
-    private string _changePinValue = "";
-    private string _changePinConfirm = "";
-    private string _changePinError = "";
-    private bool _changePinSuccess;
 
     private int _months = 6;
     private string _viewMode = "hidden";
@@ -631,29 +589,6 @@ else
         _authorized = true;
         _taxConfig = await FinanceService.GetTaxConfigAsync("hidden");
         await LoadDataAsync();
-    }
-
-    private async Task ChangePinAsync()
-    {
-        _changePinError = "";
-        _changePinSuccess = false;
-        if (_changePinValue.Length < 4 || _changePinValue.Length > 8 || !_changePinValue.All(char.IsDigit))
-        {
-            _changePinError = "PIN musi mieć 4-8 cyfr.";
-            return;
-        }
-        if (_changePinValue != _changePinConfirm)
-        {
-            _changePinError = "PIN-y się nie zgadzają.";
-            return;
-        }
-        _settingPin = true;
-        StateHasChanged();
-        await FinanceService.SetPinAsync(_changePinValue);
-        _settingPin = false;
-        _changePinValue = "";
-        _changePinConfirm = "";
-        _changePinSuccess = true;
     }
 
     private async Task ChangeRange(int months)
