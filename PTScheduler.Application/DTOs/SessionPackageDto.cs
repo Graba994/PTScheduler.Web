@@ -26,6 +26,8 @@ public class SessionPackageDto
     public PackageStatus Status { get; set; }
 
     public bool IsExpiredByDate => ExpiresAt.HasValue && ExpiresAt.Value < DateTime.UtcNow && Status == PackageStatus.Active;
+
+    public bool IsHidden { get; set; }
 }
 
 public class SessionPackageSummaryDto

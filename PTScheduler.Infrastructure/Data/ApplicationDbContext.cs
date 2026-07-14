@@ -27,6 +27,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<EmailTemplate> EmailTemplates => Set<EmailTemplate>();
     public DbSet<WebPushSettings> WebPushSettings => Set<WebPushSettings>();
     public DbSet<PushSubscription> PushSubscriptions => Set<PushSubscription>();
+    public DbSet<FinancePin> FinancePins => Set<FinancePin>();
+    public DbSet<FinanceTaxConfig> FinanceTaxConfigs => Set<FinanceTaxConfig>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -101,5 +103,28 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         builder.Entity<PushSubscription>()
             .HasIndex(ps => new { ps.UserId, ps.Endpoint })
             .IsUnique();
+
+        builder.Entity<FinanceTaxConfig>()
+            .HasIndex(f => f.Module)
+            .IsUnique();
+
+        builder.Entity<FinanceTaxConfig>()
+            .Property(f => f.VatRate).HasPrecision(5, 2);
+        builder.Entity<FinanceTaxConfig>()
+            .Property(f => f.FlatTaxRate).HasPrecision(5, 2);
+        builder.Entity<FinanceTaxConfig>()
+            .Property(f => f.LumpSumRate).HasPrecision(5, 2);
+        builder.Entity<FinanceTaxConfig>()
+            .Property(f => f.ScaleTaxThreshold).HasPrecision(12, 2);
+        builder.Entity<FinanceTaxConfig>()
+            .Property(f => f.ScaleTaxRateLow).HasPrecision(5, 2);
+        builder.Entity<FinanceTaxConfig>()
+            .Property(f => f.ScaleTaxRateHigh).HasPrecision(5, 2);
+        builder.Entity<FinanceTaxConfig>()
+            .Property(f => f.ZusMonthlyAmount).HasPrecision(10, 2);
+        builder.Entity<FinanceTaxConfig>()
+            .Property(f => f.HealthInsuranceMonthly).HasPrecision(10, 2);
+        builder.Entity<FinanceTaxConfig>()
+            .Property(f => f.MonthlyFixedCosts).HasPrecision(10, 2);
     }
 }

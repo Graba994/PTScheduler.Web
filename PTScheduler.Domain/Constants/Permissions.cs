@@ -18,6 +18,7 @@ public static class Permissions
     public const string ManageBackup = "ManageBackup";
     public const string ManageEmail = "ManageEmail";
     public const string ManagePayments = "ManagePayments";
+    public const string ViewHiddenFinance = "ViewHiddenFinance";
 
     public static readonly (string Key, string Label, string Description)[] All =
     [
@@ -26,6 +27,7 @@ public static class Permissions
         (ManagePackages,     "Pakiety",           "Tworzenie i zarządzanie pakietami sesji"),
         (ViewStats,          "Statystyki",        "Dostęp do strony statystyk"),
         (ViewFinance,        "Finanse",           "Dostęp do strony finansów"),
+        (ViewHiddenFinance,  "Ukryte finanse",    "Dostęp do ukrytego modułu finansów (wymaga PIN)"),
         (ManageAvailability, "Dostępność",        "Zarządzanie dostępnością trenera"),
         (ManageSeries,       "Serie wizyt",       "Zarządzanie seriami cyklicznymi"),
         (ManageContacts,     "Pary klientów",     "Zarządzanie parami/kontaktami klientów"),

@@ -30,5 +30,7 @@ public class SessionPackage
 
     public PackageStatus Status { get; set; } = PackageStatus.Active;
 
+    public bool IsHidden { get; set; }
+
     public ICollection<Session> Sessions { get; set; } = [];
 }

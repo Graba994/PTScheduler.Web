@@ -1,4 +1,4 @@
-@page "/finance"
+@page "/finance/hidden"
 @rendermode InteractiveServer
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
@@ -11,41 +11,80 @@
 @inject IPermissionService PermissionService
 @inject IJSRuntime JS
 @inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
 @attribute [Authorize(Roles = $"{Roles.Admin},{Roles.Trainer},{Roles.Subordinate}")]
 
-@if (!_loaded)
+@if (!_authorized)
 {
-    <div class="page-header mb-3">
-        <div class="skeleton skeleton-line w-40" style="height:24px;margin-bottom:0"></div>
-        <div class="skeleton" style="width:100px;height:32px;border-radius:8px"></div>
-    </div>
-    <div class="row g-3 mb-3">
-        @for (var i = 0; i < 4; i++)
-        {
-            <div class="col-6 col-xl-3">
-                <div class="skeleton-stat">
-                    <div class="skeleton skeleton-circle" style="width:40px;height:40px"></div>
-                    <div style="flex:1">
-                        <div class="skeleton skeleton-line w-40" style="height:20px"></div>
-                        <div class="skeleton skeleton-line w-75" style="height:10px;margin-bottom:0"></div>
+    <div class="d-flex justify-content-center align-items-center" style="min-height:60vh">
+        <div class="card" style="max-width:360px;width:100%">
+            <div class="card-body text-center p-4">
+                <i class="bi bi-shield-lock-fill d-block mb-3" style="font-size:2.5rem;color:var(--c-primary)"></i>
+
+                @if (!_hasPermission)
+                {
+                    <h5>Brak dostępu</h5>
+                    <p class="text-muted small mb-3">Nie masz uprawnień do ukrytego modułu finansów.</p>
+                    <a href="/finance" class="btn btn-primary btn-sm">Wróć do finansów</a>
+                }
+                else if (!_pinSet)
+                {
+                    <h5>Ustaw PIN</h5>
+                    <p class="text-muted small mb-3">Aby korzystać z ukrytych finansów, ustaw PIN zabezpieczający.</p>
+                    <div class="mb-3">
+                        <input type="password" class="form-control text-center" maxlength="8" placeholder="Nowy PIN (4-8 cyfr)"
+                               @bind="_newPin" @bind:event="oninput" inputmode="numeric" style="letter-spacing:.5em;font-size:1.25rem" />
                     </div>
-                </div>
+                    <div class="mb-3">
+                        <input type="password" class="form-control text-center" maxlength="8" placeholder="Powtórz PIN"
+                               @bind="_confirmPin" @bind:event="oninput" inputmode="numeric" style="letter-spacing:.5em;font-size:1.25rem" />
+                    </div>
+                    @if (!string.IsNullOrEmpty(_pinError))
+                    {
+                        <div class="text-danger small mb-2">@_pinError</div>
+                    }
+                    <button class="btn btn-primary" @onclick="SetPinAsync" disabled="@(_settingPin)">
+                        @if (_settingPin) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        Ustaw PIN
+                    </button>
+                }
+                else
+                {
+                    <h5>Wprowadź PIN</h5>
+                    <p class="text-muted small mb-3">Podaj PIN, aby uzyskać dostęp do ukrytych finansów.</p>
+                    <div class="mb-3">
+                        <input type="password" class="form-control text-center" maxlength="8" placeholder="PIN"
+                               @bind="_enteredPin" @bind:event="oninput" @onkeydown="PinKeyDown"
+                               inputmode="numeric" style="letter-spacing:.5em;font-size:1.25rem" />
+                    </div>
+                    @if (!string.IsNullOrEmpty(_pinError))
+                    {
+                        <div class="text-danger small mb-2">@_pinError</div>
+                    }
+                    <button class="btn btn-primary" @onclick="VerifyPinAsync" disabled="@(_verifyingPin)">
+                        @if (_verifyingPin) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        Odblokuj
+                    </button>
+                    <div class="mt-2">
+                        <a href="/finance" class="text-muted small text-decoration-none">Wróć do finansów</a>
+                    </div>
+                }
             </div>
-        }
+        </div>
     </div>
-    <div class="skeleton-card" style="height:200px"></div>
 }
 else
 {
     <div class="page-header">
-        <h4 class="page-title"><i class="bi bi-currency-dollar me-2" style="color:var(--c-primary)"></i>Finanse</h4>
+        <h4 class="page-title"><i class="bi bi-eye-slash-fill me-2" style="color:var(--c-primary)"></i>Ukryte finanse</h4>
         <div class="d-flex gap-2 align-items-center">
-            @if (_canViewHidden)
-            {
-                <a href="/finance/hidden" class="btn btn-sm btn-outline-secondary">
-                    <i class="bi bi-eye-slash me-1"></i>Ukryte
-                </a>
-            }
+            <a href="/finance" class="btn btn-sm btn-outline-secondary">
+                <i class="bi bi-arrow-left me-1"></i>Finanse
+            </a>
+            <div class="btn-group btn-group-sm">
+                <button type="button" class="btn @(_viewMode == "hidden" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => ChangeView("hidden")'>Ukryte</button>
+                <button type="button" class="btn @(_viewMode == "all" ? "btn-primary" : "btn-outline-secondary")" @onclick='() => ChangeView("all")'>Wszystkie</button>
+            </div>
             <div class="btn-group btn-group-sm">
                 <button type="button" class="btn @(_months == 6 ? "btn-primary" : "btn-outline-secondary")" @onclick="() => ChangeRange(6)">6M</button>
                 <button type="button" class="btn @(_months == 12 ? "btn-primary" : "btn-outline-secondary")" @onclick="() => ChangeRange(12)">12M</button>
@@ -59,7 +98,7 @@ else
             <div class="stat-card">
                 <div class="stat-icon"><i class="bi bi-cash-stack"></i></div>
                 <div>
-                    <div class="stat-value">@_packages.Sum(p => p.TotalPrice).ToString("N0") zł</div>
+                    <div class="stat-value">@_displayPackages.Sum(p => p.TotalPrice).ToString("N0") zł</div>
                     <div class="stat-label">Łączna wartość</div>
                 </div>
             </div>
@@ -68,7 +107,7 @@ else
             <div class="stat-card">
                 <div class="stat-icon stat-icon-green"><i class="bi bi-check-circle-fill"></i></div>
                 <div>
-                    <div class="stat-value">@_packages.Where(p => p.IsPaid).Sum(p => p.TotalPrice).ToString("N0") zł</div>
+                    <div class="stat-value">@_displayPackages.Where(p => p.IsPaid).Sum(p => p.TotalPrice).ToString("N0") zł</div>
                     <div class="stat-label">Opłacone</div>
                 </div>
             </div>
@@ -77,7 +116,7 @@ else
             <div class="stat-card">
                 <div class="stat-icon stat-icon-red"><i class="bi bi-exclamation-circle-fill"></i></div>
                 <div>
-                    <div class="stat-value">@_unpaid.Sum(p => p.TotalPrice).ToString("N0") zł</div>
+                    <div class="stat-value">@_displayPackages.Where(p => !p.IsPaid && p.Status != PackageStatus.Cancelled).Sum(p => p.TotalPrice).ToString("N0") zł</div>
                     <div class="stat-label">Nieopłacone</div>
                 </div>
             </div>
@@ -86,26 +125,30 @@ else
             <div class="stat-card">
                 <div class="stat-icon stat-icon-blue"><i class="bi bi-box-seam-fill"></i></div>
                 <div>
-                    <div class="stat-value">@_packages.Count(p => p.Status == PackageStatus.Active)</div>
+                    <div class="stat-value">@_displayPackages.Count(p => p.Status == PackageStatus.Active)</div>
                     <div class="stat-label">Aktywnych pakietów</div>
                 </div>
             </div>
         </div>
     </div>
 
-    @if (_taxConfig is not null && _taxConfig.VatEnabled || _taxConfig?.IncomeTaxType != "none" || _taxConfig is { ZusEnabled: true } || _taxConfig is { HealthInsuranceEnabled: true } || _taxConfig is { CostDeductionsEnabled: true })
+    @if (_taxConfig is not null && (_taxConfig.VatEnabled || _taxConfig.IncomeTaxType != "none" || _taxConfig.ZusEnabled || _taxConfig.HealthInsuranceEnabled || _taxConfig.CostDeductionsEnabled))
     {
         <div class="card mb-3">
             <div class="card-header py-2 d-flex align-items-center justify-content-between">
                 <span class="fw-semibold" style="font-size:.875rem">
                     <i class="bi bi-calculator me-2" style="color:var(--c-primary)"></i>Podsumowanie podatkowe
+                    @if (_viewMode == "all")
+                    {
+                        <span class="badge bg-info text-dark ms-1">Wszystkie</span>
+                    }
                 </span>
                 <button class="btn btn-sm btn-outline-secondary" @onclick="() => _showTaxSettings = !_showTaxSettings">
                     <i class="bi bi-gear me-1"></i>Ustawienia
                 </button>
             </div>
             <div class="card-body">
-                @{ RenderTaxSummary(_packages, _taxConfig!, _months); }
+                @{ RenderTaxSummary(_displayPackages, _taxConfig, _months); }
             </div>
         </div>
     }
@@ -115,7 +158,7 @@ else
         <div class="card mb-3 border-primary">
             <div class="card-header py-2 d-flex align-items-center justify-content-between bg-primary bg-opacity-10">
                 <span class="fw-semibold" style="font-size:.875rem">
-                    <i class="bi bi-sliders me-2"></i>Ustawienia podatkowe — moduł standardowy
+                    <i class="bi bi-sliders me-2"></i>Ustawienia podatkowe — moduł ukryty
                 </span>
                 <button class="btn btn-sm btn-outline-secondary" @onclick="() => _showTaxSettings = false">
                     <i class="bi bi-x-lg"></i>
@@ -134,7 +177,7 @@ else
                     <i class="bi bi-bar-chart-fill me-2" style="color:var(--c-primary)"></i>Przychody miesięcznie — opłacone pakiety (zł)
                 </div>
                 <div class="card-body" style="height:220px;position:relative">
-                    <canvas id="finance-bar"></canvas>
+                    <canvas id="hidden-finance-bar"></canvas>
                 </div>
             </div>
         </div>
@@ -144,75 +187,18 @@ else
                     <i class="bi bi-pie-chart-fill me-2" style="color:var(--c-primary)"></i>Status pakietów
                 </div>
                 <div class="card-body" style="height:220px;position:relative">
-                    <canvas id="finance-donut"></canvas>
+                    <canvas id="hidden-finance-donut"></canvas>
                 </div>
             </div>
         </div>
     </div>
 
-    <!-- Unpaid -->
-    <div class="card mb-3">
-        <div class="card-header py-2 d-flex align-items-center justify-content-between">
-            <span class="fw-semibold" style="font-size:.875rem">
-                <i class="bi bi-exclamation-triangle-fill me-2" style="color:var(--c-warning)"></i>Nieopłacone pakiety
-            </span>
-            @if (_unpaid.Any())
-            {
-                <span class="badge bg-warning text-dark">@_unpaid.Count</span>
-            }
-        </div>
-        <div class="card-body p-0">
-            @if (!_unpaid.Any())
-            {
-                <div class="text-center text-muted py-4 small">
-                    <i class="bi bi-check-circle d-block fs-3 mb-2" style="color:var(--c-success)"></i>Wszystkie pakiety w tym okresie są opłacone
-                </div>
-            }
-            else
-            {
-                <div class="table-responsive">
-                    <table class="table table-hover mb-0" style="font-size:.875rem">
-                        <thead>
-                            <tr>
-                                <th>Klient</th>
-                                <th>Pakiet</th>
-                                <th class="text-center">Sesje</th>
-                                <th class="text-end">Wartość</th>
-                                <th>Zakup</th>
-                                <th>Status</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var p in _unpaid.OrderByDescending(p => p.TotalPrice))
-                            {
-                                <tr>
-                                    <td><a href="/clients/@p.ClientId" class="text-decoration-none fw-semibold">@p.ClientName</a></td>
-                                    <td>@p.Name</td>
-                                    <td class="text-center">@p.TotalSessions</td>
-                                    <td class="text-end fw-semibold" style="color:var(--c-danger)">@p.TotalPrice.ToString("N0") zł</td>
-                                    <td class="text-muted">@p.PurchasedAt.ToLocalTime().ToString("dd.MM.yyyy")</td>
-                                    <td><span class="badge @StatusCss(p.Status)">@StatusLabel(p.Status)</span></td>
-                                </tr>
-                            }
-                        </tbody>
-                        <tfoot>
-                            <tr class="fw-bold table-light">
-                                <td colspan="3">Razem nieopłacone</td>
-                                <td class="text-end" style="color:var(--c-danger)">@_unpaid.Sum(p => p.TotalPrice).ToString("N0") zł</td>
-                                <td colspan="2"></td>
-                            </tr>
-                        </tfoot>
-                    </table>
-                </div>
-            }
-        </div>
-    </div>
-
-    <!-- Full history -->
+    <!-- History -->
     <div class="card">
         <div class="card-header py-2 d-flex flex-wrap gap-2 align-items-center">
             <span class="fw-semibold me-auto" style="font-size:.875rem">
-                <i class="bi bi-clock-history me-2"></i>Historia pakietów
+                <i class="bi bi-clock-history me-2"></i>
+                @(_viewMode == "all" ? "Wszystkie pakiety" : "Ukryte pakiety")
                 <span class="badge bg-secondary ms-1">@_historyFiltered.Count</span>
             </span>
             <input class="form-control form-control-sm" style="max-width:180px" placeholder="Szukaj klienta…"
@@ -223,11 +209,6 @@ else
                 <option value="Depleted">Wyczerpane</option>
                 <option value="Expired">Wygasłe</option>
                 <option value="Cancelled">Anulowane</option>
-            </select>
-            <select class="form-select form-select-sm" style="max-width:140px" @bind="_paidFilter">
-                <option value="">Płatność: wszystkie</option>
-                <option value="paid">Opłacone</option>
-                <option value="unpaid">Nieopłacone</option>
             </select>
         </div>
         <div class="table-responsive">
@@ -242,25 +223,26 @@ else
                         <th>Ważny do</th>
                         <th>Płatność</th>
                         <th>Status</th>
-                        @if (_canViewHidden)
-                        {
-                            <th style="width:40px"></th>
-                        }
+                        <th style="width:40px"></th>
                     </tr>
                 </thead>
                 <tbody>
                     @if (!_historyFiltered.Any())
                     {
-                        <tr><td colspan="@(_canViewHidden ? 9 : 8)" class="text-center text-muted py-4 small">Brak wyników dla wybranych filtrów</td></tr>
+                        <tr><td colspan="9" class="text-center text-muted py-4 small">Brak ukrytych pakietów</td></tr>
                     }
                     @foreach (var p in _historyFiltered)
                     {
-                        <tr>
+                        <tr class="@(p.IsHidden ? "" : "table-light")">
+                            <td><a href="/clients/@p.ClientId" class="text-decoration-none fw-semibold">@p.ClientName</a></td>
                             <td>
-                                <a href="/clients/@p.ClientId" class="text-decoration-none fw-semibold">@p.ClientName</a>
-                            </td>
-                            <td>
-                                <div>@p.Name</div>
+                                <div>
+                                    @p.Name
+                                    @if (_viewMode == "all" && p.IsHidden)
+                                    {
+                                        <i class="bi bi-eye-slash ms-1 text-muted" style="font-size:.7rem"></i>
+                                    }
+                                </div>
                                 <div class="text-muted" style="font-size:.75rem">@p.SessionTypeName · @p.DurationMinutes min</div>
                             </td>
                             <td class="text-center">
@@ -281,10 +263,6 @@ else
                                 @if (p.IsPaid)
                                 {
                                     <span class="badge bg-success"><i class="bi bi-check me-1"></i>Opłacony</span>
-                                    @if (p.PaidAt.HasValue)
-                                    {
-                                        <div class="text-muted" style="font-size:.7rem">@p.PaidAt.Value.ToLocalTime().ToString("dd.MM.yyyy")</div>
-                                    }
                                 }
                                 else if (p.Status != PackageStatus.Cancelled)
                                 {
@@ -296,14 +274,14 @@ else
                                 }
                             </td>
                             <td><span class="badge @StatusCss(p.Status)">@StatusLabel(p.Status)</span></td>
-                            @if (_canViewHidden)
-                            {
-                                <td>
-                                    <button class="btn btn-sm btn-link text-muted p-0" title="Ukryj pakiet" @onclick="() => HidePackageAsync(p.Id)">
-                                        <i class="bi bi-eye-slash"></i>
+                            <td>
+                                @if (p.IsHidden)
+                                {
+                                    <button class="btn btn-sm btn-link text-muted p-0" title="Pokaż pakiet (przenieś do zwykłych)" @onclick="() => UnhidePackageAsync(p.Id)">
+                                        <i class="bi bi-eye"></i>
                                     </button>
-                                </td>
-                            }
+                                }
+                            </td>
                         </tr>
                     }
                 </tbody>
@@ -313,24 +291,79 @@ else
                         <tr>
                             <td colspan="3">Razem (@_historyFiltered.Count)</td>
                             <td class="text-end">@_historyFiltered.Sum(p => p.TotalPrice).ToString("N0") zł</td>
-                            <td colspan="@(_canViewHidden ? 5 : 4)"></td>
+                            <td colspan="5"></td>
                         </tr>
                     </tfoot>
                 }
             </table>
         </div>
     </div>
+
+    <!-- PIN management -->
+    <div class="card mt-3">
+        <div class="card-header py-2 fw-semibold" style="font-size:.875rem">
+            <i class="bi bi-key me-2"></i>Zarządzanie PIN-em
+        </div>
+        <div class="card-body">
+            <div class="row g-3 align-items-end">
+                <div class="col-auto">
+                    <label class="form-label small">Nowy PIN (4-8 cyfr)</label>
+                    <input type="password" class="form-control form-control-sm" maxlength="8" @bind="_changePinValue"
+                           inputmode="numeric" style="width:140px;letter-spacing:.3em" />
+                </div>
+                <div class="col-auto">
+                    <label class="form-label small">Powtórz</label>
+                    <input type="password" class="form-control form-control-sm" maxlength="8" @bind="_changePinConfirm"
+                           inputmode="numeric" style="width:140px;letter-spacing:.3em" />
+                </div>
+                <div class="col-auto">
+                    <button class="btn btn-sm btn-outline-primary" @onclick="ChangePinAsync" disabled="@_settingPin">
+                        @if (_settingPin) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        Zmień PIN
+                    </button>
+                </div>
+                @if (!string.IsNullOrEmpty(_changePinError))
+                {
+                    <div class="col-12">
+                        <div class="text-danger small">@_changePinError</div>
+                    </div>
+                }
+                @if (_changePinSuccess)
+                {
+                    <div class="col-12">
+                        <div class="text-success small"><i class="bi bi-check-circle me-1"></i>PIN został zmieniony.</div>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
 }
 
 @code {
+    private bool _hasPermission;
+    private bool _pinSet;
+    private bool _authorized;
     private bool _loaded;
-    private int _months = 6;
     private string? _trainerUserId;
     private string _userRole = "";
-    private bool _canViewHidden;
-    private List<SessionPackageDto> _packages = [];
-    private List<SessionPackageDto> _allPackages = [];
-    private List<SessionPackageDto> _unpaid = [];
+
+    private string _newPin = "";
+    private string _confirmPin = "";
+    private string _enteredPin = "";
+    private string _pinError = "";
+    private bool _settingPin;
+    private bool _verifyingPin;
+
+    private string _changePinValue = "";
+    private string _changePinConfirm = "";
+    private string _changePinError = "";
+    private bool _changePinSuccess;
+
+    private int _months = 6;
+    private string _viewMode = "hidden";
+    private List<SessionPackageDto> _allPackagesRaw = [];
+    private List<SessionPackageDto> _hiddenPackages = [];
+    private List<SessionPackageDto> _displayPackages = [];
     private bool _chartNeedsRender;
     private FinanceTaxConfigDto? _taxConfig;
     private bool _showTaxSettings;
@@ -338,13 +371,12 @@ else
 
     private string _search = string.Empty;
     private string _statusFilter = string.Empty;
-    private string _paidFilter = string.Empty;
 
-    private List<SessionPackageDto> _historyFiltered => _allPackages
+    private List<SessionPackageDto> _historyFiltered =>
+        (_viewMode == "all" ? _allPackagesRaw : _hiddenPackages)
         .Where(p =>
             (string.IsNullOrWhiteSpace(_search) || p.ClientName.Contains(_search, StringComparison.OrdinalIgnoreCase)) &&
-            (string.IsNullOrWhiteSpace(_statusFilter) || p.Status.ToString() == _statusFilter) &&
-            (_paidFilter switch { "paid" => p.IsPaid, "unpaid" => !p.IsPaid, _ => true })
+            (string.IsNullOrWhiteSpace(_statusFilter) || p.Status.ToString() == _statusFilter)
         )
         .OrderByDescending(p => p.PurchasedAt)
         .ToList();
@@ -358,42 +390,126 @@ else
             : auth.User.IsInRole(Roles.Trainer) ? Roles.Trainer
             : auth.User.IsInRole(Roles.Subordinate) ? Roles.Subordinate
             : "";
-        _canViewHidden = await PermissionService.HasPermissionAsync(_userRole, Permissions.ViewHiddenFinance);
-        _taxConfig = await FinanceService.GetTaxConfigAsync("standard");
-        await LoadDataAsync();
+
+        _hasPermission = await PermissionService.HasPermissionAsync(_userRole, Permissions.ViewHiddenFinance);
+        if (!_hasPermission) return;
+
+        _pinSet = await FinanceService.IsPinSetAsync();
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (_chartNeedsRender)
+        if (_chartNeedsRender && _authorized)
         {
             _chartNeedsRender = false;
             await RenderChartsAsync();
         }
     }
 
+    private async Task PinKeyDown(KeyboardEventArgs e)
+    {
+        if (e.Key == "Enter") await VerifyPinAsync();
+    }
+
+    private async Task SetPinAsync()
+    {
+        _pinError = "";
+        if (_newPin.Length < 4 || _newPin.Length > 8 || !_newPin.All(char.IsDigit))
+        {
+            _pinError = "PIN musi mieć 4-8 cyfr.";
+            return;
+        }
+        if (_newPin != _confirmPin)
+        {
+            _pinError = "PIN-y się nie zgadzają.";
+            return;
+        }
+        _settingPin = true;
+        StateHasChanged();
+        await FinanceService.SetPinAsync(_newPin);
+        _pinSet = true;
+        _settingPin = false;
+    }
+
+    private async Task VerifyPinAsync()
+    {
+        _pinError = "";
+        if (string.IsNullOrWhiteSpace(_enteredPin))
+        {
+            _pinError = "Wprowadź PIN.";
+            return;
+        }
+        _verifyingPin = true;
+        StateHasChanged();
+        var ok = await FinanceService.VerifyPinAsync(_enteredPin);
+        _verifyingPin = false;
+        if (!ok)
+        {
+            _pinError = "Nieprawidłowy PIN.";
+            _enteredPin = "";
+            return;
+        }
+        _authorized = true;
+        _taxConfig = await FinanceService.GetTaxConfigAsync("hidden");
+        await LoadDataAsync();
+    }
+
+    private async Task ChangePinAsync()
+    {
+        _changePinError = "";
+        _changePinSuccess = false;
+        if (_changePinValue.Length < 4 || _changePinValue.Length > 8 || !_changePinValue.All(char.IsDigit))
+        {
+            _changePinError = "PIN musi mieć 4-8 cyfr.";
+            return;
+        }
+        if (_changePinValue != _changePinConfirm)
+        {
+            _changePinError = "PIN-y się nie zgadzają.";
+            return;
+        }
+        _settingPin = true;
+        StateHasChanged();
+        await FinanceService.SetPinAsync(_changePinValue);
+        _settingPin = false;
+        _changePinValue = "";
+        _changePinConfirm = "";
+        _changePinSuccess = true;
+    }
+
     private async Task ChangeRange(int months)
     {
         _months = months;
-        _loaded = false;
-        StateHasChanged();
         await LoadDataAsync();
+    }
+
+    private async Task ChangeView(string mode)
+    {
+        _viewMode = mode;
+        UpdateDisplayPackages();
+        _chartNeedsRender = true;
+        StateHasChanged();
     }
 
     private async Task LoadDataAsync()
     {
         var from = DateTime.UtcNow.AddMonths(-_months);
-        var all = await PackageService.GetAllPackagesAsync(_trainerUserId);
-        _allPackages = all.Where(p => !p.IsHidden).ToList();
-        _packages = _allPackages.Where(p => p.PurchasedAt >= from).ToList();
-        _unpaid = _packages.Where(p => !p.IsPaid && p.Status != PackageStatus.Cancelled).ToList();
+        _allPackagesRaw = await PackageService.GetAllPackagesAsync(_trainerUserId);
+        _allPackagesRaw = _allPackagesRaw.Where(p => p.PurchasedAt >= from).ToList();
+        _hiddenPackages = _allPackagesRaw.Where(p => p.IsHidden).ToList();
+        UpdateDisplayPackages();
         _loaded = true;
         _chartNeedsRender = true;
     }
 
-    private async Task HidePackageAsync(int packageId)
+    private void UpdateDisplayPackages()
     {
-        await FinanceService.SetPackageHiddenAsync(packageId, true);
+        _displayPackages = _viewMode == "all" ? _allPackagesRaw : _hiddenPackages;
+    }
+
+    private async Task UnhidePackageAsync(int packageId)
+    {
+        await FinanceService.SetPackageHiddenAsync(packageId, false);
         await LoadDataAsync();
     }
 
@@ -508,12 +624,11 @@ else
         var tc = _taxConfig!;
 
         <div class="row g-3">
-            <!-- VAT -->
             <div class="col-12"><h6 class="mb-0"><i class="bi bi-receipt me-2"></i>VAT</h6></div>
             <div class="col-12 col-md-6">
                 <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="vat-enabled" @bind="tc.VatEnabled" />
-                    <label class="form-check-label" for="vat-enabled">VAT naliczany</label>
+                    <input class="form-check-input" type="checkbox" id="h-vat-enabled" @bind="tc.VatEnabled" />
+                    <label class="form-check-label" for="h-vat-enabled">VAT naliczany</label>
                 </div>
             </div>
             @if (tc.VatEnabled)
@@ -524,7 +639,6 @@ else
                 </div>
             }
 
-            <!-- Income tax -->
             <div class="col-12"><h6 class="mb-0 mt-2"><i class="bi bi-bank me-2"></i>Podatek dochodowy (PIT)</h6></div>
             <div class="col-12 col-md-6">
                 <label class="form-label small">Forma opodatkowania</label>
@@ -565,12 +679,11 @@ else
                 </div>
             }
 
-            <!-- ZUS -->
             <div class="col-12"><h6 class="mb-0 mt-2"><i class="bi bi-shield-check me-2"></i>ZUS</h6></div>
             <div class="col-12 col-md-6">
                 <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="zus-enabled" @bind="tc.ZusEnabled" />
-                    <label class="form-check-label" for="zus-enabled">Składki ZUS</label>
+                    <input class="form-check-input" type="checkbox" id="h-zus-enabled" @bind="tc.ZusEnabled" />
+                    <label class="form-check-label" for="h-zus-enabled">Składki ZUS</label>
                 </div>
             </div>
             @if (tc.ZusEnabled)
@@ -581,12 +694,11 @@ else
                 </div>
             }
 
-            <!-- Health insurance -->
             <div class="col-12"><h6 class="mb-0 mt-2"><i class="bi bi-heart-pulse me-2"></i>Ubezpieczenie zdrowotne</h6></div>
             <div class="col-12 col-md-6">
                 <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="health-enabled" @bind="tc.HealthInsuranceEnabled" />
-                    <label class="form-check-label" for="health-enabled">Składka zdrowotna</label>
+                    <input class="form-check-input" type="checkbox" id="h-health-enabled" @bind="tc.HealthInsuranceEnabled" />
+                    <label class="form-check-label" for="h-health-enabled">Składka zdrowotna</label>
                 </div>
             </div>
             @if (tc.HealthInsuranceEnabled)
@@ -597,12 +709,11 @@ else
                 </div>
             }
 
-            <!-- Cost deductions -->
             <div class="col-12"><h6 class="mb-0 mt-2"><i class="bi bi-wallet2 me-2"></i>Koszty uzyskania przychodu</h6></div>
             <div class="col-12 col-md-6">
                 <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="costs-enabled" @bind="tc.CostDeductionsEnabled" />
-                    <label class="form-check-label" for="costs-enabled">Odliczanie kosztów stałych</label>
+                    <input class="form-check-input" type="checkbox" id="h-costs-enabled" @bind="tc.CostDeductionsEnabled" />
+                    <label class="form-check-label" for="h-costs-enabled">Odliczanie kosztów stałych</label>
                 </div>
             </div>
             @if (tc.CostDeductionsEnabled)
@@ -613,12 +724,11 @@ else
                 </div>
             }
 
-            <!-- Invoice numbering -->
             <div class="col-12"><h6 class="mb-0 mt-2"><i class="bi bi-hash me-2"></i>Numeracja faktur</h6></div>
             <div class="col-12 col-md-6">
                 <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="invoice-enabled" @bind="tc.InvoiceNumberingEnabled" />
-                    <label class="form-check-label" for="invoice-enabled">Automatyczna numeracja</label>
+                    <input class="form-check-input" type="checkbox" id="h-invoice-enabled" @bind="tc.InvoiceNumberingEnabled" />
+                    <label class="form-check-label" for="h-invoice-enabled">Automatyczna numeracja</label>
                 </div>
             </div>
             @if (tc.InvoiceNumberingEnabled)
@@ -654,22 +764,22 @@ else
 
         var barLabels = monthSlots.Select(m => m.Label).ToArray();
         var barRevenue = monthSlots
-            .Select(m => (double)_packages
+            .Select(m => (double)_displayPackages
                 .Where(p => p.IsPaid
                     && p.PurchasedAt.ToLocalTime().Year == m.Year
                     && p.PurchasedAt.ToLocalTime().Month == m.Month)
                 .Sum(p => p.TotalPrice))
             .ToArray();
 
-        await JS.InvokeVoidAsync("PTChart.renderBar", "finance-bar", barLabels,
+        await JS.InvokeVoidAsync("PTChart.renderBar", "hidden-finance-bar", barLabels,
             new object[] { new { label = "Przychód (zł)", data = barRevenue } });
 
-        var active = _packages.Count(p => p.Status == PackageStatus.Active);
-        var depleted = _packages.Count(p => p.Status == PackageStatus.Depleted);
-        var expired = _packages.Count(p => p.Status == PackageStatus.Expired);
-        var cancelled = _packages.Count(p => p.Status == PackageStatus.Cancelled);
+        var active = _displayPackages.Count(p => p.Status == PackageStatus.Active);
+        var depleted = _displayPackages.Count(p => p.Status == PackageStatus.Depleted);
+        var expired = _displayPackages.Count(p => p.Status == PackageStatus.Expired);
+        var cancelled = _displayPackages.Count(p => p.Status == PackageStatus.Cancelled);
 
-        await JS.InvokeVoidAsync("PTChart.renderDoughnut", "finance-donut",
+        await JS.InvokeVoidAsync("PTChart.renderDoughnut", "hidden-finance-donut",
             new[] { "Aktywne", "Wyczerpane", "Wygasłe", "Anulowane" },
             new double[] { active, depleted, expired, cancelled },
             new[] { "#3B82F6", "#16A34A", "#D97706", "#9CA3AF" });

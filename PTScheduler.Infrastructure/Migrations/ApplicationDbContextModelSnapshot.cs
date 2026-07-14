@@ -473,6 +473,105 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.ToTable("WebPushSettings");
                 });
 
+            modelBuilder.Entity("PTScheduler.Domain.Entities.FinancePin", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("PinHash")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("FinancePins");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.FinanceTaxConfig", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<bool>("CostDeductionsEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal>("FlatTaxRate")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<bool>("HealthInsuranceEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal>("HealthInsuranceMonthly")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<string>("IncomeTaxType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<bool>("InvoiceNumberingEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("InvoiceNextNumber")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("InvoicePrefix")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("LumpSumRate")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<string>("Module")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("MonthlyFixedCosts")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<decimal>("ScaleTaxRateHigh")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<decimal>("ScaleTaxRateLow")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<decimal>("ScaleTaxThreshold")
+                        .HasPrecision(12, 2)
+                        .HasColumnType("numeric(12,2)");
+
+                    b.Property<bool>("VatEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal>("VatRate")
+                        .HasPrecision(5, 2)
+                        .HasColumnType("numeric(5,2)");
+
+                    b.Property<bool>("ZusEnabled")
+                        .HasColumnType("boolean");
+
+                    b.Property<decimal>("ZusMonthlyAmount")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Module")
+                        .IsUnique();
+
+                    b.ToTable("FinanceTaxConfigs");
+                });
+
             modelBuilder.Entity("PTScheduler.Domain.Entities.EmailSettings", b =>
                 {
                     b.Property<int>("Id")
@@ -745,6 +844,9 @@ namespace PTScheduler.Infrastructure.Migrations
 
                     b.Property<DateTime?>("ExpiresAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("IsHidden")
+                        .HasColumnType("boolean");
 
                     b.Property<bool>("IsPaid")
                         .HasColumnType("boolean");

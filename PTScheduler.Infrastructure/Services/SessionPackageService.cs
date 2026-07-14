@@ -279,6 +279,7 @@ public class SessionPackageService(
         PaymentReference = p.PaymentReference,
         PurchasedAt = p.PurchasedAt,
         ExpiresAt = p.ExpiresAt,
-        Status = p.Status
+        Status = p.Status,
+        IsHidden = p.IsHidden
     };
 }
