@@ -43,7 +43,7 @@
                     {
                         <div class="text-danger small mb-2">@_pinError</div>
                     }
-                    <button class="btn btn-primary" @onclick="SetPinAsync" disabled="@(_settingPin)">
+                    <button class="btn btn-primary" @onclick="SetPinAsync" disabled="@_settingPin">
                         @if (_settingPin) { <span class="spinner-border spinner-border-sm me-1"></span> }
                         Ustaw PIN
                     </button>
@@ -61,7 +61,7 @@
                     {
                         <div class="text-danger small mb-2">@_pinError</div>
                     }
-                    <button class="btn btn-primary" @onclick="VerifyPinAsync" disabled="@(_verifyingPin)">
+                    <button class="btn btn-primary" @onclick="VerifyPinAsync" disabled="@_verifyingPin">
                         @if (_verifyingPin) { <span class="spinner-border spinner-border-sm me-1"></span> }
                         Odblokuj
                     </button>
@@ -77,7 +77,7 @@ else
 {
     <div class="page-header">
         <h4 class="page-title"><i class="bi bi-eye-slash-fill me-2" style="color:var(--c-primary)"></i>Ukryte finanse</h4>
-        <div class="d-flex gap-2 align-items-center">
+        <div class="d-flex gap-2 align-items-center flex-wrap">
             <a href="/finance" class="btn btn-sm btn-outline-secondary">
                 <i class="bi bi-arrow-left me-1"></i>Finanse
             </a>
@@ -132,8 +132,9 @@ else
         </div>
     </div>
 
-    @if (_taxConfig is not null && (_taxConfig.VatEnabled || _taxConfig.IncomeTaxType != "none" || _taxConfig.ZusEnabled || _taxConfig.HealthInsuranceEnabled || _taxConfig.CostDeductionsEnabled))
+    @if (_taxConfig is not null && HasAnyTaxOption(_taxConfig))
     {
+        var t = ComputeTax(_displayPackages, _taxConfig, _months);
         <div class="card mb-3">
             <div class="card-header py-2 d-flex align-items-center justify-content-between">
                 <span class="fw-semibold" style="font-size:.875rem">
@@ -148,7 +149,55 @@ else
                 </button>
             </div>
             <div class="card-body">
-                @{ RenderTaxSummary(_displayPackages, _taxConfig, _months); }
+                <div class="row g-3">
+                    <div class="col-6 col-md-4 col-xl-2">
+                        <div class="text-muted small">Przychód brutto</div>
+                        <div class="fw-semibold">@t.Gross.ToString("N2") zł</div>
+                    </div>
+                    @if (_taxConfig.VatEnabled)
+                    {
+                        <div class="col-6 col-md-4 col-xl-2">
+                            <div class="text-muted small">VAT (@_taxConfig.VatRate%)</div>
+                            <div class="fw-semibold" style="color:var(--c-danger)">-@t.Vat.ToString("N2") zł</div>
+                        </div>
+                        <div class="col-6 col-md-4 col-xl-2">
+                            <div class="text-muted small">Netto (bez VAT)</div>
+                            <div class="fw-semibold">@t.Net.ToString("N2") zł</div>
+                        </div>
+                    }
+                    @if (_taxConfig.IncomeTaxType != "none")
+                    {
+                        <div class="col-6 col-md-4 col-xl-2">
+                            <div class="text-muted small">@t.TaxLabel</div>
+                            <div class="fw-semibold" style="color:var(--c-danger)">-@t.IncomeTax.ToString("N2") zł</div>
+                        </div>
+                    }
+                    @if (_taxConfig.ZusEnabled)
+                    {
+                        <div class="col-6 col-md-4 col-xl-2">
+                            <div class="text-muted small">ZUS (@_months mies.)</div>
+                            <div class="fw-semibold" style="color:var(--c-danger)">-@t.Zus.ToString("N2") zł</div>
+                        </div>
+                    }
+                    @if (_taxConfig.HealthInsuranceEnabled)
+                    {
+                        <div class="col-6 col-md-4 col-xl-2">
+                            <div class="text-muted small">Zdrowotne (@_months mies.)</div>
+                            <div class="fw-semibold" style="color:var(--c-danger)">-@t.Health.ToString("N2") zł</div>
+                        </div>
+                    }
+                    @if (_taxConfig.CostDeductionsEnabled)
+                    {
+                        <div class="col-6 col-md-4 col-xl-2">
+                            <div class="text-muted small">Koszty stałe (@_months mies.)</div>
+                            <div class="fw-semibold" style="color:var(--c-danger)">-@t.Costs.ToString("N2") zł</div>
+                        </div>
+                    }
+                    <div class="col-6 col-md-4 col-xl-2">
+                        <div class="text-muted small fw-bold">Zysk netto</div>
+                        <div class="fw-bold fs-5" style="color:@(t.Profit >= 0 ? "var(--c-success)" : "var(--c-danger)")">@t.Profit.ToString("N2") zł</div>
+                    </div>
+                </div>
             </div>
         </div>
     }
@@ -165,7 +214,136 @@ else
                 </button>
             </div>
             <div class="card-body">
-                @{ RenderTaxSettingsForm(); }
+                <div class="row g-3">
+                    <div class="col-12"><h6 class="mb-0"><i class="bi bi-receipt me-2"></i>VAT</h6></div>
+                    <div class="col-12 col-md-6">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="h-vat-enabled" @bind="_taxConfig.VatEnabled" />
+                            <label class="form-check-label" for="h-vat-enabled">VAT naliczany</label>
+                        </div>
+                    </div>
+                    @if (_taxConfig.VatEnabled)
+                    {
+                        <div class="col-12 col-md-6">
+                            <label class="form-label small">Stawka VAT (%)</label>
+                            <input type="number" class="form-control form-control-sm" step="0.01" @bind="_taxConfig.VatRate" />
+                        </div>
+                    }
+
+                    <div class="col-12"><h6 class="mb-0 mt-2"><i class="bi bi-bank me-2"></i>Podatek dochodowy (PIT)</h6></div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label small">Forma opodatkowania</label>
+                        <select class="form-select form-select-sm" @bind="_taxConfig.IncomeTaxType">
+                            <option value="none">Brak</option>
+                            <option value="scale">Skala podatkowa</option>
+                            <option value="flat">Podatek liniowy</option>
+                            <option value="lump">Ryczałt</option>
+                        </select>
+                    </div>
+                    @if (_taxConfig.IncomeTaxType == "flat")
+                    {
+                        <div class="col-12 col-md-6">
+                            <label class="form-label small">Stawka liniowa (%)</label>
+                            <input type="number" class="form-control form-control-sm" step="0.01" @bind="_taxConfig.FlatTaxRate" />
+                        </div>
+                    }
+                    @if (_taxConfig.IncomeTaxType == "lump")
+                    {
+                        <div class="col-12 col-md-6">
+                            <label class="form-label small">Stawka ryczałtu (%)</label>
+                            <input type="number" class="form-control form-control-sm" step="0.01" @bind="_taxConfig.LumpSumRate" />
+                        </div>
+                    }
+                    @if (_taxConfig.IncomeTaxType == "scale")
+                    {
+                        <div class="col-6 col-md-4">
+                            <label class="form-label small">Próg (zł)</label>
+                            <input type="number" class="form-control form-control-sm" step="1" @bind="_taxConfig.ScaleTaxThreshold" />
+                        </div>
+                        <div class="col-6 col-md-4">
+                            <label class="form-label small">Stawka do progu (%)</label>
+                            <input type="number" class="form-control form-control-sm" step="0.01" @bind="_taxConfig.ScaleTaxRateLow" />
+                        </div>
+                        <div class="col-6 col-md-4">
+                            <label class="form-label small">Stawka powyżej (%)</label>
+                            <input type="number" class="form-control form-control-sm" step="0.01" @bind="_taxConfig.ScaleTaxRateHigh" />
+                        </div>
+                    }
+
+                    <div class="col-12"><h6 class="mb-0 mt-2"><i class="bi bi-shield-check me-2"></i>ZUS</h6></div>
+                    <div class="col-12 col-md-6">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="h-zus-enabled" @bind="_taxConfig.ZusEnabled" />
+                            <label class="form-check-label" for="h-zus-enabled">Składki ZUS</label>
+                        </div>
+                    </div>
+                    @if (_taxConfig.ZusEnabled)
+                    {
+                        <div class="col-12 col-md-6">
+                            <label class="form-label small">Miesięczna składka ZUS (zł)</label>
+                            <input type="number" class="form-control form-control-sm" step="0.01" @bind="_taxConfig.ZusMonthlyAmount" />
+                        </div>
+                    }
+
+                    <div class="col-12"><h6 class="mb-0 mt-2"><i class="bi bi-heart-pulse me-2"></i>Ubezpieczenie zdrowotne</h6></div>
+                    <div class="col-12 col-md-6">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="h-health-enabled" @bind="_taxConfig.HealthInsuranceEnabled" />
+                            <label class="form-check-label" for="h-health-enabled">Składka zdrowotna</label>
+                        </div>
+                    </div>
+                    @if (_taxConfig.HealthInsuranceEnabled)
+                    {
+                        <div class="col-12 col-md-6">
+                            <label class="form-label small">Miesięczna składka zdrowotna (zł)</label>
+                            <input type="number" class="form-control form-control-sm" step="0.01" @bind="_taxConfig.HealthInsuranceMonthly" />
+                        </div>
+                    }
+
+                    <div class="col-12"><h6 class="mb-0 mt-2"><i class="bi bi-wallet2 me-2"></i>Koszty uzyskania przychodu</h6></div>
+                    <div class="col-12 col-md-6">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="h-costs-enabled" @bind="_taxConfig.CostDeductionsEnabled" />
+                            <label class="form-check-label" for="h-costs-enabled">Odliczanie kosztów stałych</label>
+                        </div>
+                    </div>
+                    @if (_taxConfig.CostDeductionsEnabled)
+                    {
+                        <div class="col-12 col-md-6">
+                            <label class="form-label small">Miesięczne koszty stałe (zł)</label>
+                            <input type="number" class="form-control form-control-sm" step="0.01" @bind="_taxConfig.MonthlyFixedCosts" />
+                        </div>
+                    }
+
+                    <div class="col-12"><h6 class="mb-0 mt-2"><i class="bi bi-hash me-2"></i>Numeracja faktur</h6></div>
+                    <div class="col-12 col-md-6">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="h-invoice-enabled" @bind="_taxConfig.InvoiceNumberingEnabled" />
+                            <label class="form-check-label" for="h-invoice-enabled">Automatyczna numeracja</label>
+                        </div>
+                    </div>
+                    @if (_taxConfig.InvoiceNumberingEnabled)
+                    {
+                        <div class="col-6 col-md-3">
+                            <label class="form-label small">Prefiks</label>
+                            <input type="text" class="form-control form-control-sm" @bind="_taxConfig.InvoicePrefix" />
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label small">Następny numer</label>
+                            <input type="number" class="form-control form-control-sm" min="1" @bind="_taxConfig.InvoiceNextNumber" />
+                        </div>
+                    }
+
+                    <div class="col-12 mt-3">
+                        <button class="btn btn-primary btn-sm" @onclick="SaveTaxSettingsAsync" disabled="@_taxSaving">
+                            @if (_taxSaving)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1"></span>
+                            }
+                            <i class="bi bi-check-lg me-1"></i>Zapisz ustawienia
+                        </button>
+                    </div>
+                </div>
             </div>
         </div>
     }
@@ -233,12 +411,14 @@ else
                     }
                     @foreach (var p in _historyFiltered)
                     {
-                        <tr class="@(p.IsHidden ? "" : "table-light")">
+                        var pkgId = p.Id;
+                        var isHidden = p.IsHidden;
+                        <tr class="@(isHidden ? "" : "table-light")">
                             <td><a href="/clients/@p.ClientId" class="text-decoration-none fw-semibold">@p.ClientName</a></td>
                             <td>
                                 <div>
                                     @p.Name
-                                    @if (_viewMode == "all" && p.IsHidden)
+                                    @if (_viewMode == "all" && isHidden)
                                     {
                                         <i class="bi bi-eye-slash ms-1 text-muted" style="font-size:.7rem"></i>
                                     }
@@ -275,9 +455,9 @@ else
                             </td>
                             <td><span class="badge @StatusCss(p.Status)">@StatusLabel(p.Status)</span></td>
                             <td>
-                                @if (p.IsHidden)
+                                @if (isHidden)
                                 {
-                                    <button class="btn btn-sm btn-link text-muted p-0" title="Pokaż pakiet (przenieś do zwykłych)" @onclick="() => UnhidePackageAsync(p.Id)">
+                                    <button class="btn btn-sm btn-link text-muted p-0" title="Pokaż pakiet (przenieś do zwykłych)" @onclick="() => UnhidePackageAsync(pkgId)">
                                         <i class="bi bi-eye"></i>
                                     </button>
                                 }
@@ -343,7 +523,6 @@ else
     private bool _hasPermission;
     private bool _pinSet;
     private bool _authorized;
-    private bool _loaded;
     private string? _trainerUserId;
     private string _userRole = "";
 
@@ -483,28 +662,21 @@ else
         await LoadDataAsync();
     }
 
-    private async Task ChangeView(string mode)
+    private void ChangeView(string mode)
     {
         _viewMode = mode;
-        UpdateDisplayPackages();
+        _displayPackages = _viewMode == "all" ? _allPackagesRaw : _hiddenPackages;
         _chartNeedsRender = true;
-        StateHasChanged();
     }
 
     private async Task LoadDataAsync()
     {
         var from = DateTime.UtcNow.AddMonths(-_months);
-        _allPackagesRaw = await PackageService.GetAllPackagesAsync(_trainerUserId);
-        _allPackagesRaw = _allPackagesRaw.Where(p => p.PurchasedAt >= from).ToList();
+        _allPackagesRaw = (await PackageService.GetAllPackagesAsync(_trainerUserId))
+            .Where(p => p.PurchasedAt >= from).ToList();
         _hiddenPackages = _allPackagesRaw.Where(p => p.IsHidden).ToList();
-        UpdateDisplayPackages();
-        _loaded = true;
-        _chartNeedsRender = true;
-    }
-
-    private void UpdateDisplayPackages()
-    {
         _displayPackages = _viewMode == "all" ? _allPackagesRaw : _hiddenPackages;
+        _chartNeedsRender = true;
     }
 
     private async Task UnhidePackageAsync(int packageId)
@@ -523,236 +695,51 @@ else
         _showTaxSettings = false;
     }
 
-    private void RenderTaxSummary(List<SessionPackageDto> packages, FinanceTaxConfigDto tax, int months)
-    {
-        var paidPackages = packages.Where(p => p.IsPaid).ToList();
-        var grossRevenue = paidPackages.Sum(p => p.TotalPrice);
+    private static bool HasAnyTaxOption(FinanceTaxConfigDto tc) =>
+        tc.VatEnabled || tc.IncomeTaxType != "none" || tc.ZusEnabled || tc.HealthInsuranceEnabled || tc.CostDeductionsEnabled;
 
-        decimal vatAmount = 0;
-        decimal netRevenue = grossRevenue;
+    private static (decimal Gross, decimal Vat, decimal Net, decimal IncomeTax, string TaxLabel, decimal Zus, decimal Health, decimal Costs, decimal Profit) ComputeTax(
+        List<SessionPackageDto> packages, FinanceTaxConfigDto tax, int months)
+    {
+        var gross = packages.Where(p => p.IsPaid).Sum(p => p.TotalPrice);
+        decimal vat = 0, net = gross;
         if (tax.VatEnabled && tax.VatRate > 0)
         {
-            vatAmount = grossRevenue * tax.VatRate / (100 + tax.VatRate);
-            netRevenue = grossRevenue - vatAmount;
+            vat = gross * tax.VatRate / (100 + tax.VatRate);
+            net = gross - vat;
         }
 
         decimal incomeTax = 0;
-        string incomeTaxLabel = "";
+        string taxLabel = "";
         switch (tax.IncomeTaxType)
         {
             case "flat":
-                incomeTax = netRevenue * tax.FlatTaxRate / 100;
-                incomeTaxLabel = $"PIT liniowy ({tax.FlatTaxRate}%)";
+                incomeTax = net * tax.FlatTaxRate / 100;
+                taxLabel = $"PIT liniowy ({tax.FlatTaxRate}%)";
                 break;
             case "lump":
-                incomeTax = netRevenue * tax.LumpSumRate / 100;
-                incomeTaxLabel = $"Ryczałt ({tax.LumpSumRate}%)";
+                incomeTax = net * tax.LumpSumRate / 100;
+                taxLabel = $"Ryczałt ({tax.LumpSumRate}%)";
                 break;
             case "scale":
-                if (netRevenue <= tax.ScaleTaxThreshold)
+                if (net <= tax.ScaleTaxThreshold)
                 {
-                    incomeTax = netRevenue * tax.ScaleTaxRateLow / 100;
-                    incomeTaxLabel = $"Skala ({tax.ScaleTaxRateLow}%)";
+                    incomeTax = net * tax.ScaleTaxRateLow / 100;
+                    taxLabel = $"Skala ({tax.ScaleTaxRateLow}%)";
                 }
                 else
                 {
                     incomeTax = tax.ScaleTaxThreshold * tax.ScaleTaxRateLow / 100
-                                + (netRevenue - tax.ScaleTaxThreshold) * tax.ScaleTaxRateHigh / 100;
-                    incomeTaxLabel = $"Skala ({tax.ScaleTaxRateLow}%/{tax.ScaleTaxRateHigh}%)";
+                                + (net - tax.ScaleTaxThreshold) * tax.ScaleTaxRateHigh / 100;
+                    taxLabel = $"Skala ({tax.ScaleTaxRateLow}%/{tax.ScaleTaxRateHigh}%)";
                 }
                 break;
         }
 
-        decimal zusTotal = tax.ZusEnabled ? tax.ZusMonthlyAmount * months : 0;
-        decimal healthTotal = tax.HealthInsuranceEnabled ? tax.HealthInsuranceMonthly * months : 0;
-        decimal costsTotal = tax.CostDeductionsEnabled ? tax.MonthlyFixedCosts * months : 0;
-        decimal netProfit = netRevenue - incomeTax - zusTotal - healthTotal - costsTotal;
-
-        <div class="row g-3">
-            <div class="col-6 col-md-4 col-xl-2">
-                <div class="text-muted small">Przychód brutto</div>
-                <div class="fw-semibold">@grossRevenue.ToString("N2") zł</div>
-            </div>
-            @if (tax.VatEnabled)
-            {
-                <div class="col-6 col-md-4 col-xl-2">
-                    <div class="text-muted small">VAT (@tax.VatRate%)</div>
-                    <div class="fw-semibold" style="color:var(--c-danger)">-@vatAmount.ToString("N2") zł</div>
-                </div>
-                <div class="col-6 col-md-4 col-xl-2">
-                    <div class="text-muted small">Netto (bez VAT)</div>
-                    <div class="fw-semibold">@netRevenue.ToString("N2") zł</div>
-                </div>
-            }
-            @if (tax.IncomeTaxType != "none")
-            {
-                <div class="col-6 col-md-4 col-xl-2">
-                    <div class="text-muted small">@incomeTaxLabel</div>
-                    <div class="fw-semibold" style="color:var(--c-danger)">-@incomeTax.ToString("N2") zł</div>
-                </div>
-            }
-            @if (tax.ZusEnabled)
-            {
-                <div class="col-6 col-md-4 col-xl-2">
-                    <div class="text-muted small">ZUS (@months mies.)</div>
-                    <div class="fw-semibold" style="color:var(--c-danger)">-@zusTotal.ToString("N2") zł</div>
-                </div>
-            }
-            @if (tax.HealthInsuranceEnabled)
-            {
-                <div class="col-6 col-md-4 col-xl-2">
-                    <div class="text-muted small">Zdrowotne (@months mies.)</div>
-                    <div class="fw-semibold" style="color:var(--c-danger)">-@healthTotal.ToString("N2") zł</div>
-                </div>
-            }
-            @if (tax.CostDeductionsEnabled)
-            {
-                <div class="col-6 col-md-4 col-xl-2">
-                    <div class="text-muted small">Koszty stałe (@months mies.)</div>
-                    <div class="fw-semibold" style="color:var(--c-danger)">-@costsTotal.ToString("N2") zł</div>
-                </div>
-            }
-            <div class="col-6 col-md-4 col-xl-2">
-                <div class="text-muted small fw-bold">Zysk netto</div>
-                <div class="fw-bold fs-5" style="color:@(netProfit >= 0 ? "var(--c-success)" : "var(--c-danger)")">@netProfit.ToString("N2") zł</div>
-            </div>
-        </div>
-    }
-
-    private void RenderTaxSettingsForm()
-    {
-        var tc = _taxConfig!;
-
-        <div class="row g-3">
-            <div class="col-12"><h6 class="mb-0"><i class="bi bi-receipt me-2"></i>VAT</h6></div>
-            <div class="col-12 col-md-6">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="h-vat-enabled" @bind="tc.VatEnabled" />
-                    <label class="form-check-label" for="h-vat-enabled">VAT naliczany</label>
-                </div>
-            </div>
-            @if (tc.VatEnabled)
-            {
-                <div class="col-12 col-md-6">
-                    <label class="form-label small">Stawka VAT (%)</label>
-                    <input type="number" class="form-control form-control-sm" step="0.01" @bind="tc.VatRate" />
-                </div>
-            }
-
-            <div class="col-12"><h6 class="mb-0 mt-2"><i class="bi bi-bank me-2"></i>Podatek dochodowy (PIT)</h6></div>
-            <div class="col-12 col-md-6">
-                <label class="form-label small">Forma opodatkowania</label>
-                <select class="form-select form-select-sm" @bind="tc.IncomeTaxType">
-                    <option value="none">Brak</option>
-                    <option value="scale">Skala podatkowa</option>
-                    <option value="flat">Podatek liniowy</option>
-                    <option value="lump">Ryczałt</option>
-                </select>
-            </div>
-            @if (tc.IncomeTaxType == "flat")
-            {
-                <div class="col-12 col-md-6">
-                    <label class="form-label small">Stawka liniowa (%)</label>
-                    <input type="number" class="form-control form-control-sm" step="0.01" @bind="tc.FlatTaxRate" />
-                </div>
-            }
-            @if (tc.IncomeTaxType == "lump")
-            {
-                <div class="col-12 col-md-6">
-                    <label class="form-label small">Stawka ryczałtu (%)</label>
-                    <input type="number" class="form-control form-control-sm" step="0.01" @bind="tc.LumpSumRate" />
-                </div>
-            }
-            @if (tc.IncomeTaxType == "scale")
-            {
-                <div class="col-6 col-md-4">
-                    <label class="form-label small">Próg (zł)</label>
-                    <input type="number" class="form-control form-control-sm" step="1" @bind="tc.ScaleTaxThreshold" />
-                </div>
-                <div class="col-6 col-md-4">
-                    <label class="form-label small">Stawka do progu (%)</label>
-                    <input type="number" class="form-control form-control-sm" step="0.01" @bind="tc.ScaleTaxRateLow" />
-                </div>
-                <div class="col-6 col-md-4">
-                    <label class="form-label small">Stawka powyżej (%)</label>
-                    <input type="number" class="form-control form-control-sm" step="0.01" @bind="tc.ScaleTaxRateHigh" />
-                </div>
-            }
-
-            <div class="col-12"><h6 class="mb-0 mt-2"><i class="bi bi-shield-check me-2"></i>ZUS</h6></div>
-            <div class="col-12 col-md-6">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="h-zus-enabled" @bind="tc.ZusEnabled" />
-                    <label class="form-check-label" for="h-zus-enabled">Składki ZUS</label>
-                </div>
-            </div>
-            @if (tc.ZusEnabled)
-            {
-                <div class="col-12 col-md-6">
-                    <label class="form-label small">Miesięczna składka ZUS (zł)</label>
-                    <input type="number" class="form-control form-control-sm" step="0.01" @bind="tc.ZusMonthlyAmount" />
-                </div>
-            }
-
-            <div class="col-12"><h6 class="mb-0 mt-2"><i class="bi bi-heart-pulse me-2"></i>Ubezpieczenie zdrowotne</h6></div>
-            <div class="col-12 col-md-6">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="h-health-enabled" @bind="tc.HealthInsuranceEnabled" />
-                    <label class="form-check-label" for="h-health-enabled">Składka zdrowotna</label>
-                </div>
-            </div>
-            @if (tc.HealthInsuranceEnabled)
-            {
-                <div class="col-12 col-md-6">
-                    <label class="form-label small">Miesięczna składka zdrowotna (zł)</label>
-                    <input type="number" class="form-control form-control-sm" step="0.01" @bind="tc.HealthInsuranceMonthly" />
-                </div>
-            }
-
-            <div class="col-12"><h6 class="mb-0 mt-2"><i class="bi bi-wallet2 me-2"></i>Koszty uzyskania przychodu</h6></div>
-            <div class="col-12 col-md-6">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="h-costs-enabled" @bind="tc.CostDeductionsEnabled" />
-                    <label class="form-check-label" for="h-costs-enabled">Odliczanie kosztów stałych</label>
-                </div>
-            </div>
-            @if (tc.CostDeductionsEnabled)
-            {
-                <div class="col-12 col-md-6">
-                    <label class="form-label small">Miesięczne koszty stałe (zł)</label>
-                    <input type="number" class="form-control form-control-sm" step="0.01" @bind="tc.MonthlyFixedCosts" />
-                </div>
-            }
-
-            <div class="col-12"><h6 class="mb-0 mt-2"><i class="bi bi-hash me-2"></i>Numeracja faktur</h6></div>
-            <div class="col-12 col-md-6">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" id="h-invoice-enabled" @bind="tc.InvoiceNumberingEnabled" />
-                    <label class="form-check-label" for="h-invoice-enabled">Automatyczna numeracja</label>
-                </div>
-            </div>
-            @if (tc.InvoiceNumberingEnabled)
-            {
-                <div class="col-6 col-md-3">
-                    <label class="form-label small">Prefiks</label>
-                    <input type="text" class="form-control form-control-sm" @bind="tc.InvoicePrefix" />
-                </div>
-                <div class="col-6 col-md-3">
-                    <label class="form-label small">Następny numer</label>
-                    <input type="number" class="form-control form-control-sm" min="1" @bind="tc.InvoiceNextNumber" />
-                </div>
-            }
-
-            <div class="col-12 mt-3">
-                <button class="btn btn-primary btn-sm" @onclick="SaveTaxSettingsAsync" disabled="@_taxSaving">
-                    @if (_taxSaving)
-                    {
-                        <span class="spinner-border spinner-border-sm me-1"></span>
-                    }
-                    <i class="bi bi-check-lg me-1"></i>Zapisz ustawienia
-                </button>
-            </div>
-        </div>
+        var zus = tax.ZusEnabled ? tax.ZusMonthlyAmount * months : 0;
+        var health = tax.HealthInsuranceEnabled ? tax.HealthInsuranceMonthly * months : 0;
+        var costs = tax.CostDeductionsEnabled ? tax.MonthlyFixedCosts * months : 0;
+        return (gross, vat, net, incomeTax, taxLabel, zus, health, costs, net - incomeTax - zus - health - costs);
     }
 
     private async Task RenderChartsAsync()
