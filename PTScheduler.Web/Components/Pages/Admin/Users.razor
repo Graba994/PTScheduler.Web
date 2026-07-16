@@ -149,6 +149,20 @@ else
                             </select>
                         </div>
                     }
+
+                    @if (newUser.Role == Roles.Client)
+                    {
+                        <div class="mb-2">
+                            <label class="form-label">Trener</label>
+                            <select class="form-select" @bind="newClientTrainerId">
+                                <option value="">— brak —</option>
+                                @foreach (var t in trainers)
+                                {
+                                    <option value="@t.Id">@t.FullName (@t.Email)</option>
+                                }
+                            </select>
+                        </div>
+                    }
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-secondary" @onclick="CloseCreateModal">Anuluj</button>
@@ -171,6 +185,7 @@ else
     private bool createBusy;
     private string createError = string.Empty;
     private CreateUserDto newUser = new();
+    private string newClientTrainerId = string.Empty;
 
     private IEnumerable<UserDto> Filtered => users?
         .Where(u => string.IsNullOrEmpty(search) ||
@@ -187,6 +202,7 @@ else
     private void OpenCreateModal()
     {
         newUser = new CreateUserDto { Role = Roles.Trainer };
+        newClientTrainerId = string.Empty;
         createError = string.Empty;
         showCreateModal = true;
     }
@@ -203,6 +219,9 @@ else
         createBusy = true;
         try
         {
+            if (newUser.Role == Roles.Client && !string.IsNullOrEmpty(newClientTrainerId))
+                newUser.TrainerUserId = newClientTrainerId;
+
             var (success, error) = await UserService.CreateUserAsync(newUser);
             if (!success)
             {

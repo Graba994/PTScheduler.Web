@@ -125,7 +125,8 @@ public class UserManagementService(
                 FirstName  = dto.FirstName,
                 LastName   = dto.LastName,
                 Status     = Domain.Enums.ClientStatus.Active,
-                CreatedAt  = DateTime.UtcNow
+                CreatedAt  = DateTime.UtcNow,
+                TrainerUserId = dto.TrainerUserId
             });
             await db.SaveChangesAsync();
         }
@@ -144,6 +145,79 @@ public class UserManagementService(
         return result.Succeeded
             ? (true, null)
             : (false, string.Join(" ", result.Errors.Select(e => e.Description)));
+    }
+
+    public async Task<(bool Success, string? Error)> UpdateProfileAsync(string userId, string firstName, string lastName, string email)
+    {
+        var user = await userManager.FindByIdAsync(userId)
+            ?? throw new InvalidOperationException("User not found.");
+
+        if (!string.Equals(user.Email, email, StringComparison.OrdinalIgnoreCase))
+        {
+            var existing = await userManager.FindByEmailAsync(email);
+            if (existing is not null && existing.Id != userId)
+                return (false, $"Email '{email}' jest już zajęty przez innego użytkownika.");
+        }
+
+        user.FirstName = firstName;
+        user.LastName = lastName;
+        user.Email = email;
+        user.UserName = email;
+        user.NormalizedEmail = userManager.NormalizeEmail(email);
+        user.NormalizedUserName = userManager.NormalizeName(email);
+
+        var result = await userManager.UpdateAsync(user);
+        if (!result.Succeeded)
+            return (false, string.Join(" ", result.Errors.Select(e => e.Description)));
+
+        await using var db = dbFactory.CreateDbContext();
+        var client = await db.Clients.FirstOrDefaultAsync(c => c.ApplicationUserId == userId);
+        if (client is not null)
+        {
+            client.FirstName = firstName;
+            client.LastName = lastName;
+            await db.SaveChangesAsync();
+        }
+
+        return (true, null);
+    }
+
+    public async Task<List<ClientSummaryDto>> GetClientsByTrainerAsync(string trainerUserId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var clients = await db.Clients
+            .AsNoTracking()
+            .Where(c => c.TrainerUserId == trainerUserId)
+            .OrderBy(c => c.LastName).ThenBy(c => c.FirstName)
+            .ToListAsync();
+
+        var userIds = clients.Select(c => c.ApplicationUserId).ToList();
+        var emails = await db.Users
+            .Where(u => userIds.Contains(u.Id))
+            .ToDictionaryAsync(u => u.Id, u => u.Email);
+
+        return clients.Select(c => new ClientSummaryDto
+        {
+            Id = c.Id,
+            FirstName = c.FirstName,
+            LastName = c.LastName,
+            Email = emails.GetValueOrDefault(c.ApplicationUserId),
+            TrainerUserId = c.TrainerUserId
+        }).ToList();
+    }
+
+    public async Task ReassignClientsAsync(IEnumerable<int> clientIds, string newTrainerUserId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var ids = clientIds.ToList();
+        var clients = await db.Clients
+            .Where(c => ids.Contains(c.Id))
+            .ToListAsync();
+
+        foreach (var client in clients)
+            client.TrainerUserId = newTrainerUserId;
+
+        await db.SaveChangesAsync();
     }
 
     private static UserDto MapToDto(ApplicationUser user, string role) => new()

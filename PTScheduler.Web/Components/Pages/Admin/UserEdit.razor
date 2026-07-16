@@ -1,4 +1,4 @@
-﻿@page "/admin/users/{Id}"
+@page "/admin/users/{Id}"
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
@@ -26,19 +26,53 @@
 else
 {
     <div class="row">
-        <div class="col-md-6">
+        <div class="col-md-6 d-flex flex-column gap-3">
+
+            <!-- Profile data -->
             <div class="card">
                 <div class="card-body">
-                    <h5 class="card-title">@user.FullName</h5>
-                    <p class="text-muted mb-4">@user.Email</p>
+                    <h6 class="card-title mb-3"><i class="bi bi-person-fill me-2"></i>Dane użytkownika</h6>
+
+                    @if (!string.IsNullOrEmpty(profileMsg))
+                    {
+                        <div class="alert @(profileError ? "alert-danger" : "alert-success") py-2 small">@profileMsg</div>
+                    }
+
+                    <div class="row g-2 mb-2">
+                        <div class="col">
+                            <label class="form-label small fw-semibold">Imię</label>
+                            <input class="form-control" @bind="editFirstName" maxlength="60" />
+                        </div>
+                        <div class="col">
+                            <label class="form-label small fw-semibold">Nazwisko</label>
+                            <input class="form-control" @bind="editLastName" maxlength="60" />
+                        </div>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">E-mail</label>
+                        <input class="form-control" type="email" @bind="editEmail" maxlength="120" />
+                    </div>
+
+                    <button class="btn btn-primary btn-sm" @onclick="SaveProfile" disabled="@isBusy">
+                        @if (isBusy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                        <i class="bi bi-check-lg me-1"></i>Zapisz dane
+                    </button>
+                </div>
+            </div>
+
+            <!-- Role & status -->
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="card-title mb-3"><i class="bi bi-shield-fill me-2"></i>Rola i status</h6>
 
                     @if (!string.IsNullOrEmpty(message))
                     {
-                        <div class="alert @(isError ? "alert-danger" : "alert-success") py-2">@message</div>
+                        <div class="alert @(isError ? "alert-danger" : "alert-success") py-2 small">@message</div>
                     }
 
                     <div class="mb-3">
-                        <label class="form-label fw-semibold">Rola</label>
+                        <label class="form-label small fw-semibold">Rola</label>
                         <select class="form-select" @bind="selectedRole">
                             <option value="">— brak roli —</option>
                             <option value="@Roles.Admin">Administrator</option>
@@ -51,7 +85,7 @@ else
                     @if (selectedRole == Roles.Subordinate)
                     {
                         <div class="mb-3">
-                            <label class="form-label fw-semibold">Przełożony (Trainer)</label>
+                            <label class="form-label small fw-semibold">Przełożony (Trainer)</label>
                             <select class="form-select" @bind="selectedSupervisorId">
                                 <option value="">— brak —</option>
                                 @foreach (var trainer in trainers)
@@ -62,8 +96,8 @@ else
                         </div>
                     }
 
-                    <div class="mb-4">
-                        <label class="form-label fw-semibold">Status konta</label>
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Status konta</label>
                         <div class="form-check form-switch">
                             <input class="form-check-input" type="checkbox" role="switch"
                                    id="lockSwitch" @bind="isLocked" />
@@ -73,15 +107,87 @@ else
                         </div>
                     </div>
 
-                    <div class="d-flex gap-2">
-                        <button class="btn btn-primary" @onclick="Save" disabled="@isBusy">
-                            @if (isBusy) { <span class="spinner-border spinner-border-sm me-1" /> }
-                            Zapisz zmiany
-                        </button>
-                        <a href="/admin/users" class="btn btn-outline-secondary">Anuluj</a>
-                    </div>
+                    <button class="btn btn-primary btn-sm" @onclick="Save" disabled="@isBusy">
+                        @if (isBusy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                        <i class="bi bi-check-lg me-1"></i>Zapisz rolę
+                    </button>
                 </div>
             </div>
+
+            <!-- Trainer's clients -->
+            @if (selectedRole is Roles.Trainer or Roles.Subordinate || trainerClients.Count > 0)
+            {
+                <div class="card">
+                    <div class="card-body">
+                        <h6 class="card-title mb-3">
+                            <i class="bi bi-people-fill me-2"></i>Klienci trenera
+                            <span class="badge bg-secondary ms-1">@trainerClients.Count</span>
+                        </h6>
+
+                        @if (!string.IsNullOrEmpty(reassignMsg))
+                        {
+                            <div class="alert @(reassignError ? "alert-danger" : "alert-success") py-2 small">@reassignMsg</div>
+                        }
+
+                        @if (trainerClients.Count == 0)
+                        {
+                            <p class="text-muted small mb-0">Ten trener nie ma jeszcze żadnych klientów.</p>
+                        }
+                        else
+                        {
+                            <div class="table-responsive mb-3">
+                                <table class="table table-sm table-hover align-middle mb-0">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th style="width:30px">
+                                                <input type="checkbox" class="form-check-input"
+                                                       checked="@AllClientsSelected"
+                                                       @onchange="ToggleAllClients" />
+                                            </th>
+                                            <th>Klient</th>
+                                            <th>E-mail</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var c in trainerClients)
+                                        {
+                                            <tr>
+                                                <td>
+                                                    <input type="checkbox" class="form-check-input"
+                                                           checked="@selectedClientIds.Contains(c.Id)"
+                                                           @onchange="() => ToggleClient(c.Id)" />
+                                                </td>
+                                                <td class="fw-semibold small">@c.FullName</td>
+                                                <td class="small text-muted">@c.Email</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+
+                            @if (selectedClientIds.Count > 0)
+                            {
+                                <div class="d-flex align-items-end gap-2 flex-wrap">
+                                    <div style="min-width:200px">
+                                        <label class="form-label small fw-semibold mb-1">Przypisz do trenera</label>
+                                        <select class="form-select form-select-sm" @bind="reassignTargetTrainerId">
+                                            <option value="">— wybierz trenera —</option>
+                                            @foreach (var t in trainers.Where(t => t.Id != Id))
+                                            {
+                                                <option value="@t.Id">@t.FullName (@t.Email)</option>
+                                            }
+                                        </select>
+                                    </div>
+                                    <button class="btn btn-warning btn-sm" @onclick="ReassignClients" disabled="@(isBusy || string.IsNullOrEmpty(reassignTargetTrainerId))">
+                                        @if (isBusy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                                        <i class="bi bi-arrow-right-circle me-1"></i>Przenieś @selectedClientIds.Count
+                                    </button>
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
+            }
         </div>
 
         <div class="col-md-4 d-flex flex-column gap-3">
@@ -144,12 +250,26 @@ else
     private string message = string.Empty;
     private bool isError;
 
+    private string editFirstName = string.Empty;
+    private string editLastName = string.Empty;
+    private string editEmail = string.Empty;
+    private string profileMsg = string.Empty;
+    private bool profileError;
+
     private string newPw = string.Empty;
     private string pwMsg = string.Empty;
     private bool pwError;
 
+    private List<ClientSummaryDto> trainerClients = [];
+    private HashSet<int> selectedClientIds = [];
+    private string reassignTargetTrainerId = string.Empty;
+    private string reassignMsg = string.Empty;
+    private bool reassignError;
+
     private string _adminId = string.Empty;
     private string _adminEmail = string.Empty;
+
+    private bool AllClientsSelected => trainerClients.Count > 0 && selectedClientIds.Count == trainerClients.Count;
 
     protected override async Task OnInitializedAsync()
     {
@@ -157,6 +277,11 @@ else
         _adminId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
         _adminEmail = auth.User.Identity?.Name ?? _adminId;
 
+        await LoadUser();
+    }
+
+    private async Task LoadUser()
+    {
         user = await UserService.GetUserAsync(Id);
         trainers = await UserService.GetTrainersAsync();
 
@@ -165,7 +290,40 @@ else
             selectedRole = user.Role;
             selectedSupervisorId = user.SupervisorId;
             isLocked = user.IsLockedOut;
+            editFirstName = user.FirstName ?? string.Empty;
+            editLastName = user.LastName ?? string.Empty;
+            editEmail = user.Email;
         }
+
+        await LoadTrainerClients();
+    }
+
+    private async Task LoadTrainerClients()
+    {
+        trainerClients = await UserService.GetClientsByTrainerAsync(Id);
+        selectedClientIds.Clear();
+        reassignTargetTrainerId = string.Empty;
+    }
+
+    private async Task SaveProfile()
+    {
+        if (string.IsNullOrWhiteSpace(editEmail)) { profileMsg = "E-mail jest wymagany."; profileError = true; return; }
+
+        isBusy = true; profileMsg = string.Empty;
+        try
+        {
+            var (success, error) = await UserService.UpdateProfileAsync(Id, editFirstName.Trim(), editLastName.Trim(), editEmail.Trim());
+            if (success)
+            {
+                await AuditLogService.LogAsync(_adminId, _adminEmail, Roles.Admin, "UserProfileUpdated", "User",
+                    Id, $"Imię: {editFirstName}, Nazwisko: {editLastName}, Email: {editEmail}");
+                profileMsg = "Dane zapisane."; profileError = false;
+                user = await UserService.GetUserAsync(Id);
+            }
+            else { profileMsg = error ?? "Nie udało się zapisać danych."; profileError = true; }
+        }
+        catch (Exception ex) { profileMsg = $"Błąd: {ex.Message}"; profileError = true; }
+        finally { isBusy = false; }
     }
 
     private async Task Save()
@@ -186,8 +344,7 @@ else
 
             message = "Zmiany zapisane.";
             isError = false;
-            user = await UserService.GetUserAsync(Id);
-            trainers = await UserService.GetTrainersAsync();
+            await LoadUser();
         }
         catch (Exception ex)
         {
@@ -238,5 +395,40 @@ else
             showDeleteConfirm = false;
         }
     }
-}
 
+    private void ToggleClient(int clientId)
+    {
+        if (!selectedClientIds.Remove(clientId))
+            selectedClientIds.Add(clientId);
+    }
+
+    private void ToggleAllClients(ChangeEventArgs e)
+    {
+        if (e.Value is true)
+            selectedClientIds = trainerClients.Select(c => c.Id).ToHashSet();
+        else
+            selectedClientIds.Clear();
+    }
+
+    private async Task ReassignClients()
+    {
+        if (selectedClientIds.Count == 0 || string.IsNullOrEmpty(reassignTargetTrainerId)) return;
+
+        isBusy = true; reassignMsg = string.Empty;
+        try
+        {
+            var count = selectedClientIds.Count;
+            await UserService.ReassignClientsAsync(selectedClientIds, reassignTargetTrainerId);
+
+            var targetTrainer = trainers.FirstOrDefault(t => t.Id == reassignTargetTrainerId);
+            await AuditLogService.LogAsync(_adminId, _adminEmail, Roles.Admin, "ClientsReassigned", "Client",
+                Id, $"Przeniesiono {count} klientów do trenera: {targetTrainer?.FullName ?? reassignTargetTrainerId}");
+
+            reassignMsg = $"Przeniesiono {count} klientów do {targetTrainer?.FullName ?? "innego trenera"}.";
+            reassignError = false;
+            await LoadTrainerClients();
+        }
+        catch (Exception ex) { reassignMsg = $"Błąd: {ex.Message}"; reassignError = true; }
+        finally { isBusy = false; }
+    }
+}

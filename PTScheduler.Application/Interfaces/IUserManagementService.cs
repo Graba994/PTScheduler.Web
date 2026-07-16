@@ -13,4 +13,7 @@ public interface IUserManagementService
     Task DeleteUserAsync(string userId);
     Task<(bool Success, string? Error)> CreateUserAsync(CreateUserDto dto);
     Task<(bool Success, string? Error)> ResetPasswordAsync(string userId, string newPassword);
+    Task<(bool Success, string? Error)> UpdateProfileAsync(string userId, string firstName, string lastName, string email);
+    Task<List<ClientSummaryDto>> GetClientsByTrainerAsync(string trainerUserId);
+    Task ReassignClientsAsync(IEnumerable<int> clientIds, string newTrainerUserId);
 }
