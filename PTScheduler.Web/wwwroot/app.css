@@ -2003,17 +2003,27 @@ a.nav-link.active { /* kept for compat */ }
    SKELETON LOADERS
    ============================================================ */
 
-@keyframes skeleton-pulse {
-    0%   { opacity: .06; }
-    50%  { opacity: .12; }
-    100% { opacity: .06; }
+.skeleton {
+    background: linear-gradient(
+        90deg,
+        rgba(0,0,0,.04) 25%,
+        rgba(0,0,0,.08) 50%,
+        rgba(0,0,0,.04) 75%
+    );
+    background-size: 200% 100%;
+    animation: skeleton-shimmer 1.8s ease-in-out infinite;
+    border-radius: 6px;
+    pointer-events: none;
 }
 
-.skeleton {
-    background: currentColor;
-    border-radius: 6px;
-    animation: skeleton-pulse 1.6s ease-in-out infinite;
-    pointer-events: none;
+[data-theme$="-dark"] .skeleton {
+    background: linear-gradient(
+        90deg,
+        rgba(255,255,255,.03) 25%,
+        rgba(255,255,255,.07) 50%,
+        rgba(255,255,255,.03) 75%
+    );
+    background-size: 200% 100%;
 }
 
 .skeleton-line {
@@ -2273,4 +2283,248 @@ a.nav-link.active { /* kept for compat */ }
 @media (max-width: 480px) {
     .cookie-banner-inner { flex-direction: column; align-items: stretch; }
     .cookie-banner-btn { width: 100%; }
+}
+
+/* ============================================================
+   ANIMATIONS — Subtle entrance & micro-interactions
+   ============================================================ */
+
+/* --- Fade-in + slide-up entrance for cards & sections --- */
+.card,
+.stat-card,
+.manage-card,
+.manage-header,
+.alert,
+.session-tile,
+.empty-state {
+    animation: fadeSlideUp .4s cubic-bezier(.25,.46,.45,.94) both;
+    animation-delay: var(--enter-delay, 0ms);
+}
+
+@keyframes fadeSlideUp {
+    from { opacity: 0; transform: translateY(12px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* Staggered children inside .row and common grid layouts */
+.row > [class*="col-"]:nth-child(1)  { --enter-delay: 0ms; }
+.row > [class*="col-"]:nth-child(2)  { --enter-delay: 60ms; }
+.row > [class*="col-"]:nth-child(3)  { --enter-delay: 120ms; }
+.row > [class*="col-"]:nth-child(4)  { --enter-delay: 180ms; }
+
+/* Stagger for flex gap containers (admin cards, stat rows) */
+.d-flex.flex-column.gap-3 > :nth-child(1) { --enter-delay: 0ms; }
+.d-flex.flex-column.gap-3 > :nth-child(2) { --enter-delay: 60ms; }
+.d-flex.flex-column.gap-3 > :nth-child(3) { --enter-delay: 120ms; }
+.d-flex.flex-column.gap-3 > :nth-child(4) { --enter-delay: 180ms; }
+.d-flex.flex-column.gap-3 > :nth-child(5) { --enter-delay: 240ms; }
+
+/* Stat card row stagger */
+.row > [class*="col-"] .stat-card:nth-child(1) { --enter-delay:  40ms; }
+.row > [class*="col-"] .stat-card:nth-child(2) { --enter-delay: 100ms; }
+.row > [class*="col-"] .stat-card:nth-child(3) { --enter-delay: 160ms; }
+.row > [class*="col-"] .stat-card:nth-child(4) { --enter-delay: 220ms; }
+
+/* Session tile stagger */
+.session-tiles > .session-tile:nth-child(1)  { --enter-delay:  0ms; }
+.session-tiles > .session-tile:nth-child(2)  { --enter-delay: 40ms; }
+.session-tiles > .session-tile:nth-child(3)  { --enter-delay: 80ms; }
+.session-tiles > .session-tile:nth-child(4)  { --enter-delay: 120ms; }
+.session-tiles > .session-tile:nth-child(5)  { --enter-delay: 160ms; }
+.session-tiles > .session-tile:nth-child(n+6) { --enter-delay: 200ms; }
+
+/* --- Enhanced card hover — gentle lift + shadow bloom --- */
+.card {
+    transition: box-shadow .25s ease, transform .25s ease;
+}
+.card:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+}
+
+.stat-card {
+    transition: box-shadow .25s ease, transform .25s ease;
+}
+.stat-card:hover {
+    box-shadow: 0 4px 16px rgba(0,0,0,0.08);
+    transform: translateY(-2px);
+}
+
+[data-theme$="-dark"] .card:hover     { box-shadow: 0 4px 16px rgba(0,0,0,0.25); }
+[data-theme$="-dark"] .stat-card:hover { box-shadow: 0 4px 16px rgba(0,0,0,0.25); }
+
+/* --- Table row hover — smooth color transition --- */
+.table-hover > tbody > tr {
+    transition: background .15s ease;
+}
+
+/* --- Button micro-interactions --- */
+.btn {
+    transition: background .15s ease, border-color .15s ease, box-shadow .15s ease, transform .1s ease;
+}
+.btn:active:not(:disabled) {
+    transform: scale(.97);
+}
+
+/* --- Badge subtle pulse on appear --- */
+.badge {
+    animation: badgePop .3s cubic-bezier(.175,.885,.32,1.275) both;
+}
+@keyframes badgePop {
+    from { opacity: 0; transform: scale(.7); }
+    to   { opacity: 1; transform: scale(1); }
+}
+
+/* --- Alerts — slide in from top --- */
+.alert {
+    animation: alertSlideIn .35s cubic-bezier(.25,.46,.45,.94) both;
+}
+@keyframes alertSlideIn {
+    from { opacity: 0; transform: translateY(-8px); }
+    to   { opacity: 1; transform: translateY(0); }
+}
+
+/* --- Modal — scale + fade entrance --- */
+.modal.fade.show .modal-dialog,
+.modal.show .modal-dialog {
+    animation: modalScaleIn .3s cubic-bezier(.25,.46,.45,.94) both;
+}
+@keyframes modalScaleIn {
+    from { opacity: 0; transform: scale(.95) translateY(8px); }
+    to   { opacity: 1; transform: scale(1) translateY(0); }
+}
+
+/* --- Modal backdrop fade --- */
+.modal.fade.show,
+.modal.show[style*="background"] {
+    animation: backdropFade .25s ease both;
+}
+@keyframes backdropFade {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+/* --- Form focus — subtle scale on inputs --- */
+.form-control:focus,
+.form-select:focus {
+    transition: border-color .2s ease, box-shadow .2s ease;
+}
+
+/* --- Form switch — smoother toggle --- */
+.form-check-input[type="checkbox"] {
+    transition: background-color .2s ease, border-color .2s ease, box-shadow .2s ease;
+}
+
+/* --- Sidebar link — icon subtle shift on hover --- */
+.sidebar-link i {
+    transition: transform .2s ease, opacity .15s ease;
+}
+.sidebar-link:hover i {
+    transform: translateX(1px);
+}
+.sidebar-link.active i {
+    transform: scale(1.05);
+}
+
+/* --- Avatar hover glow --- */
+.avatar-circle,
+.sidebar-user-avatar {
+    transition: box-shadow .25s ease;
+}
+.avatar-circle:hover,
+.sidebar-user-avatar:hover {
+    box-shadow: 0 0 0 3px var(--c-focus-ring);
+}
+
+/* --- Skeleton shimmer keyframes (used by .skeleton above) --- */
+@keyframes skeleton-shimmer {
+    0%   { background-position: -200% 0; }
+    100% { background-position: 200% 0; }
+}
+
+/* --- Page title entrance --- */
+.page-title,
+h2 {
+    animation: fadeSlideUp .35s cubic-bezier(.25,.46,.45,.94) both;
+}
+
+/* --- Breadcrumb fade-in --- */
+.breadcrumb {
+    animation: fadeIn .3s ease both;
+}
+@keyframes fadeIn {
+    from { opacity: 0; }
+    to   { opacity: 1; }
+}
+
+/* --- Manage nav link — smooth active indicator --- */
+.manage-nav-link {
+    transition: all .2s ease;
+}
+
+/* --- Theme swatch — smooth scale on hover --- */
+.theme-swatch {
+    transition: border-color .15s, background .15s, transform .15s;
+}
+.theme-swatch:hover {
+    transform: scale(1.03);
+}
+.theme-swatch:active {
+    transform: scale(.97);
+}
+
+/* --- Mobile bottom sheet smooth open --- */
+@media (max-width: 767.98px) {
+    .mobile-sheet {
+        transition: transform .35s cubic-bezier(.32,.72,0,1);
+    }
+
+    /* Mobile nav item — subtle bounce on tap */
+    .mobile-nav-item:active {
+        transform: scale(.92);
+    }
+    .mobile-nav-item {
+        transition: color .15s, transform .1s ease;
+    }
+
+    /* Mobile tile tap feedback */
+    .mobile-sheet-tile:active {
+        transform: scale(.94);
+        transition: transform .08s ease;
+    }
+}
+
+/* --- Progress bar animation --- */
+.progress-bar {
+    transition: width .6s cubic-bezier(.25,.46,.45,.94);
+}
+
+/* --- Upload zone pulse on hover --- */
+.upload-zone {
+    transition: border-color .2s ease, background .2s ease, transform .15s ease;
+}
+.upload-zone:hover {
+    transform: scale(1.005);
+}
+
+/* --- Filter chip smooth transitions --- */
+.cal-filter-chip {
+    transition: all .2s ease;
+}
+.cal-filter-chip:active {
+    transform: scale(.95);
+}
+
+/* ============================================================
+   ACCESSIBILITY — Respect reduced motion preference
+   ============================================================ */
+
+@media (prefers-reduced-motion: reduce) {
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
 }
