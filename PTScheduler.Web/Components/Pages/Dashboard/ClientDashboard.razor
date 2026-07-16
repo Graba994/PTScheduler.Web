@@ -49,6 +49,15 @@ else
     <PullToRefresh OnRefresh="RefreshAsync">
     <div class="cd-page">
 
+        <!-- Greeting -->
+        <div class="cd-greeting">
+            <h5 class="cd-greeting-hi">Cześć, @(_client.FirstName is { Length: > 0 } fn ? fn : _client.Email.Split('@')[0])!</h5>
+            @if (_streakCount >= 3)
+            {
+                <div class="cd-greeting-streak"><i class="bi bi-fire"></i> @_streakCount treningów z rzędu — tak trzymaj!</div>
+            }
+        </div>
+
         @if (_client.Status == ClientStatus.Pending)
         {
             <div class="cd-pending">
@@ -114,7 +123,15 @@ else
                 <div class="cd-hero-empty">
                     <div class="cd-hero-ico">📅</div>
                     <div class="cd-hero-title">Brak zaplanowanych treningów</div>
-                    <div class="cd-hero-sub">Skontaktuj się z trenerem, aby umówić kolejną sesję.</div>
+                    @if (_client?.AllowSelfBooking == true)
+                    {
+                        <div class="cd-hero-sub">Umów się sam na trening w swoim grafiku!</div>
+                        <a href="/my" class="cd-hero-cta"><i class="bi bi-plus-circle me-1"></i>Zaplanuj trening</a>
+                    }
+                    else
+                    {
+                        <div class="cd-hero-sub">Skontaktuj się z trenerem, aby umówić kolejną sesję.</div>
+                    }
                 </div>
             }
             else
@@ -174,6 +191,17 @@ else
                     @if (_latestMeasurement?.WeightKg is { } w)
                     {
                         <span>@w.ToString("0.#", CultureInfo.InvariantCulture)<span class="cd-stat-unit">kg</span></span>
+                        @if (_previousWeight is { } pw)
+                        {
+                            var delta = w - pw;
+                            if (delta != 0)
+                            {
+                                var cls = delta < 0 ? "down" : "up";
+                                <span class="cd-stat-delta @cls">
+                                    <i class="bi bi-arrow-@(delta < 0 ? "down" : "up")-short"></i>@Math.Abs(delta).ToString("0.#", CultureInfo.InvariantCulture)
+                                </span>
+                            }
+                        }
                     }
                     else
                     {
@@ -184,16 +212,21 @@ else
             </div>
             <div class="cd-stat">
                 <div class="cd-stat-val">
-                    @if (_upcomingCount > 0)
+                    @if (_completedCount + _noShowCount > 0)
                     {
-                        <span>@_upcomingCount</span>
+                        var rate = (int)Math.Round(100.0 * _completedCount / (_completedCount + _noShowCount));
+                        <span>@rate<span class="cd-stat-unit">%</span></span>
+                    }
+                    else if (_client.TotalSessions > 0)
+                    {
+                        <span>100<span class="cd-stat-unit">%</span></span>
                     }
                     else
                     {
-                        <span class="cd-stat-empty">0</span>
+                        <span class="cd-stat-empty">—</span>
                     }
                 </div>
-                <div class="cd-stat-lab">Kolejne</div>
+                <div class="cd-stat-lab">Frekwencja</div>
             </div>
         </div>
 
@@ -254,6 +287,36 @@ else
             </div>
         }
 
+        <!-- Quick weight entry -->
+        <div class="cd-section">
+            <div class="cd-section-head">
+                <h6 class="cd-section-title"><i class="bi bi-speedometer2"></i>Szybki wpis wagi</h6>
+            </div>
+            <div class="cd-quick-weight">
+                <div class="cd-qw-form">
+                    <input type="text" inputmode="decimal"
+                           class="form-control form-control-sm cd-qw-input"
+                           placeholder="np. 72.5"
+                           @bind="_quickWeight" />
+                    <span class="cd-qw-unit">kg</span>
+                    <button class="btn btn-sm btn-primary cd-qw-btn" @onclick="LogQuickWeightAsync" disabled="@_weightSaving">
+                        @if (_weightSaving)
+                        {
+                            <span class="spinner-border spinner-border-sm"></span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-check-lg"></i><span class="d-none d-sm-inline ms-1">Zapisz</span>
+                        }
+                    </button>
+                </div>
+                @if (_weightMsg is not null)
+                {
+                    <div class="cd-qw-msg @(_weightMsgOk ? "ok" : "err")">@_weightMsg</div>
+                }
+            </div>
+        </div>
+
         <!-- Quick actions -->
         <div class="cd-actions">
             <a href="/my/profile" class="cd-action">
@@ -267,6 +330,10 @@ else
             <a href="/my/packages" class="cd-action">
                 <i class="bi bi-box-seam"></i>
                 <span>Pakiety</span>
+            </a>
+            <a href="/my/stats" class="cd-action">
+                <i class="bi bi-graph-up"></i>
+                <span>Statystyki</span>
             </a>
         </div>
 
@@ -328,6 +395,18 @@ else
     private string? _cancelError;
     private bool _cancelling;
 
+    // Computed stats
+    private decimal? _previousWeight;
+    private int _completedCount;
+    private int _noShowCount;
+    private int _streakCount;
+
+    // Quick weight entry
+    private string? _quickWeight;
+    private bool _weightSaving;
+    private string? _weightMsg;
+    private bool _weightMsgOk;
+
     // Chart re-render trigger
     private bool _chartNeedsRender;
 
@@ -359,13 +438,19 @@ else
                     _upcomingCount = upcoming.Count;
                     _nextSession   = upcoming.FirstOrDefault();
 
-                    var allRecent = await SessionService.GetClientSessionsAsync(_client.Id, 10);
-                    _recentPast    = allRecent.Where(s => s.StartTime < DateTime.Now).Take(5).ToList();
+                    var allRecent = await SessionService.GetClientSessionsAsync(_client.Id, 50);
+                    var pastSessions = allRecent.Where(s => s.StartTime < DateTime.Now).ToList();
+                    _recentPast    = pastSessions.Take(5).ToList();
+                    _completedCount = pastSessions.Count(s => s.Status == SessionStatus.Completed);
+                    _noShowCount = pastSessions.Count(s => s.Status == SessionStatus.NoShow);
+                    _streakCount = CalcStreak(pastSessions);
 
                     _invitations   = await InvitationService.GetPendingForClientAsync(_client.Id);
 
                     var measurements = await MeasurementService.GetAsync(_client.Id);
                     _latestMeasurement = measurements.OrderByDescending(m => m.MeasurementDate).FirstOrDefault();
+                    var weightHistory = measurements.Where(m => m.WeightKg.HasValue).OrderByDescending(m => m.MeasurementDate).ToList();
+                    _previousWeight = weightHistory.Count >= 2 ? weightHistory[1].WeightKg : null;
 
                     _chartPoints = measurements
                         .Where(m => m.WeightKg.HasValue)
@@ -516,4 +601,59 @@ else
         SessionStatus.AwaitingPackage => "Bez pakietu",
         _                             => s.ToString()
     };
+
+    // ---- Quick weight entry ----
+
+    private async Task LogQuickWeightAsync()
+    {
+        if (_client is null) return;
+        if (!decimal.TryParse(_quickWeight?.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out var w) || w < 20 || w > 400)
+        {
+            _weightMsg = "Podaj poprawną wagę (20–400 kg)";
+            _weightMsgOk = false;
+            return;
+        }
+        _weightSaving = true;
+        _weightMsg = null;
+        try
+        {
+            await MeasurementService.AddAsync(new CreateBodyMeasurementDto
+            {
+                ClientId = _client.Id,
+                MeasurementDate = DateOnly.FromDateTime(DateTime.Today),
+                WeightKg = w
+            });
+            _quickWeight = null;
+            _weightMsg = "Zapisano!";
+            _weightMsgOk = true;
+            var measurements = await MeasurementService.GetAsync(_client.Id);
+            _latestMeasurement = measurements.OrderByDescending(m => m.MeasurementDate).FirstOrDefault();
+            var wh = measurements.Where(m => m.WeightKg.HasValue).OrderByDescending(m => m.MeasurementDate).ToList();
+            _previousWeight = wh.Count >= 2 ? wh[1].WeightKg : null;
+            _chartPoints = measurements.Where(m => m.WeightKg.HasValue)
+                .OrderByDescending(m => m.MeasurementDate).Take(6)
+                .OrderBy(m => m.MeasurementDate)
+                .Select(m => (m.MeasurementDate.ToString("dd.MM"), (double)m.WeightKg!.Value)).ToList();
+            if (_chartPoints.Count >= 2) _chartNeedsRender = true;
+        }
+        catch (Exception ex)
+        {
+            _weightMsg = ex.Message;
+            _weightMsgOk = false;
+        }
+        finally { _weightSaving = false; }
+    }
+
+    private static int CalcStreak(List<SessionDto> pastSessions)
+    {
+        int streak = 0;
+        foreach (var s in pastSessions
+            .Where(s => s.Status is SessionStatus.Completed or SessionStatus.NoShow or SessionStatus.Cancelled)
+            .OrderByDescending(s => s.StartTime))
+        {
+            if (s.Status == SessionStatus.Completed) streak++;
+            else break;
+        }
+        return streak;
+    }
 }
