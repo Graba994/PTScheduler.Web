@@ -199,9 +199,9 @@ public class UserManagementService(
         return clients.Select(c => new ClientSummaryDto
         {
             Id = c.Id,
-            FirstName = c.FirstName,
-            LastName = c.LastName,
-            Email = emails.GetValueOrDefault(c.ApplicationUserId),
+            ApplicationUserId = c.ApplicationUserId,
+            FullName = $"{c.FirstName} {c.LastName}".Trim() is { Length: > 0 } n ? n : $"Klient #{c.Id}",
+            Email = emails.GetValueOrDefault(c.ApplicationUserId) ?? string.Empty,
             TrainerUserId = c.TrainerUserId
         }).ToList();
     }

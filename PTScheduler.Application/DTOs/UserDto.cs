@@ -27,13 +27,3 @@ public class CreateUserDto
     public string? SupervisorId { get; set; }
     public string? TrainerUserId { get; set; }
 }
-
-public class ClientSummaryDto
-{
-    public int Id { get; set; }
-    public string FirstName { get; set; } = string.Empty;
-    public string LastName { get; set; } = string.Empty;
-    public string FullName => $"{FirstName} {LastName}".Trim() is { Length: > 0 } n ? n : $"Klient #{Id}";
-    public string? Email { get; set; }
-    public string? TrainerUserId { get; set; }
-}
