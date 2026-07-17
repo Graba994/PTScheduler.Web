@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
 using PTScheduler.Application;
 using PTScheduler.Application.Interfaces;
@@ -13,6 +14,19 @@ AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Configuration.AddJsonFile("connections.json", optional: true, reloadOnChange: true);
+
+var dataProtectionKeysPath = Path.Combine(builder.Environment.ContentRootPath, "data", "keys");
+Directory.CreateDirectory(dataProtectionKeysPath);
+builder.Services.AddDataProtection()
+    .PersistKeysToFileSystem(new DirectoryInfo(dataProtectionKeysPath))
+    .SetApplicationName("PTScheduler");
+
+builder.Services.Configure<ForwardedHeadersOptions>(options =>
+{
+    options.ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto;
+    options.KnownNetworks.Clear();
+    options.KnownProxies.Clear();
+});
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -47,14 +61,18 @@ builder.Services.AddSingleton<IWebRootPathProvider, WebRootPathProvider>();
 
 var app = builder.Build();
 
-// Seed roles on startup
+// Apply pending EF Core migrations, then seed roles + session types
 using (var scope = app.Services.CreateScope())
 {
+    var db = scope.ServiceProvider.GetRequiredService<PTScheduler.Infrastructure.Data.ApplicationDbContext>();
+    await db.Database.MigrateAsync();
+
     var roleManager = scope.ServiceProvider.GetRequiredService<RoleManager<IdentityRole>>();
     await PTScheduler.Infrastructure.Data.DbInitializer.SeedRolesAsync(roleManager);
-    var db = scope.ServiceProvider.GetRequiredService<PTScheduler.Infrastructure.Data.ApplicationDbContext>();
     await PTScheduler.Infrastructure.Data.DbInitializer.SeedSessionTypesAsync(db);
 }
+
+app.UseForwardedHeaders();
 
 if (app.Environment.IsDevelopment())
 {

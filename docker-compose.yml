@@ -1,0 +1,48 @@
+services:
+  db:
+    image: postgres:16-alpine
+    container_name: ptscheduler-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-ptscheduler}
+      POSTGRES_USER: ${POSTGRES_USER:-ptscheduler}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    volumes:
+      - db-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    networks: [internal]
+
+  app:
+    image: ${APP_IMAGE:-ghcr.io/graba994/ptscheduler.web:latest}
+    container_name: ptscheduler-app
+    restart: unless-stopped
+    depends_on:
+      db:
+        condition: service_healthy
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://+:8080
+      ConnectionStrings__DefaultConnection: >-
+        Host=db;Port=5432;Database=${POSTGRES_DB:-ptscheduler};Username=${POSTGRES_USER:-ptscheduler};Password=${POSTGRES_PASSWORD}
+    volumes:
+      - app-data:/app/data
+      - app-uploads:/app/wwwroot/uploads
+    labels:
+      com.centurylinklabs.watchtower.enable: "true"
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    networks: [internal, web]
+
+volumes:
+  db-data:
+  app-data:
+  app-uploads:
+
+networks:
+  internal:
+  web:
+    external: false

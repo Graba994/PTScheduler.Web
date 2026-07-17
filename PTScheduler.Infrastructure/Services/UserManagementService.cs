@@ -9,7 +9,7 @@ namespace PTScheduler.Infrastructure.Services;
 
 public class UserManagementService(UserManager<ApplicationUser> userManager) : IUserManagementService
 {
-    public async Task<List<UserDto>> GetAllUsersAsync()
+    public async Task<List<UserDto>> GetVisibleUsersAsync(string callerRole)
     {
         var users = await userManager.Users
             .Include(u => u.Supervisor)
@@ -20,20 +20,23 @@ public class UserManagementService(UserManager<ApplicationUser> userManager) : I
         foreach (var user in users)
         {
             var roles = await userManager.GetRolesAsync(user);
-            result.Add(MapToDto(user, roles.FirstOrDefault() ?? string.Empty));
+            var role = roles.FirstOrDefault() ?? string.Empty;
+            if (callerRole != Roles.Admin && role == Roles.Admin) continue;
+            result.Add(MapToDto(user, role));
         }
         return result;
     }
 
-    public async Task<UserDto?> GetUserAsync(string id)
+    public async Task<UserDto?> GetUserAsync(string id, string callerRole)
     {
         var user = await userManager.Users
             .Include(u => u.Supervisor)
             .FirstOrDefaultAsync(u => u.Id == id);
 
         if (user is null) return null;
-        var roles = await userManager.GetRolesAsync(user);
-        return MapToDto(user, roles.FirstOrDefault() ?? string.Empty);
+        var role = (await userManager.GetRolesAsync(user)).FirstOrDefault() ?? string.Empty;
+        if (callerRole != Roles.Admin && role == Roles.Admin) return null;
+        return MapToDto(user, role);
     }
 
     public async Task<List<UserDto>> GetTrainersAsync()
@@ -42,18 +45,26 @@ public class UserManagementService(UserManager<ApplicationUser> userManager) : I
         return trainers.Select(u => MapToDto(u, Roles.Trainer)).ToList();
     }
 
-    public async Task SetRoleAsync(string userId, string role)
+    public async Task SetRoleAsync(string userId, string role, string callerRole)
     {
+        var assignable = GetAssignableRoles(callerRole);
+        if (!string.IsNullOrEmpty(role) && !assignable.Contains(role))
+            throw new UnauthorizedAccessException(
+                $"Rola '{callerRole}' nie może przypisywać roli '{role}'.");
+
         var user = await userManager.FindByIdAsync(userId)
             ?? throw new InvalidOperationException("User not found.");
 
         var currentRoles = await userManager.GetRolesAsync(user);
+        var currentRole = currentRoles.FirstOrDefault() ?? string.Empty;
+
+        EnsureCallerCanModify(callerRole, currentRole);
+
         await userManager.RemoveFromRolesAsync(user, currentRoles);
 
         if (!string.IsNullOrEmpty(role))
             await userManager.AddToRoleAsync(user, role);
 
-        // Clear supervisor if no longer a subordinate
         if (role != Roles.Subordinate && user.SupervisorId is not null)
         {
             user.SupervisorId = null;
@@ -70,21 +81,42 @@ public class UserManagementService(UserManager<ApplicationUser> userManager) : I
         await userManager.UpdateAsync(user);
     }
 
-    public async Task SetLockoutAsync(string userId, bool locked)
+    public async Task SetLockoutAsync(string userId, bool locked, string callerRole)
     {
         var user = await userManager.FindByIdAsync(userId)
             ?? throw new InvalidOperationException("User not found.");
+
+        var currentRole = (await userManager.GetRolesAsync(user)).FirstOrDefault() ?? string.Empty;
+        EnsureCallerCanModify(callerRole, currentRole);
 
         await userManager.SetLockoutEnabledAsync(user, true);
         await userManager.SetLockoutEndDateAsync(user,
             locked ? DateTimeOffset.MaxValue : DateTimeOffset.UtcNow.AddMinutes(-1));
     }
 
-    public async Task DeleteUserAsync(string userId)
+    public async Task DeleteUserAsync(string userId, string callerRole)
     {
         var user = await userManager.FindByIdAsync(userId)
             ?? throw new InvalidOperationException("User not found.");
+
+        var currentRole = (await userManager.GetRolesAsync(user)).FirstOrDefault() ?? string.Empty;
+        EnsureCallerCanModify(callerRole, currentRole);
+
         await userManager.DeleteAsync(user);
+    }
+
+    public IReadOnlyList<string> GetAssignableRoles(string callerRole) => callerRole switch
+    {
+        Roles.Admin   => [Roles.Admin, Roles.Trainer, Roles.Subordinate, Roles.Client],
+        Roles.Trainer => [Roles.Subordinate, Roles.Client],
+        _             => []
+    };
+
+    private static void EnsureCallerCanModify(string callerRole, string targetRole)
+    {
+        if (callerRole == Roles.Admin) return;
+        if (callerRole == Roles.Trainer && targetRole != Roles.Admin && targetRole != Roles.Trainer) return;
+        throw new UnauthorizedAccessException("Nie masz uprawnień do modyfikacji tego użytkownika.");
     }
 
     private static UserDto MapToDto(ApplicationUser user, string role) => new()

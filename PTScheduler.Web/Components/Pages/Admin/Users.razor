@@ -2,8 +2,10 @@
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Admin)]
+@using Microsoft.AspNetCore.Components.Authorization
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = $"{Roles.Admin},{Roles.Trainer}")]
 @inject IUserManagementService UserService
+@inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Nav
 @rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
 
@@ -80,6 +82,7 @@ else
 @code {
     private List<UserDto>? users;
     private string search = string.Empty;
+    private string _callerRole = string.Empty;
 
     private IEnumerable<UserDto> Filtered => users?
         .Where(u => string.IsNullOrEmpty(search) ||
@@ -89,7 +92,16 @@ else
 
     protected override async Task OnInitializedAsync()
     {
-        users = await UserService.GetAllUsersAsync();
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _callerRole = ResolveCallerRole(authState);
+        users = await UserService.GetVisibleUsersAsync(_callerRole);
+    }
+
+    private static string ResolveCallerRole(AuthenticationState state)
+    {
+        if (state.User.IsInRole(Roles.Admin)) return Roles.Admin;
+        if (state.User.IsInRole(Roles.Trainer)) return Roles.Trainer;
+        return string.Empty;
     }
 
     private static string RoleBadge(string role) => role switch

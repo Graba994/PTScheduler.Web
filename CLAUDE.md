@@ -22,6 +22,39 @@ The design-time factory (`ApplicationDbContextFactory`) reads the `PTSCHEDULER_C
 
 There is currently no test project in the solution.
 
+## Deployment (Docker / Portainer / Watchtower)
+
+Production runs as a Docker image built from the root `Dockerfile` (multi-stage: .NET 10 SDK → aspnet runtime, adds `postgresql-client` for `BackupService` `pg_dump`/`psql`, runs as UID 10001, exposes `:8080`, has a curl-based healthcheck).
+
+CI (`.github/workflows/build-image.yml`) builds and pushes to `ghcr.io/graba994/ptscheduler.web:latest` on push to `main`. Watchtower on the target VPS auto-pulls new tags (the app container has `com.centurylinklabs.watchtower.enable=true`).
+
+`docker-compose.yml` is a Portainer-ready stack (Postgres 16 + app) with three volumes:
+
+- `app-data` → `/app/data` — **DataProtection keys** live here (`data/keys/`). If you skip this volume, every deploy rotates keys and invalidates all auth cookies (logs everyone out).
+- `app-uploads` → `/app/wwwroot/uploads` — branding logos etc.
+- `db-data` → Postgres storage.
+
+`Program.cs` applies migrations on startup (`db.Database.MigrateAsync()`) before seeding, so a fresh container against an empty DB just works — no manual `dotnet ef database update` needed in production.
+
+Behind Nginx Proxy Manager: `UseForwardedHeaders` is wired to trust `X-Forwarded-For`/`X-Forwarded-Proto` from ANY proxy (`KnownNetworks`/`KnownProxies` cleared) — required so cookies and auth see the original HTTPS scheme.
+
+## Roles and Authorization
+
+Four roles are declared in `Domain.Constants.Roles`, but responsibilities split as:
+
+- **Admin** — infra/ops: DB connection string (`/admin/settings`), backup/restore (`/admin/backup`). Attribute-gated with `Roles = Roles.Admin`.
+- **Trainer** (Owner of a tenant instance) — business config: branding, users, clients, sessions, packages, intro config. Pages allow `"Admin,Trainer"`.
+- **Subordinate** — assistant of a Trainer (linked via `ApplicationUser.SupervisorId`).
+- **Client** — end user (kursantka).
+
+`UserManagementService` enforces role scoping in code (defense in depth), not only via `[Authorize]`:
+
+- `GetVisibleUsersAsync(callerRole)` hides Admin users from a Trainer caller.
+- `GetAssignableRoles(callerRole)` returns what the caller may assign: Admin gets everything; Trainer gets only `Subordinate`/`Client`.
+- `SetRoleAsync` / `SetLockoutAsync` / `DeleteUserAsync` all take `callerRole` and throw `UnauthorizedAccessException` if a non-Admin tries to modify an Admin or another Trainer.
+
+When adding new admin/owner pages, decide upfront whether they're **infra** (Admin only) or **business** (`Admin,Trainer`) and gate accordingly, both on the page attribute AND in `NavMenu.razor` links.
+
 ## Architecture
 
 Clean / layered architecture targeting **.NET 10**, with four projects wired through the `slnx` solution:

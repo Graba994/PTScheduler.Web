@@ -2,8 +2,10 @@
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Admin)]
+@using Microsoft.AspNetCore.Components.Authorization
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = $"{Roles.Admin},{Roles.Trainer}")]
 @inject IUserManagementService UserService
+@inject AuthenticationStateProvider AuthStateProvider
 @inject NavigationManager Nav
 @rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
 
@@ -38,10 +40,10 @@ else
                         <label class="form-label fw-semibold">Rola</label>
                         <select class="form-select" @bind="selectedRole">
                             <option value="">— brak roli —</option>
-                            <option value="@Roles.Admin">Admin</option>
-                            <option value="@Roles.Trainer">Trainer</option>
-                            <option value="@Roles.Subordinate">Subordinate</option>
-                            <option value="@Roles.Client">Client</option>
+                            @foreach (var role in _assignableRoles)
+                            {
+                                <option value="@role">@role</option>
+                            }
                         </select>
                     </div>
 
@@ -116,10 +118,16 @@ else
     private bool showDeleteConfirm;
     private string message = string.Empty;
     private bool isError;
+    private string _callerRole = string.Empty;
+    private IReadOnlyList<string> _assignableRoles = [];
 
     protected override async Task OnInitializedAsync()
     {
-        user = await UserService.GetUserAsync(Id);
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _callerRole = ResolveCallerRole(authState);
+        _assignableRoles = UserService.GetAssignableRoles(_callerRole);
+
+        user = await UserService.GetUserAsync(Id, _callerRole);
         trainers = await UserService.GetTrainersAsync();
 
         if (user is not null)
@@ -127,6 +135,11 @@ else
             selectedRole = user.Role;
             selectedSupervisorId = user.SupervisorId;
             isLocked = user.IsLockedOut;
+        }
+        else
+        {
+            message = "Nie masz uprawnień do edycji tego użytkownika.";
+            isError = true;
         }
     }
 
@@ -136,16 +149,16 @@ else
         message = string.Empty;
         try
         {
-            await UserService.SetRoleAsync(Id, selectedRole);
+            await UserService.SetRoleAsync(Id, selectedRole, _callerRole);
 
             if (selectedRole == Roles.Subordinate)
                 await UserService.SetSupervisorAsync(Id, selectedSupervisorId);
 
-            await UserService.SetLockoutAsync(Id, isLocked);
+            await UserService.SetLockoutAsync(Id, isLocked, _callerRole);
 
             message = "Zmiany zapisane.";
             isError = false;
-            user = await UserService.GetUserAsync(Id);
+            user = await UserService.GetUserAsync(Id, _callerRole);
             trainers = await UserService.GetTrainersAsync();
         }
         catch (Exception ex)
@@ -165,7 +178,7 @@ else
     {
         try
         {
-            await UserService.DeleteUserAsync(Id);
+            await UserService.DeleteUserAsync(Id, _callerRole);
             Nav.NavigateTo("/admin/users");
         }
         catch (Exception ex)
@@ -174,5 +187,12 @@ else
             isError = true;
             showDeleteConfirm = false;
         }
+    }
+
+    private static string ResolveCallerRole(AuthenticationState state)
+    {
+        if (state.User.IsInRole(Roles.Admin)) return Roles.Admin;
+        if (state.User.IsInRole(Roles.Trainer)) return Roles.Trainer;
+        return string.Empty;
     }
 }
