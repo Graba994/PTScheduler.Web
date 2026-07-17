@@ -1,0 +1,78 @@
+@page "/"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@layout PTScheduler.Web.Components.Layout.PublicLayout
+@attribute [AllowAnonymous]
+@inject ISiteSettingsService SiteSettings
+@inject NavigationManager Nav
+
+<PageTitle>@(string.IsNullOrWhiteSpace(_settings?.HeroHeadline) ? "Witaj" : _settings!.HeroHeadline)</PageTitle>
+
+@if (_settings is not null)
+{
+    <section class="welcome-hero">
+        @if (!string.IsNullOrEmpty(_settings.HeroImageUrl))
+        {
+            <img src="@_settings.HeroImageUrl" alt="" class="welcome-hero-img" />
+        }
+        <div class="welcome-hero-body">
+            <h1 class="welcome-headline">@_settings.HeroHeadline</h1>
+            @if (!string.IsNullOrWhiteSpace(_settings.HeroSubheadline))
+            {
+                <p class="welcome-subheadline">@_settings.HeroSubheadline</p>
+            }
+            <div class="welcome-cta">
+                @if (!string.IsNullOrWhiteSpace(_settings.HeroCtaLabel) && !string.IsNullOrWhiteSpace(_settings.HeroCtaUrl))
+                {
+                    <a href="@_settings.HeroCtaUrl" class="btn btn-primary btn-lg">@_settings.HeroCtaLabel</a>
+                }
+                <a href="/Account/Login" class="btn btn-outline-secondary btn-lg">Mam już konto</a>
+            </div>
+        </div>
+    </section>
+
+    @if (!string.IsNullOrWhiteSpace(_settings.BodyHtml))
+    {
+        <section class="welcome-body container">
+            @((MarkupString)_settings.BodyHtml)
+        </section>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(_settings.ContactEmail))
+    {
+        <section class="welcome-contact container text-center">
+            <a href="mailto:@_settings.ContactEmail">@_settings.ContactEmail</a>
+        </section>
+    }
+}
+
+@code {
+    [CascadingParameter]
+    private Task<AuthenticationState>? AuthStateTask { get; set; }
+
+    private SiteSettingsDto? _settings;
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Logged-in users skip the landing and go straight to their panel.
+        if (AuthStateTask is not null)
+        {
+            var auth = await AuthStateTask;
+            if (auth.User.Identity?.IsAuthenticated == true)
+            {
+                Nav.NavigateTo("/panel", forceLoad: false);
+                return;
+            }
+        }
+
+        _settings = await SiteSettings.GetAsync();
+
+        // Welcome module disabled → send anonymous visitors to the login page.
+        if (!_settings.WelcomeEnabled)
+        {
+            Nav.NavigateTo("Account/Login", forceLoad: false);
+        }
+    }
+}

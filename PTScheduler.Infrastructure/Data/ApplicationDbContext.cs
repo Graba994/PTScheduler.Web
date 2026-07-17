@@ -21,6 +21,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<AcademyLesson> AcademyLessons => Set<AcademyLesson>();
     public DbSet<AcademyEnrollment> AcademyEnrollments => Set<AcademyEnrollment>();
     public DbSet<AcademyLessonProgress> AcademyLessonProgress => Set<AcademyLessonProgress>();
+    public DbSet<SiteSettings> SiteSettings => Set<SiteSettings>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {

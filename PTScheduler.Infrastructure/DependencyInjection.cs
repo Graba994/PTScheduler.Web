@@ -36,6 +36,7 @@ public static class DependencyInjection
         services.AddScoped<IClientService, ClientService>();
         services.AddScoped<IAcademyCatalogService, AcademyCatalogService>();
         services.AddScoped<IAcademyStudentService, AcademyStudentService>();
+        services.AddScoped<ISiteSettingsService, SiteSettingsService>();
 
         return services;
     }

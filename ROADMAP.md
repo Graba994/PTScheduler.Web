@@ -154,17 +154,22 @@ Zaimplementowane:
 - Historia zamówień w panelu Ownera i klientki.
 - **Bez własnych faktur** — Fakturownia webhook jako opcja (2 dni roboty), nie budujemy własnego systemu fakturowego.
 
-### 🔨 Krok 3 — Welcome Page (~3–5 dni)
+### ✅ Krok 3 — Welcome Page (zrobione — czeka na weryfikację CI)
 
-- Statyczna, edytowalna z admina: hero, oferta, "dla kogo / nie dla kogo", "co znajdziesz w środku", opinie, FAQ, CTA.
-- Treść już mamy (z copy Any pod produkt "odNowa").
-- Sekcje jako edytowalne bloki (nie hardkodowane).
+- Publiczny landing pod `/` — **statyczny SSR** (bez `@rendermode`), więc anonimowi goście nie otwierają obwodu SignalR (oszczędność RAM na 4GB VPS).
+- Osobny `PublicLayout` (bez sidebara, górny pasek z logo + „Zaloguj się", stopka).
+- Treść w pełni edytowalna z panelu Ownera (`/admin/site`): hero (nagłówek, podtytuł, obrazek, CTA), dowolny blok HTML, e-mail kontaktowy.
+- Zalogowany użytkownik wchodząc na `/` jest przekierowany do `/panel`. Anonimowy przy wyłączonym module Welcome → `/Account/Login`.
+- **Dashboard przeniesiony z `/` na `/panel`** (Home.razor) — zaktualizowane linki w NavMenu (brand + Dashboard) i mobilnej nawigacji.
 
-### 🔨 Krok 4 — Feature flags + config panel (rozłożone w tle)
+### ✅ Krok 4 — Feature flags + config panel (zrobione — czeka na weryfikację CI)
 
-- Włączanie/wyłączanie modułów per instancja (Welcome / Learning / Commerce / Scheduler).
-- Konfiguracja bramek płatności.
-- Rozbudowa `Branding` (kolory, logo, favicon, teksty stopki, meta tagi).
+- Encja-singleton `SiteSettings` (Id=1) z przełącznikami modułów: Welcome / Scheduler / Academy / Shop. `ISiteSettingsService` get-or-create (leniwe tworzenie wiersza z domyślnymi wartościami).
+- Panel `/admin/site` (`Admin,Trainer`) — przełączniki modułów + edytor treści landingu.
+- `NavMenu` respektuje flagi: wyłączony moduł znika z menu (Kalendarz/Pierwsza wizyta pod `SchedulerEnabled`, Kursy/Zapisy/Moje kursy pod `AcademyEnabled`).
+- Migracja `20260717130000_AddSiteSettings` (ręczna).
+
+**Zostało w tym kroku (na potem):** konfiguracja bramek płatności (przy Commerce), rozbudowa `Branding` (favicon/meta), twarde blokowanie tras wyłączonych modułów (dziś tylko ukrycie w menu — strona nadal osiągalna po URL; docelowo route guard).
 
 ### 🔨 Krok 5 — Scheduler integration
 

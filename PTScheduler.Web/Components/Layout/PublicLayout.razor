@@ -1,0 +1,52 @@
+@inherits LayoutComponentBase
+@inject PTScheduler.Application.Interfaces.IBrandingService BrandingService
+
+<div class="public-shell">
+    <header class="public-topbar">
+        <a href="/" class="public-brand">
+            @if (!string.IsNullOrEmpty(_logoPath))
+            {
+                <img src="@_logoPath" alt="@_companyName" height="36" />
+            }
+            else
+            {
+                <span>@_companyName</span>
+            }
+        </a>
+        <nav class="public-nav">
+            <a href="/Account/Login" class="btn btn-outline-primary btn-sm">
+                <i class="bi bi-box-arrow-in-right me-1"></i>Zaloguj się
+            </a>
+        </nav>
+    </header>
+
+    <main class="public-main">
+        @Body
+    </main>
+
+    <footer class="public-footer">
+        <span>&copy; @DateTime.UtcNow.Year @_companyName</span>
+    </footer>
+</div>
+
+<div id="blazor-error-ui" data-nosnippet>
+    Wystąpił nieoczekiwany błąd.
+    <a href="." class="reload">Odśwież</a>
+    <span class="dismiss">✕</span>
+</div>
+
+@code {
+    private string? _logoPath;
+    private string _companyName = "PTScheduler";
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var branding = await BrandingService.GetAsync();
+            _logoPath = branding.LogoPath;
+            _companyName = branding.CompanyName ?? "PTScheduler";
+        }
+        catch { }
+    }
+}

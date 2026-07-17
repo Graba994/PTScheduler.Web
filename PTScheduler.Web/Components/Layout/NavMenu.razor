@@ -1,10 +1,12 @@
 @implements IDisposable
 @inject NavigationManager NavigationManager
 @inject PTScheduler.Application.Interfaces.IBrandingService BrandingService
+@inject PTScheduler.Application.Interfaces.ISiteSettingsService SiteSettings
+@using PTScheduler.Application.DTOs
 @using PTScheduler.Domain.Constants
 
 <!-- Sidebar brand -->
-<a href="/" class="sidebar-brand">
+<a href="/panel" class="sidebar-brand">
     @if (!string.IsNullOrEmpty(_logoPath))
     {
         <img src="@_logoPath" alt="@_companyName" />
@@ -19,43 +21,61 @@
 <!-- Navigation -->
 <div class="sidebar-nav">
     <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer},{Roles.Subordinate}")">
-        <NavLink class="sidebar-link" href="" Match="NavLinkMatch.All">
+        <NavLink class="sidebar-link" href="panel" Match="NavLinkMatch.All">
             <i class="bi bi-house-fill"></i><span>Dashboard</span>
         </NavLink>
-        <NavLink class="sidebar-link" href="calendar">
-            <i class="bi bi-calendar3"></i><span>Kalendarz</span>
-        </NavLink>
+        @if (_settings?.SchedulerEnabled ?? true)
+        {
+            <NavLink class="sidebar-link" href="calendar">
+                <i class="bi bi-calendar3"></i><span>Kalendarz</span>
+            </NavLink>
+        }
         <NavLink class="sidebar-link" href="clients">
             <i class="bi bi-people-fill"></i><span>Klienci</span>
         </NavLink>
     </AuthorizeView>
 
     <AuthorizeView Roles="@Roles.Client">
-        <NavLink class="sidebar-link" href="my">
-            <i class="bi bi-calendar-week-fill"></i><span>Mój grafik</span>
-        </NavLink>
-        <NavLink class="sidebar-link" href="academy" Match="NavLinkMatch.All">
-            <i class="bi bi-mortarboard-fill"></i><span>Moje kursy</span>
-        </NavLink>
+        @if (_settings?.SchedulerEnabled ?? true)
+        {
+            <NavLink class="sidebar-link" href="my">
+                <i class="bi bi-calendar-week-fill"></i><span>Mój grafik</span>
+            </NavLink>
+        }
+        @if (_settings?.AcademyEnabled ?? true)
+        {
+            <NavLink class="sidebar-link" href="academy" Match="NavLinkMatch.All">
+                <i class="bi bi-mortarboard-fill"></i><span>Moje kursy</span>
+            </NavLink>
+        }
     </AuthorizeView>
 
     <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer}")">
         <div class="sidebar-divider"></div>
-        <NavLink class="sidebar-link" href="trainer/intro-config">
-            <i class="bi bi-person-lines-fill"></i><span>Pierwsza wizyta</span>
-        </NavLink>
-        <NavLink class="sidebar-link" href="academy/courses">
-            <i class="bi bi-mortarboard-fill"></i><span>Kursy</span>
-        </NavLink>
-        <NavLink class="sidebar-link" href="academy/enrollments">
-            <i class="bi bi-person-check-fill"></i><span>Zapisy na kursy</span>
-        </NavLink>
+        @if (_settings?.SchedulerEnabled ?? true)
+        {
+            <NavLink class="sidebar-link" href="trainer/intro-config">
+                <i class="bi bi-person-lines-fill"></i><span>Pierwsza wizyta</span>
+            </NavLink>
+        }
+        @if (_settings?.AcademyEnabled ?? true)
+        {
+            <NavLink class="sidebar-link" href="academy/courses">
+                <i class="bi bi-mortarboard-fill"></i><span>Kursy</span>
+            </NavLink>
+            <NavLink class="sidebar-link" href="academy/enrollments">
+                <i class="bi bi-person-check-fill"></i><span>Zapisy na kursy</span>
+            </NavLink>
+        }
     </AuthorizeView>
 
     <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer}")">
         <div class="sidebar-divider"></div>
         <NavLink class="sidebar-link" href="admin/branding">
             <i class="bi bi-palette-fill"></i><span>Wygląd</span>
+        </NavLink>
+        <NavLink class="sidebar-link" href="admin/site">
+            <i class="bi bi-toggles"></i><span>Moduły i strona</span>
         </NavLink>
         <NavLink class="sidebar-link" href="admin/users">
             <i class="bi bi-shield-person-fill"></i><span>Użytkownicy</span>
@@ -104,6 +124,7 @@
     private string? _logoPath;
     private string _companyName = "PTScheduler";
     private string _initials = "?";
+    private SiteSettingsDto? _settings;
 
     [CascadingParameter]
     private Task<AuthenticationState>? AuthState { get; set; }
@@ -119,6 +140,9 @@
             _logoPath = branding.LogoPath;
             _companyName = branding.CompanyName ?? "PTScheduler";
         }
+        catch { }
+
+        try { _settings = await SiteSettings.GetAsync(); }
         catch { }
 
         if (AuthState is not null)
