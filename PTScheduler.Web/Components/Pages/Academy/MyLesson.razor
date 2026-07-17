@@ -1,0 +1,154 @@
+@page "/academy/lesson/{LessonId:int}"
+@using System.Text.RegularExpressions
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
+@using Microsoft.AspNetCore.Components.Authorization
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Client)]
+@inject IAcademyStudentService Student
+@inject AuthenticationStateProvider AuthStateProvider
+@inject NavigationManager Nav
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>@(lesson?.Title ?? "Lekcja")</PageTitle>
+
+@if (loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (lesson is null)
+{
+    <div class="alert alert-warning mt-4">
+        <i class="bi bi-lock-fill me-2"></i>Nie masz dostępu do tej lekcji lub dostęp wygasł.
+        <a href="/academy" class="alert-link">Wróć do moich kursów</a>.
+    </div>
+}
+else
+{
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="/academy">Moje kursy</a></li>
+            <li class="breadcrumb-item"><a href="@($"/academy/{lesson.CourseId}")">@lesson.CourseTitle</a></li>
+            <li class="breadcrumb-item active">@lesson.Title</li>
+        </ol>
+    </nav>
+
+    <h3 class="mb-3">@lesson.Title</h3>
+
+    @{
+        var embedUrl = BuildEmbedUrl(lesson.VideoProvider, lesson.VideoRef);
+    }
+    @if (embedUrl is not null)
+    {
+        <div class="ratio ratio-16x9 mb-4 rounded overflow-hidden shadow-sm">
+            <iframe src="@embedUrl" allow="autoplay; fullscreen" allowfullscreen style="border:0"></iframe>
+        </div>
+    }
+    else if (lesson.VideoProvider != VideoProvider.None)
+    {
+        <div class="alert alert-secondary">Wideo jest chwilowo niedostępne.</div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(lesson.Content))
+    {
+        <div class="card mb-4">
+            <div class="card-body lesson-content">
+                @((MarkupString)lesson.Content)
+            </div>
+        </div>
+    }
+
+    @if (!string.IsNullOrWhiteSpace(lesson.WorkbookUrl))
+    {
+        <a href="@lesson.WorkbookUrl" target="_blank" rel="noopener noreferrer" class="btn btn-outline-primary mb-4">
+            <i class="bi bi-file-earmark-arrow-down me-1"></i>Pobierz workbook / materiały
+        </a>
+    }
+
+    <div class="d-flex justify-content-between align-items-center border-top pt-3">
+        <div>
+            @if (lesson.PreviousLessonId.HasValue)
+            {
+                <a href="@($"/academy/lesson/{lesson.PreviousLessonId}")" class="btn btn-outline-secondary">
+                    <i class="bi bi-arrow-left me-1"></i>Poprzednia
+                </a>
+            }
+        </div>
+
+        <button class="btn @(lesson.IsCompleted ? "btn-success" : "btn-outline-success")" @onclick="ToggleComplete" disabled="@busy">
+            @if (lesson.IsCompleted)
+            {
+                <i class="bi bi-check-circle-fill me-1"></i><span>Ukończona</span>
+            }
+            else
+            {
+                <i class="bi bi-circle me-1"></i><span>Oznacz jako ukończoną</span>
+            }
+        </button>
+
+        <div>
+            @if (lesson.NextLessonId.HasValue)
+            {
+                <a href="@($"/academy/lesson/{lesson.NextLessonId}")" class="btn btn-outline-primary">
+                    Następna<i class="bi bi-arrow-right ms-1"></i>
+                </a>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int LessonId { get; set; }
+
+    private MyLessonDetailDto? lesson;
+    private bool loading = true;
+    private bool busy;
+    private string _userId = string.Empty;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        loading = true;
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        _userId = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        lesson = await Student.GetLessonForStudentAsync(_userId, LessonId);
+        loading = false;
+    }
+
+    private async Task ToggleComplete()
+    {
+        if (lesson is null) return;
+        busy = true;
+        try
+        {
+            var newState = !lesson.IsCompleted;
+            if (await Student.SetLessonCompletedAsync(_userId, LessonId, newState))
+                lesson.IsCompleted = newState;
+        }
+        finally { busy = false; }
+    }
+
+    // Build a safe iframe URL. VideoRef is charset-whitelisted so it cannot break
+    // out of the src attribute or inject a different origin.
+    private static string? BuildEmbedUrl(VideoProvider provider, string? vref)
+    {
+        if (string.IsNullOrWhiteSpace(vref)) return null;
+        vref = vref.Trim();
+
+        return provider switch
+        {
+            VideoProvider.GoogleDrive when IsSafeId(vref) =>
+                $"https://drive.google.com/file/d/{vref}/preview",
+            VideoProvider.Vimeo when IsSafeId(vref) =>
+                $"https://player.vimeo.com/video/{vref}",
+            VideoProvider.BunnyStream when IsSafeBunnyRef(vref) =>
+                $"https://iframe.mediadelivery.net/embed/{vref}",
+            _ => null
+        };
+    }
+
+    private static bool IsSafeId(string s) => Regex.IsMatch(s, "^[A-Za-z0-9_-]+$");
+
+    // Bunny ref may be "libraryId/videoGuid".
+    private static bool IsSafeBunnyRef(string s) => Regex.IsMatch(s, "^[A-Za-z0-9_/-]+$");
+}

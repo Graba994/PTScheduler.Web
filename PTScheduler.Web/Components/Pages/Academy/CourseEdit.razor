@@ -1,0 +1,234 @@
+@page "/academy/courses/{Id:int}"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = $"{Roles.Admin},{Roles.Trainer}")]
+@inject IAcademyCatalogService Catalog
+@inject NavigationManager Nav
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Edycja kursu</PageTitle>
+
+<nav aria-label="breadcrumb" class="mb-3">
+    <ol class="breadcrumb">
+        <li class="breadcrumb-item"><a href="/academy/courses">Kursy</a></li>
+        <li class="breadcrumb-item active">@(course?.Title ?? "Edycja")</li>
+    </ol>
+</nav>
+
+@if (course is null)
+{
+    <p><span class="spinner-border spinner-border-sm me-2" />Ładowanie...</p>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="alert @(isError ? "alert-danger" : "alert-success") py-2">@message</div>
+    }
+
+    <div class="row g-4">
+        <!-- Course metadata -->
+        <div class="col-lg-5">
+            <div class="card shadow-sm">
+                <div class="card-header fw-semibold"><i class="bi bi-info-circle me-2"></i>Dane kursu</div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Tytuł</label>
+                        <input class="form-control" @bind="course.Title" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Opis</label>
+                        <textarea class="form-control" rows="3" @bind="course.Description"></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">URL okładki <span class="text-muted small">(opcjonalnie)</span></label>
+                        <input class="form-control" @bind="course.CoverImageUrl" placeholder="https://..." />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Domyślny dostęp (dni)</label>
+                        <input type="number" class="form-control" style="max-width:160px" @bind="course.DefaultAccessDays"
+                               placeholder="np. 183" />
+                        <div class="form-text">Puste = dostęp bezterminowy. 6 miesięcy ≈ 183 dni.</div>
+                    </div>
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="pub" @bind="course.IsPublished" />
+                        <label class="form-check-label" for="pub">Opublikowany</label>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary" @onclick="SaveCourse" disabled="@busy">
+                            <i class="bi bi-floppy me-1"></i>Zapisz
+                        </button>
+                        <button class="btn btn-outline-danger" @onclick="DeleteCourse" disabled="@busy">
+                            <i class="bi bi-trash me-1"></i>Usuń kurs
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Modules + lessons -->
+        <div class="col-lg-7">
+            <div class="card shadow-sm">
+                <div class="card-header d-flex justify-content-between align-items-center">
+                    <span class="fw-semibold"><i class="bi bi-collection me-2"></i>Moduły i lekcje</span>
+                    <button class="btn btn-sm btn-outline-primary" @onclick="() => showAddModule = !showAddModule">
+                        <i class="bi bi-plus-lg me-1"></i>Moduł
+                    </button>
+                </div>
+                <div class="card-body">
+                    @if (showAddModule)
+                    {
+                        <div class="input-group input-group-sm mb-3">
+                            <input class="form-control" placeholder="Nazwa modułu" @bind="newModuleTitle" />
+                            <button class="btn btn-success" @onclick="AddModule" disabled="@string.IsNullOrWhiteSpace(newModuleTitle)">Dodaj</button>
+                        </div>
+                    }
+
+                    @if (modules.Count == 0)
+                    {
+                        <p class="text-muted small">Brak modułów. Dodaj pierwszy moduł, aby zacząć układać kurs.</p>
+                    }
+                    else
+                    {
+                        @foreach (var m in modules)
+                        {
+                            <div class="border rounded mb-3">
+                                <div class="d-flex justify-content-between align-items-center bg-light px-3 py-2">
+                                    <span class="fw-semibold">
+                                        <i class="bi bi-folder me-2"></i>@m.Title
+                                        <span class="text-muted small">(@m.Lessons.Count)</span>
+                                    </span>
+                                    <div class="btn-group btn-group-sm">
+                                        <button class="btn btn-outline-primary" @onclick="() => ShowAddLesson(m.Id)">
+                                            <i class="bi bi-plus"></i> Lekcja
+                                        </button>
+                                        <button class="btn btn-outline-danger" @onclick="() => DeleteModule(m.Id)">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    </div>
+                                </div>
+                                <ul class="list-group list-group-flush">
+                                    @foreach (var l in m.Lessons)
+                                    {
+                                        <li class="list-group-item d-flex justify-content-between align-items-center">
+                                            <span>
+                                                <i class="bi bi-play-circle me-2 text-muted"></i>@l.Title
+                                                @if (l.VideoProvider != VideoProvider.None)
+                                                {
+                                                    <span class="badge bg-info text-dark ms-1">@l.VideoProvider</span>
+                                                }
+                                            </span>
+                                            <a href="@($"/academy/lessons/{l.Id}")" class="btn btn-sm btn-outline-secondary">
+                                                <i class="bi bi-pencil"></i>
+                                            </a>
+                                        </li>
+                                    }
+                                    @if (addLessonModuleId == m.Id)
+                                    {
+                                        <li class="list-group-item">
+                                            <div class="input-group input-group-sm">
+                                                <input class="form-control" placeholder="Tytuł lekcji" @bind="newLessonTitle" />
+                                                <button class="btn btn-success" @onclick="() => AddLesson(m.Id)"
+                                                        disabled="@string.IsNullOrWhiteSpace(newLessonTitle)">Dodaj</button>
+                                                <button class="btn btn-outline-secondary" @onclick="() => addLessonModuleId = null">Anuluj</button>
+                                            </div>
+                                        </li>
+                                    }
+                                </ul>
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private AcademyCourseDto? course;
+    private List<AcademyModuleDto> modules = [];
+    private bool busy;
+    private string message = string.Empty;
+    private bool isError;
+
+    private bool showAddModule;
+    private string newModuleTitle = string.Empty;
+    private int? addLessonModuleId;
+    private string newLessonTitle = string.Empty;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        course = await Catalog.GetCourseAsync(Id);
+        if (course is not null)
+            modules = await Catalog.GetModulesAsync(Id);
+    }
+
+    private async Task SaveCourse()
+    {
+        if (course is null) return;
+        busy = true; message = string.Empty;
+        try
+        {
+            await Catalog.UpdateCourseAsync(course);
+            message = "Zapisano."; isError = false;
+        }
+        catch (Exception ex) { message = $"Błąd: {ex.Message}"; isError = true; }
+        finally { busy = false; }
+    }
+
+    private async Task DeleteCourse()
+    {
+        busy = true;
+        try
+        {
+            await Catalog.DeleteCourseAsync(Id);
+            Nav.NavigateTo("/academy/courses");
+        }
+        finally { busy = false; }
+    }
+
+    private async Task AddModule()
+    {
+        await Catalog.CreateModuleAsync(new AcademyModuleDto
+        {
+            CourseId = Id,
+            Title = newModuleTitle.Trim(),
+            SortOrder = modules.Count
+        });
+        newModuleTitle = string.Empty;
+        showAddModule = false;
+        modules = await Catalog.GetModulesAsync(Id);
+    }
+
+    private async Task DeleteModule(int moduleId)
+    {
+        await Catalog.DeleteModuleAsync(moduleId);
+        modules = await Catalog.GetModulesAsync(Id);
+    }
+
+    private void ShowAddLesson(int moduleId)
+    {
+        newLessonTitle = string.Empty;
+        addLessonModuleId = moduleId;
+    }
+
+    private async Task AddLesson(int moduleId)
+    {
+        var module = modules.First(m => m.Id == moduleId);
+        await Catalog.CreateLessonAsync(new AcademyLessonDto
+        {
+            ModuleId = moduleId,
+            Title = newLessonTitle.Trim(),
+            SortOrder = module.Lessons.Count
+        });
+        addLessonModuleId = null;
+        newLessonTitle = string.Empty;
+        modules = await Catalog.GetModulesAsync(Id);
+    }
+}

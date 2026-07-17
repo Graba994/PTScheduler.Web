@@ -1,0 +1,205 @@
+@page "/academy/enrollments"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@using Microsoft.AspNetCore.Components.Authorization
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = $"{Roles.Admin},{Roles.Trainer}")]
+@inject IAcademyCatalogService Catalog
+@inject IUserManagementService UserService
+@inject AuthenticationStateProvider AuthStateProvider
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Zapisy na kursy</PageTitle>
+
+<div class="d-flex align-items-center gap-2 mb-3">
+    <i class="bi bi-person-check-fill fs-4 text-primary"></i>
+    <h2 class="mb-0">Zapisy na kursy</h2>
+</div>
+<hr />
+
+@if (courses is null)
+{
+    <p><span class="spinner-border spinner-border-sm me-2" />Ładowanie...</p>
+}
+else if (courses.Count == 0)
+{
+    <div class="alert alert-info">Najpierw utwórz kurs, aby zapisywać kursantki.</div>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="alert @(isError ? "alert-danger" : "alert-success") py-2">@message</div>
+    }
+
+    <div class="card mb-4">
+        <div class="card-body">
+            <h5 class="card-title">Nadaj dostęp</h5>
+            <div class="row g-2 align-items-end">
+                <div class="col-md-4">
+                    <label class="form-label">Kurs</label>
+                    <select class="form-select" @bind="selectedCourseId">
+                        @foreach (var c in courses)
+                        {
+                            <option value="@c.Id">@c.Title</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label">Kursantka</label>
+                    <select class="form-select" @bind="selectedUserId">
+                        <option value="">— wybierz —</option>
+                        @foreach (var u in students)
+                        {
+                            <option value="@u.Id">@u.FullName (@u.Email)</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label">Wygasa <span class="text-muted small">(opcj.)</span></label>
+                    <input type="date" class="form-control" @bind="expiryOverride" />
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-success w-100" @onclick="Enroll"
+                            disabled="@(string.IsNullOrEmpty(selectedUserId) || busy)">
+                        <i class="bi bi-plus-lg me-1"></i>Zapisz
+                    </button>
+                </div>
+            </div>
+            <div class="form-text mt-2">
+                Puste „Wygasa” = użyj domyślnego dostępu kursu (jeśli ustawiony) lub bezterminowo.
+            </div>
+        </div>
+    </div>
+
+    <h5>Aktywne i historyczne zapisy</h5>
+    @if (enrollments is null)
+    {
+        <p><span class="spinner-border spinner-border-sm me-2" />Ładowanie...</p>
+    }
+    else if (enrollments.Count == 0)
+    {
+        <p class="text-muted">Brak zapisów.</p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead class="table-light">
+                    <tr>
+                        <th>Kursantka</th>
+                        <th>Kurs</th>
+                        <th>Od</th>
+                        <th>Wygasa</th>
+                        <th>Status</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var e in enrollments)
+                    {
+                        <tr>
+                            <td>
+                                <div class="fw-semibold">@e.StudentName</div>
+                                <small class="text-muted">@e.StudentEmail</small>
+                            </td>
+                            <td>@e.CourseTitle</td>
+                            <td><small>@e.EnrolledAt.ToString("dd.MM.yyyy")</small></td>
+                            <td><small>@(e.ExpiresAt?.ToString("dd.MM.yyyy") ?? "bezterminowo")</small></td>
+                            <td>
+                                @if (e.IsActive)
+                                {
+                                    <span class="badge bg-success">Aktywny</span>
+                                }
+                                else if (e.IsRevoked)
+                                {
+                                    <span class="badge bg-danger">Cofnięty</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">Wygasł</span>
+                                }
+                            </td>
+                            <td class="text-end">
+                                <div class="btn-group btn-group-sm">
+                                    @if (e.IsRevoked)
+                                    {
+                                        <button class="btn btn-outline-success" @onclick="() => Revoke(e.Id, false)">Przywróć</button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-outline-warning" @onclick="() => Revoke(e.Id, true)">Cofnij</button>
+                                    }
+                                    <button class="btn btn-outline-danger" @onclick="() => DeleteEnrollment(e.Id)">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@code {
+    private List<AcademyCourseDto>? courses;
+    private List<UserDto> students = [];
+    private List<AcademyEnrollmentDto>? enrollments;
+
+    private int selectedCourseId;
+    private string selectedUserId = string.Empty;
+    private DateTime? expiryOverride;
+
+    private bool busy;
+    private string message = string.Empty;
+    private bool isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var callerRole = authState.User.IsInRole(Roles.Admin) ? Roles.Admin
+            : authState.User.IsInRole(Roles.Trainer) ? Roles.Trainer : string.Empty;
+
+        courses = await Catalog.GetCoursesAsync();
+        if (courses.Count > 0) selectedCourseId = courses[0].Id;
+
+        var allUsers = await UserService.GetVisibleUsersAsync(callerRole);
+        students = allUsers.Where(u => u.Role == Roles.Client).ToList();
+
+        await LoadEnrollments();
+    }
+
+    private async Task LoadEnrollments() => enrollments = await Catalog.GetEnrollmentsAsync();
+
+    private async Task Enroll()
+    {
+        busy = true; message = string.Empty;
+        try
+        {
+            DateTime? expiryUtc = expiryOverride.HasValue
+                ? DateTime.SpecifyKind(expiryOverride.Value, DateTimeKind.Utc)
+                : null;
+            await Catalog.EnrollAsync(selectedCourseId, selectedUserId, expiryUtc);
+            message = "Dostęp nadany."; isError = false;
+            selectedUserId = string.Empty;
+            expiryOverride = null;
+            await LoadEnrollments();
+        }
+        catch (Exception ex) { message = $"Błąd: {ex.Message}"; isError = true; }
+        finally { busy = false; }
+    }
+
+    private async Task Revoke(int id, bool revoked)
+    {
+        await Catalog.RevokeEnrollmentAsync(id, revoked);
+        await LoadEnrollments();
+    }
+
+    private async Task DeleteEnrollment(int id)
+    {
+        await Catalog.DeleteEnrollmentAsync(id);
+        await LoadEnrollments();
+    }
+}

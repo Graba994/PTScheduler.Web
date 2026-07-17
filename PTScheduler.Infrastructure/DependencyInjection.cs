@@ -34,6 +34,8 @@ public static class DependencyInjection
         services.AddScoped<IIntroSessionService, IntroSessionService>();
         services.AddScoped<ISessionService, SessionService>();
         services.AddScoped<IClientService, ClientService>();
+        services.AddScoped<IAcademyCatalogService, AcademyCatalogService>();
+        services.AddScoped<IAcademyStudentService, AcademyStudentService>();
 
         return services;
     }

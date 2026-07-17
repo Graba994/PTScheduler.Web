@@ -1,0 +1,96 @@
+@page "/academy/{CourseId:int}"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@using Microsoft.AspNetCore.Components.Authorization
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Client)]
+@inject IAcademyStudentService Student
+@inject AuthenticationStateProvider AuthStateProvider
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>@(course?.Title ?? "Kurs")</PageTitle>
+
+@if (loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (course is null)
+{
+    <div class="alert alert-warning mt-4">
+        <i class="bi bi-lock-fill me-2"></i>Nie masz dostępu do tego kursu lub dostęp wygasł.
+        <a href="/academy" class="alert-link">Wróć do moich kursów</a>.
+    </div>
+}
+else
+{
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="/academy">Moje kursy</a></li>
+            <li class="breadcrumb-item active">@course.Title</li>
+        </ol>
+    </nav>
+
+    <h2>@course.Title</h2>
+    @if (!string.IsNullOrWhiteSpace(course.Description))
+    {
+        <p class="text-muted">@course.Description</p>
+    }
+
+    var pct = course.TotalLessons == 0 ? 0 : (int)Math.Round(100.0 * course.CompletedLessons / course.TotalLessons);
+    <div class="mb-4" style="max-width:420px">
+        <div class="d-flex justify-content-between small text-muted mb-1">
+            <span>Twój postęp</span>
+            <span>@course.CompletedLessons / @course.TotalLessons lekcji</span>
+        </div>
+        <div class="progress" style="height:10px">
+            <div class="progress-bar bg-success" style="width:@(pct)%"></div>
+        </div>
+    </div>
+
+    @foreach (var m in course.Modules)
+    {
+        <div class="card mb-3 shadow-sm">
+            <div class="card-header fw-semibold"><i class="bi bi-folder me-2"></i>@m.Title</div>
+            <ul class="list-group list-group-flush">
+                @foreach (var l in m.Lessons)
+                {
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        <a href="@($"/academy/lesson/{l.LessonId}")" class="text-decoration-none">
+                            @if (l.IsCompleted)
+                            {
+                                <i class="bi bi-check-circle-fill text-success me-2"></i>
+                            }
+                            else
+                            {
+                                <i class="bi bi-circle me-2 text-muted"></i>
+                            }
+                            @l.Title
+                        </a>
+                        <a href="@($"/academy/lesson/{l.LessonId}")" class="btn btn-sm btn-outline-primary">
+                            <i class="bi bi-play-fill"></i>
+                        </a>
+                    </li>
+                }
+                @if (m.Lessons.Count == 0)
+                {
+                    <li class="list-group-item text-muted small">Brak lekcji w tym module.</li>
+                }
+            </ul>
+        </div>
+    }
+}
+
+@code {
+    [Parameter] public int CourseId { get; set; }
+
+    private MyCourseDto? course;
+    private bool loading = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var authState = await AuthStateProvider.GetAuthenticationStateAsync();
+        var userId = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        course = await Student.GetMyCourseAsync(userId, CourseId);
+        loading = false;
+    }
+}

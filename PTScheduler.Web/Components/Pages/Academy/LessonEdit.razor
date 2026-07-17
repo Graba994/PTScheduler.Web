@@ -1,0 +1,201 @@
+@page "/academy/lessons/{Id:int}"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = $"{Roles.Admin},{Roles.Trainer}")]
+@inject IAcademyCatalogService Catalog
+@inject NavigationManager Nav
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Edycja lekcji</PageTitle>
+
+@if (lesson is null)
+{
+    <p><span class="spinner-border spinner-border-sm me-2" />Ładowanie...</p>
+}
+else
+{
+    <nav aria-label="breadcrumb" class="mb-3">
+        <ol class="breadcrumb">
+            <li class="breadcrumb-item"><a href="/academy/courses">Kursy</a></li>
+            <li class="breadcrumb-item"><a href="@($"/academy/courses/{courseId}")">Kurs</a></li>
+            <li class="breadcrumb-item active">@lesson.Title</li>
+        </ol>
+    </nav>
+
+    @if (!string.IsNullOrEmpty(message))
+    {
+        <div class="alert @(isError ? "alert-danger" : "alert-success") py-2">@message</div>
+    }
+
+    <div class="row g-4">
+        <div class="col-lg-7">
+            <div class="card shadow-sm">
+                <div class="card-header fw-semibold"><i class="bi bi-play-circle me-2"></i>Treść lekcji</div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Tytuł</label>
+                        <input class="form-control" @bind="lesson.Title" />
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Źródło wideo</label>
+                        <select class="form-select" @bind="lesson.VideoProvider">
+                            <option value="@VideoProvider.None">Brak wideo</option>
+                            <option value="@VideoProvider.GoogleDrive">Google Drive</option>
+                            <option value="@VideoProvider.BunnyStream">Bunny.net Stream</option>
+                            <option value="@VideoProvider.Vimeo">Vimeo</option>
+                        </select>
+                    </div>
+
+                    @if (lesson.VideoProvider != VideoProvider.None)
+                    {
+                        <div class="mb-3">
+                            <label class="form-label">
+                                @(lesson.VideoProvider == VideoProvider.GoogleDrive ? "ID pliku Google Drive (lub pełny link)" :
+                                  lesson.VideoProvider == VideoProvider.BunnyStream ? "GUID wideo Bunny" : "ID wideo Vimeo")
+                            </label>
+                            <input class="form-control font-monospace" @bind="lesson.VideoRef"
+                                   placeholder="@RefPlaceholder()" />
+                            <div class="form-text">@RefHint()</div>
+                        </div>
+                    }
+
+                    <div class="mb-3">
+                        <label class="form-label">Treść tekstowa (HTML dozwolony)</label>
+                        <textarea class="form-control" rows="8" @bind="lesson.Content"></textarea>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-label">Link do workbooka / PDF <span class="text-muted small">(opcjonalnie)</span></label>
+                        <input class="form-control" @bind="lesson.WorkbookUrl" placeholder="https://..." />
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary" @onclick="Save" disabled="@busy">
+                            <i class="bi bi-floppy me-1"></i>Zapisz
+                        </button>
+                        <button class="btn btn-outline-danger" @onclick="Delete" disabled="@busy">
+                            <i class="bi bi-trash me-1"></i>Usuń lekcję
+                        </button>
+                        <a href="@($"/academy/courses/{courseId}")" class="btn btn-outline-secondary">Wróć do kursu</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="card shadow-sm border-info">
+                <div class="card-header bg-info bg-opacity-10 fw-semibold text-info">
+                    <i class="bi bi-eye me-2"></i>Podgląd wideo
+                </div>
+                <div class="card-body">
+                    @if (lesson.VideoProvider != VideoProvider.None && !string.IsNullOrWhiteSpace(lesson.VideoRef))
+                    {
+                        <div class="ratio ratio-16x9">
+                            @{
+                                var url = PreviewUrl(lesson.VideoProvider, lesson.VideoRef!);
+                            }
+                            @if (url is not null)
+                            {
+                                <iframe src="@url" allow="autoplay; fullscreen" allowfullscreen style="border:0;width:100%;height:100%"></iframe>
+                            }
+                            else
+                            {
+                                <div class="text-muted small p-3">Zapisz lekcję, aby odświeżyć podgląd.</div>
+                            }
+                        </div>
+                        <div class="form-text mt-2">Podgląd używa tego samego iframe co panel kursantki.</div>
+                    }
+                    else
+                    {
+                        <p class="text-muted small mb-0">Wybierz źródło wideo i podaj identyfikator, aby zobaczyć podgląd.</p>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private AcademyLessonDto? lesson;
+    private int courseId;
+    private bool busy;
+    private string message = string.Empty;
+    private bool isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        lesson = await Catalog.GetLessonAsync(Id);
+        await ResolveCourseId();
+    }
+
+    private async Task ResolveCourseId()
+    {
+        if (lesson is null) return;
+        // Find the course that owns this lesson's module.
+        var courses = await Catalog.GetCoursesAsync();
+        foreach (var c in courses)
+        {
+            var mods = await Catalog.GetModulesAsync(c.Id);
+            if (mods.Any(m => m.Id == lesson.ModuleId))
+            {
+                courseId = c.Id;
+                return;
+            }
+        }
+    }
+
+    private async Task Save()
+    {
+        if (lesson is null) return;
+        busy = true; message = string.Empty;
+        try
+        {
+            await Catalog.UpdateLessonAsync(lesson);
+            lesson = await Catalog.GetLessonAsync(Id);
+            message = "Zapisano."; isError = false;
+        }
+        catch (Exception ex) { message = $"Błąd: {ex.Message}"; isError = true; }
+        finally { busy = false; }
+    }
+
+    private async Task Delete()
+    {
+        if (lesson is null) return;
+        busy = true;
+        try
+        {
+            await Catalog.DeleteLessonAsync(Id);
+            Nav.NavigateTo($"/academy/courses/{courseId}");
+        }
+        finally { busy = false; }
+    }
+
+    private string RefPlaceholder() => lesson!.VideoProvider switch
+    {
+        VideoProvider.GoogleDrive => "1A2B3C4D5E6F...  lub  https://drive.google.com/file/d/1A2B.../view",
+        VideoProvider.BunnyStream => "np. 8f8b1a2c-3d4e-...",
+        VideoProvider.Vimeo => "np. 123456789",
+        _ => ""
+    };
+
+    private string RefHint() => lesson!.VideoProvider switch
+    {
+        VideoProvider.GoogleDrive => "Wklej pełny link „Każdy z linkiem” — wyciągniemy samo ID pliku.",
+        VideoProvider.BunnyStream => "GUID wideo z biblioteki Bunny Stream.",
+        VideoProvider.Vimeo => "Numeryczne ID filmu Vimeo.",
+        _ => ""
+    };
+
+    private static string? PreviewUrl(VideoProvider provider, string vref) => provider switch
+    {
+        VideoProvider.GoogleDrive => $"https://drive.google.com/file/d/{vref}/preview",
+        VideoProvider.Vimeo => $"https://player.vimeo.com/video/{vref}",
+        // Bunny embed needs the library id too; preview only reliable once configured — skip here.
+        _ => null
+    };
+}

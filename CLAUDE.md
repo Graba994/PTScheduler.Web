@@ -55,6 +55,19 @@ Four roles are declared in `Domain.Constants.Roles`, but responsibilities split 
 
 When adding new admin/owner pages, decide upfront whether they're **infra** (Admin only) or **business** (`Admin,Trainer`) and gate accordingly, both on the page attribute AND in `NavMenu.razor` links.
 
+## Learning Portal (Academy)
+
+Course hierarchy `AcademyCourse → AcademyModule → AcademyLesson`, plus `AcademyEnrollment` (access grant per user×course, unique index on `(ApplicationUserId, CourseId)`, `ExpiresAt` + `IsRevoked`, computed `IsActive`) and `AcademyLessonProgress` (per user×lesson, unique index). Split into two services:
+
+- `IAcademyCatalogService` — Owner-facing CRUD (courses/modules/lessons/enrollments). Owner pages under `Components/Pages/Academy/` gated `Admin,Trainer`: `/academy/courses`, `/academy/courses/{id}`, `/academy/lessons/{id}`, `/academy/enrollments`.
+- `IAcademyStudentService` — student-facing; **every method takes `applicationUserId` and re-checks active enrollment itself** (never trust the page). Client pages gated `Client`: `/academy`, `/academy/{courseId}`, `/academy/lesson/{id}`.
+
+Video is embedded via `<iframe>` and streams from the provider's CDN (Google Drive / Bunny / Vimeo), never through the VPS. `AcademyLesson.VideoProvider` (enum) + `VideoRef` (id/guid only, not a full URL). When rendering the iframe `src`, `VideoRef` is **charset-whitelisted** (`^[A-Za-z0-9_-]+$`, Bunny also allows `/`) so it can't inject a foreign origin — keep that guard if you touch the viewer. `AcademyCatalogService.NormalizeVideoRef` extracts the bare id from a pasted Google Drive URL on save.
+
+Lesson text `Content` is rendered as `MarkupString` (raw HTML) — safe only because the author is a trusted Trainer in a single-tenant instance. If lesson content ever comes from an untrusted source, add HTML sanitization.
+
+Hand-writing EF migrations: there is no `dotnet` in the dev container, so migrations here (e.g. `20260717120000_AddAcademy`) are authored by hand — migration file + `.Designer.cs` + updated `ApplicationDbContextModelSnapshot.cs`. Runtime `MigrateAsync()` only runs `Up()`, but keep the snapshot correct so the next real `dotnet ef` diff is clean.
+
 ## Architecture
 
 Clean / layered architecture targeting **.NET 10**, with four projects wired through the `slnx` solution:

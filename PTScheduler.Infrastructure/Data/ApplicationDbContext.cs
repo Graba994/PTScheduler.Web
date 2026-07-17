@@ -16,6 +16,12 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<IntroSessionConfig> IntroSessionConfigs => Set<IntroSessionConfig>();
     public DbSet<AppBranding> AppBrandings => Set<AppBranding>();
 
+    public DbSet<AcademyCourse> AcademyCourses => Set<AcademyCourse>();
+    public DbSet<AcademyModule> AcademyModules => Set<AcademyModule>();
+    public DbSet<AcademyLesson> AcademyLessons => Set<AcademyLesson>();
+    public DbSet<AcademyEnrollment> AcademyEnrollments => Set<AcademyEnrollment>();
+    public DbSet<AcademyLessonProgress> AcademyLessonProgress => Set<AcademyLessonProgress>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -35,5 +41,37 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             .WithMany(p => p.Sessions)
             .HasForeignKey(s => s.PackageId)
             .OnDelete(DeleteBehavior.SetNull);
+
+        builder.Entity<AcademyModule>()
+            .HasOne(m => m.Course)
+            .WithMany(c => c.Modules)
+            .HasForeignKey(m => m.CourseId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<AcademyLesson>()
+            .HasOne(l => l.Module)
+            .WithMany(m => m.Lessons)
+            .HasForeignKey(l => l.ModuleId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<AcademyEnrollment>()
+            .HasOne(e => e.Course)
+            .WithMany(c => c.Enrollments)
+            .HasForeignKey(e => e.CourseId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<AcademyEnrollment>()
+            .HasIndex(e => new { e.ApplicationUserId, e.CourseId })
+            .IsUnique();
+
+        builder.Entity<AcademyLessonProgress>()
+            .HasOne(p => p.Lesson)
+            .WithMany(l => l.Progress)
+            .HasForeignKey(p => p.LessonId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<AcademyLessonProgress>()
+            .HasIndex(p => new { p.ApplicationUserId, p.LessonId })
+            .IsUnique();
     }
 }

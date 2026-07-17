@@ -127,19 +127,24 @@ Commit: `2291134`
 - `.github/workflows/build-image.yml` — build i push do GHCR na `main`.
 - `docker-compose.yml` gotowy do wklejenia w Portainer stack.
 
-### 🔨 Krok 1 — Learning Portal MVP (~2–3 tyg)
+### ✅ Krok 1 — Learning Portal MVP (zrobione — czeka na weryfikację CI)
 
 **Cel:** trenerka wrzuca 22 lekcje, klientki oglądają, widać postępy, dostęp wygasa po X miesiącach.
 
-- Model danych: `AcademyCourse` → `AcademyModule` → `AcademyLesson`.
-- `AcademyEnrollment` — kto ma dostęp do jakiego kursu, `EnrolledAt`, `ExpiresAt`.
-- `AcademyProgress` — per klientka per lekcja (obejrzana/nie).
-- CRUD w panelu Ownera: kursy, moduły, lekcje (z wyborem `VideoProvider` + `VideoRef`), załączniki PDF.
-- Panel klientki: lista dostępnych kursów, drzewko modułów/lekcji, odtwarzacz (iframe), pasek postępu.
-- Wygasanie dostępu — logika w `AcademyEnrollment.IsActive()`.
-- Ręczne nadawanie dostępu z panelu Ownera (przed integracją z Commerce).
+Zaimplementowane:
 
-**Otwarte pytanie (do decyzji):** czy jedna klientka może mieć wiele kursów z niezależnymi datami wygaśnięcia, czy zawsze "kupujesz mentoring → dostajesz cały pakiet"?
+- **Domena:** `AcademyCourse` → `AcademyModule` → `AcademyLesson`, `AcademyEnrollment` (dostęp + `ExpiresAt` + `IsRevoked`), `AcademyLessonProgress` (per klientka/lekcja). Enum `VideoProvider` (None/GoogleDrive/BunnyStream/Vimeo).
+- **Application:** DTO + `IAcademyCatalogService` (Owner) i `IAcademyStudentService` (kursantka, każda metoda egzekwuje dostęp po `applicationUserId`).
+- **Infrastructure:** DbSets + Fluent config (kaskady, unikalne indeksy `(User,Course)` i `(User,Lesson)`), oba serwisy, rejestracja w DI. Migracja `20260717120000_AddAcademy` napisana ręcznie (brak `dotnet` w środowisku dev — CI to zweryfikuje).
+- **Owner UI:** `/academy/courses` (lista+nowy), `/academy/courses/{id}` (dane kursu + moduły/lekcje inline), `/academy/lessons/{id}` (edytor lekcji z wyborem providera wideo + podgląd iframe), `/academy/enrollments` (nadaj/cofnij/usuń dostęp).
+- **Klientka UI:** `/academy` (moje kursy + pasek postępu), `/academy/{courseId}` (drzewko z odhaczaniem), `/academy/lesson/{id}` (iframe wideo + treść + workbook + prev/next + „ukończona”).
+- **NavMenu:** sekcja Akademia dla Ownera (Kursy, Zapisy) i „Moje kursy” dla kursantki.
+
+**Bezpieczeństwo iframe:** `VideoRef` renderowany w `src` jest whitelistowany znakowo (`^[A-Za-z0-9_-]+$`, dla Bunny dodatkowo `/`) — brak możliwości wstrzyknięcia obcego origin/atrybutu. Autoryzacja dostępu do lekcji po stronie serwisu — bez aktywnego zapisu iframe się nie renderuje.
+
+**Znane założenie:** treść tekstowa lekcji renderowana jako `MarkupString` (HTML) — autorem jest zaufany Trainer (single-tenant), więc OK w MVP. Gdyby treści miały pochodzić z niezaufanego źródła, dołożyć sanitizer.
+
+**Decyzja podjęta:** model `AcademyEnrollment` per (kursantka × kurs) obsługuje OBA warianty — jeden kurs = jeden zapis, wiele kursów = wiele zapisów z niezależnymi datami. Elastyczne domyślnie.
 
 ### 🔨 Krok 2 — Commerce cienki (~1 tydzień)
 
