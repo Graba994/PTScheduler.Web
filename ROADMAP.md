@@ -1,0 +1,213 @@
+# Roadmap — PTScheduler → Platforma dla trenerek
+
+Dokument roboczy. Zapisuje ustalenia, decyzje architektoniczne i plan
+budowy, żeby nie zniknęły między sesjami.
+
+---
+
+## 1. Wizja produktu
+
+Aplikacja **modularna** dla trenerek personalnych/mentorek/dietetyczek —
+łączy w jednej instancji:
+
+- **Welcome / Landing page** — strona wejściowa właścicielki, edytowalna z admina.
+- **Scheduler** — kalendarz, klienci, pakiety sesji, notatki, pomiary (to co już istnieje).
+- **Learning Portal** — kursy → moduły → lekcje (wideo + tekst + PDF), postępy, czasowy dostęp.
+- **Commerce (cienki)** — sprzedaż produktów cyfrowych, checkout redirect do bramki, webhook aktywuje dostęp.
+- **Admin/Owner config** — włączanie i konfiguracja modułów per instancja.
+
+**Filozofia:** modularny monolit z feature flagami. Każdy moduł da się
+włączyć/wyłączyć w panelu Ownera. Nie budujemy klona Publigo — budujemy
+skrojony pod jedną trenerkę produkt, który da się sprzedawać kolejnym.
+
+---
+
+## 2. Model biznesowy i pierwszy klient
+
+**Trenerka #1:** Ana (`zmotywowana-ana.pl`) — mentoring żywieniowy.
+
+**Flagowy produkt "odNowa":**
+- 3000 PLN, dostęp na 6 miesięcy od daty zakupu.
+- 22 lekcje wideo.
+- Workbook PDF.
+- Konsultacje grupowe raz w tygodniu (link zewnętrzny — Zoom/Meet — w panelu klientki).
+- Dodatkowe narzędzia: dziennik jedzenia, skala głodu, listy produktów, jadłospisy, checklisty.
+
+**Płatności obecnie:** Klarna + PayU. Docelowo wiele bramek (Stripe, tPay, Przelewy24…).
+
+**Wideo:** hostowane poza serwerem (Google Drive dziś, docelowo też Bunny.net Stream).
+
+**Konsultacje na żywo:** NIE budujemy live-streamingu; wystarczy link zewnętrzny w lekcji/panelu.
+
+---
+
+## 3. Infrastruktura
+
+**VPS (per trenerka):** VPS-1 2027 — 2 vCores, 4 GB RAM, 40 GB dysk.
+Wystarczy dla ~30–60 aktywnych klientek jednocześnie (Blazor Server trzyma
+sesję w RAM). Jeśli baza klientek rośnie — większy VPS albo osobna instancja.
+
+**Model dostarczania:** **Docker per klient** — pojedyncza instancja
+single-tenant, izolacja fizyczna. To NIE jest klasyczny multi-tenant SaaS.
+Konsekwencje:
+
+- brak `tenant_id` w tabelach (prostszy kod)
+- osobna baza per trenerka
+- update: rebuild image → Watchtower pull → restart
+- migracje EF odpalają się przy starcie kontenera (już wdrożone)
+
+**Stack serwerowy (już postawiony):**
+- Nginx Proxy Manager — reverse proxy + SSL
+- Portainer — zarządzanie stackami
+- Adminer — GUI do baz Postgres
+- Watchtower — auto-pull nowych obrazów z GHCR
+- Dozzle — live logs
+- Uptime Kuma — monitoring + alerty (Telegram/Discord)
+
+**Obraz aplikacji:** `ghcr.io/graba994/ptscheduler.web:latest` — publikowany z GitHub Actions.
+
+---
+
+## 4. Kluczowe decyzje architektoniczne
+
+### 4.1 Subdomeny vs ścieżki
+
+**Wybór: ścieżki** (`domena.pl/academy`, `domena.pl/booking`, `domena.pl/shop`).
+
+Powód: cookie sesji Blazor Server / SignalR / wspólne menu / prosty NPM config.
+Subdomeny łamią single sign-on i podwajają footprint w RAM.
+
+### 4.2 Wideo — dwa źródła
+
+Encja `AcademyLesson` przechowuje:
+- `VideoProvider` (enum: `GoogleDrive`, `BunnyStream`, `Vimeo`, `None`)
+- `VideoRef` (ID pliku Drive / GUID Bunny)
+
+Renderowanie w Blazor: dynamiczny `<iframe>` zależnie od providera. Ruch
+wideo omija VPS (streaming z Google CDN / Bunny CDN bezpośrednio do
+przeglądarki). Autoryzacja dostępu do lekcji po stronie komponentu — jeśli
+brak uprawnień, iframe nie renderuje się w ogóle.
+
+Wzorzec dla Google Drive:
+```html
+<iframe src="https://drive.google.com/file/d/@Model.GoogleDriveId/preview"
+        width="100%" height="450"
+        allow="autoplay; fullscreen"
+        allowfullscreen frameborder="0"></iframe>
+```
+
+### 4.3 Role
+
+- **Admin** — dev/ops (Ty). Widzi DB config, backup, restart. Panel `/admin/settings`, `/admin/backup`.
+- **Trainer (Owner)** — trenerka. Edytuje treści, produkty, ceny, klientów, płatności, branding. Może zarządzać rolami tylko poniżej siebie (`Subordinate`, `Client`).
+- **Subordinate** — asystentka trenerki (linkowana przez `SupervisorId`).
+- **Client** — kursantka.
+
+Rola egzekwowana **dwuwarstwowo**: `[Authorize(Roles=...)]` na stronie +
+`callerRole`-based enforcement w `UserManagementService` (defense in depth).
+
+### 4.4 Setup nowej instancji
+
+Na razie: czysta instalacja + ręczna konfiguracja przez Ownera w admin panelu.
+W przyszłości (jak nabierze popularności): dedykowany "Setup Wizard" dla klienta.
+
+---
+
+## 5. Plan budowy (etapy)
+
+### ✅ Krok 0 — Fundament (zrobione)
+
+Commit: `2291134`
+
+- Rozdzielenie ról Admin/Trainer na istniejących stronach + logika w serwisie.
+- `db.Database.Migrate()` na starcie aplikacji.
+- Persystentne DataProtection keys (`/app/data/keys`) — cookies przeżywają restart kontenera.
+- `UseForwardedHeaders` dla NPM (poprawne scheme za reverse-proxy).
+- `Dockerfile` multi-stage .NET 10 (+ `postgresql-client` dla `pg_dump`).
+- `.github/workflows/build-image.yml` — build i push do GHCR na `main`.
+- `docker-compose.yml` gotowy do wklejenia w Portainer stack.
+
+### 🔨 Krok 1 — Learning Portal MVP (~2–3 tyg)
+
+**Cel:** trenerka wrzuca 22 lekcje, klientki oglądają, widać postępy, dostęp wygasa po X miesiącach.
+
+- Model danych: `AcademyCourse` → `AcademyModule` → `AcademyLesson`.
+- `AcademyEnrollment` — kto ma dostęp do jakiego kursu, `EnrolledAt`, `ExpiresAt`.
+- `AcademyProgress` — per klientka per lekcja (obejrzana/nie).
+- CRUD w panelu Ownera: kursy, moduły, lekcje (z wyborem `VideoProvider` + `VideoRef`), załączniki PDF.
+- Panel klientki: lista dostępnych kursów, drzewko modułów/lekcji, odtwarzacz (iframe), pasek postępu.
+- Wygasanie dostępu — logika w `AcademyEnrollment.IsActive()`.
+- Ręczne nadawanie dostępu z panelu Ownera (przed integracją z Commerce).
+
+**Otwarte pytanie (do decyzji):** czy jedna klientka może mieć wiele kursów z niezależnymi datami wygaśnięcia, czy zawsze "kupujesz mentoring → dostajesz cały pakiet"?
+
+### 🔨 Krok 2 — Commerce cienki (~1 tydzień)
+
+- Encja `Product` (kurs/pakiet), cena, waluta, opis marketingowy, długość dostępu.
+- Przycisk "Kup" → redirect do bramki (PayU/Klarna/Stripe konfigurowalne).
+- Webhook endpoint → tworzy konto klientki (jeśli nie istnieje), tworzy `AcademyEnrollment`, wysyła mail z danymi logowania.
+- Historia zamówień w panelu Ownera i klientki.
+- **Bez własnych faktur** — Fakturownia webhook jako opcja (2 dni roboty), nie budujemy własnego systemu fakturowego.
+
+### 🔨 Krok 3 — Welcome Page (~3–5 dni)
+
+- Statyczna, edytowalna z admina: hero, oferta, "dla kogo / nie dla kogo", "co znajdziesz w środku", opinie, FAQ, CTA.
+- Treść już mamy (z copy Any pod produkt "odNowa").
+- Sekcje jako edytowalne bloki (nie hardkodowane).
+
+### 🔨 Krok 4 — Feature flags + config panel (rozłożone w tle)
+
+- Włączanie/wyłączanie modułów per instancja (Welcome / Learning / Commerce / Scheduler).
+- Konfiguracja bramek płatności.
+- Rozbudowa `Branding` (kolory, logo, favicon, teksty stopki, meta tagi).
+
+### 🔨 Krok 5 — Scheduler integration
+
+- Wpięcie istniejącego schedulera w te same konta użytkowników i role.
+- Dostęp do kalendarza gated per moduł (jak wyłączony to nie widać w menu).
+
+---
+
+## 6. Świadomie NIE robimy w MVP
+
+Rzeczy z Publigo, które **nie wchodzą** do pierwszej wersji:
+
+- Aplikacja mobilna z brandingiem (PWA wystarczy).
+- Własny system fakturowy (używamy Fakturownia/inFakt via webhook).
+- Program partnerski / afiliacja.
+- Certyfikaty automatyczne.
+- Znakowanie PDF-ów danymi kursanta.
+- Wewnętrzna społeczność / forum (Discord/FB grupy załatwiają temat).
+- Quizy i testy (chyba że trenerka bardzo poprosi).
+- Upselle / cross-selle / BUMP-y w koszyku.
+- Produkty fizyczne + integracja InPost.
+- Subskrypcje rekurencyjne (na razie single purchase).
+- VAT OSS dla sprzedaży zagranicznej.
+- Wielojęzyczność.
+- Live streaming wewnątrz aplikacji.
+
+Wszystko powyżej można dodać później, jak produkt się przyjmie i będą realne
+prośby od klientek Ana albo od kolejnych trenerek.
+
+---
+
+## 7. Zasady operacyjne
+
+- **Deploy = push do `main`** → CI buduje obraz → Watchtower na VPS podciąga i restartuje kontener → migracje EF odpalają się przy starcie.
+- **Backup:** dzienny `pg_dump` (endpoint `/admin/backup/download` już działa).
+- **Monitoring:** Uptime Kuma pinguje healthcheck kontenera, alert na Telegram/Discord.
+- **Logi:** Dozzle → live tail w przeglądarce.
+- **Zmiany connection stringa:** przez `/admin/settings` (zapisuje do `connections.json`, hot-reload bez restartu).
+
+---
+
+## 8. Otwarte pytania / decyzje do podjęcia w trakcie
+
+- Jeden kurs per klientka czy wiele niezależnych zapisów?
+- Czy Owner ma widzieć zakupy/płatności historycznie z Publigo (import CSV) czy zaczynamy "od dziś"?
+- Provider mailingowy dla transakcyjnych maili (potwierdzenie zakupu, dane logowania) — SMTP Fastmail? Resend? Postmark? Brevo?
+- Domena aplikacji: subdomena (`app.zmotywowana-ana.pl`) czy własna (`panel.zmotywowana-ana.pl`)? Marketingowy landing pozostaje na `zmotywowana-ana.pl`?
+
+---
+
+*Ostatnia aktualizacja: koniec Kroku 0. Następny krok: Learning Portal MVP.*
