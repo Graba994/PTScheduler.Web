@@ -1,6 +1,8 @@
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.Identity;
+using Microsoft.EntityFrameworkCore;
 using PTScheduler.Application;
 using PTScheduler.Application.Interfaces;
 using PTScheduler.Infrastructure;
