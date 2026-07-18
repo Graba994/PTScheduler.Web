@@ -1,0 +1,77 @@
+@page "/shop/my-orders"
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Client)]
+@inject IShopService ShopService
+@inject AuthenticationStateProvider AuthState
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Moje zamówienia</PageTitle>
+
+<div class="d-flex align-items-center gap-2 mb-3">
+    <i class="bi bi-bag-check fs-4 text-primary"></i>
+    <h2 class="mb-0">Moje zamówienia</h2>
+</div>
+<hr />
+
+@if (_orders is null)
+{
+    <p><span class="spinner-border spinner-border-sm me-2" />Ładowanie...</p>
+}
+else if (_orders.Count == 0)
+{
+    <div class="alert alert-info">Nie masz jeszcze żadnych zamówień.</div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr>
+                    <th>Data</th>
+                    <th>Produkt</th>
+                    <th>Kwota</th>
+                    <th>Status</th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var o in _orders)
+                {
+                    <tr>
+                        <td>@o.CreatedAt.ToString("dd.MM.yyyy")</td>
+                        <td>@o.ProductName</td>
+                        <td>@o.Amount.ToString("N2") @o.Currency</td>
+                        <td>@StatusBadge(o.Status)</td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+
+@code {
+    private List<OrderDto>? _orders;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        if (userId is not null)
+            _orders = await ShopService.GetOrdersByUserAsync(userId);
+        else
+            _orders = [];
+    }
+
+    private static MarkupString StatusBadge(OrderStatus s) => s switch
+    {
+        OrderStatus.Pending => new("<span class='badge bg-warning text-dark'>Oczekuje</span>"),
+        OrderStatus.Paid => new("<span class='badge bg-success'>Opłacone</span>"),
+        OrderStatus.Failed => new("<span class='badge bg-danger'>Błąd</span>"),
+        OrderStatus.Refunded => new("<span class='badge bg-info'>Zwrot</span>"),
+        OrderStatus.Cancelled => new("<span class='badge bg-secondary'>Anulowane</span>"),
+        _ => new("<span class='badge bg-secondary'>?</span>")
+    };
+}

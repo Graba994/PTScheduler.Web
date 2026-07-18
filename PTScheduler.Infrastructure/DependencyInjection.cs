@@ -37,6 +37,9 @@ public static class DependencyInjection
         services.AddScoped<IAcademyCatalogService, AcademyCatalogService>();
         services.AddScoped<IAcademyStudentService, AcademyStudentService>();
         services.AddScoped<ISiteSettingsService, SiteSettingsService>();
+        services.AddScoped<IShopService, ShopService>();
+        services.AddScoped<IPaymentGateway, PayUGateway>();
+        services.AddHttpClient("PayU");
 
         return services;
     }

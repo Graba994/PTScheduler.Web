@@ -101,6 +101,95 @@ app.MapGet("/admin/backup/download", async (
         $"ptscheduler_backup_{DateTime.Now:yyyyMMdd_HHmmss}.sql");
 }).RequireAuthorization();
 
+// Checkout: create order + redirect to payment gateway
+app.MapPost("/api/checkout", async (
+    HttpContext ctx,
+    PTScheduler.Application.Interfaces.IShopService shopService,
+    PTScheduler.Application.Interfaces.IPaymentGateway paymentGateway) =>
+{
+    var form = await ctx.Request.ReadFormAsync();
+    var productIdStr = form["productId"].ToString();
+    var email = form["email"].ToString().Trim();
+    var name = form["name"].ToString().Trim();
+
+    if (!int.TryParse(productIdStr, out var productId) || string.IsNullOrEmpty(email))
+        return Results.BadRequest("Brakuje wymaganych danych.");
+
+    if (!paymentGateway.IsConfigured)
+        return Results.Problem("Bramka płatności nie jest skonfigurowana.");
+
+    var product = await shopService.GetProductAsync(productId);
+    if (product is null || !product.IsActive)
+        return Results.NotFound("Produkt nie istnieje lub jest nieaktywny.");
+
+    var orderId = await shopService.CreateOrderAsync(
+        new PTScheduler.Application.DTOs.CheckoutRequest
+        {
+            ProductId = productId,
+            Email = email,
+            Name = string.IsNullOrEmpty(name) ? null : name
+        },
+        paymentGateway.ProviderName);
+
+    var request = new PTScheduler.Application.Interfaces.PaymentRequest
+    {
+        OrderId = orderId.ToString(),
+        Description = product.Name,
+        Amount = product.Price,
+        Currency = product.Currency,
+        CustomerEmail = email,
+        CustomerName = string.IsNullOrEmpty(name) ? null : name,
+        CustomerIp = ctx.Connection.RemoteIpAddress?.ToString() ?? "127.0.0.1",
+        NotifyUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}/api/payu/notify",
+        ContinueUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}/shop/thank-you"
+    };
+
+    try
+    {
+        var redirect = await paymentGateway.CreatePaymentAsync(request);
+        return Results.Redirect(redirect.RedirectUrl);
+    }
+    catch (Exception ex)
+    {
+        var logger = ctx.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("Checkout");
+        logger.LogError(ex, "Checkout failed for order {OrderId}", orderId);
+        await shopService.UpdateOrderStatusAsync(orderId, PTScheduler.Domain.Enums.OrderStatus.Failed);
+        return Results.Problem("Nie udało się utworzyć płatności. Spróbuj ponownie.");
+    }
+});
+
+// PayU webhook notification
+app.MapPost("/api/payu/notify", async (
+    HttpContext ctx,
+    PTScheduler.Application.Interfaces.IPaymentGateway paymentGateway,
+    PTScheduler.Application.Interfaces.IShopService shopService) =>
+{
+    var signature = ctx.Request.Headers["OpenPayu-Signature"].FirstOrDefault();
+    ctx.Request.EnableBuffering();
+    var notification = await paymentGateway.ParseNotificationAsync(ctx.Request.Body, signature);
+
+    if (notification is null)
+        return Results.BadRequest("Nieprawidłowy podpis.");
+
+    if (!int.TryParse(notification.InternalOrderId, out var orderId))
+        return Results.BadRequest("Nieprawidłowe extOrderId.");
+
+    var logger = ctx.RequestServices.GetRequiredService<ILoggerFactory>().CreateLogger("PayUWebhook");
+    logger.LogInformation("PayU notification: order={OrderId} status={Status}", orderId, notification.Status);
+
+    if (notification.Status == "COMPLETED")
+    {
+        await shopService.MarkOrderPaidAsync(orderId, notification.ExternalOrderId);
+        await shopService.FulfillOrderAsync(orderId);
+    }
+    else if (notification.Status == "CANCELED")
+    {
+        await shopService.UpdateOrderStatusAsync(orderId, PTScheduler.Domain.Enums.OrderStatus.Cancelled);
+    }
+
+    return Results.Ok();
+});
+
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

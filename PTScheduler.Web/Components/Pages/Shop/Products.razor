@@ -1,0 +1,95 @@
+@page "/shop/products"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = $"{Roles.Admin},{Roles.Trainer}")]
+@inject IShopService ShopService
+@inject NavigationManager Nav
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>Produkty</PageTitle>
+
+<div class="d-flex align-items-center gap-2 mb-3">
+    <i class="bi bi-box-seam fs-4 text-primary"></i>
+    <h2 class="mb-0">Produkty</h2>
+</div>
+<hr />
+
+@if (_products is null)
+{
+    <p><span class="spinner-border spinner-border-sm me-2" />Ładowanie...</p>
+}
+else
+{
+    <div class="d-flex justify-content-end mb-3">
+        <button class="btn btn-primary" @onclick="CreateNew">
+            <i class="bi bi-plus-lg me-1"></i>Nowy produkt
+        </button>
+    </div>
+
+    @if (_products.Count == 0)
+    {
+        <div class="alert alert-info">Brak produktów. Utwórz pierwszy!</div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-hover align-middle">
+                <thead>
+                    <tr>
+                        <th>Nazwa</th>
+                        <th>Cena</th>
+                        <th>Kurs</th>
+                        <th>Status</th>
+                        <th class="text-end">Sprzedaż</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var p in _products)
+                    {
+                        <tr>
+                            <td>@p.Name</td>
+                            <td>@p.Price.ToString("N2") @p.Currency</td>
+                            <td>@(p.CourseTitle ?? "—")</td>
+                            <td>
+                                @if (p.IsActive)
+                                {
+                                    <span class="badge bg-success">Aktywny</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">Szkic</span>
+                                }
+                            </td>
+                            <td class="text-end">@p.OrderCount</td>
+                            <td class="text-end">
+                                <a href="/shop/products/@p.Id" class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                                <button class="btn btn-sm btn-outline-danger ms-1" @onclick="() => Delete(p)">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@code {
+    private List<ProductDto>? _products;
+
+    protected override async Task OnInitializedAsync() =>
+        _products = await ShopService.GetProductsAsync();
+
+    private void CreateNew() => Nav.NavigateTo("/shop/products/new");
+
+    private async Task Delete(ProductDto p)
+    {
+        await ShopService.DeleteProductAsync(p.Id);
+        _products = await ShopService.GetProductsAsync();
+    }
+}

@@ -68,14 +68,29 @@ Lesson text `Content` is rendered as `MarkupString` (raw HTML) — safe only bec
 
 Hand-writing EF migrations: there is no `dotnet` in the dev container, so migrations here (e.g. `20260717120000_AddAcademy`) are authored by hand — migration file + `.Designer.cs` + updated `ApplicationDbContextModelSnapshot.cs`. Runtime `MigrateAsync()` only runs `Up()`, but keep the snapshot correct so the next real `dotnet ef` diff is clean.
 
+## Commerce (Shop)
+
+`Product` links to `AcademyCourse` via optional `CourseId`. `Order` tracks a purchase (customer email/name, amount, status, payment provider ref). `OrderStatus` enum: Pending → Paid → (Failed/Refunded/Cancelled).
+
+- `IShopService` — CRUD products, orders, checkout flow, **fulfillment** (on paid: find-or-create `ApplicationUser` with `Client` role + random temporary password, then call `IAcademyCatalogService.EnrollAsync` to grant course access).
+- `IPaymentGateway` — abstract payment provider interface. `PayUGateway` implements it (OAuth2 token, REST API v2_1/orders, MD5/SHA256 signature verification for webhooks).
+
+**Checkout flow:** public form POST to `/api/checkout` → creates `Order` (Pending) → calls `PayUGateway.CreatePaymentAsync` → redirect to PayU. PayU sends webhook POST to `/api/payu/notify` → verify signature → mark paid → fulfill (create account + enrollment). Both endpoints are minimal API in `Program.cs`.
+
+**PayU config** lives in `appsettings.json` or env vars (`PayU:BaseUrl`, `PayU:PosId`, `PayU:SecondKey`, `PayU:ClientId`, `PayU:ClientSecret`). NOT in the database — these are secrets.
+
+Owner pages gated `Admin,Trainer`: `/shop/products`, `/shop/products/{id}`, `/shop/orders`. Public pages (static SSR, `PublicLayout`, `[AllowAnonymous]`): `/shop`, `/shop/{id}`, `/shop/thank-you`. Client pages: `/shop/my-orders`. NavMenu sections gated by `SiteSettings.ShopEnabled`.
+
+Product's `AccessDurationDays` overrides `AcademyCourse.DefaultAccessDays` if set; otherwise the course default is used. The `Order.Notes` field stores the temporary password for manually created accounts (until email sending is implemented).
+
 ## Architecture
 
 Clean / layered architecture targeting **.NET 10**, with four projects wired through the `slnx` solution:
 
-- `PTScheduler.Domain` — entities (`Client`, `Session`, `SessionPackage`, `BodyMeasurement`, `TrainerNote`, `IntroSessionConfig`, `SessionType`, `AppBranding`), enums, and the `Roles` constants (`Admin`, `Trainer`, `Subordinate`, `Client`). No dependencies.
-- `PTScheduler.Application` — DTOs and service **interfaces** only (`IClientService`, `ISessionService`, `ISessionPackageService`, `IIntroSessionService`, `IBrandingService`, `IBackupService`, `IUserManagementService`, `IDatabaseMaintenanceService`, `IDatabaseSettingsService`, `IWebRootPathProvider`). `AddApplication()` is currently a no-op extension — register new application contracts here when implementations move.
+- `PTScheduler.Domain` — entities (`Client`, `Session`, `SessionPackage`, `BodyMeasurement`, `TrainerNote`, `IntroSessionConfig`, `SessionType`, `AppBranding`, `AcademyCourse`, `AcademyModule`, `AcademyLesson`, `AcademyEnrollment`, `AcademyLessonProgress`, `SiteSettings`, `Product`, `Order`), enums (`OrderStatus`, `VideoProvider`, etc.), and the `Roles` constants (`Admin`, `Trainer`, `Subordinate`, `Client`). No dependencies.
+- `PTScheduler.Application` — DTOs and service **interfaces** only (`IClientService`, `ISessionService`, `ISessionPackageService`, `IIntroSessionService`, `IBrandingService`, `IBackupService`, `IUserManagementService`, `IDatabaseMaintenanceService`, `IDatabaseSettingsService`, `IWebRootPathProvider`, `IAcademyCatalogService`, `IAcademyStudentService`, `ISiteSettingsService`, `IShopService`, `IPaymentGateway`). `AddApplication()` is currently a no-op extension — register new application contracts here when implementations move.
 - `PTScheduler.Infrastructure` — EF Core (`ApplicationDbContext`, Npgsql/PostgreSQL), migrations, `DbInitializer` (role + session-type seeding), and the concrete service implementations. All services are registered scoped via `AddInfrastructure(configuration, contentRootPath)`.
-- `PTScheduler.Web` — ASP.NET Core host using **Blazor Server** (`AddInteractiveServerComponents`, `AddInteractiveServerRenderMode`). Razor components live under `Components/{Pages,Layout,Account}`, with feature folders `Pages/{Clients,Admin,Trainer,Dashboard}`. Auth uses **ASP.NET Core Identity** with `ApplicationUser` (defined in Infrastructure) stored in the same `ApplicationDbContext`, cookie scheme, `RequireConfirmedAccount = true`, role support, and a no-op `IEmailSender`.
+- `PTScheduler.Web` — ASP.NET Core host using **Blazor Server** (`AddInteractiveServerComponents`, `AddInteractiveServerRenderMode`). Razor components live under `Components/{Pages,Layout,Account}`, with feature folders `Pages/{Clients,Admin,Trainer,Dashboard,Academy,Shop}`. Auth uses **ASP.NET Core Identity** with `ApplicationUser` (defined in Infrastructure) stored in the same `ApplicationDbContext`, cookie scheme, `RequireConfirmedAccount = true`, role support, and a no-op `IEmailSender`.
 
 Cross-cutting points to know:
 

@@ -1,0 +1,150 @@
+@page "/shop/products/new"
+@page "/shop/products/{ProductId:int}"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = $"{Roles.Admin},{Roles.Trainer}")]
+@inject IShopService ShopService
+@inject IAcademyCatalogService AcademyCatalog
+@inject NavigationManager Nav
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<PageTitle>@(IsNew ? "Nowy produkt" : "Edycja produktu")</PageTitle>
+
+<div class="d-flex align-items-center gap-2 mb-3">
+    <i class="bi bi-box-seam fs-4 text-primary"></i>
+    <h2 class="mb-0">@(IsNew ? "Nowy produkt" : "Edycja produktu")</h2>
+</div>
+<hr />
+
+@if (_dto is null)
+{
+    <p><span class="spinner-border spinner-border-sm me-2" />Ładowanie...</p>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(_msg))
+    {
+        <div class="alert @(_isError ? "alert-danger" : "alert-success") py-2">@_msg</div>
+    }
+
+    <div class="row g-4">
+        <div class="col-lg-8">
+            <div class="card shadow-sm">
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label">Nazwa produktu</label>
+                        <input class="form-control" @bind="_dto.Name" placeholder="np. odNowa — mentoring żywieniowy" />
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">Opis (marketing)</label>
+                        <textarea class="form-control" rows="4" @bind="_dto.Description"
+                                  placeholder="Krótki opis widoczny w sklepie..."></textarea>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label">URL obrazka</label>
+                        <input class="form-control" @bind="_dto.CoverImageUrl" placeholder="https://..." />
+                    </div>
+
+                    <div class="row g-2">
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Cena</label>
+                            <input class="form-control" type="number" step="0.01" @bind="_dto.Price" />
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Waluta</label>
+                            <input class="form-control" @bind="_dto.Currency" />
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            <label class="form-label">Kolejność</label>
+                            <input class="form-control" type="number" @bind="_dto.SortOrder" />
+                        </div>
+                    </div>
+
+                    <div class="row g-2">
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Powiązany kurs</label>
+                            <select class="form-select" @bind="_dto.CourseId">
+                                <option value="">— brak —</option>
+                                @foreach (var c in _courses)
+                                {
+                                    <option value="@c.Id">@c.Title</option>
+                                }
+                            </select>
+                            <div class="form-text">Zakup automatycznie nada dostęp do wybranego kursu.</div>
+                        </div>
+                        <div class="col-md-6 mb-3">
+                            <label class="form-label">Czas dostępu (dni)</label>
+                            <input class="form-control" type="number" @bind="_dto.AccessDurationDays"
+                                   placeholder="puste = domyślny z kursu" />
+                            <div class="form-text">Puste = wartość z ustawień kursu.</div>
+                        </div>
+                    </div>
+
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="isActive" @bind="_dto.IsActive" />
+                        <label class="form-check-label" for="isActive">Aktywny (widoczny w sklepie)</label>
+                    </div>
+
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary" @onclick="Save" disabled="@_busy">
+                            <i class="bi bi-floppy me-1"></i>Zapisz
+                        </button>
+                        <a href="/shop/products" class="btn btn-outline-secondary">Wróć</a>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int? ProductId { get; set; }
+    private bool IsNew => ProductId is null;
+
+    private ProductDto? _dto;
+    private List<AcademyCourseDto> _courses = [];
+    private bool _busy;
+    private string _msg = "";
+    private bool _isError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _courses = await AcademyCatalog.GetCoursesAsync();
+
+        if (IsNew)
+        {
+            _dto = new ProductDto { Currency = "PLN" };
+        }
+        else
+        {
+            _dto = await ShopService.GetProductAsync(ProductId!.Value);
+            if (_dto is null)
+            {
+                Nav.NavigateTo("/shop/products");
+                return;
+            }
+        }
+    }
+
+    private async Task Save()
+    {
+        if (_dto is null) return;
+        _busy = true; _msg = "";
+        try
+        {
+            if (IsNew)
+            {
+                var id = await ShopService.CreateProductAsync(_dto);
+                Nav.NavigateTo($"/shop/products/{id}");
+            }
+            else
+            {
+                await ShopService.UpdateProductAsync(_dto);
+            }
+            _msg = "Zapisano."; _isError = false;
+        }
+        catch (Exception ex) { _msg = $"Błąd: {ex.Message}"; _isError = true; }
+        finally { _busy = false; }
+    }
+}

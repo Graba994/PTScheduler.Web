@@ -22,6 +22,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<AcademyEnrollment> AcademyEnrollments => Set<AcademyEnrollment>();
     public DbSet<AcademyLessonProgress> AcademyLessonProgress => Set<AcademyLessonProgress>();
     public DbSet<SiteSettings> SiteSettings => Set<SiteSettings>();
+    public DbSet<Product> Products => Set<Product>();
+    public DbSet<Order> Orders => Set<Order>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -74,5 +76,28 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         builder.Entity<AcademyLessonProgress>()
             .HasIndex(p => new { p.ApplicationUserId, p.LessonId })
             .IsUnique();
+
+        builder.Entity<Product>()
+            .HasOne(p => p.Course)
+            .WithMany()
+            .HasForeignKey(p => p.CourseId)
+            .OnDelete(DeleteBehavior.SetNull);
+
+        builder.Entity<Product>()
+            .Property(p => p.Price)
+            .HasPrecision(10, 2);
+
+        builder.Entity<Order>()
+            .HasOne(o => o.Product)
+            .WithMany(p => p.Orders)
+            .HasForeignKey(o => o.ProductId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<Order>()
+            .Property(o => o.Amount)
+            .HasPrecision(10, 2);
+
+        builder.Entity<Order>()
+            .HasIndex(o => o.ExternalPaymentId);
     }
 }

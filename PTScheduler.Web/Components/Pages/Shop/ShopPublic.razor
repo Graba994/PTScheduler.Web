@@ -1,0 +1,67 @@
+@page "/shop"
+@using Microsoft.AspNetCore.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@layout PTScheduler.Web.Components.Layout.PublicLayout
+@attribute [AllowAnonymous]
+@inject IShopService ShopService
+@inject ISiteSettingsService SiteSettings
+@inject NavigationManager Nav
+
+<PageTitle>Oferta</PageTitle>
+
+@if (_products is not null)
+{
+    <section class="container py-5">
+        <h1 class="text-center mb-4">Oferta</h1>
+
+        @if (_products.Count == 0)
+        {
+            <p class="text-center text-muted">Aktualnie brak dostępnych produktów.</p>
+        }
+        else
+        {
+            <div class="row g-4 justify-content-center">
+                @foreach (var p in _products)
+                {
+                    <div class="col-md-6 col-lg-4">
+                        <div class="card h-100 shadow-sm">
+                            @if (!string.IsNullOrEmpty(p.CoverImageUrl))
+                            {
+                                <img src="@p.CoverImageUrl" class="card-img-top" alt="@p.Name"
+                                     style="object-fit:cover;max-height:220px;" />
+                            }
+                            <div class="card-body d-flex flex-column">
+                                <h5 class="card-title">@p.Name</h5>
+                                @if (!string.IsNullOrWhiteSpace(p.Description))
+                                {
+                                    <p class="card-text text-muted flex-grow-1">@p.Description</p>
+                                }
+                                <div class="mt-auto">
+                                    <p class="fs-4 fw-bold mb-2">@p.Price.ToString("N2") @p.Currency</p>
+                                    <a href="/shop/@p.Id" class="btn btn-primary w-100">Szczegóły</a>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        }
+    </section>
+}
+
+@code {
+    private List<ProductDto>? _products;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var settings = await SiteSettings.GetAsync();
+        if (!settings.ShopEnabled)
+        {
+            Nav.NavigateTo("/", forceLoad: false);
+            return;
+        }
+
+        _products = await ShopService.GetProductsAsync(activeOnly: true);
+    }
+}

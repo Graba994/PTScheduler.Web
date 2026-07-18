@@ -1,0 +1,100 @@
+@page "/shop/{ProductId:int}"
+@using Microsoft.AspNetCore.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@layout PTScheduler.Web.Components.Layout.PublicLayout
+@attribute [AllowAnonymous]
+@inject IShopService ShopService
+@inject ISiteSettingsService SiteSettings
+@inject NavigationManager Nav
+
+<PageTitle>@(_product?.Name ?? "Produkt")</PageTitle>
+
+@if (_product is not null)
+{
+    <section class="container py-5">
+        <div class="row g-4">
+            <div class="col-lg-6">
+                @if (!string.IsNullOrEmpty(_product.CoverImageUrl))
+                {
+                    <img src="@_product.CoverImageUrl" alt="@_product.Name"
+                         class="img-fluid rounded shadow" style="max-height:400px;object-fit:cover;width:100%;" />
+                }
+            </div>
+            <div class="col-lg-6">
+                <h1>@_product.Name</h1>
+                @if (!string.IsNullOrWhiteSpace(_product.Description))
+                {
+                    <p class="lead text-muted">@_product.Description</p>
+                }
+                @if (!string.IsNullOrEmpty(_product.CourseTitle))
+                {
+                    <p><i class="bi bi-mortarboard me-1"></i>Zawiera kurs: <strong>@_product.CourseTitle</strong></p>
+                }
+                @if (_product.AccessDurationDays is int days)
+                {
+                    <p><i class="bi bi-clock me-1"></i>Dostęp na @days dni</p>
+                }
+
+                <p class="fs-3 fw-bold mt-3">@_product.Price.ToString("N2") @_product.Currency</p>
+
+                <div class="card mt-3">
+                    <div class="card-body">
+                        <h5 class="card-title mb-3">Zamów teraz</h5>
+                        <form method="post" action="/api/checkout">
+                            <input type="hidden" name="productId" value="@_product.Id" />
+                            <div class="mb-3">
+                                <label class="form-label">Twój e-mail</label>
+                                <input type="email" name="email" class="form-control" required
+                                       placeholder="jan@example.com" />
+                            </div>
+                            <div class="mb-3">
+                                <label class="form-label">Imię i nazwisko <span class="text-muted small">(opcjonalnie)</span></label>
+                                <input type="text" name="name" class="form-control" placeholder="Jan Kowalski" />
+                            </div>
+                            <button type="submit" class="btn btn-primary btn-lg w-100">
+                                <i class="bi bi-credit-card me-2"></i>Kupuję — @_product.Price.ToString("N2") @_product.Currency
+                            </button>
+                        </form>
+                    </div>
+                </div>
+
+                <div class="mt-3">
+                    <a href="/shop" class="btn btn-outline-secondary">
+                        <i class="bi bi-arrow-left me-1"></i>Wróć do oferty
+                    </a>
+                </div>
+            </div>
+        </div>
+    </section>
+}
+else if (_notFound)
+{
+    <section class="container py-5 text-center">
+        <h2>Produkt nie istnieje</h2>
+        <a href="/shop" class="btn btn-outline-primary mt-3">Wróć do oferty</a>
+    </section>
+}
+
+@code {
+    [Parameter] public int ProductId { get; set; }
+    private ProductDto? _product;
+    private bool _notFound;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var settings = await SiteSettings.GetAsync();
+        if (!settings.ShopEnabled)
+        {
+            Nav.NavigateTo("/", forceLoad: false);
+            return;
+        }
+
+        _product = await ShopService.GetProductAsync(ProductId);
+        if (_product is null || !_product.IsActive)
+        {
+            _product = null;
+            _notFound = true;
+        }
+    }
+}

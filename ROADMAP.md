@@ -146,13 +146,25 @@ Zaimplementowane:
 
 **Decyzja podjęta:** model `AcademyEnrollment` per (kursantka × kurs) obsługuje OBA warianty — jeden kurs = jeden zapis, wiele kursów = wiele zapisów z niezależnymi datami. Elastyczne domyślnie.
 
-### 🔨 Krok 2 — Commerce cienki (~1 tydzień)
+### ✅ Krok 2 — Commerce cienki (zrobione — czeka na weryfikację CI)
 
-- Encja `Product` (kurs/pakiet), cena, waluta, opis marketingowy, długość dostępu.
-- Przycisk "Kup" → redirect do bramki (PayU/Klarna/Stripe konfigurowalne).
-- Webhook endpoint → tworzy konto klientki (jeśli nie istnieje), tworzy `AcademyEnrollment`, wysyła mail z danymi logowania.
-- Historia zamówień w panelu Ownera i klientki.
-- **Bez własnych faktur** — Fakturownia webhook jako opcja (2 dni roboty), nie budujemy własnego systemu fakturowego.
+**Cel:** klientka kupuje produkt, płaci przez PayU, system automatycznie tworzy konto i nadaje dostęp do kursu.
+
+Zaimplementowane:
+
+- **Domena:** `Product` (nazwa, opis, cena/waluta, opcjonalny `CourseId` → powiązanie z kursem, `AccessDurationDays`, `IsActive`, `SortOrder`). `Order` (produkt, e-mail/imię klienta, kwota, status, `PaymentProvider`, `ExternalPaymentId`, `ApplicationUserId`, `PaidAt`). Enum `OrderStatus` (Pending/Paid/Failed/Refunded/Cancelled).
+- **Application:** `IShopService` (CRUD produktów, zamówienia, checkout flow, fulfillment). `IPaymentGateway` (abstrakcja bramki: `CreatePaymentAsync` → redirect URL, `ParseNotificationAsync` → weryfikacja podpisu + parsowanie). DTOs: `ProductDto`, `OrderDto`, `CheckoutRequest`, `PaymentRequest`, `PaymentRedirect`, `PaymentNotification`.
+- **Infrastructure:** `ShopService` (pełny CRUD + fulfillment: tworzenie konta klientki z losowym hasłem, nadanie roli Client, enrollment na kurs). `PayUGateway` (OAuth2 token, REST API `v2_1/orders`, weryfikacja podpisu MD5/SHA256 z `SecondKey`).
+- **Endpointy (Program.cs):** `POST /api/checkout` (formularz → tworzenie zamówienia → redirect do PayU), `POST /api/payu/notify` (webhook PayU → mark paid → fulfill).
+- **Owner UI:** `/shop/products` (lista + nowy), `/shop/products/{id}` (edytor: nazwa, opis, cena, waluta, powiązany kurs, czas dostępu, aktywność), `/shop/orders` (historia zamówień z filtrami statusów).
+- **Publiczny UI (static SSR, `PublicLayout`):** `/shop` (listing aktywnych produktów), `/shop/{id}` (detail + formularz zakupu: e-mail + imię → POST do `/api/checkout`), `/shop/thank-you` (podziękowanie po płatności).
+- **Klientka UI:** `/shop/my-orders` (moje zamówienia z datami i statusami).
+- **NavMenu:** sekcja Sklep dla Ownera (Produkty, Zamówienia) i klientki (Moje zamówienia) gated `ShopEnabled`. Usunięty badge „wkrótce" z togglea Shop w `/admin/site`.
+- **Migracja:** `20260718120000_AddShop` — tabele `Products` i `Orders`, FK `Products.CourseId → AcademyCourses` (SetNull), FK `Orders.ProductId → Products` (Restrict), indeks na `ExternalPaymentId`.
+
+**Konfiguracja PayU:** w `appsettings.json` lub env vars: `PayU:BaseUrl`, `PayU:PosId`, `PayU:SecondKey`, `PayU:ClientId`, `PayU:ClientSecret`. Sandbox: `https://secure.snd.payu.com`. Produkcja: `https://secure.payu.com`.
+
+**Na później:** dodanie Stripe/Klarna (analogicznie do `PayUGateway`, osobna implementacja `IPaymentGateway`), konfiguracja bramki z admin UI, wysyłka maili z danymi logowania (dziś: hasło tymczasowe zapisane w `Order.Notes`), Fakturownia webhook.
 
 ### ✅ Krok 3 — Welcome Page (zrobione — czeka na weryfikację CI)
 
