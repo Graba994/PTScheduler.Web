@@ -94,6 +94,16 @@ Dashboard data is scoped by trainer:
 
 Calendar (`/calendar`) is gated `Admin,Trainer,Subordinate` — clients cannot access the trainer calendar.
 
+## Module Guard
+
+`ModuleGuardMiddleware` blocks access to routes of disabled modules (based on `SiteSettings` flags). Registered in `Program.cs` after `UseAntiforgery()`. Route-to-module mapping:
+
+- `/calendar`, `/clients`, `/trainer/intro-config`, `/my` → `SchedulerEnabled`
+- `/academy/*` → `AcademyEnabled`
+- `/shop/*`, `/api/checkout`, `/api/payu/notify` → `ShopEnabled`
+
+Disabled module → redirect to `/panel` (authenticated) or `/` (anonymous). API endpoints return 404. This is a hard block — even if a user knows the URL, the page won't render when the module is off.
+
 ## Architecture
 
 Clean / layered architecture targeting **.NET 10**, with four projects wired through the `slnx` solution:

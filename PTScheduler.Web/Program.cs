@@ -87,6 +87,7 @@ app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages:
 app.UseHttpsRedirection();
 
 app.UseAntiforgery();
+app.UseMiddleware<PTScheduler.Web.ModuleGuardMiddleware>();
 
 // Backup download endpoint (admin only)
 app.MapGet("/admin/backup/download", async (

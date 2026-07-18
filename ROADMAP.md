@@ -181,7 +181,7 @@ Zaimplementowane:
 - `NavMenu` respektuje flagi: wyłączony moduł znika z menu (Kalendarz/Pierwsza wizyta pod `SchedulerEnabled`, Kursy/Zapisy/Moje kursy pod `AcademyEnabled`).
 - Migracja `20260717130000_AddSiteSettings` (ręczna).
 
-**Zostało w tym kroku (na potem):** konfiguracja bramek płatności (przy Commerce), rozbudowa `Branding` (favicon/meta), twarde blokowanie tras wyłączonych modułów (dziś tylko ukrycie w menu — strona nadal osiągalna po URL; docelowo route guard).
+**Zostało w tym kroku (na potem):** konfiguracja bramek płatności (przy Commerce), rozbudowa `Branding` (favicon/meta).
 
 ### ✅ Krok 5 — Scheduler integration (zrobione — czeka na weryfikację CI)
 
@@ -196,6 +196,19 @@ Zaimplementowane:
   - `GetExpiringAsync(daysAhead, trainerUserId)` — filtruje wygasające pakiety po `Client.TrainerUserId`.
   - `TrainerDashboard.razor` przekazuje `TrainerUserId` do obu metod.
 - **GetUpcomingAsync fix:** dodano rozwinięcie o subordinate'ów (analogicznie do `GetSessionsAsync`), trener widzi sesje swoje + swoich asystentów.
+
+### ✅ Krok 6 — Module Guard (zrobione — czeka na weryfikację CI)
+
+**Cel:** twarde blokowanie tras wyłączonych modułów — samo ukrycie linku w menu nie wystarczy, bo użytkownik może wpisać URL ręcznie.
+
+Zaimplementowane:
+
+- **ModuleGuardMiddleware** — middleware ASP.NET Core sprawdzający `SiteSettings` flagi przed każdym requestem. Mapowanie tras do modułów:
+  - `/calendar`, `/clients`, `/trainer/intro-config`, `/my` → `SchedulerEnabled`
+  - `/academy/*` → `AcademyEnabled`
+  - `/shop/*`, `/api/checkout`, `/api/payu/notify` → `ShopEnabled`
+- Wyłączony moduł → redirect do `/panel` (zalogowany) lub `/` (anonim). Endpointy API → 404.
+- Zarejestrowany w `Program.cs` po `UseAntiforgery()`, przed endpointami.
 
 ---
 
@@ -241,4 +254,4 @@ prośby od klientek Ana albo od kolejnych trenerek.
 
 ---
 
-*Ostatnia aktualizacja: koniec Kroku 5. Wszystkie kroki 0–5 zaimplementowane.*
+*Ostatnia aktualizacja: koniec Kroku 6. Wszystkie kroki 0–6 zaimplementowane.*
