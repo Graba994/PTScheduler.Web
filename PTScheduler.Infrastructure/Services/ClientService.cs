@@ -142,6 +142,7 @@ public class ClientService(
             Phone = dto.Phone,
             TrainingGoal = dto.TrainingGoal,
             DateOfBirth = dto.DateOfBirth,
+            TrainerUserId = dto.TrainerUserId,
             CreatedAt = DateTime.UtcNow
         };
 
@@ -233,10 +234,15 @@ public class ClientService(
         await db.SaveChangesAsync();
     }
 
-    public async Task<List<ClientDto>> GetPendingClientsAsync()
+    public async Task<List<ClientDto>> GetPendingClientsAsync(string? trainerUserId = null)
     {
-        var clients = await db.Clients
-            .Where(c => c.Status == ClientStatus.Pending)
+        var query = db.Clients
+            .Where(c => c.Status == ClientStatus.Pending);
+
+        if (trainerUserId is not null)
+            query = query.Where(c => c.TrainerUserId == trainerUserId);
+
+        var clients = await query
             .OrderBy(c => c.CreatedAt)
             .ToListAsync();
 

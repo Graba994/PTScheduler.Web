@@ -83,6 +83,17 @@ Owner pages gated `Admin,Trainer`: `/shop/products`, `/shop/products/{id}`, `/sh
 
 Product's `AccessDurationDays` overrides `AcademyCourse.DefaultAccessDays` if set; otherwise the course default is used. The `Order.Notes` field stores the temporary password for manually created accounts (until email sending is implemented).
 
+## Scheduler (data scoping)
+
+`Client.TrainerUserId` links a client to the trainer/owner who created them. Set automatically in `ClientService.CreateClientAsync` from `CreateClientDto.TrainerUserId` (populated in `ClientNew.razor` from the current user).
+
+Dashboard data is scoped by trainer:
+- `GetPendingClientsAsync(trainerUserId)` — only shows pending clients belonging to that trainer.
+- `GetExpiringAsync(daysAhead, trainerUserId)` — only shows expiring packages for that trainer's clients.
+- `GetUpcomingAsync(trainerUserId)` and `GetSessionsAsync(from, to, trainerUserId)` — both resolve subordinate user IDs via `SupervisorId` and show sessions for the trainer + their subordinates.
+
+Calendar (`/calendar`) is gated `Admin,Trainer,Subordinate` — clients cannot access the trainer calendar.
+
 ## Architecture
 
 Clean / layered architecture targeting **.NET 10**, with four projects wired through the `slnx` solution:

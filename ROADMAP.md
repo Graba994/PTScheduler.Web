@@ -183,10 +183,19 @@ Zaimplementowane:
 
 **Zostało w tym kroku (na potem):** konfiguracja bramek płatności (przy Commerce), rozbudowa `Branding` (favicon/meta), twarde blokowanie tras wyłączonych modułów (dziś tylko ukrycie w menu — strona nadal osiągalna po URL; docelowo route guard).
 
-### 🔨 Krok 5 — Scheduler integration
+### ✅ Krok 5 — Scheduler integration (zrobione — czeka na weryfikację CI)
 
-- Wpięcie istniejącego schedulera w te same konta użytkowników i role.
-- Dostęp do kalendarza gated per moduł (jak wyłączony to nie widać w menu).
+**Cel:** wpięcie schedulera w nowy model ról i tenancy — trener widzi tylko swoich klientów i dane, nie globalne.
+
+Zaimplementowane:
+
+- **Calendar auth fix:** `Calendar.razor` zmieniony z `[Authorize]` na `[Authorize(Roles = "Admin,Trainer,Subordinate")]` — klientka nie ma dostępu do kalendarza trenera.
+- **Client.TrainerUserId wiring:** dodano `TrainerUserId` do `CreateClientDto`, ustawiane w `ClientService.CreateClientAsync`. `ClientNew.razor` pobiera `currentUserId` z `AuthenticationStateProvider` i przekazuje jako `TrainerUserId` przy tworzeniu klienta.
+- **Dashboard scoping:**
+  - `GetPendingClientsAsync(trainerUserId)` — filtruje oczekujących klientów po `Client.TrainerUserId`.
+  - `GetExpiringAsync(daysAhead, trainerUserId)` — filtruje wygasające pakiety po `Client.TrainerUserId`.
+  - `TrainerDashboard.razor` przekazuje `TrainerUserId` do obu metod.
+- **GetUpcomingAsync fix:** dodano rozwinięcie o subordinate'ów (analogicznie do `GetSessionsAsync`), trener widzi sesje swoje + swoich asystentów.
 
 ---
 
@@ -232,4 +241,4 @@ prośby od klientek Ana albo od kolejnych trenerek.
 
 ---
 
-*Ostatnia aktualizacja: koniec Kroku 0. Następny krok: Learning Portal MVP.*
+*Ostatnia aktualizacja: koniec Kroku 5. Wszystkie kroki 0–5 zaimplementowane.*

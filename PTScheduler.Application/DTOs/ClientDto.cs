@@ -33,6 +33,7 @@ public class CreateClientDto
     public string? Phone { get; set; }
     public string? TrainingGoal { get; set; }
     public DateOnly? DateOfBirth { get; set; }
+    public string? TrainerUserId { get; set; }
 }
 
 public class UpdateClientDto

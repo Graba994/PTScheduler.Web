@@ -167,7 +167,15 @@ public class SessionService(
             .Where(s => s.StartTime >= now && s.Status == SessionStatus.Scheduled);
 
         if (trainerUserId is not null)
-            query = query.Where(s => s.TrainerUserId == trainerUserId);
+        {
+            var subordinateIds = await userManager.Users
+                .Where(u => u.SupervisorId == trainerUserId)
+                .Select(u => u.Id)
+                .ToListAsync();
+
+            var visibleTrainerIds = subordinateIds.Append(trainerUserId).ToList();
+            query = query.Where(s => visibleTrainerIds.Contains(s.TrainerUserId));
+        }
 
         if (clientId.HasValue)
             query = query.Where(s => s.ClientId == clientId.Value);

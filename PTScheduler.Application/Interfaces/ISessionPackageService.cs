@@ -12,5 +12,5 @@ public interface ISessionPackageService
     Task DeductCreditAsync(int packageId);
     Task ReturnCreditAsync(int packageId);
     Task<int> ExpireOldPackagesAsync();
-    Task<List<ExpiringPackageDto>> GetExpiringAsync(int daysAhead = 14);
+    Task<List<ExpiringPackageDto>> GetExpiringAsync(int daysAhead = 14, string? trainerUserId = null);
 }

@@ -14,6 +14,6 @@ public interface IClientService
     Task AddNoteAsync(int clientId, string trainerUserId, string content);
     Task DeleteNoteAsync(int noteId);
     Task ApproveClientAsync(int clientId);
-    Task<List<ClientDto>> GetPendingClientsAsync();
+    Task<List<ClientDto>> GetPendingClientsAsync(string? trainerUserId = null);
     Task SetAllowSelfBookingAsync(int clientId, bool allow);
 }

@@ -2,6 +2,8 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
 @inject IClientService ClientService
 @inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
+@using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
@@ -78,6 +80,13 @@
     private CreateClientDto dto = new();
     private bool isBusy;
     private string error = string.Empty;
+    private string currentUserId = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        currentUserId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+    }
 
     private async Task Submit()
     {
@@ -89,6 +98,7 @@
         error = string.Empty;
         try
         {
+            dto.TrainerUserId = currentUserId;
             var client = await ClientService.CreateClientAsync(dto);
             Nav.NavigateTo($"/clients/{client.Id}");
         }

@@ -114,18 +114,23 @@ public class SessionPackageService(ApplicationDbContext db) : ISessionPackageSer
         return toExpire.Count;
     }
 
-    public async Task<List<ExpiringPackageDto>> GetExpiringAsync(int daysAhead = 14)
+    public async Task<List<ExpiringPackageDto>> GetExpiringAsync(int daysAhead = 14, string? trainerUserId = null)
     {
         await ExpireOldPackagesAsync();
         var now = DateTime.UtcNow;
         var cutoff = now.AddDays(daysAhead);
 
-        var packages = await db.SessionPackages
+        var query = db.SessionPackages
             .Include(p => p.Client)
             .Where(p => p.Status == PackageStatus.Active
                      && p.ExpiresAt.HasValue
                      && p.ExpiresAt.Value > now
-                     && p.ExpiresAt.Value <= cutoff)
+                     && p.ExpiresAt.Value <= cutoff);
+
+        if (trainerUserId is not null)
+            query = query.Where(p => p.Client.TrainerUserId == trainerUserId);
+
+        var packages = await query
             .OrderBy(p => p.ExpiresAt)
             .ToListAsync();
 
