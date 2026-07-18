@@ -26,6 +26,8 @@ public static class DependencyInjection
         services.AddScoped<IDatabaseSettingsService>(sp =>
             new DatabaseSettingsService(sp.GetRequiredService<IConfiguration>(), settingsFilePath));
 
+        services.AddMemoryCache();
+
         services.AddScoped<IBrandingService, BrandingService>();
         services.AddScoped<IBackupService, BackupService>();
         services.AddScoped<IDatabaseMaintenanceService, DatabaseMaintenanceService>();
