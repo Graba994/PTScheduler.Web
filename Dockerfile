@@ -24,7 +24,10 @@ RUN apt-get update \
 
 COPY --from=build /app/publish ./
 
-RUN useradd -u 10001 -m -s /usr/sbin/nologin app \
+# The aspnet:10.0 base image now ships a non-root "app" user. Reuse it by
+# forcing UID 10001 (existing volumes rely on it); fall back to creating the
+# user on older base images that don't have it.
+RUN (usermod -u 10001 app 2>/dev/null || useradd -u 10001 -m -s /usr/sbin/nologin app) \
     && mkdir -p /app/data /app/wwwroot/uploads \
     && chown -R app:app /app
 USER app
