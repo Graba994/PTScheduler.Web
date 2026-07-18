@@ -7,7 +7,9 @@ using PTScheduler.Infrastructure.Data;
 
 namespace PTScheduler.Infrastructure.Services;
 
-public class SiteSettingsService(ApplicationDbContext db, IMemoryCache cache) : ISiteSettingsService
+public class SiteSettingsService(
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    IMemoryCache cache) : ISiteSettingsService
 {
     private const int SingletonId = 1;
     private const string CacheKey = "SiteSettings";
@@ -18,7 +20,8 @@ public class SiteSettingsService(ApplicationDbContext db, IMemoryCache cache) : 
         if (cache.TryGetValue(CacheKey, out SiteSettingsDto? cached) && cached is not null)
             return cached;
 
-        var s = await GetOrCreateAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var s = await GetOrCreateAsync(db);
         var dto = MapToDto(s);
         cache.Set(CacheKey, dto, CacheDuration);
         return dto;
@@ -26,7 +29,8 @@ public class SiteSettingsService(ApplicationDbContext db, IMemoryCache cache) : 
 
     public async Task SaveAsync(SiteSettingsDto dto)
     {
-        var s = await GetOrCreateAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var s = await GetOrCreateAsync(db);
         s.WelcomeEnabled = dto.WelcomeEnabled;
         s.SchedulerEnabled = dto.SchedulerEnabled;
         s.AcademyEnabled = dto.AcademyEnabled;
@@ -67,7 +71,7 @@ public class SiteSettingsService(ApplicationDbContext db, IMemoryCache cache) : 
         PayUSecondKey = s.PayUSecondKey
     };
 
-    private async Task<SiteSettings> GetOrCreateAsync()
+    private static async Task<SiteSettings> GetOrCreateAsync(ApplicationDbContext db)
     {
         var s = await db.SiteSettings.FirstOrDefaultAsync(x => x.Id == SingletonId);
         if (s is null)

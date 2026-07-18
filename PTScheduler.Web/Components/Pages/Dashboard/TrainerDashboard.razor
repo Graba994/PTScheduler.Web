@@ -183,17 +183,14 @@ else
         var todayUtcStart = new DateTime(now.Year, now.Month, now.Day, 0, 0, 0, DateTimeKind.Local).ToUniversalTime();
         var todayUtcEnd   = todayUtcStart.AddDays(1);
 
-        var todayTask    = SessionService.GetSessionsAsync(todayUtcStart, todayUtcEnd, TrainerUserId);
-        var upcomingTask = SessionService.GetUpcomingAsync(trainerUserId: TrainerUserId, count: 8);
-        var expiringTask = PackageService.GetExpiringAsync(14, TrainerUserId);
-        var pendingTask  = ClientService.GetPendingClientsAsync(TrainerUserId);
-
-        await Task.WhenAll(todayTask, upcomingTask, expiringTask, pendingTask);
-
-        _today    = todayTask.Result;
-        _upcoming = upcomingTask.Result.Where(s => s.StartTime.Date > DateTime.UtcNow.Date).ToList();
-        _expiring = expiringTask.Result;
-        _pending  = pendingTask.Result;
+        // Sequential awaits: these services share one scoped DbContext per circuit,
+        // so running them concurrently (Task.WhenAll) throws "a second operation was
+        // started on this context instance".
+        _today    = await SessionService.GetSessionsAsync(todayUtcStart, todayUtcEnd, TrainerUserId);
+        _upcoming = (await SessionService.GetUpcomingAsync(trainerUserId: TrainerUserId, count: 8))
+            .Where(s => s.StartTime.Date > DateTime.UtcNow.Date).ToList();
+        _expiring = await PackageService.GetExpiringAsync(14, TrainerUserId);
+        _pending  = await ClientService.GetPendingClientsAsync(TrainerUserId);
         _loaded = true;
     }
 

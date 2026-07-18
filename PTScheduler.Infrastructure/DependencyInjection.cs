@@ -16,7 +16,15 @@ public static class DependencyInjection
         IConfiguration configuration,
         string contentRootPath)
     {
-        services.AddDbContext<ApplicationDbContext>((sp, options) =>
+        // Blazor Server keeps the DI scope alive for the whole circuit, so a single
+        // scoped DbContext is shared across every component on the page. When the
+        // layout (NavMenu), the page and middleware query it while rendering, EF
+        // throws "A second operation was started on this context instance". The fix
+        // is the DbContext-factory pattern: a factory produces short-lived contexts
+        // per operation. We still expose a scoped ApplicationDbContext (resolved from
+        // the factory) so Identity and the existing scoped services keep working
+        // exactly as before; the read-heavy, layout-level services take the factory.
+        static void Configure(IServiceProvider sp, Microsoft.EntityFrameworkCore.DbContextOptionsBuilder options)
         {
             var connStr = sp.GetRequiredService<IConfiguration>().GetConnectionString("DefaultConnection")
                 ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
@@ -27,7 +35,11 @@ public static class DependencyInjection
             // otherwise throw PendingModelChangesWarning at startup. The migrations
             // themselves are correct, so we suppress only that consistency check.
             options.ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning));
-        });
+        }
+
+        services.AddDbContextFactory<ApplicationDbContext>(Configure);
+        services.AddScoped<ApplicationDbContext>(sp =>
+            sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContext());
 
         var settingsFilePath = Path.Combine(contentRootPath, "connections.json");
         services.AddScoped<IDatabaseSettingsService>(sp =>

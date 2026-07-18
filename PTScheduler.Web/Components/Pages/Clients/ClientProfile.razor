@@ -473,7 +473,12 @@ else if (client is not null)
         client = await ClientService.GetClientAsync(Id);
         if (client is null) { notFound = true; return; }
 
-        await Task.WhenAll(LoadNotes(), LoadSessions(), LoadSessionTypes(), LoadPackages());
+        // Sequential: these share one scoped DbContext, so concurrent access
+        // (Task.WhenAll) throws "a second operation was started on this context".
+        await LoadNotes();
+        await LoadSessions();
+        await LoadSessionTypes();
+        await LoadPackages();
     }
 
     private async Task LoadNotes()

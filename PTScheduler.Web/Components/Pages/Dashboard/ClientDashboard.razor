@@ -179,11 +179,9 @@ else
 
         if (_client is not null)
         {
-            var upcomingTask = SessionService.GetUpcomingAsync(clientId: _client.Id, count: 1);
-            var recentTask   = SessionService.GetClientSessionsAsync(_client.Id, 10);
-            await Task.WhenAll(upcomingTask, recentTask);
-            _nextSession = upcomingTask.Result.FirstOrDefault();
-            _recent      = recentTask.Result;
+            // Sequential: shared scoped DbContext can't run two queries at once.
+            _nextSession = (await SessionService.GetUpcomingAsync(clientId: _client.Id, count: 1)).FirstOrDefault();
+            _recent      = await SessionService.GetClientSessionsAsync(_client.Id, 10);
         }
 
         _loaded = true;

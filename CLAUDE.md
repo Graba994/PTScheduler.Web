@@ -106,6 +106,15 @@ Calendar (`/calendar`) is gated `Admin,Trainer,Subordinate` — clients cannot a
 
 Disabled module → redirect to `/panel` (authenticated) or `/` (anonymous). API endpoints return 404. This is a hard block — even if a user knows the URL, the page won't render when the module is off.
 
+## DbContext lifetime (Blazor Server concurrency)
+
+Blazor Server keeps the DI scope alive for the whole circuit, so a single scoped `ApplicationDbContext` is shared by every component rendering on a page. If two of them query it at the same time — the layout (`NavMenu`), the page, `ModuleGuardMiddleware`, or a page doing `Task.WhenAll` over several services — EF throws **"A second operation was started on this context instance"** and the whole render fails (500 / restart-loop).
+
+Mitigations in place, keep them:
+- `AddInfrastructure` registers `AddDbContextFactory<ApplicationDbContext>` and a scoped `ApplicationDbContext` **resolved from the factory**. Identity and the existing scoped services (`ClientService`, `SessionService`, `ShopService`, Academy, …) keep getting a per-circuit scoped context, unchanged.
+- Services queried from the layout on every page — `BrandingService`, `SiteSettingsService` — take `IDbContextFactory` and create a short-lived context per call (`await using var db = await dbFactory.CreateDbContextAsync()`), so they never collide with the shared scoped context. `SiteSettingsService` also caches (30 s).
+- Pages must **not** `Task.WhenAll` several scoped-DbContext services; await them sequentially (see `TrainerDashboard`, `ClientDashboard`, `ClientProfile`). If you need parallelism, give each branch its own context via the factory.
+
 ## Architecture
 
 Clean / layered architecture targeting **.NET 10**, with four projects wired through the `slnx` solution:

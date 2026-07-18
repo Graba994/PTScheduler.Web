@@ -6,10 +6,13 @@ using PTScheduler.Infrastructure.Data;
 
 namespace PTScheduler.Infrastructure.Services;
 
-public class BrandingService(ApplicationDbContext db, IWebRootPathProvider webRoot) : IBrandingService
+public class BrandingService(
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    IWebRootPathProvider webRoot) : IBrandingService
 {
     public async Task<AppBrandingDto> GetAsync()
     {
+        await using var db = await dbFactory.CreateDbContextAsync();
         var b = await db.AppBrandings.FirstOrDefaultAsync();
         if (b is null)
         {
@@ -22,6 +25,7 @@ public class BrandingService(ApplicationDbContext db, IWebRootPathProvider webRo
 
     public async Task SaveAsync(SaveBrandingDto dto)
     {
+        await using var db = await dbFactory.CreateDbContextAsync();
         var b = await db.AppBrandings.FirstOrDefaultAsync() ?? new AppBranding();
         b.ThemeName = dto.ThemeName;
         b.CompanyName = dto.CompanyName;
@@ -46,6 +50,7 @@ public class BrandingService(ApplicationDbContext db, IWebRootPathProvider webRo
 
     public async Task DeleteLogoAsync()
     {
+        await using var db = await dbFactory.CreateDbContextAsync();
         var b = await db.AppBrandings.FirstOrDefaultAsync();
         if (b is null) return;
         DeleteFile(b.LogoPath);
@@ -55,6 +60,7 @@ public class BrandingService(ApplicationDbContext db, IWebRootPathProvider webRo
 
     public async Task DeleteFaviconAsync()
     {
+        await using var db = await dbFactory.CreateDbContextAsync();
         var b = await db.AppBrandings.FirstOrDefaultAsync();
         if (b is null) return;
         DeleteFile(b.FaviconPath);
@@ -64,6 +70,7 @@ public class BrandingService(ApplicationDbContext db, IWebRootPathProvider webRo
 
     private async Task UpdatePath(Action<AppBranding> update)
     {
+        await using var db = await dbFactory.CreateDbContextAsync();
         var b = await db.AppBrandings.FirstOrDefaultAsync() ?? new AppBranding();
         update(b);
         if (!db.AppBrandings.Local.Contains(b)) db.AppBrandings.Add(b);
