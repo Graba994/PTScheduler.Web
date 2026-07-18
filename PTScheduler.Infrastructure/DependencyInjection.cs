@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using PTScheduler.Application.Interfaces;
@@ -20,6 +21,12 @@ public static class DependencyInjection
             var connStr = sp.GetRequiredService<IConfiguration>().GetConnectionString("DefaultConnection")
                 ?? throw new InvalidOperationException("Connection string 'DefaultConnection' not found.");
             options.UseNpgsql(connStr);
+            // Migrations + model snapshot are hand-authored here (no dotnet ef in the
+            // dev container), so the snapshot is never a byte-perfect match for the
+            // runtime model. EF Core 10 validates this on MigrateAsync() and would
+            // otherwise throw PendingModelChangesWarning at startup. The migrations
+            // themselves are correct, so we suppress only that consistency check.
+            options.ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning));
         });
 
         var settingsFilePath = Path.Combine(contentRootPath, "connections.json");

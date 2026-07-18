@@ -68,6 +68,8 @@ Lesson text `Content` is rendered as `MarkupString` (raw HTML) — safe only bec
 
 Hand-writing EF migrations: there is no `dotnet` in the dev container, so migrations here (e.g. `20260717120000_AddAcademy`) are authored by hand — migration file + `.Designer.cs` + updated `ApplicationDbContextModelSnapshot.cs`. Runtime `MigrateAsync()` only runs `Up()`, but keep the snapshot correct so the next real `dotnet ef` diff is clean.
 
+Because the hand-authored snapshot is never a byte-perfect match for the runtime model, EF Core 10's `MigrateAsync()` would throw `PendingModelChangesWarning` at startup and crash the app in a restart loop. `AddInfrastructure` suppresses exactly that check via `options.ConfigureWarnings(w => w.Ignore(RelationalEventId.PendingModelChangesWarning))` — keep it, or startup breaks. The migrations still apply normally; only the snapshot-vs-model consistency check is silenced.
+
 ## Commerce (Shop)
 
 `Product` links to `AcademyCourse` via optional `CourseId`. `Order` tracks a purchase (customer email/name, amount, status, payment provider ref). `OrderStatus` enum: Pending → Paid → (Failed/Refunded/Cancelled).
