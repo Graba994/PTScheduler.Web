@@ -77,7 +77,7 @@ Hand-writing EF migrations: there is no `dotnet` in the dev container, so migrat
 
 **Checkout flow:** public form POST to `/api/checkout` → creates `Order` (Pending) → calls `PayUGateway.CreatePaymentAsync` → redirect to PayU. PayU sends webhook POST to `/api/payu/notify` → verify signature → mark paid → fulfill (create account + enrollment). Both endpoints are minimal API in `Program.cs`.
 
-**PayU config** lives in `appsettings.json` or env vars (`PayU:BaseUrl`, `PayU:PosId`, `PayU:SecondKey`, `PayU:ClientId`, `PayU:ClientSecret`). NOT in the database — these are secrets.
+**PayU config** lives in the `SiteSettings` singleton (editable from `/admin/site` by Admin/Trainer): `PayUPosId`, `PayUClientId`, `PayUClientSecret`, `PayUSecondKey`, `PayUIsSandbox` (bool — toggles between `secure.snd.payu.com` and `secure.payu.com`). `PayUGateway` reads via `ISiteSettingsService`; single-tenant model means DB-stored secrets are acceptable.
 
 Owner pages gated `Admin,Trainer`: `/shop/products`, `/shop/products/{id}`, `/shop/orders`. Public pages (static SSR, `PublicLayout`, `[AllowAnonymous]`): `/shop`, `/shop/{id}`, `/shop/thank-you`. Client pages: `/shop/my-orders`. NavMenu sections gated by `SiteSettings.ShopEnabled`.
 

@@ -2,29 +2,48 @@ using System.Net.Http.Json;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
-using System.Text.Json.Serialization;
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using PTScheduler.Application.DTOs;
 using PTScheduler.Application.Interfaces;
 
 namespace PTScheduler.Infrastructure.Services;
 
 public class PayUGateway(
     IHttpClientFactory httpClientFactory,
-    IConfiguration configuration,
+    ISiteSettingsService siteSettings,
     ILogger<PayUGateway> logger) : IPaymentGateway
 {
+    private SiteSettingsDto? _cached;
+
     public string ProviderName => "PayU";
 
-    public bool IsConfigured =>
-        !string.IsNullOrEmpty(configuration["PayU:PosId"]) &&
-        !string.IsNullOrEmpty(configuration["PayU:ClientId"]);
+    public bool IsConfigured
+    {
+        get
+        {
+            var s = GetSettings();
+            return !string.IsNullOrEmpty(s.PayUPosId) && !string.IsNullOrEmpty(s.PayUClientId);
+        }
+    }
 
-    private string BaseUrl => configuration["PayU:BaseUrl"] ?? "https://secure.snd.payu.com";
-    private string PosId => configuration["PayU:PosId"] ?? "";
-    private string SecondKey => configuration["PayU:SecondKey"] ?? "";
-    private string ClientId => configuration["PayU:ClientId"] ?? "";
-    private string ClientSecret => configuration["PayU:ClientSecret"] ?? "";
+    private string BaseUrl
+    {
+        get
+        {
+            var s = GetSettings();
+            return s.PayUIsSandbox
+                ? "https://secure.snd.payu.com"
+                : "https://secure.payu.com";
+        }
+    }
+
+    private string PosId => GetSettings().PayUPosId ?? "";
+    private string SecondKey => GetSettings().PayUSecondKey ?? "";
+    private string ClientId => GetSettings().PayUClientId ?? "";
+    private string ClientSecret => GetSettings().PayUClientSecret ?? "";
+
+    private SiteSettingsDto GetSettings() =>
+        _cached ??= siteSettings.GetAsync().GetAwaiter().GetResult();
 
     public async Task<PaymentRedirect> CreatePaymentAsync(PaymentRequest request)
     {

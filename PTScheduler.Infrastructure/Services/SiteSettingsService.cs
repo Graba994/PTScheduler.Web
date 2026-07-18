@@ -25,7 +25,12 @@ public class SiteSettingsService(ApplicationDbContext db) : ISiteSettingsService
             HeroCtaLabel = s.HeroCtaLabel,
             HeroCtaUrl = s.HeroCtaUrl,
             BodyHtml = s.BodyHtml,
-            ContactEmail = s.ContactEmail
+            ContactEmail = s.ContactEmail,
+            PayUIsSandbox = s.PayUIsSandbox,
+            PayUPosId = s.PayUPosId,
+            PayUClientId = s.PayUClientId,
+            PayUClientSecret = s.PayUClientSecret,
+            PayUSecondKey = s.PayUSecondKey
         };
     }
 
@@ -43,6 +48,11 @@ public class SiteSettingsService(ApplicationDbContext db) : ISiteSettingsService
         s.HeroCtaUrl = dto.HeroCtaUrl;
         s.BodyHtml = dto.BodyHtml;
         s.ContactEmail = dto.ContactEmail;
+        s.PayUIsSandbox = dto.PayUIsSandbox;
+        s.PayUPosId = dto.PayUPosId;
+        s.PayUClientId = dto.PayUClientId;
+        s.PayUClientSecret = dto.PayUClientSecret;
+        s.PayUSecondKey = dto.PayUSecondKey;
         await db.SaveChangesAsync();
     }
 

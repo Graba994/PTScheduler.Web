@@ -23,4 +23,11 @@ public class SiteSettings
     public string? BodyHtml { get; set; }
 
     public string? ContactEmail { get; set; }
+
+    // Payment gateway — PayU
+    public bool PayUIsSandbox { get; set; } = true;
+    public string? PayUPosId { get; set; }
+    public string? PayUClientId { get; set; }
+    public string? PayUClientSecret { get; set; }
+    public string? PayUSecondKey { get; set; }
 }

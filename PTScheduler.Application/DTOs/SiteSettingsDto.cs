@@ -14,4 +14,11 @@ public class SiteSettingsDto
     public string? HeroCtaUrl { get; set; }
     public string? BodyHtml { get; set; }
     public string? ContactEmail { get; set; }
+
+    // PayU
+    public bool PayUIsSandbox { get; set; } = true;
+    public string? PayUPosId { get; set; }
+    public string? PayUClientId { get; set; }
+    public string? PayUClientSecret { get; set; }
+    public string? PayUSecondKey { get; set; }
 }
