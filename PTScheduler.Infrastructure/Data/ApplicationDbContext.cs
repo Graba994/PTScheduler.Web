@@ -39,6 +39,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<QuizOption> QuizOptions => Set<QuizOption>();
     public DbSet<QuizAttempt> QuizAttempts => Set<QuizAttempt>();
     public DbSet<PaymentSettings> PaymentSettings => Set<PaymentSettings>();
+    public DbSet<Order> Orders => Set<Order>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -113,6 +114,20 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
         builder.Entity<QuizAttempt>()
             .HasIndex(a => new { a.ApplicationUserId, a.LessonId })
+            .IsUnique();
+
+        builder.Entity<Order>()
+            .Property(o => o.Amount)
+            .HasPrecision(10, 2);
+
+        builder.Entity<Order>()
+            .HasOne(o => o.Course)
+            .WithMany()
+            .HasForeignKey(o => o.CourseId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<Order>()
+            .HasIndex(o => o.ExtOrderId)
             .IsUnique();
 
         builder.Entity<Session>()

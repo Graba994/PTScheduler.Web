@@ -1,0 +1,123 @@
+@page "/courses"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ICourseService CourseService
+@inject IPaymentService PaymentService
+@inject IPaymentSettingsService PaymentSettings
+@inject IModuleSettingsService ModuleSettings
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<AppTitle Page="Kursy" />
+
+<div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <h4 class="page-title mb-0"><i class="bi bi-collection-play-fill me-2" style="color:var(--c-primary)"></i>Kursy</h4>
+    <a href="/my/courses" class="btn btn-sm btn-outline-primary"><i class="bi bi-mortarboard me-1"></i>Moje kursy</a>
+</div>
+
+@if (_moduleOff)
+{
+    <div class="alert alert-secondary"><i class="bi bi-toggle-off me-2"></i>Portal szkoleniowy jest obecnie niedostępny.</div>
+}
+else if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_catalog.Count == 0)
+{
+    <div class="text-center text-muted py-5"><i class="bi bi-collection" style="font-size:2.4rem"></i><p class="mt-2 mb-0">Brak dostępnych kursów.</p></div>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(_err)) { <div class="alert alert-danger">@_err</div> }
+
+    <div class="row g-3">
+        @foreach (var c in _catalog)
+        {
+            <div class="col-12 col-md-6 col-xl-4">
+                <div class="card h-100">
+                    @if (!string.IsNullOrEmpty(c.CoverImageUrl))
+                    {
+                        <div style="aspect-ratio:16/9;background:center/cover url('@c.CoverImageUrl');border-radius:.5rem .5rem 0 0"></div>
+                    }
+                    <div class="card-body d-flex flex-column">
+                        <div class="d-flex flex-wrap gap-1 mb-2">
+                            @if (!string.IsNullOrEmpty(c.Level)) { <span class="badge bg-body-secondary text-body">@c.Level</span> }
+                            @if (!string.IsNullOrEmpty(c.DurationText)) { <span class="badge bg-body-secondary text-body">@c.DurationText</span> }
+                        </div>
+                        <h5 class="card-title">@c.Title</h5>
+                        @if (!string.IsNullOrEmpty(c.Author)) { <div class="text-muted small mb-1"><i class="bi bi-person-circle me-1"></i>@c.Author</div> }
+                        @if (!string.IsNullOrEmpty(c.Description)) { <p class="text-muted small flex-grow-1">@c.Description</p> } else { <div class="flex-grow-1"></div> }
+
+                        <div class="d-flex align-items-center justify-content-between mt-2">
+                            <span class="fw-bold fs-5">@(c.Price > 0 ? $"{c.Price:0.00} {_currency}" : "Bezpłatny")</span>
+                            @if (_owned.Contains(c.Id))
+                            {
+                                <a href="@($"/my/courses/{c.Id}")" class="btn btn-success"><i class="bi bi-play-fill me-1"></i>Otwórz</a>
+                            }
+                            else if (_paymentsEnabled && c.Price > 0)
+                            {
+                                <button class="btn btn-primary" @onclick="() => Buy(c)" disabled="@(_buyingId == c.Id)">
+                                    @if (_buyingId == c.Id) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                                    <i class="bi bi-bag-check me-1"></i>Kup
+                                </button>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">Niedostępny</span>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private bool _moduleOff;
+    private bool _paymentsEnabled;
+    private string _currency = "PLN";
+    private string _userId = string.Empty;
+    private string _email = string.Empty;
+    private int? _buyingId;
+    private string _err = string.Empty;
+
+    private List<CourseDto> _catalog = [];
+    private HashSet<int> _owned = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!(await ModuleSettings.GetAsync()).CoursesEnabled) { _moduleOff = true; _loading = false; return; }
+
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        _email = auth.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                 ?? auth.User.Identity?.Name ?? string.Empty;
+
+        var settings = await PaymentSettings.GetAsync();
+        _paymentsEnabled = settings.Enabled;
+        _currency = settings.Currency;
+
+        _catalog = await CourseService.GetCoursesAsync(includeUnpublished: false);
+        _owned = (await CourseService.GetMyCoursesAsync(_userId)).Select(c => c.Id).ToHashSet();
+        _loading = false;
+    }
+
+    private async Task Buy(CourseDto c)
+    {
+        _err = string.Empty;
+        _buyingId = c.Id;
+        var res = await PaymentService.StartCourseCheckoutAsync(_userId, c.Id, Nav.BaseUri, _email, string.Empty);
+        if (res.Ok && res.RedirectUrl is not null)
+        {
+            Nav.NavigateTo(res.RedirectUrl, forceLoad: true);
+            return;
+        }
+        _err = res.Error ?? "Nie udało się rozpocząć płatności.";
+        _buyingId = null;
+    }
+}

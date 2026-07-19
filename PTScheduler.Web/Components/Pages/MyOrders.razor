@@ -1,0 +1,82 @@
+@page "/my/orders"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject IPaymentService PaymentService
+@inject AuthenticationStateProvider AuthState
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<AppTitle Page="Moje zamówienia" />
+
+<div class="page-header">
+    <h4 class="page-title"><i class="bi bi-receipt me-2" style="color:var(--c-primary)"></i>Moje zamówienia</h4>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <div class="alert alert-info py-2"><i class="bi bi-info-circle me-2"></i>Po zaksięgowaniu płatności dostęp do kursu nadaje się automatycznie.</div>
+
+    @if (_orders.Count == 0)
+    {
+        <div class="text-center text-muted py-5">
+            <i class="bi bi-receipt" style="font-size:2.2rem"></i>
+            <p class="mt-2 mb-0">Nie masz jeszcze żadnych zamówień. <a href="/courses">Przeglądaj kursy</a>.</p>
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table align-middle">
+                <thead><tr><th>Kurs</th><th>Kwota</th><th>Status</th><th>Data</th></tr></thead>
+                <tbody>
+                    @foreach (var o in _orders)
+                    {
+                        <tr>
+                            <td class="fw-semibold">@o.CourseTitle</td>
+                            <td>@o.Amount.ToString("0.00") @o.Currency</td>
+                            <td>
+                                <span class="badge @BadgeClass(o.Status)">@StatusLabel(o.Status)</span>
+                            </td>
+                            <td>@o.CreatedAt.ToLocalTime().ToString("yyyy-MM-dd HH:mm")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private List<OrderDto> _orders = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        _orders = await PaymentService.GetMyOrdersAsync(userId);
+        _loading = false;
+    }
+
+    private static string StatusLabel(string s) => s switch
+    {
+        "Paid" => "Opłacone",
+        "Pending" => "Oczekuje",
+        "Canceled" => "Anulowane",
+        "Failed" => "Nieudane",
+        _ => s
+    };
+
+    private static string BadgeClass(string s) => s switch
+    {
+        "Paid" => "bg-success",
+        "Pending" => "bg-warning text-dark",
+        "Canceled" => "bg-secondary",
+        "Failed" => "bg-danger",
+        _ => "bg-secondary"
+    };
+}
