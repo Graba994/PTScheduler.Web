@@ -32,6 +32,7 @@ public static class DependencyInjection
             new DatabaseSettingsService(sp.GetRequiredService<IConfiguration>(), settingsFilePath));
 
         services.AddScoped<IBrandingService, BrandingService>();
+        services.AddScoped<ISiteContentService, SiteContentService>();
         services.AddScoped<IBackupService, BackupService>();
         services.AddScoped<IDatabaseMaintenanceService, DatabaseMaintenanceService>();
         services.AddScoped<IUserManagementService, UserManagementService>();

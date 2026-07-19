@@ -1,9 +1,11 @@
 @page "/"
 @layout PublicLayout
 @using Microsoft.AspNetCore.Authorization
+@using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @attribute [AllowAnonymous]
 @inject IBrandingService BrandingService
+@inject ISiteContentService SiteContentService
 
 <PageTitle>@_companyName — trening personalny i mentoring</PageTitle>
 
@@ -38,18 +40,15 @@
     <!-- Hero -->
     <section class="wp-hero">
         <div class="wp-hero-inner">
-            <h1 class="wp-hero-title">Trening personalny i&nbsp;mentoring<br />w&nbsp;jednym miejscu</h1>
-            <p class="wp-hero-sub">
-                Umawiaj sesje, rozliczaj się z trenerem i rozwijaj się z kursami online —
-                wszystko w jednej aplikacji, bez chaosu i papierologii.
-            </p>
+            <h1 class="wp-hero-title">@_content.HeroTitle</h1>
+            <p class="wp-hero-sub">@_content.HeroSubtitle</p>
             <div class="wp-hero-cta">
                 <AuthorizeView>
                     <Authorized>
                         <a href="/app" class="wp-btn wp-btn-primary wp-btn-lg">Otwórz aplikację</a>
                     </Authorized>
                     <NotAuthorized>
-                        <a href="/book" class="wp-btn wp-btn-primary wp-btn-lg">Umów sesję wstępną</a>
+                        <a href="/book" class="wp-btn wp-btn-primary wp-btn-lg">@_content.PrimaryCtaLabel</a>
                         <a href="/Account/Login" class="wp-btn wp-btn-ghost wp-btn-lg">Mam już konto</a>
                     </NotAuthorized>
                 </AuthorizeView>
@@ -59,28 +58,35 @@
 
     <!-- Modules -->
     <section class="wp-modules">
-        <h2 class="wp-section-title">Co znajdziesz w środku</h2>
+        <h2 class="wp-section-title">@_content.SectionTitle</h2>
         <div class="wp-cards">
 
-            <article class="wp-card">
-                <div class="wp-card-icon"><i class="bi bi-calendar2-week"></i></div>
-                <h3>Trening &amp; grafik</h3>
-                <p>
-                    Rezerwacja sesji, kalendarz, pakiety treningowe, pomiary i rozliczenia.
-                    Trener zawsze wie, kto i kiedy przychodzi — a Ty masz wszystko pod ręką.
-                </p>
-                <a href="/book" class="wp-card-link">Umów sesję <i class="bi bi-arrow-right"></i></a>
-            </article>
+            @if (_content.ShowSchedulerCard)
+            {
+                <article class="wp-card">
+                    <div class="wp-card-icon"><i class="bi bi-calendar2-week"></i></div>
+                    <h3>@_content.SchedulerCardTitle</h3>
+                    <p>@_content.SchedulerCardText</p>
+                    <a href="/book" class="wp-card-link">Umów sesję <i class="bi bi-arrow-right"></i></a>
+                </article>
+            }
 
-            <article class="wp-card">
-                <div class="wp-card-icon"><i class="bi bi-mortarboard"></i></div>
-                <h3>Kursy &amp; mentoring</h3>
-                <p>
-                    Kursy online, lekcje wideo i materiały mentoringowe — dostępne dla Twoich
-                    klientów prosto z konta, z płatnościami online.
-                </p>
-                <span class="wp-card-link wp-soon"><i class="bi bi-hourglass-split"></i> Wkrótce</span>
-            </article>
+            @if (_content.ShowCoursesCard)
+            {
+                <article class="wp-card">
+                    <div class="wp-card-icon"><i class="bi bi-mortarboard"></i></div>
+                    <h3>@_content.CoursesCardTitle</h3>
+                    <p>@_content.CoursesCardText</p>
+                    @if (_content.CoursesComingSoon)
+                    {
+                        <span class="wp-card-link wp-soon"><i class="bi bi-hourglass-split"></i> Wkrótce</span>
+                    }
+                    else
+                    {
+                        <a href="/courses" class="wp-card-link">Zobacz kursy <i class="bi bi-arrow-right"></i></a>
+                    }
+                </article>
+            }
 
         </div>
     </section>
@@ -182,6 +188,7 @@
 @code {
     private string _companyName = "PTScheduler";
     private string? _logoPath;
+    private SiteContentDto _content = new();
 
     protected override async Task OnInitializedAsync()
     {
@@ -192,5 +199,11 @@
             _logoPath = b.LogoPath;
         }
         catch { } // Best-effort: fall back to defaults if branding unavailable
+
+        try
+        {
+            _content = await SiteContentService.GetAsync();
+        }
+        catch { } // Best-effort: fall back to default content
     }
 }

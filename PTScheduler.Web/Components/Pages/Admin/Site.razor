@@ -1,0 +1,146 @@
+@page "/admin/site"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Admin)]
+@inject ISiteContentService SiteContentService
+@inject NavigationManager Nav
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<AppTitle Page="Strona główna" />
+
+<div class="page-header">
+    <h4 class="page-title"><i class="bi bi-globe me-2" style="color:var(--c-primary)"></i>Strona główna (Welcome)</h4>
+</div>
+
+@if (_content is null)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <div class="alert alert-success"><i class="bi bi-check-circle me-2"></i>@_message</div>
+    }
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-2"></i>@_error</div>
+    }
+
+    <div class="row g-4">
+
+        <!-- Hero -->
+        <div class="col-12 col-lg-6">
+            <div class="card h-100">
+                <div class="card-header"><i class="bi bi-card-heading me-2"></i>Sekcja główna (hero)</div>
+                <div class="card-body">
+                    <label class="form-label fw-semibold">Nagłówek</label>
+                    <input class="form-control mb-3" @bind="_content.HeroTitle" maxlength="160" />
+
+                    <label class="form-label fw-semibold">Podtytuł</label>
+                    <textarea class="form-control mb-3" rows="3" @bind="_content.HeroSubtitle" maxlength="400"></textarea>
+
+                    <label class="form-label fw-semibold">Tekst głównego przycisku (dla niezalogowanych)</label>
+                    <input class="form-control" @bind="_content.PrimaryCtaLabel" maxlength="60" />
+                </div>
+            </div>
+        </div>
+
+        <!-- Sekcja modułów -->
+        <div class="col-12 col-lg-6">
+            <div class="card h-100">
+                <div class="card-header"><i class="bi bi-grid-1x2 me-2"></i>Sekcja modułów</div>
+                <div class="card-body">
+                    <label class="form-label fw-semibold">Tytuł sekcji</label>
+                    <input class="form-control" @bind="_content.SectionTitle" maxlength="120" />
+                    <p class="text-muted small mt-3 mb-0">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Poniżej włączysz/wyłączysz i opiszesz karty poszczególnych modułów.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Karta: scheduler -->
+        <div class="col-12 col-lg-6">
+            <div class="card h-100">
+                <div class="card-header d-flex align-items-center justify-content-between">
+                    <span><i class="bi bi-calendar2-week me-2"></i>Karta: Trening &amp; grafik</span>
+                    <div class="form-check form-switch m-0">
+                        <input class="form-check-input" type="checkbox" @bind="_content.ShowSchedulerCard" id="swSched" />
+                        <label class="form-check-label small" for="swSched">Pokaż</label>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <label class="form-label fw-semibold">Tytuł</label>
+                    <input class="form-control mb-3" @bind="_content.SchedulerCardTitle" maxlength="80" />
+                    <label class="form-label fw-semibold">Opis</label>
+                    <textarea class="form-control" rows="3" @bind="_content.SchedulerCardText" maxlength="400"></textarea>
+                </div>
+            </div>
+        </div>
+
+        <!-- Karta: kursy -->
+        <div class="col-12 col-lg-6">
+            <div class="card h-100">
+                <div class="card-header d-flex align-items-center justify-content-between">
+                    <span><i class="bi bi-mortarboard me-2"></i>Karta: Kursy &amp; mentoring</span>
+                    <div class="form-check form-switch m-0">
+                        <input class="form-check-input" type="checkbox" @bind="_content.ShowCoursesCard" id="swCourses" />
+                        <label class="form-check-label small" for="swCourses">Pokaż</label>
+                    </div>
+                </div>
+                <div class="card-body">
+                    <label class="form-label fw-semibold">Tytuł</label>
+                    <input class="form-control mb-3" @bind="_content.CoursesCardTitle" maxlength="80" />
+                    <label class="form-label fw-semibold">Opis</label>
+                    <textarea class="form-control mb-3" rows="3" @bind="_content.CoursesCardText" maxlength="400"></textarea>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" @bind="_content.CoursesComingSoon" id="swSoon" />
+                        <label class="form-check-label" for="swSoon">Oznacz jako „Wkrótce" (moduł jeszcze niedostępny)</label>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 d-flex gap-2">
+            <button class="btn btn-primary" @onclick="Save" disabled="@_saving">
+                @if (_saving) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                <i class="bi bi-save me-1"></i>Zapisz
+            </button>
+            <a class="btn btn-outline-secondary" href="/" target="_blank">
+                <i class="bi bi-box-arrow-up-right me-1"></i>Podgląd strony
+            </a>
+        </div>
+    </div>
+}
+
+@code {
+    private SiteContentDto? _content;
+    private bool _saving;
+    private string _message = string.Empty;
+    private string _error = string.Empty;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _content = await SiteContentService.GetAsync();
+    }
+
+    private async Task Save()
+    {
+        if (_content is null) return;
+        _saving = true;
+        _message = _error = string.Empty;
+        try
+        {
+            await SiteContentService.SaveAsync(_content);
+            _message = "Zapisano. Zmiany są już widoczne na stronie głównej.";
+        }
+        catch (Exception ex)
+        {
+            _error = $"Błąd zapisu: {ex.Message}";
+        }
+        finally { _saving = false; }
+    }
+}
