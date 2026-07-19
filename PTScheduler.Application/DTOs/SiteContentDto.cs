@@ -22,6 +22,11 @@ public class SiteContentDto
     public string HeroTitle { get; set; } = "Trening personalny i mentoring w jednym miejscu";
     public string HeroSubtitle { get; set; } =
         "Umawiaj sesje, rozliczaj się z trenerem i rozwijaj się z kursami online — wszystko w jednej aplikacji, bez chaosu i papierologii.";
+
+    // Optional per-text colors (null = default / theme-aware).
+    public string? HeroEyebrowColor { get; set; }
+    public string? HeroTitleColor { get; set; }
+    public string? HeroSubtitleColor { get; set; }
     public string PrimaryCtaLabel { get; set; } = "Umów sesję wstępną";
     public string PrimaryCtaUrl { get; set; } = "/book";
     public string? SecondaryCtaLabel { get; set; } = "Zobacz kursy";
