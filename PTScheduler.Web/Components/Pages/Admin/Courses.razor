@@ -45,8 +45,31 @@ else
                         <input type="number" class="form-control" @bind="_editing.SortOrder" />
                     </div>
                     <div class="col-12">
-                        <label class="form-label fw-semibold">Opis</label>
-                        <textarea class="form-control" rows="3" @bind="_editing.Description" maxlength="2000"></textarea>
+                        <label class="form-label fw-semibold">Krótki opis (streszczenie na karty)</label>
+                        <textarea class="form-control" rows="2" @bind="_editing.Description" maxlength="2000"></textarea>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label fw-semibold">Opis rozbudowany (HTML / CSS)</label>
+                        <div class="row g-2">
+                            <div class="col-12 col-lg-6">
+                                <textarea class="form-control font-monospace" rows="12" style="font-size:.82rem;tab-size:2"
+                                          @bind="_editing.DescriptionHtml" @bind:event="oninput"
+                                          placeholder="&lt;h2&gt;O kursie&lt;/h2&gt;&#10;&lt;p&gt;Opis...&lt;/p&gt;"></textarea>
+                                <div class="form-text">Dozwolony HTML i inline CSS. Podgląd po prawej stronie.</div>
+                            </div>
+                            <div class="col-12 col-lg-6">
+                                <div class="border rounded p-3" style="overflow:auto;max-height:320px">
+                                    @if (string.IsNullOrWhiteSpace(_editing.DescriptionHtml))
+                                    {
+                                        <span class="text-muted small">Podgląd opisu pojawi się tutaj…</span>
+                                    }
+                                    else
+                                    {
+                                        @((MarkupString)_editing.DescriptionHtml)
+                                    }
+                                </div>
+                            </div>
+                        </div>
                     </div>
                     <div class="col-12 col-md-4">
                         <label class="form-label fw-semibold">Domyślny typ dostępu</label>
@@ -287,6 +310,7 @@ else
         {
             Title = c.Title,
             Description = c.Description,
+            DescriptionHtml = c.DescriptionHtml,
             CoverImageUrl = c.CoverImageUrl,
             IsPublished = c.IsPublished,
             Price = c.Price,

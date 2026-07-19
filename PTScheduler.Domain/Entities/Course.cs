@@ -7,7 +7,10 @@ public class Course
     public int Id { get; set; }
 
     public string Title { get; set; } = string.Empty;
+    // Short plain-text summary shown on cards / listings.
     public string? Description { get; set; }
+    // Rich HTML/CSS description shown on the course page (authored by admin/trainer).
+    public string? DescriptionHtml { get; set; }
     public string? CoverImageUrl { get; set; }
 
     public bool IsPublished { get; set; } = false;

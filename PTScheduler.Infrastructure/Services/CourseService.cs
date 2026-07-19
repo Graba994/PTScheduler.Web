@@ -21,6 +21,7 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory) : 
                 Id = c.Id,
                 Title = c.Title,
                 Description = c.Description,
+                DescriptionHtml = c.DescriptionHtml,
                 CoverImageUrl = c.CoverImageUrl,
                 IsPublished = c.IsPublished,
                 Price = c.Price,
@@ -48,6 +49,7 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory) : 
                 Id = c.Id,
                 Title = c.Title,
                 Description = c.Description,
+                DescriptionHtml = c.DescriptionHtml,
                 CoverImageUrl = c.CoverImageUrl,
                 IsPublished = c.IsPublished,
                 Price = c.Price,
@@ -201,6 +203,7 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory) : 
     {
         c.Title = dto.Title.Trim();
         c.Description = string.IsNullOrWhiteSpace(dto.Description) ? null : dto.Description.Trim();
+        c.DescriptionHtml = string.IsNullOrWhiteSpace(dto.DescriptionHtml) ? null : dto.DescriptionHtml;
         c.CoverImageUrl = string.IsNullOrWhiteSpace(dto.CoverImageUrl) ? null : dto.CoverImageUrl.Trim();
         c.IsPublished = dto.IsPublished;
         c.Price = dto.Price < 0 ? 0 : dto.Price;

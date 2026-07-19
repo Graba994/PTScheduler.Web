@@ -7,6 +7,7 @@ public class CourseDto
     public int Id { get; set; }
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public string? DescriptionHtml { get; set; }
     public string? CoverImageUrl { get; set; }
     public bool IsPublished { get; set; }
     public decimal Price { get; set; }
@@ -22,6 +23,7 @@ public class SaveCourseDto
 {
     public string Title { get; set; } = string.Empty;
     public string? Description { get; set; }
+    public string? DescriptionHtml { get; set; }
     public string? CoverImageUrl { get; set; }
     public bool IsPublished { get; set; }
     public decimal Price { get; set; }
