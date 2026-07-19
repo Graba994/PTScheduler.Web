@@ -34,6 +34,7 @@ public static class DependencyInjection
         services.AddScoped<IBrandingService, BrandingService>();
         services.AddScoped<ISiteContentService, SiteContentService>();
         services.AddScoped<IModuleSettingsService, ModuleSettingsService>();
+        services.AddScoped<IPaymentSettingsService, PaymentSettingsService>();
         services.AddScoped<ICourseService, CourseService>();
         services.AddScoped<IBackupService, BackupService>();
         services.AddScoped<IDatabaseMaintenanceService, DatabaseMaintenanceService>();
