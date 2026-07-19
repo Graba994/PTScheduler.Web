@@ -81,6 +81,14 @@ public static class SiteTemplates
             CtaText = "Umów pierwszą sesję i przekonaj się sam.",
             CtaButtonLabel = "Umów sesję",
             CtaButtonUrl = "/book",
+
+            ShowSocial = true,
+            Socials =
+            [
+                new() { Icon = "bi-instagram", Url = "https://instagram.com/" },
+                new() { Icon = "bi-facebook",  Url = "https://facebook.com/" },
+                new() { Icon = "bi-youtube",   Url = "https://youtube.com/" },
+            ],
         };
 
         switch (key)

@@ -25,6 +25,14 @@ builder.Configuration.AddJsonFile("connections.json", optional: true, reloadOnCh
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+// Raise the Blazor Server circuit's SignalR receive limit so file uploads
+// (logo, favicon, course covers) aren't truncated — the 32 KB default cut
+// larger images in half.
+builder.Services.Configure<Microsoft.AspNetCore.SignalR.HubOptions>(options =>
+{
+    options.MaximumReceiveMessageSize = 10 * 1024 * 1024; // 10 MB
+});
+
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<IdentityRedirectManager>();
 builder.Services.AddScoped<AuthenticationStateProvider, IdentityRevalidatingAuthenticationStateProvider>();

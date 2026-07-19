@@ -79,8 +79,18 @@ public class SiteContentDto
     public string CtaButtonLabel { get; set; } = "Umów sesję";
     public string CtaButtonUrl { get; set; } = "/book";
 
+    // ---- Social media ----
+    public bool ShowSocial { get; set; }
+    public List<SocialLink> Socials { get; set; } = [];
+
     // ---- Footer ----
     public string? FooterText { get; set; }
+}
+
+public class SocialLink
+{
+    public string Icon { get; set; } = "bi-facebook"; // Bootstrap Icons class
+    public string Url { get; set; } = "";
 }
 
 public class StatItem
