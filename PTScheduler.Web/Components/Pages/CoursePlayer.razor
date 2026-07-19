@@ -21,97 +21,235 @@ else if (_detail is null)
 }
 else
 {
-    <div class="page-header">
-        <h4 class="page-title">
-            <a href="/my/courses" class="text-decoration-none text-muted me-2"><i class="bi bi-arrow-left"></i></a>
-            @_detail.Title
-        </h4>
-    </div>
+    <div class="cplayer @(_navOpen ? "is-open" : "is-closed")">
 
-    <div class="mb-3">
-        <div class="d-flex justify-content-between small text-muted mb-1">
-            <span>Twój postęp</span>
-            <span>@_detail.CompletedLessons / @_detail.TotalLessons lekcji (@_detail.ProgressPercent%)</span>
-        </div>
-        <div class="progress" style="height:8px">
-            <div class="progress-bar" style="width:@(_detail.ProgressPercent)%"></div>
-        </div>
-    </div>
+        <!-- Top bar -->
+        <div class="cplayer-top">
+            <button class="cp-iconbtn" @onclick="ToggleNav" title="Moduły" aria-label="Przełącz listę modułów">
+                <i class="bi @(_navOpen ? "bi-x-lg" : "bi-list")"></i>
+            </button>
+            <a href="/my/courses" class="cp-iconbtn" title="Wróć"><i class="bi bi-arrow-left"></i></a>
+            <div class="cplayer-title">@_detail.Title</div>
 
-    <div class="row g-3">
-        @* Sidebar: modules + lessons *@
-        <div class="col-12 col-lg-4">
-            <div class="card">
-                <div class="card-body p-2">
-                    @foreach (var m in _detail.Modules)
-                    {
-                        <div class="fw-semibold small text-muted px-2 pt-2 pb-1">@m.Title</div>
-                        @if (m.Lessons.Count == 0)
-                        {
-                            <div class="text-muted small px-2 pb-2">— brak lekcji —</div>
-                        }
-                        else
-                        {
-                            foreach (var l in m.Lessons)
-                            {
-                                <button type="button"
-                                        class="btn w-100 text-start d-flex align-items-center gap-2 mb-1 @(_selectedId == l.Id ? "btn-primary" : "btn-light")"
-                                        @onclick="() => Select(l.Id)">
-                                    <i class="bi @(l.IsCompleted ? "bi-check-circle-fill text-success" : "bi-circle")"></i>
-                                    <span class="flex-grow-1 text-truncate">@l.Title</span>
-                                    @if (!string.IsNullOrEmpty(l.VideoUrl)) { <i class="bi bi-play-circle small"></i> }
-                                </button>
-                            }
-                        }
-                    }
-                </div>
+            <!-- Progress ring -->
+            <div class="cp-ring" title="@_detail.CompletedLessons z @_detail.TotalLessons lekcji">
+                <svg viewBox="0 0 36 36">
+                    <path class="cp-ring-bg" d="M18 2.5a15.5 15.5 0 1 1 0 31 15.5 15.5 0 0 1 0-31" />
+                    <path class="cp-ring-fg" stroke-dasharray="@_detail.ProgressPercent, 100"
+                          d="M18 2.5a15.5 15.5 0 1 1 0 31 15.5 15.5 0 0 1 0-31" />
+                </svg>
+                <span class="cp-ring-text">@_detail.ProgressPercent<small>%</small></span>
             </div>
         </div>
 
-        @* Main: selected lesson *@
-        <div class="col-12 col-lg-8">
-            @if (_selected is null)
-            {
-                <div class="card"><div class="card-body text-muted">Wybierz lekcję z listy po lewej.</div></div>
-            }
-            else
-            {
-                <div class="card">
-                    <div class="card-body">
-                        <div class="d-flex align-items-center justify-content-between mb-3">
+        <div class="cplayer-body">
+            <div class="cplayer-backdrop" @onclick="() => _navOpen = false"></div>
+
+            <!-- Sidebar: modules + lessons -->
+            <aside class="cplayer-side">
+                @{ var idx = 0; }
+                @foreach (var m in _detail.Modules)
+                {
+                    <div class="cp-mod-title">@m.Title</div>
+                    @if (m.Lessons.Count == 0)
+                    {
+                        <div class="cp-empty">— brak lekcji —</div>
+                    }
+                    else
+                    {
+                        foreach (var l in m.Lessons)
+                        {
+                            idx++;
+                            var n = idx;
+                            <button type="button"
+                                    class="cp-lesson @(_selectedId == l.Id ? "active" : "") @(l.IsCompleted ? "done" : "")"
+                                    @onclick="() => Select(l.Id)">
+                                <span class="cp-lesson-badge">
+                                    @if (l.IsCompleted)
+                                    {
+                                        <i class="bi bi-check-lg"></i>
+                                    }
+                                    else
+                                    {
+                                        @n
+                                    }
+                                </span>
+                                <span class="cp-lesson-title">@l.Title</span>
+                                @if (!string.IsNullOrEmpty(l.VideoUrl)) { <i class="bi bi-play-circle cp-lesson-ico"></i> }
+                            </button>
+                        }
+                    }
+                }
+            </aside>
+
+            <!-- Main: selected lesson -->
+            <main class="cplayer-main">
+                @if (_selected is null)
+                {
+                    <div class="cp-panel text-muted">Wybierz lekcję z listy modułów.</div>
+                }
+                else
+                {
+                    <div class="cp-panel cp-fade" @key="_selectedId">
+                        <div class="cp-lesson-head">
                             <h5 class="mb-0">@_selected.Title</h5>
-                            <button class="btn btn-sm @(_selected.IsCompleted ? "btn-success" : "btn-outline-success")"
+                            <button class="cp-complete @(_selected.IsCompleted ? "done" : "")"
                                     @onclick="ToggleComplete" disabled="@_saving">
-                                <i class="bi @(_selected.IsCompleted ? "bi-check-circle-fill" : "bi-circle") me-1"></i>
-                                @(_selected.IsCompleted ? "Ukończono" : "Oznacz jako ukończone")
+                                <i class="bi @(_selected.IsCompleted ? "bi-check-circle-fill" : "bi-circle")"></i>
+                                <span>@(_selected.IsCompleted ? "Ukończono" : "Oznacz jako ukończone")</span>
                             </button>
                         </div>
 
                         @if (!string.IsNullOrEmpty(_selected.VideoUrl))
                         {
-                            <div class="mb-3"><VideoPlayer Url="@_selected.VideoUrl" ShowPlaceholder="false" /></div>
+                            <div class="cp-video"><VideoPlayer Url="@_selected.VideoUrl" ShowPlaceholder="false" /></div>
                         }
 
                         @if (!string.IsNullOrWhiteSpace(_selected.ContentHtml))
                         {
-                            <div class="lesson-content">@((MarkupString)_selected.ContentHtml)</div>
+                            <div class="cp-content">@((MarkupString)_selected.ContentHtml)</div>
                         }
                         else if (string.IsNullOrEmpty(_selected.VideoUrl))
                         {
                             <p class="text-muted mb-0">Ta lekcja nie ma jeszcze materiałów.</p>
                         }
                     </div>
-                </div>
-            }
+                }
+            </main>
         </div>
     </div>
 }
+
+<style>
+    .cplayer { --side-w: 320px; }
+
+    /* Top bar */
+    .cplayer-top {
+        display: flex; align-items: center; gap: .5rem;
+        padding: .5rem .25rem 1rem;
+    }
+    .cp-iconbtn {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 40px; height: 40px; border-radius: 10px; flex: 0 0 auto;
+        border: 1px solid var(--bs-border-color); background: var(--bs-body-bg);
+        color: var(--bs-body-color); text-decoration: none; cursor: pointer;
+        transition: background .15s ease, transform .1s ease;
+    }
+    .cp-iconbtn:hover { background: var(--c-primary-light, rgba(2,132,199,.12)); }
+    .cp-iconbtn:active { transform: scale(.94); }
+    .cplayer-title {
+        font-weight: 700; font-size: 1.1rem; flex: 1 1 auto;
+        overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    }
+
+    /* Progress ring */
+    .cp-ring { position: relative; width: 46px; height: 46px; flex: 0 0 auto; }
+    .cp-ring svg { width: 100%; height: 100%; transform: rotate(-90deg); }
+    .cp-ring-bg { fill: none; stroke: var(--bs-border-color); stroke-width: 3; }
+    .cp-ring-fg {
+        fill: none; stroke: var(--c-primary, #0284c7); stroke-width: 3; stroke-linecap: round;
+        transition: stroke-dasharray .6s cubic-bezier(.22,1,.36,1);
+    }
+    .cp-ring-text {
+        position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
+        font-size: .72rem; font-weight: 700; color: var(--c-primary, #0284c7);
+    }
+    .cp-ring-text small { font-size: .55rem; margin-left: 1px; }
+
+    /* Body layout */
+    .cplayer-body { display: flex; gap: 1rem; align-items: flex-start; position: relative; }
+    .cplayer-backdrop { display: none; }
+
+    /* Sidebar */
+    .cplayer-side {
+        flex: 0 0 var(--side-w); width: var(--side-w);
+        background: var(--bs-body-bg); border: 1px solid var(--bs-border-color);
+        border-radius: 14px; padding: .5rem; align-self: flex-start;
+        max-height: calc(100vh - 130px); overflow-y: auto;
+        transition: margin-left .32s cubic-bezier(.22,1,.36,1), opacity .25s ease;
+    }
+    .cplayer.is-closed .cplayer-side {
+        margin-left: calc(-1 * var(--side-w) - 1rem);
+        opacity: 0; pointer-events: none;
+    }
+    .cp-mod-title {
+        font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .04em;
+        color: var(--c-muted, #6b7280); padding: .7rem .6rem .3rem;
+    }
+    .cp-empty { color: var(--c-muted, #6b7280); font-size: .85rem; padding: 0 .6rem .5rem; }
+    .cp-lesson {
+        display: flex; align-items: center; gap: .6rem; width: 100%;
+        border: 0; background: transparent; text-align: left; cursor: pointer;
+        padding: .55rem .6rem; border-radius: 10px; color: var(--bs-body-color);
+        transition: background .15s ease, transform .08s ease;
+    }
+    .cp-lesson:hover { background: var(--c-primary-light, rgba(2,132,199,.1)); }
+    .cp-lesson:active { transform: scale(.99); }
+    .cp-lesson.active { background: var(--c-primary, #0284c7); color: #fff; }
+    .cp-lesson-badge {
+        flex: 0 0 auto; width: 24px; height: 24px; border-radius: 50%;
+        display: inline-flex; align-items: center; justify-content: center;
+        font-size: .78rem; font-weight: 700;
+        background: var(--bs-secondary-bg, #e9ecef); color: var(--bs-body-color);
+        transition: background .2s ease, transform .2s ease;
+    }
+    .cp-lesson.done .cp-lesson-badge { background: #16a34a; color: #fff; }
+    .cp-lesson.active .cp-lesson-badge { background: rgba(255,255,255,.25); color: #fff; }
+    .cp-lesson-title { flex: 1 1 auto; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: .92rem; }
+    .cp-lesson-ico { flex: 0 0 auto; opacity: .7; font-size: .9rem; }
+
+    /* Main panel */
+    .cplayer-main { flex: 1 1 auto; min-width: 0; }
+    .cp-panel {
+        background: var(--bs-body-bg); border: 1px solid var(--bs-border-color);
+        border-radius: 14px; padding: 1.25rem;
+    }
+    .cp-lesson-head { display: flex; align-items: center; justify-content: space-between; gap: 1rem; margin-bottom: 1rem; flex-wrap: wrap; }
+    .cp-video { border-radius: 12px; overflow: hidden; margin-bottom: 1.1rem; }
+    .cp-content { line-height: 1.6; }
+    .cp-content img { max-width: 100%; height: auto; }
+
+    /* Complete button */
+    .cp-complete {
+        display: inline-flex; align-items: center; gap: .45rem; flex: 0 0 auto;
+        padding: .5rem 1rem; border-radius: 10px; font-weight: 600; cursor: pointer;
+        border: 1.5px solid #16a34a; background: transparent; color: #16a34a;
+        transition: background .18s ease, color .18s ease, transform .1s ease;
+    }
+    .cp-complete:hover { background: rgba(22,163,74,.1); }
+    .cp-complete:active { transform: scale(.96); }
+    .cp-complete.done { background: #16a34a; color: #fff; }
+    .cp-complete i { transition: transform .25s cubic-bezier(.22,1,.36,1); }
+    .cp-complete.done i { transform: scale(1.15); }
+
+    /* Fade-in on lesson switch */
+    .cp-fade { animation: cpFade .28s ease; }
+    @@keyframes cpFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+
+    /* Mobile: sidebar becomes a slide-in drawer */
+    @@media (max-width: 991px) {
+        .cplayer-side {
+            position: fixed; top: 0; left: 0; z-index: 1050;
+            width: min(86vw, var(--side-w)); flex-basis: auto;
+            height: 100dvh; max-height: 100dvh; border-radius: 0 16px 16px 0;
+            box-shadow: 0 10px 40px -8px rgba(0,0,0,.5);
+            transition: transform .32s cubic-bezier(.22,1,.36,1);
+        }
+        .cplayer.is-open .cplayer-side { transform: translateX(0); }
+        .cplayer.is-closed .cplayer-side { transform: translateX(-102%); margin-left: 0; opacity: 1; pointer-events: none; }
+        .cplayer.is-open .cplayer-backdrop {
+            display: block; position: fixed; inset: 0; z-index: 1040;
+            background: rgba(0,0,0,.45); animation: cpFade .2s ease;
+        }
+    }
+</style>
 
 @code {
     [Parameter] public int CourseId { get; set; }
 
     private bool _loading = true;
     private bool _saving;
+    private bool _navOpen = true;
     private string _userId = string.Empty;
     private StudentCourseDetailDto? _detail;
     private int? _selectedId;
@@ -133,13 +271,18 @@ else
         if (_detail is not null)
         {
             var all = _detail.Modules.SelectMany(m => m.Lessons).ToList();
-            // Keep current selection if still present; otherwise first not-completed, else first.
             if (_selectedId is null || all.All(l => l.Id != _selectedId))
                 _selectedId = (all.FirstOrDefault(l => !l.IsCompleted) ?? all.FirstOrDefault())?.Id;
         }
     }
 
-    private void Select(int lessonId) => _selectedId = lessonId;
+    private void ToggleNav() => _navOpen = !_navOpen;
+
+    private void Select(int lessonId)
+    {
+        _selectedId = lessonId;
+        _navOpen = false; // auto-collapse the modules column after picking a lesson
+    }
 
     private async Task ToggleComplete()
     {
