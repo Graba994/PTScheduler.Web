@@ -4,12 +4,19 @@
 @using PTScheduler.Domain.Enums
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject ICourseService CourseService
+@inject IModuleSettingsService ModuleSettings
 @inject AuthenticationStateProvider AuthState
 @rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
 
 <AppTitle Page="Kurs" />
 
-@if (_loading)
+@if (_moduleOff)
+{
+    <div class="alert alert-secondary"><i class="bi bi-toggle-off me-2"></i>Portal szkoleniowy jest obecnie niedostępny.
+        <a href="/my/courses" class="alert-link">Wróć</a>.
+    </div>
+}
+else if (_loading)
 {
     <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
 }
@@ -328,6 +335,7 @@ else
     [Parameter] public int CourseId { get; set; }
 
     private bool _loading = true;
+    private bool _moduleOff;
     private bool _saving;
     private bool _navOpen = true;
     private string _userId = string.Empty;
@@ -345,6 +353,7 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        if (!(await ModuleSettings.GetAsync()).CoursesEnabled) { _moduleOff = true; _loading = false; return; }
         var auth = await AuthState.GetAuthenticationStateAsync();
         _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
         await Load();

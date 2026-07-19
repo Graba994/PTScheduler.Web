@@ -6,6 +6,7 @@
 @attribute [AllowAnonymous]
 @inject IBrandingService BrandingService
 @inject ISiteContentService SiteContentService
+@inject IModuleSettingsService ModuleSettings
 
 <PageTitle>@_companyName — trening personalny i mentoring</PageTitle>
 
@@ -71,7 +72,7 @@
                 </article>
             }
 
-            @if (_content.ShowCoursesCard)
+            @if (_content.ShowCoursesCard && _coursesEnabled)
             {
                 <article class="wp-card">
                     <div class="wp-card-icon"><i class="bi bi-mortarboard"></i></div>
@@ -189,6 +190,7 @@
     private string _companyName = "PTScheduler";
     private string? _logoPath;
     private SiteContentDto _content = new();
+    private bool _coursesEnabled = true;
 
     protected override async Task OnInitializedAsync()
     {
@@ -205,5 +207,8 @@
             _content = await SiteContentService.GetAsync();
         }
         catch { } // Best-effort: fall back to default content
+
+        try { _coursesEnabled = (await ModuleSettings.GetAsync()).CoursesEnabled; }
+        catch { }
     }
 }
