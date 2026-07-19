@@ -1,0 +1,196 @@
+@page "/"
+@layout PublicLayout
+@using Microsoft.AspNetCore.Authorization
+@using PTScheduler.Application.Interfaces
+@attribute [AllowAnonymous]
+@inject IBrandingService BrandingService
+
+<PageTitle>@_companyName — trening personalny i mentoring</PageTitle>
+
+<div class="wp">
+
+    <!-- Top bar -->
+    <header class="wp-topbar">
+        <a href="/" class="wp-brand">
+            @if (!string.IsNullOrEmpty(_logoPath))
+            {
+                <img src="@_logoPath" alt="@_companyName" />
+            }
+            else
+            {
+                <span class="wp-brand-icon"><i class="bi bi-calendar-heart"></i></span>
+            }
+            <span class="wp-brand-name">@_companyName</span>
+        </a>
+        <nav class="wp-topnav">
+            <AuthorizeView>
+                <Authorized>
+                    <a href="/app" class="wp-btn wp-btn-primary">Przejdź do aplikacji</a>
+                </Authorized>
+                <NotAuthorized>
+                    <a href="/Account/Login" class="wp-btn wp-btn-ghost">Zaloguj się</a>
+                    <a href="/book" class="wp-btn wp-btn-primary">Umów sesję</a>
+                </NotAuthorized>
+            </AuthorizeView>
+        </nav>
+    </header>
+
+    <!-- Hero -->
+    <section class="wp-hero">
+        <div class="wp-hero-inner">
+            <h1 class="wp-hero-title">Trening personalny i&nbsp;mentoring<br />w&nbsp;jednym miejscu</h1>
+            <p class="wp-hero-sub">
+                Umawiaj sesje, rozliczaj się z trenerem i rozwijaj się z kursami online —
+                wszystko w jednej aplikacji, bez chaosu i papierologii.
+            </p>
+            <div class="wp-hero-cta">
+                <AuthorizeView>
+                    <Authorized>
+                        <a href="/app" class="wp-btn wp-btn-primary wp-btn-lg">Otwórz aplikację</a>
+                    </Authorized>
+                    <NotAuthorized>
+                        <a href="/book" class="wp-btn wp-btn-primary wp-btn-lg">Umów sesję wstępną</a>
+                        <a href="/Account/Login" class="wp-btn wp-btn-ghost wp-btn-lg">Mam już konto</a>
+                    </NotAuthorized>
+                </AuthorizeView>
+            </div>
+        </div>
+    </section>
+
+    <!-- Modules -->
+    <section class="wp-modules">
+        <h2 class="wp-section-title">Co znajdziesz w środku</h2>
+        <div class="wp-cards">
+
+            <article class="wp-card">
+                <div class="wp-card-icon"><i class="bi bi-calendar2-week"></i></div>
+                <h3>Trening &amp; grafik</h3>
+                <p>
+                    Rezerwacja sesji, kalendarz, pakiety treningowe, pomiary i rozliczenia.
+                    Trener zawsze wie, kto i kiedy przychodzi — a Ty masz wszystko pod ręką.
+                </p>
+                <a href="/book" class="wp-card-link">Umów sesję <i class="bi bi-arrow-right"></i></a>
+            </article>
+
+            <article class="wp-card">
+                <div class="wp-card-icon"><i class="bi bi-mortarboard"></i></div>
+                <h3>Kursy &amp; mentoring</h3>
+                <p>
+                    Kursy online, lekcje wideo i materiały mentoringowe — dostępne dla Twoich
+                    klientów prosto z konta, z płatnościami online.
+                </p>
+                <span class="wp-card-link wp-soon"><i class="bi bi-hourglass-split"></i> Wkrótce</span>
+            </article>
+
+        </div>
+    </section>
+
+    <!-- Footer -->
+    <footer class="wp-footer">
+        <span>© @DateTime.Now.Year @_companyName</span>
+        <span class="wp-footer-links">
+            <a href="/legal/terms">Regulamin</a>
+            <a href="/legal/privacy">Prywatność</a>
+            <a href="/legal/cookies">Cookies</a>
+        </span>
+    </footer>
+</div>
+
+<style>
+    .wp {
+        min-height: 100vh;
+        display: flex;
+        flex-direction: column;
+        background:
+            radial-gradient(1200px 600px at 100% -10%, var(--c-primary-light, rgba(2,132,199,.14)), transparent 60%),
+            var(--bs-body-bg, #fff);
+        color: var(--bs-body-color, #1f2937);
+    }
+
+    /* Top bar */
+    .wp-topbar {
+        display: flex; align-items: center; justify-content: space-between;
+        gap: 1rem; padding: 1rem clamp(1rem, 4vw, 3rem);
+        max-width: 1140px; width: 100%; margin: 0 auto;
+    }
+    .wp-brand { display: flex; align-items: center; gap: .6rem; text-decoration: none; color: inherit; }
+    .wp-brand img { height: 40px; width: auto; }
+    .wp-brand-icon {
+        display: inline-flex; align-items: center; justify-content: center;
+        width: 40px; height: 40px; border-radius: 12px;
+        background: var(--c-primary, #0284c7); color: #fff; font-size: 1.25rem;
+    }
+    .wp-brand-name { font-weight: 700; font-size: 1.15rem; color: var(--c-primary, #0284c7); }
+    .wp-topnav { display: flex; gap: .5rem; }
+
+    /* Buttons */
+    .wp-btn {
+        display: inline-flex; align-items: center; justify-content: center;
+        gap: .4rem; padding: .55rem 1.1rem; border-radius: 10px;
+        font-weight: 600; text-decoration: none; cursor: pointer;
+        border: 1.5px solid transparent; transition: transform .06s ease, background .15s ease, box-shadow .15s ease;
+        white-space: nowrap; font-size: .95rem;
+    }
+    .wp-btn:active { transform: translateY(1px); }
+    .wp-btn-primary { background: var(--c-primary, #0284c7); color: #fff; }
+    .wp-btn-primary:hover { background: var(--c-primary-hover, #0369a1); color: #fff; box-shadow: 0 6px 18px -6px var(--c-primary, #0284c7); }
+    .wp-btn-ghost { background: transparent; color: var(--c-primary, #0284c7); border-color: var(--c-primary, #0284c7); }
+    .wp-btn-ghost:hover { background: var(--c-primary-light, rgba(2,132,199,.12)); }
+    .wp-btn-lg { padding: .8rem 1.6rem; font-size: 1.05rem; border-radius: 12px; }
+
+    /* Hero */
+    .wp-hero { flex: 1; display: flex; align-items: center; justify-content: center; padding: clamp(2.5rem, 8vw, 6rem) 1.5rem; text-align: center; }
+    .wp-hero-inner { max-width: 760px; }
+    .wp-hero-title { font-size: clamp(2rem, 6vw, 3.4rem); line-height: 1.1; font-weight: 800; margin: 0 0 1.2rem; letter-spacing: -.02em; }
+    .wp-hero-sub { font-size: clamp(1.05rem, 2.4vw, 1.3rem); color: var(--c-muted, #6b7280); max-width: 620px; margin: 0 auto 2rem; line-height: 1.6; }
+    .wp-hero-cta { display: flex; gap: .8rem; justify-content: center; flex-wrap: wrap; }
+
+    /* Modules */
+    .wp-modules { max-width: 1140px; width: 100%; margin: 0 auto; padding: 1rem clamp(1rem, 4vw, 3rem) 4rem; }
+    .wp-section-title { text-align: center; font-size: clamp(1.4rem, 3vw, 2rem); font-weight: 700; margin: 0 0 2rem; }
+    .wp-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 1.5rem; }
+    .wp-card {
+        background: var(--bs-body-bg, #fff);
+        border: 1px solid var(--bs-border-color, #e5e7eb);
+        border-radius: 18px; padding: 1.8rem; display: flex; flex-direction: column;
+        box-shadow: 0 8px 30px -20px rgba(0,0,0,.4); transition: transform .12s ease, box-shadow .12s ease;
+    }
+    .wp-card:hover { transform: translateY(-3px); box-shadow: 0 18px 40px -22px rgba(0,0,0,.5); }
+    .wp-card-icon {
+        width: 54px; height: 54px; border-radius: 14px; display: inline-flex;
+        align-items: center; justify-content: center; font-size: 1.6rem; margin-bottom: 1rem;
+        background: var(--c-primary-light, rgba(2,132,199,.14)); color: var(--c-primary, #0284c7);
+    }
+    .wp-card h3 { font-size: 1.3rem; font-weight: 700; margin: 0 0 .6rem; }
+    .wp-card p { color: var(--c-muted, #6b7280); line-height: 1.6; margin: 0 0 1.2rem; flex: 1; }
+    .wp-card-link { display: inline-flex; align-items: center; gap: .4rem; font-weight: 600; color: var(--c-primary, #0284c7); text-decoration: none; }
+    .wp-card-link:hover { gap: .6rem; }
+    .wp-soon { color: var(--c-muted, #6b7280); cursor: default; }
+
+    /* Footer */
+    .wp-footer {
+        border-top: 1px solid var(--bs-border-color, #e5e7eb);
+        padding: 1.4rem clamp(1rem, 4vw, 3rem); max-width: 1140px; width: 100%; margin: 0 auto;
+        display: flex; align-items: center; justify-content: space-between; gap: 1rem; flex-wrap: wrap;
+        color: var(--c-muted, #6b7280); font-size: .9rem;
+    }
+    .wp-footer-links { display: flex; gap: 1.2rem; }
+    .wp-footer-links a { color: var(--c-muted, #6b7280); text-decoration: none; }
+    .wp-footer-links a:hover { color: var(--c-primary, #0284c7); }
+</style>
+
+@code {
+    private string _companyName = "PTScheduler";
+    private string? _logoPath;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            var b = await BrandingService.GetAsync();
+            _companyName = b.CompanyName ?? "PTScheduler";
+            _logoPath = b.LogoPath;
+        }
+        catch { } // Best-effort: fall back to defaults if branding unavailable
+    }
+}

@@ -218,7 +218,7 @@ app.MapGet("/manifest.webmanifest", async (PTScheduler.Application.Interfaces.IB
         short_name = short_,
         description = "System rezerwacji dla trenera personalnego",
         lang    = "pl",
-        start_url = "/",
+        start_url = "/app",
         scope   = "/",
         display = "standalone",
         background_color = color,
