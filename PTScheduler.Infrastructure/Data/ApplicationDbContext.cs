@@ -30,6 +30,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<FinancePin> FinancePins => Set<FinancePin>();
     public DbSet<FinanceTaxConfig> FinanceTaxConfigs => Set<FinanceTaxConfig>();
     public DbSet<LoginLog> LoginLogs => Set<LoginLog>();
+    public DbSet<Course> Courses => Set<Course>();
+    public DbSet<CourseEnrollment> CourseEnrollments => Set<CourseEnrollment>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -48,6 +50,19 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         builder.Entity<SessionPackage>()
             .Property(p => p.PricePerSession)
             .HasPrecision(10, 2);
+
+        builder.Entity<Course>()
+            .Property(c => c.Price)
+            .HasPrecision(10, 2);
+
+        builder.Entity<CourseEnrollment>()
+            .HasOne(e => e.Course)
+            .WithMany(c => c.Enrollments)
+            .HasForeignKey(e => e.CourseId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<CourseEnrollment>()
+            .HasIndex(e => new { e.CourseId, e.ApplicationUserId });
 
         builder.Entity<Session>()
             .HasOne(s => s.Package)

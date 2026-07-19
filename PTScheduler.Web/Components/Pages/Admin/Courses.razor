@@ -1,0 +1,380 @@
+@page "/admin/courses"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Admin)]
+@inject ICourseService CourseService
+@inject IUserManagementService UserService
+@inject AuthenticationStateProvider AuthState
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<AppTitle Page="Kursy" />
+
+<div class="page-header d-flex align-items-center justify-content-between">
+    <h4 class="page-title"><i class="bi bi-mortarboard-fill me-2" style="color:var(--c-primary)"></i>Kursy i dostępy</h4>
+    <button class="btn btn-primary" @onclick="NewCourse"><i class="bi bi-plus-lg me-1"></i>Nowy kurs</button>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(_msg)) { <div class="alert alert-success"><i class="bi bi-check-circle me-2"></i>@_msg</div> }
+    @if (!string.IsNullOrEmpty(_err)) { <div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-2"></i>@_err</div> }
+
+    @* ---- Course editor ---- *@
+    @if (_editing is not null)
+    {
+        <div class="card mb-4">
+            <div class="card-header"><i class="bi bi-pencil-square me-2"></i>@(_editingId is null ? "Nowy kurs" : "Edycja kursu")</div>
+            <div class="card-body">
+                <div class="row g-3">
+                    <div class="col-12 col-md-8">
+                        <label class="form-label fw-semibold">Tytuł</label>
+                        <input class="form-control" @bind="_editing.Title" maxlength="160" />
+                    </div>
+                    <div class="col-6 col-md-2">
+                        <label class="form-label fw-semibold">Cena (zł)</label>
+                        <input type="number" step="0.01" min="0" class="form-control" @bind="_editing.Price" />
+                    </div>
+                    <div class="col-6 col-md-2">
+                        <label class="form-label fw-semibold">Kolejność</label>
+                        <input type="number" class="form-control" @bind="_editing.SortOrder" />
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label fw-semibold">Opis</label>
+                        <textarea class="form-control" rows="3" @bind="_editing.Description" maxlength="2000"></textarea>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <label class="form-label fw-semibold">Domyślny typ dostępu</label>
+                        <select class="form-select" @bind="_editing.DefaultAccessType">
+                            @foreach (var t in Enum.GetValues<CourseAccessType>())
+                            {
+                                <option value="@t">@AccessLabel(t)</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <label class="form-label fw-semibold">Domyślny czas dostępu (dni)</label>
+                        <input type="number" min="1" class="form-control" @bind="_editing.DefaultAccessDays"
+                               disabled="@(_editing.DefaultAccessType == CourseAccessType.Lifetime)"
+                               placeholder="@(_editing.DefaultAccessType == CourseAccessType.Lifetime ? "dożywotni — bez limitu" : "np. 183")" />
+                    </div>
+                    <div class="col-12 col-md-4 d-flex align-items-end">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" @bind="_editing.IsPublished" id="pub" />
+                            <label class="form-check-label" for="pub">Opublikowany</label>
+                        </div>
+                    </div>
+                </div>
+                <div class="mt-3 d-flex gap-2">
+                    <button class="btn btn-primary" @onclick="SaveCourse" disabled="@_saving">
+                        @if (_saving) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                        <i class="bi bi-save me-1"></i>Zapisz
+                    </button>
+                    <button class="btn btn-outline-secondary" @onclick="() => _editing = null">Anuluj</button>
+                </div>
+            </div>
+        </div>
+    }
+
+    @* ---- Course list ---- *@
+    @if (_courses.Count == 0)
+    {
+        <div class="text-center text-muted py-5">
+            <i class="bi bi-mortarboard" style="font-size:2rem"></i>
+            <p class="mt-2 mb-0">Brak kursów. Kliknij „Nowy kurs", aby dodać pierwszy.</p>
+        </div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table align-middle">
+                <thead>
+                    <tr>
+                        <th>Kurs</th><th>Status</th><th>Cena</th><th>Domyślny dostęp</th>
+                        <th class="text-center">Dostępy</th><th class="text-end">Akcje</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var c in _courses)
+                    {
+                        <tr>
+                            <td>
+                                <div class="fw-semibold">@c.Title</div>
+                                @if (!string.IsNullOrEmpty(c.Description))
+                                {
+                                    <div class="text-muted small text-truncate" style="max-width:340px">@c.Description</div>
+                                }
+                            </td>
+                            <td>
+                                @if (c.IsPublished)
+                                {
+                                    <span class="badge bg-success">Opublikowany</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary">Szkic</span>
+                                }
+                            </td>
+                            <td>@c.Price.ToString("0.00") zł</td>
+                            <td>@AccessLabel(c.DefaultAccessType)@(c.DefaultAccessType != CourseAccessType.Lifetime && c.DefaultAccessDays is not null ? $" ({c.DefaultAccessDays} dni)" : "")</td>
+                            <td class="text-center">
+                                <span class="badge bg-primary" title="Aktywne / wszystkie">@c.ActiveEnrollmentCount / @c.EnrollmentCount</span>
+                            </td>
+                            <td class="text-end">
+                                <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => ManageAccess(c)"><i class="bi bi-people"></i> Dostępy</button>
+                                <button class="btn btn-sm btn-outline-secondary me-1" @onclick="() => EditCourse(c)"><i class="bi bi-pencil"></i></button>
+                                @if (_confirmDeleteId == c.Id)
+                                {
+                                    <button class="btn btn-sm btn-danger" @onclick="() => DeleteCourse(c.Id)"><i class="bi bi-check-lg"></i> Usuń</button>
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDeleteId = null">Nie</button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => _confirmDeleteId = c.Id"><i class="bi bi-trash"></i></button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+
+    @* ---- Access panel ---- *@
+    @if (_selected is not null)
+    {
+        <div class="card mt-4">
+            <div class="card-header d-flex align-items-center justify-content-between">
+                <span><i class="bi bi-people-fill me-2"></i>Dostępy — <strong>@_selected.Title</strong></span>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="() => _selected = null">Zamknij</button>
+            </div>
+            <div class="card-body">
+
+                @* Grant form *@
+                <div class="row g-2 align-items-end mb-4">
+                    <div class="col-12 col-md-4">
+                        <label class="form-label small fw-semibold">Użytkownik</label>
+                        <select class="form-select" @bind="_grant.ApplicationUserId">
+                            <option value="">— wybierz —</option>
+                            @foreach (var u in _users)
+                            {
+                                <option value="@u.Id">@(string.IsNullOrWhiteSpace(u.FullName) ? u.Email : $"{u.FullName} ({u.Email})")</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small fw-semibold">Typ dostępu</label>
+                        <select class="form-select" @bind="_grant.AccessType">
+                            @foreach (var t in Enum.GetValues<CourseAccessType>())
+                            {
+                                <option value="@t">@AccessLabel(t)</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-6 col-md-2">
+                        <label class="form-label small fw-semibold">Wygasa (dni)</label>
+                        <input type="number" min="1" class="form-control" @bind="_grant.AccessDays"
+                               disabled="@(_grant.AccessType == CourseAccessType.Lifetime)"
+                               placeholder="@(_grant.AccessType == CourseAccessType.Lifetime ? "—" : "np. 30")" />
+                    </div>
+                    <div class="col-12 col-md-3">
+                        <button class="btn btn-primary w-100" @onclick="Grant" disabled="@_saving">
+                            <i class="bi bi-plus-circle me-1"></i>Nadaj dostęp
+                        </button>
+                    </div>
+                </div>
+
+                @if (_enrollments.Count == 0)
+                {
+                    <p class="text-muted mb-0">Nikt nie ma jeszcze dostępu do tego kursu.</p>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle">
+                            <thead>
+                                <tr><th>Użytkownik</th><th>Typ</th><th>Źródło</th><th>Nadano</th><th>Wygasa</th><th>Status</th><th></th></tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var e in _enrollments)
+                                {
+                                    <tr>
+                                        <td>@(string.IsNullOrWhiteSpace(e.UserName) ? e.UserEmail : $"{e.UserName}") <div class="text-muted small">@e.UserEmail</div></td>
+                                        <td>@AccessLabel(e.AccessType)</td>
+                                        <td>@(e.Source == EnrollmentSource.Purchase ? "Zakup" : "Ręcznie")</td>
+                                        <td>@e.GrantedAt.ToLocalTime().ToString("yyyy-MM-dd")</td>
+                                        <td>@(e.ExpiresAt is null ? "—" : e.ExpiresAt.Value.ToLocalTime().ToString("yyyy-MM-dd"))</td>
+                                        <td>
+                                            @if (e.IsRevoked)
+                                            {
+                                                <span class="badge bg-danger">Cofnięty</span>
+                                            }
+                                            else if (e.IsActive)
+                                            {
+                                                <span class="badge bg-success">Aktywny</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge bg-warning text-dark">Wygasł</span>
+                                            }
+                                        </td>
+                                        <td class="text-end">
+                                            @if (e.IsRevoked)
+                                            {
+                                                <button class="btn btn-sm btn-outline-success" @onclick="() => Restore(e.Id)">Przywróć</button>
+                                            }
+                                            else
+                                            {
+                                                <button class="btn btn-sm btn-outline-danger" @onclick="() => Revoke(e.Id)">Cofnij</button>
+                                            }
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private bool _saving;
+    private string _msg = string.Empty;
+    private string _err = string.Empty;
+
+    private List<CourseDto> _courses = [];
+    private List<UserDto> _users = [];
+    private string _adminUserId = string.Empty;
+
+    private SaveCourseDto? _editing;
+    private int? _editingId;
+    private int? _confirmDeleteId;
+
+    private CourseDto? _selected;
+    private List<CourseEnrollmentDto> _enrollments = [];
+    private GrantEnrollmentDto _grant = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _adminUserId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        _users = await UserService.GetAllUsersAsync();
+        await ReloadCourses();
+        _loading = false;
+    }
+
+    private async Task ReloadCourses() => _courses = await CourseService.GetCoursesAsync();
+
+    private void NewCourse()
+    {
+        _editingId = null;
+        _editing = new SaveCourseDto();
+        _msg = _err = string.Empty;
+    }
+
+    private void EditCourse(CourseDto c)
+    {
+        _editingId = c.Id;
+        _editing = new SaveCourseDto
+        {
+            Title = c.Title,
+            Description = c.Description,
+            CoverImageUrl = c.CoverImageUrl,
+            IsPublished = c.IsPublished,
+            Price = c.Price,
+            DefaultAccessType = c.DefaultAccessType,
+            DefaultAccessDays = c.DefaultAccessDays,
+            SortOrder = c.SortOrder
+        };
+        _msg = _err = string.Empty;
+    }
+
+    private async Task SaveCourse()
+    {
+        if (_editing is null) return;
+        if (string.IsNullOrWhiteSpace(_editing.Title)) { _err = "Podaj tytuł kursu."; return; }
+        _saving = true; _msg = _err = string.Empty;
+        try
+        {
+            if (_editingId is null)
+                await CourseService.CreateCourseAsync(_editing);
+            else
+                await CourseService.UpdateCourseAsync(_editingId.Value, _editing);
+            _editing = null; _editingId = null;
+            await ReloadCourses();
+            _msg = "Zapisano kurs.";
+        }
+        catch (Exception ex) { _err = $"Błąd: {ex.Message}"; }
+        finally { _saving = false; }
+    }
+
+    private async Task DeleteCourse(int id)
+    {
+        _confirmDeleteId = null;
+        try
+        {
+            await CourseService.DeleteCourseAsync(id);
+            if (_selected?.Id == id) _selected = null;
+            await ReloadCourses();
+            _msg = "Usunięto kurs.";
+        }
+        catch (Exception ex) { _err = $"Błąd usuwania: {ex.Message}"; }
+    }
+
+    private async Task ManageAccess(CourseDto c)
+    {
+        _selected = c;
+        _grant = new GrantEnrollmentDto { CourseId = c.Id, AccessType = c.DefaultAccessType, AccessDays = c.DefaultAccessDays };
+        _enrollments = await CourseService.GetEnrollmentsAsync(c.Id);
+    }
+
+    private async Task Grant()
+    {
+        if (_selected is null) return;
+        if (string.IsNullOrWhiteSpace(_grant.ApplicationUserId)) { _err = "Wybierz użytkownika."; return; }
+        _saving = true; _msg = _err = string.Empty;
+        try
+        {
+            _grant.CourseId = _selected.Id;
+            var error = await CourseService.GrantAccessAsync(_grant, _adminUserId);
+            if (error is not null) { _err = error; return; }
+            _enrollments = await CourseService.GetEnrollmentsAsync(_selected.Id);
+            await ReloadCourses();
+            _grant = new GrantEnrollmentDto { CourseId = _selected.Id, AccessType = _selected.DefaultAccessType, AccessDays = _selected.DefaultAccessDays };
+            _msg = "Nadano dostęp.";
+        }
+        catch (Exception ex) { _err = $"Błąd: {ex.Message}"; }
+        finally { _saving = false; }
+    }
+
+    private async Task Revoke(int id)
+    {
+        await CourseService.RevokeAccessAsync(id);
+        if (_selected is not null) _enrollments = await CourseService.GetEnrollmentsAsync(_selected.Id);
+        await ReloadCourses();
+    }
+
+    private async Task Restore(int id)
+    {
+        await CourseService.RestoreAccessAsync(id);
+        if (_selected is not null) _enrollments = await CourseService.GetEnrollmentsAsync(_selected.Id);
+        await ReloadCourses();
+    }
+
+    private static string AccessLabel(CourseAccessType t) => t switch
+    {
+        CourseAccessType.Lifetime => "Dożywotni",
+        CourseAccessType.Timed => "Czasowy",
+        CourseAccessType.Trial => "Testowy",
+        CourseAccessType.Promotional => "Promocyjny",
+        _ => t.ToString()
+    };
+}
