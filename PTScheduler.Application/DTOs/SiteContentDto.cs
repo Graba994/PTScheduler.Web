@@ -9,9 +9,19 @@ public class SiteContentDto
 {
     // ---- Global style ----
     public string Template { get; set; } = "classic";       // classic | gradient | dark | minimal
+    public bool Animations { get; set; } = true;            // scroll-reveal + stat counters
     public string HeroBackground { get; set; } = "gradient"; // gradient | solid | image
     public string? HeroImageUrl { get; set; }
     public string? AccentOverride { get; set; }              // optional CSS color to override the brand accent
+
+    // Global page colors (null = default / theme-aware).
+    public string? PageBackground { get; set; }    // page background
+    public string? HeadingColor { get; set; }      // all section titles
+    public string? BodyTextColor { get; set; }     // paragraphs / muted text
+    public string? ButtonTextColor { get; set; }   // primary button label
+    // Hero gradient (used when HeroBackground = gradient).
+    public string? HeroGradientFrom { get; set; }
+    public string? HeroGradientTo { get; set; }
 
     // Order of the movable sections (hero is always first, footer always last).
     public List<string> SectionOrder { get; set; } =
@@ -83,6 +93,11 @@ public class SiteContentDto
     public string? CtaText { get; set; } = "Umów pierwszą sesję i przekonaj się sam.";
     public string CtaButtonLabel { get; set; } = "Umów sesję";
     public string CtaButtonUrl { get; set; } = "/book";
+    public string? CtaBgFrom { get; set; }
+    public string? CtaBgTo { get; set; }
+    public string? CtaTextColor { get; set; }
+    public string? CtaButtonBg { get; set; }
+    public string? CtaButtonTextColor { get; set; }
 
     // ---- Social media ----
     public bool ShowSocial { get; set; }

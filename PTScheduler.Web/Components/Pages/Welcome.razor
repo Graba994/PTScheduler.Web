@@ -10,7 +10,7 @@
 
 <PageTitle>@_companyName — trening personalny i mentoring</PageTitle>
 
-<div class="wp tmpl-@_content.Template" style="@AccentStyle">
+<div class="wp tmpl-@_content.Template" style="@WpStyle">
 
     <!-- Top bar -->
     <header class="wp-topbar">
@@ -68,12 +68,20 @@
     {
         @if (key == "stats" && _content.ShowStats && _content.Stats.Count > 0)
         {
-            <section class="wp-sec wp-stats">
+            <section class="wp-sec wp-stats @RevealCls">
                 <div class="wp-wrap wp-stats-grid">
                     @foreach (var s in _content.Stats)
                     {
+                        var parsed = ParseStat(s.Value);
                         <div class="wp-stat">
-                            <div class="wp-stat-value">@s.Value</div>
+                            @if (_content.Animations && parsed.Num is not null)
+                            {
+                                <div class="wp-stat-value wp-count" data-count="@parsed.Num" data-suffix="@parsed.Suffix">@s.Value</div>
+                            }
+                            else
+                            {
+                                <div class="wp-stat-value">@s.Value</div>
+                            }
                             <div class="wp-stat-label">@s.Label</div>
                         </div>
                     }
@@ -83,7 +91,7 @@
 
         @if (key == "features" && _content.ShowFeatures && _content.Features.Count > 0)
         {
-            <section class="wp-sec">
+            <section class="wp-sec @RevealCls">
                 <div class="wp-wrap">
                     <h2 class="wp-h2">@_content.FeaturesTitle</h2>
                     <div class="wp-grid3">
@@ -102,7 +110,7 @@
 
         @if (key == "about" && _content.ShowAbout)
         {
-            <section class="wp-sec">
+            <section class="wp-sec @RevealCls">
                 <div class="wp-wrap wp-about">
                     @if (!string.IsNullOrEmpty(_content.AboutImageUrl))
                     {
@@ -118,7 +126,7 @@
 
         @if (key == "modules" && _content.ShowModules && (_content.ShowSchedulerCard || (_content.ShowCoursesCard && _coursesEnabled)))
         {
-            <section class="wp-sec">
+            <section class="wp-sec @RevealCls">
                 <div class="wp-wrap">
                     <h2 class="wp-h2">@_content.SectionTitle</h2>
                     <div class="wp-grid3">
@@ -154,7 +162,7 @@
 
         @if (key == "offer" && _content.ShowOffer && _content.Offers.Count > 0)
         {
-            <section class="wp-sec wp-sec--tint">
+            <section class="wp-sec wp-sec--tint @RevealCls">
                 <div class="wp-wrap">
                     <h2 class="wp-h2">@_content.OfferTitle</h2>
                     <div class="wp-grid3">
@@ -181,7 +189,7 @@
 
         @if (key == "testimonials" && _content.ShowTestimonials && _content.Testimonials.Count > 0)
         {
-            <section class="wp-sec">
+            <section class="wp-sec @RevealCls">
                 <div class="wp-wrap">
                     <h2 class="wp-h2">@_content.TestimonialsTitle</h2>
                     <div class="wp-grid3">
@@ -200,7 +208,7 @@
 
         @if (key == "faq" && _content.ShowFaq && _content.Faqs.Count > 0)
         {
-            <section class="wp-sec">
+            <section class="wp-sec @RevealCls">
                 <div class="wp-wrap wp-faq">
                     <h2 class="wp-h2">@_content.FaqTitle</h2>
                     @foreach (var q in _content.Faqs)
@@ -216,12 +224,12 @@
 
         @if (key == "cta" && _content.ShowCta)
         {
-            <section class="wp-sec">
+            <section class="wp-sec @RevealCls">
                 <div class="wp-wrap">
-                    <div class="wp-cta">
-                        <h2>@_content.CtaTitle</h2>
-                        @if (!string.IsNullOrEmpty(_content.CtaText)) { <p>@_content.CtaText</p> }
-                        <a href="@_content.CtaButtonUrl" class="wp-btn wp-btn-lg wp-cta-btn">@_content.CtaButtonLabel</a>
+                    <div class="wp-cta" style="@CtaBgStyle">
+                        <h2 style="@ColorStyle(_content.CtaTextColor)">@_content.CtaTitle</h2>
+                        @if (!string.IsNullOrEmpty(_content.CtaText)) { <p style="@ColorStyle(_content.CtaTextColor)">@_content.CtaText</p> }
+                        <a href="@_content.CtaButtonUrl" class="wp-btn wp-btn-lg wp-cta-btn" style="@CtaBtnStyle">@_content.CtaButtonLabel</a>
                     </div>
                 </div>
             </section>
@@ -270,7 +278,7 @@
         padding: .55rem 1.1rem; border-radius: 10px; font-weight: 600; text-decoration: none; cursor: pointer;
         border: 1.5px solid transparent; transition: transform .06s ease, background .15s ease, box-shadow .15s ease; white-space: nowrap; font-size: .95rem; }
     .wp-btn:active { transform: translateY(1px); }
-    .wp-btn-primary { background: var(--c-primary, #0284c7); color: #fff; }
+    .wp-btn-primary { background: var(--c-primary, #0284c7); color: var(--wp-btn-text, #fff); }
     .wp-btn-primary:hover { background: var(--c-primary-hover, #0369a1); color: #fff; box-shadow: 0 6px 18px -6px var(--c-primary, #0284c7); }
     .wp-btn-ghost { background: transparent; color: var(--c-primary, #0284c7); border-color: var(--c-primary, #0284c7); }
     .wp-btn-ghost:hover { background: var(--c-primary-light, rgba(2,132,199,.12)); }
@@ -303,9 +311,14 @@
     /* Sections */
     .wp-sec { padding: clamp(2.5rem, 6vw, 4.5rem) 0; }
     .wp-sec--tint { background: var(--bs-tertiary-bg, #f8f9fa); }
-    .wp-h2 { text-align: center; font-size: clamp(1.5rem, 3vw, 2.2rem); font-weight: 800; margin: 0 0 2.2rem; letter-spacing: -.01em; }
+    .wp-h2 { text-align: center; font-size: clamp(1.5rem, 3vw, 2.2rem); font-weight: 800; margin: 0 0 2.2rem; letter-spacing: -.01em; color: var(--wp-heading, inherit); }
     .wp-h2--left { text-align: left; margin-bottom: 1.2rem; }
     .wp-grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 1.5rem; }
+
+    /* Scroll reveal */
+    .wp-reveal { opacity: 0; transform: translateY(26px); transition: opacity .7s ease, transform .7s cubic-bezier(.22,1,.36,1); }
+    .wp-revealed { opacity: 1; transform: none; }
+    @@media (prefers-reduced-motion: reduce) { .wp-reveal { opacity: 1; transform: none; transition: none; } }
 
     /* Stats */
     .wp-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1.5rem; text-align: center; }
@@ -393,17 +406,67 @@
     private bool HeroOnDark => _content.Template is "gradient" or "dark"
         || (_content.HeroBackground == "image" && !string.IsNullOrEmpty(_content.HeroImageUrl));
 
-    private string HeroStyle =>
-        _content.HeroBackground == "image" && !string.IsNullOrEmpty(_content.HeroImageUrl)
-            ? $"background-image:linear-gradient(rgba(0,0,0,.5),rgba(0,0,0,.55)),url('{_content.HeroImageUrl}');background-size:cover;background-position:center;"
+    private string HeroStyle
+    {
+        get
+        {
+            if (_content.HeroBackground == "image" && !string.IsNullOrEmpty(_content.HeroImageUrl))
+                return $"background-image:linear-gradient(rgba(0,0,0,.5),rgba(0,0,0,.55)),url('{_content.HeroImageUrl}');background-size:cover;background-position:center;";
+            if (_content.HeroBackground == "gradient"
+                && (!string.IsNullOrWhiteSpace(_content.HeroGradientFrom) || !string.IsNullOrWhiteSpace(_content.HeroGradientTo)))
+            {
+                var from = _content.HeroGradientFrom ?? _content.HeroGradientTo;
+                var to = _content.HeroGradientTo ?? _content.HeroGradientFrom;
+                return $"background:linear-gradient(135deg,{from},{to});";
+            }
+            return "";
+        }
+    }
+
+    private string WpStyle
+    {
+        get
+        {
+            var sb = new System.Text.StringBuilder();
+            if (!string.IsNullOrWhiteSpace(_content.AccentOverride)) sb.Append($"--c-primary:{_content.AccentOverride};--c-primary-hover:{_content.AccentOverride};");
+            if (!string.IsNullOrWhiteSpace(_content.BodyTextColor)) sb.Append($"--c-muted:{_content.BodyTextColor};");
+            if (!string.IsNullOrWhiteSpace(_content.HeadingColor)) sb.Append($"--wp-heading:{_content.HeadingColor};");
+            if (!string.IsNullOrWhiteSpace(_content.ButtonTextColor)) sb.Append($"--wp-btn-text:{_content.ButtonTextColor};");
+            if (!string.IsNullOrWhiteSpace(_content.PageBackground)) sb.Append($"background:{_content.PageBackground};");
+            return sb.ToString();
+        }
+    }
+
+    private string CtaBgStyle =>
+        (!string.IsNullOrWhiteSpace(_content.CtaBgFrom) || !string.IsNullOrWhiteSpace(_content.CtaBgTo))
+            ? $"background:linear-gradient(135deg,{_content.CtaBgFrom ?? _content.CtaBgTo},{_content.CtaBgTo ?? _content.CtaBgFrom});"
             : "";
 
-    private string AccentStyle =>
-        string.IsNullOrWhiteSpace(_content.AccentOverride)
-            ? ""
-            : $"--c-primary:{_content.AccentOverride};--c-primary-hover:{_content.AccentOverride};";
+    private string CtaBtnStyle
+    {
+        get
+        {
+            var sb = new System.Text.StringBuilder();
+            if (!string.IsNullOrWhiteSpace(_content.CtaButtonBg)) sb.Append($"background:{_content.CtaButtonBg};");
+            if (!string.IsNullOrWhiteSpace(_content.CtaButtonTextColor)) sb.Append($"color:{_content.CtaButtonTextColor};");
+            return sb.ToString();
+        }
+    }
+
+    private string RevealCls => _content.Animations ? "wp-reveal" : "";
 
     private static string ColorStyle(string? c) => string.IsNullOrWhiteSpace(c) ? "" : $"color:{c}";
+
+    private static (double? Num, string Suffix) ParseStat(string? value)
+    {
+        value ??= "";
+        var m = System.Text.RegularExpressions.Regex.Match(value, @"\d[\d\s.,]*");
+        if (!m.Success) return (null, value);
+        var numStr = m.Value.Replace(" ", "").Replace(",", "").TrimEnd('.');
+        if (!double.TryParse(numStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var n))
+            return (null, value);
+        return (n, value[(m.Index + m.Length)..]);
+    }
 
     protected override async Task OnInitializedAsync()
     {
