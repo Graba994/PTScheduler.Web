@@ -4,13 +4,19 @@
 @using PTScheduler.Domain.Constants
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Admin)]
 @inject ISiteContentService SiteContentService
-@inject NavigationManager Nav
 @rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
 
 <AppTitle Page="Strona główna" />
 
-<div class="page-header">
-    <h4 class="page-title"><i class="bi bi-globe me-2" style="color:var(--c-primary)"></i>Strona główna (Welcome)</h4>
+<div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <h4 class="page-title mb-0"><i class="bi bi-globe me-2" style="color:var(--c-primary)"></i>Strona główna (Welcome)</h4>
+    <div class="d-flex gap-2">
+        <a class="btn btn-outline-secondary" href="/" target="_blank"><i class="bi bi-box-arrow-up-right me-1"></i>Podgląd</a>
+        <button class="btn btn-primary" @onclick="Save" disabled="@(_content is null || _saving)">
+            @if (_saving) { <span class="spinner-border spinner-border-sm me-2"></span> }
+            <i class="bi bi-save me-1"></i>Zapisz
+        </button>
+    </div>
 </div>
 
 @if (_content is null)
@@ -19,100 +25,259 @@
 }
 else
 {
-    @if (!string.IsNullOrEmpty(_message))
+    @if (!string.IsNullOrEmpty(_message)) { <div class="alert alert-success"><i class="bi bi-check-circle me-2"></i>@_message</div> }
+    @if (!string.IsNullOrEmpty(_error)) { <div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-2"></i>@_error</div> }
+
+    <!-- Templates -->
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-palette2 me-2"></i>Szablony</div>
+        <div class="card-body">
+            <p class="text-muted small">Zastosuj gotowy szablon (wypełni treść i styl — potem edytuj dowolnie). Zapisze się dopiero po kliknięciu „Zapisz".</p>
+            <div class="d-flex flex-wrap gap-2">
+                @foreach (var t in SiteTemplates.All)
+                {
+                    <button class="btn @(_content.Template == t.Key ? "btn-primary" : "btn-outline-primary")" @onclick="() => ApplyTemplate(t.Key)">
+                        @t.Name<br /><span class="small opacity-75">@t.Desc</span>
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+
+    <!-- Style -->
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-brush me-2"></i>Styl i tło</div>
+        <div class="card-body row g-3">
+            <div class="col-12 col-md-4">
+                <label class="form-label fw-semibold">Szablon (styl)</label>
+                <select class="form-select" @bind="_content.Template">
+                    @foreach (var t in SiteTemplates.All) { <option value="@t.Key">@t.Name</option> }
+                </select>
+            </div>
+            <div class="col-12 col-md-4">
+                <label class="form-label fw-semibold">Tło sekcji hero</label>
+                <select class="form-select" @bind="_content.HeroBackground">
+                    <option value="gradient">Gradient</option>
+                    <option value="solid">Jednolite</option>
+                    <option value="image">Obrazek</option>
+                </select>
+            </div>
+            <div class="col-12 col-md-4">
+                <label class="form-label fw-semibold">Kolor akcentu (opcjonalnie)</label>
+                <input class="form-control" @bind="_content.AccentOverride" placeholder="np. #e11d48 lub puste = z brandingu" />
+            </div>
+            <div class="col-12">
+                <label class="form-label fw-semibold">URL obrazka hero (gdy tło = Obrazek)</label>
+                <input class="form-control" @bind="_content.HeroImageUrl" placeholder="https://..." />
+            </div>
+        </div>
+    </div>
+
+    <!-- Hero -->
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-card-heading me-2"></i>Sekcja główna (hero)</div>
+        <div class="card-body row g-3">
+            <div class="col-12 col-md-6">
+                <label class="form-label fw-semibold">Etykieta (eyebrow)</label>
+                <input class="form-control" @bind="_content.HeroEyebrow" maxlength="60" />
+            </div>
+            <div class="col-12">
+                <label class="form-label fw-semibold">Nagłówek</label>
+                <input class="form-control" @bind="_content.HeroTitle" maxlength="200" />
+            </div>
+            <div class="col-12">
+                <label class="form-label fw-semibold">Podtytuł</label>
+                <textarea class="form-control" rows="2" @bind="_content.HeroSubtitle" maxlength="400"></textarea>
+            </div>
+            <div class="col-6 col-md-3">
+                <label class="form-label fw-semibold">Przycisk 1 — tekst</label>
+                <input class="form-control" @bind="_content.PrimaryCtaLabel" maxlength="60" />
+            </div>
+            <div class="col-6 col-md-3">
+                <label class="form-label fw-semibold">Przycisk 1 — link</label>
+                <input class="form-control" @bind="_content.PrimaryCtaUrl" />
+            </div>
+            <div class="col-6 col-md-3">
+                <label class="form-label fw-semibold">Przycisk 2 — tekst</label>
+                <input class="form-control" @bind="_content.SecondaryCtaLabel" maxlength="60" />
+            </div>
+            <div class="col-6 col-md-3">
+                <label class="form-label fw-semibold">Przycisk 2 — link</label>
+                <input class="form-control" @bind="_content.SecondaryCtaUrl" />
+            </div>
+        </div>
+    </div>
+
+    <!-- Movable sections -->
+    <h5 class="mt-4 mb-2"><i class="bi bi-layout-text-window me-2"></i>Sekcje strony</h5>
+    <p class="text-muted small">Włączaj, edytuj i zmieniaj kolejność sekcji. Hero jest zawsze na górze, stopka na dole.</p>
+
+    @foreach (var key in _content.SectionOrder)
     {
-        <div class="alert alert-success"><i class="bi bi-check-circle me-2"></i>@_message</div>
+        <div class="card mb-3">
+            <div class="card-header d-flex align-items-center gap-2">
+                <span class="fw-semibold flex-grow-1"><i class="bi @SectionIcon(key) me-2"></i>@SectionName(key)</span>
+                <button class="btn btn-sm btn-outline-secondary" title="W górę" @onclick="() => MoveSection(key, -1)"><i class="bi bi-arrow-up"></i></button>
+                <button class="btn btn-sm btn-outline-secondary" title="W dół" @onclick="() => MoveSection(key, 1)"><i class="bi bi-arrow-down"></i></button>
+                <div class="form-check form-switch m-0 ms-2">
+                    <input class="form-check-input" type="checkbox" checked="@IsSectionOn(key)" @onchange="e => SetSectionOn(key, (bool)(e.Value ?? false))" />
+                </div>
+            </div>
+            <div class="card-body">
+                @switch (key)
+                {
+                    case "stats":
+                        @foreach (var s in _content.Stats)
+                        {
+                            <div class="row g-2 mb-2 align-items-center">
+                                <div class="col"><input class="form-control" placeholder="Wartość (np. 150+)" @bind="s.Value" /></div>
+                                <div class="col"><input class="form-control" placeholder="Opis (np. klientów)" @bind="s.Label" /></div>
+                                <div class="col-auto"><button class="btn btn-outline-danger" @onclick="() => _content.Stats.Remove(s)"><i class="bi bi-x-lg"></i></button></div>
+                            </div>
+                        }
+                        <button class="btn btn-sm btn-outline-primary" @onclick="() => _content.Stats.Add(new())"><i class="bi bi-plus-lg me-1"></i>Dodaj statystykę</button>
+                        break;
+
+                    case "features":
+                        <label class="form-label fw-semibold">Tytuł sekcji</label>
+                        <input class="form-control mb-3" @bind="_content.FeaturesTitle" />
+                        @foreach (var f in _content.Features)
+                        {
+                            <div class="row g-2 mb-2">
+                                <div class="col-12 col-md-3"><input class="form-control" placeholder="Ikona (bi-star)" @bind="f.Icon" /></div>
+                                <div class="col-12 col-md-3"><input class="form-control" placeholder="Tytuł" @bind="f.Title" /></div>
+                                <div class="col"><input class="form-control" placeholder="Opis" @bind="f.Text" /></div>
+                                <div class="col-auto"><button class="btn btn-outline-danger" @onclick="() => _content.Features.Remove(f)"><i class="bi bi-x-lg"></i></button></div>
+                            </div>
+                        }
+                        <div class="d-flex justify-content-between align-items-center">
+                            <button class="btn btn-sm btn-outline-primary" @onclick="() => _content.Features.Add(new())"><i class="bi bi-plus-lg me-1"></i>Dodaj punkt</button>
+                            <a class="small text-muted" href="https://icons.getbootstrap.com" target="_blank">lista ikon <i class="bi bi-box-arrow-up-right"></i></a>
+                        </div>
+                        break;
+
+                    case "about":
+                        <label class="form-label fw-semibold">Tytuł</label>
+                        <input class="form-control mb-3" @bind="_content.AboutTitle" />
+                        <label class="form-label fw-semibold">Treść (HTML)</label>
+                        <textarea class="form-control mb-3 font-monospace" rows="5" style="font-size:.85rem" @bind="_content.AboutHtml"></textarea>
+                        <label class="form-label fw-semibold">URL obrazka (opcjonalnie)</label>
+                        <input class="form-control" @bind="_content.AboutImageUrl" placeholder="https://..." />
+                        break;
+
+                    case "modules":
+                        <label class="form-label fw-semibold">Tytuł sekcji</label>
+                        <input class="form-control mb-3" @bind="_content.SectionTitle" />
+                        <div class="border rounded p-3 mb-2">
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" @bind="_content.ShowSchedulerCard" id="swSched" />
+                                <label class="form-check-label fw-semibold" for="swSched">Karta: Trening &amp; grafik</label>
+                            </div>
+                            <input class="form-control mb-2" placeholder="Tytuł" @bind="_content.SchedulerCardTitle" />
+                            <textarea class="form-control" rows="2" placeholder="Opis" @bind="_content.SchedulerCardText"></textarea>
+                        </div>
+                        <div class="border rounded p-3">
+                            <div class="form-check form-switch mb-2">
+                                <input class="form-check-input" type="checkbox" @bind="_content.ShowCoursesCard" id="swCourses" />
+                                <label class="form-check-label fw-semibold" for="swCourses">Karta: Kursy &amp; mentoring</label>
+                            </div>
+                            <input class="form-control mb-2" placeholder="Tytuł" @bind="_content.CoursesCardTitle" />
+                            <textarea class="form-control mb-2" rows="2" placeholder="Opis" @bind="_content.CoursesCardText"></textarea>
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" @bind="_content.CoursesComingSoon" id="swSoon" />
+                                <label class="form-check-label" for="swSoon">Oznacz jako „Wkrótce"</label>
+                            </div>
+                        </div>
+                        break;
+
+                    case "offer":
+                        <label class="form-label fw-semibold">Tytuł sekcji</label>
+                        <input class="form-control mb-3" @bind="_content.OfferTitle" />
+                        @foreach (var o in _content.Offers)
+                        {
+                            <div class="border rounded p-3 mb-2">
+                                <div class="row g-2 mb-2">
+                                    <div class="col"><input class="form-control" placeholder="Nazwa" @bind="o.Name" /></div>
+                                    <div class="col-6 col-md-3"><input class="form-control" placeholder="Cena" @bind="o.Price" /></div>
+                                    <div class="col-6 col-md-3"><input class="form-control" placeholder="Okres (/mies.)" @bind="o.Period" /></div>
+                                    <div class="col-auto"><button class="btn btn-outline-danger" @onclick="() => _content.Offers.Remove(o)"><i class="bi bi-x-lg"></i></button></div>
+                                </div>
+                                <input class="form-control mb-2" placeholder="Krótki opis" @bind="o.Description" />
+                                <label class="form-label small text-muted mb-1">Cechy (jedna na linię)</label>
+                                <textarea class="form-control mb-2" rows="3" value="@string.Join("\n", o.Features)"
+                                          @onchange="e => o.Features = SplitLines(e.Value)"></textarea>
+                                <div class="row g-2 align-items-center">
+                                    <div class="col"><input class="form-control" placeholder="Tekst przycisku" @bind="o.CtaLabel" /></div>
+                                    <div class="col"><input class="form-control" placeholder="Link przycisku" @bind="o.CtaUrl" /></div>
+                                    <div class="col-auto form-check form-switch m-0">
+                                        <input class="form-check-input" type="checkbox" @bind="o.Highlighted" id="@($"hot{o.GetHashCode()}")" />
+                                        <label class="form-check-label small" for="@($"hot{o.GetHashCode()}")">Polecany</label>
+                                    </div>
+                                </div>
+                            </div>
+                        }
+                        <button class="btn btn-sm btn-outline-primary" @onclick="() => _content.Offers.Add(new())"><i class="bi bi-plus-lg me-1"></i>Dodaj pakiet</button>
+                        break;
+
+                    case "testimonials":
+                        <label class="form-label fw-semibold">Tytuł sekcji</label>
+                        <input class="form-control mb-3" @bind="_content.TestimonialsTitle" />
+                        @foreach (var t in _content.Testimonials)
+                        {
+                            <div class="row g-2 mb-2">
+                                <div class="col-12 col-md-3"><input class="form-control" placeholder="Autor" @bind="t.Author" /></div>
+                                <div class="col-12 col-md-3"><input class="form-control" placeholder="Rola (opcjonalnie)" @bind="t.Role" /></div>
+                                <div class="col"><input class="form-control" placeholder="Treść opinii" @bind="t.Text" /></div>
+                                <div class="col-auto"><button class="btn btn-outline-danger" @onclick="() => _content.Testimonials.Remove(t)"><i class="bi bi-x-lg"></i></button></div>
+                            </div>
+                        }
+                        <button class="btn btn-sm btn-outline-primary" @onclick="() => _content.Testimonials.Add(new())"><i class="bi bi-plus-lg me-1"></i>Dodaj opinię</button>
+                        break;
+
+                    case "faq":
+                        <label class="form-label fw-semibold">Tytuł sekcji</label>
+                        <input class="form-control mb-3" @bind="_content.FaqTitle" />
+                        @foreach (var q in _content.Faqs)
+                        {
+                            <div class="row g-2 mb-2">
+                                <div class="col-12 col-md-4"><input class="form-control" placeholder="Pytanie" @bind="q.Question" /></div>
+                                <div class="col"><input class="form-control" placeholder="Odpowiedź" @bind="q.Answer" /></div>
+                                <div class="col-auto"><button class="btn btn-outline-danger" @onclick="() => _content.Faqs.Remove(q)"><i class="bi bi-x-lg"></i></button></div>
+                            </div>
+                        }
+                        <button class="btn btn-sm btn-outline-primary" @onclick="() => _content.Faqs.Add(new())"><i class="bi bi-plus-lg me-1"></i>Dodaj pytanie</button>
+                        break;
+
+                    case "cta":
+                        <label class="form-label fw-semibold">Nagłówek</label>
+                        <input class="form-control mb-2" @bind="_content.CtaTitle" />
+                        <label class="form-label fw-semibold">Tekst</label>
+                        <input class="form-control mb-2" @bind="_content.CtaText" />
+                        <div class="row g-2">
+                            <div class="col"><input class="form-control" placeholder="Tekst przycisku" @bind="_content.CtaButtonLabel" /></div>
+                            <div class="col"><input class="form-control" placeholder="Link przycisku" @bind="_content.CtaButtonUrl" /></div>
+                        </div>
+                        break;
+                }
+            </div>
+        </div>
     }
-    @if (!string.IsNullOrEmpty(_error))
-    {
-        <div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-2"></i>@_error</div>
-    }
 
-    <div class="row g-4">
-
-        <!-- Hero -->
-        <div class="col-12 col-lg-6">
-            <div class="card h-100">
-                <div class="card-header"><i class="bi bi-card-heading me-2"></i>Sekcja główna (hero)</div>
-                <div class="card-body">
-                    <label class="form-label fw-semibold">Nagłówek</label>
-                    <input class="form-control mb-3" @bind="_content.HeroTitle" maxlength="160" />
-
-                    <label class="form-label fw-semibold">Podtytuł</label>
-                    <textarea class="form-control mb-3" rows="3" @bind="_content.HeroSubtitle" maxlength="400"></textarea>
-
-                    <label class="form-label fw-semibold">Tekst głównego przycisku (dla niezalogowanych)</label>
-                    <input class="form-control" @bind="_content.PrimaryCtaLabel" maxlength="60" />
-                </div>
-            </div>
+    <!-- Footer -->
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-dash-square me-2"></i>Stopka</div>
+        <div class="card-body">
+            <label class="form-label fw-semibold">Tekst stopki (puste = © rok + nazwa)</label>
+            <input class="form-control" @bind="_content.FooterText" />
         </div>
+    </div>
 
-        <!-- Sekcja modułów -->
-        <div class="col-12 col-lg-6">
-            <div class="card h-100">
-                <div class="card-header"><i class="bi bi-grid-1x2 me-2"></i>Sekcja modułów</div>
-                <div class="card-body">
-                    <label class="form-label fw-semibold">Tytuł sekcji</label>
-                    <input class="form-control" @bind="_content.SectionTitle" maxlength="120" />
-                    <p class="text-muted small mt-3 mb-0">
-                        <i class="bi bi-info-circle me-1"></i>
-                        Poniżej włączysz/wyłączysz i opiszesz karty poszczególnych modułów.
-                    </p>
-                </div>
-            </div>
-        </div>
-
-        <!-- Karta: scheduler -->
-        <div class="col-12 col-lg-6">
-            <div class="card h-100">
-                <div class="card-header d-flex align-items-center justify-content-between">
-                    <span><i class="bi bi-calendar2-week me-2"></i>Karta: Trening &amp; grafik</span>
-                    <div class="form-check form-switch m-0">
-                        <input class="form-check-input" type="checkbox" @bind="_content.ShowSchedulerCard" id="swSched" />
-                        <label class="form-check-label small" for="swSched">Pokaż</label>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <label class="form-label fw-semibold">Tytuł</label>
-                    <input class="form-control mb-3" @bind="_content.SchedulerCardTitle" maxlength="80" />
-                    <label class="form-label fw-semibold">Opis</label>
-                    <textarea class="form-control" rows="3" @bind="_content.SchedulerCardText" maxlength="400"></textarea>
-                </div>
-            </div>
-        </div>
-
-        <!-- Karta: kursy -->
-        <div class="col-12 col-lg-6">
-            <div class="card h-100">
-                <div class="card-header d-flex align-items-center justify-content-between">
-                    <span><i class="bi bi-mortarboard me-2"></i>Karta: Kursy &amp; mentoring</span>
-                    <div class="form-check form-switch m-0">
-                        <input class="form-check-input" type="checkbox" @bind="_content.ShowCoursesCard" id="swCourses" />
-                        <label class="form-check-label small" for="swCourses">Pokaż</label>
-                    </div>
-                </div>
-                <div class="card-body">
-                    <label class="form-label fw-semibold">Tytuł</label>
-                    <input class="form-control mb-3" @bind="_content.CoursesCardTitle" maxlength="80" />
-                    <label class="form-label fw-semibold">Opis</label>
-                    <textarea class="form-control mb-3" rows="3" @bind="_content.CoursesCardText" maxlength="400"></textarea>
-                    <div class="form-check form-switch">
-                        <input class="form-check-input" type="checkbox" @bind="_content.CoursesComingSoon" id="swSoon" />
-                        <label class="form-check-label" for="swSoon">Oznacz jako „Wkrótce" (moduł jeszcze niedostępny)</label>
-                    </div>
-                </div>
-            </div>
-        </div>
-
-        <div class="col-12 d-flex gap-2">
-            <button class="btn btn-primary" @onclick="Save" disabled="@_saving">
-                @if (_saving) { <span class="spinner-border spinner-border-sm me-2"></span> }
-                <i class="bi bi-save me-1"></i>Zapisz
-            </button>
-            <a class="btn btn-outline-secondary" href="/" target="_blank">
-                <i class="bi bi-box-arrow-up-right me-1"></i>Podgląd strony
-            </a>
-        </div>
+    <div class="d-flex gap-2 mb-4">
+        <button class="btn btn-primary" @onclick="Save" disabled="@_saving">
+            @if (_saving) { <span class="spinner-border spinner-border-sm me-2"></span> }
+            <i class="bi bi-save me-1"></i>Zapisz
+        </button>
+        <a class="btn btn-outline-secondary" href="/" target="_blank"><i class="bi bi-box-arrow-up-right me-1"></i>Podgląd strony</a>
     </div>
 }
 
@@ -127,6 +292,82 @@ else
         _content = await SiteContentService.GetAsync();
     }
 
+    private void ApplyTemplate(string key)
+    {
+        _content = SiteTemplates.Build(key);
+        _message = "Zastosowano szablon — sprawdź i zapisz.";
+        _error = string.Empty;
+    }
+
+    private void MoveSection(string key, int dir)
+    {
+        if (_content is null) return;
+        var list = _content.SectionOrder;
+        var idx = list.IndexOf(key);
+        var target = idx + dir;
+        if (idx < 0 || target < 0 || target >= list.Count) return;
+        list.RemoveAt(idx);
+        list.Insert(target, key);
+    }
+
+    private bool IsSectionOn(string key) => key switch
+    {
+        "stats" => _content!.ShowStats,
+        "features" => _content!.ShowFeatures,
+        "about" => _content!.ShowAbout,
+        "modules" => _content!.ShowModules,
+        "offer" => _content!.ShowOffer,
+        "testimonials" => _content!.ShowTestimonials,
+        "faq" => _content!.ShowFaq,
+        "cta" => _content!.ShowCta,
+        _ => false
+    };
+
+    private void SetSectionOn(string key, bool on)
+    {
+        if (_content is null) return;
+        switch (key)
+        {
+            case "stats": _content.ShowStats = on; break;
+            case "features": _content.ShowFeatures = on; break;
+            case "about": _content.ShowAbout = on; break;
+            case "modules": _content.ShowModules = on; break;
+            case "offer": _content.ShowOffer = on; break;
+            case "testimonials": _content.ShowTestimonials = on; break;
+            case "faq": _content.ShowFaq = on; break;
+            case "cta": _content.ShowCta = on; break;
+        }
+    }
+
+    private static string SectionName(string key) => key switch
+    {
+        "stats" => "Statystyki",
+        "features" => "Zalety / dlaczego warto",
+        "about" => "O mnie",
+        "modules" => "Moduły (karty)",
+        "offer" => "Oferta / cennik",
+        "testimonials" => "Opinie",
+        "faq" => "FAQ",
+        "cta" => "Baner CTA",
+        _ => key
+    };
+
+    private static string SectionIcon(string key) => key switch
+    {
+        "stats" => "bi-bar-chart",
+        "features" => "bi-stars",
+        "about" => "bi-person-badge",
+        "modules" => "bi-grid-1x2",
+        "offer" => "bi-tag",
+        "testimonials" => "bi-chat-quote",
+        "faq" => "bi-question-circle",
+        "cta" => "bi-megaphone",
+        _ => "bi-square"
+    };
+
+    private static List<string> SplitLines(object? value) =>
+        (value?.ToString() ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
     private async Task Save()
     {
         if (_content is null) return;
@@ -137,10 +378,7 @@ else
             await SiteContentService.SaveAsync(_content);
             _message = "Zapisano. Zmiany są już widoczne na stronie głównej.";
         }
-        catch (Exception ex)
-        {
-            _error = $"Błąd zapisu: {ex.Message}";
-        }
+        catch (Exception ex) { _error = $"Błąd zapisu: {ex.Message}"; }
         finally { _saving = false; }
     }
 }
