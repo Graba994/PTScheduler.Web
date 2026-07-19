@@ -259,7 +259,9 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IW
                         Title = l.Title,
                         SortOrder = l.SortOrder,
                         VideoUrl = l.VideoUrl,
-                        ContentHtml = l.ContentHtml
+                        ContentHtml = l.ContentHtml,
+                        HasQuiz = l.QuizQuestions.Any(),
+                        QuizPassThreshold = l.QuizPassThreshold
                     }).ToList()
             })
             .ToListAsync();
@@ -363,6 +365,160 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IW
             .ToListAsync();
         Reorder(siblings, lessonId, direction, x => x.Id, (x, o) => x.SortOrder = o);
         await db.SaveChangesAsync();
+    }
+
+    // ---- Quizzes ----
+
+    public async Task<QuizDto> GetQuizForEditAsync(int lessonId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var questions = await db.QuizQuestions.AsNoTracking().Include(q => q.Options)
+            .Where(q => q.LessonId == lessonId)
+            .OrderBy(q => q.SortOrder).ThenBy(q => q.Id)
+            .ToListAsync();
+        var threshold = await db.Lessons.Where(l => l.Id == lessonId)
+            .Select(l => (int?)l.QuizPassThreshold).FirstOrDefaultAsync() ?? 70;
+        return new QuizDto
+        {
+            LessonId = lessonId,
+            PassThreshold = threshold,
+            Questions = questions.Select(q => new QuizQuestionDto
+            {
+                Id = q.Id, Text = q.Text, Type = q.Type, SortOrder = q.SortOrder,
+                Options = q.Options.OrderBy(o => o.SortOrder).ThenBy(o => o.Id)
+                    .Select(o => new QuizOptionDto { Id = o.Id, Text = o.Text, IsCorrect = o.IsCorrect, SortOrder = o.SortOrder })
+                    .ToList()
+            }).ToList()
+        };
+    }
+
+    public async Task SaveQuizAsync(int lessonId, int passThreshold, List<QuizQuestionDto> questions)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var lesson = await db.Lessons.Include(l => l.QuizQuestions).ThenInclude(q => q.Options)
+            .FirstOrDefaultAsync(l => l.Id == lessonId);
+        if (lesson is null) return;
+
+        db.QuizOptions.RemoveRange(lesson.QuizQuestions.SelectMany(q => q.Options));
+        db.QuizQuestions.RemoveRange(lesson.QuizQuestions);
+
+        lesson.QuizPassThreshold = Math.Clamp(passThreshold, 1, 100);
+
+        var qi = 0;
+        foreach (var q in questions)
+        {
+            if (string.IsNullOrWhiteSpace(q.Text)) continue;
+            var qe = new QuizQuestion { LessonId = lessonId, Text = q.Text.Trim(), Type = q.Type, SortOrder = qi++ };
+            var oi = 0;
+            foreach (var o in q.Options)
+            {
+                if (string.IsNullOrWhiteSpace(o.Text)) continue;
+                qe.Options.Add(new QuizOption { Text = o.Text.Trim(), IsCorrect = o.IsCorrect, SortOrder = oi++ });
+            }
+            db.QuizQuestions.Add(qe);
+        }
+        await db.SaveChangesAsync();
+    }
+
+    public async Task<QuizDto?> GetQuizForStudentAsync(string userId, int lessonId)
+    {
+        var courseId = await GetLessonCourseId(lessonId);
+        if (courseId is null || !await HasActiveAccessAsync(userId, courseId.Value)) return null;
+
+        await using var db = dbFactory.CreateDbContext();
+        var questions = await db.QuizQuestions.AsNoTracking().Include(q => q.Options)
+            .Where(q => q.LessonId == lessonId)
+            .OrderBy(q => q.SortOrder).ThenBy(q => q.Id)
+            .ToListAsync();
+        if (questions.Count == 0) return null;
+
+        var threshold = await db.Lessons.Where(l => l.Id == lessonId).Select(l => l.QuizPassThreshold).FirstOrDefaultAsync();
+        return new QuizDto
+        {
+            LessonId = lessonId,
+            PassThreshold = threshold,
+            Questions = questions.Select(q => new QuizQuestionDto
+            {
+                Id = q.Id, Text = q.Text, Type = q.Type, SortOrder = q.SortOrder,
+                Options = q.Options.OrderBy(o => o.SortOrder).ThenBy(o => o.Id)
+                    // IsCorrect intentionally NOT exposed to students.
+                    .Select(o => new QuizOptionDto { Id = o.Id, Text = o.Text, IsCorrect = false, SortOrder = o.SortOrder })
+                    .ToList()
+            }).ToList()
+        };
+    }
+
+    public async Task<QuizResultDto?> SubmitQuizAsync(string userId, int lessonId, List<QuizAnswerDto> answers)
+    {
+        var courseId = await GetLessonCourseId(lessonId);
+        if (courseId is null || !await HasActiveAccessAsync(userId, courseId.Value)) return null;
+
+        await using var db = dbFactory.CreateDbContext();
+        var questions = await db.QuizQuestions.AsNoTracking().Include(q => q.Options)
+            .Where(q => q.LessonId == lessonId).ToListAsync();
+        if (questions.Count == 0) return null;
+
+        var answerMap = answers.GroupBy(a => a.QuestionId).ToDictionary(g => g.Key, g => g.SelectMany(a => a.SelectedOptionIds).ToHashSet());
+        var correctQ = new HashSet<int>();
+        foreach (var q in questions)
+        {
+            var validOptionIds = q.Options.Select(o => o.Id).ToHashSet();
+            var correct = q.Options.Where(o => o.IsCorrect).Select(o => o.Id).ToHashSet();
+            var selected = answerMap.TryGetValue(q.Id, out var s)
+                ? s.Where(validOptionIds.Contains).ToHashSet()
+                : [];
+            if (correct.Count > 0 && selected.SetEquals(correct)) correctQ.Add(q.Id);
+        }
+
+        var total = questions.Count;
+        var correctCount = correctQ.Count;
+        var score = total == 0 ? 0 : (int)Math.Round(100.0 * correctCount / total);
+        var threshold = await db.Lessons.Where(l => l.Id == lessonId).Select(l => l.QuizPassThreshold).FirstOrDefaultAsync();
+        var passed = score >= threshold;
+
+        var attempt = await db.QuizAttempts.FirstOrDefaultAsync(a => a.ApplicationUserId == userId && a.LessonId == lessonId);
+        if (attempt is null)
+            db.QuizAttempts.Add(new QuizAttempt { ApplicationUserId = userId, LessonId = lessonId, ScorePercent = score, Passed = passed, AttemptedAt = DateTime.UtcNow });
+        else
+        {
+            attempt.ScorePercent = score;
+            attempt.Passed = passed;
+            attempt.AttemptedAt = DateTime.UtcNow;
+        }
+
+        if (passed)
+        {
+            var prog = await db.LessonProgress.FirstOrDefaultAsync(p => p.ApplicationUserId == userId && p.LessonId == lessonId);
+            if (prog is null)
+                db.LessonProgress.Add(new LessonProgress { ApplicationUserId = userId, LessonId = lessonId, CompletedAt = DateTime.UtcNow });
+        }
+        await db.SaveChangesAsync();
+
+        return new QuizResultDto
+        {
+            ScorePercent = score,
+            Passed = passed,
+            PassThreshold = threshold,
+            CorrectCount = correctCount,
+            TotalCount = total,
+            CorrectQuestionIds = correctQ
+        };
+    }
+
+    public async Task<QuizAttemptDto?> GetLastAttemptAsync(string userId, int lessonId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        return await db.QuizAttempts.AsNoTracking()
+            .Where(a => a.ApplicationUserId == userId && a.LessonId == lessonId)
+            .Select(a => new QuizAttemptDto { ScorePercent = a.ScorePercent, Passed = a.Passed, AttemptedAt = a.AttemptedAt })
+            .FirstOrDefaultAsync();
+    }
+
+    private async Task<int?> GetLessonCourseId(int lessonId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        return await db.Lessons.Where(l => l.Id == lessonId)
+            .Select(l => (int?)l.Module.CourseId).FirstOrDefaultAsync();
     }
 
     // ---- Student-facing (access-gated) ----

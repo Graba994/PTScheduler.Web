@@ -15,4 +15,9 @@ public class Lesson
 
     // Rich lesson materials (HTML/CSS).
     public string? ContentHtml { get; set; }
+
+    // Auto-graded quiz: minimum percent of correct questions to pass.
+    public int QuizPassThreshold { get; set; } = 70;
+
+    public ICollection<QuizQuestion> QuizQuestions { get; set; } = [];
 }

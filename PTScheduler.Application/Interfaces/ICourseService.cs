@@ -34,6 +34,13 @@ public interface ICourseService
     Task DeleteLessonAsync(int lessonId);
     Task MoveLessonAsync(int lessonId, int direction);
 
+    // ---- Quizzes ----
+    Task<QuizDto> GetQuizForEditAsync(int lessonId);
+    Task SaveQuizAsync(int lessonId, int passThreshold, List<QuizQuestionDto> questions);
+    Task<QuizDto?> GetQuizForStudentAsync(string userId, int lessonId);
+    Task<QuizResultDto?> SubmitQuizAsync(string userId, int lessonId, List<QuizAnswerDto> answers);
+    Task<QuizAttemptDto?> GetLastAttemptAsync(string userId, int lessonId);
+
     // ---- Student-facing (access-gated) ----
     Task<List<StudentCourseDto>> GetMyCoursesAsync(string userId);
     Task<StudentCourseDetailDto?> GetStudentCourseAsync(string userId, int courseId);

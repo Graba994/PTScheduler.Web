@@ -2,6 +2,7 @@
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Admin)]
 @inject ICourseService CourseService
 @inject NavigationManager Nav
@@ -114,6 +115,10 @@ else
     private int? _lessonFormId;
     private SaveLessonDto _lessonForm = new();
 
+    private QuizDto _quiz = new();
+    private bool _savingQuiz;
+    private bool _quizSaved;
+
     protected override async Task OnInitializedAsync()
     {
         _course = await CourseService.GetCourseAsync(CourseId);
@@ -164,13 +169,17 @@ else
         _lessonFormModuleId = moduleId;
         _lessonFormId = null;
         _lessonForm = new SaveLessonDto();
+        _quiz = new QuizDto();
+        _quizSaved = false;
     }
 
-    private void EditLesson(LessonDto l)
+    private async Task EditLesson(LessonDto l)
     {
         _lessonFormModuleId = l.ModuleId;
         _lessonFormId = l.Id;
         _lessonForm = new SaveLessonDto { Title = l.Title, VideoUrl = l.VideoUrl, ContentHtml = l.ContentHtml };
+        _quizSaved = false;
+        _quiz = await CourseService.GetQuizForEditAsync(l.Id);
     }
 
     private void CancelLessonForm()
@@ -178,6 +187,7 @@ else
         _lessonFormModuleId = null;
         _lessonFormId = null;
         _lessonForm = new SaveLessonDto();
+        _quiz = new QuizDto();
     }
 
     private async Task SaveLesson()
@@ -188,13 +198,34 @@ else
         try
         {
             if (_lessonFormId is null)
+            {
                 await CourseService.AddLessonAsync(_lessonFormModuleId.Value, _lessonForm);
+                CancelLessonForm();
+            }
             else
+            {
                 await CourseService.UpdateLessonAsync(_lessonFormId.Value, _lessonForm);
-            CancelLessonForm();
+            }
             await ReloadContent();
         }
         finally { _saving = false; }
+    }
+
+    private void AddQuestion() =>
+        _quiz.Questions.Add(new QuizQuestionDto { Options = { new QuizOptionDto(), new QuizOptionDto() } });
+
+    private async Task SaveQuiz()
+    {
+        if (_lessonFormId is null) return;
+        _savingQuiz = true; _quizSaved = false;
+        try
+        {
+            await CourseService.SaveQuizAsync(_lessonFormId.Value, _quiz.PassThreshold, _quiz.Questions);
+            _quiz = await CourseService.GetQuizForEditAsync(_lessonFormId.Value);
+            await ReloadContent();
+            _quizSaved = true;
+        }
+        finally { _savingQuiz = false; }
     }
 
     private async Task MoveLesson(int lessonId, int direction)
@@ -212,10 +243,10 @@ else
 
     private bool IsLessonOpen(LessonDto l) => _lessonFormId == l.Id;
 
-    private void ToggleLesson(LessonDto l)
+    private async Task ToggleLesson(LessonDto l)
     {
         if (_lessonFormId == l.Id) CancelLessonForm();
-        else EditLesson(l);
+        else await EditLesson(l);
     }
 
     private RenderFragment LessonFormUi() =>@<div class="border rounded p-3 mt-2 bg-body-tertiary">
@@ -255,5 +286,50 @@ else
             </button>
             <button class="btn btn-outline-secondary" @onclick="CancelLessonForm">Anuluj</button>
         </div>
+
+        @if (_lessonFormId is not null)
+        {
+            <hr class="my-3" />
+            <div class="d-flex align-items-center justify-content-between mb-2 flex-wrap gap-2">
+                <h6 class="mb-0"><i class="bi bi-patch-question me-1"></i>Quiz <span class="text-muted small">(opcjonalny, auto-oceniany)</span></h6>
+                <div class="d-flex align-items-center gap-1">
+                    <label class="small text-muted mb-0">Próg zaliczenia</label>
+                    <input type="number" min="1" max="100" class="form-control form-control-sm" style="width:78px" @bind="_quiz.PassThreshold" />
+                    <span class="small text-muted">%</span>
+                </div>
+            </div>
+
+            @foreach (var q in _quiz.Questions)
+            {
+                <div class="border rounded p-2 mb-2 bg-body">
+                    <div class="d-flex gap-2 mb-2">
+                        <input class="form-control form-control-sm" placeholder="Treść pytania" @bind="q.Text" />
+                        <select class="form-select form-select-sm" style="width:auto" @bind="q.Type">
+                            <option value="@QuizQuestionType.SingleChoice">Jednokrotny wybór</option>
+                            <option value="@QuizQuestionType.MultipleChoice">Wielokrotny wybór</option>
+                        </select>
+                        <button class="btn btn-sm btn-outline-danger" title="Usuń pytanie" @onclick="() => _quiz.Questions.Remove(q)"><i class="bi bi-trash"></i></button>
+                    </div>
+                    @foreach (var o in q.Options)
+                    {
+                        <div class="d-flex align-items-center gap-2 mb-1 ms-3">
+                            <input class="form-check-input mt-0" type="checkbox" @bind="o.IsCorrect" title="Poprawna odpowiedź" />
+                            <input class="form-control form-control-sm" placeholder="Treść odpowiedzi" @bind="o.Text" />
+                            <button class="btn btn-sm btn-outline-secondary" title="Usuń odpowiedź" @onclick="() => q.Options.Remove(o)"><i class="bi bi-x-lg"></i></button>
+                        </div>
+                    }
+                    <button class="btn btn-sm btn-link px-1" @onclick="() => q.Options.Add(new QuizOptionDto())"><i class="bi bi-plus"></i> Dodaj odpowiedź</button>
+                </div>
+            }
+
+            <div class="d-flex gap-2 mt-2">
+                <button class="btn btn-sm btn-outline-primary" @onclick="AddQuestion"><i class="bi bi-plus-lg me-1"></i>Dodaj pytanie</button>
+                <button class="btn btn-sm btn-success" @onclick="SaveQuiz" disabled="@_savingQuiz">
+                    @if (_savingQuiz) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                    <i class="bi bi-save me-1"></i>Zapisz quiz
+                </button>
+                @if (_quizSaved) { <span class="text-success small align-self-center"><i class="bi bi-check-circle me-1"></i>Zapisano</span> }
+            </div>
+        }
     </div>;
 }

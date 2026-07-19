@@ -17,6 +17,8 @@ public class LessonDto
     public int SortOrder { get; set; }
     public string? VideoUrl { get; set; }
     public string? ContentHtml { get; set; }
+    public bool HasQuiz { get; set; }
+    public int QuizPassThreshold { get; set; } = 70;
     // Student view: whether the current student has completed this lesson.
     public bool IsCompleted { get; set; }
 }

@@ -35,6 +35,9 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<CourseModule> CourseModules => Set<CourseModule>();
     public DbSet<Lesson> Lessons => Set<Lesson>();
     public DbSet<LessonProgress> LessonProgress => Set<LessonProgress>();
+    public DbSet<QuizQuestion> QuizQuestions => Set<QuizQuestion>();
+    public DbSet<QuizOption> QuizOptions => Set<QuizOption>();
+    public DbSet<QuizAttempt> QuizAttempts => Set<QuizAttempt>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -87,6 +90,28 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
         builder.Entity<LessonProgress>()
             .HasIndex(p => new { p.ApplicationUserId, p.LessonId })
+            .IsUnique();
+
+        builder.Entity<QuizQuestion>()
+            .HasOne(q => q.Lesson)
+            .WithMany(l => l.QuizQuestions)
+            .HasForeignKey(q => q.LessonId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<QuizOption>()
+            .HasOne(o => o.Question)
+            .WithMany(q => q.Options)
+            .HasForeignKey(o => o.QuestionId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<QuizAttempt>()
+            .HasOne(a => a.Lesson)
+            .WithMany()
+            .HasForeignKey(a => a.LessonId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<QuizAttempt>()
+            .HasIndex(a => new { a.ApplicationUserId, a.LessonId })
             .IsUnique();
 
         builder.Entity<Session>()
