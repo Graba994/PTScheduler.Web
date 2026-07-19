@@ -32,6 +32,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<LoginLog> LoginLogs => Set<LoginLog>();
     public DbSet<Course> Courses => Set<Course>();
     public DbSet<CourseEnrollment> CourseEnrollments => Set<CourseEnrollment>();
+    public DbSet<CourseModule> CourseModules => Set<CourseModule>();
+    public DbSet<Lesson> Lessons => Set<Lesson>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -63,6 +65,18 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
 
         builder.Entity<CourseEnrollment>()
             .HasIndex(e => new { e.CourseId, e.ApplicationUserId });
+
+        builder.Entity<CourseModule>()
+            .HasOne(m => m.Course)
+            .WithMany(c => c.Modules)
+            .HasForeignKey(m => m.CourseId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<Lesson>()
+            .HasOne(l => l.Module)
+            .WithMany(m => m.Lessons)
+            .HasForeignKey(l => l.ModuleId)
+            .OnDelete(DeleteBehavior.Cascade);
 
         builder.Entity<Session>()
             .HasOne(s => s.Package)

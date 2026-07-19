@@ -25,5 +25,6 @@ public class Course
     public int SortOrder { get; set; } = 0;
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
+    public ICollection<CourseModule> Modules { get; set; } = [];
     public ICollection<CourseEnrollment> Enrollments { get; set; } = [];
 }

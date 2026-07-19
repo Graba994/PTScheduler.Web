@@ -199,6 +199,149 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory) : 
         await db.SaveChangesAsync();
     }
 
+    // ---- Course content: modules + lessons ----
+
+    public async Task<List<ModuleDto>> GetContentAsync(int courseId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        return await db.CourseModules.AsNoTracking()
+            .Where(m => m.CourseId == courseId)
+            .OrderBy(m => m.SortOrder).ThenBy(m => m.Id)
+            .Select(m => new ModuleDto
+            {
+                Id = m.Id,
+                CourseId = m.CourseId,
+                Title = m.Title,
+                SortOrder = m.SortOrder,
+                Lessons = m.Lessons
+                    .OrderBy(l => l.SortOrder).ThenBy(l => l.Id)
+                    .Select(l => new LessonDto
+                    {
+                        Id = l.Id,
+                        ModuleId = l.ModuleId,
+                        Title = l.Title,
+                        SortOrder = l.SortOrder,
+                        VideoUrl = l.VideoUrl,
+                        ContentHtml = l.ContentHtml
+                    }).ToList()
+            })
+            .ToListAsync();
+    }
+
+    public async Task<int> AddModuleAsync(int courseId, string title)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var maxOrder = await db.CourseModules
+            .Where(m => m.CourseId == courseId)
+            .Select(m => (int?)m.SortOrder).MaxAsync() ?? -1;
+        var m = new CourseModule
+        {
+            CourseId = courseId,
+            Title = string.IsNullOrWhiteSpace(title) ? "Nowy moduł" : title.Trim(),
+            SortOrder = maxOrder + 1
+        };
+        db.CourseModules.Add(m);
+        await db.SaveChangesAsync();
+        return m.Id;
+    }
+
+    public async Task UpdateModuleAsync(int moduleId, string title)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var m = await db.CourseModules.FirstOrDefaultAsync(x => x.Id == moduleId);
+        if (m is null) return;
+        m.Title = string.IsNullOrWhiteSpace(title) ? m.Title : title.Trim();
+        await db.SaveChangesAsync();
+    }
+
+    public async Task DeleteModuleAsync(int moduleId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var m = await db.CourseModules.FirstOrDefaultAsync(x => x.Id == moduleId);
+        if (m is null) return;
+        db.CourseModules.Remove(m);
+        await db.SaveChangesAsync();
+    }
+
+    public async Task MoveModuleAsync(int moduleId, int direction)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var m = await db.CourseModules.FirstOrDefaultAsync(x => x.Id == moduleId);
+        if (m is null) return;
+        var siblings = await db.CourseModules
+            .Where(x => x.CourseId == m.CourseId)
+            .OrderBy(x => x.SortOrder).ThenBy(x => x.Id)
+            .ToListAsync();
+        Reorder(siblings, moduleId, direction, x => x.Id, (x, o) => x.SortOrder = o);
+        await db.SaveChangesAsync();
+    }
+
+    public async Task<int> AddLessonAsync(int moduleId, SaveLessonDto dto)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var maxOrder = await db.Lessons
+            .Where(l => l.ModuleId == moduleId)
+            .Select(l => (int?)l.SortOrder).MaxAsync() ?? -1;
+        var lesson = new Lesson
+        {
+            ModuleId = moduleId,
+            Title = string.IsNullOrWhiteSpace(dto.Title) ? "Nowa lekcja" : dto.Title.Trim(),
+            VideoUrl = string.IsNullOrWhiteSpace(dto.VideoUrl) ? null : dto.VideoUrl.Trim(),
+            ContentHtml = string.IsNullOrWhiteSpace(dto.ContentHtml) ? null : dto.ContentHtml,
+            SortOrder = maxOrder + 1
+        };
+        db.Lessons.Add(lesson);
+        await db.SaveChangesAsync();
+        return lesson.Id;
+    }
+
+    public async Task UpdateLessonAsync(int lessonId, SaveLessonDto dto)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var l = await db.Lessons.FirstOrDefaultAsync(x => x.Id == lessonId);
+        if (l is null) return;
+        l.Title = string.IsNullOrWhiteSpace(dto.Title) ? l.Title : dto.Title.Trim();
+        l.VideoUrl = string.IsNullOrWhiteSpace(dto.VideoUrl) ? null : dto.VideoUrl.Trim();
+        l.ContentHtml = string.IsNullOrWhiteSpace(dto.ContentHtml) ? null : dto.ContentHtml;
+        await db.SaveChangesAsync();
+    }
+
+    public async Task DeleteLessonAsync(int lessonId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var l = await db.Lessons.FirstOrDefaultAsync(x => x.Id == lessonId);
+        if (l is null) return;
+        db.Lessons.Remove(l);
+        await db.SaveChangesAsync();
+    }
+
+    public async Task MoveLessonAsync(int lessonId, int direction)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var l = await db.Lessons.FirstOrDefaultAsync(x => x.Id == lessonId);
+        if (l is null) return;
+        var siblings = await db.Lessons
+            .Where(x => x.ModuleId == l.ModuleId)
+            .OrderBy(x => x.SortOrder).ThenBy(x => x.Id)
+            .ToListAsync();
+        Reorder(siblings, lessonId, direction, x => x.Id, (x, o) => x.SortOrder = o);
+        await db.SaveChangesAsync();
+    }
+
+    // Moves the item with the given id up (-1) or down (+1) in the list and
+    // renormalizes SortOrder to a clean 0..n-1 sequence.
+    private static void Reorder<T>(List<T> items, int id, int direction, Func<T, int> idOf, Action<T, int> setOrder)
+    {
+        var idx = items.FindIndex(x => idOf(x) == id);
+        if (idx < 0) return;
+        var target = idx + direction;
+        if (target < 0 || target >= items.Count) return;
+        var item = items[idx];
+        items.RemoveAt(idx);
+        items.Insert(target, item);
+        for (int i = 0; i < items.Count; i++) setOrder(items[i], i);
+    }
+
     private static void Apply(Course c, SaveCourseDto dto)
     {
         c.Title = dto.Title.Trim();

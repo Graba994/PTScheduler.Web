@@ -19,4 +19,15 @@ public interface ICourseService
     Task RestoreAccessAsync(int enrollmentId);
 
     Task<bool> HasActiveAccessAsync(string userId, int courseId);
+
+    // ---- Course content: modules + lessons ----
+    Task<List<ModuleDto>> GetContentAsync(int courseId);
+    Task<int> AddModuleAsync(int courseId, string title);
+    Task UpdateModuleAsync(int moduleId, string title);
+    Task DeleteModuleAsync(int moduleId);
+    Task MoveModuleAsync(int moduleId, int direction);
+    Task<int> AddLessonAsync(int moduleId, SaveLessonDto dto);
+    Task UpdateLessonAsync(int lessonId, SaveLessonDto dto);
+    Task DeleteLessonAsync(int lessonId);
+    Task MoveLessonAsync(int lessonId, int direction);
 }
