@@ -19,6 +19,7 @@ public static class Permissions
     public const string ManageEmail = "ManageEmail";
     public const string ManagePayments = "ManagePayments";
     public const string ViewHiddenFinance = "ViewHiddenFinance";
+    public const string ManageCourses = "ManageCourses";
 
     public static readonly (string Key, string Label, string Description)[] All =
     [
@@ -38,7 +39,8 @@ public static class Permissions
         (ManageSessionTypes, "Typy sesji",        "Zarządzanie typami sesji"),
         (ManageBackup,       "Backup / Reset",    "Operacje backup i reset bazy"),
         (ManageEmail,        "E-mail",            "Konfiguracja ustawień e-mail"),
-        (ManagePayments,     "Płatności",         "Konfiguracja płatności online"),
+        (ManagePayments,     "Płatności",         "Konfiguracja płatności online (PayU)"),
+        (ManageCourses,      "Kursy",             "Zarządzanie kursami, treścią i dostępami"),
     ];
 
     public static readonly Dictionary<string, string[]> Defaults = new()
@@ -48,7 +50,8 @@ public static class Permissions
         [
             ManageClients, ManageSessions, ManagePackages,
             ViewStats, ViewFinance,
-            ManageAvailability, ManageSeries, ManageContacts, ManageIntroConfig
+            ManageAvailability, ManageSeries, ManageContacts, ManageIntroConfig,
+            ManageCourses, ManagePayments
         ],
         [Roles.Subordinate] =
         [

@@ -1,56 +1,87 @@
+@inject PTScheduler.Application.Interfaces.IPermissionService Permission
+@inject AuthenticationStateProvider AuthState
+@using PTScheduler.Domain.Constants
+
 <nav class="manage-nav">
-    <div class="manage-nav-section">Użytkownicy</div>
-    <NavLink class="manage-nav-link" href="admin/users">
-        <i class="bi bi-people-fill"></i> Użytkownicy
-    </NavLink>
-    <NavLink class="manage-nav-link" href="admin/permissions">
-        <i class="bi bi-shield-lock-fill"></i> Uprawnienia
-    </NavLink>
 
-    <div class="manage-nav-section" style="margin-top:.75rem">Konfiguracja</div>
-    <NavLink class="manage-nav-link" href="admin/branding">
-        <i class="bi bi-palette-fill"></i> Wygląd
-    </NavLink>
-    <NavLink class="manage-nav-link" href="admin/site">
-        <i class="bi bi-globe"></i> Strona główna
-    </NavLink>
-    <NavLink class="manage-nav-link" href="admin/modules">
-        <i class="bi bi-toggles"></i> Moduły
-    </NavLink>
+    @if (Can(Permissions.ManageUsers))
+    {
+        <div class="manage-nav-section">Użytkownicy</div>
+        <NavLink class="manage-nav-link" href="admin/users"><i class="bi bi-people-fill"></i> Użytkownicy</NavLink>
+        <NavLink class="manage-nav-link" href="admin/permissions"><i class="bi bi-shield-lock-fill"></i> Uprawnienia</NavLink>
+    }
 
-    <div class="manage-nav-section" style="margin-top:.75rem">Portal szkoleniowy</div>
-    <NavLink class="manage-nav-link" href="admin/courses">
-        <i class="bi bi-mortarboard-fill"></i> Kursy i dostępy
-    </NavLink>
-    <NavLink class="manage-nav-link" href="admin/email">
-        <i class="bi bi-envelope-fill"></i> Email
-    </NavLink>
-    <NavLink class="manage-nav-link" href="admin/email-templates">
-        <i class="bi bi-file-earmark-richtext-fill"></i> Szablony email
-    </NavLink>
-    <NavLink class="manage-nav-link" href="admin/push">
-        <i class="bi bi-bell-fill"></i> Push
-    </NavLink>
-    <NavLink class="manage-nav-link" href="admin/session-types">
-        <i class="bi bi-clock-fill"></i> Typy sesji
-    </NavLink>
-    <NavLink class="manage-nav-link" href="admin/payments">
-        <i class="bi bi-credit-card-fill"></i> Płatności
-    </NavLink>
+    @if (Can(Permissions.ManageBranding) || Can(Permissions.ManageEmail) || Can(Permissions.ManageSessionTypes) || Can(Permissions.ManagePayments))
+    {
+        <div class="manage-nav-section" style="margin-top:.75rem">Konfiguracja</div>
+        @if (Can(Permissions.ManageBranding))
+        {
+            <NavLink class="manage-nav-link" href="admin/branding"><i class="bi bi-palette-fill"></i> Wygląd</NavLink>
+            <NavLink class="manage-nav-link" href="admin/site"><i class="bi bi-globe"></i> Strona główna</NavLink>
+            <NavLink class="manage-nav-link" href="admin/modules"><i class="bi bi-toggles"></i> Moduły</NavLink>
+        }
+        @if (Can(Permissions.ManageEmail))
+        {
+            <NavLink class="manage-nav-link" href="admin/email"><i class="bi bi-envelope-fill"></i> Email</NavLink>
+            <NavLink class="manage-nav-link" href="admin/email-templates"><i class="bi bi-file-earmark-richtext-fill"></i> Szablony email</NavLink>
+            <NavLink class="manage-nav-link" href="admin/push"><i class="bi bi-bell-fill"></i> Push</NavLink>
+        }
+        @if (Can(Permissions.ManageSessionTypes))
+        {
+            <NavLink class="manage-nav-link" href="admin/session-types"><i class="bi bi-clock-fill"></i> Typy sesji</NavLink>
+        }
+        @if (Can(Permissions.ManagePayments))
+        {
+            <NavLink class="manage-nav-link" href="admin/payments"><i class="bi bi-credit-card-fill"></i> Płatności</NavLink>
+        }
+    }
 
-    <div class="manage-nav-section" style="margin-top:.75rem">System</div>
-    <NavLink class="manage-nav-link" href="admin/settings">
-        <i class="bi bi-database-fill"></i> Baza danych
-    </NavLink>
-    <NavLink class="manage-nav-link" href="admin/backup">
-        <i class="bi bi-archive-fill"></i> Backup
-    </NavLink>
+    @if (Can(Permissions.ManageCourses))
+    {
+        <div class="manage-nav-section" style="margin-top:.75rem">Portal szkoleniowy</div>
+        <NavLink class="manage-nav-link" href="admin/courses"><i class="bi bi-mortarboard-fill"></i> Kursy i dostępy</NavLink>
+    }
 
-    <div class="manage-nav-section" style="margin-top:.75rem">Konserwacja</div>
-    <NavLink class="manage-nav-link" href="admin/audit-logs">
-        <i class="bi bi-journal-text"></i> Logi systemowe
-    </NavLink>
-    <NavLink class="manage-nav-link" href="admin/demo">
-        <i class="bi bi-database-fill-gear"></i> Demo i reset
-    </NavLink>
+    @if (Can(Permissions.ManageBackup))
+    {
+        <div class="manage-nav-section" style="margin-top:.75rem">System</div>
+        <NavLink class="manage-nav-link" href="admin/settings"><i class="bi bi-database-fill"></i> Baza danych</NavLink>
+        <NavLink class="manage-nav-link" href="admin/backup"><i class="bi bi-archive-fill"></i> Backup</NavLink>
+    }
+
+    @if (Can(Permissions.ViewAuditLogs) || Can(Permissions.ManageBackup))
+    {
+        <div class="manage-nav-section" style="margin-top:.75rem">Konserwacja</div>
+        @if (Can(Permissions.ViewAuditLogs))
+        {
+            <NavLink class="manage-nav-link" href="admin/audit-logs"><i class="bi bi-journal-text"></i> Logi systemowe</NavLink>
+        }
+        @if (Can(Permissions.ManageBackup))
+        {
+            <NavLink class="manage-nav-link" href="admin/demo"><i class="bi bi-database-fill-gear"></i> Demo i reset</NavLink>
+        }
+    }
+
 </nav>
+
+@code {
+    private bool _isAdmin;
+    private readonly HashSet<string> _granted = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        if (auth.User.IsInRole(Roles.Admin)) { _isAdmin = true; return; }
+
+        var role = auth.User.IsInRole(Roles.Trainer) ? Roles.Trainer
+                 : auth.User.IsInRole(Roles.Subordinate) ? Roles.Subordinate
+                 : string.Empty;
+        if (role.Length == 0) return;
+
+        foreach (var p in Permissions.All)
+            if (await Permission.HasPermissionAsync(role, p.Key))
+                _granted.Add(p.Key);
+    }
+
+    private bool Can(string perm) => _isAdmin || _granted.Contains(perm);
+}

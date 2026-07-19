@@ -3,8 +3,10 @@
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
 @using PTScheduler.Domain.Enums
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Admin)]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
 @inject ICourseService CourseService
+@inject IPermissionService Permission
+@inject AuthenticationStateProvider AuthState
 @inject NavigationManager Nav
 @rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
 
@@ -17,7 +19,11 @@
     </h4>
 </div>
 
-@if (_loading)
+@if (_denied)
+{
+    <div class="alert alert-danger"><i class="bi bi-shield-lock me-2"></i>Brak uprawnień do zarządzania kursami.</div>
+}
+else if (_loading)
 {
     <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
 }
@@ -102,6 +108,7 @@ else
     [Parameter] public int CourseId { get; set; }
 
     private bool _loading = true;
+    private bool _denied;
     private bool _saving;
     private CourseDto? _course;
     private List<ModuleDto> _modules = [];
@@ -121,6 +128,15 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var role = auth.User.IsInRole(Roles.Admin) ? Roles.Admin
+                 : auth.User.IsInRole(Roles.Trainer) ? Roles.Trainer
+                 : auth.User.IsInRole(Roles.Subordinate) ? Roles.Subordinate : string.Empty;
+        if (!await Permission.HasPermissionAsync(role, PTScheduler.Domain.Constants.Permissions.ManageCourses))
+        {
+            _denied = true; _loading = false; return;
+        }
+
         _course = await CourseService.GetCourseAsync(CourseId);
         if (_course is not null) await ReloadContent();
         _loading = false;

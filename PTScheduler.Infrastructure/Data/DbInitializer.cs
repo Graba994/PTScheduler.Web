@@ -9,13 +9,22 @@ public static class DbInitializer
 {
     public static async Task SeedPermissionsAsync(ApplicationDbContext db)
     {
-        if (await db.RolePermissions.AnyAsync()) return;
+        // Idempotent: add any missing (role, permission) rows without touching
+        // existing ones, so newly introduced permissions appear for management
+        // on databases that were seeded before those permissions existed.
+        var existing = (await db.RolePermissions
+                .Select(rp => new { rp.Role, rp.Permission })
+                .ToListAsync())
+            .Select(e => (e.Role, e.Permission))
+            .ToHashSet();
 
+        var toAdd = new List<RolePermission>();
         foreach (var (role, permissions) in Permissions.Defaults)
         {
             foreach (var perm in Permissions.All)
             {
-                db.RolePermissions.Add(new RolePermission
+                if (existing.Contains((role, perm.Key))) continue;
+                toAdd.Add(new RolePermission
                 {
                     Role = role,
                     Permission = perm.Key,
@@ -24,7 +33,11 @@ public static class DbInitializer
             }
         }
 
-        await db.SaveChangesAsync();
+        if (toAdd.Count > 0)
+        {
+            db.RolePermissions.AddRange(toAdd);
+            await db.SaveChangesAsync();
+        }
     }
 
     public static async Task SeedRolesAsync(RoleManager<IdentityRole> roleManager)
