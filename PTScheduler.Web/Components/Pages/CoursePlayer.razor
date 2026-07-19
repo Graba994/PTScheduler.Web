@@ -1,0 +1,155 @@
+@page "/my/courses/{CourseId:int}"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ICourseService CourseService
+@inject AuthenticationStateProvider AuthState
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<AppTitle Page="Kurs" />
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_detail is null)
+{
+    <div class="alert alert-warning">
+        <i class="bi bi-lock me-2"></i>Nie masz dostępu do tego kursu (lub dostęp wygasł).
+        <a href="/my/courses" class="alert-link">Wróć do moich kursów</a>.
+    </div>
+}
+else
+{
+    <div class="page-header">
+        <h4 class="page-title">
+            <a href="/my/courses" class="text-decoration-none text-muted me-2"><i class="bi bi-arrow-left"></i></a>
+            @_detail.Title
+        </h4>
+    </div>
+
+    <div class="mb-3">
+        <div class="d-flex justify-content-between small text-muted mb-1">
+            <span>Twój postęp</span>
+            <span>@_detail.CompletedLessons / @_detail.TotalLessons lekcji (@_detail.ProgressPercent%)</span>
+        </div>
+        <div class="progress" style="height:8px">
+            <div class="progress-bar" style="width:@(_detail.ProgressPercent)%"></div>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        @* Sidebar: modules + lessons *@
+        <div class="col-12 col-lg-4">
+            <div class="card">
+                <div class="card-body p-2">
+                    @foreach (var m in _detail.Modules)
+                    {
+                        <div class="fw-semibold small text-muted px-2 pt-2 pb-1">@m.Title</div>
+                        @if (m.Lessons.Count == 0)
+                        {
+                            <div class="text-muted small px-2 pb-2">— brak lekcji —</div>
+                        }
+                        else
+                        {
+                            foreach (var l in m.Lessons)
+                            {
+                                <button type="button"
+                                        class="btn w-100 text-start d-flex align-items-center gap-2 mb-1 @(_selectedId == l.Id ? "btn-primary" : "btn-light")"
+                                        @onclick="() => Select(l.Id)">
+                                    <i class="bi @(l.IsCompleted ? "bi-check-circle-fill text-success" : "bi-circle")"></i>
+                                    <span class="flex-grow-1 text-truncate">@l.Title</span>
+                                    @if (!string.IsNullOrEmpty(l.VideoUrl)) { <i class="bi bi-play-circle small"></i> }
+                                </button>
+                            }
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+
+        @* Main: selected lesson *@
+        <div class="col-12 col-lg-8">
+            @if (_selected is null)
+            {
+                <div class="card"><div class="card-body text-muted">Wybierz lekcję z listy po lewej.</div></div>
+            }
+            else
+            {
+                <div class="card">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center justify-content-between mb-3">
+                            <h5 class="mb-0">@_selected.Title</h5>
+                            <button class="btn btn-sm @(_selected.IsCompleted ? "btn-success" : "btn-outline-success")"
+                                    @onclick="ToggleComplete" disabled="@_saving">
+                                <i class="bi @(_selected.IsCompleted ? "bi-check-circle-fill" : "bi-circle") me-1"></i>
+                                @(_selected.IsCompleted ? "Ukończono" : "Oznacz jako ukończone")
+                            </button>
+                        </div>
+
+                        @if (!string.IsNullOrEmpty(_selected.VideoUrl))
+                        {
+                            <div class="mb-3"><VideoPlayer Url="@_selected.VideoUrl" ShowPlaceholder="false" /></div>
+                        }
+
+                        @if (!string.IsNullOrWhiteSpace(_selected.ContentHtml))
+                        {
+                            <div class="lesson-content">@((MarkupString)_selected.ContentHtml)</div>
+                        }
+                        else if (string.IsNullOrEmpty(_selected.VideoUrl))
+                        {
+                            <p class="text-muted mb-0">Ta lekcja nie ma jeszcze materiałów.</p>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int CourseId { get; set; }
+
+    private bool _loading = true;
+    private bool _saving;
+    private string _userId = string.Empty;
+    private StudentCourseDetailDto? _detail;
+    private int? _selectedId;
+
+    private LessonDto? _selected =>
+        _detail?.Modules.SelectMany(m => m.Lessons).FirstOrDefault(l => l.Id == _selectedId);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        await Load();
+        _loading = false;
+    }
+
+    private async Task Load()
+    {
+        _detail = await CourseService.GetStudentCourseAsync(_userId, CourseId);
+        if (_detail is not null)
+        {
+            var all = _detail.Modules.SelectMany(m => m.Lessons).ToList();
+            // Keep current selection if still present; otherwise first not-completed, else first.
+            if (_selectedId is null || all.All(l => l.Id != _selectedId))
+                _selectedId = (all.FirstOrDefault(l => !l.IsCompleted) ?? all.FirstOrDefault())?.Id;
+        }
+    }
+
+    private void Select(int lessonId) => _selectedId = lessonId;
+
+    private async Task ToggleComplete()
+    {
+        if (_selected is null) return;
+        _saving = true;
+        try
+        {
+            await CourseService.SetLessonCompletedAsync(_userId, _selected.Id, !_selected.IsCompleted);
+            await Load();
+        }
+        finally { _saving = false; }
+    }
+}

@@ -328,6 +328,89 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory) : 
         await db.SaveChangesAsync();
     }
 
+    // ---- Student-facing (access-gated) ----
+
+    public async Task<List<StudentCourseDto>> GetMyCoursesAsync(string userId)
+    {
+        var now = DateTime.UtcNow;
+        await using var db = dbFactory.CreateDbContext();
+
+        var courseIds = await db.CourseEnrollments.AsNoTracking()
+            .Where(e => e.ApplicationUserId == userId && !e.IsRevoked
+                && (e.ExpiresAt == null || e.ExpiresAt > now)
+                && (e.StartsAt == null || e.StartsAt <= now))
+            .Select(e => e.CourseId).Distinct().ToListAsync();
+
+        if (courseIds.Count == 0) return [];
+
+        var courses = await db.Courses.AsNoTracking()
+            .Where(c => courseIds.Contains(c.Id))
+            .OrderBy(c => c.SortOrder).ThenBy(c => c.Id)
+            .Select(c => new StudentCourseDto
+            {
+                Id = c.Id,
+                Title = c.Title,
+                Description = c.Description,
+                CoverImageUrl = c.CoverImageUrl,
+                TotalLessons = c.Modules.SelectMany(m => m.Lessons).Count()
+            }).ToListAsync();
+
+        var completed = await db.LessonProgress.AsNoTracking()
+            .Where(p => p.ApplicationUserId == userId && courseIds.Contains(p.Lesson.Module.CourseId))
+            .GroupBy(p => p.Lesson.Module.CourseId)
+            .Select(g => new { CourseId = g.Key, Count = g.Count() })
+            .ToListAsync();
+        var map = completed.ToDictionary(x => x.CourseId, x => x.Count);
+        foreach (var c in courses) c.CompletedLessons = map.GetValueOrDefault(c.Id);
+        return courses;
+    }
+
+    public async Task<StudentCourseDetailDto?> GetStudentCourseAsync(string userId, int courseId)
+    {
+        if (!await HasActiveAccessAsync(userId, courseId)) return null;
+
+        await using var db = dbFactory.CreateDbContext();
+        var course = await db.Courses.AsNoTracking().FirstOrDefaultAsync(c => c.Id == courseId);
+        if (course is null) return null;
+
+        var modules = await GetContentAsync(courseId);
+
+        var completedIds = (await db.LessonProgress.AsNoTracking()
+            .Where(p => p.ApplicationUserId == userId && p.Lesson.Module.CourseId == courseId)
+            .Select(p => p.LessonId).ToListAsync()).ToHashSet();
+
+        foreach (var m in modules)
+            foreach (var l in m.Lessons)
+                l.IsCompleted = completedIds.Contains(l.Id);
+
+        return new StudentCourseDetailDto
+        {
+            Id = course.Id,
+            Title = course.Title,
+            DescriptionHtml = course.DescriptionHtml,
+            Modules = modules,
+            TotalLessons = modules.Sum(m => m.Lessons.Count),
+            CompletedLessons = modules.SelectMany(m => m.Lessons).Count(l => l.IsCompleted)
+        };
+    }
+
+    public async Task SetLessonCompletedAsync(string userId, int lessonId, bool completed)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var courseId = await db.Lessons.Where(l => l.Id == lessonId)
+            .Select(l => (int?)l.Module.CourseId).FirstOrDefaultAsync();
+        if (courseId is null) return;
+        if (!await HasActiveAccessAsync(userId, courseId.Value)) return;
+
+        var existing = await db.LessonProgress
+            .FirstOrDefaultAsync(p => p.ApplicationUserId == userId && p.LessonId == lessonId);
+        if (completed && existing is null)
+            db.LessonProgress.Add(new LessonProgress { ApplicationUserId = userId, LessonId = lessonId, CompletedAt = DateTime.UtcNow });
+        else if (!completed && existing is not null)
+            db.LessonProgress.Remove(existing);
+        await db.SaveChangesAsync();
+    }
+
     // Moves the item with the given id up (-1) or down (+1) in the list and
     // renormalizes SortOrder to a clean 0..n-1 sequence.
     private static void Reorder<T>(List<T> items, int id, int direction, Func<T, int> idOf, Action<T, int> setOrder)

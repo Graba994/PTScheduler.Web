@@ -34,6 +34,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<CourseEnrollment> CourseEnrollments => Set<CourseEnrollment>();
     public DbSet<CourseModule> CourseModules => Set<CourseModule>();
     public DbSet<Lesson> Lessons => Set<Lesson>();
+    public DbSet<LessonProgress> LessonProgress => Set<LessonProgress>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -77,6 +78,16 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             .WithMany(m => m.Lessons)
             .HasForeignKey(l => l.ModuleId)
             .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<LessonProgress>()
+            .HasOne(p => p.Lesson)
+            .WithMany()
+            .HasForeignKey(p => p.LessonId)
+            .OnDelete(DeleteBehavior.Cascade);
+
+        builder.Entity<LessonProgress>()
+            .HasIndex(p => new { p.ApplicationUserId, p.LessonId })
+            .IsUnique();
 
         builder.Entity<Session>()
             .HasOne(s => s.Package)

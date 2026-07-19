@@ -1,0 +1,73 @@
+@page "/my/courses"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ICourseService CourseService
+@inject AuthenticationStateProvider AuthState
+@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+
+<AppTitle Page="Moje kursy" />
+
+<div class="page-header">
+    <h4 class="page-title"><i class="bi bi-mortarboard-fill me-2" style="color:var(--c-primary)"></i>Moje kursy</h4>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_courses.Count == 0)
+{
+    <div class="text-center text-muted py-5">
+        <i class="bi bi-mortarboard" style="font-size:2.4rem"></i>
+        <p class="mt-2 mb-0">Nie masz jeszcze dostępu do żadnego kursu.</p>
+    </div>
+}
+else
+{
+    <div class="row g-3">
+        @foreach (var c in _courses)
+        {
+            <div class="col-12 col-md-6 col-xl-4">
+                <div class="card h-100">
+                    <div class="card-body d-flex flex-column">
+                        <h5 class="card-title">@c.Title</h5>
+                        @if (!string.IsNullOrEmpty(c.Description))
+                        {
+                            <p class="text-muted small flex-grow-1">@c.Description</p>
+                        }
+                        else
+                        {
+                            <div class="flex-grow-1"></div>
+                        }
+                        <div class="mb-2">
+                            <div class="d-flex justify-content-between small text-muted mb-1">
+                                <span>Postęp</span>
+                                <span>@c.CompletedLessons / @c.TotalLessons lekcji</span>
+                            </div>
+                            <div class="progress" style="height:8px" role="progressbar" aria-valuenow="@c.ProgressPercent" aria-valuemin="0" aria-valuemax="100">
+                                <div class="progress-bar" style="width:@(c.ProgressPercent)%"></div>
+                            </div>
+                        </div>
+                        <a class="btn btn-primary mt-2" href="@($"/my/courses/{c.Id}")">
+                            <i class="bi bi-play-fill me-1"></i>@(c.CompletedLessons > 0 ? "Kontynuuj" : "Rozpocznij")
+                        </a>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private List<StudentCourseDto> _courses = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        _courses = await CourseService.GetMyCoursesAsync(userId);
+        _loading = false;
+    }
+}

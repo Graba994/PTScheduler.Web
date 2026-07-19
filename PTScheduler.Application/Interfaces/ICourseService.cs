@@ -30,4 +30,9 @@ public interface ICourseService
     Task UpdateLessonAsync(int lessonId, SaveLessonDto dto);
     Task DeleteLessonAsync(int lessonId);
     Task MoveLessonAsync(int lessonId, int direction);
+
+    // ---- Student-facing (access-gated) ----
+    Task<List<StudentCourseDto>> GetMyCoursesAsync(string userId);
+    Task<StudentCourseDetailDto?> GetStudentCourseAsync(string userId, int courseId);
+    Task SetLessonCompletedAsync(string userId, int lessonId, bool completed);
 }
