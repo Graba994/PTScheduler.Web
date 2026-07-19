@@ -8,8 +8,19 @@
 
 <AppTitle Page="Moje kursy" />
 
-<div class="page-header">
-    <h4 class="page-title"><i class="bi bi-mortarboard-fill me-2" style="color:var(--c-primary)"></i>Moje kursy</h4>
+<div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <h4 class="page-title mb-0"><i class="bi bi-mortarboard-fill me-2" style="color:var(--c-primary)"></i>Moje kursy</h4>
+    @if (!_loading && _courses.Count > 1)
+    {
+        <div class="d-flex align-items-center gap-2">
+            <span class="text-muted small"><i class="bi bi-sort-down"></i></span>
+            <select class="form-select form-select-sm" style="width:auto" @bind="_sort">
+                <option value="recent">Ostatnio dodane</option>
+                <option value="title">Nazwa (A–Z)</option>
+                <option value="progress">Postęp</option>
+            </select>
+        </div>
+    }
 </div>
 
 @if (_loading)
@@ -25,42 +36,112 @@ else if (_courses.Count == 0)
 }
 else
 {
-    <div class="row g-3">
-        @foreach (var c in _courses)
+    <div class="mycourses row g-3">
+        @foreach (var c in Sorted())
         {
-            <div class="col-12 col-md-6 col-xl-4">
-                <div class="card h-100">
-                    <div class="card-body d-flex flex-column">
-                        <h5 class="card-title">@c.Title</h5>
+            <div class="@ColClass">
+                <a class="mc-card @(IsSingle ? "mc-wide" : "")" href="@($"/my/courses/{c.Id}")">
+                    <div class="mc-cover" style="@CoverStyle(c)">
+                        @if (string.IsNullOrEmpty(c.CoverImageUrl))
+                        {
+                            <i class="bi bi-mortarboard"></i>
+                        }
+                        @if (c.ProgressPercent > 0 && c.ProgressPercent >= 100)
+                        {
+                            <span class="mc-badge-done"><i class="bi bi-check-lg"></i> Ukończony</span>
+                        }
+                    </div>
+                    <div class="mc-body">
+                        <div class="mc-tags">
+                            @if (!string.IsNullOrEmpty(c.Level)) { <span class="mc-tag"><i class="bi bi-bar-chart-fill"></i> @c.Level</span> }
+                            @if (!string.IsNullOrEmpty(c.DurationText)) { <span class="mc-tag"><i class="bi bi-clock"></i> @c.DurationText</span> }
+                            <span class="mc-tag"><i class="bi bi-collection-play"></i> @c.TotalLessons lekcji</span>
+                        </div>
+                        <h5 class="mc-title">@c.Title</h5>
+                        @if (!string.IsNullOrEmpty(c.Author))
+                        {
+                            <div class="mc-author"><i class="bi bi-person-circle me-1"></i>@c.Author</div>
+                        }
                         @if (!string.IsNullOrEmpty(c.Description))
                         {
-                            <p class="text-muted small flex-grow-1">@c.Description</p>
+                            <p class="mc-desc">@c.Description</p>
                         }
-                        else
-                        {
-                            <div class="flex-grow-1"></div>
-                        }
-                        <div class="mb-2">
-                            <div class="d-flex justify-content-between small text-muted mb-1">
-                                <span>Postęp</span>
-                                <span>@c.CompletedLessons / @c.TotalLessons lekcji</span>
+                        <div class="mc-foot">
+                            <div class="mc-progress">
+                                <div class="d-flex justify-content-between small mb-1">
+                                    <span class="text-muted">@(c.CompletedLessons == 0 ? "Jeszcze nie zaczęto" : $"{c.CompletedLessons}/{c.TotalLessons} ukończone")</span>
+                                    <span class="fw-semibold" style="color:var(--c-primary)">@c.ProgressPercent%</span>
+                                </div>
+                                <div class="mc-bar"><span style="width:@(c.ProgressPercent)%"></span></div>
                             </div>
-                            <div class="progress" style="height:8px" role="progressbar" aria-valuenow="@c.ProgressPercent" aria-valuemin="0" aria-valuemax="100">
-                                <div class="progress-bar" style="width:@(c.ProgressPercent)%"></div>
-                            </div>
+                            <span class="mc-cta">@(c.CompletedLessons > 0 ? "Kontynuuj" : "Rozpocznij") <i class="bi bi-arrow-right"></i></span>
                         </div>
-                        <a class="btn btn-primary mt-2" href="@($"/my/courses/{c.Id}")">
-                            <i class="bi bi-play-fill me-1"></i>@(c.CompletedLessons > 0 ? "Kontynuuj" : "Rozpocznij")
-                        </a>
                     </div>
-                </div>
+                </a>
             </div>
         }
     </div>
 }
 
+<style>
+    .mycourses .mc-card {
+        display: flex; flex-direction: column; height: 100%;
+        background: var(--bs-body-bg); border: 1px solid var(--bs-border-color);
+        border-radius: 16px; overflow: hidden; text-decoration: none; color: inherit;
+        transition: transform .16s ease, box-shadow .16s ease, border-color .16s ease;
+    }
+    .mycourses .mc-card:hover {
+        transform: translateY(-4px);
+        box-shadow: 0 18px 40px -22px rgba(0,0,0,.55);
+        border-color: var(--c-primary, #0284c7);
+    }
+    .mc-cover {
+        position: relative; aspect-ratio: 16/9; background-size: cover; background-position: center;
+        background-color: var(--c-primary-light, #e0f2fe);
+        display: flex; align-items: center; justify-content: center;
+        color: var(--c-primary, #0284c7); font-size: 2.2rem;
+    }
+    .mc-badge-done {
+        position: absolute; top: .6rem; right: .6rem;
+        background: #16a34a; color: #fff; font-size: .72rem; font-weight: 700;
+        padding: .2rem .55rem; border-radius: 999px;
+    }
+    .mc-body { display: flex; flex-direction: column; flex: 1 1 auto; padding: 1rem 1.1rem 1.1rem; }
+    .mc-tags { display: flex; flex-wrap: wrap; gap: .4rem; margin-bottom: .5rem; }
+    .mc-tag {
+        display: inline-flex; align-items: center; gap: .3rem;
+        font-size: .72rem; font-weight: 600; color: var(--c-muted, #6b7280);
+        background: var(--bs-secondary-bg, #f1f3f5); padding: .18rem .5rem; border-radius: 999px;
+    }
+    .mc-title { font-size: 1.15rem; font-weight: 700; margin: 0 0 .25rem; }
+    .mc-author { font-size: .82rem; color: var(--c-muted, #6b7280); margin-bottom: .4rem; }
+    .mc-desc {
+        color: var(--c-muted, #6b7280); font-size: .9rem; line-height: 1.5; margin: 0 0 1rem; flex: 1 1 auto;
+        display: -webkit-box; -webkit-line-clamp: 3; line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden;
+    }
+    .mc-foot { margin-top: auto; }
+    .mc-bar { height: 8px; border-radius: 999px; background: var(--bs-secondary-bg, #e9ecef); overflow: hidden; }
+    .mc-bar span { display: block; height: 100%; border-radius: 999px; background: var(--c-primary, #0284c7); transition: width .6s cubic-bezier(.22,1,.36,1); }
+    .mc-cta {
+        display: inline-flex; align-items: center; gap: .35rem; margin-top: .9rem;
+        font-weight: 600; color: var(--c-primary, #0284c7); font-size: .95rem;
+        transition: gap .15s ease;
+    }
+    .mc-card:hover .mc-cta { gap: .6rem; }
+
+    /* Single course: wide hero layout */
+    @@media (min-width: 768px) {
+        .mc-card.mc-wide { flex-direction: row; }
+        .mc-card.mc-wide .mc-cover { flex: 0 0 42%; aspect-ratio: auto; min-height: 260px; }
+        .mc-card.mc-wide .mc-body { padding: 1.6rem 1.8rem; }
+        .mc-card.mc-wide .mc-title { font-size: 1.7rem; }
+        .mc-card.mc-wide .mc-desc { -webkit-line-clamp: 5; line-clamp: 5; font-size: 1rem; }
+    }
+</style>
+
 @code {
     private bool _loading = true;
+    private string _sort = "recent";
     private List<StudentCourseDto> _courses = [];
 
     protected override async Task OnInitializedAsync()
@@ -70,4 +151,25 @@ else
         _courses = await CourseService.GetMyCoursesAsync(userId);
         _loading = false;
     }
+
+    private bool IsSingle => _courses.Count == 1;
+
+    private string ColClass
+    {
+        get
+        {
+            var span = _courses.Count switch { <= 1 => 12, 2 => 6, 3 => 4, _ => 3 };
+            return span == 12 ? "col-12" : $"col-12 col-md-{span}";
+        }
+    }
+
+    private IEnumerable<StudentCourseDto> Sorted() => _sort switch
+    {
+        "title" => _courses.OrderBy(c => c.Title),
+        "progress" => _courses.OrderByDescending(c => c.ProgressPercent),
+        _ => _courses.OrderByDescending(c => c.CreatedAt)
+    };
+
+    private static string CoverStyle(StudentCourseDto c) =>
+        string.IsNullOrEmpty(c.CoverImageUrl) ? "" : $"background-image:url('{c.CoverImageUrl}')";
 }

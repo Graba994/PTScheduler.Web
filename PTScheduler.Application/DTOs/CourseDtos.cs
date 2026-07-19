@@ -9,6 +9,9 @@ public class CourseDto
     public string? Description { get; set; }
     public string? DescriptionHtml { get; set; }
     public string? CoverImageUrl { get; set; }
+    public string? DurationText { get; set; }
+    public string? Level { get; set; }
+    public string? Author { get; set; }
     public bool IsPublished { get; set; }
     public decimal Price { get; set; }
     public CourseAccessType DefaultAccessType { get; set; }
@@ -25,6 +28,9 @@ public class SaveCourseDto
     public string? Description { get; set; }
     public string? DescriptionHtml { get; set; }
     public string? CoverImageUrl { get; set; }
+    public string? DurationText { get; set; }
+    public string? Level { get; set; }
+    public string? Author { get; set; }
     public bool IsPublished { get; set; }
     public decimal Price { get; set; }
     public CourseAccessType DefaultAccessType { get; set; } = CourseAccessType.Lifetime;

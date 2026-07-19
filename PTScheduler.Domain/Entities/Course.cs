@@ -13,6 +13,11 @@ public class Course
     public string? DescriptionHtml { get; set; }
     public string? CoverImageUrl { get; set; }
 
+    // Optional presentation fields (all nullable — shown only when filled).
+    public string? DurationText { get; set; } // e.g. "6 tygodni", "12h materiału"
+    public string? Level { get; set; }         // e.g. "Początkujący"
+    public string? Author { get; set; }        // instructor / mentor name
+
     public bool IsPublished { get; set; } = false;
 
     public decimal Price { get; set; } = 0m;

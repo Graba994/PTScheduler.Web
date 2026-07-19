@@ -14,6 +14,9 @@ public interface ICourseService
     Task<List<CourseEnrollmentDto>> GetUserEnrollmentsAsync(string userId);
 
     /// <summary>Grant (or re-grant) course access. Returns an error message on failure, null on success.</summary>
+    Task<string> UploadCoverAsync(int courseId, Stream stream, string fileName);
+    Task DeleteCoverAsync(int courseId);
+
     Task<string?> GrantAccessAsync(GrantEnrollmentDto dto, string grantedByUserId);
     Task RevokeAccessAsync(int enrollmentId);
     Task RestoreAccessAsync(int enrollmentId);

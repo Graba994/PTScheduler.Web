@@ -7,7 +7,7 @@ using PTScheduler.Infrastructure.Data;
 
 namespace PTScheduler.Infrastructure.Services;
 
-public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory) : ICourseService
+public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IWebRootPathProvider webRoot) : ICourseService
 {
     public async Task<List<CourseDto>> GetCoursesAsync(bool includeUnpublished = true)
     {
@@ -23,6 +23,9 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory) : 
                 Description = c.Description,
                 DescriptionHtml = c.DescriptionHtml,
                 CoverImageUrl = c.CoverImageUrl,
+                DurationText = c.DurationText,
+                Level = c.Level,
+                Author = c.Author,
                 IsPublished = c.IsPublished,
                 Price = c.Price,
                 DefaultAccessType = c.DefaultAccessType,
@@ -51,6 +54,9 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory) : 
                 Description = c.Description,
                 DescriptionHtml = c.DescriptionHtml,
                 CoverImageUrl = c.CoverImageUrl,
+                DurationText = c.DurationText,
+                Level = c.Level,
+                Author = c.Author,
                 IsPublished = c.IsPublished,
                 Price = c.Price,
                 DefaultAccessType = c.DefaultAccessType,
@@ -173,6 +179,37 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory) : 
         });
         await db.SaveChangesAsync();
         return null;
+    }
+
+    public async Task<string> UploadCoverAsync(int courseId, Stream stream, string fileName)
+    {
+        var ext = Path.GetExtension(fileName).ToLowerInvariant();
+        if (string.IsNullOrEmpty(ext)) ext = ".jpg";
+        var dir = Path.Combine(webRoot.WebRootPath, "branding", "courses");
+        Directory.CreateDirectory(dir);
+        // Remove any previous cover for this course (any extension).
+        foreach (var old in Directory.GetFiles(dir, $"{courseId}.*"))
+            File.Delete(old);
+        var filePath = Path.Combine(dir, $"{courseId}{ext}");
+        await using (var fs = File.Create(filePath))
+            await stream.CopyToAsync(fs);
+
+        var relative = $"/branding/courses/{courseId}{ext}";
+        await using var db = dbFactory.CreateDbContext();
+        var c = await db.Courses.FirstOrDefaultAsync(x => x.Id == courseId);
+        if (c is not null) { c.CoverImageUrl = relative; await db.SaveChangesAsync(); }
+        return relative;
+    }
+
+    public async Task DeleteCoverAsync(int courseId)
+    {
+        var dir = Path.Combine(webRoot.WebRootPath, "branding", "courses");
+        if (Directory.Exists(dir))
+            foreach (var old in Directory.GetFiles(dir, $"{courseId}.*"))
+                File.Delete(old);
+        await using var db = dbFactory.CreateDbContext();
+        var c = await db.Courses.FirstOrDefaultAsync(x => x.Id == courseId);
+        if (c is not null) { c.CoverImageUrl = null; await db.SaveChangesAsync(); }
     }
 
     public async Task RevokeAccessAsync(int enrollmentId) => await SetRevoked(enrollmentId, true);
@@ -352,6 +389,10 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory) : 
                 Title = c.Title,
                 Description = c.Description,
                 CoverImageUrl = c.CoverImageUrl,
+                DurationText = c.DurationText,
+                Level = c.Level,
+                Author = c.Author,
+                CreatedAt = c.CreatedAt,
                 TotalLessons = c.Modules.SelectMany(m => m.Lessons).Count()
             }).ToListAsync();
 
@@ -431,6 +472,9 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory) : 
         c.Description = string.IsNullOrWhiteSpace(dto.Description) ? null : dto.Description.Trim();
         c.DescriptionHtml = string.IsNullOrWhiteSpace(dto.DescriptionHtml) ? null : dto.DescriptionHtml;
         c.CoverImageUrl = string.IsNullOrWhiteSpace(dto.CoverImageUrl) ? null : dto.CoverImageUrl.Trim();
+        c.DurationText = string.IsNullOrWhiteSpace(dto.DurationText) ? null : dto.DurationText.Trim();
+        c.Level = string.IsNullOrWhiteSpace(dto.Level) ? null : dto.Level.Trim();
+        c.Author = string.IsNullOrWhiteSpace(dto.Author) ? null : dto.Author.Trim();
         c.IsPublished = dto.IsPublished;
         c.Price = dto.Price < 0 ? 0 : dto.Price;
         c.DefaultAccessType = dto.DefaultAccessType;

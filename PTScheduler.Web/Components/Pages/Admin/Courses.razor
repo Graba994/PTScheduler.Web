@@ -1,4 +1,5 @@
 @page "/admin/courses"
+@using Microsoft.AspNetCore.Components.Forms
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
@@ -90,6 +91,51 @@ else
                         <div class="form-check form-switch">
                             <input class="form-check-input" type="checkbox" @bind="_editing.IsPublished" id="pub" />
                             <label class="form-check-label" for="pub">Opublikowany</label>
+                        </div>
+                    </div>
+
+                    <div class="col-12 col-md-4">
+                        <label class="form-label fw-semibold">Czas trwania <span class="text-muted small">(opcjonalne)</span></label>
+                        <input class="form-control" @bind="_editing.DurationText" maxlength="60" placeholder="np. 6 tygodni · 12h" />
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <label class="form-label fw-semibold">Poziom <span class="text-muted small">(opcjonalne)</span></label>
+                        <input class="form-control" list="lvlSuggest" @bind="_editing.Level" maxlength="40" placeholder="np. Początkujący" />
+                        <datalist id="lvlSuggest">
+                            <option value="Początkujący"></option>
+                            <option value="Średni"></option>
+                            <option value="Zaawansowany"></option>
+                        </datalist>
+                    </div>
+                    <div class="col-12 col-md-4">
+                        <label class="form-label fw-semibold">Autor / prowadzący <span class="text-muted small">(opcjonalne)</span></label>
+                        <input class="form-control" @bind="_editing.Author" maxlength="80" />
+                    </div>
+
+                    <div class="col-12">
+                        <label class="form-label fw-semibold">Obrazek kursu <span class="text-muted small">(opcjonalne)</span></label>
+                        <div class="d-flex align-items-start gap-3 flex-wrap">
+                            @if (!string.IsNullOrEmpty(_editing.CoverImageUrl))
+                            {
+                                <img src="@_editing.CoverImageUrl" alt="Okładka"
+                                     style="width:160px;height:90px;object-fit:cover;border-radius:10px;border:1px solid var(--bs-border-color)" />
+                            }
+                            <div class="flex-grow-1" style="min-width:220px">
+                                @if (_editingId is not null)
+                                {
+                                    <InputFile class="form-control mb-2" OnChange="UploadCover" accept="image/*" />
+                                    <div class="form-text mb-2">Wgraj obrazek (JPG/PNG, do 5&nbsp;MB) — lub wklej URL poniżej.</div>
+                                }
+                                else
+                                {
+                                    <div class="form-text mb-2">Zapisz kurs, aby wgrać obrazek z dysku. Na teraz możesz wkleić URL.</div>
+                                }
+                                <input class="form-control" @bind="_editing.CoverImageUrl" placeholder="https://… (URL obrazka)" />
+                                @if (!string.IsNullOrEmpty(_editing.CoverImageUrl) && _editingId is not null)
+                                {
+                                    <button type="button" class="btn btn-sm btn-outline-danger mt-2" @onclick="RemoveCover"><i class="bi bi-trash me-1"></i>Usuń obrazek</button>
+                                }
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -313,6 +359,9 @@ else
             Description = c.Description,
             DescriptionHtml = c.DescriptionHtml,
             CoverImageUrl = c.CoverImageUrl,
+            DurationText = c.DurationText,
+            Level = c.Level,
+            Author = c.Author,
             IsPublished = c.IsPublished,
             Price = c.Price,
             DefaultAccessType = c.DefaultAccessType,
@@ -339,6 +388,28 @@ else
         }
         catch (Exception ex) { _err = $"Błąd: {ex.Message}"; }
         finally { _saving = false; }
+    }
+
+    private async Task UploadCover(InputFileChangeEventArgs e)
+    {
+        if (_editing is null || _editingId is null) return;
+        _err = _msg = string.Empty;
+        try
+        {
+            await using var stream = e.File.OpenReadStream(5 * 1024 * 1024);
+            var path = await CourseService.UploadCoverAsync(_editingId.Value, stream, e.File.Name);
+            _editing.CoverImageUrl = path;
+            await ReloadCourses();
+        }
+        catch (Exception ex) { _err = $"Błąd obrazka: {ex.Message}"; }
+    }
+
+    private async Task RemoveCover()
+    {
+        if (_editing is null || _editingId is null) return;
+        await CourseService.DeleteCoverAsync(_editingId.Value);
+        _editing.CoverImageUrl = null;
+        await ReloadCourses();
     }
 
     private async Task DeleteCourse(int id)
