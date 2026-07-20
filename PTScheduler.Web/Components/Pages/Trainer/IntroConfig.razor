@@ -3,6 +3,7 @@
 @using PTScheduler.Application.Interfaces
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.Authorization
+@using PTScheduler.Domain.Constants
 @attribute [Authorize(Roles = "Admin,Trainer")]
 @inject IIntroSessionService IntroService
 @inject AuthenticationStateProvider AuthStateProvider
@@ -15,6 +16,18 @@
         <i class="bi bi-gear-fill fs-4 text-primary"></i>
         <h2 class="mb-0">Sesja wstępna — konfiguracja</h2>
     </div>
+
+    @if (isPureAdmin)
+    {
+        <div class="alert alert-warning d-flex align-items-start gap-2" role="alert">
+            <i class="bi bi-exclamation-triangle-fill mt-1"></i>
+            <div>
+                Jesteś zalogowany jako <strong>administrator</strong>. Konto administratora nie występuje publicznie jako trener —
+                oferta skonfigurowana na tym koncie <strong>nie pojawi się</strong> na stronie rezerwacji.
+                Aby oferta była widoczna, skonfiguruj ją na koncie z rolą <strong>Trener</strong>.
+            </div>
+        </div>
+    }
 
     <div class="row g-4">
         <div class="col-lg-7">
@@ -204,11 +217,13 @@
     private string? successMsg;
     private string? errorMsg;
     private string userId = string.Empty;
+    private bool isPureAdmin;
 
     protected override async Task OnInitializedAsync()
     {
         var authState = await AuthStateProvider.GetAuthenticationStateAsync();
         userId = authState.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        isPureAdmin = authState.User.IsInRole(Roles.Admin) && !authState.User.IsInRole(Roles.Trainer);
 
         var config = await IntroService.GetConfigAsync(userId);
         if (config is not null)

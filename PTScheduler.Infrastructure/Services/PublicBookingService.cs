@@ -27,25 +27,31 @@ public class PublicBookingService(
     public async Task<PublicIntroOfferDto> GetActiveOfferAsync()
     {
         await using var db = dbFactory.CreateDbContext();
-        var cfg = await db.IntroSessionConfigs
+        var configs = await db.IntroSessionConfigs
             .AsNoTracking()
             .Where(c => c.IsActive)
             .OrderBy(c => c.Id)
-            .FirstOrDefaultAsync();
+            .ToListAsync();
 
-        if (cfg is null)
+        // Only accounts that are actually trainers may be surfaced publicly —
+        // an administrator account must never appear as a trainer.
+        ApplicationUser? trainer = null;
+        IntroSessionConfig? cfg = null;
+        foreach (var candidate in configs)
+        {
+            var user = await userManager.FindByIdAsync(candidate.TrainerUserId);
+            if (user is null) continue;
+            if (!await userManager.IsInRoleAsync(user, Roles.Trainer)) continue;
+            trainer = user;
+            cfg = candidate;
+            break;
+        }
+
+        if (cfg is null || trainer is null)
             return new PublicIntroOfferDto
             {
                 IsAvailable = false,
                 UnavailableReason = "Brak skonfigurowanej oferty wstępnej. Trener musi włączyć ofertę w ustawieniach."
-            };
-
-        var trainer = await userManager.FindByIdAsync(cfg.TrainerUserId);
-        if (trainer is null)
-            return new PublicIntroOfferDto
-            {
-                IsAvailable = false,
-                UnavailableReason = "Trener przypisany do oferty nie istnieje."
             };
 
         return new PublicIntroOfferDto
@@ -103,6 +109,10 @@ public class PublicBookingService(
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.TrainerUserId == dto.TrainerUserId && c.IsActive);
         if (cfg is null)
+            return Fail("Oferta sesji wstępnej jest nieaktywna.");
+
+        var trainerAccount = await userManager.FindByIdAsync(dto.TrainerUserId);
+        if (trainerAccount is null || !await userManager.IsInRoleAsync(trainerAccount, Roles.Trainer))
             return Fail("Oferta sesji wstępnej jest nieaktywna.");
 
         if (!await availabilityService.IsSlotFreeAsync(dto.TrainerUserId, dto.SlotStart, cfg.DurationMinutes))
