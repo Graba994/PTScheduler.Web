@@ -135,7 +135,10 @@ public class BrandingService(IDbContextFactory<ApplicationDbContext> dbFactory, 
         PwaBannerTitle = b.PwaBannerTitle,
         PwaBannerBody = b.PwaBannerBody,
         PwaBannerButton = b.PwaBannerButton,
-        PwaIconPath = ResolveFilePath(b.PwaIconPath)
+        PwaIconPath = ResolveFilePath(b.PwaIconPath),
+        SetupCompleted = b.SetupCompleted,
+        SetupMode = b.SetupMode,
+        SetupCompletedAt = b.SetupCompletedAt
     };
 
     private string? ResolveFilePath(string? relativePath)

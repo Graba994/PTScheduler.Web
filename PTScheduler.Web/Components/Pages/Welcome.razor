@@ -7,6 +7,8 @@
 @inject IBrandingService BrandingService
 @inject ISiteContentService SiteContentService
 @inject IModuleSettingsService ModuleSettings
+@inject ISetupService SetupService
+@inject NavigationManager Nav
 
 <PageTitle>@_companyName — trening personalny i mentoring</PageTitle>
 
@@ -479,6 +481,16 @@
 
     protected override async Task OnInitializedAsync()
     {
+        try
+        {
+            if (!await SetupService.IsSetupCompletedAsync())
+            {
+                Nav.NavigateTo("/setup", forceLoad: true);
+                return;
+            }
+        }
+        catch { }
+
         try
         {
             var b = await BrandingService.GetAsync();
