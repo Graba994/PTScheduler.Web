@@ -1,6 +1,6 @@
 namespace PTScheduler.Domain.Entities;
 
-/// <summary>Single-row PayU configuration.</summary>
+/// <summary>Single-row payment configuration (master switch + per-gateway config).</summary>
 public class PaymentSettings
 {
     public int Id { get; set; } = 1;
@@ -8,14 +8,19 @@ public class PaymentSettings
     // Master switch — online payments available to clients.
     public bool Enabled { get; set; }
 
-    // true = PayU sandbox, false = production.
+    // Legacy single-gateway PayU fields (kept for backward compatibility;
+    // migrated into ProvidersJson on first save of the new config UI).
     public bool Sandbox { get; set; } = true;
-
-    // PayU credentials (from the PayU merchant panel).
-    public string? PosId { get; set; }        // POS ID / merchant POS
-    public string? SecondKey { get; set; }    // second key (MD5) for signature
-    public string? ClientId { get; set; }     // OAuth client_id (often equals PosId)
-    public string? ClientSecret { get; set; } // OAuth client_secret
+    public string? PosId { get; set; }
+    public string? SecondKey { get; set; }
+    public string? ClientId { get; set; }
+    public string? ClientSecret { get; set; }
 
     public string Currency { get; set; } = "PLN";
+
+    /// <summary>
+    /// JSON map of gateway key → provider config
+    /// ({ enabled, sandbox, fields: { ... } }). See PaymentSettingsService.
+    /// </summary>
+    public string? ProvidersJson { get; set; }
 }

@@ -40,6 +40,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<QuizAttempt> QuizAttempts => Set<QuizAttempt>();
     public DbSet<PaymentSettings> PaymentSettings => Set<PaymentSettings>();
     public DbSet<Order> Orders => Set<Order>();
+    public DbSet<PackageOffer> PackageOffers => Set<PackageOffer>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -127,8 +128,24 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             .OnDelete(DeleteBehavior.Restrict);
 
         builder.Entity<Order>()
+            .HasOne(o => o.PackageOffer)
+            .WithMany()
+            .HasForeignKey(o => o.PackageOfferId)
+            .OnDelete(DeleteBehavior.Restrict);
+
+        builder.Entity<Order>()
             .HasIndex(o => o.ExtOrderId)
             .IsUnique();
+
+        builder.Entity<PackageOffer>()
+            .Property(p => p.Price)
+            .HasPrecision(10, 2);
+
+        builder.Entity<PackageOffer>()
+            .HasOne(p => p.SessionType)
+            .WithMany()
+            .HasForeignKey(p => p.SessionTypeId)
+            .OnDelete(DeleteBehavior.Restrict);
 
         builder.Entity<Session>()
             .HasOne(s => s.Package)

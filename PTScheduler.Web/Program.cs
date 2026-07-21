@@ -270,14 +270,15 @@ app.MapGet("/health", (StartupHealth h) => Results.Json(new
     timestamp = DateTime.Now.ToString("o")
 }));
 
-// PayU notify (webhook): verifies signature and grants course access on payment.
-app.MapPost("/payments/payu/notify",
-    async (HttpContext ctx, PTScheduler.Application.Interfaces.IPaymentService payments) =>
+// Gateway notify (webhook): verifies the payment and fulfils the order.
+// Route carries the provider key, e.g. /payments/payu/notify, /payments/p24/notify.
+app.MapPost("/payments/{provider}/notify",
+    async (string provider, HttpContext ctx, PTScheduler.Application.Interfaces.IPaymentService payments) =>
 {
     using var reader = new StreamReader(ctx.Request.Body);
     var body = await reader.ReadToEndAsync();
-    var signature = ctx.Request.Headers["OpenPayu-Signature"].ToString();
-    var ok = await payments.HandleNotifyAsync(body, signature);
+    var headers = ctx.Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString(), StringComparer.OrdinalIgnoreCase);
+    var ok = await payments.HandleNotifyAsync(provider, body, headers);
     return ok ? Results.Ok() : Results.BadRequest();
 });
 

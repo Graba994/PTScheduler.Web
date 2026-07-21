@@ -35,7 +35,13 @@ public static class DependencyInjection
         services.AddScoped<ISiteContentService, SiteContentService>();
         services.AddScoped<IModuleSettingsService, ModuleSettingsService>();
         services.AddScoped<IPaymentSettingsService, PaymentSettingsService>();
-        services.AddScoped<IPaymentService, PayUService>();
+        // Payment gateways (resolved as a set by the orchestrator).
+        services.AddScoped<Services.Payments.IPaymentProvider, Services.Payments.SimulatorProvider>();
+        services.AddScoped<Services.Payments.IPaymentProvider, Services.Payments.PayUProvider>();
+        services.AddScoped<Services.Payments.IPaymentProvider, Services.Payments.Przelewy24Provider>();
+        services.AddScoped<Services.Payments.IPaymentProvider, Services.Payments.KlarnaProvider>();
+        services.AddScoped<Services.Payments.IPaymentProvider, Services.Payments.AutoPayProvider>();
+        services.AddScoped<IPaymentService, PaymentService>();
         services.AddScoped<ICourseService, CourseService>();
         services.AddScoped<IBackupService, BackupService>();
         services.AddScoped<IDatabaseMaintenanceService, DatabaseMaintenanceService>();

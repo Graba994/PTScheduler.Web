@@ -87,11 +87,35 @@ else
     </div>
 }
 
+@if (_pickFor is not null)
+{
+    <div class="modal-backdrop-custom" @onclick="ClosePicker">
+        <div class="pay-picker" @onclick:stopPropagation="true">
+            <div class="pay-picker-head">
+                <span class="fw-semibold">Wybierz metodę płatności</span>
+                <button class="btn-close" @onclick="ClosePicker"></button>
+            </div>
+            <div class="pay-picker-sub">@_pickFor.Title — <strong>@_pickFor.Price.ToString("0.00") @_currency</strong></div>
+            @if (!string.IsNullOrEmpty(_err)) { <div class="alert alert-danger py-2 mb-2">@_err</div> }
+            <div class="d-grid gap-2">
+                @foreach (var opt in _options)
+                {
+                    <button class="pay-option" @onclick="() => StartCourse(_pickFor, opt.Key)" disabled="@_busy">
+                        <i class="bi @opt.Icon"></i><span>@opt.Name</span>
+                        <i class="bi bi-chevron-right ms-auto"></i>
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private bool _loading = true;
     private bool _moduleOff;
     private bool _paymentsEnabled;
     private bool _isStaff;
+    private bool _busy;
     private string _currency = "PLN";
     private string _userId = string.Empty;
     private string _email = string.Empty;
@@ -100,6 +124,8 @@ else
 
     private List<CourseDto> _catalog = [];
     private HashSet<int> _owned = [];
+    private List<PaymentOptionDto> _options = [];
+    private CourseDto? _pickFor;
 
     protected override async Task OnInitializedAsync()
     {
@@ -112,8 +138,9 @@ else
         _isStaff = auth.User.IsInRole("Admin") || auth.User.IsInRole("Trainer") || auth.User.IsInRole("Subordinate");
 
         var settings = await PaymentSettings.GetAsync();
-        _paymentsEnabled = settings.Enabled;
         _currency = settings.Currency;
+        _options = await PaymentService.GetEnabledOptionsAsync();
+        _paymentsEnabled = _options.Count > 0;
 
         _catalog = await CourseService.GetCoursesAsync(includeUnpublished: false);
         _owned = (await CourseService.GetMyCoursesAsync(_userId)).Select(c => c.Id).ToHashSet();
@@ -129,23 +156,49 @@ else
         if (c.Price <= 0)
         {
             var free = await CourseService.SelfEnrollFreeAsync(_userId, c.Id);
-            if (free is null)
-            {
-                Nav.NavigateTo($"/my/courses/{c.Id}", forceLoad: true);
-                return;
-            }
+            if (free is null) { Nav.NavigateTo($"/my/courses/{c.Id}", forceLoad: true); return; }
             _err = free;
             _buyingId = null;
             return;
         }
 
-        var res = await PaymentService.StartCourseCheckoutAsync(_userId, c.Id, Nav.BaseUri, _email, string.Empty);
-        if (res.Ok && res.RedirectUrl is not null)
-        {
-            Nav.NavigateTo(res.RedirectUrl, forceLoad: true);
-            return;
-        }
-        _err = res.Error ?? "Nie udało się rozpocząć płatności.";
+        // Single gateway → go straight; multiple → let the buyer choose.
+        if (_options.Count == 1) { await StartCourse(c, _options[0].Key); return; }
+        _pickFor = c;
         _buyingId = null;
     }
+
+    private async Task StartCourse(CourseDto c, string providerKey)
+    {
+        _busy = true; _err = string.Empty;
+        var res = await PaymentService.StartCourseCheckoutAsync(_userId, c.Id, providerKey, Nav.BaseUri, _email, string.Empty);
+        if (res.Ok && res.RedirectUrl is not null) { Nav.NavigateTo(res.RedirectUrl, forceLoad: true); return; }
+        _err = res.Error ?? "Nie udało się rozpocząć płatności.";
+        _busy = false;
+    }
+
+    private void ClosePicker() { _pickFor = null; _err = string.Empty; }
 }
+
+<style>
+    .modal-backdrop-custom {
+        position: fixed; inset: 0; background: rgba(0,0,0,.45);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 1080; padding: 1rem; backdrop-filter: blur(2px);
+    }
+    .pay-picker {
+        width: 100%; max-width: 380px; background: var(--bs-body-bg);
+        border: 1px solid var(--bs-border-color); border-radius: 1rem;
+        padding: 1.25rem; box-shadow: 0 20px 50px -20px rgba(0,0,0,.55);
+    }
+    .pay-picker-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:.25rem; }
+    .pay-picker-sub { color: var(--bs-secondary-color); font-size:.9rem; margin-bottom:1rem; }
+    .pay-option {
+        display:flex; align-items:center; gap:.7rem; width:100%;
+        padding:.75rem .9rem; border:1px solid var(--bs-border-color);
+        border-radius:.7rem; background:var(--bs-body-bg); color:var(--bs-body-color);
+        font-weight:600; transition:border-color .15s, transform .15s;
+    }
+    .pay-option:hover:not(:disabled) { border-color: var(--c-primary); transform: translateY(-1px); }
+    .pay-option i:first-child { color: var(--c-primary); font-size:1.15rem; }
+</style>

@@ -8,12 +8,23 @@ public class Order
 
     public string ApplicationUserId { get; set; } = string.Empty;
 
-    public int CourseId { get; set; }
-    public Course Course { get; set; } = null!;
+    /// <summary>What this order pays for.</summary>
+    public OrderKind Kind { get; set; } = OrderKind.Course;
 
-    // Our unique order reference sent to PayU as extOrderId.
+    /// <summary>Payment gateway key that handles this order (see <see cref="Constants.PaymentProviders"/>).</summary>
+    public string Provider { get; set; } = Constants.PaymentProviders.PayU;
+
+    // Course order target (null for package orders).
+    public int? CourseId { get; set; }
+    public Course? Course { get; set; }
+
+    // Package order target (null for course orders).
+    public int? PackageOfferId { get; set; }
+    public PackageOffer? PackageOffer { get; set; }
+
+    // Our unique order reference sent to the gateway as extOrderId.
     public string ExtOrderId { get; set; } = string.Empty;
-    // PayU's own order id, filled after the order is created.
+    // The gateway's own order id, filled after the order is created.
     public string? PayUOrderId { get; set; }
 
     public decimal Amount { get; set; }
