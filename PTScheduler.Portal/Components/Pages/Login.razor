@@ -1,8 +1,5 @@
 @page "/login"
 @layout PublicLayout
-@inject SignInManager<IdentityUser> SignInMgr
-@inject NavigationManager Nav
-@rendermode InteractiveServer
 
 <PageTitle>Logowanie — PTScheduler Portal</PageTitle>
 
@@ -17,36 +14,38 @@
 
                 <div class="card border-0 shadow-sm">
                     <div class="card-body p-4">
-                        <EditForm Model="_form" OnValidSubmit="Submit" FormName="login">
-                            <DataAnnotationsValidator />
+                        <form method="post" action="/api/account/login">
+                            <input type="hidden" name="returnUrl" value="/panel" />
+                            <AntiforgeryToken />
 
                             <div class="mb-3">
                                 <label class="form-label fw-semibold">Email</label>
-                                <InputText class="form-control" type="email" @bind-Value="_form.Email" placeholder="admin@ptscheduler.pl" />
-                                <ValidationMessage For="() => _form.Email" />
+                                <input class="form-control" type="email" name="email" placeholder="admin@ptscheduler.pl" required />
                             </div>
 
                             <div class="mb-3">
                                 <label class="form-label fw-semibold">Hasło</label>
-                                <InputText class="form-control" type="password" @bind-Value="_form.Password" />
-                                <ValidationMessage For="() => _form.Password" />
+                                <input class="form-control" type="password" name="password" required />
                             </div>
 
                             <div class="form-check mb-3">
-                                <InputCheckbox class="form-check-input" @bind-Value="_form.RememberMe" />
-                                <label class="form-check-label">Zapamiętaj mnie</label>
+                                <input class="form-check-input" type="checkbox" name="rememberMe" value="true" id="rememberMe" />
+                                <label class="form-check-label" for="rememberMe">Zapamiętaj mnie</label>
                             </div>
 
-                            @if (_error is not null)
+                            @if (_error)
                             {
-                                <div class="alert alert-danger py-2 small">@_error</div>
+                                <div class="alert alert-danger py-2 small">Nieprawidłowy email lub hasło.</div>
                             }
 
-                            <button type="submit" class="btn btn-primary w-100" disabled="@_loading">
-                                @if (_loading) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            <button type="submit" class="btn btn-primary w-100">
                                 <i class="bi bi-box-arrow-in-right me-1"></i>Zaloguj się
                             </button>
-                        </EditForm>
+                        </form>
+
+                        <p class="text-muted text-center small mt-3 mb-0">
+                            <a href="/">Wróć na stronę główną</a>
+                        </p>
                     </div>
                 </div>
             </div>
@@ -55,39 +54,7 @@
 </section>
 
 @code {
-    private LoginForm _form = new();
-    private bool _loading;
-    private string? _error;
+    [SupplyParameterFromQuery] public string? Error { get; set; }
 
-    private async Task Submit()
-    {
-        _error = null;
-        _loading = true;
-
-        var result = await SignInMgr.PasswordSignInAsync(
-            _form.Email, _form.Password, _form.RememberMe, lockoutOnFailure: false);
-
-        if (result.Succeeded)
-        {
-            Nav.NavigateTo("/panel", forceLoad: true);
-        }
-        else
-        {
-            _error = "Nieprawidłowy email lub hasło.";
-        }
-
-        _loading = false;
-    }
-
-    private class LoginForm
-    {
-        [global::System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Wymagane")]
-        [global::System.ComponentModel.DataAnnotations.EmailAddress(ErrorMessage = "Nieprawidłowy email")]
-        public string Email { get; set; } = "";
-
-        [global::System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Wymagane")]
-        public string Password { get; set; } = "";
-
-        public bool RememberMe { get; set; }
-    }
+    private bool _error => !string.IsNullOrEmpty(Error);
 }

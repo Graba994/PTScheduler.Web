@@ -73,6 +73,31 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
 
+app.MapPost("/api/account/login", async (
+    HttpContext ctx,
+    SignInManager<IdentityUser> signIn,
+    UserManager<IdentityUser> userMgr) =>
+{
+    var form = await ctx.Request.ReadFormAsync();
+    var email = form["email"].ToString();
+    var password = form["password"].ToString();
+    var remember = form["rememberMe"] == "true";
+    var returnUrl = form["returnUrl"].ToString();
+    if (string.IsNullOrEmpty(returnUrl)) returnUrl = "/panel";
+
+    var result = await signIn.PasswordSignInAsync(email, password, remember, lockoutOnFailure: false);
+    if (result.Succeeded)
+        return Results.Redirect(returnUrl);
+
+    return Results.Redirect("/login?error=1");
+});
+
+app.MapGet("/api/account/logout", async (SignInManager<IdentityUser> signIn) =>
+{
+    await signIn.SignOutAsync();
+    return Results.Redirect("/logout");
+});
+
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
