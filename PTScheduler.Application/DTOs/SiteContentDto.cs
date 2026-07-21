@@ -72,6 +72,11 @@ public class SiteContentDto
         "Kursy online, lekcje wideo i materiały mentoringowe — dostępne dla Twoich klientów prosto z konta, z płatnościami online.";
     public bool CoursesComingSoon { get; set; } = true;
 
+    public bool ShowPackagesCard { get; set; } = true;
+    public string PackagesCardTitle { get; set; } = "Pakiety treningowe";
+    public string PackagesCardText { get; set; } =
+        "Kup pakiet sesji online — im więcej treningów, tym lepsza cena. Wygodna płatność, natychmiastowy dostęp do rezerwacji.";
+
     // ---- Offer / pricing ----
     public bool ShowOffer { get; set; }
     public string OfferTitle { get; set; } = "Oferta";
