@@ -8,6 +8,7 @@
 @inject IBodyMeasurementService MeasurementService
 @inject IJSRuntime JS
 @inject NavigationManager Nav
+@inject IModuleSettingsService ModuleSettings
 
 @if (!_loaded)
 {
@@ -317,6 +318,18 @@ else
             </div>
         </div>
 
+        @if (_coursesEnabled)
+        {
+            <a href="/courses" class="cd-courses-cta">
+                <div class="cd-courses-cta-icon"><i class="bi bi-collection-play-fill"></i></div>
+                <div class="cd-courses-cta-body">
+                    <div class="cd-courses-cta-title">Rozwijaj się z kursami online</div>
+                    <div class="cd-courses-cta-sub">Wiedza od trenera dostępna 24/7 — przeglądaj dostępne kursy i mentoring.</div>
+                </div>
+                <span class="cd-courses-cta-btn">Przeglądaj kursy <i class="bi bi-arrow-right"></i></span>
+            </a>
+        }
+
         <!-- Quick actions -->
         <div class="cd-actions">
             <a href="/my/profile" class="cd-action">
@@ -331,6 +344,13 @@ else
                 <i class="bi bi-box-seam"></i>
                 <span>Pakiety</span>
             </a>
+            @if (_coursesEnabled)
+            {
+                <a href="/my/courses" class="cd-action">
+                    <i class="bi bi-mortarboard-fill"></i>
+                    <span>Moje kursy</span>
+                </a>
+            }
             <a href="/my/stats" class="cd-action">
                 <i class="bi bi-graph-up"></i>
                 <span>Statystyki</span>
@@ -410,6 +430,9 @@ else
     // Chart re-render trigger
     private bool _chartNeedsRender;
 
+    // Courses module
+    private bool _coursesEnabled;
+
     private async Task RefreshAsync()
     {
         _loading = false;
@@ -425,6 +448,7 @@ else
             _loaded = false;
             _client = null;
             _errorMsg = null;
+            _coursesEnabled = (await ModuleSettings.GetAsync()).CoursesEnabled;
             try
             {
                 if (ClientIdOverride.HasValue)

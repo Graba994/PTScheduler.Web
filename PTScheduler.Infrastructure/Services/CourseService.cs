@@ -181,6 +181,31 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IW
         return null;
     }
 
+    public async Task<string?> SelfEnrollFreeAsync(string userId, int courseId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+
+        var course = await db.Courses.FirstOrDefaultAsync(c => c.Id == courseId);
+        if (course is null) return "Kurs nie istnieje.";
+        if (!course.IsPublished) return "Kurs nie jest dostępny.";
+        if (course.Price > 0) return "Kurs jest płatny.";
+
+        if (await HasActiveAccessAsync(userId, courseId)) return null; // already has access — idempotent
+
+        db.CourseEnrollments.Add(new CourseEnrollment
+        {
+            CourseId = courseId,
+            ApplicationUserId = userId,
+            AccessType = CourseAccessType.Lifetime,
+            Source = EnrollmentSource.Manual,
+            GrantedAt = DateTime.UtcNow,
+            ExpiresAt = null,
+            Notes = "Dostęp bezpłatny"
+        });
+        await db.SaveChangesAsync();
+        return null;
+    }
+
     public async Task<string> UploadCoverAsync(int courseId, Stream stream, string fileName)
     {
         var ext = Path.GetExtension(fileName).ToLowerInvariant();

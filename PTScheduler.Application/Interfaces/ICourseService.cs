@@ -18,6 +18,9 @@ public interface ICourseService
     Task DeleteCoverAsync(int courseId);
 
     Task<string?> GrantAccessAsync(GrantEnrollmentDto dto, string grantedByUserId);
+
+    /// <summary>Let a client claim lifetime access to a free, published course. Returns an error message on failure, null on success.</summary>
+    Task<string?> SelfEnrollFreeAsync(string userId, int courseId);
     Task RevokeAccessAsync(int enrollmentId);
     Task RestoreAccessAsync(int enrollmentId);
 

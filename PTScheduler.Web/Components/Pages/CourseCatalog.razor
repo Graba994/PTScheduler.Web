@@ -53,11 +53,22 @@ else
 
                         <div class="d-flex align-items-center justify-content-between mt-2">
                             <span class="fw-bold fs-5">@(c.Price > 0 ? $"{c.Price:0.00} {_currency}" : "Bezpłatny")</span>
-                            @if (_owned.Contains(c.Id))
+                            @if (_isStaff)
+                            {
+                                <a href="/admin/courses" class="btn btn-outline-secondary btn-sm"><i class="bi bi-gear me-1"></i>Zarządzaj</a>
+                            }
+                            else if (_owned.Contains(c.Id))
                             {
                                 <a href="@($"/my/courses/{c.Id}")" class="btn btn-success"><i class="bi bi-play-fill me-1"></i>Otwórz</a>
                             }
-                            else if (_paymentsEnabled && c.Price > 0)
+                            else if (c.Price <= 0)
+                            {
+                                <button class="btn btn-primary" @onclick="() => Buy(c)" disabled="@(_buyingId == c.Id)">
+                                    @if (_buyingId == c.Id) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                                    <i class="bi bi-unlock me-1"></i>Odbierz dostęp
+                                </button>
+                            }
+                            else if (_paymentsEnabled)
                             {
                                 <button class="btn btn-primary" @onclick="() => Buy(c)" disabled="@(_buyingId == c.Id)">
                                     @if (_buyingId == c.Id) { <span class="spinner-border spinner-border-sm me-2"></span> }
@@ -80,6 +91,7 @@ else
     private bool _loading = true;
     private bool _moduleOff;
     private bool _paymentsEnabled;
+    private bool _isStaff;
     private string _currency = "PLN";
     private string _userId = string.Empty;
     private string _email = string.Empty;
@@ -97,6 +109,7 @@ else
         _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
         _email = auth.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
                  ?? auth.User.Identity?.Name ?? string.Empty;
+        _isStaff = auth.User.IsInRole("Admin") || auth.User.IsInRole("Trainer") || auth.User.IsInRole("Subordinate");
 
         var settings = await PaymentSettings.GetAsync();
         _paymentsEnabled = settings.Enabled;
@@ -111,6 +124,21 @@ else
     {
         _err = string.Empty;
         _buyingId = c.Id;
+
+        // Free course — grant access directly, no payment gateway.
+        if (c.Price <= 0)
+        {
+            var free = await CourseService.SelfEnrollFreeAsync(_userId, c.Id);
+            if (free is null)
+            {
+                Nav.NavigateTo($"/my/courses/{c.Id}", forceLoad: true);
+                return;
+            }
+            _err = free;
+            _buyingId = null;
+            return;
+        }
+
         var res = await PaymentService.StartCourseCheckoutAsync(_userId, c.Id, Nav.BaseUri, _email, string.Empty);
         if (res.Ok && res.RedirectUrl is not null)
         {
