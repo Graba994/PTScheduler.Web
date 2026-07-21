@@ -107,6 +107,25 @@ public class DockerService : IDisposable
         };
     }
 
+    public async Task<List<DockerContainer>> ListAllContainersAsync()
+    {
+        var containers = await _client.Containers.ListContainersAsync(
+            new ContainersListParameters { All = true });
+
+        return containers.Select(c => new DockerContainer
+        {
+            Id = c.ID[..12],
+            Name = c.Names.FirstOrDefault()?.TrimStart('/') ?? c.ID[..12],
+            Image = c.Image,
+            State = c.State,
+            Status = c.Status,
+            Ports = string.Join(", ", c.Ports
+                .Where(p => p.PublicPort > 0)
+                .Select(p => $"{p.PublicPort}→{p.PrivatePort}")),
+            Created = c.Created
+        }).OrderBy(c => c.Name).ToList();
+    }
+
     public void Dispose() => _client.Dispose();
 }
 
@@ -127,6 +146,17 @@ public class TenantContainerStatus
     public ContainerInfo? Web { get; set; }
     public ContainerInfo? Db { get; set; }
     public bool IsHealthy { get; set; }
+}
+
+public class DockerContainer
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Image { get; set; } = "";
+    public string State { get; set; } = "";
+    public string Status { get; set; } = "";
+    public string Ports { get; set; } = "";
+    public DateTime Created { get; set; }
 }
 
 public class SystemInfo

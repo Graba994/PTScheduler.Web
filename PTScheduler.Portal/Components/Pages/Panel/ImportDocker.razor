@@ -1,0 +1,279 @@
+@page "/panel/import"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject DockerService DockerSvc
+@inject TenantService TenantSvc
+@inject NavigationManager Nav
+@rendermode InteractiveServer
+
+<PageTitle>Import z Dockera — PTScheduler Portal</PageTitle>
+
+<div class="d-flex align-items-center gap-2 mb-4">
+    <a href="/panel/tenants" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i></a>
+    <h4 class="fw-bold mb-0"><i class="bi bi-box-arrow-in-down me-2 text-primary"></i>Import z Dockera</h4>
+    <button class="btn btn-sm btn-outline-secondary ms-auto" @onclick="LoadContainers" disabled="@_loading">
+        <i class="bi bi-arrow-clockwise"></i> Odśwież
+    </button>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_error is not null)
+{
+    <div class="alert alert-danger">@_error</div>
+}
+else if (_selected is null)
+{
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            <p class="text-muted small mb-3">Wybierz kontener, który chcesz dodać jako tenanta. Wyświetlane są wszystkie kontenery z serwera.</p>
+
+            <div class="table-responsive">
+                <table class="table table-sm table-hover align-middle mb-0 small">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Nazwa</th>
+                            <th>Obraz</th>
+                            <th>Status</th>
+                            <th>Porty</th>
+                            <th>Utworzony</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var c in _containers)
+                        {
+                            <tr>
+                                <td class="font-monospace fw-semibold">@c.Name</td>
+                                <td class="text-muted">@TruncateImage(c.Image)</td>
+                                <td>
+                                    <span class="badge @(c.State == "running" ? "bg-success" : "bg-secondary")">
+                                        @c.State
+                                    </span>
+                                </td>
+                                <td class="font-monospace">@(string.IsNullOrEmpty(c.Ports) ? "—" : c.Ports)</td>
+                                <td class="text-muted">@c.Created.ToString("dd.MM.yyyy")</td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-primary" @onclick="() => SelectContainer(c)">
+                                        <i class="bi bi-plus-lg me-1"></i>Importuj
+                                    </button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+
+            @if (_containers.Count == 0)
+            {
+                <p class="text-muted text-center py-3">Nie znaleziono kontenerów Docker.</p>
+            }
+        </div>
+    </div>
+}
+else
+{
+    <div class="row">
+        <div class="col-lg-7">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex align-items-center gap-2 mb-3">
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => _selected = null">
+                            <i class="bi bi-arrow-left"></i>
+                        </button>
+                        <h6 class="fw-bold mb-0">Importuj kontener: <span class="text-primary font-monospace">@_selected.Name</span></h6>
+                    </div>
+
+                    <div class="alert alert-info py-2 small">
+                        <i class="bi bi-info-circle me-1"></i>
+                        Obraz: <strong>@_selected.Image</strong> | Status: <strong>@_selected.Status</strong> | Porty: <strong>@(string.IsNullOrEmpty(_selected.Ports) ? "brak" : _selected.Ports)</strong>
+                    </div>
+
+                    <EditForm Model="_form" OnValidSubmit="Import" FormName="import">
+                        <DataAnnotationsValidator />
+
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">Slug <span class="text-danger">*</span></label>
+                                <InputText class="form-control font-monospace" @bind-Value="_form.Slug" />
+                                <div class="form-text">Unikalny identyfikator tenanta</div>
+                                <ValidationMessage For="() => _form.Slug" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">Domena <span class="text-danger">*</span></label>
+                                <InputText class="form-control" @bind-Value="_form.Domain" />
+                                <ValidationMessage For="() => _form.Domain" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">Port <span class="text-danger">*</span></label>
+                                <InputNumber class="form-control font-monospace" @bind-Value="_form.Port" />
+                                <ValidationMessage For="() => _form.Port" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">Plan</label>
+                                <InputSelect class="form-select" @bind-Value="_form.PlanId">
+                                    <option value="start">Start (0 zł)</option>
+                                    <option value="pro">Pro (79 zł/mies.)</option>
+                                    <option value="studio">Studio (149 zł/mies.)</option>
+                                </InputSelect>
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label fw-semibold">Nazwa studia <span class="text-danger">*</span></label>
+                                <InputText class="form-control" @bind-Value="_form.CompanyName" />
+                                <ValidationMessage For="() => _form.CompanyName" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">Właściciel <span class="text-danger">*</span></label>
+                                <InputText class="form-control" @bind-Value="_form.OwnerName" />
+                                <ValidationMessage For="() => _form.OwnerName" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">Email <span class="text-danger">*</span></label>
+                                <InputText class="form-control" type="email" @bind-Value="_form.OwnerEmail" />
+                                <ValidationMessage For="() => _form.OwnerEmail" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">Telefon</label>
+                                <InputText class="form-control" @bind-Value="_form.Phone" />
+                            </div>
+                        </div>
+
+                        @if (_importError is not null)
+                        {
+                            <div class="alert alert-danger py-2 small mt-3">@_importError</div>
+                        }
+
+                        <div class="mt-4 d-flex gap-2">
+                            <button type="submit" class="btn btn-primary" disabled="@_saving">
+                                @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                <i class="bi bi-box-arrow-in-down me-1"></i>Importuj jako tenanta
+                            </button>
+                            <button type="button" class="btn btn-outline-secondary" @onclick="() => _selected = null">Anuluj</button>
+                        </div>
+                    </EditForm>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-5">
+            <div class="card border-0 shadow-sm bg-light">
+                <div class="card-body">
+                    <h6 class="fw-bold"><i class="bi bi-info-circle me-2"></i>Info</h6>
+                    <ul class="small text-muted mb-0">
+                        <li>Import dodaje istniejący kontener do zarządzania w portalu</li>
+                        <li>Kontener nie jest restartowany ani modyfikowany</li>
+                        <li>Status zostanie ustawiony na <strong>Aktywny</strong></li>
+                        <li>Port ustaw na port publiczny kontenera</li>
+                        <li>Domenę możesz zmienić później w NPM</li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<DockerContainer> _containers = [];
+    private DockerContainer? _selected;
+    private ImportForm _form = new();
+    private bool _loading = true;
+    private bool _saving;
+    private string? _error;
+    private string? _importError;
+
+    protected override async Task OnInitializedAsync() => await LoadContainers();
+
+    private async Task LoadContainers()
+    {
+        _loading = true;
+        _error = null;
+        try { _containers = await DockerSvc.ListAllContainersAsync(); }
+        catch (Exception ex) { _error = $"Nie można połączyć z Dockerem: {ex.Message}"; }
+        _loading = false;
+    }
+
+    private void SelectContainer(DockerContainer c)
+    {
+        _selected = c;
+        _importError = null;
+
+        var slug = c.Name.Replace("pt-", "").Replace("-web", "").Replace("-db", "");
+        var port = 0;
+        var portStr = c.Ports.Split('→').FirstOrDefault()?.Trim();
+        if (!string.IsNullOrEmpty(portStr)) int.TryParse(portStr, out port);
+
+        _form = new ImportForm
+        {
+            Slug = slug,
+            Domain = $"{slug}.ptscheduler.pl",
+            Port = port,
+            CompanyName = slug,
+            OwnerName = "",
+            OwnerEmail = "",
+            PlanId = "start"
+        };
+    }
+
+    private async Task Import()
+    {
+        _importError = null;
+        _saving = true;
+
+        try
+        {
+            var tenant = await TenantSvc.ImportAsync(
+                _form.Slug.Trim().ToLowerInvariant(),
+                _form.Domain.Trim().ToLowerInvariant(),
+                _form.Port,
+                _form.CompanyName.Trim(),
+                _form.OwnerName.Trim(),
+                _form.OwnerEmail.Trim().ToLowerInvariant(),
+                _form.Phone?.Trim(),
+                _form.PlanId);
+
+            Nav.NavigateTo($"/panel/tenants/{tenant.Id}");
+        }
+        catch (Exception ex)
+        {
+            _importError = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private static string TruncateImage(string image)
+    {
+        var parts = image.Split('/');
+        var last = parts[^1];
+        return last.Length > 40 ? last[..37] + "..." : last;
+    }
+
+    private class ImportForm
+    {
+        [global::System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Wymagane")]
+        public string Slug { get; set; } = "";
+
+        [global::System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Wymagane")]
+        public string Domain { get; set; } = "";
+
+        [global::System.ComponentModel.DataAnnotations.Range(1, 65535, ErrorMessage = "Port 1-65535")]
+        public int Port { get; set; }
+
+        [global::System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Wymagane")]
+        public string CompanyName { get; set; } = "";
+
+        [global::System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Wymagane")]
+        public string OwnerName { get; set; } = "";
+
+        [global::System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Wymagane")]
+        [global::System.ComponentModel.DataAnnotations.EmailAddress(ErrorMessage = "Nieprawidłowy email")]
+        public string OwnerEmail { get; set; } = "";
+
+        public string? Phone { get; set; }
+        public string PlanId { get; set; } = "start";
+    }
+}

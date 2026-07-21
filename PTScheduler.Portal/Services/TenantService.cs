@@ -137,6 +137,35 @@ public class TenantService(
         await db.SaveChangesAsync();
     }
 
+    public async Task<Tenant> ImportAsync(string slug, string domain, int port,
+        string companyName, string ownerName, string ownerEmail, string? phone, string planId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+
+        if (await db.Tenants.AnyAsync(t => t.Slug == slug))
+            throw new InvalidOperationException($"Tenant '{slug}' już istnieje.");
+
+        var tenant = new Tenant
+        {
+            Slug = slug,
+            Domain = domain,
+            Port = port,
+            CompanyName = companyName,
+            OwnerName = ownerName,
+            OwnerEmail = ownerEmail,
+            Phone = phone,
+            DbPassword = "imported",
+            PlanId = planId,
+            SetupMode = "admin",
+            Status = TenantStatus.Active,
+            ProvisionedAt = DateTime.UtcNow
+        };
+
+        db.Tenants.Add(tenant);
+        await db.SaveChangesAsync();
+        return tenant;
+    }
+
     public async Task<DashboardStats> GetStatsAsync()
     {
         await using var db = dbFactory.CreateDbContext();
