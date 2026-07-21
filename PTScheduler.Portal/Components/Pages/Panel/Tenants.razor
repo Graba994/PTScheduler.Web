@@ -1,0 +1,151 @@
+@page "/panel/tenants"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject TenantService TenantSvc
+@inject DockerService DockerSvc
+@rendermode InteractiveServer
+
+<PageTitle>Trenerzy — PTScheduler Portal</PageTitle>
+
+<div class="d-flex align-items-center justify-content-between mb-4">
+    <h4 class="fw-bold mb-0"><i class="bi bi-building me-2 text-primary"></i>Trenerzy</h4>
+    <a href="/panel/provision" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Nowa instancja</a>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <div class="card border-0 shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="table-light">
+                    <tr>
+                        <th>Trener</th>
+                        <th>Domena</th>
+                        <th>Port</th>
+                        <th>Plan</th>
+                        <th>Kontenery</th>
+                        <th>Status</th>
+                        <th>Data</th>
+                        <th></th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var t in _tenants)
+                    {
+                        var cs = _containerStatuses.GetValueOrDefault(t.Slug);
+                        <tr>
+                            <td>
+                                <a href="/panel/tenants/@t.Id" class="fw-semibold text-decoration-none">@t.CompanyName</a>
+                                <div class="text-muted small">@t.OwnerEmail</div>
+                            </td>
+                            <td class="small">
+                                <a href="https://@t.Domain" target="_blank" class="text-decoration-none">@t.Domain</a>
+                            </td>
+                            <td class="text-muted font-monospace small">@t.Port</td>
+                            <td><span class="badge bg-primary-subtle text-primary-emphasis">@(t.Plan?.Name ?? t.PlanId)</span></td>
+                            <td>
+                                @if (cs is not null)
+                                {
+                                    <span class="badge @(cs.IsHealthy ? "bg-success" : "bg-danger") me-1">
+                                        <i class="bi @(cs.IsHealthy ? "bi-check" : "bi-x")"></i>
+                                        @(cs.IsHealthy ? "OK" : "Down")
+                                    </span>
+                                }
+                                else
+                                {
+                                    <span class="text-muted small">—</span>
+                                }
+                            </td>
+                            <td>
+                                <span class="badge @StatusBadge(t.Status)">@StatusLabel(t.Status)</span>
+                            </td>
+                            <td class="text-muted text-nowrap small">@t.CreatedAt.ToString("dd.MM.yyyy")</td>
+                            <td>
+                                <div class="dropdown">
+                                    <button class="btn btn-sm btn-outline-secondary dropdown-toggle" data-bs-toggle="dropdown">
+                                        <i class="bi bi-three-dots"></i>
+                                    </button>
+                                    <ul class="dropdown-menu dropdown-menu-end">
+                                        <li><a class="dropdown-item" href="/panel/tenants/@t.Id"><i class="bi bi-eye me-2"></i>Szczegóły</a></li>
+                                        @if (t.Status == TenantStatus.Active)
+                                        {
+                                            <li><button class="dropdown-item text-warning" @onclick="() => Suspend(t)"><i class="bi bi-pause-circle me-2"></i>Zawieś</button></li>
+                                        }
+                                        @if (t.Status == TenantStatus.Suspended)
+                                        {
+                                            <li><button class="dropdown-item text-success" @onclick="() => Resume(t)"><i class="bi bi-play-circle me-2"></i>Wznów</button></li>
+                                        }
+                                    </ul>
+                                </div>
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private List<Tenant> _tenants = [];
+    private Dictionary<string, TenantContainerStatus> _containerStatuses = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _tenants = await TenantSvc.GetAllAsync();
+
+        try
+        {
+            var statuses = await DockerSvc.GetAllTenantsStatusAsync(_tenants.Select(t => t.Slug));
+            _containerStatuses = statuses.ToDictionary(s => s.Slug);
+        }
+        catch { }
+
+        _loading = false;
+    }
+
+    private async Task Suspend(Tenant t)
+    {
+        try
+        {
+            await TenantSvc.SuspendAsync(t.Id);
+            t.Status = TenantStatus.Suspended;
+        }
+        catch { }
+    }
+
+    private async Task Resume(Tenant t)
+    {
+        try
+        {
+            await TenantSvc.ResumeAsync(t.Id);
+            t.Status = TenantStatus.Active;
+        }
+        catch { }
+    }
+
+    private static string StatusLabel(TenantStatus s) => s switch
+    {
+        TenantStatus.Active => "Aktywny",
+        TenantStatus.Pending => "Oczekuje",
+        TenantStatus.Provisioning => "Tworzenie...",
+        TenantStatus.Suspended => "Zawieszony",
+        TenantStatus.Destroyed => "Usunięty",
+        _ => s.ToString()
+    };
+
+    private static string StatusBadge(TenantStatus s) => s switch
+    {
+        TenantStatus.Active => "bg-success",
+        TenantStatus.Pending => "bg-warning text-dark",
+        TenantStatus.Provisioning => "bg-info",
+        TenantStatus.Suspended => "bg-danger",
+        TenantStatus.Destroyed => "bg-secondary",
+        _ => "bg-secondary"
+    };
+}

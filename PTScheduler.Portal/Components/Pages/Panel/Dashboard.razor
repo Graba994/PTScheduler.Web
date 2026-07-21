@@ -1,0 +1,237 @@
+@page "/panel"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject TenantService TenantSvc
+@inject DockerService DockerSvc
+@rendermode InteractiveServer
+
+<PageTitle>Dashboard — PTScheduler Portal</PageTitle>
+
+<h4 class="fw-bold mb-4"><i class="bi bi-speedometer2 me-2 text-primary"></i>Dashboard</h4>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-lg-3">
+            <div class="portal-stat">
+                <div class="portal-stat-icon bg-primary bg-opacity-10 text-primary"><i class="bi bi-building"></i></div>
+                <div class="portal-stat-val">@_stats.TotalTenants</div>
+                <div class="portal-stat-label">Trenerzy</div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="portal-stat">
+                <div class="portal-stat-icon bg-success bg-opacity-10 text-success"><i class="bi bi-check-circle"></i></div>
+                <div class="portal-stat-val">@_stats.ActiveTenants</div>
+                <div class="portal-stat-label">Aktywnych</div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="portal-stat">
+                <div class="portal-stat-icon bg-warning bg-opacity-10 text-warning"><i class="bi bi-hourglass-split"></i></div>
+                <div class="portal-stat-val">@_stats.PendingTenants</div>
+                <div class="portal-stat-label">Oczekujących</div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="portal-stat">
+                <div class="portal-stat-icon bg-info bg-opacity-10 text-info"><i class="bi bi-currency-exchange"></i></div>
+                <div class="portal-stat-val">@_stats.TotalRevenue.ToString("0") zł</div>
+                <div class="portal-stat-label">MRR</div>
+            </div>
+        </div>
+    </div>
+
+    @if (_system is not null)
+    {
+        <div class="row g-3 mb-4">
+            <div class="col-md-6">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-body">
+                        <h6 class="fw-bold mb-3"><i class="bi bi-cpu me-2 text-primary"></i>Serwer</h6>
+                        <div class="d-flex flex-column gap-2">
+                            <div class="d-flex justify-content-between small">
+                                <span class="text-muted">CPU</span>
+                                <span class="fw-semibold">@_system.CpuCount rdzeni</span>
+                            </div>
+                            <div class="d-flex justify-content-between small">
+                                <span class="text-muted">RAM</span>
+                                <span class="fw-semibold">@(_system.TotalMemoryMB / 1024) GB</span>
+                            </div>
+                            <div class="d-flex justify-content-between small">
+                                <span class="text-muted">Docker</span>
+                                <span class="fw-semibold">@_system.DockerVersion</span>
+                            </div>
+                            <div class="d-flex justify-content-between small">
+                                <span class="text-muted">Kontenery</span>
+                                <span class="fw-semibold">@_system.RunningContainers / @_system.TotalContainers</span>
+                            </div>
+
+                            @{
+                                var usedMB = _stats.ActiveTenants * 150;
+                                var pct = _system.TotalMemoryMB > 0 ? (int)(usedMB * 100 / _system.TotalMemoryMB) : 0;
+                            }
+                            <div class="mt-2">
+                                <div class="d-flex justify-content-between small mb-1">
+                                    <span class="text-muted">RAM (est.)</span>
+                                    <span>@usedMB MB / @_system.TotalMemoryMB MB</span>
+                                </div>
+                                <div class="progress" style="height:6px">
+                                    <div class="progress-bar @(pct > 80 ? "bg-danger" : pct > 60 ? "bg-warning" : "bg-success")"
+                                         style="width:@pct%"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <div class="col-md-6">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-body">
+                        <h6 class="fw-bold mb-3"><i class="bi bi-graph-up me-2 text-success"></i>Capacity</h6>
+                        <div class="d-flex flex-column gap-2">
+                            @{
+                                var maxTenants = (int)(_system.TotalMemoryMB / 150);
+                                var capacityPct = maxTenants > 0 ? (_stats.ActiveTenants * 100 / maxTenants) : 0;
+                            }
+                            <div class="d-flex justify-content-between small">
+                                <span class="text-muted">Max trenerów (est.)</span>
+                                <span class="fw-semibold">~@maxTenants</span>
+                            </div>
+                            <div class="d-flex justify-content-between small">
+                                <span class="text-muted">Zajęte sloty</span>
+                                <span class="fw-semibold">@_stats.ActiveTenants / @maxTenants</span>
+                            </div>
+                            <div class="progress mt-2" style="height:20px">
+                                <div class="progress-bar @(capacityPct > 80 ? "bg-danger" : capacityPct > 60 ? "bg-warning" : "bg-primary")"
+                                     style="width:@capacityPct%">
+                                    @capacityPct%
+                                </div>
+                            </div>
+
+                            <div class="d-flex justify-content-between small mt-2">
+                                <span class="text-muted">Aktywne subskrypcje</span>
+                                <span class="fw-semibold">@_stats.ActiveSubscriptions</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            <div class="d-flex align-items-center justify-content-between mb-3">
+                <h6 class="fw-bold mb-0"><i class="bi bi-building me-2"></i>Ostatni trenerzy</h6>
+                <a href="/panel/tenants" class="btn btn-sm btn-outline-primary">Wszyscy</a>
+            </div>
+            @if (_tenants.Count == 0)
+            {
+                <p class="text-muted small">Brak trenerów. <a href="/panel/provision">Dodaj pierwszego</a>.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 small">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Trener</th>
+                                <th>Domena</th>
+                                <th>Plan</th>
+                                <th>Status</th>
+                                <th>Data</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var t in _tenants.Take(10))
+                            {
+                                <tr>
+                                    <td>
+                                        <a href="/panel/tenants/@t.Id" class="fw-semibold text-decoration-none">@t.CompanyName</a>
+                                        <div class="text-muted small">@t.OwnerEmail</div>
+                                    </td>
+                                    <td class="text-muted">@t.Domain</td>
+                                    <td><span class="badge bg-primary-subtle text-primary-emphasis">@(t.Plan?.Name ?? t.PlanId)</span></td>
+                                    <td><span class="badge @StatusBadge(t.Status)">@StatusLabel(t.Status)</span></td>
+                                    <td class="text-muted text-nowrap">@t.CreatedAt.ToString("dd.MM.yyyy")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+<style>
+    .portal-stat {
+        background: #fff;
+        border-radius: .75rem;
+        padding: 1.25rem;
+        box-shadow: 0 1px 3px rgba(0,0,0,.06);
+    }
+    .portal-stat-icon {
+        width: 40px;
+        height: 40px;
+        border-radius: .5rem;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.1rem;
+        margin-bottom: .6rem;
+    }
+    .portal-stat-val {
+        font-size: 1.5rem;
+        font-weight: 700;
+        line-height: 1.2;
+    }
+    .portal-stat-label {
+        font-size: .8rem;
+        color: #6b7280;
+    }
+</style>
+
+@code {
+    private bool _loading = true;
+    private DashboardStats _stats = new();
+    private SystemInfo? _system;
+    private List<Tenant> _tenants = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _stats = await TenantSvc.GetStatsAsync();
+        _tenants = await TenantSvc.GetAllAsync();
+
+        try { _system = await DockerSvc.GetSystemInfoAsync(); }
+        catch { }
+
+        _loading = false;
+    }
+
+    private static string StatusLabel(TenantStatus s) => s switch
+    {
+        TenantStatus.Active => "Aktywny",
+        TenantStatus.Pending => "Oczekuje",
+        TenantStatus.Provisioning => "Tworzenie...",
+        TenantStatus.Suspended => "Zawieszony",
+        TenantStatus.Destroyed => "Usunięty",
+        _ => s.ToString()
+    };
+
+    private static string StatusBadge(TenantStatus s) => s switch
+    {
+        TenantStatus.Active => "bg-success",
+        TenantStatus.Pending => "bg-warning text-dark",
+        TenantStatus.Provisioning => "bg-info",
+        TenantStatus.Suspended => "bg-danger",
+        TenantStatus.Destroyed => "bg-secondary",
+        _ => "bg-secondary"
+    };
+}

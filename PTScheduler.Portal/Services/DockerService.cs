@@ -1,0 +1,140 @@
+using Docker.DotNet;
+using Docker.DotNet.Models;
+
+namespace PTScheduler.Portal.Services;
+
+public class DockerService : IDisposable
+{
+    private readonly DockerClient _client = new DockerClientConfiguration(
+        new Uri("unix:///var/run/docker.sock")).CreateClient();
+
+    public async Task<ContainerInfo?> GetContainerInfoAsync(string containerName)
+    {
+        try
+        {
+            var response = await _client.Containers.InspectContainerAsync(containerName);
+            return new ContainerInfo
+            {
+                Id = response.ID[..12],
+                Name = containerName,
+                Status = response.State.Status,
+                Running = response.State.Running,
+                StartedAt = response.State.StartedAt,
+                Image = response.Config.Image,
+                MemoryUsage = 0
+            };
+        }
+        catch (DockerContainerNotFoundException)
+        {
+            return null;
+        }
+    }
+
+    public async Task<TenantContainerStatus> GetTenantStatusAsync(string slug)
+    {
+        var web = await GetContainerInfoAsync($"pt-{slug}-web");
+        var db = await GetContainerInfoAsync($"pt-{slug}-db");
+
+        return new TenantContainerStatus
+        {
+            Slug = slug,
+            Web = web,
+            Db = db,
+            IsHealthy = web?.Running == true && db?.Running == true
+        };
+    }
+
+    public async Task<List<TenantContainerStatus>> GetAllTenantsStatusAsync(IEnumerable<string> slugs)
+    {
+        var results = new List<TenantContainerStatus>();
+        foreach (var slug in slugs)
+            results.Add(await GetTenantStatusAsync(slug));
+        return results;
+    }
+
+    public async Task StartContainerAsync(string containerName)
+    {
+        await _client.Containers.StartContainerAsync(containerName, new ContainerStartParameters());
+    }
+
+    public async Task StopContainerAsync(string containerName)
+    {
+        await _client.Containers.StopContainerAsync(containerName,
+            new ContainerStopParameters { WaitBeforeKillSeconds = 10 });
+    }
+
+    public async Task RestartContainerAsync(string containerName)
+    {
+        await _client.Containers.RestartContainerAsync(containerName,
+            new ContainerRestartParameters { WaitBeforeKillSeconds = 10 });
+    }
+
+    public async Task<string> GetContainerLogsAsync(string containerName, int tail = 100)
+    {
+        var parameters = new ContainerLogsParameters
+        {
+            ShowStdout = true,
+            ShowStderr = true,
+            Tail = tail.ToString()
+        };
+
+        using var stream = await _client.Containers.GetContainerLogsAsync(containerName, false, parameters);
+        var sb = new System.Text.StringBuilder();
+        var buffer = new byte[8192];
+        while (true)
+        {
+            var result = await stream.ReadOutputAsync(buffer, 0, buffer.Length, default);
+            if (result.Count == 0) break;
+            sb.Append(System.Text.Encoding.UTF8.GetString(buffer, 0, result.Count));
+        }
+        return sb.ToString();
+    }
+
+    public async Task<SystemInfo> GetSystemInfoAsync()
+    {
+        var info = await _client.System.GetSystemInfoAsync();
+        var containers = await _client.Containers.ListContainersAsync(
+            new ContainersListParameters { All = true });
+
+        return new SystemInfo
+        {
+            TotalContainers = containers.Count,
+            RunningContainers = containers.Count(c => c.State == "running"),
+            TotalMemoryMB = info.MemTotal / 1024 / 1024,
+            CpuCount = info.NCPU,
+            DockerVersion = info.ServerVersion,
+            OsType = info.OSType
+        };
+    }
+
+    public void Dispose() => _client.Dispose();
+}
+
+public class ContainerInfo
+{
+    public string Id { get; set; } = "";
+    public string Name { get; set; } = "";
+    public string Status { get; set; } = "";
+    public bool Running { get; set; }
+    public string? StartedAt { get; set; }
+    public string? Image { get; set; }
+    public long MemoryUsage { get; set; }
+}
+
+public class TenantContainerStatus
+{
+    public string Slug { get; set; } = "";
+    public ContainerInfo? Web { get; set; }
+    public ContainerInfo? Db { get; set; }
+    public bool IsHealthy { get; set; }
+}
+
+public class SystemInfo
+{
+    public int TotalContainers { get; set; }
+    public int RunningContainers { get; set; }
+    public long TotalMemoryMB { get; set; }
+    public long CpuCount { get; set; }
+    public string DockerVersion { get; set; } = "";
+    public string OsType { get; set; } = "";
+}

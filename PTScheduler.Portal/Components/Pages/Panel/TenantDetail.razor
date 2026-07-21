@@ -1,0 +1,267 @@
+@page "/panel/tenants/{Id:int}"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject TenantService TenantSvc
+@inject DockerService DockerSvc
+@rendermode InteractiveServer
+
+<PageTitle>@(_tenant?.CompanyName ?? "Trener") — PTScheduler Portal</PageTitle>
+
+@if (_tenant is null)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <div class="d-flex align-items-center gap-2 mb-4">
+        <a href="/panel/tenants" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i></a>
+        <h4 class="fw-bold mb-0">@_tenant.CompanyName</h4>
+        <span class="badge @StatusBadge(_tenant.Status) ms-2">@StatusLabel(_tenant.Status)</span>
+    </div>
+
+    <div class="row g-3">
+        <!-- Info card -->
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h6 class="fw-bold mb-3"><i class="bi bi-person-badge me-2 text-primary"></i>Dane trenera</h6>
+                    <dl class="row mb-0 small">
+                        <dt class="col-5 text-muted">Właściciel</dt>
+                        <dd class="col-7">@_tenant.OwnerName</dd>
+                        <dt class="col-5 text-muted">Email</dt>
+                        <dd class="col-7"><a href="mailto:@_tenant.OwnerEmail">@_tenant.OwnerEmail</a></dd>
+                        <dt class="col-5 text-muted">Telefon</dt>
+                        <dd class="col-7">@(_tenant.Phone ?? "—")</dd>
+                        <dt class="col-5 text-muted">Slug</dt>
+                        <dd class="col-7 font-monospace">@_tenant.Slug</dd>
+                        <dt class="col-5 text-muted">Domena</dt>
+                        <dd class="col-7"><a href="https://@_tenant.Domain" target="_blank">@_tenant.Domain</a></dd>
+                        <dt class="col-5 text-muted">Port</dt>
+                        <dd class="col-7 font-monospace">@_tenant.Port</dd>
+                        <dt class="col-5 text-muted">Plan</dt>
+                        <dd class="col-7"><span class="badge bg-primary-subtle text-primary-emphasis">@(_tenant.Plan?.Name ?? _tenant.PlanId)</span></dd>
+                        <dt class="col-5 text-muted">Setup</dt>
+                        <dd class="col-7">@(_tenant.SetupMode ?? "—")</dd>
+                        <dt class="col-5 text-muted">Utworzono</dt>
+                        <dd class="col-7">@_tenant.CreatedAt.ToString("dd.MM.yyyy HH:mm")</dd>
+                        <dt class="col-5 text-muted">Provisioned</dt>
+                        <dd class="col-7">@(_tenant.ProvisionedAt?.ToString("dd.MM.yyyy HH:mm") ?? "—")</dd>
+                    </dl>
+                </div>
+            </div>
+        </div>
+
+        <!-- Container status -->
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="fw-bold mb-0"><i class="bi bi-box me-2 text-info"></i>Kontenery</h6>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="RefreshContainers">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+
+                    @if (_containerStatus is not null)
+                    {
+                        <div class="d-flex flex-column gap-3">
+                            @foreach (var (label, info, name) in new[] {
+                                ("Web", _containerStatus.Web, $"pt-{_tenant.Slug}-web"),
+                                ("DB", _containerStatus.Db, $"pt-{_tenant.Slug}-db")
+                            })
+                            {
+                                <div class="d-flex align-items-center justify-content-between">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="badge @(info?.Running == true ? "bg-success" : "bg-danger")">
+                                            @(info?.Running == true ? "Running" : "Stopped")
+                                        </span>
+                                        <span class="fw-semibold small">@label</span>
+                                        @if (info is not null)
+                                        {
+                                            <span class="text-muted small font-monospace">@info.Id</span>
+                                        }
+                                    </div>
+                                    @if (info is not null)
+                                    {
+                                        var containerName = name;
+                                        <button class="btn btn-sm btn-outline-warning" @onclick="() => RestartContainer(containerName)">
+                                            <i class="bi bi-arrow-repeat"></i>
+                                        </button>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="text-muted small">Nie udało się pobrać statusu kontenerów.</p>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <!-- Actions -->
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <h6 class="fw-bold mb-3"><i class="bi bi-gear me-2 text-warning"></i>Akcje</h6>
+                    <div class="d-flex flex-wrap gap-2">
+                        @if (_tenant.Status == TenantStatus.Pending)
+                        {
+                            <button class="btn btn-primary btn-sm" @onclick="Provision" disabled="@_provisioning">
+                                @if (_provisioning) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                <i class="bi bi-rocket me-1"></i>Provisioning
+                            </button>
+                        }
+                        @if (_tenant.Status == TenantStatus.Active)
+                        {
+                            <button class="btn btn-warning btn-sm" @onclick="Suspend">
+                                <i class="bi bi-pause-circle me-1"></i>Zawieś
+                            </button>
+                        }
+                        @if (_tenant.Status == TenantStatus.Suspended)
+                        {
+                            <button class="btn btn-success btn-sm" @onclick="Resume">
+                                <i class="bi bi-play-circle me-1"></i>Wznów
+                            </button>
+                        }
+                        <a href="https://@_tenant.Domain" target="_blank" class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-box-arrow-up-right me-1"></i>Otwórz instancję
+                        </a>
+                    </div>
+
+                    @if (_provisionOutput is not null)
+                    {
+                        <pre class="mt-3 p-3 bg-dark text-light rounded small" style="max-height:300px;overflow:auto">@_provisionOutput</pre>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <!-- Logs -->
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="fw-bold mb-0"><i class="bi bi-terminal me-2 text-dark"></i>Logi (web)</h6>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="LoadLogs" disabled="@_loadingLogs">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+
+                    @if (_logs is not null)
+                    {
+                        <pre class="p-3 bg-dark text-light rounded small" style="max-height:400px;overflow:auto;font-size:.75rem">@_logs</pre>
+                    }
+                    else
+                    {
+                        <button class="btn btn-sm btn-outline-dark" @onclick="LoadLogs" disabled="@_loadingLogs">
+                            @if (_loadingLogs) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            Załaduj logi
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <!-- Notes -->
+        @if (!string.IsNullOrWhiteSpace(_tenant.Notes))
+        {
+            <div class="col-12">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-body">
+                        <h6 class="fw-bold mb-2"><i class="bi bi-sticky me-2"></i>Notatki</h6>
+                        <p class="small text-muted mb-0">@_tenant.Notes</p>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private Tenant? _tenant;
+    private TenantContainerStatus? _containerStatus;
+    private bool _provisioning;
+    private string? _provisionOutput;
+    private string? _logs;
+    private bool _loadingLogs;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _tenant = await TenantSvc.GetAsync(Id);
+        if (_tenant is not null)
+            await RefreshContainers();
+    }
+
+    private async Task RefreshContainers()
+    {
+        if (_tenant is null) return;
+        try { _containerStatus = await DockerSvc.GetTenantStatusAsync(_tenant.Slug); }
+        catch { _containerStatus = null; }
+    }
+
+    private async Task Provision()
+    {
+        if (_tenant is null) return;
+        _provisioning = true;
+        var (_, output) = await TenantSvc.ProvisionAsync(_tenant.Id);
+        _provisionOutput = output;
+        _tenant = await TenantSvc.GetAsync(Id);
+        await RefreshContainers();
+        _provisioning = false;
+    }
+
+    private async Task Suspend()
+    {
+        if (_tenant is null) return;
+        await TenantSvc.SuspendAsync(_tenant.Id);
+        _tenant = await TenantSvc.GetAsync(Id);
+        await RefreshContainers();
+    }
+
+    private async Task Resume()
+    {
+        if (_tenant is null) return;
+        await TenantSvc.ResumeAsync(_tenant.Id);
+        _tenant = await TenantSvc.GetAsync(Id);
+        await RefreshContainers();
+    }
+
+    private async Task RestartContainer(string name)
+    {
+        try { await DockerSvc.RestartContainerAsync(name); }
+        catch { }
+        await Task.Delay(2000);
+        await RefreshContainers();
+    }
+
+    private async Task LoadLogs()
+    {
+        if (_tenant is null) return;
+        _loadingLogs = true;
+        try { _logs = await DockerSvc.GetContainerLogsAsync($"pt-{_tenant.Slug}-web", 200); }
+        catch (Exception ex) { _logs = $"Błąd: {ex.Message}"; }
+        _loadingLogs = false;
+    }
+
+    private static string StatusLabel(TenantStatus s) => s switch
+    {
+        TenantStatus.Active => "Aktywny",
+        TenantStatus.Pending => "Oczekuje",
+        TenantStatus.Provisioning => "Tworzenie...",
+        TenantStatus.Suspended => "Zawieszony",
+        TenantStatus.Destroyed => "Usunięty",
+        _ => s.ToString()
+    };
+
+    private static string StatusBadge(TenantStatus s) => s switch
+    {
+        TenantStatus.Active => "bg-success",
+        TenantStatus.Pending => "bg-warning text-dark",
+        _ => "bg-secondary"
+    };
+}
+

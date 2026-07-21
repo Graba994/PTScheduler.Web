@@ -1,8 +1,11 @@
-# Shared infrastructure — Nginx Proxy Manager + image builder
+# Shared infrastructure — Nginx Proxy Manager + Portal + Portal DB
 # Start once: docker compose -f docker-compose.infra.yml up -d
 #
 # NPM dashboard: http://YOUR_SERVER_IP:81
 # Default login:  admin@example.com / changeme
+#
+# Portal:         http://YOUR_SERVER_IP:8081 (proxy via NPM)
+# Portal admin:   admin@ptscheduler.pl / Admin123!
 
 services:
 
@@ -22,6 +25,39 @@ services:
       timeout: 10s
       retries: 5
 
+  portal-db:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ptportal
+      POSTGRES_USER: ptportal
+      POSTGRES_PASSWORD: ${PORTAL_DB_PASSWORD:-ptportal_secret}
+    volumes:
+      - portal_db_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ptportal"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  portal:
+    build:
+      context: ..
+      dockerfile: PTScheduler.Portal/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=portal-db;Port=5432;Database=ptportal;Username=ptportal;Password=${PORTAL_DB_PASSWORD:-ptportal_secret}"
+      Portal__DeployDir: /deploy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./:/deploy
+    depends_on:
+      portal-db:
+        condition: service_healthy
+
 volumes:
   npm_data:
   npm_letsencrypt:
+  portal_db_data:
