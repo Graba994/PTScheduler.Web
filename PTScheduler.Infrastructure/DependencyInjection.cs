@@ -42,6 +42,7 @@ public static class DependencyInjection
         services.AddScoped<Services.Payments.IPaymentProvider, Services.Payments.KlarnaProvider>();
         services.AddScoped<Services.Payments.IPaymentProvider, Services.Payments.AutoPayProvider>();
         services.AddScoped<IPaymentService, PaymentService>();
+        services.AddScoped<IPackageOfferService, PackageOfferService>();
         services.AddScoped<ICourseService, CourseService>();
         services.AddScoped<IBackupService, BackupService>();
         services.AddScoped<IDatabaseMaintenanceService, DatabaseMaintenanceService>();
