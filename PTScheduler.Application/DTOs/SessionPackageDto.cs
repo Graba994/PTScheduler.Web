@@ -65,6 +65,7 @@ public class CreateSessionPackageDto
     public decimal PricePerSession { get; set; }
     public DateTime? ExpiresAt { get; set; }
     public string? Notes { get; set; }
+    public bool IsHidden { get; set; }
 }
 
 public class UpdateSessionPackageDto
@@ -74,4 +75,5 @@ public class UpdateSessionPackageDto
     public decimal PricePerSession { get; set; }
     public DateTime? ExpiresAt { get; set; }
     public string? Notes { get; set; }
+    public bool IsHidden { get; set; }
 }

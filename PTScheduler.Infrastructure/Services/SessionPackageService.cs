@@ -73,6 +73,7 @@ public class SessionPackageService(
             PricePerSession = dto.PricePerSession,
             ExpiresAt = dto.ExpiresAt,
             Notes = dto.Notes,
+            IsHidden = dto.IsHidden,
             PurchasedAt = DateTime.UtcNow,
             Status = PackageStatus.Active
         };
@@ -168,6 +169,7 @@ public class SessionPackageService(
         p.PricePerSession = dto.PricePerSession;
         p.ExpiresAt = dto.ExpiresAt;
         p.Notes = dto.Notes;
+        p.IsHidden = dto.IsHidden;
 
         if (p.Status != PackageStatus.Cancelled)
         {

@@ -1,10 +1,514 @@
 @page "/admin"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<PTScheduler.Infrastructure.Data.ApplicationDbContext> DbFactory
+@inject IAuditLogService AuditService
+@inject IUserManagementService UserService
+@inject IPermissionService Permission
+@inject IPaymentSettingsService PaymentSettings
+@inject IModuleSettingsService ModuleSettings
+@inject AuthenticationStateProvider AuthState
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Panel zarządzania" />
 
-<div class="page-header">
-    <h4 class="page-title"><i class="bi bi-sliders me-2" style="color:var(--c-primary)"></i>Panel zarządzania</h4>
+<div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <h4 class="page-title mb-0"><i class="bi bi-shield-fill-check me-2" style="color:var(--c-primary)"></i>Panel zarządzania</h4>
+    <div class="d-flex gap-2 align-items-center">
+        <span class="badge bg-body-secondary text-body"><i class="bi bi-person-fill me-1"></i>@_userEmail</span>
+        <span class="badge bg-primary">@_role</span>
+    </div>
 </div>
 
-<p class="text-muted">Wybierz sekcję z menu po lewej stronie. Widoczne są tylko obszary, do których masz uprawnienia.</p>
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <!-- Quick stats -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-md-3">
+            <div class="adm-stat-card">
+                <div class="adm-stat-icon" style="background:rgba(59,130,246,.12);color:#3b82f6"><i class="bi bi-people-fill"></i></div>
+                <div class="adm-stat-body">
+                    <div class="adm-stat-value">@_stats.Users</div>
+                    <div class="adm-stat-label">Użytkownicy</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="adm-stat-card">
+                <div class="adm-stat-icon" style="background:rgba(16,185,129,.12);color:#10b981"><i class="bi bi-person-check-fill"></i></div>
+                <div class="adm-stat-body">
+                    <div class="adm-stat-value">@_stats.Clients</div>
+                    <div class="adm-stat-label">Klienci</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="adm-stat-card">
+                <div class="adm-stat-icon" style="background:rgba(139,92,246,.12);color:#8b5cf6"><i class="bi bi-calendar-check-fill"></i></div>
+                <div class="adm-stat-body">
+                    <div class="adm-stat-value">@_stats.Sessions</div>
+                    <div class="adm-stat-label">Sesje (ogółem)</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="adm-stat-card">
+                <div class="adm-stat-icon" style="background:rgba(245,158,11,.12);color:#f59e0b"><i class="bi bi-box-seam-fill"></i></div>
+                <div class="adm-stat-body">
+                    <div class="adm-stat-value">@_stats.Packages</div>
+                    <div class="adm-stat-label">Pakiety</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-4">
+        <!-- Left column -->
+        <div class="col-12 col-lg-8">
+            <!-- System status -->
+            @if (_isAdmin)
+            {
+                <div class="card mb-4">
+                    <div class="card-header bg-transparent d-flex align-items-center justify-content-between">
+                        <span class="fw-semibold"><i class="bi bi-heart-pulse me-2 text-success"></i>Stan systemu</span>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="Refresh" disabled="@_loading">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+                    <div class="card-body p-0">
+                        <div class="adm-sys-grid">
+                            <div class="adm-sys-item">
+                                <div class="adm-sys-label">Baza danych</div>
+                                <div class="adm-sys-value">
+                                    @if (_dbOnline)
+                                    {
+                                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Online</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Offline</span>
+                                    }
+                                </div>
+                            </div>
+                            <div class="adm-sys-item">
+                                <div class="adm-sys-label">Wielkość bazy</div>
+                                <div class="adm-sys-value fw-semibold">@_dbSize</div>
+                            </div>
+                            <div class="adm-sys-item">
+                                <div class="adm-sys-label">Tabele</div>
+                                <div class="adm-sys-value fw-semibold">@_tableCount</div>
+                            </div>
+                            <div class="adm-sys-item">
+                                <div class="adm-sys-label">Migracje EF</div>
+                                <div class="adm-sys-value fw-semibold">@_migrationCount</div>
+                            </div>
+                            <div class="adm-sys-item">
+                                <div class="adm-sys-label">Środowisko</div>
+                                <div class="adm-sys-value"><span class="badge bg-body-secondary text-body">@_environment</span></div>
+                            </div>
+                            <div class="adm-sys-item">
+                                <div class="adm-sys-label">.NET</div>
+                                <div class="adm-sys-value"><span class="badge bg-body-secondary text-body">@_dotnetVersion</span></div>
+                            </div>
+                            <div class="adm-sys-item">
+                                <div class="adm-sys-label">Płatności online</div>
+                                <div class="adm-sys-value">
+                                    @if (_paymentsEnabled)
+                                    {
+                                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Włączone (@_enabledGateways)</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-secondary">Wyłączone</span>
+                                    }
+                                </div>
+                            </div>
+                            <div class="adm-sys-item">
+                                <div class="adm-sys-label">Moduł kursów</div>
+                                <div class="adm-sys-value">
+                                    @if (_coursesEnabled)
+                                    {
+                                        <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Włączony</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-secondary">Wyłączony</span>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Table sizes -->
+                @if (_tableSizes.Count > 0)
+                {
+                    <div class="card mb-4">
+                        <div class="card-header bg-transparent">
+                            <span class="fw-semibold"><i class="bi bi-database me-2" style="color:var(--c-primary)"></i>Rozmiary tabel</span>
+                        </div>
+                        <div class="card-body p-0">
+                            <div class="table-responsive">
+                                <table class="table table-sm table-hover align-middle mb-0" style="font-size:.85rem">
+                                    <thead class="table-light">
+                                        <tr><th>Tabela</th><th class="text-end">Wiersze</th><th class="text-end">Rozmiar</th></tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var t in _tableSizes)
+                                        {
+                                            <tr>
+                                                <td class="fw-semibold font-monospace" style="font-size:.8rem">@t.Name</td>
+                                                <td class="text-end text-muted">@t.Rows.ToString("N0")</td>
+                                                <td class="text-end text-muted">@t.Size</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        </div>
+                    </div>
+                }
+            }
+
+            <!-- Recent activity -->
+            <div class="card">
+                <div class="card-header bg-transparent d-flex align-items-center justify-content-between">
+                    <span class="fw-semibold"><i class="bi bi-clock-history me-2" style="color:var(--c-primary)"></i>Ostatnia aktywność</span>
+                    <a href="/admin/audit-logs" class="btn btn-sm btn-outline-primary">Zobacz wszystko</a>
+                </div>
+                <div class="card-body p-0">
+                    @if (_recentLogs.Count == 0)
+                    {
+                        <div class="text-center text-muted py-4 small">Brak aktywności.</div>
+                    }
+                    else
+                    {
+                        <div class="adm-activity">
+                            @foreach (var log in _recentLogs)
+                            {
+                                <div class="adm-activity-item">
+                                    <div class="adm-activity-dot @ActivityDotClass(log.Action)"></div>
+                                    <div class="adm-activity-body">
+                                        <div class="adm-activity-action">
+                                            <span class="fw-semibold">@log.Action</span>
+                                            @if (!string.IsNullOrEmpty(log.EntityType))
+                                            {
+                                                <span class="badge bg-body-secondary text-body ms-1" style="font-size:.7rem">@log.EntityType</span>
+                                            }
+                                        </div>
+                                        @if (!string.IsNullOrEmpty(log.Details))
+                                        {
+                                            <div class="text-muted small text-truncate" style="max-width:500px">@log.Details</div>
+                                        }
+                                        <div class="adm-activity-meta">
+                                            <span>@log.UserEmail</span>
+                                            <span>@log.Timestamp.ToLocalTime().ToString("dd.MM HH:mm")</span>
+                                        </div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <!-- Right column -->
+        <div class="col-12 col-lg-4">
+            <!-- Quick links -->
+            <div class="card mb-4">
+                <div class="card-header bg-transparent fw-semibold">
+                    <i class="bi bi-lightning-fill me-2" style="color:#f59e0b"></i>Szybkie akcje
+                </div>
+                <div class="card-body p-0">
+                    <div class="adm-quick-links">
+                        <a href="/admin/users" class="adm-qlink"><i class="bi bi-people-fill"></i><span>Użytkownicy</span><i class="bi bi-chevron-right ms-auto"></i></a>
+                        <a href="/admin/session-types" class="adm-qlink"><i class="bi bi-clock-fill"></i><span>Typy sesji</span><i class="bi bi-chevron-right ms-auto"></i></a>
+                        <a href="/admin/package-offers" class="adm-qlink"><i class="bi bi-box-seam-fill"></i><span>Pakiety na sprzedaż</span><i class="bi bi-chevron-right ms-auto"></i></a>
+                        <a href="/admin/payments" class="adm-qlink"><i class="bi bi-credit-card-fill"></i><span>Płatności</span><i class="bi bi-chevron-right ms-auto"></i></a>
+                        <a href="/admin/courses" class="adm-qlink"><i class="bi bi-mortarboard-fill"></i><span>Kursy</span><i class="bi bi-chevron-right ms-auto"></i></a>
+                        <a href="/admin/branding" class="adm-qlink"><i class="bi bi-palette-fill"></i><span>Wygląd</span><i class="bi bi-chevron-right ms-auto"></i></a>
+                        <a href="/admin/email" class="adm-qlink"><i class="bi bi-envelope-fill"></i><span>Email</span><i class="bi bi-chevron-right ms-auto"></i></a>
+                        @if (_isAdmin)
+                        {
+                            <a href="/admin/backup" class="adm-qlink"><i class="bi bi-archive-fill"></i><span>Backup</span><i class="bi bi-chevron-right ms-auto"></i></a>
+                            <a href="/admin/settings" class="adm-qlink"><i class="bi bi-database-fill"></i><span>Baza danych</span><i class="bi bi-chevron-right ms-auto"></i></a>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            <!-- User breakdown -->
+            <div class="card mb-4">
+                <div class="card-header bg-transparent fw-semibold">
+                    <i class="bi bi-pie-chart-fill me-2" style="color:#8b5cf6"></i>Użytkownicy wg roli
+                </div>
+                <div class="card-body">
+                    @foreach (var r in _roleCounts)
+                    {
+                        var pct = _stats.Users > 0 ? (int)Math.Round((double)r.Count / _stats.Users * 100) : 0;
+                        <div class="mb-3">
+                            <div class="d-flex justify-content-between mb-1" style="font-size:.85rem">
+                                <span class="fw-semibold">@r.Role</span>
+                                <span class="text-muted">@r.Count (@pct%)</span>
+                            </div>
+                            <div class="progress" style="height:6px;border-radius:3px">
+                                <div class="progress-bar" style="width:@pct%;background:@r.Color;border-radius:3px"></div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+
+            <!-- Orders summary -->
+            <div class="card">
+                <div class="card-header bg-transparent fw-semibold">
+                    <i class="bi bi-bag-check-fill me-2" style="color:#10b981"></i>Zamówienia
+                </div>
+                <div class="card-body">
+                    <div class="d-flex justify-content-between mb-2" style="font-size:.9rem">
+                        <span class="text-muted">Ogółem</span><span class="fw-bold">@_stats.Orders</span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2" style="font-size:.9rem">
+                        <span class="text-muted">Opłacone</span><span class="fw-bold text-success">@_stats.PaidOrders</span>
+                    </div>
+                    <div class="d-flex justify-content-between mb-2" style="font-size:.9rem">
+                        <span class="text-muted">Oczekujące</span><span class="fw-bold text-warning">@_stats.PendingOrders</span>
+                    </div>
+                    @if (_stats.Revenue > 0)
+                    {
+                        <hr />
+                        <div class="d-flex justify-content-between" style="font-size:.9rem">
+                            <span class="text-muted">Przychód online</span>
+                            <span class="fw-bold" style="color:var(--c-primary)">@_stats.Revenue.ToString("N2") PLN</span>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .adm-stat-card {
+        display: flex; align-items: center; gap: .85rem;
+        padding: 1.1rem 1rem; border-radius: 1rem;
+        background: var(--bs-body-bg); border: 1px solid var(--bs-border-color);
+        transition: transform .12s, box-shadow .12s;
+    }
+    .adm-stat-card:hover { transform: translateY(-2px); box-shadow: 0 8px 24px -12px rgba(0,0,0,.12); }
+    .adm-stat-icon {
+        width: 48px; height: 48px; border-radius: 14px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 1.3rem; flex-shrink: 0;
+    }
+    .adm-stat-value { font-size: 1.5rem; font-weight: 800; line-height: 1.1; }
+    .adm-stat-label { font-size: .78rem; color: var(--bs-secondary-color); font-weight: 500; }
+
+    .adm-sys-grid {
+        display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+    }
+    .adm-sys-item {
+        display: flex; align-items: center; justify-content: space-between; gap: .5rem;
+        padding: .7rem 1rem; border-bottom: 1px solid var(--bs-border-color);
+    }
+    .adm-sys-item:last-child { border-bottom: none; }
+    .adm-sys-label { font-size: .85rem; color: var(--bs-secondary-color); }
+    .adm-sys-value { font-size: .85rem; }
+
+    .adm-activity { display: flex; flex-direction: column; }
+    .adm-activity-item {
+        display: flex; gap: .75rem; padding: .75rem 1rem;
+        border-bottom: 1px solid var(--bs-border-color);
+    }
+    .adm-activity-item:last-child { border-bottom: none; }
+    .adm-activity-dot {
+        width: 10px; height: 10px; border-radius: 50%; margin-top: 5px; flex-shrink: 0;
+        background: var(--bs-secondary-color);
+    }
+    .adm-activity-dot.create { background: #10b981; }
+    .adm-activity-dot.update { background: #3b82f6; }
+    .adm-activity-dot.delete { background: #ef4444; }
+    .adm-activity-dot.login { background: #8b5cf6; }
+    .adm-activity-body { flex: 1; min-width: 0; }
+    .adm-activity-action { font-size: .88rem; }
+    .adm-activity-meta {
+        display: flex; gap: .75rem; font-size: .75rem;
+        color: var(--bs-secondary-color); margin-top: .15rem;
+    }
+
+    .adm-quick-links { display: flex; flex-direction: column; }
+    .adm-qlink {
+        display: flex; align-items: center; gap: .65rem;
+        padding: .65rem 1rem; text-decoration: none;
+        color: var(--bs-body-color); font-weight: 500; font-size: .9rem;
+        border-bottom: 1px solid var(--bs-border-color);
+        transition: background .12s;
+    }
+    .adm-qlink:last-child { border-bottom: none; }
+    .adm-qlink:hover { background: var(--bs-tertiary-bg); color: var(--c-primary); }
+    .adm-qlink i:first-child { color: var(--c-primary); font-size: 1.05rem; width: 20px; text-align: center; }
+    .adm-qlink i:last-child { font-size: .7rem; color: var(--bs-secondary-color); }
+</style>
+
+@code {
+    private bool _loading = true;
+    private bool _isAdmin;
+    private string _role = "";
+    private string _userEmail = "";
+
+    private bool _dbOnline;
+    private string _dbSize = "—";
+    private int _tableCount;
+    private int _migrationCount;
+    private string _environment = "";
+    private string _dotnetVersion = "";
+    private bool _paymentsEnabled;
+    private int _enabledGateways;
+    private bool _coursesEnabled;
+
+    private AdminStats _stats = new();
+    private List<AuditLogDto> _recentLogs = [];
+    private List<RoleCount> _roleCounts = [];
+    private List<TableSize> _tableSizes = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userEmail = auth.User.Identity?.Name ?? "";
+        _isAdmin = auth.User.IsInRole(Roles.Admin);
+        _role = _isAdmin ? "Admin"
+              : auth.User.IsInRole(Roles.Trainer) ? "Trener"
+              : auth.User.IsInRole(Roles.Subordinate) ? "Podwładny" : "—";
+
+        _dotnetVersion = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription;
+        _environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production";
+
+        await LoadDataAsync();
+        _loading = false;
+    }
+
+    private async Task Refresh()
+    {
+        _loading = true;
+        await LoadDataAsync();
+        _loading = false;
+    }
+
+    private async Task LoadDataAsync()
+    {
+        await using var db = DbFactory.CreateDbContext();
+
+        try { _dbOnline = await db.Database.CanConnectAsync(); } catch { _dbOnline = false; }
+
+        if (_dbOnline)
+        {
+            _stats.Users = await db.Users.CountAsync();
+            _stats.Clients = await db.Clients.CountAsync();
+            _stats.Sessions = await db.Sessions.CountAsync();
+            _stats.Packages = await db.SessionPackages.CountAsync();
+            _stats.Orders = await db.Orders.CountAsync();
+            _stats.PaidOrders = await db.Orders.CountAsync(o => o.Status == PTScheduler.Domain.Enums.OrderStatus.Paid);
+            _stats.PendingOrders = await db.Orders.CountAsync(o => o.Status == PTScheduler.Domain.Enums.OrderStatus.Pending);
+            _stats.Revenue = await db.Orders
+                .Where(o => o.Status == PTScheduler.Domain.Enums.OrderStatus.Paid)
+                .SumAsync(o => (decimal?)o.Amount) ?? 0;
+
+            var users = await UserService.GetAllUsersAsync();
+            _roleCounts =
+            [
+                new("Admin", users.Count(u => u.Role == "Admin"), "#3b82f6"),
+                new("Trener", users.Count(u => u.Role == "Trainer"), "#10b981"),
+                new("Podwładny", users.Count(u => u.Role == "Subordinate"), "#f59e0b"),
+                new("Klient", users.Count(u => u.Role == "Client"), "#8b5cf6"),
+            ];
+
+            if (_isAdmin)
+            {
+                try
+                {
+                    var sizeResult = await db.Database.SqlQueryRaw<string>(
+                        "SELECT pg_size_pretty(pg_database_size(current_database())) AS \"Value\"")
+                        .FirstOrDefaultAsync();
+                    _dbSize = sizeResult ?? "—";
+                }
+                catch { _dbSize = "—"; }
+
+                try
+                {
+                    _tableCount = await db.Database.SqlQueryRaw<int>(
+                        "SELECT COUNT(*)::int AS \"Value\" FROM information_schema.tables WHERE table_schema = 'public'")
+                        .FirstOrDefaultAsync();
+                }
+                catch { }
+
+                try
+                {
+                    _migrationCount = await db.Database.SqlQueryRaw<int>(
+                        "SELECT COUNT(*)::int AS \"Value\" FROM \"__EFMigrationsHistory\"")
+                        .FirstOrDefaultAsync();
+                }
+                catch { }
+
+                try
+                {
+                    _tableSizes = await db.Database.SqlQueryRaw<TableSizeRaw>(
+                        @"SELECT relname AS ""Name"",
+                                 n_live_tup AS ""Rows"",
+                                 pg_size_pretty(pg_total_relation_size(quote_ident(relname))) AS ""Size""
+                          FROM pg_stat_user_tables
+                          ORDER BY pg_total_relation_size(quote_ident(relname)) DESC
+                          LIMIT 15")
+                        .Select(r => new TableSize(r.Name, r.Rows, r.Size))
+                        .ToListAsync();
+                }
+                catch { _tableSizes = []; }
+            }
+        }
+
+        try
+        {
+            var ps = await PaymentSettings.GetAsync();
+            _paymentsEnabled = ps.Enabled;
+            _enabledGateways = ps.Providers.Count(p => p.Enabled);
+        }
+        catch { }
+
+        try { _coursesEnabled = (await ModuleSettings.GetAsync()).CoursesEnabled; } catch { }
+
+        try { _recentLogs = await AuditService.GetLogsAsync(count: 15); } catch { }
+    }
+
+    private static string ActivityDotClass(string action)
+    {
+        var a = action.ToLowerInvariant();
+        if (a.Contains("create") || a.Contains("dodano") || a.Contains("utwo")) return "create";
+        if (a.Contains("update") || a.Contains("edycja") || a.Contains("zmian")) return "update";
+        if (a.Contains("delete") || a.Contains("usun") || a.Contains("anulo")) return "delete";
+        if (a.Contains("login") || a.Contains("logowa")) return "login";
+        return "";
+    }
+
+    private class AdminStats
+    {
+        public int Users, Clients, Sessions, Packages, Orders, PaidOrders, PendingOrders;
+        public decimal Revenue;
+    }
+
+    private record RoleCount(string Role, int Count, string Color);
+    private record TableSize(string Name, long Rows, string Size);
+
+    private class TableSizeRaw
+    {
+        public string Name { get; set; } = "";
+        public long Rows { get; set; }
+        public string Size { get; set; } = "";
+    }
+}
