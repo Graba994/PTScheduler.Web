@@ -84,8 +84,15 @@ EOF
 
 # ── Build shared image if needed ─────────────────────────────────────────────
 if ! docker image inspect ptscheduler-web:latest &>/dev/null; then
-    echo ">>> Building ptscheduler-web:latest image..."
-    docker build -t ptscheduler-web:latest "$REPO_ROOT"
+    if [[ -f "$REPO_ROOT/Dockerfile" ]]; then
+        echo ">>> Building ptscheduler-web:latest image..."
+        docker build -t ptscheduler-web:latest "$REPO_ROOT"
+    else
+        echo "ERROR: Image ptscheduler-web:latest not found."
+        echo "       Build it first on the host:"
+        echo "       docker build -t ptscheduler-web:latest /mnt/user/appdata/ptscheduler"
+        exit 1
+    fi
 else
     echo ">>> Image ptscheduler-web:latest already exists (use upgrade.sh to rebuild)"
 fi
