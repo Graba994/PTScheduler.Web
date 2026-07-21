@@ -108,8 +108,8 @@ public class TenantService(
         var tenant = await db.Tenants.FindAsync(tenantId)
             ?? throw new InvalidOperationException("Tenant not found.");
 
-        await docker.StopContainerAsync($"pt-{tenant.Slug}-web");
-        await docker.StopContainerAsync($"pt-{tenant.Slug}-db");
+        try { await docker.StopContainerAsync($"pt-{tenant.Slug}-web"); } catch { }
+        try { await docker.StopContainerAsync($"pt-{tenant.Slug}-db"); } catch { }
 
         tenant.Status = TenantStatus.Suspended;
         await db.SaveChangesAsync();
@@ -121,10 +121,28 @@ public class TenantService(
         var tenant = await db.Tenants.FindAsync(tenantId)
             ?? throw new InvalidOperationException("Tenant not found.");
 
-        await docker.StartContainerAsync($"pt-{tenant.Slug}-db");
-        await docker.StartContainerAsync($"pt-{tenant.Slug}-web");
+        try { await docker.StartContainerAsync($"pt-{tenant.Slug}-db"); } catch { }
+        try { await docker.StartContainerAsync($"pt-{tenant.Slug}-web"); } catch { }
 
         tenant.Status = TenantStatus.Active;
+        await db.SaveChangesAsync();
+    }
+
+    public async Task DeleteAsync(int tenantId, bool removeContainers)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var tenant = await db.Tenants.FindAsync(tenantId)
+            ?? throw new InvalidOperationException("Tenant not found.");
+
+        if (removeContainers)
+        {
+            try { await docker.StopContainerAsync($"pt-{tenant.Slug}-web"); } catch { }
+            try { await docker.StopContainerAsync($"pt-{tenant.Slug}-db"); } catch { }
+            try { await docker.RemoveContainerAsync($"pt-{tenant.Slug}-web"); } catch { }
+            try { await docker.RemoveContainerAsync($"pt-{tenant.Slug}-db"); } catch { }
+        }
+
+        db.Tenants.Remove(tenant);
         await db.SaveChangesAsync();
     }
 

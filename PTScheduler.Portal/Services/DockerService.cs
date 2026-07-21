@@ -63,6 +63,12 @@ public class DockerService : IDisposable
             new ContainerStopParameters { WaitBeforeKillSeconds = 10 });
     }
 
+    public async Task RemoveContainerAsync(string containerName)
+    {
+        await _client.Containers.RemoveContainerAsync(containerName,
+            new ContainerRemoveParameters { Force = true });
+    }
+
     public async Task RestartContainerAsync(string containerName)
     {
         await _client.Containers.RestartContainerAsync(containerName,

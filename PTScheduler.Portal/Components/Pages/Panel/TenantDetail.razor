@@ -3,6 +3,7 @@
 @attribute [Authorize(Roles = "Admin")]
 @inject TenantService TenantSvc
 @inject DockerService DockerSvc
+@inject NavigationManager Nav
 @rendermode InteractiveServer
 
 <PageTitle>@(_tenant?.CompanyName ?? "Trener") — PTScheduler Portal</PageTitle>
@@ -19,8 +20,15 @@ else
         <span class="badge @StatusBadge(_tenant.Status) ms-2">@StatusLabel(_tenant.Status)</span>
     </div>
 
+    @if (_actionMessage is not null)
+    {
+        <div class="alert @(_actionIsError ? "alert-danger" : "alert-success") alert-dismissible py-2 small">
+            @_actionMessage
+            <button type="button" class="btn-close btn-close-sm" @onclick="() => _actionMessage = null"></button>
+        </div>
+    }
+
     <div class="row g-3">
-        <!-- Info card -->
         <div class="col-md-6">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-body">
@@ -51,7 +59,6 @@ else
             </div>
         </div>
 
-        <!-- Container status -->
         <div class="col-md-6">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-body">
@@ -62,7 +69,7 @@ else
                         </button>
                     </div>
 
-                    @if (_containerStatus is not null)
+                    @if (_containerStatus is not null && (_containerStatus.Web is not null || _containerStatus.Db is not null))
                     {
                         <div class="d-flex flex-column gap-3">
                             @foreach (var (label, info, name) in new[] {
@@ -94,13 +101,16 @@ else
                     }
                     else
                     {
-                        <p class="text-muted small">Nie udało się pobrać statusu kontenerów.</p>
+                        <p class="text-muted small mb-0">
+                            <i class="bi bi-info-circle me-1"></i>
+                            Nie znaleziono kontenerów <code>pt-@(_tenant.Slug)-web/db</code>.
+                            Importowany tenant może mieć inną nazwę kontenerów.
+                        </p>
                     }
                 </div>
             </div>
         </div>
 
-        <!-- Actions -->
         <div class="col-md-6">
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
@@ -126,7 +136,7 @@ else
                             </button>
                         }
                         <a href="https://@_tenant.Domain" target="_blank" class="btn btn-outline-primary btn-sm">
-                            <i class="bi bi-box-arrow-up-right me-1"></i>Otwórz instancję
+                            <i class="bi bi-box-arrow-up-right me-1"></i>Otwórz
                         </a>
                     </div>
 
@@ -138,7 +148,6 @@ else
             </div>
         </div>
 
-        <!-- Logs -->
         <div class="col-md-6">
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
@@ -164,7 +173,6 @@ else
             </div>
         </div>
 
-        <!-- Notes -->
         @if (!string.IsNullOrWhiteSpace(_tenant.Notes))
         {
             <div class="col-12">
@@ -176,6 +184,50 @@ else
                 </div>
             </div>
         }
+
+        <!-- Delete section -->
+        <div class="col-12">
+            <div class="card border-0 shadow-sm border-danger">
+                <div class="card-body">
+                    <h6 class="fw-bold mb-3 text-danger"><i class="bi bi-exclamation-triangle me-2"></i>Strefa zagrożenia</h6>
+                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                        @if (!_confirmDelete && !_confirmDeleteWithDocker)
+                        {
+                            <button class="btn btn-outline-danger btn-sm" @onclick="() => _confirmDelete = true">
+                                <i class="bi bi-trash me-1"></i>Usuń wpis
+                            </button>
+                            <button class="btn btn-danger btn-sm" @onclick="() => _confirmDeleteWithDocker = true">
+                                <i class="bi bi-trash-fill me-1"></i>Usuń wpis + kontenery Docker
+                            </button>
+                        }
+
+                        @if (_confirmDelete)
+                        {
+                            <div class="alert alert-warning py-2 small mb-0 d-flex align-items-center gap-2">
+                                <span>Usunąć wpis <strong>@_tenant.CompanyName</strong> z portalu? Kontenery Docker pozostaną.</span>
+                                <button class="btn btn-danger btn-sm" @onclick="DeleteEntry" disabled="@_deleting">
+                                    @if (_deleting) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                    Tak, usuń
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="() => _confirmDelete = false">Anuluj</button>
+                            </div>
+                        }
+
+                        @if (_confirmDeleteWithDocker)
+                        {
+                            <div class="alert alert-danger py-2 small mb-0 d-flex align-items-center gap-2">
+                                <span>Usunąć wpis <strong>@_tenant.CompanyName</strong> RAZEM z kontenerami Docker? To nieodwracalne!</span>
+                                <button class="btn btn-danger btn-sm" @onclick="DeleteWithDocker" disabled="@_deleting">
+                                    @if (_deleting) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                    Tak, usuń wszystko
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="() => _confirmDeleteWithDocker = false">Anuluj</button>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
     </div>
 }
 
@@ -188,6 +240,11 @@ else
     private string? _provisionOutput;
     private string? _logs;
     private bool _loadingLogs;
+    private string? _actionMessage;
+    private bool _actionIsError;
+    private bool _confirmDelete;
+    private bool _confirmDeleteWithDocker;
+    private bool _deleting;
 
     protected override async Task OnInitializedAsync()
     {
@@ -217,7 +274,12 @@ else
     private async Task Suspend()
     {
         if (_tenant is null) return;
-        await TenantSvc.SuspendAsync(_tenant.Id);
+        try
+        {
+            await TenantSvc.SuspendAsync(_tenant.Id);
+            ShowMessage("Tenant zawieszony.");
+        }
+        catch (Exception ex) { ShowMessage($"Błąd: {ex.Message}", true); }
         _tenant = await TenantSvc.GetAsync(Id);
         await RefreshContainers();
     }
@@ -225,7 +287,12 @@ else
     private async Task Resume()
     {
         if (_tenant is null) return;
-        await TenantSvc.ResumeAsync(_tenant.Id);
+        try
+        {
+            await TenantSvc.ResumeAsync(_tenant.Id);
+            ShowMessage("Tenant wznowiony.");
+        }
+        catch (Exception ex) { ShowMessage($"Błąd: {ex.Message}", true); }
         _tenant = await TenantSvc.GetAsync(Id);
         await RefreshContainers();
     }
@@ -247,6 +314,38 @@ else
         _loadingLogs = false;
     }
 
+    private async Task DeleteEntry()
+    {
+        if (_tenant is null) return;
+        _deleting = true;
+        try
+        {
+            await TenantSvc.DeleteAsync(_tenant.Id, removeContainers: false);
+            Nav.NavigateTo("/panel/tenants");
+        }
+        catch (Exception ex) { ShowMessage($"Błąd: {ex.Message}", true); }
+        _deleting = false;
+    }
+
+    private async Task DeleteWithDocker()
+    {
+        if (_tenant is null) return;
+        _deleting = true;
+        try
+        {
+            await TenantSvc.DeleteAsync(_tenant.Id, removeContainers: true);
+            Nav.NavigateTo("/panel/tenants");
+        }
+        catch (Exception ex) { ShowMessage($"Błąd: {ex.Message}", true); }
+        _deleting = false;
+    }
+
+    private void ShowMessage(string msg, bool isError = false)
+    {
+        _actionMessage = msg;
+        _actionIsError = isError;
+    }
+
     private static string StatusLabel(TenantStatus s) => s switch
     {
         TenantStatus.Active => "Aktywny",
@@ -264,4 +363,3 @@ else
         _ => "bg-secondary"
     };
 }
-
