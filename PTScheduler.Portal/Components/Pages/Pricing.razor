@@ -1,5 +1,6 @@
 @page "/pricing"
 @layout PublicLayout
+@inject IDbContextFactory<PortalDbContext> DbFactory
 
 <PageTitle>Cennik — PTScheduler</PageTitle>
 
@@ -16,8 +17,8 @@
             @foreach (var plan in _plans)
             {
                 <div class="col-md-4">
-                    <div class="pricing-card @(plan.Featured ? "featured" : "")">
-                        @if (plan.Featured)
+                    <div class="pricing-card @(plan.IsFeatured ? "featured" : "")">
+                        @if (plan.IsFeatured)
                         {
                             <div class="pricing-popular">Najpopularniejszy</div>
                         }
@@ -25,34 +26,59 @@
                         <p class="text-muted small mb-3">@plan.Description</p>
 
                         <div class="pricing-price">
-                            @if (plan.Price == 0)
+                            @if (plan.MonthlyPrice == 0)
                             {
                                 <span class="price-val">0 zł</span>
                                 <span class="price-period">na zawsze</span>
                             }
                             else
                             {
-                                <span class="price-val">@plan.Price zł</span>
+                                <span class="price-val">@plan.MonthlyPrice.ToString("0") zł</span>
                                 <span class="price-period">/ miesiąc</span>
                                 @if (plan.YearlyPrice.HasValue)
                                 {
-                                    <div class="text-muted small mt-1">lub @plan.YearlyPrice zł/rok (oszczędzasz @(plan.Price * 12 - plan.YearlyPrice.Value) zł)</div>
+                                    <div class="text-muted small mt-1">lub @plan.YearlyPrice.Value.ToString("0") zł/rok (oszczędzasz @((plan.MonthlyPrice * 12 - plan.YearlyPrice.Value).ToString("0")) zł)</div>
                                 }
                             }
                         </div>
 
                         <ul class="pricing-features">
-                            @foreach (var f in plan.Features)
-                            {
-                                <li class="@(f.Included ? "" : "disabled")">
-                                    <i class="bi @(f.Included ? "bi-check-lg text-success" : "bi-x-lg text-muted")"></i>
-                                    @f.Text
-                                </li>
-                            }
+                            <li>
+                                <i class="bi bi-check-lg text-success"></i>
+                                Max @(plan.MaxClients == int.MaxValue ? "bez limitu" : plan.MaxClients.ToString()) klientów
+                            </li>
+                            <li>
+                                <i class="bi bi-check-lg text-success"></i>
+                                Grafik i rezerwacje
+                            </li>
+                            <li>
+                                <i class="bi bi-check-lg text-success"></i>
+                                Pakiety treningowe
+                            </li>
+                            <li>
+                                <i class="bi bi-check-lg text-success"></i>
+                                Własny branding
+                            </li>
+                            <li class="@(plan.PaymentsEnabled ? "" : "disabled")">
+                                <i class="bi @(plan.PaymentsEnabled ? "bi-check-lg text-success" : "bi-x-lg text-muted")"></i>
+                                Płatności online
+                            </li>
+                            <li class="@(plan.CoursesEnabled ? "" : "disabled")">
+                                <i class="bi @(plan.CoursesEnabled ? "bi-check-lg text-success" : "bi-x-lg text-muted")"></i>
+                                Kursy i mentoring
+                            </li>
+                            <li class="@(plan.CustomDomain ? "" : "disabled")">
+                                <i class="bi @(plan.CustomDomain ? "bi-check-lg text-success" : "bi-x-lg text-muted")"></i>
+                                Własna domena
+                            </li>
+                            <li class="@(plan.PrioritySupport ? "" : "disabled")">
+                                <i class="bi @(plan.PrioritySupport ? "bi-check-lg text-success" : "bi-x-lg text-muted")"></i>
+                                Priorytetowe wsparcie
+                            </li>
                         </ul>
 
-                        <a href="/register?plan=@plan.Id" class="btn @(plan.Featured ? "btn-primary" : "btn-outline-primary") w-100">
-                            @(plan.Price == 0 ? "Zacznij za darmo" : "Wybierz plan")
+                        <a href="/register?plan=@plan.Id" class="btn @(plan.IsFeatured ? "btn-primary" : "btn-outline-primary") w-100">
+                            @(plan.MonthlyPrice == 0 ? "Zacznij za darmo" : "Wybierz plan")
                         </a>
                     </div>
                 </div>
@@ -133,8 +159,7 @@
 </style>
 
 @code {
-    private record PlanFeature(string Text, bool Included);
-    private record PlanInfo(string Id, string Name, string Description, decimal Price, decimal? YearlyPrice, bool Featured, PlanFeature[] Features);
+    private List<Plan> _plans = [];
 
     private readonly (string Q, string A)[] _faqs =
     [
@@ -145,37 +170,13 @@
         ("Czy dane są bezpieczne?", "Każdy trener ma osobną bazę danych i osobny kontener. Pełna izolacja. Backup codziennie."),
     ];
 
-    private readonly PlanInfo[] _plans =
-    [
-        new("start", "Start", "Dla trenera, który zaczyna", 0, null, false, [
-            new("Do 3 klientów", true),
-            new("Grafik i rezerwacje", true),
-            new("Pakiety treningowe", true),
-            new("Własny branding", true),
-            new("Płatności online", false),
-            new("Kursy i mentoring", false),
-            new("Własna domena", false),
-            new("Priorytetowe wsparcie", false),
-        ]),
-        new("pro", "Pro", "Pełna funkcjonalność", 79, 790, true, [
-            new("Do 50 klientów", true),
-            new("Grafik i rezerwacje", true),
-            new("Pakiety treningowe", true),
-            new("Własny branding", true),
-            new("Płatności online", true),
-            new("Kursy i mentoring", true),
-            new("Własna domena", false),
-            new("Priorytetowe wsparcie", false),
-        ]),
-        new("studio", "Studio", "Bez limitów", 149, 1490, false, [
-            new("Bez limitu klientów", true),
-            new("Grafik i rezerwacje", true),
-            new("Pakiety treningowe", true),
-            new("Własny branding", true),
-            new("Płatności online", true),
-            new("Kursy i mentoring", true),
-            new("Własna domena", true),
-            new("Priorytetowe wsparcie", true),
-        ]),
-    ];
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = DbFactory.CreateDbContext();
+        _plans = await db.Plans
+            .AsNoTracking()
+            .Where(p => p.IsActive)
+            .OrderBy(p => p.SortOrder)
+            .ToListAsync();
+    }
 }
