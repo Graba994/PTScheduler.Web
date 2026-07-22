@@ -24,10 +24,18 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string SmtpFrom = "smtp_from";
         public const string SmtpFromName = "smtp_from_name";
         public const string SmtpSsl = "smtp_ssl";
+        public const string MainDomain = "main_domain";
+        public const string NpmUrl = "npm_url";
+        public const string NpmEmail = "npm_email";
+        public const string NpmPassword = "npm_password";
+        public const string NpmToken = "npm_token";
+        public const string NpmAutoRegister = "npm_auto_register";
     }
 
     private static readonly Dictionary<string, string> Defaults = new()
     {
+        [Keys.MainDomain] = "ptscheduler.pl",
+        [Keys.NpmAutoRegister] = "true",
         [Keys.HeroBadge] = "Platforma SaaS dla trenerów",
         [Keys.HeroTitle] = "Twoja instancja PTScheduler gotowa w 5 minut",
         [Keys.HeroSubtitle] = "Grafik, klienci, płatności online, kursy wideo, pakiety treningowe — wszystko pod Twoją domeną, w pełni konfigurowane. Bez programowania.",

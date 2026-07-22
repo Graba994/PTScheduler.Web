@@ -8,10 +8,13 @@ namespace PTScheduler.Portal.Services;
 public class TenantService(
     IDbContextFactory<PortalDbContext> dbFactory,
     DockerService docker,
+    SiteSettingsService settings,
+    NpmService npm,
     IConfiguration config,
     ILogger<TenantService> logger)
 {
     private string TenantImage => config.GetValue<string>("Portal:TenantImage") ?? "ptscheduler-web:latest";
+    private string ForwardHost => config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220";
 
     public async Task<List<Tenant>> GetAllAsync()
     {
@@ -106,7 +109,16 @@ public class TenantService(
             tenant.ProvisionedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
 
-            return (true, $"Tenant '{tenant.Slug}' provisioned on port {tenant.Port}");
+            var output = $"Tenant '{tenant.Slug}' provisioned on port {tenant.Port}";
+
+            var autoReg = await settings.GetAsync(SiteSettingsService.Keys.NpmAutoRegister);
+            if (autoReg != "false" && !string.IsNullOrWhiteSpace(tenant.Domain))
+            {
+                var (npmOk, npmMsg) = await npm.RegisterProxyHostAsync(tenant.Domain, ForwardHost, tenant.Port);
+                output += "\nNPM: " + (npmOk ? npmMsg : $"nie udało się zarejestrować ({npmMsg}) — dodaj ręcznie");
+            }
+
+            return (true, output);
         }
         catch (Exception ex)
         {
@@ -162,6 +174,9 @@ public class TenantService(
             try { await docker.RemoveContainerAsync(webName); } catch { }
             try { await docker.RemoveContainerAsync(dbName); } catch { }
             await docker.RemoveTenantResourcesAsync(tenant.Slug);
+
+            if (!string.IsNullOrWhiteSpace(tenant.Domain))
+                try { await npm.DeleteProxyHostByDomainAsync(tenant.Domain); } catch { }
         }
 
         db.Tenants.Remove(tenant);

@@ -3,6 +3,7 @@
 @attribute [Authorize(Roles = "Admin")]
 @inject TenantService TenantSvc
 @inject IDbContextFactory<PortalDbContext> DbFactory
+@inject SiteSettingsService Settings
 @inject NavigationManager Nav
 @rendermode InteractiveServer
 
@@ -182,7 +183,8 @@
     private List<Plan> _plans = [];
     private Plan? _selectedPlan;
 
-    private string AutoDomain => string.IsNullOrWhiteSpace(_form.Slug) ? "" : $"{_form.Slug}.ptscheduler.pl";
+    private string _mainDomain = "ptscheduler.pl";
+    private string AutoDomain => string.IsNullOrWhiteSpace(_form.Slug) ? "" : $"{_form.Slug}.{_mainDomain}";
 
     protected override async Task OnInitializedAsync()
     {
@@ -198,6 +200,9 @@
             _form.PlanId = _plans[0].Id;
             _selectedPlan = _plans[0];
         }
+
+        var mainDomain = await Settings.GetAsync(SiteSettingsService.Keys.MainDomain);
+        if (!string.IsNullOrWhiteSpace(mainDomain)) _mainDomain = mainDomain;
     }
 
     private void SelectPlan(string planId)
@@ -216,7 +221,7 @@
             var slug = _form.Slug.Trim().ToLowerInvariant();
             var domain = _selectedPlan?.CustomDomain == true
                 ? _form.Domain.Trim().ToLowerInvariant()
-                : $"{slug}.ptscheduler.pl";
+                : $"{slug}.{_mainDomain}";
 
             if (string.IsNullOrWhiteSpace(domain))
             {
