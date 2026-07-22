@@ -271,6 +271,23 @@ app.MapGet("/health", (StartupHealth h) => Results.Json(new
     timestamp = DateTime.Now.ToString("o")
 }));
 
+// Internal endpoint for the portal to push a new entitlements JSON without
+// restarting the container. Protected by a shared secret env var
+// TENANT_INTERNAL_SECRET — the portal sends it in the X-Internal-Secret header.
+app.MapPost("/internal/entitlements/reload",
+    async (HttpContext ctx, PTScheduler.Web.Services.EntitlementService svc) =>
+{
+    var expected = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+    if (string.IsNullOrEmpty(expected)) return Results.NotFound();
+    if (ctx.Request.Headers["X-Internal-Secret"].ToString() != expected)
+        return Results.Unauthorized();
+
+    using var reader = new StreamReader(ctx.Request.Body);
+    var json = await reader.ReadToEndAsync();
+    svc.ReplaceFromJson(json);
+    return Results.Ok(new { plan = svc.Current.Name });
+});
+
 // Gateway notify (webhook): verifies the payment and fulfils the order.
 // Route carries the provider key, e.g. /payments/payu/notify, /payments/p24/notify.
 app.MapPost("/payments/{provider}/notify",

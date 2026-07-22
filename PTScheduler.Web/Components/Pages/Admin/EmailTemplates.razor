@@ -4,9 +4,25 @@
 @using PTScheduler.Application.Interfaces
 @inject IEmailTemplateService TemplateService
 @inject IBrandingService BrandingService
+@inject EntitlementService Entitlements
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Szablony email" />
+
+@if (!Entitlements.IsAllowed("CustomEmailTemplates"))
+{
+    <div class="page-header">
+        <h4 class="page-title"><i class="bi bi-file-earmark-richtext-fill me-2" style="color:var(--c-primary)"></i>Szablony email</h4>
+    </div>
+    <FeatureGate Flag="CustomEmailTemplates" RequiredPlan="Pro"
+                 Title="Własne szablony email są dostępne w planie Pro">
+        <Description>
+            Personalizuj treść wiadomości wysyłanych do klientów (potwierdzenia rezerwacji, przypomnienia, faktury). Odblokuj w planie <strong>Pro</strong> lub <strong>Studio</strong>.
+        </Description>
+    </FeatureGate>
+}
+else
+{
 
 <div class="cal-shell">
     <div class="cal-topbar">
@@ -229,6 +245,8 @@
         </div>
     </div>
 </div>
+
+}
 
 @code {
     private List<EmailTemplateDto>? templates;

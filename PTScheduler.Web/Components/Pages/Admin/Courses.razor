@@ -8,17 +8,44 @@
 @inject ICourseService CourseService
 @inject IUserManagementService UserService
 @inject IPermissionService Permission
+@inject EntitlementService Entitlements
 @inject AuthenticationStateProvider AuthState
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Kursy" />
 
 <div class="page-header d-flex align-items-center justify-content-between">
-    <h4 class="page-title"><i class="bi bi-mortarboard-fill me-2" style="color:var(--c-primary)"></i>Kursy i dostępy</h4>
-    <button class="btn btn-primary" @onclick="NewCourse"><i class="bi bi-plus-lg me-1"></i>Nowy kurs</button>
+    <h4 class="page-title">
+        <i class="bi bi-mortarboard-fill me-2" style="color:var(--c-primary)"></i>Kursy i dostępy
+        @if (Entitlements.Current.MaxCourses != int.MaxValue && _courses is not null)
+        {
+            <span class="badge bg-secondary ms-2 fs-6">@_courses.Count / @(Entitlements.Current.MaxCourses)</span>
+        }
+    </h4>
+    @if (!Entitlements.IsAllowed("CoursesEnabled"))
+    {
+        <a href="/upgrade" class="btn btn-warning btn-sm"><i class="bi bi-lock-fill me-1"></i>Odblokuj (Pro)</a>
+    }
+    else if (_courses is not null && _courses.Count >= Entitlements.Current.MaxCourses)
+    {
+        <a href="/upgrade" class="btn btn-warning btn-sm"><i class="bi bi-arrow-up-circle me-1"></i>Zwiększ limit</a>
+    }
+    else
+    {
+        <button class="btn btn-primary" @onclick="NewCourse"><i class="bi bi-plus-lg me-1"></i>Nowy kurs</button>
+    }
 </div>
 
-@if (_denied)
+@if (!Entitlements.IsAllowed("CoursesEnabled"))
+{
+    <FeatureGate Flag="CoursesEnabled" RequiredPlan="Pro"
+                 Title="Kursy wideo są dostępne w planie Pro">
+        <Description>
+            Sprzedawaj klientom kursy wideo, mentoring i materiały treningowe. Odblokuj w planie <strong>Pro</strong> lub <strong>Studio</strong>.
+        </Description>
+    </FeatureGate>
+}
+else if (_denied)
 {
     <div class="alert alert-danger"><i class="bi bi-shield-lock me-2"></i>Brak uprawnień do zarządzania kursami.</div>
 }

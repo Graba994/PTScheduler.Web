@@ -10,7 +10,7 @@ namespace PTScheduler.Web.Services;
 // restart (triggered by portal on plan change) reloads it.
 public class EntitlementService
 {
-    private readonly Entitlements _current;
+    private Entitlements _current;
     private readonly IDbContextFactory<ApplicationDbContext> _dbFactory;
     private readonly ILogger<EntitlementService> _logger;
 
@@ -25,26 +25,37 @@ public class EntitlementService
         var json = Environment.GetEnvironmentVariable("TENANT_ENTITLEMENTS")
                    ?? config.GetValue<string>("Tenant:Entitlements");
 
+        _current = ParseOrUnlimited(json);
+    }
+
+    private Entitlements ParseOrUnlimited(string? json)
+    {
         if (string.IsNullOrWhiteSpace(json))
         {
-            _current = Entitlements.Unlimited();
             _logger.LogWarning("TENANT_ENTITLEMENTS not set — running in unlimited mode.");
-            return;
+            return Entitlements.Unlimited();
         }
 
         try
         {
-            _current = JsonSerializer.Deserialize<Entitlements>(json,
-                new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-                ?? Entitlements.Unlimited();
-
-            _logger.LogInformation("Loaded entitlements for plan '{Plan}'.", _current.Name);
+            var parsed = JsonSerializer.Deserialize<Entitlements>(json,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (parsed is null) return Entitlements.Unlimited();
+            _logger.LogInformation("Loaded entitlements for plan '{Plan}'.", parsed.Name);
+            return parsed;
         }
         catch (Exception ex)
         {
-            _current = Entitlements.Unlimited();
-            _logger.LogError(ex, "Failed to parse TENANT_ENTITLEMENTS — falling back to unlimited.");
+            _logger.LogError(ex, "Failed to parse entitlements JSON — falling back to unlimited.");
+            return Entitlements.Unlimited();
         }
+    }
+
+    // Replace the in-memory plan without a restart. The portal calls the tenant's
+    // POST /internal/entitlements/reload endpoint (shared secret) on plan changes.
+    public void ReplaceFromJson(string json)
+    {
+        _current = ParseOrUnlimited(json);
     }
 
     public Entitlements Current => _current;

@@ -5,6 +5,7 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
 @inject IPaymentSettingsService PaymentSettings
 @inject IPermissionService Permission
+@inject EntitlementService Entitlements
 @inject AuthenticationStateProvider AuthState
 @rendermode PTScheduler.Web.RenderModes.Server
 
@@ -14,7 +15,16 @@
     <h4 class="page-title"><i class="bi bi-credit-card-fill me-2" style="color:var(--c-primary)"></i>Płatności online</h4>
 </div>
 
-@if (_denied)
+@if (!Entitlements.IsAllowed("PaymentsEnabled"))
+{
+    <FeatureGate Flag="PaymentsEnabled" RequiredPlan="Pro"
+                 Title="Płatności online są dostępne w planie Pro">
+        <Description>
+            Umożliw klientom płacenie za sesje, pakiety i kursy przez PayU, Przelewy24, Stripe. Odblokuj w planie <strong>Pro</strong> lub <strong>Studio</strong>.
+        </Description>
+    </FeatureGate>
+}
+else if (_denied)
 {
     <div class="alert alert-danger"><i class="bi bi-shield-lock me-2"></i>Brak uprawnień do konfiguracji płatności.</div>
 }
