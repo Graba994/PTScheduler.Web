@@ -137,6 +137,123 @@ public class DockerService : IDisposable
         }).OrderBy(c => c.Name).ToList();
     }
 
+    public async Task ProvisionTenantAsync(string slug, string dbPassword, int appPort,
+        string webImage, string tenantDomain)
+    {
+        var webName = $"pt-{slug}-web";
+        var dbName = $"pt-{slug}-db";
+        var networkName = $"pt-{slug}-net";
+        var pgVolume = $"pt-{slug}-pgdata";
+        var brandingVolume = $"pt-{slug}-branding";
+
+        var existingNetworks = await _client.Networks.ListNetworksAsync(
+            new NetworksListParameters { Filters = new Dictionary<string, IDictionary<string, bool>>
+                { ["name"] = new Dictionary<string, bool> { [networkName] = true } } });
+        if (!existingNetworks.Any(n => n.Name == networkName))
+        {
+            await _client.Networks.CreateNetworkAsync(new NetworksCreateParameters
+            {
+                Name = networkName,
+                Driver = "bridge"
+            });
+        }
+
+        try { await _client.Volumes.InspectAsync(pgVolume); }
+        catch { await _client.Volumes.CreateAsync(new VolumesCreateParameters { Name = pgVolume }); }
+
+        try { await _client.Volumes.InspectAsync(brandingVolume); }
+        catch { await _client.Volumes.CreateAsync(new VolumesCreateParameters { Name = brandingVolume }); }
+
+        await EnsureImagePulledAsync("postgres:17-alpine");
+
+        var dbExisting = await GetContainerInfoAsync(dbName);
+        if (dbExisting is null)
+        {
+            await _client.Containers.CreateContainerAsync(new CreateContainerParameters
+            {
+                Name = dbName,
+                Image = "postgres:17-alpine",
+                Env = new List<string>
+                {
+                    "POSTGRES_DB=ptscheduler",
+                    "POSTGRES_USER=ptscheduler",
+                    $"POSTGRES_PASSWORD={dbPassword}"
+                },
+                HostConfig = new HostConfig
+                {
+                    RestartPolicy = new RestartPolicy { Name = RestartPolicyKind.UnlessStopped },
+                    NetworkMode = networkName,
+                    Mounts = new List<Mount>
+                    {
+                        new() { Type = "volume", Source = pgVolume, Target = "/var/lib/postgresql/data" }
+                    }
+                }
+            });
+            await _client.Containers.StartContainerAsync(dbName, new ContainerStartParameters());
+        }
+
+        var webExisting = await GetContainerInfoAsync(webName);
+        if (webExisting is null)
+        {
+            await _client.Containers.CreateContainerAsync(new CreateContainerParameters
+            {
+                Name = webName,
+                Image = webImage,
+                Env = new List<string>
+                {
+                    $"ConnectionStrings__DefaultConnection=Host={dbName};Port=5432;Database=ptscheduler;Username=ptscheduler;Password={dbPassword}",
+                    "ASPNETCORE_ENVIRONMENT=Production",
+                    $"TENANT_SLUG={slug}",
+                    $"TENANT_DOMAIN={tenantDomain}"
+                },
+                ExposedPorts = new Dictionary<string, EmptyStruct> { ["8080/tcp"] = default },
+                HostConfig = new HostConfig
+                {
+                    RestartPolicy = new RestartPolicy { Name = RestartPolicyKind.UnlessStopped },
+                    NetworkMode = networkName,
+                    PortBindings = new Dictionary<string, IList<PortBinding>>
+                    {
+                        ["8080/tcp"] = new List<PortBinding>
+                        {
+                            new() { HostPort = appPort.ToString() }
+                        }
+                    },
+                    Mounts = new List<Mount>
+                    {
+                        new() { Type = "volume", Source = brandingVolume, Target = "/app/wwwroot/branding" }
+                    }
+                }
+            });
+            await _client.Containers.StartContainerAsync(webName, new ContainerStartParameters());
+        }
+    }
+
+    public async Task<bool> ImageExistsAsync(string image)
+    {
+        try { await _client.Images.InspectImageAsync(image); return true; }
+        catch { return false; }
+    }
+
+    private async Task EnsureImagePulledAsync(string image)
+    {
+        if (await ImageExistsAsync(image)) return;
+        await _client.Images.CreateImageAsync(
+            new ImagesCreateParameters { FromImage = image },
+            null,
+            new Progress<JSONMessage>());
+    }
+
+    public async Task RemoveTenantResourcesAsync(string slug)
+    {
+        var networkName = $"pt-{slug}-net";
+        var pgVolume = $"pt-{slug}-pgdata";
+        var brandingVolume = $"pt-{slug}-branding";
+
+        try { await _client.Networks.DeleteNetworkAsync(networkName); } catch { }
+        try { await _client.Volumes.RemoveAsync(pgVolume); } catch { }
+        try { await _client.Volumes.RemoveAsync(brandingVolume); } catch { }
+    }
+
     public void Dispose() => _client.Dispose();
 }
 

@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using PTScheduler.Portal.Data;
@@ -12,7 +11,7 @@ public class TenantService(
     IConfiguration config,
     ILogger<TenantService> logger)
 {
-    private string DeployDir => config.GetValue<string>("Portal:DeployDir") ?? "/opt/ptscheduler/deploy";
+    private string TenantImage => config.GetValue<string>("Portal:TenantImage") ?? "ptscheduler-web:latest";
 
     public async Task<List<Tenant>> GetAllAsync()
     {
@@ -87,14 +86,23 @@ public class TenantService(
 
         try
         {
-            var scriptPath = Path.Combine(DeployDir, "provision.sh");
-            var result = await RunScriptAsync(scriptPath, $"{tenant.Slug} {tenant.Domain}");
+            if (!await docker.ImageExistsAsync(TenantImage))
+                throw new InvalidOperationException(
+                    $"Image '{TenantImage}' not found on the Docker host. " +
+                    "Build it first: docker build -t ptscheduler-web:latest <path-to-main-app-repo>");
+
+            await docker.ProvisionTenantAsync(
+                tenant.Slug,
+                tenant.DbPassword,
+                tenant.Port,
+                TenantImage,
+                tenant.Domain);
 
             tenant.Status = TenantStatus.Active;
             tenant.ProvisionedAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
 
-            return (true, result);
+            return (true, $"Tenant '{tenant.Slug}' provisioned on port {tenant.Port}");
         }
         catch (Exception ex)
         {
@@ -149,6 +157,7 @@ public class TenantService(
             try { await docker.StopContainerAsync(dbName); } catch { }
             try { await docker.RemoveContainerAsync(webName); } catch { }
             try { await docker.RemoveContainerAsync(dbName); } catch { }
+            await docker.RemoveTenantResourcesAsync(tenant.Slug);
         }
 
         db.Tenants.Remove(tenant);
@@ -213,29 +222,6 @@ public class TenantService(
         };
     }
 
-    private static async Task<string> RunScriptAsync(string script, string args)
-    {
-        var psi = new ProcessStartInfo
-        {
-            FileName = "/bin/bash",
-            Arguments = $"{script} {args}",
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            UseShellExecute = false
-        };
-
-        using var process = Process.Start(psi)
-            ?? throw new InvalidOperationException("Failed to start process.");
-
-        var output = await process.StandardOutput.ReadToEndAsync();
-        var error = await process.StandardError.ReadToEndAsync();
-        await process.WaitForExitAsync();
-
-        if (process.ExitCode != 0)
-            throw new InvalidOperationException($"Script failed (exit {process.ExitCode}): {error}");
-
-        return output;
-    }
 }
 
 public class DashboardStats
