@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using PTScheduler.Portal.Components;
 using PTScheduler.Portal.Data;
+using PTScheduler.Portal.Entities;
 using PTScheduler.Portal.Services;
 
 var builder = WebApplication.CreateBuilder(args);
@@ -23,6 +24,9 @@ builder.Services.AddIdentity<IdentityUser, IdentityRole>(o =>
     o.Password.RequireUppercase = true;
     o.Password.RequireNonAlphanumeric = true;
     o.SignIn.RequireConfirmedAccount = false;
+    o.Lockout.DefaultLockoutTimeSpan = TimeSpan.FromMinutes(15);
+    o.Lockout.MaxFailedAccessAttempts = 5;
+    o.Lockout.AllowedForNewUsers = true;
 })
 .AddEntityFrameworkStores<PortalDbContext>()
 .AddDefaultTokenProviders();
@@ -76,7 +80,8 @@ app.UseAntiforgery();
 app.MapPost("/api/account/login", async (
     HttpContext ctx,
     SignInManager<IdentityUser> signIn,
-    UserManager<IdentityUser> userMgr) =>
+    UserManager<IdentityUser> userMgr,
+    IDbContextFactory<PortalDbContext> dbFactory) =>
 {
     var form = await ctx.Request.ReadFormAsync();
     var email = form["email"].ToString();
@@ -85,9 +90,31 @@ app.MapPost("/api/account/login", async (
     var returnUrl = form["returnUrl"].ToString();
     if (string.IsNullOrEmpty(returnUrl)) returnUrl = "/panel";
 
-    var result = await signIn.PasswordSignInAsync(email, password, remember, lockoutOnFailure: false);
+    var ip = ctx.Connection.RemoteIpAddress?.ToString();
+    var ua = ctx.Request.Headers.UserAgent.ToString();
+    if (ua.Length > 256) ua = ua[..256];
+
+    var result = await signIn.PasswordSignInAsync(email, password, remember, lockoutOnFailure: true);
+
+    await using var db = dbFactory.CreateDbContext();
+    db.LoginLogs.Add(new LoginLog
+    {
+        Email = email,
+        Success = result.Succeeded,
+        IpAddress = ip,
+        UserAgent = ua,
+        FailureReason = result.Succeeded ? null
+            : result.IsLockedOut ? "locked_out"
+            : result.IsNotAllowed ? "not_allowed"
+            : "invalid_credentials"
+    });
+    await db.SaveChangesAsync();
+
     if (result.Succeeded)
         return Results.Redirect(returnUrl);
+
+    if (result.IsLockedOut)
+        return Results.Redirect("/login?error=locked");
 
     return Results.Redirect("/login?error=1");
 });

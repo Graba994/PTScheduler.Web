@@ -11,6 +11,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Plan> Plans => Set<Plan>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
+    public DbSet<LoginLog> LoginLogs => Set<LoginLog>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -33,6 +34,12 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
         {
             e.HasOne(s => s.Tenant).WithMany(t => t.Subscriptions).HasForeignKey(s => s.TenantId);
             e.HasOne(s => s.Plan).WithMany().HasForeignKey(s => s.PlanId);
+        });
+
+        b.Entity<LoginLog>(e =>
+        {
+            e.HasIndex(l => l.Email);
+            e.HasIndex(l => l.CreatedAt);
         });
 
         SeedPlans(b);
