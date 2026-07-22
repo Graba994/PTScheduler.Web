@@ -1,0 +1,160 @@
+@page "/panel/homepage"
+@layout AdminLayout
+@attribute [Authorize]
+@inject SiteSettingsService Settings
+
+<PageTitle>Edycja strony — PTScheduler</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h4 class="fw-bold mb-1">Strona publiczna</h4>
+        <p class="text-muted small mb-0">Edytuj teksty wyświetlane na stronie głównej</p>
+    </div>
+    <a href="/" target="_blank" class="btn btn-outline-primary btn-sm">
+        <i class="bi bi-eye me-1"></i>Podgląd
+    </a>
+</div>
+
+@if (_saved)
+{
+    <div class="alert alert-success alert-dismissible fade show">
+        <i class="bi bi-check-circle me-1"></i>Zapisano zmiany.
+        <button type="button" class="btn-close" @onclick="() => _saved = false"></button>
+    </div>
+}
+
+<EditForm Model="_form" OnValidSubmit="Save" FormName="homepage">
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white fw-semibold">
+            <i class="bi bi-stars me-1"></i>Sekcja Hero
+        </div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Badge (mała etykieta)</label>
+                <input class="form-control" @bind="_form.HeroBadge" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Tytuł</label>
+                <input class="form-control" @bind="_form.HeroTitle" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Podtytuł</label>
+                <textarea class="form-control" rows="2" @bind="_form.HeroSubtitle"></textarea>
+            </div>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">Tekst przycisku CTA</label>
+                    <input class="form-control" @bind="_form.HeroCta" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">URL przycisku CTA</label>
+                    <input class="form-control" @bind="_form.HeroCtaUrl" />
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white fw-semibold">
+            <i class="bi bi-layout-text-window me-1"></i>Sekcja funkcji
+        </div>
+        <div class="card-body">
+            <div class="mb-0">
+                <label class="form-label small fw-semibold">Tytuł sekcji</label>
+                <input class="form-control" @bind="_form.SectionTitle" />
+            </div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white fw-semibold">
+            <i class="bi bi-megaphone me-1"></i>Sekcja CTA (dolna)
+        </div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Tytuł</label>
+                <input class="form-control" @bind="_form.CtaTitle" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Podtytuł</label>
+                <input class="form-control" @bind="_form.CtaSubtitle" />
+            </div>
+            <div class="mb-0">
+                <label class="form-label small fw-semibold">Tekst przycisku</label>
+                <input class="form-control" @bind="_form.CtaButton" />
+            </div>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary" disabled="@_saving">
+        @if (_saving)
+        {
+            <span class="spinner-border spinner-border-sm me-1"></span>
+        }
+        <i class="bi bi-floppy me-1"></i>Zapisz zmiany
+    </button>
+</EditForm>
+
+@code {
+    private HomepageForm _form = new();
+    private bool _saving, _saved;
+
+    private class HomepageForm
+    {
+        public string HeroBadge { get; set; } = "";
+        public string HeroTitle { get; set; } = "";
+        public string HeroSubtitle { get; set; } = "";
+        public string HeroCta { get; set; } = "";
+        public string HeroCtaUrl { get; set; } = "";
+        public string SectionTitle { get; set; } = "";
+        public string CtaTitle { get; set; } = "";
+        public string CtaSubtitle { get; set; } = "";
+        public string CtaButton { get; set; } = "";
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var s = await Settings.GetAllAsync(
+            SiteSettingsService.Keys.HeroBadge,
+            SiteSettingsService.Keys.HeroTitle,
+            SiteSettingsService.Keys.HeroSubtitle,
+            SiteSettingsService.Keys.HeroCta,
+            SiteSettingsService.Keys.HeroCtaUrl,
+            SiteSettingsService.Keys.SectionTitle,
+            SiteSettingsService.Keys.CtaTitle,
+            SiteSettingsService.Keys.CtaSubtitle,
+            SiteSettingsService.Keys.CtaButton);
+
+        _form.HeroBadge = s[SiteSettingsService.Keys.HeroBadge];
+        _form.HeroTitle = s[SiteSettingsService.Keys.HeroTitle];
+        _form.HeroSubtitle = s[SiteSettingsService.Keys.HeroSubtitle];
+        _form.HeroCta = s[SiteSettingsService.Keys.HeroCta];
+        _form.HeroCtaUrl = s[SiteSettingsService.Keys.HeroCtaUrl];
+        _form.SectionTitle = s[SiteSettingsService.Keys.SectionTitle];
+        _form.CtaTitle = s[SiteSettingsService.Keys.CtaTitle];
+        _form.CtaSubtitle = s[SiteSettingsService.Keys.CtaSubtitle];
+        _form.CtaButton = s[SiteSettingsService.Keys.CtaButton];
+    }
+
+    private async Task Save()
+    {
+        _saving = true;
+        _saved = false;
+
+        await Settings.SetManyAsync(new Dictionary<string, string>
+        {
+            [SiteSettingsService.Keys.HeroBadge] = _form.HeroBadge,
+            [SiteSettingsService.Keys.HeroTitle] = _form.HeroTitle,
+            [SiteSettingsService.Keys.HeroSubtitle] = _form.HeroSubtitle,
+            [SiteSettingsService.Keys.HeroCta] = _form.HeroCta,
+            [SiteSettingsService.Keys.HeroCtaUrl] = _form.HeroCtaUrl,
+            [SiteSettingsService.Keys.SectionTitle] = _form.SectionTitle,
+            [SiteSettingsService.Keys.CtaTitle] = _form.CtaTitle,
+            [SiteSettingsService.Keys.CtaSubtitle] = _form.CtaSubtitle,
+            [SiteSettingsService.Keys.CtaButton] = _form.CtaButton,
+        });
+
+        _saving = false;
+        _saved = true;
+    }
+}

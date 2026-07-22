@@ -12,6 +12,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<Plan> Plans => Set<Plan>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
     public DbSet<LoginLog> LoginLogs => Set<LoginLog>();
+    public DbSet<SiteSetting> SiteSettings => Set<SiteSetting>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -40,6 +41,11 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
         {
             e.HasIndex(l => l.Email);
             e.HasIndex(l => l.CreatedAt);
+        });
+
+        b.Entity<SiteSetting>(e =>
+        {
+            e.HasKey(s => s.Key);
         });
 
         SeedPlans(b);

@@ -41,6 +41,7 @@ builder.Services.AddAuthorization();
 
 builder.Services.AddSingleton<DockerService>();
 builder.Services.AddScoped<TenantService>();
+builder.Services.AddScoped<SiteSettingsService>();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
