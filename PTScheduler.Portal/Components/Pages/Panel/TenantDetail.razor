@@ -3,6 +3,7 @@
 @attribute [Authorize(Roles = "Admin")]
 @inject TenantService TenantSvc
 @inject DockerService DockerSvc
+@inject IDbContextFactory<PortalDbContext> DbFactory
 @inject NavigationManager Nav
 @rendermode InteractiveServer
 
@@ -140,6 +141,30 @@ else
                         </a>
                     </div>
 
+                    <hr class="my-3" />
+                    <h6 class="fw-bold mb-2 small text-muted">Plan</h6>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-7">
+                            <select class="form-select form-select-sm" @bind="_selectedPlanId">
+                                @foreach (var p in _availablePlans)
+                                {
+                                    <option value="@p.Id">@p.Name — @p.MonthlyPrice.ToString("0") zł</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-5">
+                            <button class="btn btn-warning btn-sm w-100" @onclick="ApplyPlanChange" disabled="@_applyingPlan">
+                                @if (_applyingPlan) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                <i class="bi bi-arrow-repeat me-1"></i>Zastosuj (restart web)
+                            </button>
+                        </div>
+                        <div class="col-12">
+                            <p class="text-muted small mb-0 mt-1">
+                                <i class="bi bi-info-circle me-1"></i>Zmiana planu odtwarza kontener web z nowymi limitami. Baza i wolumeny pozostają.
+                            </p>
+                        </div>
+                    </div>
+
                     @if (_provisionOutput is not null)
                     {
                         <pre class="mt-3 p-3 bg-dark text-light rounded small" style="max-height:300px;overflow:auto">@_provisionOutput</pre>
@@ -245,12 +270,43 @@ else
     private bool _confirmDelete;
     private bool _confirmDeleteWithDocker;
     private bool _deleting;
+    private List<Plan> _availablePlans = new();
+    private string _selectedPlanId = "";
+    private bool _applyingPlan;
 
     protected override async Task OnInitializedAsync()
     {
         _tenant = await TenantSvc.GetAsync(Id);
         if (_tenant is not null)
+        {
             await RefreshContainers();
+            _selectedPlanId = _tenant.PlanId;
+
+            await using var db = DbFactory.CreateDbContext();
+            _availablePlans = await db.Plans.AsNoTracking()
+                .Where(p => p.IsActive).OrderBy(p => p.SortOrder).ToListAsync();
+        }
+    }
+
+    private async Task ApplyPlanChange()
+    {
+        if (_tenant is null || string.IsNullOrWhiteSpace(_selectedPlanId)) return;
+        _applyingPlan = true;
+        try
+        {
+            if (_selectedPlanId != _tenant.PlanId)
+                await TenantSvc.UpdatePlanAsync(_tenant.Id, _selectedPlanId);
+
+            var (ok, msg) = await TenantSvc.ReprovisionWebAsync(_tenant.Id);
+            ShowMessage(msg, !ok);
+            _tenant = await TenantSvc.GetAsync(Id);
+            await RefreshContainers();
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Błąd: {ex.Message}", true);
+        }
+        _applyingPlan = false;
     }
 
     private string WebContainerName => _tenant?.WebContainerName ?? $"pt-{_tenant?.Slug}-web";

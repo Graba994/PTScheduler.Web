@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using PTScheduler.Portal.Data;
 using PTScheduler.Portal.Entities;
@@ -98,12 +99,16 @@ public class TenantService(
                     $"Image '{TenantImage}' not found on the Docker host. " +
                     "Build it first: docker build -t ptscheduler-web:latest <path-to-main-app-repo>");
 
+            var plan = await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == tenant.PlanId);
+            var entitlementsJson = plan is null ? null : SerializePlan(plan);
+
             await docker.ProvisionTenantAsync(
                 tenant.Slug,
                 tenant.DbPassword,
                 tenant.Port,
                 TenantImage,
-                tenant.Domain);
+                tenant.Domain,
+                entitlementsJson);
 
             tenant.Status = TenantStatus.Active;
             tenant.ProvisionedAt = DateTime.UtcNow;
@@ -191,6 +196,38 @@ public class TenantService(
         tenant.PlanId = planId;
         await db.SaveChangesAsync();
     }
+
+    public async Task<(bool Success, string Message)> ReprovisionWebAsync(int tenantId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var tenant = await db.Tenants.FindAsync(tenantId)
+            ?? throw new InvalidOperationException("Tenant not found.");
+
+        var plan = await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == tenant.PlanId);
+        if (plan is null) return (false, $"Plan '{tenant.PlanId}' not found.");
+
+        try
+        {
+            var entitlements = SerializePlan(plan);
+            await docker.RecreateWebContainerAsync(
+                tenant.Slug, tenant.DbPassword, tenant.Port,
+                TenantImage, tenant.Domain, entitlements);
+            return (true, $"Web container '{tenant.WebContainerName}' zrestartowany z nowym planem '{plan.Name}'.");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Reprovision failed for tenant {Id}", tenantId);
+            return (false, ex.Message);
+        }
+    }
+
+    public static string SerializePlan(Plan plan) =>
+        JsonSerializer.Serialize(plan, new JsonSerializerOptions
+        {
+            PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+            DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+            ReferenceHandler = System.Text.Json.Serialization.ReferenceHandler.IgnoreCycles
+        });
 
     public async Task<Tenant> ImportAsync(string slug, string domain, int port,
         string companyName, string ownerName, string ownerEmail, string? phone, string planId,

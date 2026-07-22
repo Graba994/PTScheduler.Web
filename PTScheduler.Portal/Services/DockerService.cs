@@ -138,7 +138,7 @@ public class DockerService : IDisposable
     }
 
     public async Task ProvisionTenantAsync(string slug, string dbPassword, int appPort,
-        string webImage, string tenantDomain)
+        string webImage, string tenantDomain, string? entitlementsJson = null)
     {
         var webName = $"pt-{slug}-web";
         var dbName = $"pt-{slug}-db";
@@ -195,17 +195,21 @@ public class DockerService : IDisposable
         var webExisting = await GetContainerInfoAsync(webName);
         if (webExisting is null)
         {
+            var env = new List<string>
+            {
+                $"ConnectionStrings__DefaultConnection=Host={dbName};Port=5432;Database=ptscheduler;Username=ptscheduler;Password={dbPassword}",
+                "ASPNETCORE_ENVIRONMENT=Production",
+                $"TENANT_SLUG={slug}",
+                $"TENANT_DOMAIN={tenantDomain}"
+            };
+            if (!string.IsNullOrWhiteSpace(entitlementsJson))
+                env.Add($"TENANT_ENTITLEMENTS={entitlementsJson}");
+
             await _client.Containers.CreateContainerAsync(new CreateContainerParameters
             {
                 Name = webName,
                 Image = webImage,
-                Env = new List<string>
-                {
-                    $"ConnectionStrings__DefaultConnection=Host={dbName};Port=5432;Database=ptscheduler;Username=ptscheduler;Password={dbPassword}",
-                    "ASPNETCORE_ENVIRONMENT=Production",
-                    $"TENANT_SLUG={slug}",
-                    $"TENANT_DOMAIN={tenantDomain}"
-                },
+                Env = env,
                 ExposedPorts = new Dictionary<string, EmptyStruct> { ["8080/tcp"] = default },
                 HostConfig = new HostConfig
                 {
@@ -241,6 +245,15 @@ public class DockerService : IDisposable
             new ImagesCreateParameters { FromImage = image },
             null,
             new Progress<JSONMessage>());
+    }
+
+    public async Task RecreateWebContainerAsync(string slug, string dbPassword, int appPort,
+        string webImage, string tenantDomain, string entitlementsJson)
+    {
+        var webName = $"pt-{slug}-web";
+        try { await _client.Containers.StopContainerAsync(webName, new ContainerStopParameters()); } catch { }
+        try { await _client.Containers.RemoveContainerAsync(webName, new ContainerRemoveParameters { Force = true }); } catch { }
+        await ProvisionTenantAsync(slug, dbPassword, appPort, webImage, tenantDomain, entitlementsJson);
     }
 
     public async Task RemoveTenantResourcesAsync(string slug)

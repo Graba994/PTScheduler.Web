@@ -29,152 +29,313 @@
                 <i class="bi bi-pencil me-2"></i>@(_isNew ? "Nowy plan" : $"Edycja: {_editing.Name}")
             </h6>
 
-            <EditForm Model="_editing" OnValidSubmit="SavePlan" FormName="planForm">
-                <DataAnnotationsValidator />
-                <div class="row g-3">
-                    <div class="col-md-4">
-                        <label class="form-label fw-semibold">ID <span class="text-danger">*</span></label>
-                        <InputText class="form-control font-monospace" @bind-Value="_editing.Id" disabled="@(!_isNew)" />
-                        <div class="form-text">Unikalny identyfikator (np. pro, studio)</div>
-                        <ValidationMessage For="() => _editing.Id" />
+            <div class="row g-3 mb-3">
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">ID (slug)</label>
+                    <input class="form-control font-monospace" @bind="_editing.Id" disabled="@(!_isNew)" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">Nazwa</label>
+                    <input class="form-control" @bind="_editing.Name" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">Opis</label>
+                    <input class="form-control" @bind="_editing.Description" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">Cena mies. (zł)</label>
+                    <input type="number" class="form-control" @bind="_editing.MonthlyPrice" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">Cena roczna (zł)</label>
+                    <input type="number" class="form-control" @bind="_editing.YearlyPrice" />
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-semibold">Kolejność</label>
+                    <input type="number" class="form-control" @bind="_editing.SortOrder" />
+                </div>
+                <div class="col-md-4 d-flex align-items-end gap-3">
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="ac" @bind="_editing.IsActive" />
+                        <label class="form-check-label small" for="ac">Aktywny</label>
                     </div>
-                    <div class="col-md-4">
-                        <label class="form-label fw-semibold">Nazwa <span class="text-danger">*</span></label>
-                        <InputText class="form-control" @bind-Value="_editing.Name" />
-                        <ValidationMessage For="() => _editing.Name" />
+                    <div class="form-check">
+                        <input class="form-check-input" type="checkbox" id="fe" @bind="_editing.IsFeatured" />
+                        <label class="form-check-label small" for="fe">Wyróżniony</label>
                     </div>
-                    <div class="col-md-4">
-                        <label class="form-label fw-semibold">Kolejność</label>
-                        <InputNumber class="form-control" @bind-Value="_editing.SortOrder" />
-                    </div>
-                    <div class="col-12">
-                        <label class="form-label fw-semibold">Opis</label>
-                        <InputText class="form-control" @bind-Value="_editing.Description" />
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label fw-semibold">Cena mies. (zł)</label>
-                        <InputNumber class="form-control" @bind-Value="_editing.MonthlyPrice" />
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label fw-semibold">Cena roczna (zł)</label>
-                        <InputNumber class="form-control" @bind-Value="_editing.YearlyPrice" />
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label fw-semibold">Max klientów</label>
-                        <InputNumber class="form-control" @bind-Value="_editing.MaxClients" />
-                    </div>
-                    <div class="col-md-3">
-                        <label class="form-label fw-semibold">Waluta</label>
-                        <InputText class="form-control" @bind-Value="_editing.Currency" />
-                    </div>
+                </div>
+            </div>
 
-                    <div class="col-12">
-                        <div class="d-flex flex-wrap gap-3">
-                            <div class="form-check">
-                                <InputCheckbox class="form-check-input" @bind-Value="_editing.PaymentsEnabled" id="chkPayments" />
-                                <label class="form-check-label" for="chkPayments">Płatności</label>
-                            </div>
-                            <div class="form-check">
-                                <InputCheckbox class="form-check-input" @bind-Value="_editing.CoursesEnabled" id="chkCourses" />
-                                <label class="form-check-label" for="chkCourses">Kursy</label>
-                            </div>
-                            <div class="form-check">
-                                <InputCheckbox class="form-check-input" @bind-Value="_editing.CustomDomain" id="chkDomain" />
-                                <label class="form-check-label" for="chkDomain">Własna domena</label>
-                            </div>
-                            <div class="form-check">
-                                <InputCheckbox class="form-check-input" @bind-Value="_editing.PrioritySupport" id="chkSupport" />
-                                <label class="form-check-label" for="chkSupport">Priorytet</label>
-                            </div>
-                            <div class="form-check">
-                                <InputCheckbox class="form-check-input" @bind-Value="_editing.IsFeatured" id="chkFeatured" />
-                                <label class="form-check-label" for="chkFeatured">Wyróżniony</label>
-                            </div>
-                            <div class="form-check">
-                                <InputCheckbox class="form-check-input" @bind-Value="_editing.IsActive" id="chkActive" />
-                                <label class="form-check-label" for="chkActive">Aktywny</label>
+            <div class="accordion" id="planAcc">
+                @Section("limits", "Limity ilościowe", "bi-graph-up", () =>
+                {
+                    return
+                    @<div class="row g-2">
+                        @Number("Klienci", () => _editing!.MaxClients, v => _editing!.MaxClients = v)
+                        @Number("Trenerzy dodatkowi", () => _editing!.MaxTrainers, v => _editing!.MaxTrainers = v)
+                        @Number("Asystenci/podwładni", () => _editing!.MaxSubordinates, v => _editing!.MaxSubordinates = v)
+                        @Number("Lokalizacje", () => _editing!.MaxLocations, v => _editing!.MaxLocations = v)
+                        @Number("Kursy wideo", () => _editing!.MaxCourses, v => _editing!.MaxCourses = v)
+                        @Number("Wizyty / mies.", () => _editing!.MaxSessionsPerMonth, v => _editing!.MaxSessionsPerMonth = v)
+                        @Number("Storage (GB)", () => _editing!.MaxStorageGB, v => _editing!.MaxStorageGB = v)
+                        @Number("Video storage (GB)", () => _editing!.MaxVideoStorageGB, v => _editing!.MaxVideoStorageGB = v)
+                        @Number("Video bandwidth (GB/mies.)", () => _editing!.MaxVideoBandwidthGBPerMonth, v => _editing!.MaxVideoBandwidthGBPerMonth = v)
+                        @Number("Emaile / mies.", () => _editing!.MaxEmailsPerMonth, v => _editing!.MaxEmailsPerMonth = v)
+                        @Number("SMS / mies.", () => _editing!.MaxSmsPerMonth, v => _editing!.MaxSmsPerMonth = v)
+                        @Number("Push / dzień", () => _editing!.MaxPushNotificationsPerDay, v => _editing!.MaxPushNotificationsPerDay = v)
+                        @Number("Retencja backupów (dni)", () => _editing!.BackupRetentionDays, v => _editing!.BackupRetentionDays = v)
+                    </div>;
+                })
+
+                @Section("payments", "Płatności", "bi-credit-card", () =>
+                {
+                    return
+                    @<div class="row g-2">
+                        @Flag("Płatności online", () => _editing!.PaymentsEnabled, v => _editing!.PaymentsEnabled = v)
+                        @Flag("Wielu operatorów płatności", () => _editing!.MultipleGateways, v => _editing!.MultipleGateways = v)
+                        @Flag("Fakturowanie", () => _editing!.Invoicing, v => _editing!.Invoicing = v)
+                        @Flag("Raporty VAT/JPK", () => _editing!.TaxReports, v => _editing!.TaxReports = v)
+                        @Flag("Kody rabatowe", () => _editing!.Coupons, v => _editing!.Coupons = v)
+                        @Flag("Subskrypcje cykliczne", () => _editing!.Subscriptions, v => _editing!.Subscriptions = v)
+                    </div>;
+                })
+
+                @Section("materials", "Materiały dla klientów", "bi-book", () =>
+                {
+                    return
+                    @<div class="row g-2">
+                        @Flag("Kursy wideo", () => _editing!.CoursesEnabled, v => _editing!.CoursesEnabled = v)
+                        @Flag("Plany treningowe", () => _editing!.WorkoutPlansEnabled, v => _editing!.WorkoutPlansEnabled = v)
+                        @Flag("Plany dietetyczne", () => _editing!.MealPlansEnabled, v => _editing!.MealPlansEnabled = v)
+                        @Flag("Dokumenty klienta", () => _editing!.ClientDocuments, v => _editing!.ClientDocuments = v)
+                        @Flag("Zdjęcia postępów", () => _editing!.ProgressPhotos, v => _editing!.ProgressPhotos = v)
+                        @Flag("Pomiary ciała", () => _editing!.BodyMeasurements, v => _editing!.BodyMeasurements = v)
+                        @Flag("Śledzenie makro/kcal", () => _editing!.NutritionTracking, v => _editing!.NutritionTracking = v)
+                    </div>;
+                })
+
+                @Section("comm", "Komunikacja", "bi-chat-dots", () =>
+                {
+                    return
+                    @<div class="row g-2">
+                        @Flag("Czat z klientem", () => _editing!.ClientChat, v => _editing!.ClientChat = v)
+                        @Flag("Rozmowy wideo", () => _editing!.VideoCalls, v => _editing!.VideoCalls = v)
+                        @Flag("Przypomnienia email", () => _editing!.EmailReminders, v => _editing!.EmailReminders = v)
+                        @Flag("Przypomnienia SMS", () => _editing!.SmsReminders, v => _editing!.SmsReminders = v)
+                        @Flag("Push notyfikacje", () => _editing!.PushNotifications, v => _editing!.PushNotifications = v)
+                        @Flag("Automatyczne follow-upy", () => _editing!.AutomatedFollowups, v => _editing!.AutomatedFollowups = v)
+                        @Flag("Wiadomości do grup", () => _editing!.GroupMessaging, v => _editing!.GroupMessaging = v)
+                    </div>;
+                })
+
+                @Section("schedule", "Grafik", "bi-calendar-week", () =>
+                {
+                    return
+                    @<div class="row g-2">
+                        @Flag("Sesje grupowe", () => _editing!.GroupSessions, v => _editing!.GroupSessions = v)
+                        @Flag("Sesje cykliczne", () => _editing!.RecurringSessions, v => _editing!.RecurringSessions = v)
+                        @Flag("Lista oczekujących", () => _editing!.Waitlist, v => _editing!.Waitlist = v)
+                        @Flag("Wiele kalendarzy", () => _editing!.MultipleCalendars, v => _editing!.MultipleCalendars = v)
+                        @Flag("Sync (Google/iCal)", () => _editing!.CalendarSync, v => _editing!.CalendarSync = v)
+                    </div>;
+                })
+
+                @Section("security", "Uprawnienia i bezpieczeństwo", "bi-shield-lock", () =>
+                {
+                    return
+                    @<div class="row g-2">
+                        @Flag("Role i uprawnienia (RBAC)", () => _editing!.RoleBasedAccess, v => _editing!.RoleBasedAccess = v)
+                        @Flag("Audit log", () => _editing!.AuditLog, v => _editing!.AuditLog = v)
+                        @Flag("2FA (dwuskładnikowe)", () => _editing!.TwoFactorAuth, v => _editing!.TwoFactorAuth = v)
+                    </div>;
+                })
+
+                @Section("branding", "Branding i wygląd", "bi-palette", () =>
+                {
+                    return
+                    @<div class="row g-2">
+                        @Flag("Własne logo", () => _editing!.CustomLogo, v => _editing!.CustomLogo = v)
+                        @Flag("Własne kolory", () => _editing!.CustomColors, v => _editing!.CustomColors = v)
+                        @Flag("Własna favicon", () => _editing!.CustomFavicon, v => _editing!.CustomFavicon = v)
+                        @Flag("Własna domena", () => _editing!.CustomDomain, v => _editing!.CustomDomain = v)
+                        @Flag("Usunięcie \"Powered by\"", () => _editing!.RemoveWatermark, v => _editing!.RemoveWatermark = v)
+                        @Flag("Szablony email", () => _editing!.CustomEmailTemplates, v => _editing!.CustomEmailTemplates = v)
+                        @Flag("Wiele języków", () => _editing!.MultiLanguage, v => _editing!.MultiLanguage = v)
+                        @Flag("Landing page builder", () => _editing!.LandingPageBuilder, v => _editing!.LandingPageBuilder = v)
+                        @Flag("Blog", () => _editing!.BlogModule, v => _editing!.BlogModule = v)
+                    </div>;
+                })
+
+                @Section("reports", "Raporty i analityka", "bi-graph-up-arrow", () =>
+                {
+                    return
+                    @<div class="row g-2">
+                        @Flag("Podstawowe statystyki", () => _editing!.BasicAnalytics, v => _editing!.BasicAnalytics = v)
+                        @Flag("Zaawansowana analityka", () => _editing!.AdvancedAnalytics, v => _editing!.AdvancedAnalytics = v)
+                        @Flag("Raporty finansowe", () => _editing!.FinancialReports, v => _editing!.FinancialReports = v)
+                        @Flag("Raporty klienta (PDF)", () => _editing!.ClientReports, v => _editing!.ClientReports = v)
+                        @Flag("Eksport danych (CSV/JSON)", () => _editing!.DataExport, v => _editing!.DataExport = v)
+                    </div>;
+                })
+
+                @Section("ai", "AI", "bi-stars", () =>
+                {
+                    return
+                    @<div class="row g-2">
+                        @Flag("AI generator treningów", () => _editing!.AiWorkoutGenerator, v => _editing!.AiWorkoutGenerator = v)
+                        @Flag("AI planner diet", () => _editing!.AiMealPlanner, v => _editing!.AiMealPlanner = v)
+                        @Flag("AI chatbot", () => _editing!.AiChatbot, v => _editing!.AiChatbot = v)
+                        @Flag("AI transkrypcje rozmów", () => _editing!.AiCallTranscription, v => _editing!.AiCallTranscription = v)
+                    </div>;
+                })
+
+                @Section("support", "Wsparcie", "bi-headset", () =>
+                {
+                    return
+                    @<div class="row g-2">
+                        @Flag("Email support", () => _editing!.EmailSupport, v => _editing!.EmailSupport = v)
+                        @Flag("Priorytetowe wsparcie", () => _editing!.PrioritySupport, v => _editing!.PrioritySupport = v)
+                        @Flag("Wsparcie telefoniczne", () => _editing!.PhoneSupport, v => _editing!.PhoneSupport = v)
+                        @Flag("Dedykowany opiekun", () => _editing!.DedicatedAccountManager, v => _editing!.DedicatedAccountManager = v)
+                        @Flag("Onboarding call", () => _editing!.OnboardingCall, v => _editing!.OnboardingCall = v)
+                        @Flag("Gwarancja SLA", () => _editing!.SlaGuarantee, v => _editing!.SlaGuarantee = v)
+                    </div>;
+                })
+
+                @Section("integrations", "Integracje", "bi-plug", () =>
+                {
+                    return
+                    @<div>
+                        <div class="text-muted small mb-2 mt-1"><strong>Płatności</strong></div>
+                        <div class="row g-2 mb-2">
+                            @Flag("PayU", () => _editing!.IntegrationPayU, v => _editing!.IntegrationPayU = v)
+                            @Flag("Przelewy24", () => _editing!.IntegrationPrzelewy24, v => _editing!.IntegrationPrzelewy24 = v)
+                            @Flag("Stripe", () => _editing!.IntegrationStripe, v => _editing!.IntegrationStripe = v)
+                            @Flag("AutoPay", () => _editing!.IntegrationAutoPay, v => _editing!.IntegrationAutoPay = v)
+                            @Flag("Klarna", () => _editing!.IntegrationKlarna, v => _editing!.IntegrationKlarna = v)
+                            @Flag("BLIK", () => _editing!.IntegrationBlik, v => _editing!.IntegrationBlik = v)
+                        </div>
+                        <div class="text-muted small mb-2"><strong>Wideo (hosting materiałów)</strong></div>
+                        <div class="row g-2 mb-2">
+                            <div class="col-md-6">
+                                <label class="form-label small">Provider wideo</label>
+                                <select class="form-select form-select-sm" @bind="_editing!.VideoProvider">
+                                    <option value="none">Brak</option>
+                                    <option value="youtube">YouTube (linki)</option>
+                                    <option value="bunny">Bunny.net</option>
+                                    <option value="vimeo">Vimeo</option>
+                                </select>
                             </div>
                         </div>
-                    </div>
-                </div>
+                        <div class="text-muted small mb-2"><strong>Kalendarze i rozmowy</strong></div>
+                        <div class="row g-2 mb-2">
+                            @Flag("Google Calendar", () => _editing!.IntegrationGoogleCalendar, v => _editing!.IntegrationGoogleCalendar = v)
+                            @Flag("Outlook Calendar", () => _editing!.IntegrationOutlookCalendar, v => _editing!.IntegrationOutlookCalendar = v)
+                            @Flag("Apple Calendar", () => _editing!.IntegrationAppleCalendar, v => _editing!.IntegrationAppleCalendar = v)
+                            @Flag("Zoom", () => _editing!.IntegrationZoom, v => _editing!.IntegrationZoom = v)
+                            @Flag("Google Meet", () => _editing!.IntegrationGoogleMeet, v => _editing!.IntegrationGoogleMeet = v)
+                            @Flag("MS Teams", () => _editing!.IntegrationTeams, v => _editing!.IntegrationTeams = v)
+                        </div>
+                        <div class="text-muted small mb-2"><strong>Marketing i automatyzacja</strong></div>
+                        <div class="row g-2 mb-2">
+                            @Flag("MailerLite", () => _editing!.IntegrationMailerLite, v => _editing!.IntegrationMailerLite = v)
+                            @Flag("Mailchimp", () => _editing!.IntegrationMailchimp, v => _editing!.IntegrationMailchimp = v)
+                            @Flag("Zapier", () => _editing!.IntegrationZapier, v => _editing!.IntegrationZapier = v)
+                            @Flag("Make (Integromat)", () => _editing!.IntegrationMake, v => _editing!.IntegrationMake = v)
+                            @Flag("Custom webhooks", () => _editing!.IntegrationCustomWebhooks, v => _editing!.IntegrationCustomWebhooks = v)
+                        </div>
+                        <div class="text-muted small mb-2"><strong>Powiadomienia zewnętrzne</strong></div>
+                        <div class="row g-2 mb-2">
+                            @Flag("Slack", () => _editing!.IntegrationSlack, v => _editing!.IntegrationSlack = v)
+                            @Flag("Telegram", () => _editing!.IntegrationTelegram, v => _editing!.IntegrationTelegram = v)
+                            @Flag("WhatsApp Business", () => _editing!.IntegrationWhatsApp, v => _editing!.IntegrationWhatsApp = v)
+                            @Flag("Discord", () => _editing!.IntegrationDiscord, v => _editing!.IntegrationDiscord = v)
+                        </div>
+                        <div class="text-muted small mb-2"><strong>Analityka</strong></div>
+                        <div class="row g-2">
+                            @Flag("Google Analytics", () => _editing!.IntegrationGoogleAnalytics, v => _editing!.IntegrationGoogleAnalytics = v)
+                            @Flag("Meta Pixel", () => _editing!.IntegrationMetaPixel, v => _editing!.IntegrationMetaPixel = v)
+                        </div>
+                    </div>;
+                })
+            </div>
 
-                <div class="mt-4 d-flex gap-2">
-                    <button type="submit" class="btn btn-primary btn-sm" disabled="@_saving">
-                        @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                        <i class="bi bi-check-lg me-1"></i>Zapisz
-                    </button>
-                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => _editing = null">Anuluj</button>
-                </div>
-            </EditForm>
+            <div class="mt-4 d-flex gap-2">
+                <button class="btn btn-primary" @onclick="Save"><i class="bi bi-floppy me-1"></i>Zapisz</button>
+                <button class="btn btn-outline-secondary" @onclick="Cancel">Anuluj</button>
+            </div>
         </div>
     </div>
 }
 
 <div class="card border-0 shadow-sm">
-    <div class="table-responsive">
-        <table class="table table-hover align-middle mb-0 small">
-            <thead class="table-light">
-                <tr>
-                    <th>ID</th>
-                    <th>Nazwa</th>
-                    <th>Cena mies.</th>
-                    <th>Cena roczna</th>
-                    <th>Max klientów</th>
-                    <th>Funkcje</th>
-                    <th>Trenerów</th>
-                    <th>Status</th>
-                    <th></th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var p in _plans)
-                {
-                    <tr class="@(!p.IsActive ? "table-secondary" : "")">
-                        <td class="font-monospace fw-semibold">@p.Id</td>
-                        <td>
-                            @p.Name
-                            @if (p.IsFeatured) { <span class="badge bg-warning text-dark ms-1">★</span> }
-                        </td>
-                        <td class="fw-semibold">@p.MonthlyPrice.ToString("0") zł</td>
-                        <td class="text-muted">@(p.YearlyPrice?.ToString("0") ?? "—") zł</td>
-                        <td>@(p.MaxClients == int.MaxValue ? "∞" : p.MaxClients.ToString())</td>
-                        <td>
-                            @if (p.PaymentsEnabled) { <span class="badge bg-success-subtle text-success-emphasis me-1">Płatności</span> }
-                            @if (p.CoursesEnabled) { <span class="badge bg-info-subtle text-info-emphasis me-1">Kursy</span> }
-                            @if (p.CustomDomain) { <span class="badge bg-primary-subtle text-primary-emphasis me-1">Domena</span> }
-                            @if (p.PrioritySupport) { <span class="badge bg-warning-subtle text-warning-emphasis">Priorytet</span> }
-                        </td>
-                        <td class="text-muted">@p.Tenants.Count</td>
-                        <td>
-                            <span class="badge @(p.IsActive ? "bg-success" : "bg-secondary")">
-                                @(p.IsActive ? "Aktywny" : "Nieaktywny")
-                            </span>
-                        </td>
-                        <td>
-                            <div class="d-flex gap-1">
-                                <button class="btn btn-sm btn-outline-primary" @onclick="() => EditPlan(p)">
-                                    <i class="bi bi-pencil"></i>
-                                </button>
-                                @if (p.Tenants.Count == 0)
-                                {
-                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => DeletePlan(p.Id)">
-                                        <i class="bi bi-trash"></i>
+    <div class="card-body p-0">
+        @if (_plans.Count == 0)
+        {
+            <p class="text-muted small p-3 mb-0">Brak planów.</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 small align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>ID</th>
+                            <th>Nazwa</th>
+                            <th>Cena/mies.</th>
+                            <th>Klienci</th>
+                            <th>Trenerów</th>
+                            <th>Video GB</th>
+                            <th>Video BW</th>
+                            <th>Płatności</th>
+                            <th>Domena</th>
+                            <th>AI</th>
+                            <th>Aktywny</th>
+                            <th>Trenerów w planie</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var p in _plans.OrderBy(x => x.SortOrder))
+                        {
+                            <tr>
+                                <td class="font-monospace text-muted">@p.Id</td>
+                                <td class="fw-semibold">@p.Name @if (p.IsFeatured) { <span class="badge bg-warning text-dark ms-1">★</span> }</td>
+                                <td>@p.MonthlyPrice.ToString("0") zł</td>
+                                <td>@Fmt(p.MaxClients)</td>
+                                <td>@Fmt(p.MaxTrainers)</td>
+                                <td>@p.MaxVideoStorageGB</td>
+                                <td>@p.MaxVideoBandwidthGBPerMonth</td>
+                                <td>@Yn(p.PaymentsEnabled)</td>
+                                <td>@Yn(p.CustomDomain)</td>
+                                <td>@Yn(p.AiWorkoutGenerator || p.AiMealPlanner || p.AiChatbot)</td>
+                                <td>@Yn(p.IsActive)</td>
+                                <td>@_planTenantCount.GetValueOrDefault(p.Id, 0)</td>
+                                <td class="text-end">
+                                    <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => Edit(p)">
+                                        <i class="bi bi-pencil"></i>
                                     </button>
-                                }
-                            </div>
-                        </td>
-                    </tr>
-                }
-            </tbody>
-        </table>
+                                    @if (_planTenantCount.GetValueOrDefault(p.Id, 0) == 0)
+                                    {
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => Delete(p.Id)">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
     </div>
 </div>
 
 @code {
-    private List<Plan> _plans = [];
+    private List<Plan> _plans = new();
+    private Dictionary<string, int> _planTenantCount = new();
     private Plan? _editing;
     private bool _isNew;
-    private bool _saving;
     private string? _message;
     private bool _msgError;
 
@@ -183,113 +344,118 @@
     private async Task Load()
     {
         await using var db = DbFactory.CreateDbContext();
-        _plans = await db.Plans
-            .AsNoTracking()
-            .Include(p => p.Tenants)
-            .OrderBy(p => p.SortOrder)
-            .ToListAsync();
+        _plans = await db.Plans.AsNoTracking().ToListAsync();
+        _planTenantCount = await db.Tenants.GroupBy(t => t.PlanId)
+            .Select(g => new { g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count);
     }
 
     private void NewPlan()
     {
         _isNew = true;
-        _editing = new Plan
-        {
-            Id = "",
-            Name = "",
-            SortOrder = _plans.Count + 1,
-            MaxClients = 10,
-            IsActive = true
-        };
+        _editing = new Plan { Id = "", Name = "", IsActive = true, SortOrder = _plans.Count + 1 };
     }
 
-    private void EditPlan(Plan p)
+    private void Edit(Plan p)
     {
         _isNew = false;
-        _editing = new Plan
-        {
-            Id = p.Id,
-            Name = p.Name,
-            Description = p.Description,
-            MonthlyPrice = p.MonthlyPrice,
-            YearlyPrice = p.YearlyPrice,
-            Currency = p.Currency,
-            MaxClients = p.MaxClients,
-            PaymentsEnabled = p.PaymentsEnabled,
-            CoursesEnabled = p.CoursesEnabled,
-            CustomDomain = p.CustomDomain,
-            PrioritySupport = p.PrioritySupport,
-            SortOrder = p.SortOrder,
-            IsActive = p.IsActive,
-            IsFeatured = p.IsFeatured
-        };
+        _editing = CloneOf(p);
     }
 
-    private async Task SavePlan()
+    private void Cancel() => _editing = null;
+
+    private async Task Save()
     {
         if (_editing is null) return;
-        _saving = true;
+        if (string.IsNullOrWhiteSpace(_editing.Id) || string.IsNullOrWhiteSpace(_editing.Name))
+        {
+            _message = "ID i nazwa są wymagane."; _msgError = true; return;
+        }
+
         try
         {
             await using var db = DbFactory.CreateDbContext();
             if (_isNew)
             {
-                if (string.IsNullOrWhiteSpace(_editing.Id))
-                {
-                    Show("ID planu jest wymagane.", true);
-                    return;
-                }
-                _editing.Id = _editing.Id.Trim().ToLowerInvariant();
                 if (await db.Plans.AnyAsync(p => p.Id == _editing.Id))
-                {
-                    Show($"Plan '{_editing.Id}' już istnieje.", true);
-                    return;
-                }
+                    throw new InvalidOperationException($"Plan o ID '{_editing.Id}' już istnieje.");
                 db.Plans.Add(_editing);
             }
             else
             {
-                var existing = await db.Plans.FindAsync(_editing.Id);
-                if (existing is null) { Show("Plan nie znaleziony.", true); return; }
-
-                existing.Name = _editing.Name;
-                existing.Description = _editing.Description;
-                existing.MonthlyPrice = _editing.MonthlyPrice;
-                existing.YearlyPrice = _editing.YearlyPrice;
-                existing.Currency = _editing.Currency;
-                existing.MaxClients = _editing.MaxClients;
-                existing.PaymentsEnabled = _editing.PaymentsEnabled;
-                existing.CoursesEnabled = _editing.CoursesEnabled;
-                existing.CustomDomain = _editing.CustomDomain;
-                existing.PrioritySupport = _editing.PrioritySupport;
-                existing.SortOrder = _editing.SortOrder;
-                existing.IsActive = _editing.IsActive;
-                existing.IsFeatured = _editing.IsFeatured;
+                var existing = await db.Plans.FirstOrDefaultAsync(p => p.Id == _editing.Id);
+                if (existing is null) throw new InvalidOperationException("Plan nie istnieje.");
+                db.Entry(existing).CurrentValues.SetValues(_editing);
             }
             await db.SaveChangesAsync();
             _editing = null;
-            Show(_isNew ? "Plan utworzony." : "Plan zapisany.");
             await Load();
+            _message = "Zapisano."; _msgError = false;
         }
-        catch (Exception ex) { Show($"Błąd: {ex.Message}", true); }
-        finally { _saving = false; }
+        catch (Exception ex)
+        {
+            _message = ex.Message; _msgError = true;
+        }
     }
 
-    private async Task DeletePlan(string id)
+    private async Task Delete(string id)
     {
         try
         {
             await using var db = DbFactory.CreateDbContext();
-            var plan = await db.Plans.Include(p => p.Tenants).FirstOrDefaultAsync(p => p.Id == id);
-            if (plan is null) return;
-            if (plan.Tenants.Count > 0) { Show("Nie można usunąć planu z przypisanymi trenerami.", true); return; }
-            db.Plans.Remove(plan);
+            var p = await db.Plans.FirstOrDefaultAsync(x => x.Id == id);
+            if (p is null) return;
+            db.Plans.Remove(p);
             await db.SaveChangesAsync();
-            Show("Plan usunięty.");
             await Load();
+            _message = "Plan usunięty."; _msgError = false;
         }
-        catch (Exception ex) { Show($"Błąd: {ex.Message}", true); }
+        catch (Exception ex)
+        {
+            _message = ex.Message; _msgError = true;
+        }
     }
 
-    private void Show(string msg, bool err = false) { _message = msg; _msgError = err; }
+    private static Plan CloneOf(Plan p)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(p);
+        return System.Text.Json.JsonSerializer.Deserialize<Plan>(json)!;
+    }
+
+    private static string Fmt(int v) => v == int.MaxValue ? "∞" : v.ToString();
+    private static MarkupString Yn(bool b) => new(b
+        ? "<i class=\"bi bi-check-circle-fill text-success\"></i>"
+        : "<i class=\"bi bi-dash text-muted\"></i>");
+
+    private RenderFragment Section(string id, string title, string icon, Func<RenderFragment> body) =>
+        @<div class="accordion-item">
+            <h2 class="accordion-header">
+                <button class="accordion-button collapsed small fw-semibold" type="button"
+                        data-bs-toggle="collapse" data-bs-target="#sec-@id">
+                    <i class="bi @icon me-2"></i>@title
+                </button>
+            </h2>
+            <div id="sec-@id" class="accordion-collapse collapse" data-bs-parent="#planAcc">
+                <div class="accordion-body">
+                    @body()
+                </div>
+            </div>
+        </div>;
+
+    private RenderFragment Flag(string label, Func<bool> get, Action<bool> set) =>
+        @<div class="col-md-4">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" checked="@get()"
+                       @onchange="e => set((bool)e.Value!)" id="f-@label.GetHashCode()" />
+                <label class="form-check-label small" for="f-@label.GetHashCode()">@label</label>
+            </div>
+        </div>;
+
+    private RenderFragment Number(string label, Func<int> get, Action<int> set) =>
+        @<div class="col-md-3">
+            <label class="form-label small mb-1">@label</label>
+            <input type="number" class="form-control form-control-sm"
+                   value="@get()"
+                   @onchange="e => set(int.TryParse(e.Value?.ToString(), out var v) ? v : 0)" />
+        </div>;
 }
