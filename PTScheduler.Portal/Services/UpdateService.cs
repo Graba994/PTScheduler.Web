@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using Docker.DotNet.Models;
 using Microsoft.EntityFrameworkCore;
 using PTScheduler.Portal.Data;
 
@@ -9,6 +10,7 @@ public class UpdateService(
     IConfiguration config,
     IDbContextFactory<PortalDbContext> dbFactory,
     TenantService tenants,
+    DockerService docker,
     ILogger<UpdateService> logger)
 {
     private static readonly HttpClient _http = new()
@@ -22,6 +24,8 @@ public class UpdateService(
     private string GitHubRepo => config.GetValue<string>("Portal:GitHubRepo") ?? "ptscheduler.web";
     private string DefaultBranch => Environment.GetEnvironmentVariable("PTS_BUILD_BRANCH") ?? "main";
     private string TenantImage => config.GetValue<string>("Portal:TenantImage") ?? "ptscheduler-web:latest";
+    private string PortalContainerName => config.GetValue<string>("Portal:ContainerName") ?? "ptportal";
+    private string PortalImage => config.GetValue<string>("Portal:PortalImage") ?? "ptportal:latest";
 
     public VersionInfo GetCurrent() => new()
     {
@@ -63,6 +67,108 @@ public class UpdateService(
         && current.Commit != "unknown"
         && !remote.Commit.StartsWith(current.Commit)
         && !current.Commit.StartsWith(remote.Commit);
+
+    public async Task<UpgradeResult> UpgradePortalAsync()
+    {
+        var log = new List<string>();
+        try
+        {
+            if (!Directory.Exists(RepoDir))
+                return new UpgradeResult(false,
+                    $"Katalog repo '{RepoDir}' nie zamontowany. Dodaj -v /mnt/user/appdata/ptscheduler-repo:/opt/ptscheduler/repo",
+                    log);
+
+            var (fetchOk, fetchOut) = await RunAsync("git", "fetch origin", RepoDir);
+            log.Add($"git fetch: {(fetchOk ? "OK" : "FAIL")}");
+            log.Add(fetchOut);
+            if (!fetchOk) return new UpgradeResult(false, "git fetch nie powiódł się", log);
+
+            var (pullOk, pullOut) = await RunAsync("git", $"pull origin {DefaultBranch}", RepoDir);
+            log.Add($"git pull origin {DefaultBranch}: {(pullOk ? "OK" : "FAIL")}");
+            log.Add(pullOut);
+            if (!pullOk) return new UpgradeResult(false, "git pull nie powiódł się", log);
+
+            var (commitOk, commitOut) = await RunAsync("git", "rev-parse HEAD", RepoDir);
+            var newCommit = commitOk ? commitOut.Trim() : "unknown";
+            var now = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+
+            log.Add("→ Building portal image (ptportal:pending)...");
+            var (buildOk, buildOut) = await RunAsync("docker",
+                $"build --build-arg BUILD_COMMIT={newCommit} --build-arg BUILD_TIME={now} --build-arg BUILD_BRANCH={DefaultBranch} -t ptportal:pending -f PTScheduler.Portal/Dockerfile .",
+                RepoDir, timeoutMinutes: 20);
+            log.Add(buildOut);
+            if (!buildOk) return new UpgradeResult(false, "Build portalu nie powiódł się", log);
+            log.Add("✓ ptportal:pending zbudowany");
+
+            var self = await docker.InspectAsync(PortalContainerName);
+            if (self is null)
+                return new UpgradeResult(false,
+                    $"Nie mogę zinspekcjonować kontenera '{PortalContainerName}'. Sprawdź Portal:ContainerName.", log);
+
+            log.Add($"✓ Zinspekcjonowałem kontener {PortalContainerName}");
+            log.Add("→ Uruchamiam pomocnika-restartera (5 sekund opóźnienia)...");
+
+            // Serialize current portal config as docker run flags for the helper
+            var envArgs = string.Join(" ",
+                self.Config.Env.Select(e => $"-e {ShellQuote(e)}"));
+            var bindArgs = self.HostConfig.Binds is null ? "" :
+                string.Join(" ", self.HostConfig.Binds.Select(b => $"-v {ShellQuote(b)}"));
+            var netMode = self.HostConfig.NetworkMode ?? "bridge";
+            var restart = self.HostConfig.RestartPolicy?.Name.ToString().ToLowerInvariant() ?? "unless-stopped";
+            var portArgs = "";
+            if (netMode != "host" && self.HostConfig.PortBindings is not null)
+            {
+                var parts = new List<string>();
+                foreach (var (containerPort, bindings) in self.HostConfig.PortBindings)
+                {
+                    if (bindings is null) continue;
+                    foreach (var b in bindings)
+                    {
+                        var hostPort = string.IsNullOrEmpty(b.HostPort) ? "" : b.HostPort;
+                        var proto = containerPort.Split('/').Last();
+                        var num = containerPort.Split('/')[0];
+                        parts.Add($"-p {hostPort}:{num}/{proto}");
+                    }
+                }
+                portArgs = string.Join(" ", parts);
+            }
+
+            var script =
+                "set -e\n" +
+                "sleep 5\n" +
+                $"docker stop {PortalContainerName} 2>/dev/null || true\n" +
+                $"docker rm {PortalContainerName} 2>/dev/null || true\n" +
+                $"docker tag ptportal:pending {PortalImage}\n" +
+                $"docker run -d --name {PortalContainerName} --network {netMode} --restart {restart} {envArgs} {bindArgs} {portArgs} {PortalImage}\n";
+
+            var helperName = $"ptportal-upgrader-{DateTime.UtcNow:yyyyMMddHHmmss}";
+            await docker.StartDetachedAsync(new CreateContainerParameters
+            {
+                Name = helperName,
+                Image = "docker:cli",
+                Cmd = new List<string> { "sh", "-c", script },
+                HostConfig = new HostConfig
+                {
+                    AutoRemove = true,
+                    Binds = new List<string> { "/var/run/docker.sock:/var/run/docker.sock" },
+                    NetworkMode = "bridge"
+                }
+            });
+
+            log.Add($"✓ Restarter '{helperName}' uruchomiony. Portal zostanie zrestartowany za 5 sekund.");
+            return new UpgradeResult(true,
+                "Portal zaraz się zrestartuje. Odczekaj 10-20 sekund i odśwież stronę.",
+                log);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Portal upgrade failed");
+            log.Add($"✖ Wyjątek: {ex.Message}");
+            return new UpgradeResult(false, ex.Message, log);
+        }
+    }
+
+    private static string ShellQuote(string s) => "'" + s.Replace("'", "'\\''") + "'";
 
     public async Task<UpgradeResult> RunUpgradeAsync(bool rebuildTenantImage, bool reprovisionTenants)
     {

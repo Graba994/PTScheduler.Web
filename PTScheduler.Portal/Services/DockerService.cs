@@ -256,6 +256,19 @@ public class DockerService : IDisposable
         await ProvisionTenantAsync(slug, dbPassword, appPort, webImage, tenantDomain, entitlementsJson);
     }
 
+    public async Task<ContainerInspectResponse?> InspectAsync(string containerName)
+    {
+        try { return await _client.Containers.InspectContainerAsync(containerName); }
+        catch { return null; }
+    }
+
+    public async Task<string?> StartDetachedAsync(CreateContainerParameters spec)
+    {
+        var created = await _client.Containers.CreateContainerAsync(spec);
+        await _client.Containers.StartContainerAsync(created.ID, new ContainerStartParameters());
+        return created.ID;
+    }
+
     public async Task RemoveTenantResourcesAsync(string slug)
     {
         var networkName = $"pt-{slug}-net";

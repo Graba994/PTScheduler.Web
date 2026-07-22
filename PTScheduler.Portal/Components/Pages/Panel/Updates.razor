@@ -85,42 +85,75 @@ else if (_remote is not null)
     </div>
 }
 
-<div class="card border-0 shadow-sm mb-3">
-    <div class="card-header bg-white fw-semibold">
-        <i class="bi bi-play-circle me-1"></i>Wykonaj upgrade
-    </div>
-    <div class="card-body">
-        <div class="form-check mb-2">
-            <input class="form-check-input" type="checkbox" @bind="_rebuildImage" id="rb" />
-            <label class="form-check-label small" for="rb">
-                Przebuduj obraz trenera <code>ptscheduler-web:latest</code> (10-15 min)
-            </label>
-        </div>
-        <div class="form-check mb-3">
-            <input class="form-check-input" type="checkbox" @bind="_reprovision" id="rp" />
-            <label class="form-check-label small" for="rp">
-                Zrestartuj kontenery aktywnych trenerów po zbudowaniu (kilka sekund downtime na trenera)
-            </label>
-        </div>
+<div class="row g-3 mb-3">
+    <div class="col-md-6">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white fw-semibold">
+                <i class="bi bi-people me-1"></i>Aplikacja trenera + kontenery
+            </div>
+            <div class="card-body">
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" @bind="_rebuildImage" id="rb" />
+                    <label class="form-check-label small" for="rb">
+                        Przebuduj obraz trenera <code>ptscheduler-web:latest</code> (10-15 min)
+                    </label>
+                </div>
+                <div class="form-check mb-3">
+                    <input class="form-check-input" type="checkbox" @bind="_reprovision" id="rp" />
+                    <label class="form-check-label small" for="rp">
+                        Zrestartuj kontenery aktywnych trenerów (kilka sekund downtime/trener)
+                    </label>
+                </div>
 
-        <button class="btn btn-primary" @onclick="RunUpgrade" disabled="@_upgrading">
-            @if (_upgrading)
-            {
-                <span class="spinner-border spinner-border-sm me-1"></span>
-                <span>Trwa upgrade…</span>
-            }
-            else
-            {
-                <i class="bi bi-cloud-arrow-down me-1"></i>
-                <span>Uruchom upgrade</span>
-            }
-        </button>
-
-        <div class="text-muted small mt-3">
-            <i class="bi bi-info-circle me-1"></i>
-            Wymagany wolumin: <code>-v /mnt/user/appdata/ptscheduler-repo:/opt/ptscheduler/repo</code> na kontenerze portalu.
+                <button class="btn btn-primary" @onclick="RunUpgrade" disabled="@(_upgrading || _upgradingPortal)">
+                    @if (_upgrading)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1"></span>
+                        <span>Trwa upgrade…</span>
+                    }
+                    else
+                    {
+                        <i class="bi bi-people me-1"></i>
+                        <span>Aktualizuj aplikację trenera</span>
+                    }
+                </button>
+            </div>
         </div>
     </div>
+
+    <div class="col-md-6">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-header bg-white fw-semibold">
+                <i class="bi bi-boxes me-1"></i>Portal (ten panel)
+            </div>
+            <div class="card-body">
+                <p class="small text-muted mb-3">
+                    Przebuduje obraz portalu, uruchomi pomocniczy kontener który podmieni portal.
+                    Panel będzie niedostępny przez ~15 sekund — po tym czasie odśwież stronę.
+                </p>
+                <button class="btn btn-warning" @onclick="UpgradePortal" disabled="@(_upgrading || _upgradingPortal)">
+                    @if (_upgradingPortal)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1"></span>
+                        <span>Trwa restart portalu…</span>
+                    }
+                    else
+                    {
+                        <i class="bi bi-arrow-repeat me-1"></i>
+                        <span>Aktualizuj portal</span>
+                    }
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+<div class="alert alert-info small">
+    <i class="bi bi-info-circle me-1"></i>
+    Wymagane volumy na kontenerze portalu:
+    <code>-v /var/run/docker.sock:/var/run/docker.sock</code> i
+    <code>-v /mnt/user/appdata/ptscheduler-repo:/opt/ptscheduler/repo</code>.
+    Bez nich upgrade zwróci błąd.
 </div>
 
 @if (_result is not null)
@@ -144,6 +177,7 @@ else if (_remote is not null)
     private bool _checking;
     private bool _behind;
     private bool _upgrading;
+    private bool _upgradingPortal;
     private bool _rebuildImage = true;
     private bool _reprovision = true;
     private UpgradeResult? _result;
@@ -170,6 +204,14 @@ else if (_remote is not null)
         _upgrading = false;
         _current = UpdateSvc.GetCurrent();
         await Refresh();
+    }
+
+    private async Task UpgradePortal()
+    {
+        _upgradingPortal = true;
+        _result = null;
+        _result = await UpdateSvc.UpgradePortalAsync();
+        _upgradingPortal = false;
     }
 
     private static string Truncate(string s, int max) =>
