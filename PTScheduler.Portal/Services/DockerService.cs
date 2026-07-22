@@ -10,6 +10,7 @@ public class DockerService : IDisposable
 
     public async Task<ContainerInfo?> GetContainerInfoAsync(string containerName)
     {
+        if (string.IsNullOrWhiteSpace(containerName)) return null;
         try
         {
             var response = await _client.Containers.InspectContainerAsync(containerName);
@@ -24,7 +25,7 @@ public class DockerService : IDisposable
                 MemoryUsage = 0
             };
         }
-        catch (DockerContainerNotFoundException)
+        catch
         {
             return null;
         }
@@ -47,11 +48,12 @@ public class DockerService : IDisposable
         };
     }
 
-    public async Task<List<TenantContainerStatus>> GetAllTenantsStatusAsync(IEnumerable<string> slugs)
+    public async Task<List<TenantContainerStatus>> GetAllTenantsStatusAsync(
+        IEnumerable<(string Slug, string? WebName, string? DbName)> tenants)
     {
         var results = new List<TenantContainerStatus>();
-        foreach (var slug in slugs)
-            results.Add(await GetTenantStatusAsync(slug));
+        foreach (var (slug, webName, dbName) in tenants)
+            results.Add(await GetTenantStatusAsync(slug, webName, dbName));
         return results;
     }
 
