@@ -73,8 +73,8 @@ else
                     {
                         <div class="d-flex flex-column gap-3">
                             @foreach (var (label, info, name) in new[] {
-                                ("Web", _containerStatus.Web, $"pt-{_tenant.Slug}-web"),
-                                ("DB", _containerStatus.Db, $"pt-{_tenant.Slug}-db")
+                                ("Web", _containerStatus.Web, WebContainerName),
+                                ("DB", _containerStatus.Db, DbContainerName)
                             })
                             {
                                 <div class="d-flex align-items-center justify-content-between">
@@ -83,9 +83,10 @@ else
                                             @(info?.Running == true ? "Running" : "Stopped")
                                         </span>
                                         <span class="fw-semibold small">@label</span>
+                                        <span class="text-muted small font-monospace">@name</span>
                                         @if (info is not null)
                                         {
-                                            <span class="text-muted small font-monospace">@info.Id</span>
+                                            <span class="text-muted small font-monospace">(@info.Id)</span>
                                         }
                                     </div>
                                     @if (info is not null)
@@ -103,8 +104,7 @@ else
                     {
                         <p class="text-muted small mb-0">
                             <i class="bi bi-info-circle me-1"></i>
-                            Nie znaleziono kontenerów <code>pt-@(_tenant.Slug)-web/db</code>.
-                            Importowany tenant może mieć inną nazwę kontenerów.
+                            Nie znaleziono kontenerów <code>@WebContainerName</code> / <code>@DbContainerName</code>.
                         </p>
                     }
                 </div>
@@ -253,10 +253,13 @@ else
             await RefreshContainers();
     }
 
+    private string WebContainerName => _tenant?.WebContainerName ?? $"pt-{_tenant?.Slug}-web";
+    private string DbContainerName => _tenant?.DbContainerName ?? $"pt-{_tenant?.Slug}-db";
+
     private async Task RefreshContainers()
     {
         if (_tenant is null) return;
-        try { _containerStatus = await DockerSvc.GetTenantStatusAsync(_tenant.Slug); }
+        try { _containerStatus = await DockerSvc.GetTenantStatusAsync(_tenant.Slug, _tenant.WebContainerName, _tenant.DbContainerName); }
         catch { _containerStatus = null; }
     }
 
@@ -309,7 +312,7 @@ else
     {
         if (_tenant is null) return;
         _loadingLogs = true;
-        try { _logs = await DockerSvc.GetContainerLogsAsync($"pt-{_tenant.Slug}-web", 200); }
+        try { _logs = await DockerSvc.GetContainerLogsAsync(WebContainerName, 200); }
         catch (Exception ex) { _logs = $"Błąd: {ex.Message}"; }
         _loadingLogs = false;
     }

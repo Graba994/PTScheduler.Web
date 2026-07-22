@@ -15,6 +15,8 @@ public class Tenant
     public string PlanId { get; set; } = "start";
     public string? SetupMode { get; set; }
     public string? Notes { get; set; }
+    public string? WebContainerName { get; set; }
+    public string? DbContainerName { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ProvisionedAt { get; set; }
     public DateTime? ExpiresAt { get; set; }

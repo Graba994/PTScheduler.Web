@@ -30,17 +30,20 @@ public class DockerService : IDisposable
         }
     }
 
-    public async Task<TenantContainerStatus> GetTenantStatusAsync(string slug)
+    public async Task<TenantContainerStatus> GetTenantStatusAsync(string slug,
+        string? webContainerName = null, string? dbContainerName = null)
     {
-        var web = await GetContainerInfoAsync($"pt-{slug}-web");
-        var db = await GetContainerInfoAsync($"pt-{slug}-db");
+        var webName = webContainerName ?? $"pt-{slug}-web";
+        var dbName = dbContainerName ?? $"pt-{slug}-db";
+        var web = await GetContainerInfoAsync(webName);
+        var db = await GetContainerInfoAsync(dbName);
 
         return new TenantContainerStatus
         {
             Slug = slug,
             Web = web,
             Db = db,
-            IsHealthy = web?.Running == true && db?.Running == true
+            IsHealthy = web?.Running == true || db?.Running == true
         };
     }
 

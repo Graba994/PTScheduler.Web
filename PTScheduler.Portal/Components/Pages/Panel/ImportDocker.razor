@@ -138,6 +138,17 @@ else
                                 <label class="form-label fw-semibold">Telefon</label>
                                 <InputText class="form-control" @bind-Value="_form.Phone" />
                             </div>
+
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">Kontener Web</label>
+                                <InputText class="form-control font-monospace" @bind-Value="_form.WebContainerName" />
+                                <div class="form-text">Nazwa kontenera aplikacji</div>
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label fw-semibold">Kontener DB</label>
+                                <InputText class="form-control font-monospace" @bind-Value="_form.DbContainerName" />
+                                <div class="form-text">Nazwa kontenera bazy danych (opcjonalne)</div>
+                            </div>
                         </div>
 
                         @if (_importError is not null)
@@ -212,7 +223,9 @@ else
             CompanyName = slug,
             OwnerName = "",
             OwnerEmail = "",
-            PlanId = "start"
+            PlanId = "start",
+            WebContainerName = c.Name,
+            DbContainerName = ""
         };
     }
 
@@ -231,7 +244,9 @@ else
                 _form.OwnerName.Trim(),
                 _form.OwnerEmail.Trim().ToLowerInvariant(),
                 _form.Phone?.Trim(),
-                _form.PlanId);
+                _form.PlanId,
+                string.IsNullOrWhiteSpace(_form.WebContainerName) ? null : _form.WebContainerName.Trim(),
+                string.IsNullOrWhiteSpace(_form.DbContainerName) ? null : _form.DbContainerName.Trim());
 
             Nav.NavigateTo($"/panel/tenants/{tenant.Id}");
         }
@@ -275,5 +290,7 @@ else
 
         public string? Phone { get; set; }
         public string PlanId { get; set; } = "start";
+        public string? WebContainerName { get; set; }
+        public string? DbContainerName { get; set; }
     }
 }

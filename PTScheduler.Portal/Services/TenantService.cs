@@ -65,7 +65,9 @@ public class TenantService(
             DbPassword = dbPassword,
             PlanId = planId,
             SetupMode = setupMode,
-            Status = TenantStatus.Pending
+            Status = TenantStatus.Pending,
+            WebContainerName = $"pt-{slug}-web",
+            DbContainerName = $"pt-{slug}-db"
         };
 
         db.Tenants.Add(tenant);
@@ -108,8 +110,10 @@ public class TenantService(
         var tenant = await db.Tenants.FindAsync(tenantId)
             ?? throw new InvalidOperationException("Tenant not found.");
 
-        try { await docker.StopContainerAsync($"pt-{tenant.Slug}-web"); } catch { }
-        try { await docker.StopContainerAsync($"pt-{tenant.Slug}-db"); } catch { }
+        var webName = tenant.WebContainerName ?? $"pt-{tenant.Slug}-web";
+        var dbName = tenant.DbContainerName ?? $"pt-{tenant.Slug}-db";
+        try { await docker.StopContainerAsync(webName); } catch { }
+        try { await docker.StopContainerAsync(dbName); } catch { }
 
         tenant.Status = TenantStatus.Suspended;
         await db.SaveChangesAsync();
@@ -121,8 +125,10 @@ public class TenantService(
         var tenant = await db.Tenants.FindAsync(tenantId)
             ?? throw new InvalidOperationException("Tenant not found.");
 
-        try { await docker.StartContainerAsync($"pt-{tenant.Slug}-db"); } catch { }
-        try { await docker.StartContainerAsync($"pt-{tenant.Slug}-web"); } catch { }
+        var webName = tenant.WebContainerName ?? $"pt-{tenant.Slug}-web";
+        var dbName = tenant.DbContainerName ?? $"pt-{tenant.Slug}-db";
+        try { await docker.StartContainerAsync(dbName); } catch { }
+        try { await docker.StartContainerAsync(webName); } catch { }
 
         tenant.Status = TenantStatus.Active;
         await db.SaveChangesAsync();
@@ -136,10 +142,12 @@ public class TenantService(
 
         if (removeContainers)
         {
-            try { await docker.StopContainerAsync($"pt-{tenant.Slug}-web"); } catch { }
-            try { await docker.StopContainerAsync($"pt-{tenant.Slug}-db"); } catch { }
-            try { await docker.RemoveContainerAsync($"pt-{tenant.Slug}-web"); } catch { }
-            try { await docker.RemoveContainerAsync($"pt-{tenant.Slug}-db"); } catch { }
+            var webName = tenant.WebContainerName ?? $"pt-{tenant.Slug}-web";
+            var dbName = tenant.DbContainerName ?? $"pt-{tenant.Slug}-db";
+            try { await docker.StopContainerAsync(webName); } catch { }
+            try { await docker.StopContainerAsync(dbName); } catch { }
+            try { await docker.RemoveContainerAsync(webName); } catch { }
+            try { await docker.RemoveContainerAsync(dbName); } catch { }
         }
 
         db.Tenants.Remove(tenant);
@@ -156,7 +164,8 @@ public class TenantService(
     }
 
     public async Task<Tenant> ImportAsync(string slug, string domain, int port,
-        string companyName, string ownerName, string ownerEmail, string? phone, string planId)
+        string companyName, string ownerName, string ownerEmail, string? phone, string planId,
+        string? webContainerName, string? dbContainerName)
     {
         await using var db = dbFactory.CreateDbContext();
 
@@ -176,7 +185,9 @@ public class TenantService(
             PlanId = planId,
             SetupMode = "admin",
             Status = TenantStatus.Active,
-            ProvisionedAt = DateTime.UtcNow
+            ProvisionedAt = DateTime.UtcNow,
+            WebContainerName = webContainerName,
+            DbContainerName = dbContainerName
         };
 
         db.Tenants.Add(tenant);
