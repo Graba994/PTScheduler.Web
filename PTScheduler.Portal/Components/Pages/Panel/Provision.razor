@@ -2,6 +2,7 @@
 @layout AdminLayout
 @attribute [Authorize(Roles = "Admin")]
 @inject TenantService TenantSvc
+@inject IDbContextFactory<PortalDbContext> DbFactory
 @inject NavigationManager Nav
 @rendermode InteractiveServer
 
@@ -20,6 +21,29 @@
                     <DataAnnotationsValidator />
 
                     <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label fw-semibold">Plan</label>
+                            <div class="row g-2">
+                                @foreach (var p in _plans)
+                                {
+                                    <div class="col-md-4">
+                                        <div class="plan-option @(_form.PlanId == p.Id ? "selected" : "")" @onclick="() => SelectPlan(p.Id)">
+                                            <div class="fw-bold">@p.Name</div>
+                                            <div class="small text-muted">
+                                                @(p.MonthlyPrice == 0 ? "0 zł" : $"{p.MonthlyPrice:0} zł/mies.")
+                                            </div>
+                                            <div class="small text-muted mt-1">
+                                                <i class="bi bi-people me-1"></i>@(p.MaxClients == int.MaxValue ? "∞" : p.MaxClients.ToString()) klientów
+                                            </div>
+                                            <div class="small">
+                                                <i class="bi @(p.CustomDomain ? "bi-check-circle text-success" : "bi-x-circle text-muted") me-1"></i>Własna domena
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
                         <div class="col-md-6">
                             <label class="form-label fw-semibold">Slug <span class="text-danger">*</span></label>
                             <InputText class="form-control font-monospace" @bind-Value="_form.Slug" placeholder="jan-kowalski" />
@@ -27,22 +51,34 @@
                             <ValidationMessage For="() => _form.Slug" />
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label fw-semibold">Domena <span class="text-danger">*</span></label>
-                            <InputText class="form-control" @bind-Value="_form.Domain" placeholder="jan.ptscheduler.pl" />
+                            <label class="form-label fw-semibold">
+                                Domena
+                                @if (_selectedPlan?.CustomDomain == true)
+                                {
+                                    <span class="text-danger">*</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary ms-1">auto</span>
+                                }
+                            </label>
+                            @if (_selectedPlan?.CustomDomain == true)
+                            {
+                                <InputText class="form-control" @bind-Value="_form.Domain" placeholder="jan.mojadomena.pl" />
+                                <div class="form-text">Plan @(_selectedPlan.Name) pozwala na własną domenę</div>
+                            }
+                            else
+                            {
+                                <input class="form-control bg-light" value="@AutoDomain" readonly />
+                                <div class="form-text">Automatyczna subdomena (plan bez własnej domeny)</div>
+                            }
                             <ValidationMessage For="() => _form.Domain" />
                         </div>
+
                         <div class="col-md-6">
                             <label class="form-label fw-semibold">Nazwa studia <span class="text-danger">*</span></label>
                             <InputText class="form-control" @bind-Value="_form.CompanyName" placeholder="FitStudio Jan Kowalski" />
                             <ValidationMessage For="() => _form.CompanyName" />
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label fw-semibold">Plan</label>
-                            <InputSelect class="form-select" @bind-Value="_form.PlanId">
-                                <option value="start">Start (0 zł)</option>
-                                <option value="pro">Pro (79 zł/mies.)</option>
-                                <option value="studio">Studio (149 zł/mies.)</option>
-                            </InputSelect>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label fw-semibold">Imię i nazwisko <span class="text-danger">*</span></label>
@@ -81,7 +117,10 @@
 
                     <div class="mt-4 d-flex gap-2">
                         <button type="submit" class="btn btn-primary" disabled="@_saving">
-                            @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            @if (_saving)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1"></span>
+                            }
                             <i class="bi bi-plus-lg me-1"></i>Utwórz instancję
                         </button>
                         <a href="/panel/tenants" class="btn btn-outline-secondary">Anuluj</a>
@@ -100,17 +139,72 @@
                     <li>Port jest przydzielany automatycznie</li>
                     <li>Hasło DB jest generowane losowo</li>
                     <li>Auto-provisioning tworzy kontenery i uruchamia migracje</li>
-                    <li>Po provisioning instancja jest dostępna pod domeną</li>
+                    <li>Własna domena tylko w planach które ją oferują</li>
                 </ul>
             </div>
         </div>
+
+        @if (_selectedPlan is not null)
+        {
+            <div class="card border-0 shadow-sm mt-3">
+                <div class="card-body">
+                    <h6 class="fw-bold mb-3">@_selectedPlan.Name</h6>
+                    <ul class="list-unstyled small mb-0">
+                        <li class="mb-1"><i class="bi bi-check text-success me-1"></i>Max @(_selectedPlan.MaxClients == int.MaxValue ? "bez limitu" : _selectedPlan.MaxClients.ToString()) klientów</li>
+                        <li class="mb-1"><i class="bi @(_selectedPlan.PaymentsEnabled ? "bi-check text-success" : "bi-x text-muted") me-1"></i>Płatności online</li>
+                        <li class="mb-1"><i class="bi @(_selectedPlan.CoursesEnabled ? "bi-check text-success" : "bi-x text-muted") me-1"></i>Kursy wideo</li>
+                        <li class="mb-1"><i class="bi @(_selectedPlan.CustomDomain ? "bi-check text-success" : "bi-x text-muted") me-1"></i>Własna domena</li>
+                        <li class="mb-1"><i class="bi @(_selectedPlan.PrioritySupport ? "bi-check text-success" : "bi-x text-muted") me-1"></i>Priorytetowe wsparcie</li>
+                    </ul>
+                </div>
+            </div>
+        }
     </div>
 </div>
+
+<style>
+    .plan-option {
+        border: 2px solid #e5e7eb;
+        border-radius: .6rem;
+        padding: .75rem 1rem;
+        cursor: pointer;
+        transition: border-color .2s, background .2s;
+        height: 100%;
+    }
+    .plan-option:hover { border-color: #6366f1; }
+    .plan-option.selected { border-color: #6366f1; background: rgba(99,102,241,.05); }
+</style>
 
 @code {
     private bool _saving;
     private string? _error;
     private ProvisionForm _form = new();
+    private List<Plan> _plans = [];
+    private Plan? _selectedPlan;
+
+    private string AutoDomain => string.IsNullOrWhiteSpace(_form.Slug) ? "" : $"{_form.Slug}.ptscheduler.pl";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = DbFactory.CreateDbContext();
+        _plans = await db.Plans
+            .AsNoTracking()
+            .Where(p => p.IsActive)
+            .OrderBy(p => p.SortOrder)
+            .ToListAsync();
+
+        if (_plans.Count > 0)
+        {
+            _form.PlanId = _plans[0].Id;
+            _selectedPlan = _plans[0];
+        }
+    }
+
+    private void SelectPlan(string planId)
+    {
+        _form.PlanId = planId;
+        _selectedPlan = _plans.FirstOrDefault(p => p.Id == planId);
+    }
 
     private async Task Submit()
     {
@@ -119,9 +213,21 @@
 
         try
         {
+            var slug = _form.Slug.Trim().ToLowerInvariant();
+            var domain = _selectedPlan?.CustomDomain == true
+                ? _form.Domain.Trim().ToLowerInvariant()
+                : $"{slug}.ptscheduler.pl";
+
+            if (string.IsNullOrWhiteSpace(domain))
+            {
+                _error = "Domena jest wymagana dla planów z własną domeną.";
+                _saving = false;
+                return;
+            }
+
             var tenant = await TenantSvc.CreateAsync(
-                _form.Slug.Trim().ToLowerInvariant(),
-                _form.Domain.Trim().ToLowerInvariant(),
+                slug,
+                domain,
                 _form.CompanyName.Trim(),
                 _form.OwnerName.Trim(),
                 _form.OwnerEmail.Trim().ToLowerInvariant(),
@@ -150,7 +256,6 @@
         [global::System.ComponentModel.DataAnnotations.RegularExpression(@"^[a-z0-9][a-z0-9-]*[a-z0-9]$", ErrorMessage = "Tylko małe litery, cyfry, myślniki")]
         public string Slug { get; set; } = "";
 
-        [global::System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Wymagane")]
         public string Domain { get; set; } = "";
 
         [global::System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Wymagane")]

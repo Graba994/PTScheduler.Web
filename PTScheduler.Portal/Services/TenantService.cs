@@ -50,8 +50,9 @@ public class TenantService(
 
         var maxPort = await db.Tenants.MaxAsync(t => (int?)t.Port) ?? 9000;
         var port = maxPort + 1;
-        var dbPassword = Convert.ToBase64String(RandomNumberGenerator.GetBytes(24))
-            .Replace("/", "").Replace("+", "").Replace("=", "")[..32];
+        var dbPassword = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48))
+            .Replace("/", "").Replace("+", "").Replace("=", "");
+        if (dbPassword.Length > 32) dbPassword = dbPassword[..32];
 
         var tenant = new Tenant
         {
