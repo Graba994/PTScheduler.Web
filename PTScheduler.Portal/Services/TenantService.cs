@@ -47,8 +47,12 @@ public class TenantService(
         if (await db.Tenants.AnyAsync(t => t.Slug == slug))
             throw new InvalidOperationException($"Tenant '{slug}' already exists.");
 
-        var maxPort = await db.Tenants.MaxAsync(t => (int?)t.Port) ?? 9000;
-        var port = maxPort + 1;
+        const int basePort = 9001;
+        var portalPort = config.GetValue<int?>("Portal:PortalPort") ?? 8081;
+        var maxPort = await db.Tenants.MaxAsync(t => (int?)t.Port) ?? (basePort - 1);
+        var port = Math.Max(maxPort + 1, basePort);
+        while (port == portalPort) port++;
+
         var dbPassword = Convert.ToBase64String(RandomNumberGenerator.GetBytes(48))
             .Replace("/", "").Replace("+", "").Replace("=", "");
         if (dbPassword.Length > 32) dbPassword = dbPassword[..32];
