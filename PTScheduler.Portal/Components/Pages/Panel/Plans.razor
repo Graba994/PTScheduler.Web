@@ -1,0 +1,295 @@
+@page "/panel/plans"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@rendermode InteractiveServer
+
+<PageTitle>Plany cenowe — PTScheduler Portal</PageTitle>
+
+<div class="d-flex align-items-center justify-content-between mb-4">
+    <h4 class="fw-bold mb-0"><i class="bi bi-tags me-2 text-primary"></i>Plany cenowe</h4>
+    <button class="btn btn-primary btn-sm" @onclick="NewPlan">
+        <i class="bi bi-plus-lg me-1"></i>Nowy plan
+    </button>
+</div>
+
+@if (_message is not null)
+{
+    <div class="alert @(_msgError ? "alert-danger" : "alert-success") alert-dismissible py-2 small">
+        @_message
+        <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button>
+    </div>
+}
+
+@if (_editing is not null)
+{
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <h6 class="fw-bold mb-3">
+                <i class="bi bi-pencil me-2"></i>@(_isNew ? "Nowy plan" : $"Edycja: {_editing.Name}")
+            </h6>
+
+            <EditForm Model="_editing" OnValidSubmit="SavePlan" FormName="planForm">
+                <DataAnnotationsValidator />
+                <div class="row g-3">
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold">ID <span class="text-danger">*</span></label>
+                        <InputText class="form-control font-monospace" @bind-Value="_editing.Id" disabled="@(!_isNew)" />
+                        <div class="form-text">Unikalny identyfikator (np. pro, studio)</div>
+                        <ValidationMessage For="() => _editing.Id" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold">Nazwa <span class="text-danger">*</span></label>
+                        <InputText class="form-control" @bind-Value="_editing.Name" />
+                        <ValidationMessage For="() => _editing.Name" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label fw-semibold">Kolejność</label>
+                        <InputNumber class="form-control" @bind-Value="_editing.SortOrder" />
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label fw-semibold">Opis</label>
+                        <InputText class="form-control" @bind-Value="_editing.Description" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold">Cena mies. (zł)</label>
+                        <InputNumber class="form-control" @bind-Value="_editing.MonthlyPrice" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold">Cena roczna (zł)</label>
+                        <InputNumber class="form-control" @bind-Value="_editing.YearlyPrice" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold">Max klientów</label>
+                        <InputNumber class="form-control" @bind-Value="_editing.MaxClients" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label fw-semibold">Waluta</label>
+                        <InputText class="form-control" @bind-Value="_editing.Currency" />
+                    </div>
+
+                    <div class="col-12">
+                        <div class="d-flex flex-wrap gap-3">
+                            <div class="form-check">
+                                <InputCheckbox class="form-check-input" @bind-Value="_editing.PaymentsEnabled" id="chkPayments" />
+                                <label class="form-check-label" for="chkPayments">Płatności</label>
+                            </div>
+                            <div class="form-check">
+                                <InputCheckbox class="form-check-input" @bind-Value="_editing.CoursesEnabled" id="chkCourses" />
+                                <label class="form-check-label" for="chkCourses">Kursy</label>
+                            </div>
+                            <div class="form-check">
+                                <InputCheckbox class="form-check-input" @bind-Value="_editing.CustomDomain" id="chkDomain" />
+                                <label class="form-check-label" for="chkDomain">Własna domena</label>
+                            </div>
+                            <div class="form-check">
+                                <InputCheckbox class="form-check-input" @bind-Value="_editing.PrioritySupport" id="chkSupport" />
+                                <label class="form-check-label" for="chkSupport">Priorytet</label>
+                            </div>
+                            <div class="form-check">
+                                <InputCheckbox class="form-check-input" @bind-Value="_editing.IsFeatured" id="chkFeatured" />
+                                <label class="form-check-label" for="chkFeatured">Wyróżniony</label>
+                            </div>
+                            <div class="form-check">
+                                <InputCheckbox class="form-check-input" @bind-Value="_editing.IsActive" id="chkActive" />
+                                <label class="form-check-label" for="chkActive">Aktywny</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <div class="mt-4 d-flex gap-2">
+                    <button type="submit" class="btn btn-primary btn-sm" disabled="@_saving">
+                        @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        <i class="bi bi-check-lg me-1"></i>Zapisz
+                    </button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="() => _editing = null">Anuluj</button>
+                </div>
+            </EditForm>
+        </div>
+    </div>
+}
+
+<div class="card border-0 shadow-sm">
+    <div class="table-responsive">
+        <table class="table table-hover align-middle mb-0 small">
+            <thead class="table-light">
+                <tr>
+                    <th>ID</th>
+                    <th>Nazwa</th>
+                    <th>Cena mies.</th>
+                    <th>Cena roczna</th>
+                    <th>Max klientów</th>
+                    <th>Funkcje</th>
+                    <th>Trenerów</th>
+                    <th>Status</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var p in _plans)
+                {
+                    <tr class="@(!p.IsActive ? "table-secondary" : "")">
+                        <td class="font-monospace fw-semibold">@p.Id</td>
+                        <td>
+                            @p.Name
+                            @if (p.IsFeatured) { <span class="badge bg-warning text-dark ms-1">★</span> }
+                        </td>
+                        <td class="fw-semibold">@p.MonthlyPrice.ToString("0") zł</td>
+                        <td class="text-muted">@(p.YearlyPrice?.ToString("0") ?? "—") zł</td>
+                        <td>@(p.MaxClients == int.MaxValue ? "∞" : p.MaxClients.ToString())</td>
+                        <td>
+                            @if (p.PaymentsEnabled) { <span class="badge bg-success-subtle text-success-emphasis me-1">Płatności</span> }
+                            @if (p.CoursesEnabled) { <span class="badge bg-info-subtle text-info-emphasis me-1">Kursy</span> }
+                            @if (p.CustomDomain) { <span class="badge bg-primary-subtle text-primary-emphasis me-1">Domena</span> }
+                            @if (p.PrioritySupport) { <span class="badge bg-warning-subtle text-warning-emphasis">Priorytet</span> }
+                        </td>
+                        <td class="text-muted">@p.Tenants.Count</td>
+                        <td>
+                            <span class="badge @(p.IsActive ? "bg-success" : "bg-secondary")">
+                                @(p.IsActive ? "Aktywny" : "Nieaktywny")
+                            </span>
+                        </td>
+                        <td>
+                            <div class="d-flex gap-1">
+                                <button class="btn btn-sm btn-outline-primary" @onclick="() => EditPlan(p)">
+                                    <i class="bi bi-pencil"></i>
+                                </button>
+                                @if (p.Tenants.Count == 0)
+                                {
+                                    <button class="btn btn-sm btn-outline-danger" @onclick="() => DeletePlan(p.Id)">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                }
+                            </div>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+</div>
+
+@code {
+    private List<Plan> _plans = [];
+    private Plan? _editing;
+    private bool _isNew;
+    private bool _saving;
+    private string? _message;
+    private bool _msgError;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        await using var db = DbFactory.CreateDbContext();
+        _plans = await db.Plans
+            .AsNoTracking()
+            .Include(p => p.Tenants)
+            .OrderBy(p => p.SortOrder)
+            .ToListAsync();
+    }
+
+    private void NewPlan()
+    {
+        _isNew = true;
+        _editing = new Plan
+        {
+            Id = "",
+            Name = "",
+            SortOrder = _plans.Count + 1,
+            MaxClients = 10,
+            IsActive = true
+        };
+    }
+
+    private void EditPlan(Plan p)
+    {
+        _isNew = false;
+        _editing = new Plan
+        {
+            Id = p.Id,
+            Name = p.Name,
+            Description = p.Description,
+            MonthlyPrice = p.MonthlyPrice,
+            YearlyPrice = p.YearlyPrice,
+            Currency = p.Currency,
+            MaxClients = p.MaxClients,
+            PaymentsEnabled = p.PaymentsEnabled,
+            CoursesEnabled = p.CoursesEnabled,
+            CustomDomain = p.CustomDomain,
+            PrioritySupport = p.PrioritySupport,
+            SortOrder = p.SortOrder,
+            IsActive = p.IsActive,
+            IsFeatured = p.IsFeatured
+        };
+    }
+
+    private async Task SavePlan()
+    {
+        if (_editing is null) return;
+        _saving = true;
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            if (_isNew)
+            {
+                if (string.IsNullOrWhiteSpace(_editing.Id))
+                {
+                    Show("ID planu jest wymagane.", true);
+                    return;
+                }
+                _editing.Id = _editing.Id.Trim().ToLowerInvariant();
+                if (await db.Plans.AnyAsync(p => p.Id == _editing.Id))
+                {
+                    Show($"Plan '{_editing.Id}' już istnieje.", true);
+                    return;
+                }
+                db.Plans.Add(_editing);
+            }
+            else
+            {
+                var existing = await db.Plans.FindAsync(_editing.Id);
+                if (existing is null) { Show("Plan nie znaleziony.", true); return; }
+
+                existing.Name = _editing.Name;
+                existing.Description = _editing.Description;
+                existing.MonthlyPrice = _editing.MonthlyPrice;
+                existing.YearlyPrice = _editing.YearlyPrice;
+                existing.Currency = _editing.Currency;
+                existing.MaxClients = _editing.MaxClients;
+                existing.PaymentsEnabled = _editing.PaymentsEnabled;
+                existing.CoursesEnabled = _editing.CoursesEnabled;
+                existing.CustomDomain = _editing.CustomDomain;
+                existing.PrioritySupport = _editing.PrioritySupport;
+                existing.SortOrder = _editing.SortOrder;
+                existing.IsActive = _editing.IsActive;
+                existing.IsFeatured = _editing.IsFeatured;
+            }
+            await db.SaveChangesAsync();
+            _editing = null;
+            Show(_isNew ? "Plan utworzony." : "Plan zapisany.");
+            await Load();
+        }
+        catch (Exception ex) { Show($"Błąd: {ex.Message}", true); }
+        finally { _saving = false; }
+    }
+
+    private async Task DeletePlan(string id)
+    {
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            var plan = await db.Plans.Include(p => p.Tenants).FirstOrDefaultAsync(p => p.Id == id);
+            if (plan is null) return;
+            if (plan.Tenants.Count > 0) { Show("Nie można usunąć planu z przypisanymi trenerami.", true); return; }
+            db.Plans.Remove(plan);
+            await db.SaveChangesAsync();
+            Show("Plan usunięty.");
+            await Load();
+        }
+        catch (Exception ex) { Show($"Błąd: {ex.Message}", true); }
+    }
+
+    private void Show(string msg, bool err = false) { _message = msg; _msgError = err; }
+}
