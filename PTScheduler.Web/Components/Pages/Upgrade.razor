@@ -1,0 +1,109 @@
+@page "/upgrade"
+@attribute [Authorize]
+@inject EntitlementService Entitlements
+
+<PageTitle>Zwiększ możliwości — @Entitlements.Current.Name</PageTitle>
+
+<div class="container py-4">
+    <div class="text-center mb-4">
+        <h2 class="fw-bold">Twój plan: <span class="text-primary">@Entitlements.Current.Name</span></h2>
+        <p class="text-muted">Chcesz odblokować więcej funkcji? Skontaktuj się z administratorem platformy.</p>
+    </div>
+
+    <div class="row g-4">
+        <div class="col-lg-6">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <h5 class="fw-bold mb-3"><i class="bi bi-check2-square me-2 text-success"></i>Co masz w swoim planie</h5>
+                    <ul class="list-unstyled small mb-0">
+                        <li class="mb-2">
+                            <i class="bi bi-people me-1"></i>
+                            Klientów: <strong>@Fmt(Entitlements.Current.MaxClients)</strong>
+                        </li>
+                        <li class="mb-2">
+                            <i class="bi bi-calendar-check me-1"></i>
+                            Sesji miesięcznie: <strong>@Fmt(Entitlements.Current.MaxSessionsPerMonth)</strong>
+                        </li>
+                        <li class="mb-2">
+                            <i class="bi bi-hdd me-1"></i>
+                            Storage: <strong>@Entitlements.Current.MaxStorageGB GB</strong>
+                        </li>
+                        @if (Entitlements.Current.MaxVideoStorageGB > 0)
+                        {
+                            <li class="mb-2">
+                                <i class="bi bi-camera-video me-1"></i>
+                                Video storage: <strong>@Entitlements.Current.MaxVideoStorageGB GB</strong>
+                            </li>
+                        }
+                        @foreach (var (label, on) in ActiveFeatures())
+                        {
+                            @if (on)
+                            {
+                                <li class="mb-2"><i class="bi bi-check-circle-fill text-success me-1"></i>@label</li>
+                            }
+                        }
+                    </ul>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-6">
+            <div class="card border-0 shadow-sm border-primary border-2">
+                <div class="card-body">
+                    <h5 class="fw-bold mb-3"><i class="bi bi-lock-fill me-2 text-primary"></i>Odblokuj w wyższym planie</h5>
+                    <ul class="list-unstyled small mb-0">
+                        @foreach (var (label, on) in ActiveFeatures())
+                        {
+                            @if (!on)
+                            {
+                                <li class="mb-2 text-muted"><i class="bi bi-lock me-1"></i>@label</li>
+                            }
+                        }
+                    </ul>
+                    <hr />
+                    <p class="small mb-2 text-muted">
+                        Zmiana planu wymaga kontaktu z administratorem platformy — po zmianie Twoja instancja zostanie zrestartowana z nowymi limitami (kilka sekund).
+                    </p>
+                    <a href="mailto:admin@ptscheduler.pl?subject=Zmiana%20planu" class="btn btn-primary w-100">
+                        <i class="bi bi-envelope me-1"></i>Napisz do administratora
+                    </a>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private static string Fmt(int v) => v == int.MaxValue ? "bez limitu" : v.ToString();
+
+    private IEnumerable<(string Label, bool On)> ActiveFeatures()
+    {
+        var e = Entitlements.Current;
+        yield return ("Płatności online", e.PaymentsEnabled);
+        yield return ("Fakturowanie", e.Invoicing);
+        yield return ("Kupony rabatowe", e.Coupons);
+        yield return ("Subskrypcje cykliczne", e.Subscriptions);
+        yield return ("Kursy wideo", e.CoursesEnabled);
+        yield return ("Plany dietetyczne", e.MealPlansEnabled);
+        yield return ("Zdjęcia postępów", e.ProgressPhotos);
+        yield return ("Śledzenie makro/kcal", e.NutritionTracking);
+        yield return ("Czat z klientami", e.ClientChat);
+        yield return ("Rozmowy wideo", e.VideoCalls);
+        yield return ("SMS-y", e.SmsReminders);
+        yield return ("Automatyczne follow-upy", e.AutomatedFollowups);
+        yield return ("Sesje grupowe", e.GroupSessions);
+        yield return ("Lista oczekujących", e.Waitlist);
+        yield return ("Sync z Google/Outlook Calendar", e.CalendarSync);
+        yield return ("Własna domena", e.CustomDomain);
+        yield return ("Własne kolory", e.CustomColors);
+        yield return ("Landing page builder", e.LandingPageBuilder);
+        yield return ("Zaawansowana analityka", e.AdvancedAnalytics);
+        yield return ("Raporty finansowe", e.FinancialReports);
+        yield return ("Eksport danych", e.DataExport);
+        yield return ("AI generator treningów", e.AiWorkoutGenerator);
+        yield return ("AI planner diet", e.AiMealPlanner);
+        yield return ("AI chatbot", e.AiChatbot);
+        yield return ("Priorytetowe wsparcie", e.PrioritySupport);
+        yield return ("Onboarding call", e.OnboardingCall);
+    }
+}
