@@ -43,6 +43,9 @@ builder.Services.AddSingleton<DockerService>();
 builder.Services.AddScoped<TenantService>();
 builder.Services.AddScoped<SiteSettingsService>();
 builder.Services.AddScoped<NpmService>();
+builder.Services.AddScoped<UpdateService>();
+builder.Services.AddSingleton<UpdateNotifier>();
+builder.Services.AddHostedService<UpdatePollerService>();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();

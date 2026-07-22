@@ -1,0 +1,177 @@
+@page "/panel/updates"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject UpdateService UpdateSvc
+@rendermode InteractiveServer
+
+<PageTitle>Aktualizacje — PTScheduler Portal</PageTitle>
+
+<div class="mb-4">
+    <h4 class="fw-bold mb-1"><i class="bi bi-cloud-arrow-down me-2 text-primary"></i>Aktualizacje</h4>
+    <p class="text-muted small mb-0">Sprawdź czy w repozytorium jest nowa wersja i zaktualizuj instalację</p>
+</div>
+
+<div class="row g-3 mb-3">
+    <div class="col-md-6">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-3"><i class="bi bi-hdd me-2 text-secondary"></i>Aktualnie zainstalowane</h6>
+                <dl class="row small mb-0">
+                    <dt class="col-4 text-muted">Commit</dt>
+                    <dd class="col-8 font-monospace">@_current.CommitShort</dd>
+                    <dt class="col-4 text-muted">Build</dt>
+                    <dd class="col-8">@_current.BuildTime</dd>
+                    <dt class="col-4 text-muted">Branch</dt>
+                    <dd class="col-8 font-monospace">@_current.Branch</dd>
+                </dl>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-6">
+        <div class="card border-0 shadow-sm h-100 @(_behind ? "border-warning border-2" : "")">
+            <div class="card-body">
+                <h6 class="fw-bold mb-3">
+                    <i class="bi bi-github me-2"></i>Najnowsza w GitHub
+                    <button class="btn btn-sm btn-outline-secondary float-end" @onclick="Refresh" disabled="@_checking">
+                        @if (_checking)
+                        {
+                            <span class="spinner-border spinner-border-sm"></span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-arrow-clockwise"></i>
+                        }
+                    </button>
+                </h6>
+                @if (_remote is null)
+                {
+                    <p class="text-muted small mb-0">Kliknij odśwież żeby sprawdzić.</p>
+                }
+                else
+                {
+                    <dl class="row small mb-0">
+                        <dt class="col-4 text-muted">Commit</dt>
+                        <dd class="col-8 font-monospace">@_remote.CommitShort</dd>
+                        <dt class="col-4 text-muted">Autor</dt>
+                        <dd class="col-8">@_remote.Author</dd>
+                        <dt class="col-4 text-muted">Data</dt>
+                        <dd class="col-8">@_remote.Date</dd>
+                        <dt class="col-4 text-muted">Wiadomość</dt>
+                        <dd class="col-8"><em>@Truncate(_remote.Message, 80)</em></dd>
+                    </dl>
+                }
+            </div>
+        </div>
+    </div>
+</div>
+
+@if (_behind)
+{
+    <div class="alert alert-warning">
+        <div class="d-flex align-items-center gap-2">
+            <i class="bi bi-exclamation-triangle-fill fs-4"></i>
+            <div class="flex-grow-1">
+                <strong>Nowa wersja jest dostępna.</strong>
+                <span class="small text-muted d-block">Instalka jest za @_current.CommitShort → @_remote?.CommitShort.</span>
+            </div>
+        </div>
+    </div>
+}
+else if (_remote is not null)
+{
+    <div class="alert alert-success py-2">
+        <i class="bi bi-check-circle me-1"></i>Masz najnowszą wersję.
+    </div>
+}
+
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-header bg-white fw-semibold">
+        <i class="bi bi-play-circle me-1"></i>Wykonaj upgrade
+    </div>
+    <div class="card-body">
+        <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" @bind="_rebuildImage" id="rb" />
+            <label class="form-check-label small" for="rb">
+                Przebuduj obraz trenera <code>ptscheduler-web:latest</code> (10-15 min)
+            </label>
+        </div>
+        <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" @bind="_reprovision" id="rp" />
+            <label class="form-check-label small" for="rp">
+                Zrestartuj kontenery aktywnych trenerów po zbudowaniu (kilka sekund downtime na trenera)
+            </label>
+        </div>
+
+        <button class="btn btn-primary" @onclick="RunUpgrade" disabled="@_upgrading">
+            @if (_upgrading)
+            {
+                <span class="spinner-border spinner-border-sm me-1"></span>
+                <span>Trwa upgrade…</span>
+            }
+            else
+            {
+                <i class="bi bi-cloud-arrow-down me-1"></i>
+                <span>Uruchom upgrade</span>
+            }
+        </button>
+
+        <div class="text-muted small mt-3">
+            <i class="bi bi-info-circle me-1"></i>
+            Wymagany wolumin: <code>-v /mnt/user/appdata/ptscheduler-repo:/opt/ptscheduler/repo</code> na kontenerze portalu.
+        </div>
+    </div>
+</div>
+
+@if (_result is not null)
+{
+    <div class="alert @(_result.Success ? "alert-success" : "alert-danger")">
+        <strong>@_result.Summary</strong>
+    </div>
+    <div class="card border-0 shadow-sm">
+        <div class="card-header bg-white fw-semibold">
+            <i class="bi bi-terminal me-1"></i>Log
+        </div>
+        <div class="card-body p-0">
+            <pre class="p-3 bg-dark text-light m-0 small" style="max-height:500px;overflow:auto;font-size:.72rem;line-height:1.4">@string.Join("\n", _result.Log)</pre>
+        </div>
+    </div>
+}
+
+@code {
+    private VersionInfo _current = new();
+    private RemoteInfo? _remote;
+    private bool _checking;
+    private bool _behind;
+    private bool _upgrading;
+    private bool _rebuildImage = true;
+    private bool _reprovision = true;
+    private UpgradeResult? _result;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _current = UpdateSvc.GetCurrent();
+        await Refresh();
+    }
+
+    private async Task Refresh()
+    {
+        _checking = true;
+        _remote = await UpdateSvc.CheckRemoteAsync();
+        _behind = UpdateSvc.IsBehind(_current, _remote);
+        _checking = false;
+    }
+
+    private async Task RunUpgrade()
+    {
+        _upgrading = true;
+        _result = null;
+        _result = await UpdateSvc.RunUpgradeAsync(_rebuildImage, _reprovision);
+        _upgrading = false;
+        _current = UpdateSvc.GetCurrent();
+        await Refresh();
+    }
+
+    private static string Truncate(string s, int max) =>
+        s.Length <= max ? s : s[..max] + "…";
+}
