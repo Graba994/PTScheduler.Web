@@ -3,6 +3,7 @@
 @attribute [Authorize(Roles = "Admin")]
 @inject TenantService TenantSvc
 @inject DockerService DockerSvc
+@inject StripeService StripeSvc
 @inject IDbContextFactory<PortalDbContext> DbFactory
 @inject NavigationManager Nav
 @rendermode InteractiveServer
@@ -142,6 +143,45 @@ else
                     </div>
 
                     <hr class="my-3" />
+                    <h6 class="fw-bold mb-2 small text-muted">
+                        <i class="bi bi-credit-card-2-front me-1"></i>Billing (Stripe)
+                    </h6>
+                    <dl class="row small mb-2">
+                        <dt class="col-5 text-muted">Status</dt>
+                        <dd class="col-7">
+                            <span class="badge @BillingBadge(_tenant.BillingStatus)">@_tenant.BillingStatus</span>
+                        </dd>
+                        @if (_tenant.TrialEndsAt is not null)
+                        {
+                            <dt class="col-5 text-muted">Trial do</dt>
+                            <dd class="col-7">@_tenant.TrialEndsAt?.ToString("dd.MM.yyyy HH:mm")</dd>
+                        }
+                        @if (!string.IsNullOrEmpty(_tenant.StripeCustomerId))
+                        {
+                            <dt class="col-5 text-muted">Customer</dt>
+                            <dd class="col-7 font-monospace small">@_tenant.StripeCustomerId</dd>
+                        }
+                        @if (!string.IsNullOrEmpty(_tenant.StripeSubscriptionId))
+                        {
+                            <dt class="col-5 text-muted">Subscription</dt>
+                            <dd class="col-7 font-monospace small">@_tenant.StripeSubscriptionId</dd>
+                        }
+                    </dl>
+                    @if (!string.IsNullOrEmpty(_tenant.StripeCustomerId))
+                    {
+                        <button class="btn btn-sm btn-outline-primary" @onclick="OpenCustomerPortal" disabled="@_openingPortal">
+                            @if (_openingPortal) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            <i class="bi bi-box-arrow-up-right me-1"></i>Otwórz Stripe Customer Portal
+                        </button>
+                    }
+                    else
+                    {
+                        <p class="text-muted small mb-0">
+                            <i class="bi bi-info-circle me-1"></i>Ten trener nie ma subskrypcji Stripe (plan darmowy lub utworzony ręcznie).
+                        </p>
+                    }
+
+                    <hr class="my-3" />
                     <h6 class="fw-bold mb-2 small text-muted">Plan</h6>
                     <div class="row g-2 align-items-end">
                         <div class="col-md-7">
@@ -197,6 +237,67 @@ else
                 </div>
             </div>
         </div>
+
+        @if (!string.IsNullOrEmpty(_tenant.StripeCustomerId))
+        {
+            <div class="col-12">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="fw-bold mb-0"><i class="bi bi-receipt me-2 text-success"></i>Faktury</h6>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="LoadInvoices" disabled="@_loadingInvoices">
+                                @if (_loadingInvoices) { <span class="spinner-border spinner-border-sm"></span> } else { <i class="bi bi-arrow-clockwise"></i> }
+                            </button>
+                        </div>
+                        @if (_invoices is null)
+                        {
+                            <button class="btn btn-sm btn-outline-dark" @onclick="LoadInvoices" disabled="@_loadingInvoices">Załaduj faktury</button>
+                        }
+                        else if (_invoices.Count == 0)
+                        {
+                            <p class="text-muted small mb-0">Brak faktur.</p>
+                        }
+                        else
+                        {
+                            <div class="table-responsive">
+                                <table class="table table-sm mb-0 small align-middle">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Numer</th>
+                                            <th>Data</th>
+                                            <th>Kwota</th>
+                                            <th>Status</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var inv in _invoices)
+                                        {
+                                            <tr>
+                                                <td class="font-monospace">@inv.Number</td>
+                                                <td>@inv.Date.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                                                <td>@inv.Amount.ToString("0.00") @inv.Currency</td>
+                                                <td><span class="badge @InvoiceBadge(inv.Status)">@inv.Status</span></td>
+                                                <td class="text-end">
+                                                    @if (!string.IsNullOrEmpty(inv.HostedInvoiceUrl))
+                                                    {
+                                                        <a href="@inv.HostedInvoiceUrl" target="_blank" class="btn btn-sm btn-outline-primary" title="Otwórz"><i class="bi bi-eye"></i></a>
+                                                    }
+                                                    @if (!string.IsNullOrEmpty(inv.InvoicePdf))
+                                                    {
+                                                        <a href="@inv.InvoicePdf" target="_blank" class="btn btn-sm btn-outline-secondary ms-1" title="PDF"><i class="bi bi-file-pdf"></i></a>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
 
         @if (!string.IsNullOrWhiteSpace(_tenant.Notes))
         {
@@ -273,6 +374,9 @@ else
     private List<Plan> _availablePlans = new();
     private string _selectedPlanId = "";
     private bool _applyingPlan;
+    private bool _openingPortal;
+    private List<InvoiceInfo>? _invoices;
+    private bool _loadingInvoices;
 
     protected override async Task OnInitializedAsync()
     {
@@ -287,6 +391,50 @@ else
                 .Where(p => p.IsActive).OrderBy(p => p.SortOrder).ToListAsync();
         }
     }
+
+    private async Task LoadInvoices()
+    {
+        if (_tenant is null || string.IsNullOrEmpty(_tenant.StripeCustomerId)) return;
+        _loadingInvoices = true;
+        _invoices = await StripeSvc.ListInvoicesAsync(_tenant.StripeCustomerId);
+        _loadingInvoices = false;
+    }
+
+    private static string InvoiceBadge(string status) => status switch
+    {
+        "paid" => "bg-success",
+        "open" => "bg-warning text-dark",
+        "uncollectible" => "bg-danger",
+        "void" => "bg-secondary",
+        "draft" => "bg-light text-dark",
+        _ => "bg-secondary"
+    };
+
+    private async Task OpenCustomerPortal()
+    {
+        if (_tenant is null || string.IsNullOrEmpty(_tenant.StripeCustomerId)) return;
+        _openingPortal = true;
+        try
+        {
+            var returnUrl = Nav.Uri;
+            var url = await StripeSvc.CreateCustomerPortalLinkAsync(_tenant.StripeCustomerId, returnUrl);
+            if (!string.IsNullOrEmpty(url))
+                Nav.NavigateTo(url, forceLoad: true);
+            else
+                ShowMessage("Nie udało się utworzyć linku (Stripe nie skonfigurowany?)", true);
+        }
+        catch (Exception ex) { ShowMessage($"Błąd: {ex.Message}", true); }
+        _openingPortal = false;
+    }
+
+    private static string BillingBadge(string status) => status switch
+    {
+        "active" => "bg-success",
+        "trialing" => "bg-info text-dark",
+        "past_due" => "bg-warning text-dark",
+        "canceled" => "bg-danger",
+        _ => "bg-secondary"
+    };
 
     private async Task ApplyPlanChange()
     {

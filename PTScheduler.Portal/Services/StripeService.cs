@@ -6,6 +6,18 @@ using Stripe.Checkout;
 
 namespace PTScheduler.Portal.Services;
 
+public class InvoiceInfo
+{
+    public string Id { get; set; } = "";
+    public string Number { get; set; } = "";
+    public decimal Amount { get; set; }
+    public string Currency { get; set; } = "PLN";
+    public string Status { get; set; } = "";
+    public DateTime Date { get; set; }
+    public string? HostedInvoiceUrl { get; set; }
+    public string? InvoicePdf { get; set; }
+}
+
 public class StripeService(
     SiteSettingsService settings,
     IDbContextFactory<PortalDbContext> dbFactory,
@@ -233,6 +245,38 @@ public class StripeService(
         tenant.BillingStatus = "past_due";
         await db.SaveChangesAsync();
         logger.LogWarning("Payment failed for tenant {Slug} — customer {Customer}", tenant.Slug, invoice.CustomerId);
+    }
+
+    public async Task<List<InvoiceInfo>> ListInvoicesAsync(string customerId, int limit = 12)
+    {
+        var key = await ConfigureAsync();
+        if (key is null || string.IsNullOrWhiteSpace(customerId)) return new();
+
+        try
+        {
+            var svc = new InvoiceService();
+            var list = await svc.ListAsync(new InvoiceListOptions
+            {
+                Customer = customerId,
+                Limit = limit
+            });
+            return list.Data.Select(i => new InvoiceInfo
+            {
+                Id = i.Id,
+                Number = i.Number ?? "—",
+                Amount = (i.AmountPaid > 0 ? i.AmountPaid : i.AmountDue) / 100m,
+                Currency = (i.Currency ?? "pln").ToUpperInvariant(),
+                Status = i.Status ?? "",
+                Date = i.Created,
+                HostedInvoiceUrl = i.HostedInvoiceUrl,
+                InvoicePdf = i.InvoicePdf
+            }).ToList();
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Listing invoices failed for customer {C}", customerId);
+            return new();
+        }
     }
 
     // Returns a link the trainer can use to update payment methods.

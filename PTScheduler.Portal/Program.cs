@@ -48,6 +48,7 @@ builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<StripeService>();
 builder.Services.AddSingleton<UpdateNotifier>();
 builder.Services.AddHostedService<UpdatePollerService>();
+builder.Services.AddHostedService<TrialExpirationService>();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
