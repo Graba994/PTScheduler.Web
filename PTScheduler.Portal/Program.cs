@@ -45,6 +45,7 @@ builder.Services.AddScoped<SiteSettingsService>();
 builder.Services.AddScoped<NpmService>();
 builder.Services.AddScoped<UpdateService>();
 builder.Services.AddScoped<EmailService>();
+builder.Services.AddScoped<StripeService>();
 builder.Services.AddSingleton<UpdateNotifier>();
 builder.Services.AddHostedService<UpdatePollerService>();
 
@@ -129,6 +130,17 @@ app.MapGet("/api/account/logout", async (SignInManager<IdentityUser> signIn) =>
 {
     await signIn.SignOutAsync();
     return Results.Redirect("/logout");
+});
+
+// Stripe webhook — Stripe posts events here as JSON with a signature
+// header. Return 200 quickly; Stripe will retry on any non-2xx.
+app.MapPost("/api/webhooks/stripe", async (HttpContext ctx, StripeService stripe) =>
+{
+    using var reader = new StreamReader(ctx.Request.Body);
+    var payload = await reader.ReadToEndAsync();
+    var sig = ctx.Request.Headers["Stripe-Signature"].ToString();
+    var (handled, msg) = await stripe.HandleWebhookAsync(payload, sig);
+    return handled ? Results.Ok(new { received = true, type = msg }) : Results.BadRequest(new { error = msg });
 });
 
 app.MapStaticAssets();

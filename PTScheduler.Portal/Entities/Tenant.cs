@@ -20,6 +20,13 @@ public class Tenant
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ProvisionedAt { get; set; }
     public DateTime? ExpiresAt { get; set; }
+    public DateTime? TrialEndsAt { get; set; }
+
+    // Stripe subscription lifecycle
+    public string? StripeCustomerId { get; set; }
+    public string? StripeSubscriptionId { get; set; }
+    public string? StripeCheckoutSessionId { get; set; }
+    public string BillingStatus { get; set; } = "none"; // none | trialing | active | past_due | canceled
 
     public Plan? Plan { get; set; }
     public ICollection<Subscription> Subscriptions { get; set; } = [];

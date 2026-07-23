@@ -3,6 +3,7 @@
 @inject TenantService TenantSvc
 @inject IDbContextFactory<PortalDbContext> DbFactory
 @inject EmailService EmailSvc
+@inject StripeService StripeSvc
 @inject SiteSettingsService Settings
 @inject NavigationManager Nav
 @rendermode InteractiveServer
@@ -252,14 +253,26 @@
                 {
                     _provisionError = output;
                 }
+                _done = true;
+                return;
             }
-            else
+
+            // For paid plans — try Stripe checkout; if not configured, fall back to "we'll contact you"
+            if (await StripeSvc.IsConfiguredAsync())
             {
-                _pendingPayment = true;
-                var body = EmailSvc.PendingPaymentEmailBody(
-                    _form.FullName, _selectedPlan.Name, _selectedPlan.MonthlyPrice);
-                _ = EmailSvc.SendAsync(_form.Email, "PTScheduler — dziękujemy za rejestrację", body);
+                var (ok, checkoutUrl, err) = await StripeSvc.StartSubscriptionCheckoutAsync(tenant.Id, "monthly");
+                if (ok && !string.IsNullOrEmpty(checkoutUrl))
+                {
+                    Nav.NavigateTo(checkoutUrl, forceLoad: true);
+                    return;
+                }
+                _provisionError = err ?? "Nie udało się utworzyć sesji płatności.";
             }
+
+            _pendingPayment = true;
+            var body2 = EmailSvc.PendingPaymentEmailBody(
+                _form.FullName, _selectedPlan.Name, _selectedPlan.MonthlyPrice);
+            _ = EmailSvc.SendAsync(_form.Email, "PTScheduler — dziękujemy za rejestrację", body2);
 
             _done = true;
         }

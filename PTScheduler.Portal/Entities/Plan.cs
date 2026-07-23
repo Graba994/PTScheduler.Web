@@ -12,6 +12,11 @@ public class Plan
     public bool IsActive { get; set; } = true;
     public bool IsFeatured { get; set; }
 
+    // Stripe Price IDs (created in Stripe Dashboard, one per interval)
+    public string? StripeMonthlyPriceId { get; set; }
+    public string? StripeYearlyPriceId { get; set; }
+    public int TrialDays { get; set; } = 14;
+
     // ── Limity ilościowe ─────────────────────────────────
     public int MaxClients { get; set; }
     public int MaxTrainers { get; set; }

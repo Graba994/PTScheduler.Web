@@ -30,6 +30,11 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string NpmPassword = "npm_password";
         public const string NpmToken = "npm_token";
         public const string NpmAutoRegister = "npm_auto_register";
+        public const string StripeSecretKey = "stripe_secret_key";
+        public const string StripePublishableKey = "stripe_publishable_key";
+        public const string StripeWebhookSecret = "stripe_webhook_secret";
+        public const string StripeSuccessUrl = "stripe_success_url";
+        public const string StripeCancelUrl = "stripe_cancel_url";
     }
 
     private static readonly Dictionary<string, string> Defaults = new()
