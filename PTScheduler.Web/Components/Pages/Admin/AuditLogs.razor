@@ -1,6 +1,7 @@
 ﻿@page "/admin/audit-logs"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
 @inject IAuditLogService AuditLogService
+@inject EntitlementService Entitlements
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @using System.Globalization
@@ -8,6 +9,20 @@
 
 <AppTitle Page="Logi systemowe" />
 
+@if (!Entitlements.IsAllowed("AuditLog"))
+{
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <h4 class="mb-0 fw-bold"><i class="bi bi-journal-text me-2"></i>Logi systemowe</h4>
+    </div>
+    <FeatureGate Flag="AuditLog" RequiredPlan="Studio"
+                 Title="Audit log jest dostępny w planie Studio">
+        <Description>
+            Pełny dziennik akcji w aplikacji (kto, co, kiedy) — logowania, zmiany, usunięcia. Odblokuj w planie <strong>Studio</strong>.
+        </Description>
+    </FeatureGate>
+}
+else
+{
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h4 class="mb-0 fw-bold">
         <i class="bi bi-journal-text me-2"></i>Logi systemowe
@@ -75,6 +90,7 @@ else
         </table>
     </div>
     <div class="text-muted small mt-1">Wyświetlono @_logs.Count wpisów (max 500)</div>
+}
 }
 
 @code {

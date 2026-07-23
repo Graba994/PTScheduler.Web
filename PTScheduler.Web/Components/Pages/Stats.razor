@@ -10,7 +10,19 @@
 @inject IClientService ClientService
 @inject IJSRuntime JS
 @inject AuthenticationStateProvider AuthState
+@inject EntitlementService Entitlements
 @attribute [Authorize(Roles = $"{Roles.Admin},{Roles.Trainer},{Roles.Subordinate}")]
+
+@if (!Entitlements.IsAllowed("AdvancedAnalytics"))
+{
+    <div class="alert alert-primary d-flex align-items-center gap-3 mb-3">
+        <i class="bi bi-arrow-up-circle fs-4"></i>
+        <div class="flex-grow-1 small">
+            Widzisz <strong>podstawowe statystyki</strong>. Zaawansowana analityka (kohorty, retencja, LTV, prognozy) jest w planie <strong>Pro</strong>.
+        </div>
+        <a href="/upgrade" class="btn btn-sm btn-primary">Zwiększ plan</a>
+    </div>
+}
 
 @if (!_loaded)
 {
