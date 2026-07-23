@@ -13,6 +13,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<Subscription> Subscriptions => Set<Subscription>();
     public DbSet<LoginLog> LoginLogs => Set<LoginLog>();
     public DbSet<SiteSetting> SiteSettings => Set<SiteSetting>();
+    public DbSet<BackupEntry> BackupEntries => Set<BackupEntry>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -46,6 +47,12 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
         b.Entity<SiteSetting>(e =>
         {
             e.HasKey(s => s.Key);
+        });
+
+        b.Entity<BackupEntry>(e =>
+        {
+            e.HasIndex(x => x.Slug);
+            e.HasIndex(x => x.CreatedAt);
         });
 
         SeedPlans(b);

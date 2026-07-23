@@ -35,12 +35,18 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string StripeWebhookSecret = "stripe_webhook_secret";
         public const string StripeSuccessUrl = "stripe_success_url";
         public const string StripeCancelUrl = "stripe_cancel_url";
+        public const string BackupDir = "backup_dir";
+        public const string BackupSchedule = "backup_schedule"; // "daily" | "off"
+        public const string BackupRetentionDays = "backup_retention_days";
     }
 
     private static readonly Dictionary<string, string> Defaults = new()
     {
         [Keys.MainDomain] = "ptscheduler.pl",
         [Keys.NpmAutoRegister] = "true",
+        [Keys.BackupDir] = "/opt/ptscheduler/backups",
+        [Keys.BackupSchedule] = "daily",
+        [Keys.BackupRetentionDays] = "14",
         [Keys.HeroBadge] = "Platforma SaaS dla trenerów",
         [Keys.HeroTitle] = "Twoja instancja PTScheduler gotowa w 5 minut",
         [Keys.HeroSubtitle] = "Grafik, klienci, płatności online, kursy wideo, pakiety treningowe — wszystko pod Twoją domeną, w pełni konfigurowane. Bez programowania.",

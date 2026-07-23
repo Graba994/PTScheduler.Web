@@ -46,6 +46,8 @@ builder.Services.AddScoped<NpmService>();
 builder.Services.AddScoped<UpdateService>();
 builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<StripeService>();
+builder.Services.AddScoped<BackupService>();
+builder.Services.AddHostedService<BackupScheduler>();
 builder.Services.AddSingleton<UpdateNotifier>();
 builder.Services.AddHostedService<UpdatePollerService>();
 builder.Services.AddHostedService<TrialExpirationService>();
@@ -143,6 +145,24 @@ app.MapPost("/api/webhooks/stripe", async (HttpContext ctx, StripeService stripe
     var (handled, msg) = await stripe.HandleWebhookAsync(payload, sig);
     return handled ? Results.Ok(new { received = true, type = msg }) : Results.BadRequest(new { error = msg });
 });
+
+// Backup file download — admin only. The BackupEntry.Id determines
+// which file to stream; the path is stored in the entry so nothing
+// user-controlled hits the filesystem.
+app.MapGet("/api/backups/{id:int}/download", async (
+    int id,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory) =>
+{
+    if (!ctx.User.IsInRole("Admin")) return Results.Forbid();
+
+    await using var db = dbFactory.CreateDbContext();
+    var entry = await db.BackupEntries.FindAsync(id);
+    if (entry is null || string.IsNullOrEmpty(entry.FilePath) || !File.Exists(entry.FilePath))
+        return Results.NotFound();
+
+    return Results.File(entry.FilePath, "application/gzip", Path.GetFileName(entry.FilePath));
+}).RequireAuthorization();
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
