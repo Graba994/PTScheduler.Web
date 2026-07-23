@@ -1,5 +1,7 @@
 using System.Text.Json;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using PTScheduler.Domain.Constants;
 using PTScheduler.Domain.Entities;
 using PTScheduler.Infrastructure.Data;
 
@@ -84,5 +86,54 @@ public class EntitlementService
         await using var db = await _dbFactory.CreateDbContextAsync();
         var count = await db.Clients.CountAsync();
         return (count < max, count, max);
+    }
+
+    // Counts users in a given role and compares to a plan limit.
+    // Used before allowing admin to add another trainer/subordinate.
+    public async Task<(bool Allowed, int Current, int Max)> CheckRoleLimitAsync(
+        UserManager<ApplicationUser> userManager, string role, int max)
+    {
+        if (max == int.MaxValue) return (true, 0, int.MaxValue);
+        var users = await userManager.GetUsersInRoleAsync(role);
+        var count = users.Count;
+        return (count < max, count, max);
+    }
+
+    public Task<(bool Allowed, int Current, int Max)> CheckTrainerLimitAsync(
+        UserManager<ApplicationUser> userManager)
+        => CheckRoleLimitAsync(userManager, Roles.Trainer, _current.MaxTrainers);
+
+    public Task<(bool Allowed, int Current, int Max)> CheckSubordinateLimitAsync(
+        UserManager<ApplicationUser> userManager)
+        => CheckRoleLimitAsync(userManager, Roles.Subordinate, _current.MaxSubordinates);
+
+    public async Task<(bool Allowed, int Current, int Max)> CheckMonthlySessionsAsync()
+    {
+        var max = _current.MaxSessionsPerMonth;
+        if (max == int.MaxValue) return (true, 0, int.MaxValue);
+
+        await using var db = await _dbFactory.CreateDbContextAsync();
+        var since = new DateTime(DateTime.Now.Year, DateTime.Now.Month, 1);
+        var count = await db.Sessions.CountAsync(s => s.StartTime >= since);
+        return (count < max, count, max);
+    }
+
+    // Reads the size of the branding uploads directory. Cheap because it
+    // just enumerates FileInfos once — we don't need real-time accuracy.
+    public (bool Allowed, long CurrentBytes, long MaxBytes) CheckStorage(string uploadsPath)
+    {
+        var maxGB = _current.MaxStorageGB;
+        if (maxGB == int.MaxValue) return (true, 0, long.MaxValue);
+        long maxBytes = (long)maxGB * 1024 * 1024 * 1024;
+
+        try
+        {
+            if (!Directory.Exists(uploadsPath)) return (true, 0, maxBytes);
+            var used = new DirectoryInfo(uploadsPath)
+                .EnumerateFiles("*", SearchOption.AllDirectories)
+                .Sum(f => f.Length);
+            return (used < maxBytes, used, maxBytes);
+        }
+        catch { return (true, 0, maxBytes); }
     }
 }

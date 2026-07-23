@@ -6,6 +6,7 @@
 @inject ITrainerAvailabilityService AvailabilityService
 @inject ISessionSeriesService SeriesService
 @inject ITrainerConfigService TrainerConfigService
+@inject EntitlementService Entitlements
 @inject AuthenticationStateProvider AuthState
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
@@ -891,6 +892,14 @@ else
             _bookingError = "Wybierz termin.";
             return;
         }
+        // Plan limit — reject before hitting the DB if the tenant is at the monthly session cap
+        var (sessionsOk, sessionsCur, sessionsMax) = await Entitlements.CheckMonthlySessionsAsync();
+        if (!sessionsOk)
+        {
+            _bookingError = $"Osiągnięto limit sesji w tym miesiącu ({sessionsCur}/{sessionsMax}) w planie {Entitlements.Current.Name}. Zwiększ plan aby dodać więcej.";
+            return;
+        }
+
         _bookingBusy = true; _bookingError = string.Empty;
         try
         {
