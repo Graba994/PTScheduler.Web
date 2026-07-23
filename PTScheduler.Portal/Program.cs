@@ -44,6 +44,7 @@ builder.Services.AddScoped<TenantService>();
 builder.Services.AddScoped<SiteSettingsService>();
 builder.Services.AddScoped<NpmService>();
 builder.Services.AddScoped<UpdateService>();
+builder.Services.AddScoped<EmailService>();
 builder.Services.AddSingleton<UpdateNotifier>();
 builder.Services.AddHostedService<UpdatePollerService>();
 

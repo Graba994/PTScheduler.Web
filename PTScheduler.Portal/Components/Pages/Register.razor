@@ -2,6 +2,8 @@
 @layout PublicLayout
 @inject TenantService TenantSvc
 @inject IDbContextFactory<PortalDbContext> DbFactory
+@inject EmailService EmailSvc
+@inject SiteSettingsService Settings
 @inject NavigationManager Nav
 @rendermode InteractiveServer
 
@@ -15,28 +17,61 @@
                 @if (_done)
                 {
                     <div class="text-center py-4">
-                        <div style="width:70px;height:70px;border-radius:50%;background:#198754;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:2rem" class="mb-3">
-                            <i class="bi bi-check-lg"></i>
-                        </div>
-                        <h3 class="fw-bold">Gotowe!</h3>
-                        <p class="text-muted">
-                            Twoja instancja PTScheduler jest przygotowywana.
-                            Otrzymasz email na <strong>@_form.Email</strong> gdy będzie gotowa.
-                        </p>
-                        @if (_form.SetupMode == "self")
+                        @if (_provisioned)
                         {
+                            <div style="width:70px;height:70px;border-radius:50%;background:#198754;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:2rem" class="mb-3">
+                                <i class="bi bi-check-lg"></i>
+                            </div>
+                            <h3 class="fw-bold">Instancja gotowa!</h3>
+                            <p class="text-muted">
+                                Twoja aplikacja PTScheduler jest uruchomiona.
+                            </p>
+                            <div class="alert alert-success text-start">
+                                <div class="mb-2"><strong>Link do Twojej aplikacji:</strong></div>
+                                <a href="@_instanceUrl" target="_blank" class="btn btn-success btn-sm">
+                                    <i class="bi bi-box-arrow-up-right me-1"></i>Otwórz @_form.CompanyName
+                                </a>
+                                <div class="small mt-2 text-muted">
+                                    @_instanceUrl
+                                </div>
+                            </div>
                             <div class="alert alert-info small text-start">
                                 <i class="bi bi-info-circle me-1"></i>
-                                Wybrałeś samodzielną konfigurację. Po uruchomieniu instancji wejdź na swoją domenę
-                                i przejdź przez kreator Setup.
+                                Po otwarciu przejdź przez <strong>kreator konfiguracji</strong> — utworzysz w nim konto admina i skonfigurujesz aplikację.
+                                Link wysłaliśmy też na <strong>@_form.Email</strong>.
+                            </div>
+                        }
+                        else if (_pendingPayment)
+                        {
+                            <div style="width:70px;height:70px;border-radius:50%;background:#f59e0b;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:2rem" class="mb-3">
+                                <i class="bi bi-hourglass-split"></i>
+                            </div>
+                            <h3 class="fw-bold">Rejestracja przyjęta</h3>
+                            <p class="text-muted">
+                                Wybrałeś plan <strong>@(_selectedPlan?.Name)</strong> (@(_selectedPlan?.MonthlyPrice.ToString("0")) zł/mies.).
+                            </p>
+                            <div class="alert alert-warning text-start">
+                                <i class="bi bi-envelope me-1"></i>
+                                Skontaktujemy się z Tobą w ciągu 24h na <strong>@_form.Email</strong> z linkiem do płatności.
+                                Po opłaceniu Twoja instancja zostanie uruchomiona automatycznie.
                             </div>
                         }
                         else
                         {
-                            <div class="alert alert-info small text-start">
-                                <i class="bi bi-headset me-1"></i>
-                                Wybrałeś konfigurację przez nasz zespół. Skontaktujemy się z Tobą w ciągu 24h.
+                            <div style="width:70px;height:70px;border-radius:50%;background:#dc2626;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:2rem" class="mb-3">
+                                <i class="bi bi-exclamation-triangle"></i>
                             </div>
+                            <h3 class="fw-bold">Rejestracja zapisana</h3>
+                            <p class="text-muted">
+                                Twoje dane zostały zapisane, ale uruchomienie instancji nie powiodło się.
+                                Nasz zespół skontaktuje się z Tobą.
+                            </p>
+                            @if (!string.IsNullOrEmpty(_provisionError))
+                            {
+                                <div class="alert alert-danger small text-start">
+                                    <strong>Szczegóły:</strong> @_provisionError
+                                </div>
+                            }
                         }
                     </div>
                 }
@@ -149,7 +184,13 @@
     private List<Plan> _plans = [];
     private bool _saving;
     private bool _done;
+    private bool _provisioned;
+    private bool _pendingPayment;
     private string? _error;
+    private string? _provisionError;
+    private string? _instanceUrl;
+    private Plan? _selectedPlan;
+    private string _mainDomain = "ptscheduler.pl";
     private RegisterForm _form = new();
 
     protected override async Task OnInitializedAsync()
@@ -165,6 +206,9 @@
             _form.PlanId = Plan;
         else if (_plans.Count > 0)
             _form.PlanId = _plans[0].Id;
+
+        var md = await Settings.GetAsync(SiteSettingsService.Keys.MainDomain);
+        if (!string.IsNullOrWhiteSpace(md)) _mainDomain = md;
     }
 
     private async Task Submit()
@@ -174,10 +218,15 @@
 
         try
         {
-            var slug = GenerateSlug(_form.CompanyName);
-            var domain = $"{slug}.ptscheduler.pl";
+            _selectedPlan = _plans.FirstOrDefault(p => p.Id == _form.PlanId);
+            if (_selectedPlan is null) throw new InvalidOperationException("Wybierz plan.");
 
-            await TenantSvc.CreateAsync(
+            var slug = GenerateSlug(_form.CompanyName);
+            var domain = _selectedPlan.CustomDomain
+                ? $"{slug}.{_mainDomain}"
+                : $"{slug}.{_mainDomain}";
+
+            var tenant = await TenantSvc.CreateAsync(
                 slug, domain,
                 _form.CompanyName.Trim(),
                 _form.FullName.Trim(),
@@ -185,6 +234,32 @@
                 _form.Phone?.Trim(),
                 _form.PlanId,
                 _form.SetupMode);
+
+            // For free plans — provision immediately and email the trainer
+            if (_selectedPlan.MonthlyPrice == 0)
+            {
+                var (ok, output) = await TenantSvc.ProvisionAsync(tenant.Id);
+                if (ok)
+                {
+                    _instanceUrl = $"http://192.168.0.220:{tenant.Port}";
+                    _provisioned = true;
+
+                    var body = EmailSvc.WelcomeEmailBody(
+                        _form.FullName, domain, tenant.Port.ToString(), _selectedPlan.Name);
+                    _ = EmailSvc.SendAsync(_form.Email, "Twoja instancja PTScheduler jest gotowa!", body);
+                }
+                else
+                {
+                    _provisionError = output;
+                }
+            }
+            else
+            {
+                _pendingPayment = true;
+                var body = EmailSvc.PendingPaymentEmailBody(
+                    _form.FullName, _selectedPlan.Name, _selectedPlan.MonthlyPrice);
+                _ = EmailSvc.SendAsync(_form.Email, "PTScheduler — dziękujemy za rejestrację", body);
+            }
 
             _done = true;
         }
