@@ -30,6 +30,13 @@ public class Order
     public decimal Amount { get; set; }
     public string Currency { get; set; } = "PLN";
 
+    // Coupon applied at checkout (optional). Amount above is the FINAL charged amount;
+    // OriginalAmount + DiscountAmount describe the discount applied.
+    public int? CouponId { get; set; }
+    public string? CouponCode { get; set; }
+    public decimal? OriginalAmount { get; set; }
+    public decimal? DiscountAmount { get; set; }
+
     public OrderStatus Status { get; set; } = OrderStatus.Pending;
     public string? Description { get; set; }
 

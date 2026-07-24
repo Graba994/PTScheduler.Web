@@ -5,6 +5,7 @@
 @inject IPackageOfferService OfferService
 @inject IPaymentService PaymentService
 @inject IPaymentSettingsService PaymentSettings
+@inject ICouponService CouponSvc
 @inject AuthenticationStateProvider AuthState
 @inject NavigationManager Nav
 @rendermode PTScheduler.Web.RenderModes.Server
@@ -129,7 +130,41 @@ else
                 <span class="fw-semibold">Wybierz metodę płatności</span>
                 <button class="btn-close" @onclick="ClosePicker"></button>
             </div>
-            <div class="pay-picker-sub">@_pickFor.Name — <strong>@_pickFor.Price.ToString("0.00") @_currency</strong></div>
+            <div class="pay-picker-sub">
+                @_pickFor.Name —
+                @if (_couponFinal.HasValue)
+                {
+                    <span class="text-muted text-decoration-line-through">@_pickFor.Price.ToString("0.00")</span>
+                    <strong class="text-success ms-1">@_couponFinal.Value.ToString("0.00") @_currency</strong>
+                    <div class="small text-success">Rabat: -@(_pickFor.Price - _couponFinal.Value).ToString("0.00") @_currency</div>
+                }
+                else
+                {
+                    <strong>@_pickFor.Price.ToString("0.00") @_currency</strong>
+                }
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Kod rabatowy</label>
+                <div class="input-group input-group-sm">
+                    <input class="form-control font-monospace" placeholder="np. LATO20"
+                           @bind="_couponCode" @bind:event="oninput" />
+                    <button class="btn btn-outline-primary" @onclick="ApplyCoupon" disabled="@(_couponBusy || string.IsNullOrWhiteSpace(_couponCode))">
+                        @if (_couponBusy) { <span class="spinner-border spinner-border-sm"></span> } else { <span>Zastosuj</span> }
+                    </button>
+                    @if (!string.IsNullOrEmpty(_appliedCoupon))
+                    {
+                        <button class="btn btn-outline-secondary" @onclick="ClearCoupon"><i class="bi bi-x"></i></button>
+                    }
+                </div>
+                @if (!string.IsNullOrEmpty(_couponMsg))
+                {
+                    <div class="small mt-1 @(_couponError ? "text-danger" : "text-success")">
+                        <i class="bi @(_couponError ? "bi-exclamation-circle" : "bi-check-circle") me-1"></i>@_couponMsg
+                    </div>
+                }
+            </div>
+
             @if (!string.IsNullOrEmpty(_err)) { <div class="alert alert-danger py-2 mb-2">@_err</div> }
             <div class="d-grid gap-2">
                 @foreach (var opt in _options)
@@ -161,6 +196,45 @@ else
     private List<PaymentOptionDto> _options = [];
     private PackageOfferDto? _pickFor;
 
+    // Coupon state (per-picker instance)
+    private string _couponCode = string.Empty;
+    private string? _appliedCoupon;
+    private decimal? _couponFinal;
+    private bool _couponBusy;
+    private bool _couponError;
+    private string? _couponMsg;
+
+    private async Task ApplyCoupon()
+    {
+        if (_pickFor is null || string.IsNullOrWhiteSpace(_couponCode)) return;
+        _couponBusy = true; _couponMsg = null;
+        var res = await CouponSvc.ValidateAsync(_couponCode.Trim(), _pickFor.Price, "package");
+        if (res.IsValid)
+        {
+            _appliedCoupon = res.Code;
+            _couponFinal = res.FinalAmount;
+            _couponError = false;
+            _couponMsg = $"Kod zastosowany: -{res.DiscountAmount:0.00} {_currency}";
+        }
+        else
+        {
+            _appliedCoupon = null;
+            _couponFinal = null;
+            _couponError = true;
+            _couponMsg = res.Error;
+        }
+        _couponBusy = false;
+    }
+
+    private void ClearCoupon()
+    {
+        _couponCode = string.Empty;
+        _appliedCoupon = null;
+        _couponFinal = null;
+        _couponMsg = null;
+        _couponError = false;
+    }
+
     protected override async Task OnInitializedAsync()
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
@@ -184,6 +258,7 @@ else
     {
         _err = string.Empty;
         _buyingId = o.Id;
+        ClearCoupon();
 
         if (_options.Count == 1) { await StartCheckout(o, _options[0].Key); return; }
         _pickFor = o;
@@ -193,14 +268,14 @@ else
     private async Task StartCheckout(PackageOfferDto o, string providerKey)
     {
         _busy = true; _err = string.Empty;
-        var res = await PaymentService.StartPackageCheckoutAsync(_userId, o.Id, providerKey, Nav.BaseUri, _email, string.Empty);
+        var res = await PaymentService.StartPackageCheckoutAsync(_userId, o.Id, providerKey, Nav.BaseUri, _email, string.Empty, _appliedCoupon);
         if (res.Ok && res.RedirectUrl is not null) { Nav.NavigateTo(res.RedirectUrl, forceLoad: true); return; }
         _err = res.Error ?? "Nie udało się rozpocząć płatności.";
         _busy = false;
         _buyingId = null;
     }
 
-    private void ClosePicker() { _pickFor = null; _err = string.Empty; }
+    private void ClosePicker() { _pickFor = null; _err = string.Empty; ClearCoupon(); }
 }
 
 <style>

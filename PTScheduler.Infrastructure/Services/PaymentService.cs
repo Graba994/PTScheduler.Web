@@ -18,6 +18,7 @@ namespace PTScheduler.Infrastructure.Services;
 public class PaymentService(
     IDbContextFactory<ApplicationDbContext> dbFactory,
     IPaymentSettingsService settingsService,
+    ICouponService coupons,
     IEnumerable<IPaymentProvider> providers,
     ILogger<PaymentService> logger) : IPaymentService
 {
@@ -38,7 +39,7 @@ public class PaymentService(
         return options;
     }
 
-    public async Task<PaymentInitResult> StartCourseCheckoutAsync(string userId, int courseId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp)
+    public async Task<PaymentInitResult> StartCourseCheckoutAsync(string userId, int courseId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null)
     {
         await using var db = dbFactory.CreateDbContext();
         var course = await db.Courses.FirstOrDefaultAsync(c => c.Id == courseId);
@@ -59,10 +60,11 @@ public class PaymentService(
             Description = $"Kurs: {course.Title}",
             CreatedAt = now
         };
+        await ApplyCouponIfAnyAsync(order, couponCode, "course");
         return await StartAsync(db, order, providerKey, course.Title, appBaseUrl, buyerEmail, customerIp);
     }
 
-    public async Task<PaymentInitResult> StartPackageCheckoutAsync(string userId, int packageOfferId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp)
+    public async Task<PaymentInitResult> StartPackageCheckoutAsync(string userId, int packageOfferId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null)
     {
         await using var db = dbFactory.CreateDbContext();
         var offer = await db.PackageOffers.FirstOrDefaultAsync(o => o.Id == packageOfferId);
@@ -82,7 +84,24 @@ public class PaymentService(
             Description = $"Pakiet: {offer.Name}",
             CreatedAt = DateTime.UtcNow
         };
+        await ApplyCouponIfAnyAsync(order, couponCode, "package");
         return await StartAsync(db, order, providerKey, offer.Name, appBaseUrl, buyerEmail, customerIp);
+    }
+
+    // Validates the coupon and mutates the order to store the discount +
+    // final Amount. The caller decides whether to bubble errors up; we
+    // silently ignore bad codes so a stale code doesn't block checkout.
+    private async Task ApplyCouponIfAnyAsync(Order order, string? couponCode, string targetType)
+    {
+        if (string.IsNullOrWhiteSpace(couponCode)) return;
+        var result = await coupons.ValidateAsync(couponCode, order.Amount, targetType);
+        if (!result.IsValid) return;
+
+        order.OriginalAmount = order.Amount;
+        order.DiscountAmount = result.DiscountAmount;
+        order.Amount = result.FinalAmount;
+        order.CouponId = result.CouponId;
+        order.CouponCode = result.Code;
     }
 
     private async Task<PaymentInitResult> StartAsync(ApplicationDbContext db, Order order, string providerKey,
@@ -173,6 +192,20 @@ public class PaymentService(
                 order.PaidAt = DateTime.UtcNow;
                 await FulfilAsync(db, order);
                 await db.SaveChangesAsync();
+
+                // Record coupon redemption after the order is committed so a rollback
+                // wouldn't leave the counter incremented without a paid order behind it.
+                if (order.CouponId is int cid && order.OriginalAmount.HasValue && order.DiscountAmount.HasValue)
+                {
+                    try
+                    {
+                        await coupons.RedeemAsync(cid, order.ApplicationUserId, null,
+                            order.OriginalAmount.Value, order.DiscountAmount.Value, order.Amount,
+                            order.Kind == OrderKind.Course ? "course" : "package",
+                            order.CourseId ?? order.PackageOfferId);
+                    }
+                    catch (Exception ex) { logger.LogError(ex, "Coupon redemption bookkeeping failed for order {OrderId}", order.Id); }
+                }
             }
         }
         else if (outcome == PaymentOutcome.Canceled)
