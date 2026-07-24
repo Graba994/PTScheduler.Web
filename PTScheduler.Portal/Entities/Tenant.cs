@@ -28,6 +28,14 @@ public class Tenant
     public string? StripeCheckoutSessionId { get; set; }
     public string BillingStatus { get; set; } = "none"; // none | trialing | active | past_due | canceled
 
+    // Health monitoring
+    public bool? IsHealthy { get; set; }
+    public DateTime? LastHealthCheckAt { get; set; }
+    public string? LastHealthError { get; set; }
+    public int? LastHealthResponseMs { get; set; }
+    public DateTime? UnhealthySinceUtc { get; set; }
+    public bool DownAlertSent { get; set; }
+
     public Plan? Plan { get; set; }
     public ICollection<Subscription> Subscriptions { get; set; } = [];
 }
