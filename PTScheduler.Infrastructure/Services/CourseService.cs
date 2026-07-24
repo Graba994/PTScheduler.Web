@@ -284,6 +284,7 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IW
                         Title = l.Title,
                         SortOrder = l.SortOrder,
                         VideoUrl = l.VideoUrl,
+                        BunnyVideoId = l.BunnyVideoId,
                         ContentHtml = l.ContentHtml,
                         HasQuiz = l.QuizQuestions.Any(),
                         QuizPassThreshold = l.QuizPassThreshold
@@ -351,6 +352,7 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IW
             ModuleId = moduleId,
             Title = string.IsNullOrWhiteSpace(dto.Title) ? "Nowa lekcja" : dto.Title.Trim(),
             VideoUrl = string.IsNullOrWhiteSpace(dto.VideoUrl) ? null : dto.VideoUrl.Trim(),
+            BunnyVideoId = string.IsNullOrWhiteSpace(dto.BunnyVideoId) ? null : dto.BunnyVideoId.Trim(),
             ContentHtml = string.IsNullOrWhiteSpace(dto.ContentHtml) ? null : dto.ContentHtml,
             SortOrder = maxOrder + 1
         };
@@ -366,6 +368,7 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IW
         if (l is null) return;
         l.Title = string.IsNullOrWhiteSpace(dto.Title) ? l.Title : dto.Title.Trim();
         l.VideoUrl = string.IsNullOrWhiteSpace(dto.VideoUrl) ? null : dto.VideoUrl.Trim();
+        l.BunnyVideoId = string.IsNullOrWhiteSpace(dto.BunnyVideoId) ? null : dto.BunnyVideoId.Trim();
         l.ContentHtml = string.IsNullOrWhiteSpace(dto.ContentHtml) ? null : dto.ContentHtml;
         await db.SaveChangesAsync();
     }

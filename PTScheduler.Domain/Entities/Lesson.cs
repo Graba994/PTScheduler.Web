@@ -13,6 +13,13 @@ public class Lesson
     // Video source URL (YouTube / Bunny / Google Drive). Rendered as an embed.
     public string? VideoUrl { get; set; }
 
+    // Bunny.net video ID (GUID). When set the app renders the Bunny embed
+    // instead of the raw VideoUrl, so trainers on higher plans get the
+    // proper streaming/CDN pipeline.
+    public string? BunnyVideoId { get; set; }
+    public int? BunnyVideoDurationSec { get; set; }
+    public long? BunnyVideoSizeBytes { get; set; }
+
     // Rich lesson materials (HTML/CSS).
     public string? ContentHtml { get; set; }
 

@@ -16,6 +16,7 @@ public class LessonDto
     public string Title { get; set; } = string.Empty;
     public int SortOrder { get; set; }
     public string? VideoUrl { get; set; }
+    public string? BunnyVideoId { get; set; }
     public string? ContentHtml { get; set; }
     public bool HasQuiz { get; set; }
     public int QuizPassThreshold { get; set; } = 70;
@@ -27,5 +28,6 @@ public class SaveLessonDto
 {
     public string Title { get; set; } = string.Empty;
     public string? VideoUrl { get; set; }
+    public string? BunnyVideoId { get; set; }
     public string? ContentHtml { get; set; }
 }

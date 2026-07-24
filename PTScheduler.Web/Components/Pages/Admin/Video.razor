@@ -1,0 +1,124 @@
+@page "/admin/video"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@inject IBunnyService Bunny
+@inject EntitlementService Entitlements
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Wideo (Bunny.net)" />
+
+<div class="page-header">
+    <h4 class="page-title"><i class="bi bi-camera-video-fill me-2" style="color:var(--c-primary)"></i>Wideo — hosting Bunny.net</h4>
+</div>
+
+@if (Entitlements.Current.VideoProvider != "bunny")
+{
+    <FeatureGate Flag="CoursesEnabled" RequiredPlan="Pro"
+                 Title="Hosting wideo w Bunny.net jest dostępny w planie Pro / Studio">
+        <Description>
+            Twój plan używa dostawcy wideo: <strong>@Entitlements.Current.VideoProvider</strong>. Bunny.net z limitem
+            @(Entitlements.Current.MaxVideoStorageGB) GB storage / @(Entitlements.Current.MaxVideoBandwidthGBPerMonth) GB transferu
+            jest w wyższych planach.
+        </Description>
+    </FeatureGate>
+}
+else if (_settings is null)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    @if (_message is not null)
+    {
+        <div class="alert @(_msgError ? "alert-danger" : "alert-success") alert-dismissible py-2 small">
+            @_message
+            <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button>
+        </div>
+    }
+
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-gear me-1"></i>Konfiguracja Bunny Stream</div>
+        <div class="card-body">
+            <div class="form-check mb-3">
+                <input class="form-check-input" type="checkbox" @bind="_settings.Enabled" id="en" />
+                <label class="form-check-label fw-semibold" for="en">Włącz hosting Bunny.net</label>
+            </div>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">Library ID</label>
+                    <input class="form-control font-monospace" @bind="_settings.LibraryId" placeholder="123456" />
+                    <div class="form-text small">Znajdziesz w Bunny Dashboard → Stream → Video Libraries</div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">API Key</label>
+                    <input type="password" class="form-control font-monospace" @bind="_settings.ApiKey" />
+                    <div class="form-text small">Library API Key (zakładka "API")</div>
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">CDN Hostname</label>
+                    <input class="form-control font-monospace" @bind="_settings.CdnHostname" placeholder="vz-abcd1234-xxx.b-cdn.net" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">Pull Zone URL (opcjonalne)</label>
+                    <input class="form-control font-monospace" @bind="_settings.PullZoneUrl" placeholder="https://..." />
+                </div>
+            </div>
+
+            <div class="mt-3 d-flex gap-2">
+                <button class="btn btn-primary" @onclick="Save"><i class="bi bi-floppy me-1"></i>Zapisz</button>
+                <button class="btn btn-outline-secondary" @onclick="Test" disabled="@_testing">
+                    @if (_testing) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                    <i class="bi bi-wifi me-1"></i>Testuj połączenie
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <div class="alert alert-info small">
+        <i class="bi bi-info-circle me-1"></i>
+        <strong>Jak zacząć:</strong>
+        <ol class="mb-0 mt-2">
+            <li>Załóż konto w <a href="https://bunny.net" target="_blank">bunny.net</a> (test 500MB gratis)</li>
+            <li>Utwórz Video Library w sekcji Stream</li>
+            <li>Skopiuj Library ID + API Key + CDN Hostname i wklej powyżej</li>
+            <li>Kliknij "Testuj połączenie" — potwierdzi że komunikacja działa</li>
+            <li>W kursach dodawaj lekcje z uploadem wideo — pliki wylatują prosto do Bunny.net</li>
+        </ol>
+    </div>
+}
+
+@code {
+    private BunnySettingsDto? _settings;
+    private string? _message;
+    private bool _msgError;
+    private bool _testing;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Entitlements.Current.VideoProvider == "bunny")
+            _settings = await Bunny.GetSettingsAsync();
+    }
+
+    private async Task Save()
+    {
+        if (_settings is null) return;
+        try
+        {
+            await Bunny.SaveSettingsAsync(_settings);
+            _message = "Zapisano.";
+            _msgError = false;
+        }
+        catch (Exception ex) { _message = ex.Message; _msgError = true; }
+    }
+
+    private async Task Test()
+    {
+        if (_settings is null) return;
+        _testing = true;
+        var (ok, msg) = await Bunny.TestConnectionAsync(_settings);
+        _testing = false;
+        _message = msg;
+        _msgError = !ok;
+    }
+}

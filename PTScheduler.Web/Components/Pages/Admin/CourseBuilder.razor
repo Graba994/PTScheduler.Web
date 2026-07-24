@@ -6,6 +6,7 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
 @inject ICourseService CourseService
 @inject IPermissionService Permission
+@inject IBunnyService Bunny
 @inject AuthenticationStateProvider AuthState
 @inject NavigationManager Nav
 @rendermode PTScheduler.Web.RenderModes.Server
@@ -121,6 +122,11 @@ else
     private int? _lessonFormModuleId;
     private int? _lessonFormId;
     private SaveLessonDto _lessonForm = new();
+    private string _videoTab = "url";
+    private bool _uploading;
+    private bool _uploadError;
+    private string? _uploadMsg;
+    private long _uploadedMB;
 
     private QuizDto _quiz = new();
     private bool _savingQuiz;
@@ -193,9 +199,45 @@ else
     {
         _lessonFormModuleId = l.ModuleId;
         _lessonFormId = l.Id;
-        _lessonForm = new SaveLessonDto { Title = l.Title, VideoUrl = l.VideoUrl, ContentHtml = l.ContentHtml };
+        _lessonForm = new SaveLessonDto { Title = l.Title, VideoUrl = l.VideoUrl, BunnyVideoId = l.BunnyVideoId, ContentHtml = l.ContentHtml };
         _quizSaved = false;
         _quiz = await CourseService.GetQuizForEditAsync(l.Id);
+    }
+
+    private async Task UploadToBunny(InputFileChangeEventArgs e)
+    {
+        _uploading = true; _uploadMsg = null; _uploadError = false;
+        try
+        {
+            var f = e.File;
+            // Cap at 2 GB per file; larger uploads should go direct via TUS in a later iteration
+            const long max = 2L * 1024 * 1024 * 1024;
+            if (f.Size > max)
+            {
+                _uploadMsg = "Plik za duży (max 2 GB w tej wersji).";
+                _uploadError = true;
+                _uploading = false;
+                return;
+            }
+
+            _uploadedMB = f.Size / (1024 * 1024);
+            var title = string.IsNullOrWhiteSpace(_lessonForm.Title) ? f.Name : _lessonForm.Title;
+            await using var stream = f.OpenReadStream(max);
+            var (ok, id, err) = await Bunny.CreateAndUploadAsync(title, stream);
+            if (ok && !string.IsNullOrEmpty(id))
+            {
+                _lessonForm.BunnyVideoId = id;
+                _uploadMsg = $"Wgrano — ID: {id}. Wideo jest przetwarzane, będzie gotowe za chwilę.";
+                _uploadError = false;
+            }
+            else
+            {
+                _uploadMsg = err ?? "Upload nie powiódł się.";
+                _uploadError = true;
+            }
+        }
+        catch (Exception ex) { _uploadMsg = ex.Message; _uploadError = true; }
+        _uploading = false;
     }
 
     private void CancelLessonForm()
@@ -273,11 +315,51 @@ else
         </div>
         <div class="row g-3">
             <div class="col-12 col-lg-6">
-                <label class="form-label fw-semibold">Wideo (URL)</label>
-                <input class="form-control" @bind="_lessonForm.VideoUrl" @bind:event="oninput"
-                       placeholder="YouTube / Bunny / Google Drive" />
-                <div class="form-text">Wklej link do filmu — osadzimy go automatycznie.</div>
-                <div class="mt-2"><VideoPlayer Url="@_lessonForm.VideoUrl" /></div>
+                <label class="form-label fw-semibold">Wideo</label>
+                <ul class="nav nav-tabs small mb-2">
+                    <li class="nav-item">
+                        <a class="nav-link @(_videoTab == "url" ? "active" : "")" @onclick='() => _videoTab = "url"' href="javascript:void(0)">Link (YouTube / URL)</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link @(_videoTab == "bunny" ? "active" : "")" @onclick='() => _videoTab = "bunny"' href="javascript:void(0)">
+                            Bunny.net Upload
+                            <PlanBadge Flag="CoursesEnabled" RequiredPlan="Pro" />
+                        </a>
+                    </li>
+                </ul>
+
+                @if (_videoTab == "url")
+                {
+                    <input class="form-control" @bind="_lessonForm.VideoUrl" @bind:event="oninput"
+                           placeholder="https://youtube.com/... lub inny link" />
+                    <div class="form-text">Wklej link do filmu — osadzimy go automatycznie.</div>
+                }
+                else
+                {
+                    <div class="mb-2">
+                        <label class="form-label small">Bunny Video ID (GUID)</label>
+                        <input class="form-control font-monospace" @bind="_lessonForm.BunnyVideoId" @bind:event="oninput"
+                               placeholder="a1b2c3d4-e5f6-7890-abcd-ef1234567890" />
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small">…lub wgraj plik MP4</label>
+                        <InputFile OnChange="UploadToBunny" accept="video/*" class="form-control form-control-sm" />
+                        @if (_uploading)
+                        {
+                            <div class="text-muted small mt-1">
+                                <span class="spinner-border spinner-border-sm me-1"></span>Wgrywam do Bunny.net (@(_uploadedMB) MB)…
+                            </div>
+                        }
+                        @if (!string.IsNullOrEmpty(_uploadMsg))
+                        {
+                            <div class="alert @(_uploadError ? "alert-danger" : "alert-success") py-1 small mt-2 mb-0">@_uploadMsg</div>
+                        }
+                    </div>
+                }
+
+                <div class="mt-2">
+                    <VideoPlayer Url="@_lessonForm.VideoUrl" BunnyVideoId="@_lessonForm.BunnyVideoId" />
+                </div>
             </div>
             <div class="col-12 col-lg-6">
                 <label class="form-label fw-semibold">Materiały (HTML / CSS)</label>

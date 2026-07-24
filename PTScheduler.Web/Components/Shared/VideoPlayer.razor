@@ -1,3 +1,6 @@
+@using PTScheduler.Application.Interfaces
+@inject IBunnyService Bunny
+
 @if (!string.IsNullOrWhiteSpace(_src))
 {
     <div class="ratio ratio-16x9">
@@ -17,7 +20,22 @@ else if (ShowPlaceholder)
 
 @code {
     [Parameter] public string? Url { get; set; }
+    [Parameter] public string? BunnyVideoId { get; set; }
     [Parameter] public bool ShowPlaceholder { get; set; } = true;
 
-    private string? _src => VideoEmbed.ToEmbed(Url);
+    private string? _src;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(BunnyVideoId))
+        {
+            var s = await Bunny.GetSettingsAsync();
+            if (!string.IsNullOrEmpty(s.LibraryId))
+            {
+                _src = $"https://iframe.mediadelivery.net/embed/{s.LibraryId}/{BunnyVideoId}";
+                return;
+            }
+        }
+        _src = VideoEmbed.ToEmbed(Url);
+    }
 }
