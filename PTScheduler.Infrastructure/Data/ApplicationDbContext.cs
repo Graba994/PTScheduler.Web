@@ -41,6 +41,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<PaymentSettings> PaymentSettings => Set<PaymentSettings>();
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<PackageOffer> PackageOffers => Set<PackageOffer>();
+    public DbSet<Coupon> Coupons => Set<Coupon>();
+    public DbSet<CouponRedemption> CouponRedemptions => Set<CouponRedemption>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -49,6 +51,24 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         builder.Entity<EmailTemplate>()
             .HasIndex(e => e.Key)
             .IsUnique();
+
+        builder.Entity<Coupon>(e =>
+        {
+            e.HasIndex(c => c.Code).IsUnique();
+            e.Property(c => c.DiscountValue).HasPrecision(10, 2);
+        });
+
+        builder.Entity<CouponRedemption>(e =>
+        {
+            e.HasOne(r => r.Coupon)
+             .WithMany(c => c.Redemptions)
+             .HasForeignKey(r => r.CouponId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.Property(r => r.OriginalAmount).HasPrecision(10, 2);
+            e.Property(r => r.DiscountAmount).HasPrecision(10, 2);
+            e.Property(r => r.FinalAmount).HasPrecision(10, 2);
+            e.HasIndex(r => r.RedeemedAt);
+        });
 
         builder.Entity<ApplicationUser>()
             .HasOne(u => u.Supervisor)
