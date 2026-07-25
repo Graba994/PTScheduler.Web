@@ -15,6 +15,12 @@ public class OrderDto
     public DateTime CreatedAt { get; set; }
     public DateTime? PaidAt { get; set; }
 
+    public decimal? OriginalAmount { get; set; }
+    public decimal? DiscountAmount { get; set; }
+    public string? CouponCode { get; set; }
+
+    public bool HasDiscount => DiscountAmount.HasValue && DiscountAmount > 0;
+
     // Back-compat alias (older markup referenced CourseTitle).
     public string CourseTitle => ItemTitle;
 }

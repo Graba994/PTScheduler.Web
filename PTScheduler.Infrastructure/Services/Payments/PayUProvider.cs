@@ -39,7 +39,7 @@ public sealed class PayUProvider(ILogger<PayUProvider> logger) : IPaymentProvide
         var payload = new
         {
             notifyUrl = $"{baseApp}/payments/payu/notify",
-            continueUrl = $"{baseApp}/my/orders",
+            continueUrl = $"{baseApp}/payment/success?order={order.ExtOrderId}",
             customerIp = string.IsNullOrWhiteSpace(ctx.CustomerIp) ? "127.0.0.1" : ctx.CustomerIp,
             merchantPosId = cfg.Get("PosId"),
             description = order.Description ?? ctx.ItemName,

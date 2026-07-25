@@ -341,7 +341,10 @@ public class PaymentService(
                 Currency = o.Currency,
                 Status = o.Status.ToString(),
                 CreatedAt = o.CreatedAt,
-                PaidAt = o.PaidAt
+                PaidAt = o.PaidAt,
+                OriginalAmount = o.OriginalAmount,
+                DiscountAmount = o.DiscountAmount,
+                CouponCode = o.CouponCode
             })
             .FirstOrDefaultAsync();
     }
@@ -364,7 +367,10 @@ public class PaymentService(
                 Currency = o.Currency,
                 Status = o.Status.ToString(),
                 CreatedAt = o.CreatedAt,
-                PaidAt = o.PaidAt
+                PaidAt = o.PaidAt,
+                OriginalAmount = o.OriginalAmount,
+                DiscountAmount = o.DiscountAmount,
+                CouponCode = o.CouponCode
             })
             .ToListAsync();
     }
