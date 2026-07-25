@@ -374,4 +374,30 @@ public class PaymentService(
             })
             .ToListAsync();
     }
+
+    public async Task<List<OrderDto>> GetPaidOrdersAsync(DateTime from)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        return await db.Orders.AsNoTracking()
+            .Where(o => o.Status == OrderStatus.Paid && o.PaidAt != null && o.PaidAt >= from)
+            .OrderByDescending(o => o.PaidAt)
+            .Select(o => new OrderDto
+            {
+                Id = o.Id,
+                ItemTitle = o.Kind == OrderKind.Package
+                    ? (o.PackageOffer != null ? o.PackageOffer.Name : "Pakiet")
+                    : (o.Course != null ? o.Course.Title : "Kurs"),
+                Kind = o.Kind.ToString(),
+                Provider = o.Provider,
+                Amount = o.Amount,
+                Currency = o.Currency,
+                Status = o.Status.ToString(),
+                CreatedAt = o.CreatedAt,
+                PaidAt = o.PaidAt,
+                OriginalAmount = o.OriginalAmount,
+                DiscountAmount = o.DiscountAmount,
+                CouponCode = o.CouponCode
+            })
+            .ToListAsync();
+    }
 }

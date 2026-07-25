@@ -28,4 +28,6 @@ public interface IPaymentService
     Task<List<PaymentOptionDto>> GetEnabledOptionsAsync();
 
     Task<List<OrderDto>> GetMyOrdersAsync(string userId);
+
+    Task<List<OrderDto>> GetPaidOrdersAsync(DateTime from);
 }

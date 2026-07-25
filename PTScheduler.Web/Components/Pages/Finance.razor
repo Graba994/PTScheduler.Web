@@ -7,6 +7,7 @@
 @using PTScheduler.Domain.Enums
 @using PTScheduler.Domain.Constants
 @inject ISessionPackageService PackageService
+@inject IPaymentService PaymentService
 @inject IFinanceService FinanceService
 @inject IPermissionService PermissionService
 @inject IJSRuntime JS
@@ -106,9 +107,51 @@ else
         </div>
     </div>
 
+    @if (_onlineOrders.Count > 0)
+    {
+        <div class="row g-3 mb-3">
+            <div class="col-6 col-xl-3">
+                <div class="stat-card">
+                    <div class="stat-icon" style="background:rgba(16,185,129,.12);color:#10b981"><i class="bi bi-cart-check-fill"></i></div>
+                    <div>
+                        <div class="stat-value">@_onlineOrders.Sum(o => o.Amount).ToString("N0") @(_onlineOrders.FirstOrDefault()?.Currency ?? "PLN")</div>
+                        <div class="stat-label">Płatności online</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-xl-3">
+                <div class="stat-card">
+                    <div class="stat-icon" style="background:rgba(99,102,241,.12);color:#6366f1"><i class="bi bi-mortarboard-fill"></i></div>
+                    <div>
+                        <div class="stat-value">@_onlineOrders.Count(o => o.Kind == "Course")</div>
+                        <div class="stat-label">Kupione kursy</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-xl-3">
+                <div class="stat-card">
+                    <div class="stat-icon" style="background:rgba(245,158,11,.12);color:#f59e0b"><i class="bi bi-box-seam-fill"></i></div>
+                    <div>
+                        <div class="stat-value">@_onlineOrders.Count(o => o.Kind == "Package")</div>
+                        <div class="stat-label">Kupione pakiety</div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-6 col-xl-3">
+                <div class="stat-card">
+                    <div class="stat-icon" style="background:rgba(236,72,153,.12);color:#ec4899"><i class="bi bi-tag-fill"></i></div>
+                    <div>
+                        <div class="stat-value">@_onlineOrders.Where(o => o.HasDiscount).Sum(o => o.DiscountAmount!.Value).ToString("N0") @(_onlineOrders.FirstOrDefault()?.Currency ?? "PLN")</div>
+                        <div class="stat-label">Rabaty (kupony)</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+
     @if (_taxConfig is not null && HasAnyTaxOption(_taxConfig))
     {
-        var t = ComputeTax(_packages, _taxConfig, _months);
+        var t = ComputeTax(_packages, _onlineOrders, _taxConfig, _months);
         <div class="card mb-3">
             <div class="card-header py-2 d-flex align-items-center justify-content-between">
                 <span class="fw-semibold" style="font-size:.875rem">
@@ -322,7 +365,7 @@ else
         <div class="col-12 col-lg-8">
             <div class="card h-100">
                 <div class="card-header py-2 fw-semibold" style="font-size:.875rem">
-                    <i class="bi bi-bar-chart-fill me-2" style="color:var(--c-primary)"></i>Przychody miesięcznie — opłacone pakiety (zł)
+                    <i class="bi bi-bar-chart-fill me-2" style="color:var(--c-primary)"></i>Przychody miesięcznie (zł)
                 </div>
                 <div class="card-body" style="height:220px;position:relative">
                     <canvas id="finance-bar"></canvas>
@@ -398,6 +441,75 @@ else
             }
         </div>
     </div>
+
+    @if (_onlineOrders.Count > 0)
+    {
+        <div class="card mb-3">
+            <div class="card-header py-2 d-flex align-items-center justify-content-between">
+                <span class="fw-semibold" style="font-size:.875rem">
+                    <i class="bi bi-cart-check-fill me-2" style="color:#10b981"></i>Zamówienia online
+                    <span class="badge bg-success ms-1">@_onlineOrders.Count</span>
+                </span>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-hover align-middle mb-0" style="font-size:.875rem">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Produkt</th>
+                            <th>Typ</th>
+                            <th>Bramka</th>
+                            <th class="text-end">Kwota</th>
+                            <th>Kupon</th>
+                            <th>Data płatności</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var o in _onlineOrders)
+                        {
+                            <tr>
+                                <td class="fw-semibold">@o.ItemTitle</td>
+                                <td>
+                                    <span class="badge @(o.Kind == "Course" ? "bg-info-subtle text-info-emphasis" : "bg-primary-subtle text-primary-emphasis")">
+                                        @(o.Kind == "Course" ? "Kurs" : "Pakiet")
+                                    </span>
+                                </td>
+                                <td class="text-muted small">@(o.Provider ?? "—")</td>
+                                <td class="text-end text-nowrap">
+                                    @if (o.HasDiscount)
+                                    {
+                                        <span class="text-muted text-decoration-line-through small">@o.OriginalAmount!.Value.ToString("0.00")</span>
+                                        <span class="ms-1">@o.Amount.ToString("0.00") @o.Currency</span>
+                                    }
+                                    else
+                                    {
+                                        @($"{o.Amount:0.00} {o.Currency}")
+                                    }
+                                </td>
+                                <td>
+                                    @if (o.HasDiscount)
+                                    {
+                                        <span class="badge bg-success-subtle text-success-emphasis">@o.CouponCode (−@o.DiscountAmount!.Value.ToString("0.00"))</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">—</span>
+                                    }
+                                </td>
+                                <td class="text-nowrap text-muted">@(o.PaidAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—")</td>
+                            </tr>
+                        }
+                    </tbody>
+                    <tfoot class="fw-bold table-light">
+                        <tr>
+                            <td colspan="3">Razem (@_onlineOrders.Count zamówień)</td>
+                            <td class="text-end">@_onlineOrders.Sum(o => o.Amount).ToString("N2") @(_onlineOrders.FirstOrDefault()?.Currency ?? "PLN")</td>
+                            <td colspan="2"></td>
+                        </tr>
+                    </tfoot>
+                </table>
+            </div>
+        </div>
+    }
 
     <!-- Full history -->
     <div class="card">
@@ -523,6 +635,7 @@ else
     private List<SessionPackageDto> _packages = [];
     private List<SessionPackageDto> _allPackages = [];
     private List<SessionPackageDto> _unpaid = [];
+    private List<OrderDto> _onlineOrders = [];
     private bool _chartNeedsRender;
     private FinanceTaxConfigDto? _taxConfig;
     private bool _showTaxSettings;
@@ -579,6 +692,7 @@ else
         _allPackages = all.Where(p => !p.IsHidden).ToList();
         _packages = _allPackages.Where(p => p.PurchasedAt >= from).ToList();
         _unpaid = _packages.Where(p => !p.IsPaid && p.Status != PackageStatus.Cancelled).ToList();
+        _onlineOrders = await PaymentService.GetPaidOrdersAsync(from);
         _loaded = true;
         _chartNeedsRender = true;
     }
@@ -603,9 +717,10 @@ else
         tc.VatEnabled || tc.IncomeTaxType != "none" || tc.ZusEnabled || tc.HealthInsuranceEnabled || tc.CostDeductionsEnabled;
 
     private static (decimal Gross, decimal Vat, decimal Net, decimal IncomeTax, string TaxLabel, decimal Zus, decimal Health, decimal Costs, decimal Profit) ComputeTax(
-        List<SessionPackageDto> packages, FinanceTaxConfigDto tax, int months)
+        List<SessionPackageDto> packages, List<OrderDto> onlineOrders, FinanceTaxConfigDto tax, int months)
     {
-        var gross = packages.Where(p => p.IsPaid).Sum(p => p.TotalPrice);
+        var gross = packages.Where(p => p.IsPaid).Sum(p => p.TotalPrice)
+                   + onlineOrders.Sum(o => o.Amount);
         decimal vat = 0, net = gross;
         if (tax.VatEnabled && tax.VatRate > 0)
         {
@@ -661,9 +776,19 @@ else
                     && p.PurchasedAt.ToLocalTime().Month == m.Month)
                 .Sum(p => p.TotalPrice))
             .ToArray();
+        var barOnline = monthSlots
+            .Select(m => (double)_onlineOrders
+                .Where(o => o.PaidAt.HasValue
+                    && o.PaidAt.Value.ToLocalTime().Year == m.Year
+                    && o.PaidAt.Value.ToLocalTime().Month == m.Month)
+                .Sum(o => o.Amount))
+            .ToArray();
 
-        await JS.InvokeVoidAsync("PTChart.renderBar", "finance-bar", barLabels,
-            new object[] { new { label = "Przychód (zł)", data = barRevenue } });
+        var datasets = new List<object> { new { label = "Pakiety (zł)", data = barRevenue } };
+        if (barOnline.Any(v => v > 0))
+            datasets.Add(new { label = "Online (zł)", data = barOnline });
+
+        await JS.InvokeVoidAsync("PTChart.renderBar", "finance-bar", barLabels, datasets.ToArray());
 
         var active = _packages.Count(p => p.Status == PackageStatus.Active);
         var depleted = _packages.Count(p => p.Status == PackageStatus.Depleted);
