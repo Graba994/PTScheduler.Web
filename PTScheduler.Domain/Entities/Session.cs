@@ -24,6 +24,9 @@ public class Session
     public int? SeriesId { get; set; }
     public SessionSeries? Series { get; set; }
 
+    public string? MeetingUrl { get; set; }
+    public string? CalendarEventId { get; set; }
+
     /// <summary>
     /// Set when the 24h reminder email was successfully delivered.
     /// Used as persistent dedup so a service restart doesn't double-send.

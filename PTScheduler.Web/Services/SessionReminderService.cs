@@ -89,6 +89,9 @@ public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<S
                 var templateService = scope.ServiceProvider.GetRequiredService<IEmailTemplateService>();
                 var dateLabel = session.StartTime.ToString("dddd, d MMMM yyyy");
                 if (dateLabel.Length > 0) dateLabel = char.ToUpper(dateLabel[0]) + dateLabel[1..];
+                var meetRow = !string.IsNullOrWhiteSpace(session.MeetingUrl)
+                    ? $"<tr><td style=\"padding:8px 0;color:#6b7280;font-size:14px\">Google Meet</td><td style=\"padding:8px 0;font-size:14px\"><a href=\"{session.MeetingUrl}\">{session.MeetingUrl}</a></td></tr>"
+                    : "";
                 var vars = new Dictionary<string, string>
                 {
                     ["ClientName"] = clientName,
@@ -96,7 +99,9 @@ public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<S
                     ["SessionType"] = session.SessionType.Name,
                     ["SessionDate"] = dateLabel,
                     ["SessionTime"] = session.StartTime.ToString("HH:mm"),
-                    ["Duration"] = session.SessionType.DurationMinutes.ToString()
+                    ["Duration"] = session.SessionType.DurationMinutes.ToString(),
+                    ["MeetingUrl"] = session.MeetingUrl ?? "",
+                    ["MeetingRow"] = meetRow
                 };
                 var (subject, html) = await templateService.RenderAsync("session-reminder", vars);
 

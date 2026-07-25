@@ -288,6 +288,24 @@ app.MapPost("/internal/entitlements/reload",
     return Results.Ok(new { plan = svc.Current.Name });
 });
 
+// Google Meet OAuth callback — exchanges the authorization code for a refresh token.
+app.MapGet("/api/google-meet/callback", async (HttpContext ctx, PTScheduler.Application.Interfaces.IGoogleMeetService meet) =>
+{
+    var code = ctx.Request.Query["code"].ToString();
+    if (string.IsNullOrEmpty(code))
+        return Results.BadRequest("Brak kodu autoryzacji.");
+
+    var scheme = ctx.Request.Scheme;
+    var host = ctx.Request.Host.ToString();
+    var redirectUri = $"{scheme}://{host}/api/google-meet/callback";
+
+    var (ok, error) = await meet.ExchangeCodeAsync(code, redirectUri);
+    var html = ok
+        ? "<html><body><h2>Połączono z Google Meet!</h2><p>Możesz zamknąć tę kartę i wrócić do panelu administracyjnego.</p></body></html>"
+        : $"<html><body><h2>Błąd</h2><p>{error}</p></body></html>";
+    return Results.Content(html, "text/html");
+});
+
 // Gateway notify (webhook): verifies the payment and fulfils the order.
 // Route carries the provider key, e.g. /payments/payu/notify, /payments/p24/notify.
 app.MapPost("/payments/{provider}/notify",

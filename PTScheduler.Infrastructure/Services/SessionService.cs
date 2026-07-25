@@ -14,6 +14,7 @@ public class SessionService(
     IEmailService emailService,
     IEmailTemplateService emailTemplateService,
     INotificationPreferencesService notificationPrefs,
+    IGoogleMeetService googleMeetService,
     ILogger<SessionService> logger) : ISessionService
 {
     public async Task<List<SessionDto>> GetSessionsAsync(DateTime from, DateTime to, string? trainerUserId = null, int? clientId = null)
@@ -138,6 +139,31 @@ public class SessionService(
         }
 
         await db.SaveChangesAsync();
+
+        try
+        {
+            if (googleMeetService.IsConfigured)
+            {
+                var client = await db.Clients.FindAsync(session.ClientId);
+                var clientUser = client is not null
+                    ? await db.Users.FirstOrDefaultAsync(u => u.Id == client.ApplicationUserId)
+                    : null;
+                var result = await googleMeetService.CreateMeetingAsync(
+                    $"{sessionType.Name} — {client?.FirstName} {client?.LastName}".Trim(),
+                    $"Sesja treningowa: {sessionType.Name}, {sessionType.DurationMinutes} min",
+                    session.StartTime,
+                    sessionType.DurationMinutes,
+                    clientUser?.Email);
+                if (result is not null)
+                {
+                    session.MeetingUrl = result.MeetingUrl;
+                    session.CalendarEventId = result.CalendarEventId;
+                    await db.SaveChangesAsync();
+                }
+            }
+        }
+        catch (Exception ex) { logger.LogWarning(ex, "Błąd tworzenia Google Meet (SessionId={Id})", session.Id); }
+
         try { await SendBookingConfirmationAsync(session, sessionType); }
         catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila potwierdzającego rezerwację (SessionId={Id})", session.Id); }
         return (await GetSessionAsync(session.Id))!;
@@ -177,6 +203,9 @@ public class SessionService(
 
         if (status == SessionStatus.Cancelled)
         {
+            try { if (session.CalendarEventId is not null) await googleMeetService.DeleteMeetingAsync(session.CalendarEventId); }
+            catch (Exception ex) { logger.LogWarning(ex, "Błąd usuwania Google Meet (SessionId={Id})", session.Id); }
+
             try { await SendCancellationEmailAsync(session, cancellationReason); }
             catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila o anulowaniu (SessionId={Id})", session.Id); }
         }
@@ -396,6 +425,9 @@ public class SessionService(
         var trainer = await db.Users.FirstOrDefaultAsync(u => u.Id == session.TrainerUserId);
         var trainerName = $"{trainer?.FirstName} {trainer?.LastName}".Trim().NullIfEmpty() ?? trainer?.Email ?? "Trener";
         var clientName = $"{client.FirstName} {client.LastName}".Trim().NullIfEmpty() ?? clientUser.Email;
+        var meetRow = !string.IsNullOrWhiteSpace(session.MeetingUrl)
+            ? $"<tr><td style=\"padding:8px 0;color:#6b7280;font-size:14px\">Google Meet</td><td style=\"padding:8px 0;font-size:14px\"><a href=\"{session.MeetingUrl}\">{session.MeetingUrl}</a></td></tr>"
+            : "";
         var vars = new Dictionary<string, string>
         {
             ["ClientName"] = clientName,
@@ -403,7 +435,9 @@ public class SessionService(
             ["SessionType"] = sessionType.Name,
             ["SessionDate"] = session.StartTime.ToString("dddd, dd MMMM yyyy"),
             ["SessionTime"] = session.StartTime.ToString("HH:mm"),
-            ["Duration"] = sessionType.DurationMinutes.ToString()
+            ["Duration"] = sessionType.DurationMinutes.ToString(),
+            ["MeetingUrl"] = session.MeetingUrl ?? "",
+            ["MeetingRow"] = meetRow
         };
         var (subject, html) = await emailTemplateService.RenderAsync("session-booked", vars);
         await emailService.SendAsync(clientUser.Email, clientName, subject, html);
@@ -507,7 +541,8 @@ public class SessionService(
         StartTime = s.StartTime,
         Status = s.Status,
         Notes = s.Notes,
-        CancellationReason = s.CancellationReason
+        CancellationReason = s.CancellationReason,
+        MeetingUrl = s.MeetingUrl
     };
 }
 
