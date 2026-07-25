@@ -169,11 +169,13 @@ public class PublicBookingServiceTests
         userManager ??= MockUserManagerHelper.Create();
         availabilityService ??= new Mock<ITrainerAvailabilityService>();
         emailService ??= new Mock<IEmailService>();
+        var emailTemplateService = new Mock<IEmailTemplateService>();
         return new PublicBookingService(
             factory,
             userManager.Object,
             availabilityService.Object,
             emailService.Object,
+            emailTemplateService.Object,
             NullLogger<PublicBookingService>.Instance);
     }
 }
