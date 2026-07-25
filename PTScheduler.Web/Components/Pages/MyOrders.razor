@@ -3,7 +3,9 @@
 @using PTScheduler.Application.Interfaces
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject IPaymentService PaymentService
+@inject IReceiptService ReceiptService
 @inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Moje zamówienia" />
@@ -44,6 +46,7 @@ else
                         <th>Bramka</th>
                         <th>Status</th>
                         <th>Data</th>
+                        <th></th>
                     </tr>
                 </thead>
                 <tbody>
@@ -77,6 +80,22 @@ else
                                     <div class="small text-success"><i class="bi bi-check-circle me-1"></i>@o.PaidAt.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</div>
                                 }
                             </td>
+                            <td>
+                                @if (o.Status == "Paid")
+                                {
+                                    <button class="btn btn-sm btn-outline-secondary" title="Pobierz potwierdzenie"
+                                            @onclick="() => DownloadReceipt(o.Id)" disabled="@(_downloadingId == o.Id)">
+                                        @if (_downloadingId == o.Id)
+                                        {
+                                            <span class="spinner-border spinner-border-sm"></span>
+                                        }
+                                        else
+                                        {
+                                            <i class="bi bi-file-earmark-pdf"></i>
+                                        }
+                                    </button>
+                                }
+                            </td>
                         </tr>
                     }
                 </tbody>
@@ -88,6 +107,7 @@ else
 @code {
     private bool _loading = true;
     private List<OrderDto> _orders = [];
+    private int? _downloadingId;
 
     protected override async Task OnInitializedAsync()
     {
@@ -95,6 +115,18 @@ else
         var userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
         _orders = await PaymentService.GetMyOrdersAsync(userId);
         _loading = false;
+    }
+
+    private async Task DownloadReceipt(int orderId)
+    {
+        _downloadingId = orderId;
+        try
+        {
+            var (bytes, fileName) = await ReceiptService.GenerateReceiptAsync(orderId);
+            await JS.InvokeVoidAsync("PTExport.downloadCsv", fileName, bytes);
+        }
+        catch { }
+        finally { _downloadingId = null; }
     }
 
     private static string StatusLabel(string s) => s switch

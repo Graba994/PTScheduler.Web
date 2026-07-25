@@ -3,6 +3,8 @@
 @using PTScheduler.Application.Interfaces
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject IPaymentService PaymentService
+@inject IReceiptService ReceiptService
+@inject IJSRuntime JS
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Płatność zakończona" />
@@ -65,7 +67,7 @@
                     </div>
                 </div>
 
-                <div class="d-flex gap-2 justify-content-center mt-4">
+                <div class="d-flex gap-2 justify-content-center mt-4 flex-wrap">
                     @if (_order.Kind == "Course")
                     {
                         <a href="/my/courses" class="btn btn-primary"><i class="bi bi-play-fill me-1"></i>Moje kursy</a>
@@ -73,6 +75,13 @@
                     else
                     {
                         <a href="/my/packages" class="btn btn-primary"><i class="bi bi-box-seam me-1"></i>Moje pakiety</a>
+                    }
+                    @if (_order.Status == "Paid")
+                    {
+                        <button class="btn btn-outline-primary" @onclick="DownloadReceipt" disabled="@_downloading">
+                            @if (_downloading) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            <i class="bi bi-file-earmark-pdf me-1"></i>Pobierz potwierdzenie
+                        </button>
                     }
                     <a href="/my/orders" class="btn btn-outline-secondary"><i class="bi bi-receipt me-1"></i>Zamówienia</a>
                 </div>
@@ -86,6 +95,7 @@
     public string? ExtOrderId { get; set; }
 
     private bool _loading = true;
+    private bool _downloading;
     private OrderDto? _order;
 
     protected override async Task OnInitializedAsync()
@@ -93,5 +103,18 @@
         if (!string.IsNullOrEmpty(ExtOrderId))
             _order = await PaymentService.GetOrderByExtAsync(ExtOrderId);
         _loading = false;
+    }
+
+    private async Task DownloadReceipt()
+    {
+        if (_order is null) return;
+        _downloading = true;
+        try
+        {
+            var (bytes, fileName) = await ReceiptService.GenerateReceiptAsync(_order.Id);
+            await JS.InvokeVoidAsync("PTExport.downloadCsv", fileName, bytes);
+        }
+        catch { }
+        finally { _downloading = false; }
     }
 }

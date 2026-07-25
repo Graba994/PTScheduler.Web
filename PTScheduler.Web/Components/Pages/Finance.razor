@@ -8,6 +8,7 @@
 @using PTScheduler.Domain.Constants
 @inject ISessionPackageService PackageService
 @inject IPaymentService PaymentService
+@inject IReceiptService ReceiptService
 @inject IFinanceService FinanceService
 @inject IPermissionService PermissionService
 @inject IJSRuntime JS
@@ -461,6 +462,7 @@ else
                             <th class="text-end">Kwota</th>
                             <th>Kupon</th>
                             <th>Data płatności</th>
+                            <th></th>
                         </tr>
                     </thead>
                     <tbody>
@@ -496,6 +498,19 @@ else
                                     }
                                 </td>
                                 <td class="text-nowrap text-muted">@(o.PaidAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—")</td>
+                                <td>
+                                    <button class="btn btn-sm btn-outline-secondary" title="Pobierz potwierdzenie"
+                                            @onclick="() => DownloadReceipt(o.Id)" disabled="@(_downloadingReceiptId == o.Id)">
+                                        @if (_downloadingReceiptId == o.Id)
+                                        {
+                                            <span class="spinner-border spinner-border-sm"></span>
+                                        }
+                                        else
+                                        {
+                                            <i class="bi bi-file-earmark-pdf"></i>
+                                        }
+                                    </button>
+                                </td>
                             </tr>
                         }
                     </tbody>
@@ -503,7 +518,7 @@ else
                         <tr>
                             <td colspan="3">Razem (@_onlineOrders.Count zamówień)</td>
                             <td class="text-end">@_onlineOrders.Sum(o => o.Amount).ToString("N2") @(_onlineOrders.FirstOrDefault()?.Currency ?? "PLN")</td>
-                            <td colspan="2"></td>
+                            <td colspan="3"></td>
                         </tr>
                     </tfoot>
                 </table>
@@ -636,6 +651,7 @@ else
     private List<SessionPackageDto> _allPackages = [];
     private List<SessionPackageDto> _unpaid = [];
     private List<OrderDto> _onlineOrders = [];
+    private int? _downloadingReceiptId;
     private bool _chartNeedsRender;
     private FinanceTaxConfigDto? _taxConfig;
     private bool _showTaxSettings;
@@ -711,6 +727,18 @@ else
         await FinanceService.SaveTaxConfigAsync(_taxConfig);
         _taxSaving = false;
         _showTaxSettings = false;
+    }
+
+    private async Task DownloadReceipt(int orderId)
+    {
+        _downloadingReceiptId = orderId;
+        try
+        {
+            var (bytes, fileName) = await ReceiptService.GenerateReceiptAsync(orderId);
+            await JS.InvokeVoidAsync("PTExport.downloadCsv", fileName, bytes);
+        }
+        catch { }
+        finally { _downloadingReceiptId = null; }
     }
 
     private static bool HasAnyTaxOption(FinanceTaxConfigDto tc) =>

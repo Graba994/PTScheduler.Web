@@ -74,6 +74,7 @@ public static class DependencyInjection
         services.AddScoped<IWebPushService, WebPushService>();
         services.AddScoped<IFinanceService, FinanceService>();
         services.AddScoped<IDataExportService, DataExportService>();
+        services.AddScoped<IReceiptService, ReceiptService>();
         services.AddScoped<ISetupService, SetupService>();
 
         // QuestPDF community license — free for orgs <$1M annual revenue.
