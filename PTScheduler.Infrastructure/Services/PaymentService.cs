@@ -110,6 +110,35 @@ public class PaymentService(
         var settings = await settingsService.GetAsync();
         if (!settings.Enabled) return new(false, null, "Płatności online są wyłączone.");
 
+        order.Provider = providerKey;
+        order.Currency = string.IsNullOrWhiteSpace(settings.Currency) ? "PLN" : settings.Currency;
+        order.ExtOrderId = Guid.NewGuid().ToString("N");
+
+        // 100% discount — skip gateway entirely, auto-fulfil.
+        if (order.Amount <= 0)
+        {
+            order.Status = OrderStatus.Paid;
+            order.PaidAt = DateTime.UtcNow;
+            db.Orders.Add(order);
+            await FulfilAsync(db, order);
+            await db.SaveChangesAsync();
+
+            if (order.CouponId is int cid && order.OriginalAmount.HasValue && order.DiscountAmount.HasValue)
+            {
+                try
+                {
+                    await coupons.RedeemAsync(cid, order.ApplicationUserId, null,
+                        order.OriginalAmount.Value, order.DiscountAmount.Value, order.Amount,
+                        order.Kind == OrderKind.Course ? "course" : "package",
+                        order.CourseId ?? order.PackageOfferId);
+                }
+                catch (Exception ex) { logger.LogError(ex, "Coupon redemption bookkeeping failed for free order {OrderId}", order.Id); }
+            }
+
+            var returnUrl = $"{appBaseUrl.TrimEnd('/')}/payment/success?order={order.ExtOrderId}";
+            return new(true, returnUrl, null);
+        }
+
         var providerCfg = settings.Provider(providerKey);
         if (providerCfg is null || !providerCfg.Enabled)
             return new(false, null, "Wybrana bramka płatności jest niedostępna.");
@@ -126,9 +155,6 @@ public class PaymentService(
         if (!provider.IsConfigured(runtime))
             return new(false, null, "Wybrana bramka nie jest w pełni skonfigurowana.");
 
-        order.Provider = providerKey;
-        order.Currency = string.IsNullOrWhiteSpace(settings.Currency) ? "PLN" : settings.Currency;
-        order.ExtOrderId = Guid.NewGuid().ToString("N");
         order.Status = OrderStatus.Pending;
         db.Orders.Add(order);
         await db.SaveChangesAsync();
