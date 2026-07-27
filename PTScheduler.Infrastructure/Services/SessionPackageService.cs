@@ -14,6 +14,7 @@ public class SessionPackageService(
     IEmailService emailService,
     IEmailTemplateService emailTemplateService,
     INotificationPreferencesService notificationPrefs,
+    IAuditLogService auditLog,
     ILogger<SessionPackageService> logger) : ISessionPackageService
 {
     public async Task<List<SessionPackageDto>> GetPackagesAsync(int clientId)
@@ -198,7 +199,15 @@ public class SessionPackageService(
             p.Status = PackageStatus.Expired;
 
         if (toExpire.Count > 0)
+        {
             await db.SaveChangesAsync();
+            try
+            {
+                await auditLog.LogAsync("system", "system", "System", "PackagesExpired", "SessionPackage", null,
+                    $"Automatycznie wygaszono {toExpire.Count} pakiet(ów): {string.Join(", ", toExpire.Select(p => $"#{p.Id}"))}");
+            }
+            catch (Exception ex) { logger.LogError(ex, "Audit log write failed for package expiry batch"); }
+        }
 
         return toExpire.Count;
     }

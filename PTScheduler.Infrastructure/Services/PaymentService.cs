@@ -20,8 +20,13 @@ public class PaymentService(
     IPaymentSettingsService settingsService,
     ICouponService coupons,
     IEnumerable<IPaymentProvider> providers,
+    IAuditLogService auditLog,
     ILogger<PaymentService> logger) : IPaymentService
 {
+    private const string SystemUserId = "system";
+    private const string SystemUserEmail = "system";
+    private const string SystemRole = "System";
+
     private IPaymentProvider? Provider(string key) => providers.FirstOrDefault(p => p.Key == key);
 
     public async Task<List<PaymentOptionDto>> GetEnabledOptionsAsync()
@@ -135,6 +140,8 @@ public class PaymentService(
                 catch (Exception ex) { logger.LogError(ex, "Coupon redemption bookkeeping failed for free order {OrderId}", order.Id); }
             }
 
+            await LogOrderPaidAsync(order);
+
             var returnUrl = $"{appBaseUrl.TrimEnd('/')}/payment/success?order={order.ExtOrderId}";
             return new(true, returnUrl, null);
         }
@@ -232,6 +239,8 @@ public class PaymentService(
                     }
                     catch (Exception ex) { logger.LogError(ex, "Coupon redemption bookkeeping failed for order {OrderId}", order.Id); }
                 }
+
+                await LogOrderPaidAsync(order);
             }
         }
         else if (outcome == PaymentOutcome.Canceled)
@@ -242,6 +251,19 @@ public class PaymentService(
         {
             if (order.Status == OrderStatus.Pending) { order.Status = OrderStatus.Failed; await db.SaveChangesAsync(); }
         }
+    }
+
+    private async Task LogOrderPaidAsync(Order order)
+    {
+        try
+        {
+            var itemLabel = order.Kind == OrderKind.Course ? "kurs" : "pakiet";
+            var details = $"Kupujący: {order.ApplicationUserId}, kwota: {order.Amount:0.00} {order.Currency}, bramka: {order.Provider}"
+                + (order.CouponCode is not null ? $", kupon: {order.CouponCode}" : "");
+            await auditLog.LogAsync(SystemUserId, SystemUserEmail, SystemRole, "OrderPaid", "Order", order.Id.ToString(),
+                $"Opłacono {itemLabel} — {details}");
+        }
+        catch (Exception ex) { logger.LogError(ex, "Audit log write failed for paid order {OrderId}", order.Id); }
     }
 
     private static async Task FulfilAsync(ApplicationDbContext db, Order order)
