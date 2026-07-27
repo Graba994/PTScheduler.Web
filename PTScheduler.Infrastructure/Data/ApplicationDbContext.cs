@@ -22,6 +22,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<ClientContact> ClientContacts => Set<ClientContact>();
     public DbSet<SessionInvitation> SessionInvitations => Set<SessionInvitation>();
     public DbSet<EmailSettings> EmailSettings => Set<EmailSettings>();
+    public DbSet<SmsSettings> SmsSettings => Set<SmsSettings>();
     public DbSet<NotificationPreferences> NotificationPreferences => Set<NotificationPreferences>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<EmailTemplate> EmailTemplates => Set<EmailTemplate>();

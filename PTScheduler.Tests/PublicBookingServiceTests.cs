@@ -66,13 +66,15 @@ public class PublicBookingServiceTests
         await db.SaveChangesAsync();
 
         var um = MockUserManagerHelper.Create();
-        um.Setup(m => m.FindByIdAsync("trainer-real")).ReturnsAsync(new ApplicationUser
+        var trainerUser = new ApplicationUser
         {
             Id = "trainer-real",
             FirstName = "Anna",
             LastName = "Kowalska",
             Email = "anna@example.com"
-        });
+        };
+        um.Setup(m => m.FindByIdAsync("trainer-real")).ReturnsAsync(trainerUser);
+        um.Setup(m => m.IsInRoleAsync(trainerUser, PTScheduler.Domain.Constants.Roles.Trainer)).ReturnsAsync(true);
 
         var svc = MakeService(factory, um);
 
