@@ -108,9 +108,15 @@ public class UpdateService(
             log.Add($"✓ Zinspekcjonowałem kontener {PortalContainerName}");
             log.Add("→ Uruchamiam pomocnika-restartera (5 sekund opóźnienia)...");
 
-            // Serialize current portal config as docker run flags for the helper
+            // Serialize current portal config as docker run flags for the helper.
+            // PTS_BUILD_* is excluded on purpose — those come baked into the new image via
+            // --build-arg above, and an explicit `-e PTS_BUILD_COMMIT=<old value>` here would
+            // silently override them, making the "current version" badge never advance past
+            // whatever commit the portal happened to be built at originally.
             var envArgs = string.Join(" ",
-                self.Config.Env.Select(e => $"-e {ShellQuote(e)}"));
+                self.Config.Env
+                    .Where(e => !e.StartsWith("PTS_BUILD_", StringComparison.Ordinal))
+                    .Select(e => $"-e {ShellQuote(e)}"));
             var bindArgs = self.HostConfig.Binds is null ? "" :
                 string.Join(" ", self.HostConfig.Binds.Select(b => $"-v {ShellQuote(b)}"));
             var netMode = self.HostConfig.NetworkMode ?? "bridge";

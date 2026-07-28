@@ -197,6 +197,25 @@ public class TenantService(
         await db.SaveChangesAsync();
     }
 
+    /// <summary>
+    /// Forces the tenant's Postgres role password back in sync with tenant.DbPassword without
+    /// touching the web container. Use this to recover a tenant that's stuck on a
+    /// "password authentication failed" error after a container was manually recreated or a
+    /// stale volume was reused.
+    /// </summary>
+    public async Task<(bool Success, string Message)> SyncDbPasswordAsync(int tenantId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var tenant = await db.Tenants.FindAsync(tenantId)
+            ?? throw new InvalidOperationException("Tenant not found.");
+
+        var dbContainerName = tenant.DbContainerName ?? $"pt-{tenant.Slug}-db";
+        var (ok, error) = await docker.EnsureDbPasswordAsync(dbContainerName, tenant.DbPassword);
+        return ok
+            ? (true, "Hasło bazy danych zsynchronizowane. Zrestartuj web jeśli nadal widzisz błąd połączenia.")
+            : (false, $"Synchronizacja nie powiodła się: {error}");
+    }
+
     public async Task<(bool Success, string Message)> ReprovisionWebAsync(int tenantId)
     {
         await using var db = dbFactory.CreateDbContext();

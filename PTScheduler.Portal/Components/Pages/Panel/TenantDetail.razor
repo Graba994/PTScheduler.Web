@@ -57,6 +57,29 @@ else
                         <dt class="col-5 text-muted">Provisioned</dt>
                         <dd class="col-7">@(_tenant.ProvisionedAt?.ToString("dd.MM.yyyy HH:mm") ?? "—")</dd>
                     </dl>
+
+                    <hr class="my-3" />
+                    <h6 class="fw-bold mb-2 small text-muted"><i class="bi bi-key me-1"></i>Poświadczenia bazy danych</h6>
+                    <dl class="row mb-0 small align-items-center">
+                        <dt class="col-5 text-muted">Użytkownik</dt>
+                        <dd class="col-7 font-monospace">ptscheduler</dd>
+                        <dt class="col-5 text-muted">Hasło</dt>
+                        <dd class="col-7">
+                            <div class="d-flex align-items-center gap-2">
+                                <code class="font-monospace">@(_showPassword ? _tenant.DbPassword : Mask(_tenant.DbPassword))</code>
+                                <button class="btn btn-sm btn-link p-0" @onclick="() => _showPassword = !_showPassword" title="Pokaż/ukryj">
+                                    <i class="bi @(_showPassword ? "bi-eye-slash" : "bi-eye")"></i>
+                                </button>
+                            </div>
+                        </dd>
+                    </dl>
+                    <button class="btn btn-sm btn-outline-secondary mt-2" @onclick="SyncPassword" disabled="@_syncingPassword">
+                        @if (_syncingPassword) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        <i class="bi bi-arrow-repeat me-1"></i>Zsynchronizuj hasło z bazą
+                    </button>
+                    <p class="text-muted small mb-0 mt-1">
+                        <i class="bi bi-info-circle me-1"></i>Użyj tego jeśli web zwraca "password authentication failed" po ręcznej ingerencji w kontenery.
+                    </p>
                 </div>
             </div>
         </div>
@@ -405,6 +428,8 @@ else
     private bool _openingPortal;
     private List<InvoiceInfo>? _invoices;
     private bool _loadingInvoices;
+    private bool _showPassword;
+    private bool _syncingPassword;
 
     protected override async Task OnInitializedAsync()
     {
@@ -483,6 +508,22 @@ else
             ShowMessage($"Błąd: {ex.Message}", true);
         }
         _applyingPlan = false;
+    }
+
+    private static string Mask(string s) =>
+        string.IsNullOrEmpty(s) ? "—" : new string('•', Math.Min(s.Length, 24));
+
+    private async Task SyncPassword()
+    {
+        if (_tenant is null) return;
+        _syncingPassword = true;
+        try
+        {
+            var (ok, msg) = await TenantSvc.SyncDbPasswordAsync(_tenant.Id);
+            ShowMessage(msg, !ok);
+        }
+        catch (Exception ex) { ShowMessage($"Błąd: {ex.Message}", true); }
+        _syncingPassword = false;
     }
 
     private string WebContainerName => _tenant?.WebContainerName ?? $"pt-{_tenant?.Slug}-web";

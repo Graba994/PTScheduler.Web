@@ -191,6 +191,20 @@ public class DockerService : IDisposable
             });
             await _client.Containers.StartContainerAsync(dbName, new ContainerStartParameters());
         }
+        else if (!dbExisting.Running)
+        {
+            await _client.Containers.StartContainerAsync(dbName, new ContainerStartParameters());
+        }
+
+        // POSTGRES_PASSWORD is only honoured by the official postgres image on first init —
+        // if the data directory (volume) already existed (leftover from an earlier attempt,
+        // an import, or a manually recreated container), Postgres silently keeps whatever
+        // password was baked in at that time and ignores the env var on subsequent starts.
+        // Force it to match tenant.DbPassword every single time so the web container's
+        // connection string is guaranteed to work, regardless of the volume's history.
+        var (syncOk, syncError) = await EnsureDbPasswordAsync(dbName, dbPassword);
+        if (!syncOk)
+            throw new InvalidOperationException($"Nie udało się zsynchronizować hasła bazy danych: {syncError}");
 
         var webExisting = await GetContainerInfoAsync(webName);
         if (webExisting is null)
@@ -254,6 +268,47 @@ public class DockerService : IDisposable
         try { await _client.Containers.StopContainerAsync(webName, new ContainerStopParameters()); } catch { }
         try { await _client.Containers.RemoveContainerAsync(webName, new ContainerRemoveParameters { Force = true }); } catch { }
         await ProvisionTenantAsync(slug, dbPassword, appPort, webImage, tenantDomain, entitlementsJson);
+    }
+
+    /// <summary>
+    /// Forces the Postgres "ptscheduler" role's password inside the given DB container to
+    /// match <paramref name="password"/>. Retries for a few seconds since a just-started
+    /// container needs a moment before it accepts connections. Safe to call unconditionally —
+    /// it's a plain ALTER USER, not a destructive operation.
+    /// </summary>
+    public async Task<(bool Success, string? Error)> EnsureDbPasswordAsync(string dbContainerName, string password)
+    {
+        var sql = $"ALTER USER ptscheduler WITH PASSWORD '{password.Replace("'", "''")}';";
+        Exception? lastError = null;
+
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            try
+            {
+                var exec = await _client.Exec.ExecCreateContainerAsync(dbContainerName, new ContainerExecCreateParameters
+                {
+                    AttachStdout = true,
+                    AttachStderr = true,
+                    Cmd = new List<string> { "psql", "-U", "ptscheduler", "-d", "ptscheduler", "-v", "ON_ERROR_STOP=1", "-c", sql }
+                });
+
+                using var stream = await _client.Exec.StartAndAttachContainerExecAsync(exec.ID, false);
+                var (stdout, stderr) = await stream.ReadOutputToEndAsync(CancellationToken.None);
+
+                var inspect = await _client.Exec.InspectContainerExecAsync(exec.ID);
+                if (inspect.ExitCode == 0) return (true, null);
+
+                lastError = new InvalidOperationException(string.IsNullOrWhiteSpace(stderr) ? stdout : stderr);
+            }
+            catch (Exception ex)
+            {
+                lastError = ex;
+            }
+
+            await Task.Delay(1000);
+        }
+
+        return (false, lastError?.Message ?? "Nieznany błąd synchronizacji hasła.");
     }
 
     public async Task<ContainerInspectResponse?> InspectAsync(string containerName)
