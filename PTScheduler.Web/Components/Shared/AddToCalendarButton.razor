@@ -1,0 +1,74 @@
+@using PTScheduler.Web.Services
+@inject IJSRuntime JS
+
+<div class="atc-wrap">
+    <button class="@ButtonClass" @onclick="Toggle" type="button">
+        <i class="bi bi-calendar-plus me-1"></i>@(Compact ? "" : "Dodaj do kalendarza")
+    </button>
+    @if (_open)
+    {
+        <div class="atc-backdrop" @onclick="Close"></div>
+        <div class="atc-menu">
+            <a href="@_googleUrl" target="_blank" rel="noopener" class="atc-item" @onclick="Close">
+                <i class="bi bi-google me-2"></i>Google Calendar
+            </a>
+            <a href="@_outlookUrl" target="_blank" rel="noopener" class="atc-item" @onclick="Close">
+                <i class="bi bi-microsoft me-2"></i>Outlook.com
+            </a>
+            <button class="atc-item" @onclick="DownloadIcsAsync" type="button">
+                <i class="bi bi-file-earmark-arrow-down me-2"></i>Pobierz .ics (Apple/Outlook)
+            </button>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter, EditorRequired] public DateTime StartTime { get; set; }
+    [Parameter, EditorRequired] public int DurationMinutes { get; set; }
+    [Parameter] public string? Details { get; set; }
+    [Parameter] public string? Location { get; set; }
+    [Parameter] public string? Uid { get; set; }
+    [Parameter] public bool Compact { get; set; }
+    [Parameter] public string ButtonClass { get; set; } = "btn btn-sm btn-outline-secondary";
+
+    private bool _open;
+    private string _googleUrl = "";
+    private string _outlookUrl = "";
+
+    protected override void OnParametersSet()
+    {
+        var end = StartTime.AddMinutes(DurationMinutes);
+        _googleUrl = CalendarLinks.GoogleUrl(Title, StartTime, end, Details ?? "", Location ?? "");
+        _outlookUrl = CalendarLinks.OutlookUrl(Title, StartTime, end, Details ?? "", Location ?? "");
+    }
+
+    private void Toggle() => _open = !_open;
+    private void Close() => _open = false;
+
+    private async Task DownloadIcsAsync()
+    {
+        var end = StartTime.AddMinutes(DurationMinutes);
+        var uid = $"{Uid ?? Guid.NewGuid().ToString()}@ptscheduler";
+        var bytes = CalendarLinks.BuildIcs(Title, StartTime, end, Details ?? "", Location ?? "", uid);
+        await JS.InvokeVoidAsync("PTExport.downloadCsv", "sesja.ics", bytes);
+        Close();
+    }
+}
+
+<style>
+    .atc-wrap { position: relative; display: inline-block; }
+    .atc-backdrop { position: fixed; inset: 0; z-index: 1040; background: transparent; }
+    .atc-menu {
+        position: absolute; top: calc(100% + 4px); right: 0; z-index: 1050;
+        background: var(--bs-body-bg); border: 1px solid var(--bs-border-color);
+        border-radius: .5rem; box-shadow: 0 8px 24px -8px rgba(0,0,0,.25);
+        min-width: 220px; padding: .35rem; display: flex; flex-direction: column; gap: .15rem;
+    }
+    .atc-item {
+        display: flex; align-items: center; padding: .45rem .6rem; border-radius: .4rem;
+        font-size: .85rem; color: var(--bs-body-color); text-decoration: none;
+        border: none; background: none; text-align: left; width: 100%;
+    }
+    .atc-item:hover { background: var(--bs-tertiary-bg); color: var(--bs-body-color); }
+</style>
