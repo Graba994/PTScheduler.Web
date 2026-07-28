@@ -147,6 +147,9 @@ public class UpdateService(
                 $"docker tag ptportal:pending {PortalImage}\n" +
                 $"docker run -d --name {PortalContainerName} --network {netMode} --restart {restart} {envArgs} {bindArgs} {portArgs} {PortalImage}\n";
 
+            log.Add("→ Sprawdzam obraz docker:cli dla pomocnika-restartera...");
+            await docker.EnsureImagePulledAsync("docker:cli");
+
             var helperName = $"ptportal-upgrader-{DateTime.UtcNow:yyyyMMddHHmmss}";
             await docker.StartDetachedAsync(new CreateContainerParameters
             {

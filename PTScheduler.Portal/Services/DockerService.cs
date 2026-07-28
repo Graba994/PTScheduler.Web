@@ -252,7 +252,7 @@ public class DockerService : IDisposable
         catch { return false; }
     }
 
-    private async Task EnsureImagePulledAsync(string image)
+    public async Task EnsureImagePulledAsync(string image)
     {
         if (await ImageExistsAsync(image)) return;
         await _client.Images.CreateImageAsync(
