@@ -137,7 +137,11 @@ public class PaymentService(
                         order.Kind == OrderKind.Course ? "course" : "package",
                         order.CourseId ?? order.PackageOfferId);
                 }
-                catch (Exception ex) { logger.LogError(ex, "Coupon redemption bookkeeping failed for free order {OrderId}", order.Id); }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Coupon redemption bookkeeping failed for free order {OrderId}", order.Id);
+                    await LogCouponBookkeepingFailedAsync(order, ex);
+                }
             }
 
             await LogOrderPaidAsync(order);
@@ -237,7 +241,11 @@ public class PaymentService(
                             order.Kind == OrderKind.Course ? "course" : "package",
                             order.CourseId ?? order.PackageOfferId);
                     }
-                    catch (Exception ex) { logger.LogError(ex, "Coupon redemption bookkeeping failed for order {OrderId}", order.Id); }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Coupon redemption bookkeeping failed for order {OrderId}", order.Id);
+                        await LogCouponBookkeepingFailedAsync(order, ex);
+                    }
                 }
 
                 await LogOrderPaidAsync(order);
@@ -264,6 +272,16 @@ public class PaymentService(
                 $"Opłacono {itemLabel} — {details}");
         }
         catch (Exception ex) { logger.LogError(ex, "Audit log write failed for paid order {OrderId}", order.Id); }
+    }
+
+    private async Task LogCouponBookkeepingFailedAsync(Order order, Exception ex)
+    {
+        try
+        {
+            await auditLog.LogAsync(SystemUserId, SystemUserEmail, SystemRole, "CouponRedemptionFailed", "Order",
+                order.Id.ToString(), $"Kupon: {order.CouponCode}, błąd: {ex.Message}", Domain.Enums.AuditSeverity.Error);
+        }
+        catch (Exception auditEx) { logger.LogError(auditEx, "Audit log write failed for coupon bookkeeping failure on order {OrderId}", order.Id); }
     }
 
     private static async Task FulfilAsync(ApplicationDbContext db, Order order)

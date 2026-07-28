@@ -46,6 +46,7 @@ public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<S
         var db = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
         var userManager = scope.ServiceProvider.GetRequiredService<UserManager<ApplicationUser>>();
         var prefs = scope.ServiceProvider.GetRequiredService<INotificationPreferencesService>();
+        var auditLog = scope.ServiceProvider.GetRequiredService<IAuditLogService>();
         var maxSmsPerMonth = entitlements.Limit("MaxSmsPerMonth");
 
         // 23-25h window with 1h cycle gives every session at least one chance to be picked up.
@@ -127,9 +128,17 @@ public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<S
                     if (result.Success)
                         logger.LogInformation("Sent 24h SMS reminder for session {Id}", session.Id);
                     else if (result.QuotaExceeded)
+                    {
                         logger.LogWarning("Session {Id}: SMS reminder skipped — monthly quota exceeded.", session.Id);
+                        await auditLog.LogAsync("system", "system", "System", "SmsReminderQuotaExceeded", "Session",
+                            session.Id.ToString(), $"Limit SMS/miesiąc wyczerpany (max {maxSmsPerMonth}).", AuditSeverity.Warning);
+                    }
                     else
+                    {
                         logger.LogWarning("Session {Id}: SMS reminder failed — {Error}", session.Id, result.Error);
+                        await auditLog.LogAsync("system", "system", "System", "SmsReminderFailed", "Session",
+                            session.Id.ToString(), result.Error, AuditSeverity.Warning);
+                    }
                 }
 
                 session.ReminderSentAt = DateTime.UtcNow;
@@ -138,6 +147,12 @@ public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<S
             {
                 // Leave ReminderSentAt null so next cycle retries (possibly succeeding once SMTP/SMS is fixed).
                 logger.LogError(ex, "Failed to send reminder for session {Id}", session.Id);
+                try
+                {
+                    await auditLog.LogAsync("system", "system", "System", "ReminderCycleFailed", "Session",
+                        session.Id.ToString(), ex.Message, AuditSeverity.Error);
+                }
+                catch (Exception auditEx) { logger.LogError(auditEx, "Audit log write failed for reminder failure on session {Id}", session.Id); }
             }
         }
 
