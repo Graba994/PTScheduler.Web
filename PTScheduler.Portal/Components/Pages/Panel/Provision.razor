@@ -37,7 +37,7 @@
                                                 <i class="bi bi-people me-1"></i>@(p.MaxClients == int.MaxValue ? "∞" : p.MaxClients.ToString()) klientów
                                             </div>
                                             <div class="small">
-                                                <i class="bi @(p.CustomDomain ? "bi-check-circle text-success" : "bi-x-circle text-muted") me-1"></i>Własna domena
+                                                <i class="bi @(p.SmsReminders ? "bi-check-circle text-success" : "bi-x-circle text-muted") me-1"></i>SMS
                                             </div>
                                         </div>
                                     </div>
@@ -54,26 +54,10 @@
                         <div class="col-md-6">
                             <label class="form-label fw-semibold">
                                 Domena
-                                @if (_selectedPlan?.CustomDomain == true)
-                                {
-                                    <span class="text-danger">*</span>
-                                }
-                                else
-                                {
-                                    <span class="badge bg-secondary ms-1">auto</span>
-                                }
+                                <span class="badge bg-secondary ms-1">auto</span>
                             </label>
-                            @if (_selectedPlan?.CustomDomain == true)
-                            {
-                                <InputText class="form-control" @bind-Value="_form.Domain" placeholder="jan.mojadomena.pl" />
-                                <div class="form-text">Plan @(_selectedPlan.Name) pozwala na własną domenę</div>
-                            }
-                            else
-                            {
-                                <input class="form-control bg-light" value="@AutoDomain" readonly />
-                                <div class="form-text">Automatyczna subdomena (plan bez własnej domeny)</div>
-                            }
-                            <ValidationMessage For="() => _form.Domain" />
+                            <input class="form-control bg-light" value="@AutoDomain" readonly />
+                            <div class="form-text">Automatyczna subdomena</div>
                         </div>
 
                         <div class="col-md-6">
@@ -140,7 +124,7 @@
                     <li>Port jest przydzielany automatycznie</li>
                     <li>Hasło DB jest generowane losowo</li>
                     <li>Auto-provisioning tworzy kontenery i uruchamia migracje</li>
-                    <li>Własna domena tylko w planach które ją oferują</li>
+                    <li>Domena jest generowana automatycznie jako subdomena</li>
                 </ul>
             </div>
         </div>
@@ -154,8 +138,8 @@
                         <li class="mb-1"><i class="bi bi-check text-success me-1"></i>Max @(_selectedPlan.MaxClients == int.MaxValue ? "bez limitu" : _selectedPlan.MaxClients.ToString()) klientów</li>
                         <li class="mb-1"><i class="bi @(_selectedPlan.PaymentsEnabled ? "bi-check text-success" : "bi-x text-muted") me-1"></i>Płatności online</li>
                         <li class="mb-1"><i class="bi @(_selectedPlan.CoursesEnabled ? "bi-check text-success" : "bi-x text-muted") me-1"></i>Kursy wideo</li>
-                        <li class="mb-1"><i class="bi @(_selectedPlan.CustomDomain ? "bi-check text-success" : "bi-x text-muted") me-1"></i>Własna domena</li>
-                        <li class="mb-1"><i class="bi @(_selectedPlan.PrioritySupport ? "bi-check text-success" : "bi-x text-muted") me-1"></i>Priorytetowe wsparcie</li>
+                        <li class="mb-1"><i class="bi @(_selectedPlan.SmsReminders ? "bi-check text-success" : "bi-x text-muted") me-1"></i>Przypomnienia SMS</li>
+                        <li class="mb-1"><i class="bi @(_selectedPlan.AuditLog ? "bi-check text-success" : "bi-x text-muted") me-1"></i>Audit log</li>
                     </ul>
                 </div>
             </div>
@@ -219,16 +203,7 @@
         try
         {
             var slug = _form.Slug.Trim().ToLowerInvariant();
-            var domain = _selectedPlan?.CustomDomain == true
-                ? _form.Domain.Trim().ToLowerInvariant()
-                : $"{slug}.{_mainDomain}";
-
-            if (string.IsNullOrWhiteSpace(domain))
-            {
-                _error = "Domena jest wymagana dla planów z własną domeną.";
-                _saving = false;
-                return;
-            }
+            var domain = $"{slug}.{_mainDomain}";
 
             var tenant = await TenantSvc.CreateAsync(
                 slug,
