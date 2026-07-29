@@ -35,7 +35,7 @@ public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<S
         var smsService = scope.ServiceProvider.GetRequiredService<ISmsService>();
         var entitlements = scope.ServiceProvider.GetRequiredService<EntitlementService>();
 
-        var emailEnabled = await emailService.IsEnabledAsync();
+        var emailEnabled = entitlements.IsAllowed("EmailReminders") && await emailService.IsEnabledAsync();
         var smsEnabled = entitlements.IsAllowed("SmsReminders") && await smsService.IsEnabledAsync();
         if (!emailEnabled && !smsEnabled)
         {

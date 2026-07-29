@@ -5,9 +5,21 @@
 @using PTScheduler.Domain.Entities
 @using PermConst = PTScheduler.Domain.Constants.Permissions
 @inject IPermissionService PermissionService
+@inject EntitlementService Entitlements
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Uprawnienia" />
+
+@if (!Entitlements.IsAllowed("RoleBasedAccess"))
+{
+    <FeatureGate Flag="RoleBasedAccess" RequiredPlan="Studio"
+                 Title="Zarządzanie uprawnieniami ról jest dostępne w planie Studio">
+        <Description>
+            Konfiguruj uprawnienia trenerów i pomocników — kontroluj kto może zarządzać klientami, sesjami, płatnościami i innymi modułami.
+        </Description>
+    </FeatureGate>
+    return;
+}
 
 <div class="page-header mb-3">
     <h4 class="page-title"><i class="bi bi-shield-lock me-2" style="color:var(--c-primary)"></i>Uprawnienia ról</h4>

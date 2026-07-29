@@ -6,6 +6,7 @@
 @inject IAuditLogService AuditLogService
 @inject AuthenticationStateProvider AuthState
 @inject ILogger<Series> Logger
+@inject EntitlementService Entitlements
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
@@ -14,6 +15,17 @@
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Serie wizyt" />
+
+@if (!Entitlements.IsAllowed("RecurringSessions"))
+{
+    <FeatureGate Flag="RecurringSessions" RequiredPlan="Pro"
+                 Title="Serie wizyt cyklicznych są niedostępne w Twoim planie">
+        <Description>
+            Automatycznie twórz cykliczne serie wizyt dla klientów — cotygodniowe treningi, powtarzające się sesje i wiele więcej.
+        </Description>
+    </FeatureGate>
+    return;
+}
 
 <div class="cal-shell">
     <div class="cal-topbar">

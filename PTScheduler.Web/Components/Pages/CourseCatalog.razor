@@ -9,6 +9,7 @@
 @inject AuthenticationStateProvider AuthState
 @inject ICouponService CouponSvc
 @inject NavigationManager Nav
+@inject EntitlementService Entitlements
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Kursy" />
@@ -181,7 +182,8 @@ else
 
         var settings = await PaymentSettings.GetAsync();
         _currency = settings.Currency;
-        _options = await PaymentService.GetEnabledOptionsAsync();
+        _options = (await PaymentService.GetEnabledOptionsAsync())
+            .Where(o => IsProviderAllowed(o.Key)).ToList();
         _paymentsEnabled = _options.Count > 0;
 
         _catalog = await CourseService.GetCoursesAsync(includeUnpublished: false);
@@ -249,6 +251,13 @@ else
     }
 
     private void ClosePicker() { _pickFor = null; _err = string.Empty; ClearCoupon(); }
+
+    private bool IsProviderAllowed(string key) => key switch
+    {
+        "payu" => Entitlements.IsAllowed("IntegrationPayU"),
+        "p24"  => Entitlements.IsAllowed("IntegrationPrzelewy24"),
+        _      => true
+    };
 }
 
 <style>

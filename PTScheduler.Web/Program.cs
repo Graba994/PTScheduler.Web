@@ -174,6 +174,7 @@ app.MapGet("/reports/client/{clientId:int}/monthly", async (
     int year,
     int month,
     PTScheduler.Application.Interfaces.IClientReportService reportService,
+    PTScheduler.Web.Services.EntitlementService entitlements,
     HttpContext ctx) =>
 {
     var u = ctx.User;
@@ -181,6 +182,9 @@ app.MapGet("/reports/client/{clientId:int}/monthly", async (
        || u.IsInRole(PTScheduler.Domain.Constants.Roles.Trainer)
        || u.IsInRole(PTScheduler.Domain.Constants.Roles.Subordinate)))
         return Results.Forbid();
+
+    if (!entitlements.IsAllowed("ClientReports"))
+        return Results.StatusCode(403);
 
     if (year < 2000 || year > 2100 || month < 1 || month > 12)
         return Results.BadRequest("Nieprawidłowy rok lub miesiąc.");
