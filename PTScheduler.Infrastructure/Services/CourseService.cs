@@ -261,6 +261,14 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IW
         await db.SaveChangesAsync();
     }
 
+    public async Task<long> GetVideoStorageUsedBytesAsync()
+    {
+        await using var db = dbFactory.CreateDbContext();
+        return await db.Lessons
+            .Where(l => l.BunnyVideoSizeBytes != null)
+            .SumAsync(l => l.BunnyVideoSizeBytes!.Value);
+    }
+
     // ---- Course content: modules + lessons ----
 
     public async Task<List<ModuleDto>> GetContentAsync(int courseId)
@@ -285,6 +293,8 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IW
                         SortOrder = l.SortOrder,
                         VideoUrl = l.VideoUrl,
                         BunnyVideoId = l.BunnyVideoId,
+                        BunnyVideoSizeBytes = l.BunnyVideoSizeBytes,
+                        BunnyVideoDurationSec = l.BunnyVideoDurationSec,
                         ContentHtml = l.ContentHtml,
                         HasQuiz = l.QuizQuestions.Any(),
                         QuizPassThreshold = l.QuizPassThreshold
@@ -353,6 +363,8 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IW
             Title = string.IsNullOrWhiteSpace(dto.Title) ? "Nowa lekcja" : dto.Title.Trim(),
             VideoUrl = string.IsNullOrWhiteSpace(dto.VideoUrl) ? null : dto.VideoUrl.Trim(),
             BunnyVideoId = string.IsNullOrWhiteSpace(dto.BunnyVideoId) ? null : dto.BunnyVideoId.Trim(),
+            BunnyVideoSizeBytes = dto.BunnyVideoSizeBytes,
+            BunnyVideoDurationSec = dto.BunnyVideoDurationSec,
             ContentHtml = string.IsNullOrWhiteSpace(dto.ContentHtml) ? null : dto.ContentHtml,
             SortOrder = maxOrder + 1
         };
@@ -369,6 +381,8 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IW
         l.Title = string.IsNullOrWhiteSpace(dto.Title) ? l.Title : dto.Title.Trim();
         l.VideoUrl = string.IsNullOrWhiteSpace(dto.VideoUrl) ? null : dto.VideoUrl.Trim();
         l.BunnyVideoId = string.IsNullOrWhiteSpace(dto.BunnyVideoId) ? null : dto.BunnyVideoId.Trim();
+        l.BunnyVideoSizeBytes = dto.BunnyVideoSizeBytes ?? l.BunnyVideoSizeBytes;
+        l.BunnyVideoDurationSec = dto.BunnyVideoDurationSec ?? l.BunnyVideoDurationSec;
         l.ContentHtml = string.IsNullOrWhiteSpace(dto.ContentHtml) ? null : dto.ContentHtml;
         await db.SaveChangesAsync();
     }

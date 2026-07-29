@@ -3,6 +3,7 @@
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @inject IBunnyService Bunny
+@inject ICourseService CourseService
 @inject EntitlementService Entitlements
 @rendermode PTScheduler.Web.RenderModes.Server
 
@@ -75,6 +76,31 @@ else
         </div>
     </div>
 
+    <div class="card mb-3">
+        <div class="card-header"><i class="bi bi-hdd me-1"></i>Zużycie video storage</div>
+        <div class="card-body">
+            @if (_storageMaxBytes > 0)
+            {
+                <div class="d-flex justify-content-between mb-1">
+                    <span>@FormatSize(_storageUsedBytes) z @FormatSize(_storageMaxBytes)</span>
+                    <span class="fw-bold @(StoragePct > 90 ? "text-danger" : StoragePct > 70 ? "text-warning" : "text-success")">@(StoragePct)%</span>
+                </div>
+                <div class="progress mb-2" style="height:10px">
+                    <div class="progress-bar @(StoragePct > 90 ? "bg-danger" : StoragePct > 70 ? "bg-warning" : "bg-success")"
+                         style="width:@(StoragePct)%"></div>
+                </div>
+                <div class="small text-muted">
+                    Limit planu: <strong>@(Entitlements.Current.MaxVideoStorageGB) GB</strong> storage,
+                    <strong>@(Entitlements.Current.MaxVideoBandwidthGBPerMonth) GB</strong> transfer/mies.
+                </div>
+            }
+            else
+            {
+                <span class="text-muted small">Brak limitu — plan unlimited.</span>
+            }
+        </div>
+    </div>
+
     <div class="alert alert-info small">
         <i class="bi bi-info-circle me-1"></i>
         <strong>Jak zacząć:</strong>
@@ -93,11 +119,19 @@ else
     private string? _message;
     private bool _msgError;
     private bool _testing;
+    private long _storageUsedBytes;
+    private long _storageMaxBytes;
+    private int StoragePct => _storageMaxBytes > 0 ? Math.Min(100, (int)(100.0 * _storageUsedBytes / _storageMaxBytes)) : 0;
 
     protected override async Task OnInitializedAsync()
     {
         if (Entitlements.Current.VideoProvider == "bunny")
+        {
             _settings = await Bunny.GetSettingsAsync();
+            var (_, used, maxB) = await Entitlements.CheckVideoStorageAsync(CourseService);
+            _storageUsedBytes = used;
+            _storageMaxBytes = maxB;
+        }
     }
 
     private async Task Save()
@@ -120,5 +154,13 @@ else
         _testing = false;
         _message = msg;
         _msgError = !ok;
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:0.#} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):0.#} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):0.##} GB";
     }
 }

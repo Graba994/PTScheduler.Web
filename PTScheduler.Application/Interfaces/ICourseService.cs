@@ -44,6 +44,8 @@ public interface ICourseService
     Task<QuizResultDto?> SubmitQuizAsync(string userId, int lessonId, List<QuizAnswerDto> answers);
     Task<QuizAttemptDto?> GetLastAttemptAsync(string userId, int lessonId);
 
+    Task<long> GetVideoStorageUsedBytesAsync();
+
     // ---- Student-facing (access-gated) ----
     Task<List<StudentCourseDto>> GetMyCoursesAsync(string userId);
     Task<StudentCourseDetailDto?> GetStudentCourseAsync(string userId, int courseId);

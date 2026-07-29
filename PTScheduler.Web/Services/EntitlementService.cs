@@ -118,6 +118,17 @@ public class EntitlementService
         return (count < max, count, max);
     }
 
+    public async Task<(bool Allowed, long CurrentBytes, long MaxBytes)> CheckVideoStorageAsync(
+        Application.Interfaces.ICourseService courseService)
+    {
+        var maxGB = _current.MaxVideoStorageGB;
+        if (maxGB == int.MaxValue) return (true, 0, long.MaxValue);
+        if (maxGB <= 0) return (false, 0, 0);
+        long maxBytes = (long)maxGB * 1024 * 1024 * 1024;
+        var used = await courseService.GetVideoStorageUsedBytesAsync();
+        return (used < maxBytes, used, maxBytes);
+    }
+
     // Reads the size of the branding uploads directory. Cheap because it
     // just enumerates FileInfos once — we don't need real-time accuracy.
     public (bool Allowed, long CurrentBytes, long MaxBytes) CheckStorage(string uploadsPath)

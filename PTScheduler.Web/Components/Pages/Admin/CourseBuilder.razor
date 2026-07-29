@@ -7,6 +7,7 @@
 @inject ICourseService CourseService
 @inject IPermissionService Permission
 @inject IBunnyService Bunny
+@inject EntitlementService Entitlements
 @inject AuthenticationStateProvider AuthState
 @inject NavigationManager Nav
 @rendermode PTScheduler.Web.RenderModes.Server
@@ -68,8 +69,14 @@ else
                             <div class="border rounded mb-2">
                                 <div class="d-flex align-items-center gap-2 px-2 py-2" style="cursor:pointer" @onclick="() => ToggleLesson(l)">
                                     <i class="bi @(IsLessonOpen(l) ? "bi-chevron-down" : "bi-chevron-right") text-muted"></i>
-                                    <i class="bi @(string.IsNullOrEmpty(l.VideoUrl) ? "bi-file-text" : "bi-play-circle") text-muted"></i>
-                                    <span class="flex-grow-1">@l.Title</span>
+                                    <i class="bi @(!string.IsNullOrEmpty(l.BunnyVideoId) ? "bi-camera-video" : !string.IsNullOrEmpty(l.VideoUrl) ? "bi-play-circle" : "bi-file-text") text-muted"></i>
+                                    <span class="flex-grow-1">
+                                        @l.Title
+                                        @if (l.BunnyVideoSizeBytes > 0)
+                                        {
+                                            <span class="badge bg-secondary ms-1" style="font-size:.65rem">@FormatSize(l.BunnyVideoSizeBytes.Value)</span>
+                                        }
+                                    </span>
                                     <button class="btn btn-sm btn-outline-secondary" title="W górę" @onclick="() => MoveLesson(l.Id, -1)" @onclick:stopPropagation="true"><i class="bi bi-arrow-up"></i></button>
                                     <button class="btn btn-sm btn-outline-secondary" title="W dół" @onclick="() => MoveLesson(l.Id, 1)" @onclick:stopPropagation="true"><i class="bi bi-arrow-down"></i></button>
                                     <button class="btn btn-sm btn-outline-danger" title="Usuń" @onclick="() => DeleteLesson(l.Id)" @onclick:stopPropagation="true"><i class="bi bi-trash"></i></button>
@@ -132,6 +139,12 @@ else
     private bool _savingQuiz;
     private bool _quizSaved;
 
+    private bool _bunnyAvailable;
+    private long _videoStorageUsedBytes;
+    private long _videoStorageMaxBytes;
+    private bool _deletingVideo;
+    private int VideoStoragePct => _videoStorageMaxBytes > 0 ? Math.Min(100, (int)(100.0 * _videoStorageUsedBytes / _videoStorageMaxBytes)) : 0;
+
     protected override async Task OnInitializedAsync()
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
@@ -145,6 +158,11 @@ else
 
         _course = await CourseService.GetCourseAsync(CourseId);
         if (_course is not null) await ReloadContent();
+
+        _bunnyAvailable = Entitlements.Current.VideoProvider == "bunny";
+        if (_bunnyAvailable)
+            await RefreshVideoUsage();
+
         _loading = false;
     }
 
@@ -210,11 +228,20 @@ else
         try
         {
             var f = e.File;
-            // Cap at 2 GB per file; larger uploads should go direct via TUS in a later iteration
             const long max = 2L * 1024 * 1024 * 1024;
             if (f.Size > max)
             {
                 _uploadMsg = "Plik za duży (max 2 GB w tej wersji).";
+                _uploadError = true;
+                _uploading = false;
+                return;
+            }
+
+            if (_videoStorageMaxBytes > 0 && _videoStorageUsedBytes + f.Size > _videoStorageMaxBytes)
+            {
+                var usedGB = _videoStorageUsedBytes / (1024.0 * 1024 * 1024);
+                var maxGB = _videoStorageMaxBytes / (1024.0 * 1024 * 1024);
+                _uploadMsg = $"Brak miejsca — wykorzystano {usedGB:0.#} z {maxGB:0} GB. Zmień plan, aby zwiększyć limit.";
                 _uploadError = true;
                 _uploading = false;
                 return;
@@ -227,8 +254,18 @@ else
             if (ok && !string.IsNullOrEmpty(id))
             {
                 _lessonForm.BunnyVideoId = id;
-                _uploadMsg = $"Wgrano — ID: {id}. Wideo jest przetwarzane, będzie gotowe za chwilę.";
+                _lessonForm.BunnyVideoSizeBytes = f.Size;
+
+                var info = await Bunny.GetVideoInfoAsync(id);
+                if (info is not null)
+                {
+                    _lessonForm.BunnyVideoSizeBytes = info.StorageSize > 0 ? info.StorageSize : f.Size;
+                    _lessonForm.BunnyVideoDurationSec = info.Length > 0 ? info.Length : null;
+                }
+
+                _uploadMsg = $"Wgrano — {FormatSize(f.Size)}. Wideo jest przetwarzane.";
                 _uploadError = false;
+                await RefreshVideoUsage();
             }
             else
             {
@@ -238,6 +275,43 @@ else
         }
         catch (Exception ex) { _uploadMsg = ex.Message; _uploadError = true; }
         _uploading = false;
+    }
+
+    private async Task DeleteBunnyVideo()
+    {
+        if (string.IsNullOrWhiteSpace(_lessonForm.BunnyVideoId)) return;
+        _deletingVideo = true;
+        var (ok, err) = await Bunny.DeleteAsync(_lessonForm.BunnyVideoId);
+        if (ok)
+        {
+            _lessonForm.BunnyVideoId = null;
+            _lessonForm.BunnyVideoSizeBytes = null;
+            _lessonForm.BunnyVideoDurationSec = null;
+            _uploadMsg = "Wideo usunięte z Bunny.net.";
+            _uploadError = false;
+            await RefreshVideoUsage();
+        }
+        else
+        {
+            _uploadMsg = err ?? "Nie udało się usunąć wideo.";
+            _uploadError = true;
+        }
+        _deletingVideo = false;
+    }
+
+    private async Task RefreshVideoUsage()
+    {
+        var (_, used, maxB) = await Entitlements.CheckVideoStorageAsync(CourseService);
+        _videoStorageUsedBytes = used;
+        _videoStorageMaxBytes = maxB;
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:0.#} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):0.#} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):0.##} GB";
     }
 
     private void CancelLessonForm()
@@ -320,12 +394,23 @@ else
                     <li class="nav-item">
                         <a class="nav-link @(_videoTab == "url" ? "active" : "")" @onclick='() => _videoTab = "url"' href="javascript:void(0)">Link (YouTube / URL)</a>
                     </li>
-                    <li class="nav-item">
-                        <a class="nav-link @(_videoTab == "bunny" ? "active" : "")" @onclick='() => _videoTab = "bunny"' href="javascript:void(0)">
-                            Bunny.net Upload
-                            <PlanBadge Flag="CoursesEnabled" RequiredPlan="Pro" />
-                        </a>
-                    </li>
+                    @if (_bunnyAvailable)
+                    {
+                        <li class="nav-item">
+                            <a class="nav-link @(_videoTab == "bunny" ? "active" : "")" @onclick='() => _videoTab = "bunny"' href="javascript:void(0)">
+                                Bunny.net Upload
+                            </a>
+                        </li>
+                    }
+                    else
+                    {
+                        <li class="nav-item">
+                            <span class="nav-link disabled text-muted">
+                                Bunny.net Upload
+                                <PlanBadge Flag="CoursesEnabled" RequiredPlan="Pro" />
+                            </span>
+                        </li>
+                    }
                 </ul>
 
                 @if (_videoTab == "url")
@@ -334,13 +419,42 @@ else
                            placeholder="https://youtube.com/... lub inny link" />
                     <div class="form-text">Wklej link do filmu — osadzimy go automatycznie.</div>
                 }
-                else
+                else if (_bunnyAvailable)
                 {
-                    <div class="mb-2">
-                        <label class="form-label small">Bunny Video ID (GUID)</label>
-                        <input class="form-control font-monospace" @bind="_lessonForm.BunnyVideoId" @bind:event="oninput"
-                               placeholder="a1b2c3d4-e5f6-7890-abcd-ef1234567890" />
-                    </div>
+                    @if (_videoStorageMaxBytes > 0)
+                    {
+                        <div class="small mb-2">
+                            <div class="d-flex justify-content-between text-muted mb-1">
+                                <span>Video storage</span>
+                                <span>@FormatSize(_videoStorageUsedBytes) / @FormatSize(_videoStorageMaxBytes)</span>
+                            </div>
+                            <div class="progress" style="height:6px">
+                                <div class="progress-bar @(VideoStoragePct > 90 ? "bg-danger" : VideoStoragePct > 70 ? "bg-warning" : "bg-success")"
+                                     style="width:@(VideoStoragePct)%"></div>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(_lessonForm.BunnyVideoId))
+                    {
+                        <div class="d-flex align-items-center gap-2 mb-2">
+                            <input class="form-control font-monospace flex-grow-1" @bind="_lessonForm.BunnyVideoId" @bind:event="oninput"
+                                   placeholder="a1b2c3d4-e5f6-7890-abcd-ef1234567890" />
+                            <button class="btn btn-sm btn-outline-danger" title="Usuń wideo z Bunny.net"
+                                    @onclick="DeleteBunnyVideo" disabled="@_deletingVideo">
+                                @if (_deletingVideo) { <span class="spinner-border spinner-border-sm"></span> }
+                                else { <i class="bi bi-trash"></i> }
+                            </button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="mb-2">
+                            <label class="form-label small">Bunny Video ID (GUID)</label>
+                            <input class="form-control font-monospace" @bind="_lessonForm.BunnyVideoId" @bind:event="oninput"
+                                   placeholder="a1b2c3d4-e5f6-7890-abcd-ef1234567890" />
+                        </div>
+                    }
                     <div class="mb-2">
                         <label class="form-label small">…lub wgraj plik MP4</label>
                         <InputFile OnChange="UploadToBunny" accept="video/*" class="form-control form-control-sm" />
