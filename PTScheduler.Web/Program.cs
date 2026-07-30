@@ -2,6 +2,7 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 using PTScheduler.Application;
 using PTScheduler.Application.DTOs;
 using PTScheduler.Application.Interfaces;
@@ -290,6 +291,40 @@ app.MapPost("/internal/entitlements/reload",
     var json = await reader.ReadToEndAsync();
     svc.ReplaceFromJson(json);
     return Results.Ok(new { plan = svc.Current.Name });
+});
+
+app.MapGet("/internal/metrics",
+    async (HttpContext ctx, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+{
+    var expected = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+    if (string.IsNullOrEmpty(expected)) return Results.NotFound();
+    if (ctx.Request.Headers["X-Internal-Secret"].ToString() != expected)
+        return Results.Unauthorized();
+
+    await using var db = dbFactory.CreateDbContext();
+    var clientsCount = await db.Clients.CountAsync();
+    var activeClients = await db.Clients.CountAsync(c => c.Status == PTScheduler.Domain.Enums.ClientStatus.Active);
+    var sessionsTotal = await db.Sessions.CountAsync();
+    var sessionsThisMonth = await db.Sessions.CountAsync(s =>
+        s.StartTime >= new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1));
+    var packagesActive = await db.SessionPackages.CountAsync(p =>
+        p.Status == PTScheduler.Domain.Enums.PackageStatus.Active);
+    var ordersTotal = await db.Orders.CountAsync();
+    var revenue = await db.Orders
+        .Where(o => o.Status == PTScheduler.Domain.Enums.OrderStatus.Paid)
+        .SumAsync(o => (decimal?)o.Amount) ?? 0;
+
+    return Results.Json(new
+    {
+        clients = clientsCount,
+        activeClients,
+        sessionsTotal,
+        sessionsThisMonth,
+        packagesActive,
+        ordersTotal,
+        revenue,
+        timestamp = DateTime.UtcNow.ToString("o")
+    });
 });
 
 // Google Meet OAuth callback — exchanges the authorization code for a refresh token.

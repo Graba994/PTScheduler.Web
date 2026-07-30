@@ -9,6 +9,7 @@
 @inject ISessionPackageService PackageService
 @inject IPaymentService PaymentService
 @inject IReceiptService ReceiptService
+@inject IInvoiceService InvoiceService
 @inject IFinanceService FinanceService
 @inject IPermissionService PermissionService
 @inject IJSRuntime JS
@@ -346,6 +347,24 @@ else
                             <label class="form-label small">Następny numer</label>
                             <input type="number" class="form-control form-control-sm" min="1" @bind="_taxConfig.InvoiceNextNumber" />
                         </div>
+
+                        <div class="col-12"><h6 class="mb-0 mt-2"><i class="bi bi-building me-2"></i>Dane sprzedawcy (faktura)</h6></div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label small">NIP</label>
+                            <input type="text" class="form-control form-control-sm font-monospace" placeholder="np. 1234567890" @bind="_taxConfig.SellerNip" />
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label small">Adres (ulica i numer)</label>
+                            <input type="text" class="form-control form-control-sm" placeholder="np. ul. Sportowa 12" @bind="_taxConfig.SellerAddress" />
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label small">Kod pocztowy</label>
+                            <input type="text" class="form-control form-control-sm font-monospace" placeholder="00-000" @bind="_taxConfig.SellerPostalCode" />
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label small">Miasto</label>
+                            <input type="text" class="form-control form-control-sm" @bind="_taxConfig.SellerCity" />
+                        </div>
                     }
 
                     <div class="col-12 mt-3">
@@ -498,7 +517,7 @@ else
                                     }
                                 </td>
                                 <td class="text-nowrap text-muted">@(o.PaidAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—")</td>
-                                <td>
+                                <td class="text-nowrap">
                                     <button class="btn btn-sm btn-outline-secondary" title="Pobierz potwierdzenie"
                                             @onclick="() => DownloadReceipt(o.Id)" disabled="@(_downloadingReceiptId == o.Id)">
                                         @if (_downloadingReceiptId == o.Id)
@@ -510,6 +529,20 @@ else
                                             <i class="bi bi-file-earmark-pdf"></i>
                                         }
                                     </button>
+                                    @if (_taxConfig is not null && _taxConfig.InvoiceNumberingEnabled)
+                                    {
+                                        <button class="btn btn-sm btn-outline-primary ms-1" title="Faktura VAT"
+                                                @onclick="() => DownloadInvoice(o.Id)" disabled="@(_downloadingInvoiceId == o.Id)">
+                                            @if (_downloadingInvoiceId == o.Id)
+                                            {
+                                                <span class="spinner-border spinner-border-sm"></span>
+                                            }
+                                            else
+                                            {
+                                                <i class="bi bi-receipt"></i>
+                                            }
+                                        </button>
+                                    }
                                 </td>
                             </tr>
                         }
@@ -652,6 +685,7 @@ else
     private List<SessionPackageDto> _unpaid = [];
     private List<OrderDto> _onlineOrders = [];
     private int? _downloadingReceiptId;
+    private int? _downloadingInvoiceId;
     private bool _chartNeedsRender;
     private FinanceTaxConfigDto? _taxConfig;
     private bool _showTaxSettings;
@@ -739,6 +773,19 @@ else
         }
         catch { }
         finally { _downloadingReceiptId = null; }
+    }
+
+    private async Task DownloadInvoice(int orderId)
+    {
+        _downloadingInvoiceId = orderId;
+        try
+        {
+            var (bytes, fileName) = await InvoiceService.GenerateInvoiceAsync(orderId);
+            await JS.InvokeVoidAsync("PTExport.downloadCsv", fileName, bytes);
+            _taxConfig = await FinanceService.GetTaxConfigAsync("standard");
+        }
+        catch { }
+        finally { _downloadingInvoiceId = null; }
     }
 
     private static bool HasAnyTaxOption(FinanceTaxConfigDto tc) =>

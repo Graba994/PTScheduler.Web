@@ -42,4 +42,7 @@ public class Order
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public DateTime? PaidAt { get; set; }
+
+    public string? InvoiceNumber { get; set; }
+    public DateTime? InvoiceIssuedAt { get; set; }
 }

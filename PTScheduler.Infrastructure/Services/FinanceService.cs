@@ -74,7 +74,11 @@ public class FinanceService(IDbContextFactory<ApplicationDbContext> dbFactory) :
             MonthlyFixedCosts = cfg.MonthlyFixedCosts,
             InvoiceNumberingEnabled = cfg.InvoiceNumberingEnabled,
             InvoicePrefix = cfg.InvoicePrefix,
-            InvoiceNextNumber = cfg.InvoiceNextNumber
+            InvoiceNextNumber = cfg.InvoiceNextNumber,
+            SellerNip = cfg.SellerNip,
+            SellerAddress = cfg.SellerAddress,
+            SellerCity = cfg.SellerCity,
+            SellerPostalCode = cfg.SellerPostalCode
         };
     }
 
@@ -104,6 +108,10 @@ public class FinanceService(IDbContextFactory<ApplicationDbContext> dbFactory) :
         cfg.InvoiceNumberingEnabled = dto.InvoiceNumberingEnabled;
         cfg.InvoicePrefix = dto.InvoicePrefix;
         cfg.InvoiceNextNumber = dto.InvoiceNextNumber;
+        cfg.SellerNip = dto.SellerNip;
+        cfg.SellerAddress = dto.SellerAddress;
+        cfg.SellerCity = dto.SellerCity;
+        cfg.SellerPostalCode = dto.SellerPostalCode;
         await db.SaveChangesAsync();
     }
 

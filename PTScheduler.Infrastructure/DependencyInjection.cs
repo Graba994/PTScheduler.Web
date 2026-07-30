@@ -75,6 +75,7 @@ public static class DependencyInjection
         services.AddScoped<IFinanceService, FinanceService>();
         services.AddScoped<IDataExportService, DataExportService>();
         services.AddScoped<IReceiptService, ReceiptService>();
+        services.AddScoped<IInvoiceService, InvoiceService>();
         services.AddScoped<ISmsSettingsService, SmsSettingsService>();
         services.AddScoped<ISmsService, SmsApiService>();
         services.AddScoped<ISetupService, SetupService>();

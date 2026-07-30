@@ -12,8 +12,6 @@ public abstract class PendingExternalProvider(string key, string displayName) : 
 {
     public string Key => key;
 
-    // Considered "configured" once toggled on with any credentials — so it shows
-    // as available in admin; the checkout itself is what reports the pending state.
     public bool IsConfigured(ProviderRuntimeConfig cfg) => true;
 
     public Task<ProviderCheckoutResult> CreateCheckoutAsync(ProviderCheckoutContext ctx, ProviderRuntimeConfig cfg)
@@ -24,7 +22,3 @@ public abstract class PendingExternalProvider(string key, string displayName) : 
     public Task<ProviderNotifyResult> HandleNotifyAsync(string rawBody, IReadOnlyDictionary<string, string> headers, ProviderRuntimeConfig cfg)
         => Task.FromResult(new ProviderNotifyResult(false, null, PaymentOutcome.Pending));
 }
-
-public sealed class Przelewy24Provider() : PendingExternalProvider(PaymentProviders.Przelewy24, "Przelewy24");
-public sealed class KlarnaProvider() : PendingExternalProvider(PaymentProviders.Klarna, "Klarna");
-public sealed class AutoPayProvider() : PendingExternalProvider(PaymentProviders.AutoPay, "Autopay");

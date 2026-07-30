@@ -6,6 +6,7 @@
 @inject StripeService StripeSvc
 @inject IDbContextFactory<PortalDbContext> DbFactory
 @inject NavigationManager Nav
+@inject IConfiguration Config
 @rendermode InteractiveServer
 
 <PageTitle>@(_tenant?.CompanyName ?? "Trener") — PTScheduler Portal</PageTitle>
@@ -265,6 +266,74 @@ else
         </div>
 
         <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="fw-bold mb-0"><i class="bi bi-graph-up me-2 text-success"></i>Metryki aplikacji</h6>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="LoadMetrics" disabled="@_loadingMetrics">
+                            @if (_loadingMetrics) { <span class="spinner-border spinner-border-sm"></span> } else { <i class="bi bi-arrow-clockwise"></i> }
+                        </button>
+                    </div>
+
+                    @if (_metrics is not null)
+                    {
+                        <div class="row g-2 text-center">
+                            <div class="col-4">
+                                <div class="border rounded p-2">
+                                    <div class="fw-bold fs-5 text-primary">@_metrics.Clients</div>
+                                    <div class="text-muted" style="font-size:.7rem">Klienci</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="border rounded p-2">
+                                    <div class="fw-bold fs-5 text-info">@_metrics.SessionsTotal</div>
+                                    <div class="text-muted" style="font-size:.7rem">Sesje</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="border rounded p-2">
+                                    <div class="fw-bold fs-5 text-warning">@_metrics.SessionsThisMonth</div>
+                                    <div class="text-muted" style="font-size:.7rem">Ten miesiąc</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="border rounded p-2">
+                                    <div class="fw-bold fs-5 text-success">@_metrics.PackagesActive</div>
+                                    <div class="text-muted" style="font-size:.7rem">Aktywne pakiety</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="border rounded p-2">
+                                    <div class="fw-bold fs-5">@_metrics.OrdersTotal</div>
+                                    <div class="text-muted" style="font-size:.7rem">Zamówienia</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="border rounded p-2">
+                                    <div class="fw-bold fs-5 text-success">@_metrics.Revenue.ToString("N0")</div>
+                                    <div class="text-muted" style="font-size:.7rem">Przychód (PLN)</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="text-muted small mt-2"><i class="bi bi-clock me-1"></i>@_metrics.Timestamp.ToLocalTime().ToString("HH:mm dd.MM.yyyy")</div>
+                    }
+                    else if (_metricsError is not null)
+                    {
+                        <p class="text-danger small mb-1">@_metricsError</p>
+                        <button class="btn btn-sm btn-outline-primary" @onclick="LoadMetrics">Spróbuj ponownie</button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-sm btn-outline-dark" @onclick="LoadMetrics" disabled="@_loadingMetrics">
+                            @if (_loadingMetrics) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            Pobierz metryki
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center mb-3">
@@ -430,6 +499,9 @@ else
     private bool _loadingInvoices;
     private bool _showPassword;
     private bool _syncingPassword;
+    private TenantMetrics? _metrics;
+    private bool _loadingMetrics;
+    private string? _metricsError;
 
     protected override async Task OnInitializedAsync()
     {
@@ -638,4 +710,39 @@ else
         TenantStatus.Pending => "bg-warning text-dark",
         _ => "bg-secondary"
     };
+
+    private async Task LoadMetrics()
+    {
+        if (_tenant is null || _tenant.Status != TenantStatus.Active) return;
+        _loadingMetrics = true;
+        _metricsError = null;
+        try
+        {
+            var forwardHost = Config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220";
+            var secret = Config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"http://{forwardHost}:{_tenant.Port}/internal/metrics");
+            if (!string.IsNullOrEmpty(secret))
+                req.Headers.Add("X-Internal-Secret", secret);
+            var resp = await http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) { _metricsError = $"HTTP {(int)resp.StatusCode}"; return; }
+            var json = await resp.Content.ReadAsStringAsync();
+            _metrics = System.Text.Json.JsonSerializer.Deserialize<TenantMetrics>(json,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch (Exception ex) { _metricsError = ex.Message; }
+        finally { _loadingMetrics = false; }
+    }
+
+    private record TenantMetrics
+    {
+        public int Clients { get; init; }
+        public int ActiveClients { get; init; }
+        public int SessionsTotal { get; init; }
+        public int SessionsThisMonth { get; init; }
+        public int PackagesActive { get; init; }
+        public int OrdersTotal { get; init; }
+        public decimal Revenue { get; init; }
+        public DateTime Timestamp { get; init; }
+    }
 }
