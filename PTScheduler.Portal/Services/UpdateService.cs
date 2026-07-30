@@ -139,13 +139,25 @@ public class UpdateService(
                 portArgs = string.Join(" ", parts);
             }
 
+            var runCmd = $"docker run -d --name {PortalContainerName} --network {netMode} --restart {restart} {envArgs} {bindArgs} {portArgs} {PortalImage}";
+
             var script =
                 "set -e\n" +
                 "sleep 5\n" +
+                $"docker tag {PortalImage} ptportal:previous 2>/dev/null || true\n" +
                 $"docker stop {PortalContainerName} 2>/dev/null || true\n" +
                 $"docker rm {PortalContainerName} 2>/dev/null || true\n" +
                 $"docker tag ptportal:pending {PortalImage}\n" +
-                $"docker run -d --name {PortalContainerName} --network {netMode} --restart {restart} {envArgs} {bindArgs} {portArgs} {PortalImage}\n";
+                $"{runCmd}\n" +
+                "sleep 12\n" +
+                $"if ! docker inspect --format='{{{{.State.Running}}}}' {PortalContainerName} 2>/dev/null | grep -q true; then\n" +
+                $"  echo 'New container failed — rolling back to ptportal:previous'\n" +
+                $"  docker stop {PortalContainerName} 2>/dev/null || true\n" +
+                $"  docker rm {PortalContainerName} 2>/dev/null || true\n" +
+                $"  docker tag ptportal:previous {PortalImage}\n" +
+                $"  {runCmd}\n" +
+                "fi\n" +
+                "docker rmi ptportal:pending 2>/dev/null || true\n";
 
             log.Add("→ Sprawdzam obraz docker:cli dla pomocnika-restartera...");
             await docker.EnsureImagePulledAsync("docker:cli");
@@ -207,6 +219,9 @@ public class UpdateService(
 
             if (rebuildTenantImage)
             {
+                log.Add($"→ Zachowuję poprzedni obraz jako {TenantImage.Replace(":latest", ":previous")}...");
+                await RunAsync("docker", $"tag {TenantImage} {TenantImage.Replace(":latest", ":previous")}", RepoDir);
+
                 log.Add("→ Building tenant image: ptscheduler-web:latest");
                 var (buildOk, buildOut) = await RunAsync("docker",
                     $"build -t {TenantImage} .", RepoDir, timeoutMinutes: 20);
@@ -214,7 +229,8 @@ public class UpdateService(
                 if (!buildOk)
                 {
                     ok = false;
-                    log.Add("✖ Build obrazu trenera nie powiódł się.");
+                    log.Add("✖ Build obrazu trenera nie powiódł się — przywracam poprzedni obraz.");
+                    await RunAsync("docker", $"tag {TenantImage.Replace(":latest", ":previous")} {TenantImage}", RepoDir);
                     return new UpgradeResult(false, "docker build zakończył się błędem", log);
                 }
                 log.Add("✓ Nowy obraz trenera zbudowany");
