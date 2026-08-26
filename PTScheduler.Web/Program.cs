@@ -327,6 +327,77 @@ app.MapGet("/internal/metrics",
     });
 });
 
+app.MapGet("/internal/admin-info",
+    async (HttpContext ctx, UserManager<ApplicationUser> userManager) =>
+{
+    var expected = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+    if (string.IsNullOrEmpty(expected)) return Results.NotFound();
+    if (ctx.Request.Headers["X-Internal-Secret"].ToString() != expected)
+        return Results.Unauthorized();
+
+    var admins = await userManager.GetUsersInRoleAsync(PTScheduler.Domain.Constants.Roles.Admin);
+    var admin = admins.FirstOrDefault();
+    if (admin is null) return Results.Json(new { found = false });
+
+    return Results.Json(new
+    {
+        found = true,
+        email = admin.Email,
+        firstName = admin.FirstName,
+        lastName = admin.LastName,
+        emailConfirmed = admin.EmailConfirmed,
+        lockoutEnd = admin.LockoutEnd?.ToString("o")
+    });
+});
+
+app.MapPost("/internal/admin-reset",
+    async (HttpContext ctx, UserManager<ApplicationUser> userManager) =>
+{
+    var expected = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+    if (string.IsNullOrEmpty(expected)) return Results.NotFound();
+    if (ctx.Request.Headers["X-Internal-Secret"].ToString() != expected)
+        return Results.Unauthorized();
+
+    using var reader = new StreamReader(ctx.Request.Body);
+    var body = await reader.ReadToEndAsync();
+    using var doc = System.Text.Json.JsonDocument.Parse(body);
+    var root = doc.RootElement;
+
+    var newPassword = root.TryGetProperty("password", out var p) ? p.GetString() : null;
+    var newEmail = root.TryGetProperty("email", out var e) ? e.GetString() : null;
+
+    var admins = await userManager.GetUsersInRoleAsync(PTScheduler.Domain.Constants.Roles.Admin);
+    var admin = admins.FirstOrDefault();
+    if (admin is null) return Results.Json(new { success = false, error = "Brak konta admin" });
+
+    if (!string.IsNullOrWhiteSpace(newEmail) && newEmail != admin.Email)
+    {
+        admin.Email = newEmail;
+        admin.NormalizedEmail = newEmail.ToUpperInvariant();
+        admin.UserName = newEmail;
+        admin.NormalizedUserName = newEmail.ToUpperInvariant();
+        var emailResult = await userManager.UpdateAsync(admin);
+        if (!emailResult.Succeeded)
+            return Results.Json(new { success = false, error = string.Join(", ", emailResult.Errors.Select(x => x.Description)) });
+    }
+
+    if (!string.IsNullOrWhiteSpace(newPassword))
+    {
+        var token = await userManager.GeneratePasswordResetTokenAsync(admin);
+        var passResult = await userManager.ResetPasswordAsync(admin, token, newPassword);
+        if (!passResult.Succeeded)
+            return Results.Json(new { success = false, error = string.Join(", ", passResult.Errors.Select(x => x.Description)) });
+    }
+
+    if (admin.LockoutEnd is not null)
+    {
+        await userManager.SetLockoutEndDateAsync(admin, null);
+        await userManager.ResetAccessFailedCountAsync(admin);
+    }
+
+    return Results.Json(new { success = true, email = admin.Email });
+});
+
 // Google Meet OAuth callback — exchanges the authorization code for a refresh token.
 app.MapGet("/api/google-meet/callback", async (HttpContext ctx, PTScheduler.Application.Interfaces.IGoogleMeetService meet) =>
 {
