@@ -61,8 +61,14 @@ public class HealthMonitorService(
                 // Alert on first flip to unhealthy after being healthy (or on first-ever failure)
                 if ((wasHealthy == true || wasHealthy is null) && !t.DownAlertSent)
                 {
+                    db.TenantEvents.Add(new TenantEvent
+                    {
+                        TenantId = t.Id,
+                        EventType = TenantEventTypes.HealthDown,
+                        Detail = error
+                    });
                     _ = email.SendAsync(adminEmail,
-                        $"⚠ Tenant {t.Slug} nie odpowiada",
+                        $"Tenant {t.Slug} nie odpowiada",
                         BuildDownAlert(t, error));
                     t.DownAlertSent = true;
                 }
@@ -71,12 +77,17 @@ public class HealthMonitorService(
             {
                 if (wasHealthy == false)
                 {
-                    // Recovery — clear flags and notify
                     var downtime = t.UnhealthySinceUtc.HasValue
                         ? DateTime.UtcNow - t.UnhealthySinceUtc.Value
                         : TimeSpan.Zero;
+                    db.TenantEvents.Add(new TenantEvent
+                    {
+                        TenantId = t.Id,
+                        EventType = TenantEventTypes.HealthRecovered,
+                        Detail = $"Downtime: {downtime.TotalMinutes:0} min"
+                    });
                     _ = email.SendAsync(adminEmail,
-                        $"✓ Tenant {t.Slug} znów działa",
+                        $"Tenant {t.Slug} znow dziala",
                         BuildUpAlert(t, downtime));
                 }
                 t.UnhealthySinceUtc = null;

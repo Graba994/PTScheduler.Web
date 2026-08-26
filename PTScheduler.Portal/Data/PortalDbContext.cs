@@ -14,6 +14,8 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<LoginLog> LoginLogs => Set<LoginLog>();
     public DbSet<SiteSetting> SiteSettings => Set<SiteSetting>();
     public DbSet<BackupEntry> BackupEntries => Set<BackupEntry>();
+    public DbSet<PaymentRecord> PaymentRecords => Set<PaymentRecord>();
+    public DbSet<TenantEvent> TenantEvents => Set<TenantEvent>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -53,6 +55,22 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
         {
             e.HasIndex(x => x.Slug);
             e.HasIndex(x => x.CreatedAt);
+        });
+
+        b.Entity<PaymentRecord>(e =>
+        {
+            e.HasIndex(p => p.TenantId);
+            e.HasIndex(p => p.CreatedAt);
+            e.HasIndex(p => p.StripeInvoiceId);
+            e.HasOne(p => p.Tenant).WithMany().HasForeignKey(p => p.TenantId);
+        });
+
+        b.Entity<TenantEvent>(e =>
+        {
+            e.HasIndex(x => x.TenantId);
+            e.HasIndex(x => x.OccurredAt);
+            e.HasIndex(x => x.EventType);
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId);
         });
 
         SeedPlans(b);
