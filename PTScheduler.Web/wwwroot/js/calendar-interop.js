@@ -4,12 +4,17 @@ let summaryEl = null;
 export function initCalendar(dotnetRef, el, canEdit) {
     const isMobile = window.innerWidth < 768;
 
+    const now = new Date();
+    const scrollHour = Math.max(0, now.getHours() - 1);
+    const scrollTime = String(scrollHour).padStart(2, '0') + ':00:00';
+
     calendar = new FullCalendar.Calendar(el, {
         initialView: isMobile ? 'listWeek' : 'timeGridWeek',
         locale: 'pl',
         firstDay: 1,
-        height: isMobile ? 'auto' : 'calc(100vh - 168px)',
+        height: isMobile ? 'auto' : 'calc(100vh - 108px)',
         nowIndicator: true,
+        scrollTime: scrollTime,
         slotMinTime: '06:00:00',
         slotMaxTime: '22:00:00',
         slotDuration: '00:30:00',
