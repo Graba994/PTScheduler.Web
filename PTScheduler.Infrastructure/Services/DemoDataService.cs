@@ -602,6 +602,737 @@ public class DemoDataService(
 
         await db.SaveChangesAsync();
 
+        // 14. Package offers (sellable templates) ---------------------------------
+        var offerPersonal10 = new PackageOffer
+        {
+            Name = "Pakiet Personalny 10", Description = "10 sesji treningowych 1-na-1 z trenerem",
+            SessionTypeId = stPersonal.Id, SessionsCount = 10, Price = 1200m,
+            ValidDays = 90, IsActive = true, IsFeatured = false, SortOrder = 1,
+            CreatedByUserId = trainer.Id, CreatedAt = today.AddDays(-90)
+        };
+        var offerPersonal20 = new PackageOffer
+        {
+            Name = "Pakiet Personalny 20", Description = "20 sesji — najlepsza wartość! Oszczędzasz 200 zł.",
+            SessionTypeId = stPersonal.Id, SessionsCount = 20, Price = 2200m,
+            ValidDays = 180, IsActive = true, IsFeatured = true, SortOrder = 2,
+            CreatedByUserId = trainer.Id, CreatedAt = today.AddDays(-90)
+        };
+        var offerPilates12 = new PackageOffer
+        {
+            Name = "Pakiet Pilates 12", Description = "12 sesji pilates — elastyczność i siła core",
+            SessionTypeId = stPilates.Id, SessionsCount = 12, Price = 1260m,
+            ValidDays = 120, IsActive = true, IsFeatured = false, SortOrder = 3,
+            CreatedByUserId = trainer.Id, CreatedAt = today.AddDays(-75)
+        };
+        var offerCardio10 = new PackageOffer
+        {
+            Name = "Pakiet Cardio HIIT 10", Description = "10 intensywnych sesji cardio",
+            SessionTypeId = stCardio.Id, SessionsCount = 10, Price = 900m,
+            ValidDays = 90, IsActive = true, IsFeatured = false, SortOrder = 4,
+            CreatedByUserId = trainer.Id, CreatedAt = today.AddDays(-60)
+        };
+        var offerStretch4 = new PackageOffer
+        {
+            Name = "Pakiet Stretching 4", Description = "4 sesje rozciągające — idealny na start",
+            SessionTypeId = stStretch.Id, SessionsCount = 4, Price = 320m,
+            ValidDays = 60, IsActive = true, IsFeatured = false, SortOrder = 5,
+            CreatedByUserId = trainer.Id, CreatedAt = today.AddDays(-60)
+        };
+        db.PackageOffers.AddRange(offerPersonal10, offerPersonal20, offerPilates12, offerCardio10, offerStretch4);
+        await db.SaveChangesAsync();
+
+        // 15. Coupons -------------------------------------------------------------
+        var couponWelcome = new Coupon
+        {
+            Code = "WELCOME10", Description = "10% rabatu na pierwszy pakiet",
+            DiscountType = "percent", DiscountValue = 10m,
+            ValidFrom = today.AddDays(-60), ValidUntil = today.AddDays(30),
+            MaxUses = 0, UsedCount = 3, Scope = "packages",
+            IsActive = true, CreatedAt = today.AddDays(-60)
+        };
+        var couponSummer = new Coupon
+        {
+            Code = "LATO2026", Description = "20 zł zniżki — promocja letnia",
+            DiscountType = "amount", DiscountValue = 20m,
+            ValidFrom = today.AddDays(-30), ValidUntil = today.AddDays(60),
+            MaxUses = 50, UsedCount = 7, Scope = "all",
+            IsActive = true, CreatedAt = today.AddDays(-30)
+        };
+        var couponReferral = new Coupon
+        {
+            Code = "POLECENIE50", Description = "50 zł za polecenie — jednorazowy",
+            DiscountType = "amount", DiscountValue = 50m,
+            ValidFrom = today.AddDays(-90), ValidUntil = today.AddDays(90),
+            MaxUses = 10, UsedCount = 1, Scope = "packages",
+            IsActive = true, CreatedAt = today.AddDays(-90)
+        };
+        var couponExpired = new Coupon
+        {
+            Code = "WIOSNA25", Description = "15% rabatu — kampania wiosenna (wygasła)",
+            DiscountType = "percent", DiscountValue = 15m,
+            ValidFrom = today.AddDays(-120), ValidUntil = today.AddDays(-30),
+            MaxUses = 20, UsedCount = 5, Scope = "all",
+            IsActive = false, CreatedAt = today.AddDays(-120)
+        };
+        db.Coupons.AddRange(couponWelcome, couponSummer, couponReferral, couponExpired);
+        await db.SaveChangesAsync();
+
+        // 16. Orders (payment history) --------------------------------------------
+        var clientUserIds = new Dictionary<int, string>
+        {
+            [cMarek.Id] = (await userManager.FindByEmailAsync("marek@demo.pl"))!.Id,
+            [cKatarzyna.Id] = (await userManager.FindByEmailAsync("katarzyna@demo.pl"))!.Id,
+            [cTomasz.Id] = (await userManager.FindByEmailAsync("tomasz@demo.pl"))!.Id,
+            [cMagdalena.Id] = (await userManager.FindByEmailAsync("magdalena@demo.pl"))!.Id,
+            [cRobert.Id] = (await userManager.FindByEmailAsync("robert@demo.pl"))!.Id,
+            [cAlicja.Id] = (await userManager.FindByEmailAsync("alicja@demo.pl"))!.Id,
+            [cPiotr.Id] = (await userManager.FindByEmailAsync("piotr@demo.pl"))!.Id,
+        };
+
+        var orders = new List<Order>
+        {
+            new()
+            {
+                ApplicationUserId = clientUserIds[cMarek.Id], Kind = OrderKind.Package,
+                Provider = "payu", PackageOfferId = offerPersonal10.Id,
+                ExtOrderId = $"ORD-{Guid.NewGuid():N}"[..20], Amount = 1200m,
+                Status = OrderStatus.Paid, Description = "Pakiet Personalny 10 — Marek Nowak",
+                CreatedAt = today.AddDays(-95), PaidAt = today.AddDays(-95),
+                InvoiceNumber = "FV/2026/001", InvoiceIssuedAt = today.AddDays(-95)
+            },
+            new()
+            {
+                ApplicationUserId = clientUserIds[cMarek.Id], Kind = OrderKind.Package,
+                Provider = "payu", PackageOfferId = offerPersonal20.Id,
+                ExtOrderId = $"ORD-{Guid.NewGuid():N}"[..20], Amount = 1980m,
+                OriginalAmount = 2200m, DiscountAmount = 220m,
+                CouponId = couponWelcome.Id, CouponCode = "WELCOME10",
+                Status = OrderStatus.Paid, Description = "Pakiet Personalny 20 — Marek Nowak (kupon WELCOME10)",
+                CreatedAt = today.AddDays(-50), PaidAt = today.AddDays(-50),
+                InvoiceNumber = "FV/2026/002", InvoiceIssuedAt = today.AddDays(-50)
+            },
+            new()
+            {
+                ApplicationUserId = clientUserIds[cMarek.Id], Kind = OrderKind.Package,
+                Provider = "sim", PackageOfferId = offerStretch4.Id,
+                ExtOrderId = $"ORD-{Guid.NewGuid():N}"[..20], Amount = 320m,
+                Status = OrderStatus.Pending, Description = "Doładowanie stretching (4) — Marek Nowak",
+                CreatedAt = today.AddDays(-2)
+            },
+            new()
+            {
+                ApplicationUserId = clientUserIds[cKatarzyna.Id], Kind = OrderKind.Package,
+                Provider = "payu", PackageOfferId = offerPilates12.Id,
+                ExtOrderId = $"ORD-{Guid.NewGuid():N}"[..20], Amount = 1260m,
+                Status = OrderStatus.Paid, Description = "Pakiet Pilates 12 — Katarzyna Zielińska",
+                CreatedAt = today.AddDays(-75), PaidAt = today.AddDays(-75),
+                InvoiceNumber = "FV/2026/003", InvoiceIssuedAt = today.AddDays(-75)
+            },
+            new()
+            {
+                ApplicationUserId = clientUserIds[cPiotr.Id], Kind = OrderKind.Package,
+                Provider = "payu", PackageOfferId = offerPersonal10.Id,
+                ExtOrderId = $"ORD-{Guid.NewGuid():N}"[..20], Amount = 1200m,
+                Status = OrderStatus.Paid, Description = "Pakiet Standard 10 — Piotr Wiśniewski",
+                CreatedAt = today.AddDays(-90), PaidAt = today.AddDays(-90),
+                InvoiceNumber = "FV/2026/004", InvoiceIssuedAt = today.AddDays(-90)
+            },
+            new()
+            {
+                ApplicationUserId = clientUserIds[cAlicja.Id], Kind = OrderKind.Package,
+                Provider = "payu", PackageOfferId = offerStretch4.Id,
+                ExtOrderId = $"ORD-{Guid.NewGuid():N}"[..20], Amount = 300m,
+                OriginalAmount = 320m, DiscountAmount = 20m,
+                CouponId = couponSummer.Id, CouponCode = "LATO2026",
+                Status = OrderStatus.Paid, Description = "Pakiet próbny stretching — Alicja Kowalska (kupon LATO2026)",
+                CreatedAt = today.AddDays(-8), PaidAt = today.AddDays(-6),
+                InvoiceNumber = "FV/2026/005", InvoiceIssuedAt = today.AddDays(-6)
+            },
+            new()
+            {
+                ApplicationUserId = clientUserIds[cTomasz.Id], Kind = OrderKind.Package,
+                Provider = "payu", PackageOfferId = offerPersonal10.Id,
+                ExtOrderId = $"ORD-{Guid.NewGuid():N}"[..20], Amount = 1200m,
+                Status = OrderStatus.Paid, Description = "Pakiet Siłowy 15 — Tomasz Lewandowski",
+                CreatedAt = today.AddDays(-95), PaidAt = today.AddDays(-95),
+                InvoiceNumber = "FV/2026/006", InvoiceIssuedAt = today.AddDays(-95)
+            },
+            new()
+            {
+                ApplicationUserId = clientUserIds[cTomasz.Id], Kind = OrderKind.Package,
+                Provider = "payu", PackageOfferId = offerCardio10.Id,
+                ExtOrderId = $"ORD-{Guid.NewGuid():N}"[..20], Amount = 900m,
+                Status = OrderStatus.Paid, Description = "Pakiet Cardio HIIT 10 — Tomasz Lewandowski",
+                CreatedAt = today.AddDays(-40), PaidAt = today.AddDays(-40),
+                InvoiceNumber = "FV/2026/007", InvoiceIssuedAt = today.AddDays(-40)
+            },
+            new()
+            {
+                ApplicationUserId = clientUserIds[cMagdalena.Id], Kind = OrderKind.Package,
+                Provider = "p24", PackageOfferId = offerPilates12.Id,
+                ExtOrderId = $"ORD-{Guid.NewGuid():N}"[..20], Amount = 1210m,
+                OriginalAmount = 1260m, DiscountAmount = 50m,
+                CouponId = couponReferral.Id, CouponCode = "POLECENIE50",
+                Status = OrderStatus.Paid, Description = "Pakiet Body 12 — Magdalena Dąbrowska (polecenie)",
+                CreatedAt = today.AddDays(-60), PaidAt = today.AddDays(-58),
+                InvoiceNumber = "FV/2026/008", InvoiceIssuedAt = today.AddDays(-58)
+            },
+            new()
+            {
+                ApplicationUserId = clientUserIds[cRobert.Id], Kind = OrderKind.Package,
+                Provider = "payu", PackageOfferId = offerPersonal10.Id,
+                ExtOrderId = $"ORD-{Guid.NewGuid():N}"[..20], Amount = 1200m,
+                Status = OrderStatus.Paid, Description = "Pakiet Siłowy Duet 15 — Robert Kamiński",
+                CreatedAt = today.AddDays(-95), PaidAt = today.AddDays(-95),
+                InvoiceNumber = "FV/2026/009", InvoiceIssuedAt = today.AddDays(-95)
+            },
+            new()
+            {
+                ApplicationUserId = clientUserIds[cPiotr.Id], Kind = OrderKind.Package,
+                Provider = "payu", PackageOfferId = offerPersonal20.Id,
+                ExtOrderId = $"ORD-{Guid.NewGuid():N}"[..20], Amount = 2200m,
+                Status = OrderStatus.Canceled, Description = "Pakiet Personalny 20 — Piotr (anulowany)",
+                CreatedAt = today.AddDays(-15)
+            },
+            new()
+            {
+                ApplicationUserId = clientUserIds[cKatarzyna.Id], Kind = OrderKind.Package,
+                Provider = "payu", PackageOfferId = offerPilates12.Id,
+                ExtOrderId = $"ORD-{Guid.NewGuid():N}"[..20], Amount = 1260m,
+                Status = OrderStatus.Failed, Description = "Pakiet Pilates 12 — Katarzyna (nieudana płatność)",
+                CreatedAt = today.AddDays(-10)
+            },
+        };
+        db.Orders.AddRange(orders);
+
+        // Coupon redemptions matching the orders above
+        db.CouponRedemptions.AddRange(
+            new CouponRedemption
+            {
+                CouponId = couponWelcome.Id, UserId = clientUserIds[cMarek.Id],
+                UserEmail = "marek@demo.pl", OriginalAmount = 2200m,
+                DiscountAmount = 220m, FinalAmount = 1980m,
+                TargetType = "package", TargetId = offerPersonal20.Id,
+                RedeemedAt = today.AddDays(-50)
+            },
+            new CouponRedemption
+            {
+                CouponId = couponSummer.Id, UserId = clientUserIds[cAlicja.Id],
+                UserEmail = "alicja@demo.pl", OriginalAmount = 320m,
+                DiscountAmount = 20m, FinalAmount = 300m,
+                TargetType = "package", TargetId = offerStretch4.Id,
+                RedeemedAt = today.AddDays(-8)
+            },
+            new CouponRedemption
+            {
+                CouponId = couponReferral.Id, UserId = clientUserIds[cMagdalena.Id],
+                UserEmail = "magdalena@demo.pl", OriginalAmount = 1260m,
+                DiscountAmount = 50m, FinalAmount = 1210m,
+                TargetType = "package", TargetId = offerPilates12.Id,
+                RedeemedAt = today.AddDays(-60)
+            });
+
+        await db.SaveChangesAsync();
+
+        // 17. Course with modules, lessons, quizzes --------------------------------
+        var course = new Course
+        {
+            Title = "Trening siłowy dla początkujących",
+            Description = "Kompletny kurs techniki ćwiczeń siłowych — od podstaw do samodzielnego treningu.",
+            DescriptionHtml = """
+                <h2>Dla kogo jest ten kurs?</h2>
+                <p>Jeśli dopiero zaczynasz przygodę z siłownią i chcesz nauczyć się poprawnej techniki,
+                ten kurs jest dla Ciebie. W 8 lekcjach poznasz najważniejsze wzorce ruchowe,
+                nauczysz się planować trening i unikać kontuzji.</p>
+                <h2>Co otrzymasz?</h2>
+                <ul>
+                  <li>8 lekcji wideo z szczegółowym omówieniem techniki</li>
+                  <li>Materiały PDF do wydrukowania</li>
+                  <li>Quizy sprawdzające wiedzę po każdym module</li>
+                  <li>Dostęp do trenera na czacie</li>
+                </ul>
+                """,
+            DurationText = "4 tygodnie · 8 lekcji",
+            Level = "Początkujący",
+            Author = "Jan Kowalski",
+            IsPublished = true,
+            Price = 149m,
+            DefaultAccessType = CourseAccessType.Lifetime,
+            SortOrder = 1,
+            CreatedAt = today.AddDays(-45)
+        };
+        db.Courses.Add(course);
+        await db.SaveChangesAsync();
+
+        // Module 1: Podstawy
+        var mod1 = new CourseModule { CourseId = course.Id, Title = "Moduł 1: Podstawy treningu siłowego", SortOrder = 1 };
+        var mod2 = new CourseModule { CourseId = course.Id, Title = "Moduł 2: Kluczowe ćwiczenia", SortOrder = 2 };
+        var mod3 = new CourseModule { CourseId = course.Id, Title = "Moduł 3: Planowanie i progresja", SortOrder = 3 };
+        db.CourseModules.AddRange(mod1, mod2, mod3);
+        await db.SaveChangesAsync();
+
+        // Lessons
+        var lesson1 = new Lesson
+        {
+            ModuleId = mod1.Id, Title = "Dlaczego trening siłowy?", SortOrder = 1,
+            VideoUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            ContentHtml = "<p>W tej lekcji dowiesz się, dlaczego trening siłowy jest fundamentem zdrowia i sprawności fizycznej.</p>"
+        };
+        var lesson2 = new Lesson
+        {
+            ModuleId = mod1.Id, Title = "Rozgrzewka i bezpieczeństwo", SortOrder = 2,
+            VideoUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            ContentHtml = "<p>Prawidłowa rozgrzewka zapobiega kontuzjom. Poznasz schemat rozgrzewki na każdy trening.</p>"
+        };
+        var lesson3 = new Lesson
+        {
+            ModuleId = mod1.Id, Title = "Sprzęt i wyposażenie", SortOrder = 3,
+            ContentHtml = "<p>Co potrzebujesz na start? Omawiamy buty, pasy, paski, magnezję i inne akcesoria.</p>"
+        };
+        var lesson4 = new Lesson
+        {
+            ModuleId = mod2.Id, Title = "Przysiad (Squat)", SortOrder = 1,
+            VideoUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            ContentHtml = "<p>Król ćwiczeń. Technika high-bar i low-bar, najczęstsze błędy, progresja obciążeń.</p>"
+        };
+        var lesson5 = new Lesson
+        {
+            ModuleId = mod2.Id, Title = "Wyciskanie (Bench Press)", SortOrder = 2,
+            VideoUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            ContentHtml = "<p>Technika wyciskania na ławce płaskiej — ustawienie, łopatki, tor ruchu sztangi.</p>"
+        };
+        var lesson6 = new Lesson
+        {
+            ModuleId = mod2.Id, Title = "Martwy ciąg (Deadlift)", SortOrder = 3,
+            VideoUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            ContentHtml = "<p>Konwencjonalny vs sumo. Pozycja startowa, napięcie pleców, lock-out.</p>"
+        };
+        var lesson7 = new Lesson
+        {
+            ModuleId = mod3.Id, Title = "Jak ułożyć plan treningowy", SortOrder = 1,
+            ContentHtml = "<p>Split treningowy, objętość, intensywność. Planowanie mikrocykli i mezocykli.</p>"
+        };
+        var lesson8 = new Lesson
+        {
+            ModuleId = mod3.Id, Title = "Progresja i deload", SortOrder = 2,
+            ContentHtml = "<p>Kiedy dodawać obciążenie, kiedy odpocząć. Sygnały przeciążenia i planowanie deloadów.</p>"
+        };
+        db.Lessons.AddRange(lesson1, lesson2, lesson3, lesson4, lesson5, lesson6, lesson7, lesson8);
+        await db.SaveChangesAsync();
+
+        // Quizzes for key lessons
+        var quiz1 = new QuizQuestion
+        {
+            LessonId = lesson2.Id, Text = "Ile powinna trwać rozgrzewka przed treningiem siłowym?",
+            Type = QuizQuestionType.SingleChoice, SortOrder = 1
+        };
+        var quiz2 = new QuizQuestion
+        {
+            LessonId = lesson2.Id, Text = "Które elementy powinna zawierać rozgrzewka?",
+            Type = QuizQuestionType.MultipleChoice, SortOrder = 2
+        };
+        var quiz3 = new QuizQuestion
+        {
+            LessonId = lesson4.Id, Text = "W przysiadzie high-bar sztanga spoczywa na:",
+            Type = QuizQuestionType.SingleChoice, SortOrder = 1
+        };
+        var quiz4 = new QuizQuestion
+        {
+            LessonId = lesson5.Id, Text = "Podczas wyciskania łopatki powinny być:",
+            Type = QuizQuestionType.SingleChoice, SortOrder = 1
+        };
+        var quiz5 = new QuizQuestion
+        {
+            LessonId = lesson8.Id, Text = "Kiedy najlepiej zaplanować tydzień deload?",
+            Type = QuizQuestionType.SingleChoice, SortOrder = 1
+        };
+        db.QuizQuestions.AddRange(quiz1, quiz2, quiz3, quiz4, quiz5);
+        await db.SaveChangesAsync();
+
+        // Quiz options
+        db.QuizOptions.AddRange(
+            // quiz1 - rozgrzewka czas
+            new QuizOption { QuestionId = quiz1.Id, Text = "2-3 minuty", IsCorrect = false, SortOrder = 1 },
+            new QuizOption { QuestionId = quiz1.Id, Text = "10-15 minut", IsCorrect = true, SortOrder = 2 },
+            new QuizOption { QuestionId = quiz1.Id, Text = "30 minut", IsCorrect = false, SortOrder = 3 },
+            new QuizOption { QuestionId = quiz1.Id, Text = "Można pominąć", IsCorrect = false, SortOrder = 4 },
+            // quiz2 - elementy rozgrzewki (multi)
+            new QuizOption { QuestionId = quiz2.Id, Text = "Cardio niskointensywne", IsCorrect = true, SortOrder = 1 },
+            new QuizOption { QuestionId = quiz2.Id, Text = "Mobilność stawów", IsCorrect = true, SortOrder = 2 },
+            new QuizOption { QuestionId = quiz2.Id, Text = "Serie rozgrzewkowe z lekkim ciężarem", IsCorrect = true, SortOrder = 3 },
+            new QuizOption { QuestionId = quiz2.Id, Text = "Statyczny stretching", IsCorrect = false, SortOrder = 4 },
+            // quiz3 - przysiad high-bar
+            new QuizOption { QuestionId = quiz3.Id, Text = "Na górze trapezów", IsCorrect = true, SortOrder = 1 },
+            new QuizOption { QuestionId = quiz3.Id, Text = "Na tylnych deltach", IsCorrect = false, SortOrder = 2 },
+            new QuizOption { QuestionId = quiz3.Id, Text = "Na szyi", IsCorrect = false, SortOrder = 3 },
+            // quiz4 - łopatki bench
+            new QuizOption { QuestionId = quiz4.Id, Text = "Rozluźnione", IsCorrect = false, SortOrder = 1 },
+            new QuizOption { QuestionId = quiz4.Id, Text = "Ściągnięte i obniżone", IsCorrect = true, SortOrder = 2 },
+            new QuizOption { QuestionId = quiz4.Id, Text = "Wysunięte do przodu", IsCorrect = false, SortOrder = 3 },
+            // quiz5 - deload
+            new QuizOption { QuestionId = quiz5.Id, Text = "Co drugi tydzień", IsCorrect = false, SortOrder = 1 },
+            new QuizOption { QuestionId = quiz5.Id, Text = "Co 4-6 tygodni lub przy objawach zmęczenia", IsCorrect = true, SortOrder = 2 },
+            new QuizOption { QuestionId = quiz5.Id, Text = "Nigdy, deload spowalnia postępy", IsCorrect = false, SortOrder = 3 },
+            new QuizOption { QuestionId = quiz5.Id, Text = "Tylko po kontuzji", IsCorrect = false, SortOrder = 4 });
+        await db.SaveChangesAsync();
+
+        // Second course (shorter, published)
+        var course2 = new Course
+        {
+            Title = "Mobilność i regeneracja",
+            Description = "Stretching, foam rolling i techniki oddechowe dla lepszej regeneracji.",
+            DurationText = "2 tygodnie · 5 lekcji",
+            Level = "Każdy poziom",
+            Author = "Jan Kowalski",
+            IsPublished = true,
+            Price = 79m,
+            DefaultAccessType = CourseAccessType.Timed,
+            DefaultAccessDays = 90,
+            SortOrder = 2,
+            CreatedAt = today.AddDays(-20)
+        };
+        db.Courses.Add(course2);
+        await db.SaveChangesAsync();
+
+        var mod2a = new CourseModule { CourseId = course2.Id, Title = "Teoria regeneracji", SortOrder = 1 };
+        var mod2b = new CourseModule { CourseId = course2.Id, Title = "Praktyka", SortOrder = 2 };
+        db.CourseModules.AddRange(mod2a, mod2b);
+        await db.SaveChangesAsync();
+
+        var les2a = new Lesson { ModuleId = mod2a.Id, Title = "Dlaczego regeneracja jest ważna?", SortOrder = 1,
+            ContentHtml = "<p>Sen, stres, odżywianie — trzy filary regeneracji sportowej.</p>" };
+        var les2b = new Lesson { ModuleId = mod2a.Id, Title = "Foam rolling — techniki", SortOrder = 2,
+            VideoUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            ContentHtml = "<p>Roller na każdą partię mięśniową — uda, plecy, pośladki, łydki.</p>" };
+        var les2c = new Lesson { ModuleId = mod2b.Id, Title = "Rozciąganie dynamiczne", SortOrder = 1,
+            VideoUrl = "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+            ContentHtml = "<p>20-minutowa rutyna rozciągania dynamicznego na cały dzień.</p>" };
+        var les2d = new Lesson { ModuleId = mod2b.Id, Title = "Oddychanie przeponowe", SortOrder = 2,
+            ContentHtml = "<p>Technika box breathing i oddychanie przeponowe dla redukcji stresu.</p>" };
+        var les2e = new Lesson { ModuleId = mod2b.Id, Title = "Plan regeneracji na tydzień", SortOrder = 3,
+            ContentHtml = "<p>Gotowy szablon tygodniowy — kiedy stretching, kiedy foam rolling, kiedy odpoczynek.</p>" };
+        db.Lessons.AddRange(les2a, les2b, les2c, les2d, les2e);
+        await db.SaveChangesAsync();
+
+        // 18. Course enrollments + progress ----------------------------------------
+        // Marek: enrolled in course 1, completed 6/8 lessons
+        var enrollMarek = new CourseEnrollment
+        {
+            CourseId = course.Id, ApplicationUserId = clientUserIds[cMarek.Id],
+            AccessType = CourseAccessType.Lifetime, Source = EnrollmentSource.Purchase,
+            GrantedAt = today.AddDays(-30), GrantedByUserId = trainer.Id
+        };
+        // Katarzyna: enrolled in both courses
+        var enrollKat1 = new CourseEnrollment
+        {
+            CourseId = course.Id, ApplicationUserId = clientUserIds[cKatarzyna.Id],
+            AccessType = CourseAccessType.Lifetime, Source = EnrollmentSource.Purchase,
+            GrantedAt = today.AddDays(-25), GrantedByUserId = trainer.Id
+        };
+        var enrollKat2 = new CourseEnrollment
+        {
+            CourseId = course2.Id, ApplicationUserId = clientUserIds[cKatarzyna.Id],
+            AccessType = CourseAccessType.Timed, Source = EnrollmentSource.Purchase,
+            GrantedAt = today.AddDays(-15), ExpiresAt = today.AddDays(75),
+            GrantedByUserId = trainer.Id
+        };
+        // Tomasz: enrolled in course 1, completed all lessons
+        var enrollTomasz = new CourseEnrollment
+        {
+            CourseId = course.Id, ApplicationUserId = clientUserIds[cTomasz.Id],
+            AccessType = CourseAccessType.Lifetime, Source = EnrollmentSource.Purchase,
+            GrantedAt = today.AddDays(-40), GrantedByUserId = trainer.Id
+        };
+        // Alicja: trial enrollment in course 2
+        var enrollAlicja = new CourseEnrollment
+        {
+            CourseId = course2.Id, ApplicationUserId = clientUserIds[cAlicja.Id],
+            AccessType = CourseAccessType.Trial, Source = EnrollmentSource.Manual,
+            GrantedAt = today.AddDays(-5), ExpiresAt = today.AddDays(9),
+            GrantedByUserId = trainer.Id, Notes = "Darmowy dostęp próbny dla nowej klientki"
+        };
+        db.CourseEnrollments.AddRange(enrollMarek, enrollKat1, enrollKat2, enrollTomasz, enrollAlicja);
+        await db.SaveChangesAsync();
+
+        // Course orders for enrollments
+        db.Orders.AddRange(
+            new Order
+            {
+                ApplicationUserId = clientUserIds[cMarek.Id], Kind = OrderKind.Course,
+                Provider = "payu", CourseId = course.Id,
+                ExtOrderId = $"ORD-{Guid.NewGuid():N}"[..20], Amount = 149m,
+                Status = OrderStatus.Paid, Description = "Kurs: Trening siłowy — Marek Nowak",
+                CreatedAt = today.AddDays(-30), PaidAt = today.AddDays(-30),
+                InvoiceNumber = "FV/2026/010", InvoiceIssuedAt = today.AddDays(-30)
+            },
+            new Order
+            {
+                ApplicationUserId = clientUserIds[cKatarzyna.Id], Kind = OrderKind.Course,
+                Provider = "payu", CourseId = course.Id,
+                ExtOrderId = $"ORD-{Guid.NewGuid():N}"[..20], Amount = 129m,
+                OriginalAmount = 149m, DiscountAmount = 20m,
+                CouponId = couponSummer.Id, CouponCode = "LATO2026",
+                Status = OrderStatus.Paid, Description = "Kurs: Trening siłowy — Katarzyna (kupon LATO2026)",
+                CreatedAt = today.AddDays(-25), PaidAt = today.AddDays(-25),
+                InvoiceNumber = "FV/2026/011", InvoiceIssuedAt = today.AddDays(-25)
+            },
+            new Order
+            {
+                ApplicationUserId = clientUserIds[cKatarzyna.Id], Kind = OrderKind.Course,
+                Provider = "p24", CourseId = course2.Id,
+                ExtOrderId = $"ORD-{Guid.NewGuid():N}"[..20], Amount = 79m,
+                Status = OrderStatus.Paid, Description = "Kurs: Mobilność i regeneracja — Katarzyna",
+                CreatedAt = today.AddDays(-15), PaidAt = today.AddDays(-15),
+                InvoiceNumber = "FV/2026/012", InvoiceIssuedAt = today.AddDays(-15)
+            },
+            new Order
+            {
+                ApplicationUserId = clientUserIds[cTomasz.Id], Kind = OrderKind.Course,
+                Provider = "payu", CourseId = course.Id,
+                ExtOrderId = $"ORD-{Guid.NewGuid():N}"[..20], Amount = 149m,
+                Status = OrderStatus.Paid, Description = "Kurs: Trening siłowy — Tomasz Lewandowski",
+                CreatedAt = today.AddDays(-40), PaidAt = today.AddDays(-40),
+                InvoiceNumber = "FV/2026/013", InvoiceIssuedAt = today.AddDays(-40)
+            });
+        await db.SaveChangesAsync();
+
+        // Lesson progress — Marek: 6/8 done
+        db.LessonProgress.AddRange(
+            new LessonProgress { ApplicationUserId = clientUserIds[cMarek.Id], LessonId = lesson1.Id, CompletedAt = today.AddDays(-28) },
+            new LessonProgress { ApplicationUserId = clientUserIds[cMarek.Id], LessonId = lesson2.Id, CompletedAt = today.AddDays(-26) },
+            new LessonProgress { ApplicationUserId = clientUserIds[cMarek.Id], LessonId = lesson3.Id, CompletedAt = today.AddDays(-24) },
+            new LessonProgress { ApplicationUserId = clientUserIds[cMarek.Id], LessonId = lesson4.Id, CompletedAt = today.AddDays(-20) },
+            new LessonProgress { ApplicationUserId = clientUserIds[cMarek.Id], LessonId = lesson5.Id, CompletedAt = today.AddDays(-16) },
+            new LessonProgress { ApplicationUserId = clientUserIds[cMarek.Id], LessonId = lesson6.Id, CompletedAt = today.AddDays(-12) });
+
+        // Katarzyna: 4/8 in course 1, 2/5 in course 2
+        db.LessonProgress.AddRange(
+            new LessonProgress { ApplicationUserId = clientUserIds[cKatarzyna.Id], LessonId = lesson1.Id, CompletedAt = today.AddDays(-23) },
+            new LessonProgress { ApplicationUserId = clientUserIds[cKatarzyna.Id], LessonId = lesson2.Id, CompletedAt = today.AddDays(-21) },
+            new LessonProgress { ApplicationUserId = clientUserIds[cKatarzyna.Id], LessonId = lesson3.Id, CompletedAt = today.AddDays(-18) },
+            new LessonProgress { ApplicationUserId = clientUserIds[cKatarzyna.Id], LessonId = lesson4.Id, CompletedAt = today.AddDays(-14) },
+            new LessonProgress { ApplicationUserId = clientUserIds[cKatarzyna.Id], LessonId = les2a.Id, CompletedAt = today.AddDays(-12) },
+            new LessonProgress { ApplicationUserId = clientUserIds[cKatarzyna.Id], LessonId = les2b.Id, CompletedAt = today.AddDays(-10) });
+
+        // Tomasz: all 8/8 done
+        db.LessonProgress.AddRange(
+            new LessonProgress { ApplicationUserId = clientUserIds[cTomasz.Id], LessonId = lesson1.Id, CompletedAt = today.AddDays(-38) },
+            new LessonProgress { ApplicationUserId = clientUserIds[cTomasz.Id], LessonId = lesson2.Id, CompletedAt = today.AddDays(-36) },
+            new LessonProgress { ApplicationUserId = clientUserIds[cTomasz.Id], LessonId = lesson3.Id, CompletedAt = today.AddDays(-34) },
+            new LessonProgress { ApplicationUserId = clientUserIds[cTomasz.Id], LessonId = lesson4.Id, CompletedAt = today.AddDays(-30) },
+            new LessonProgress { ApplicationUserId = clientUserIds[cTomasz.Id], LessonId = lesson5.Id, CompletedAt = today.AddDays(-26) },
+            new LessonProgress { ApplicationUserId = clientUserIds[cTomasz.Id], LessonId = lesson6.Id, CompletedAt = today.AddDays(-22) },
+            new LessonProgress { ApplicationUserId = clientUserIds[cTomasz.Id], LessonId = lesson7.Id, CompletedAt = today.AddDays(-18) },
+            new LessonProgress { ApplicationUserId = clientUserIds[cTomasz.Id], LessonId = lesson8.Id, CompletedAt = today.AddDays(-14) });
+
+        // Alicja: 1/5 in course 2
+        db.LessonProgress.Add(
+            new LessonProgress { ApplicationUserId = clientUserIds[cAlicja.Id], LessonId = les2a.Id, CompletedAt = today.AddDays(-3) });
+
+        // Quiz attempts
+        db.QuizAttempts.AddRange(
+            new QuizAttempt { ApplicationUserId = clientUserIds[cMarek.Id], LessonId = lesson2.Id, ScorePercent = 100, Passed = true, AttemptedAt = today.AddDays(-26) },
+            new QuizAttempt { ApplicationUserId = clientUserIds[cMarek.Id], LessonId = lesson4.Id, ScorePercent = 100, Passed = true, AttemptedAt = today.AddDays(-20) },
+            new QuizAttempt { ApplicationUserId = clientUserIds[cMarek.Id], LessonId = lesson5.Id, ScorePercent = 100, Passed = true, AttemptedAt = today.AddDays(-16) },
+            new QuizAttempt { ApplicationUserId = clientUserIds[cTomasz.Id], LessonId = lesson2.Id, ScorePercent = 100, Passed = true, AttemptedAt = today.AddDays(-36) },
+            new QuizAttempt { ApplicationUserId = clientUserIds[cTomasz.Id], LessonId = lesson4.Id, ScorePercent = 100, Passed = true, AttemptedAt = today.AddDays(-30) },
+            new QuizAttempt { ApplicationUserId = clientUserIds[cTomasz.Id], LessonId = lesson5.Id, ScorePercent = 100, Passed = true, AttemptedAt = today.AddDays(-26) },
+            new QuizAttempt { ApplicationUserId = clientUserIds[cTomasz.Id], LessonId = lesson8.Id, ScorePercent = 100, Passed = true, AttemptedAt = today.AddDays(-14) },
+            new QuizAttempt { ApplicationUserId = clientUserIds[cKatarzyna.Id], LessonId = lesson2.Id, ScorePercent = 50, Passed = false, AttemptedAt = today.AddDays(-21) },
+            new QuizAttempt { ApplicationUserId = clientUserIds[cKatarzyna.Id], LessonId = lesson4.Id, ScorePercent = 100, Passed = true, AttemptedAt = today.AddDays(-14) });
+        await db.SaveChangesAsync();
+
+        // 19. Payment settings (sandbox/demo mode) ---------------------------------
+        if (!await db.PaymentSettings.AnyAsync())
+        {
+            db.PaymentSettings.Add(new PaymentSettings
+            {
+                Enabled = true,
+                Sandbox = true,
+                Currency = "PLN",
+                ProvidersJson = """{"sim":{"enabled":true,"sandbox":true},"payu":{"enabled":true,"sandbox":true,"fields":{"posId":"300746","secondKey":"b6ca15b0d1020e8094f2b5571c1670c","clientId":"300746","clientSecret":"2ee86a66e5d97e3fadc400c9f19b065d"}},"p24":{"enabled":true,"sandbox":true,"fields":{"merchantId":"12345","crc":"demo-crc-key","apiKey":"demo-api-key"}}}"""
+            });
+        }
+
+        // 20. Finance/tax config ---------------------------------------------------
+        if (!await db.FinanceTaxConfigs.AnyAsync())
+        {
+            db.FinanceTaxConfigs.Add(new FinanceTaxConfig
+            {
+                Module = "standard",
+                VatEnabled = false,
+                IncomeTaxType = "lumpsum",
+                LumpSumRate = 8.5m,
+                ZusEnabled = true, ZusMonthlyAmount = 1600.32m,
+                HealthInsuranceEnabled = true, HealthInsuranceMonthly = 381.78m,
+                CostDeductionsEnabled = true, MonthlyFixedCosts = 250m,
+                InvoiceNumberingEnabled = true, InvoicePrefix = "FV",
+                InvoiceNextNumber = 14,
+                SellerNip = "1234567890",
+                SellerAddress = "ul. Sportowa 15/3",
+                SellerCity = "Warszawa",
+                SellerPostalCode = "00-001"
+            });
+        }
+
+        // 21. Branding (demo setup completed) --------------------------------------
+        var branding = await db.AppBrandings.FirstOrDefaultAsync();
+        if (branding is null)
+        {
+            db.AppBrandings.Add(new AppBranding
+            {
+                ThemeName = "violet",
+                ThemeMode = "system",
+                CompanyName = "Jan Kowalski Fitness",
+                PwaShortName = "JK Fitness",
+                PwaBannerEnabled = true,
+                PwaBannerTitle = "Zainstaluj aplikację",
+                PwaBannerBody = "Dodaj JK Fitness do ekranu głównego dla szybkiego dostępu.",
+                PwaBannerButton = "Zainstaluj",
+                SetupCompleted = true,
+                SetupMode = "demo",
+                SetupCompletedAt = today.AddDays(-90)
+            });
+        }
+
+        // 22. Login logs (recent history) ------------------------------------------
+        var loginEntries = new List<LoginLog>();
+        // Trainer logs in daily for the last 14 days
+        for (int d = 13; d >= 0; d--)
+        {
+            loginEntries.Add(new LoginLog
+            {
+                UserId = trainer.Id,
+                LoginTime = today.AddDays(-d).AddHours(7).AddMinutes(15 + d % 10),
+                IpAddress = "192.168.1.100",
+                UserAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) Chrome/127.0",
+                Success = true
+            });
+        }
+        // Client logins scattered
+        loginEntries.Add(new LoginLog { UserId = clientUserIds[cMarek.Id], LoginTime = today.AddDays(-1).AddHours(18), IpAddress = "83.24.56.78", UserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5) Safari/605.1.15", Success = true });
+        loginEntries.Add(new LoginLog { UserId = clientUserIds[cMarek.Id], LoginTime = today.AddDays(-3).AddHours(20), IpAddress = "83.24.56.78", UserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5) Safari/605.1.15", Success = true });
+        loginEntries.Add(new LoginLog { UserId = clientUserIds[cKatarzyna.Id], LoginTime = today.AddDays(-2).AddHours(16), IpAddress = "89.73.12.45", UserAgent = "Mozilla/5.0 (Linux; Android 14) Chrome/127.0", Success = true });
+        loginEntries.Add(new LoginLog { UserId = clientUserIds[cTomasz.Id], LoginTime = today.AddDays(-1).AddHours(19), IpAddress = "78.11.23.99", UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) Safari/605.1.15", Success = true });
+        loginEntries.Add(new LoginLog { UserId = clientUserIds[cTomasz.Id], LoginTime = today.AddDays(-4).AddHours(8), IpAddress = "78.11.23.99", UserAgent = "Mozilla/5.0 (Macintosh; Intel Mac OS X 14_5) Safari/605.1.15", Success = true });
+        loginEntries.Add(new LoginLog { UserId = clientUserIds[cMagdalena.Id], LoginTime = today.AddDays(-5).AddHours(14), IpAddress = "156.17.88.12", UserAgent = "Mozilla/5.0 (Linux; Android 14) Chrome/127.0", Success = true });
+        loginEntries.Add(new LoginLog { UserId = clientUserIds[cAlicja.Id], LoginTime = today.AddDays(-3).AddHours(9), IpAddress = "91.215.34.67", UserAgent = "Mozilla/5.0 (iPhone; CPU iPhone OS 17_5) Safari/605.1.15", Success = true });
+        // Failed logins
+        loginEntries.Add(new LoginLog { UserId = clientUserIds[cPiotr.Id], LoginTime = today.AddDays(-7).AddHours(22), IpAddress = "45.56.78.90", UserAgent = "Mozilla/5.0 (Windows NT 10.0) Chrome/127.0", Success = false });
+        loginEntries.Add(new LoginLog { UserId = clientUserIds[cPiotr.Id], LoginTime = today.AddDays(-7).AddHours(22).AddMinutes(2), IpAddress = "45.56.78.90", UserAgent = "Mozilla/5.0 (Windows NT 10.0) Chrome/127.0", Success = true });
+        db.LoginLogs.AddRange(loginEntries);
+
+        // 23. Email templates (2 customized by trainer) ----------------------------
+        db.EmailTemplates.AddRange(
+            new EmailTemplate
+            {
+                Key = "session-reminder",
+                Subject = "Przypomnienie — jutro trening u Jana!",
+                HeaderTitle = "Do zobaczenia jutro! 💪",
+                HtmlBody = """
+                    <p style="color:#374151;font-size:15px">Hej <strong>{{ClientName}}</strong>!</p>
+                    <p style="color:#374151;font-size:15px">Tylko przypominam — jutro widzimy się na treningu. Przygotuj się na solidną dawkę endorfin! 🔥</p>
+                    <div style="background:#f3f4f6;border-radius:8px;padding:16px;margin:20px 0">
+                      <p style="margin:6px 0"><strong>📅 Kiedy:</strong> {{SessionDate}} o {{SessionTime}}</p>
+                      <p style="margin:6px 0"><strong>⏱️ Czas:</strong> {{Duration}} min</p>
+                      <p style="margin:6px 0"><strong>🏋️ Typ:</strong> {{SessionType}}</p>
+                    </div>
+                    <p style="color:#6b7280;font-size:13px">Jeśli nie dasz rady — odwołaj w aplikacji minimum 24h wcześniej.</p>
+                    """,
+                AccentColor = "#7C3AED",
+                FooterText = "Jan Kowalski Fitness — wiadomość automatyczna.",
+                UpdatedAt = today.AddDays(-60)
+            },
+            new EmailTemplate
+            {
+                Key = "package-assigned",
+                Subject = "Nowy pakiet treningowy czeka na Ciebie!",
+                HeaderTitle = "Masz nowy pakiet! 🎉",
+                HtmlBody = """
+                    <p style="color:#374151;font-size:15px">Cześć <strong>{{ClientName}}</strong>!</p>
+                    <p style="color:#374151;font-size:15px">Właśnie przypisałem Ci nowy pakiet treningowy. Czas wziąć się do roboty! 💪</p>
+                    <table style="width:100%;border-collapse:collapse;margin:16px 0">
+                      <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;width:40%">Pakiet</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{PackageName}}</td></tr>
+                      <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Typ sesji</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{SessionType}}</td></tr>
+                      <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Sesji do wykorzystania</td><td style="padding:8px 0;font-size:14px;font-weight:600;color:#16A34A">{{TotalSessions}}</td></tr>
+                      {{ExpiresRow}}
+                    </table>
+                    <p style="color:#374151;font-size:14px">Zarezerwuj pierwszy trening w aplikacji!</p>
+                    """,
+                AccentColor = "#16A34A",
+                FooterText = "Jan Kowalski Fitness — wiadomość automatyczna.",
+                UpdatedAt = today.AddDays(-55)
+            });
+
+        // 24. More audit log entries for payments/courses --------------------------
+        db.AuditLogs.AddRange(
+            new AuditLog
+            {
+                Timestamp = today.AddDays(-50), UserId = trainer.Id,
+                UserEmail = TrainerEmail, UserRole = Roles.Trainer,
+                Action = "OrderPaid", EntityType = nameof(Order),
+                Details = "Zamówienie opłacone: Pakiet Personalny 20 — Marek Nowak (2 200 zł → 1 980 zł, kupon WELCOME10)",
+                Severity = AuditSeverity.Info
+            },
+            new AuditLog
+            {
+                Timestamp = today.AddDays(-45), UserId = trainer.Id,
+                UserEmail = TrainerEmail, UserRole = Roles.Trainer,
+                Action = "CourseCreated", EntityType = nameof(Course),
+                Details = "Utworzono kurs: Trening siłowy dla początkujących (149 zł)",
+                Severity = AuditSeverity.Info
+            },
+            new AuditLog
+            {
+                Timestamp = today.AddDays(-30), UserId = trainer.Id,
+                UserEmail = TrainerEmail, UserRole = Roles.Trainer,
+                Action = "CourseEnrollment", EntityType = nameof(CourseEnrollment),
+                Details = "Zapisano na kurs: Marek Nowak → Trening siłowy dla początkujących",
+                Severity = AuditSeverity.Info
+            },
+            new AuditLog
+            {
+                Timestamp = today.AddDays(-20), UserId = trainer.Id,
+                UserEmail = TrainerEmail, UserRole = Roles.Trainer,
+                Action = "CouponCreated", EntityType = nameof(Coupon),
+                Details = "Utworzono kupon: LATO2026 (20 zł zniżki)",
+                Severity = AuditSeverity.Info
+            },
+            new AuditLog
+            {
+                Timestamp = today.AddDays(-15), UserId = trainer.Id,
+                UserEmail = TrainerEmail, UserRole = Roles.Trainer,
+                Action = "OrderPaid", EntityType = nameof(Order),
+                Details = "Zamówienie opłacone: Kurs Mobilność i regeneracja — Katarzyna Zielińska (79 zł)",
+                Severity = AuditSeverity.Info
+            },
+            new AuditLog
+            {
+                Timestamp = today.AddDays(-10), UserId = trainer.Id,
+                UserEmail = TrainerEmail, UserRole = Roles.Trainer,
+                Action = "PaymentFailed", EntityType = nameof(Order),
+                Details = "Nieudana płatność: Pakiet Pilates 12 — Katarzyna Zielińska",
+                Severity = AuditSeverity.Warning
+            },
+            new AuditLog
+            {
+                Timestamp = today.AddDays(-7), UserId = clientUserIds[cPiotr.Id],
+                UserEmail = "piotr@demo.pl", UserRole = Roles.Client,
+                Action = "LoginFailed", EntityType = "User",
+                Details = "Nieudana próba logowania z IP 45.56.78.90",
+                Severity = AuditSeverity.Warning
+            },
+            new AuditLog
+            {
+                Timestamp = today.AddDays(-5), UserId = trainer.Id,
+                UserEmail = TrainerEmail, UserRole = Roles.Trainer,
+                Action = "BrandingUpdated", EntityType = nameof(AppBranding),
+                Details = "Zmieniono branding: motyw violet, nazwa 'Jan Kowalski Fitness'",
+                Severity = AuditSeverity.Info
+            });
+
+        await db.SaveChangesAsync();
+
         return result;
     }
 
@@ -617,6 +1348,7 @@ public class DemoDataService(
         await using var db = dbFactory.CreateDbContext();
         // Delete in FK-safe order
         await db.AuditLogs.ExecuteDeleteAsync();
+        await db.LoginLogs.ExecuteDeleteAsync();
         await db.SessionInvitations.ExecuteDeleteAsync();
 
         // Null nullable FKs so dependent tables can be deleted without FK violations
@@ -638,6 +1370,28 @@ public class DemoDataService(
         await db.IntroSessionConfigs.ExecuteDeleteAsync();
         await db.NotificationPreferences.ExecuteDeleteAsync();
         await db.RolePermissions.ExecuteDeleteAsync();
+
+        // Courses / LMS
+        await db.QuizAttempts.ExecuteDeleteAsync();
+        await db.LessonProgress.ExecuteDeleteAsync();
+        await db.QuizOptions.ExecuteDeleteAsync();
+        await db.QuizQuestions.ExecuteDeleteAsync();
+        await db.Lessons.ExecuteDeleteAsync();
+        await db.CourseModules.ExecuteDeleteAsync();
+        await db.CourseEnrollments.ExecuteDeleteAsync();
+        await db.Courses.ExecuteDeleteAsync();
+
+        // Payments / commerce
+        await db.CouponRedemptions.ExecuteDeleteAsync();
+        await db.Orders.ExecuteDeleteAsync();
+        await db.Coupons.ExecuteDeleteAsync();
+        await db.PackageOffers.ExecuteDeleteAsync();
+
+        // Settings (reset to unconfigured)
+        await db.EmailTemplates.ExecuteDeleteAsync();
+        await db.PaymentSettings.ExecuteDeleteAsync();
+        await db.FinanceTaxConfigs.ExecuteDeleteAsync();
+        await db.AppBrandings.ExecuteDeleteAsync();
 
         // Delete all identity users
         var allUsers = await userManager.Users.ToListAsync();
