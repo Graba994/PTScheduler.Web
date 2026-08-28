@@ -42,6 +42,7 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string GithubOwner = "github_owner";
         public const string GithubRepo = "github_repo";
         public const string GithubBranch = "github_branch";
+        public const string FeaturedTrainers = "featured_trainers";
     }
 
     private static readonly Dictionary<string, string> Defaults = new()
@@ -65,6 +66,7 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         [Keys.GithubOwner] = "graba994",
         [Keys.GithubRepo] = "ptscheduler.web",
         [Keys.GithubBranch] = "master",
+        [Keys.FeaturedTrainers] = "[]",
     };
 
     public async Task<string> GetAsync(string key)
