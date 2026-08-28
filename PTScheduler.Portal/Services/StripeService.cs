@@ -270,7 +270,7 @@ public class StripeService(
         {
             TenantId = tenant.Id,
             StripeInvoiceId = invoice.Id,
-            StripePaymentIntentId = invoice.PaymentIntent?.Id,
+            StripePaymentIntentId = null,
             Amount = (invoice.AmountDue) / 100m,
             Currency = (invoice.Currency ?? "pln").ToUpperInvariant(),
             Status = PaymentRecordStatus.Failed,
@@ -302,7 +302,7 @@ public class StripeService(
         {
             TenantId = tenant.Id,
             StripeInvoiceId = invoice.Id,
-            StripePaymentIntentId = invoice.PaymentIntent?.Id,
+            StripePaymentIntentId = null,
             Amount = (invoice.AmountPaid > 0 ? invoice.AmountPaid : invoice.AmountDue) / 100m,
             Currency = (invoice.Currency ?? "pln").ToUpperInvariant(),
             Status = PaymentRecordStatus.Paid,
