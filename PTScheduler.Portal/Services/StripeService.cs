@@ -266,12 +266,12 @@ public class StripeService(
 
         tenant.BillingStatus = "past_due";
 
-        db.PaymentRecords.Add(new PaymentRecord
+        db.PaymentRecords.Add(new Entities.PaymentRecord
         {
             TenantId = tenant.Id,
             StripeInvoiceId = invoice.Id,
-            StripePaymentIntentId = invoice.PaymentIntentId,
-            Amount = (invoice.AmountDue ?? 0) / 100m,
+            StripePaymentIntentId = invoice.PaymentIntent?.Id,
+            Amount = (invoice.AmountDue) / 100m,
             Currency = (invoice.Currency ?? "pln").ToUpperInvariant(),
             Status = PaymentRecordStatus.Failed,
             Description = invoice.Description ?? $"Faktura {invoice.Number}"
@@ -281,13 +281,13 @@ public class StripeService(
         {
             TenantId = tenant.Id,
             EventType = TenantEventTypes.PaymentFailed,
-            Detail = $"Kwota: {(invoice.AmountDue ?? 0) / 100m:0.00} {(invoice.Currency ?? "PLN").ToUpperInvariant()}, faktura: {invoice.Number}"
+            Detail = $"Kwota: {invoice.AmountDue / 100m:0.00} {(invoice.Currency ?? "PLN").ToUpperInvariant()}, faktura: {invoice.Number}"
         });
 
         await db.SaveChangesAsync();
         logger.LogWarning("Payment failed for tenant {Slug} — customer {Customer}", tenant.Slug, invoice.CustomerId);
 
-        var body = email.PaymentFailedEmailBody(tenant.OwnerName, (invoice.AmountDue ?? 0) / 100m, invoice.Number ?? "—");
+        var body = email.PaymentFailedEmailBody(tenant.OwnerName, invoice.AmountDue / 100m, invoice.Number ?? "—");
         _ = email.SendAsync(tenant.OwnerEmail, "Nieudana platnosc — PTScheduler", body);
     }
 
@@ -298,12 +298,12 @@ public class StripeService(
             .FirstOrDefaultAsync(t => t.StripeCustomerId == invoice.CustomerId);
         if (tenant is null) return;
 
-        db.PaymentRecords.Add(new PaymentRecord
+        db.PaymentRecords.Add(new Entities.PaymentRecord
         {
             TenantId = tenant.Id,
             StripeInvoiceId = invoice.Id,
-            StripePaymentIntentId = invoice.PaymentIntentId,
-            Amount = (invoice.AmountPaid > 0 ? invoice.AmountPaid : invoice.AmountDue ?? 0) / 100m,
+            StripePaymentIntentId = invoice.PaymentIntent?.Id,
+            Amount = (invoice.AmountPaid > 0 ? invoice.AmountPaid : invoice.AmountDue) / 100m,
             Currency = (invoice.Currency ?? "pln").ToUpperInvariant(),
             Status = PaymentRecordStatus.Paid,
             Description = invoice.Description ?? $"Faktura {invoice.Number}"
@@ -313,13 +313,13 @@ public class StripeService(
         {
             TenantId = tenant.Id,
             EventType = TenantEventTypes.PaymentReceived,
-            Detail = $"Kwota: {(invoice.AmountPaid > 0 ? invoice.AmountPaid : invoice.AmountDue ?? 0) / 100m:0.00} {(invoice.Currency ?? "PLN").ToUpperInvariant()}, faktura: {invoice.Number}"
+            Detail = $"Kwota: {(invoice.AmountPaid > 0 ? invoice.AmountPaid : invoice.AmountDue) / 100m:0.00} {(invoice.Currency ?? "PLN").ToUpperInvariant()}, faktura: {invoice.Number}"
         });
 
         await db.SaveChangesAsync();
         logger.LogInformation("Payment succeeded for tenant {Slug} — invoice {Number}", tenant.Slug, invoice.Number);
 
-        var amount = (invoice.AmountPaid > 0 ? invoice.AmountPaid : invoice.AmountDue ?? 0) / 100m;
+        var amount = (invoice.AmountPaid > 0 ? invoice.AmountPaid : invoice.AmountDue) / 100m;
         var body = email.PaymentReceivedEmailBody(tenant.OwnerName, amount, invoice.Number ?? "—");
         _ = email.SendAsync(tenant.OwnerEmail, "Potwierdzenie platnosci — PTScheduler", body);
     }
