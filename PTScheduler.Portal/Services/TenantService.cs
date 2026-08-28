@@ -80,6 +80,15 @@ public class TenantService(
 
         db.Tenants.Add(tenant);
         await db.SaveChangesAsync();
+
+        db.TenantEvents.Add(new TenantEvent
+        {
+            TenantId = tenant.Id,
+            EventType = TenantEventTypes.Created,
+            Detail = $"Plan: {planId}, domena: {domain}"
+        });
+        await db.SaveChangesAsync();
+
         return tenant;
     }
 
@@ -112,6 +121,14 @@ public class TenantService(
 
             tenant.Status = TenantStatus.Active;
             tenant.ProvisionedAt = DateTime.UtcNow;
+
+            db.TenantEvents.Add(new TenantEvent
+            {
+                TenantId = tenant.Id,
+                EventType = TenantEventTypes.Provisioned,
+                Detail = $"Port: {tenant.Port}, image: {TenantImage}"
+            });
+
             await db.SaveChangesAsync();
 
             var output = $"Tenant '{tenant.Slug}' provisioned on port {tenant.Port}";
@@ -146,6 +163,13 @@ public class TenantService(
         try { await docker.StopContainerAsync(dbName); } catch { }
 
         tenant.Status = TenantStatus.Suspended;
+
+        db.TenantEvents.Add(new TenantEvent
+        {
+            TenantId = tenant.Id,
+            EventType = TenantEventTypes.Suspended
+        });
+
         await db.SaveChangesAsync();
     }
 
@@ -161,6 +185,13 @@ public class TenantService(
         try { await docker.StartContainerAsync(webName); } catch { }
 
         tenant.Status = TenantStatus.Active;
+
+        db.TenantEvents.Add(new TenantEvent
+        {
+            TenantId = tenant.Id,
+            EventType = TenantEventTypes.Resumed
+        });
+
         await db.SaveChangesAsync();
     }
 
@@ -184,6 +215,13 @@ public class TenantService(
                 try { await npm.DeleteProxyHostByDomainAsync(tenant.Domain); } catch { }
         }
 
+        db.TenantEvents.Add(new TenantEvent
+        {
+            TenantId = tenant.Id,
+            EventType = TenantEventTypes.Deleted,
+            Detail = removeContainers ? "Z kontenerami Docker" : "Tylko wpis"
+        });
+
         db.Tenants.Remove(tenant);
         await db.SaveChangesAsync();
     }
@@ -193,7 +231,16 @@ public class TenantService(
         await using var db = dbFactory.CreateDbContext();
         var tenant = await db.Tenants.FindAsync(tenantId)
             ?? throw new InvalidOperationException("Tenant not found.");
+        var oldPlan = tenant.PlanId;
         tenant.PlanId = planId;
+
+        db.TenantEvents.Add(new TenantEvent
+        {
+            TenantId = tenant.Id,
+            EventType = TenantEventTypes.PlanChanged,
+            Detail = $"{oldPlan} -> {planId}"
+        });
+
         await db.SaveChangesAsync();
     }
 
@@ -297,6 +344,55 @@ public class TenantService(
         };
     }
 
+    public async Task<List<TenantEvent>> GetRecentEventsAsync(int limit = 20, int? tenantId = null)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var q = db.TenantEvents.AsNoTracking().Include(e => e.Tenant);
+        if (tenantId.HasValue)
+            q = q.Where(e => e.TenantId == tenantId.Value);
+        return await q.OrderByDescending(e => e.OccurredAt).Take(limit).ToListAsync();
+    }
+
+    public async Task<List<PaymentRecord>> GetRecentPaymentsAsync(int limit = 20, int? tenantId = null)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var q = db.PaymentRecords.AsNoTracking().Include(p => p.Tenant).AsQueryable();
+        if (tenantId.HasValue)
+            q = q.Where(p => p.TenantId == tenantId.Value);
+        return await q.OrderByDescending(p => p.CreatedAt).Take(limit).ToListAsync();
+    }
+
+    public async Task<DashboardStats> GetExtendedStatsAsync()
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var now = DateTime.UtcNow;
+        var monthStart = new DateTime(now.Year, now.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var prevMonthStart = monthStart.AddMonths(-1);
+
+        var stats = await GetStatsAsync();
+
+        stats.MonthlyPaymentsTotal = await db.PaymentRecords
+            .Where(p => p.Status == PaymentRecordStatus.Paid && p.CreatedAt >= monthStart)
+            .SumAsync(p => (decimal?)p.Amount) ?? 0;
+
+        stats.PrevMonthPaymentsTotal = await db.PaymentRecords
+            .Where(p => p.Status == PaymentRecordStatus.Paid && p.CreatedAt >= prevMonthStart && p.CreatedAt < monthStart)
+            .SumAsync(p => (decimal?)p.Amount) ?? 0;
+
+        stats.FailedPaymentsCount = await db.PaymentRecords
+            .CountAsync(p => p.Status == PaymentRecordStatus.Failed && p.CreatedAt >= monthStart);
+
+        stats.NewTenantsThisMonth = await db.Tenants
+            .CountAsync(t => t.CreatedAt >= monthStart);
+
+        stats.ChurnedThisMonth = await db.Tenants
+            .CountAsync(t => t.Status == TenantStatus.Suspended && t.CreatedAt < monthStart);
+
+        stats.TrialingTenants = await db.Tenants
+            .CountAsync(t => t.BillingStatus == "trialing" && t.Status == TenantStatus.Active);
+
+        return stats;
+    }
 }
 
 public class DashboardStats
@@ -307,4 +403,10 @@ public class DashboardStats
     public int SuspendedTenants { get; set; }
     public decimal TotalRevenue { get; set; }
     public int ActiveSubscriptions { get; set; }
+    public decimal MonthlyPaymentsTotal { get; set; }
+    public decimal PrevMonthPaymentsTotal { get; set; }
+    public int FailedPaymentsCount { get; set; }
+    public int NewTenantsThisMonth { get; set; }
+    public int ChurnedThisMonth { get; set; }
+    public int TrialingTenants { get; set; }
 }

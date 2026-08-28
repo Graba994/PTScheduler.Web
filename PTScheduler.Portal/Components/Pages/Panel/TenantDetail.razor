@@ -5,6 +5,7 @@
 @inject DockerService DockerSvc
 @inject StripeService StripeSvc
 @inject IDbContextFactory<PortalDbContext> DbFactory
+@inject NpmService NpmSvc
 @inject NavigationManager Nav
 @inject IConfiguration Config
 @rendermode InteractiveServer
@@ -81,6 +82,82 @@ else
                     <p class="text-muted small mb-0 mt-1">
                         <i class="bi bi-info-circle me-1"></i>Użyj tego jeśli web zwraca "password authentication failed" po ręcznej ingerencji w kontenery.
                     </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="fw-bold mb-0"><i class="bi bi-person-lock me-2 text-danger"></i>Konto administratora</h6>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="LoadAdminInfo" disabled="@_loadingAdmin">
+                            @if (_loadingAdmin) { <span class="spinner-border spinner-border-sm"></span> } else { <i class="bi bi-arrow-clockwise"></i> }
+                        </button>
+                    </div>
+
+                    @if (_adminInfo is not null && _adminInfo.Found)
+                    {
+                        <dl class="row mb-0 small">
+                            <dt class="col-5 text-muted">Email (login)</dt>
+                            <dd class="col-7 font-monospace">@_adminInfo.Email</dd>
+                            <dt class="col-5 text-muted">Imię i nazwisko</dt>
+                            <dd class="col-7">@_adminInfo.FirstName @_adminInfo.LastName</dd>
+                            <dt class="col-5 text-muted">Zablokowany</dt>
+                            <dd class="col-7">
+                                @if (_adminInfo.LockoutEnd is not null)
+                                {
+                                    <span class="badge bg-danger">Tak (do @_adminInfo.LockoutEnd)</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-success">Nie</span>
+                                }
+                            </dd>
+                        </dl>
+
+                        <hr class="my-3" />
+                        <h6 class="fw-bold mb-2 small text-muted"><i class="bi bi-pencil-square me-1"></i>Zmień dane admina</h6>
+                        <div class="row g-2 mb-2">
+                            <div class="col-12">
+                                <label class="form-label small mb-1">Nowy email (login)</label>
+                                <input type="email" class="form-control form-control-sm" @bind="_newAdminEmail" placeholder="@_adminInfo.Email" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label small mb-1">Nowe hasło</label>
+                                <div class="input-group input-group-sm">
+                                    <input type="@(_showNewAdminPassword ? "text" : "password")" class="form-control" @bind="_newAdminPassword" placeholder="Pozostaw puste aby nie zmieniać" />
+                                    <button class="btn btn-outline-secondary" type="button" @onclick="() => _showNewAdminPassword = !_showNewAdminPassword">
+                                        <i class="bi @(_showNewAdminPassword ? "bi-eye-slash" : "bi-eye")"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="btn btn-sm btn-warning" @onclick="ResetAdmin" disabled="@_resettingAdmin">
+                            @if (_resettingAdmin) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            <i class="bi bi-shield-lock me-1"></i>Zastosuj zmiany
+                        </button>
+                        @if (!string.IsNullOrEmpty(_adminResetMessage))
+                        {
+                            <div class="alert @(_adminResetError ? "alert-danger" : "alert-success") py-1 small mt-2 mb-0">@_adminResetMessage</div>
+                        }
+                    }
+                    else if (_adminInfo is not null && !_adminInfo.Found)
+                    {
+                        <p class="text-warning small mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Brak konta admin w aplikacji tenanta.</p>
+                    }
+                    else if (_adminError is not null)
+                    {
+                        <p class="text-danger small mb-1">@_adminError</p>
+                        <button class="btn btn-sm btn-outline-primary" @onclick="LoadAdminInfo">Spróbuj ponownie</button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-sm btn-outline-dark" @onclick="LoadAdminInfo" disabled="@_loadingAdmin">
+                            @if (_loadingAdmin) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            Pobierz dane admina
+                        </button>
+                    }
                 </div>
             </div>
         </div>
@@ -431,6 +508,129 @@ else
             </div>
         }
 
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h6 class="fw-bold mb-3"><i class="bi bi-globe me-2 text-primary"></i>Domena niestandardowa</h6>
+                    <dl class="row mb-2 small">
+                        <dt class="col-5 text-muted">Aktualna domena</dt>
+                        <dd class="col-7"><a href="https://@_tenant.Domain" target="_blank">@_tenant.Domain</a></dd>
+                    </dl>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-8">
+                            <label class="form-label small mb-1">Nowa domena</label>
+                            <input type="text" class="form-control form-control-sm" @bind="_newDomain"
+                                   placeholder="np. trener.example.com" />
+                        </div>
+                        <div class="col-md-4">
+                            <button class="btn btn-sm btn-primary w-100" @onclick="ChangeDomain" disabled="@_changingDomain">
+                                @if (_changingDomain) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                Zmien
+                            </button>
+                        </div>
+                    </div>
+                    @if (_domainMessage is not null)
+                    {
+                        <div class="alert @(_domainError ? "alert-danger" : "alert-success") py-1 small mt-2 mb-0">@_domainMessage</div>
+                    }
+                    <p class="text-muted small mb-0 mt-2">
+                        <i class="bi bi-info-circle me-1"></i>Domena zostanie automatycznie zarejestrowana w NPM z certyfikatem SSL.
+                        Upewnij sie, ze rekord DNS (A/CNAME) wskazuje na serwer.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h6 class="fw-bold mb-3"><i class="bi bi-credit-card me-2 text-success"></i>Platnosci SaaS</h6>
+                    @if (_paymentRecords is null)
+                    {
+                        <button class="btn btn-sm btn-outline-dark" @onclick="LoadPaymentRecords" disabled="@_loadingPayments">
+                            @if (_loadingPayments) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            Zaladuj platnosci
+                        </button>
+                    }
+                    else if (_paymentRecords.Count == 0)
+                    {
+                        <p class="text-muted small mb-0">Brak zarejestrowanych platnosci.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive" style="max-height:300px;overflow-y:auto">
+                            <table class="table table-sm mb-0 small align-middle">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Kwota</th>
+                                        <th>Status</th>
+                                        <th>Data</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var p in _paymentRecords)
+                                    {
+                                        <tr>
+                                            <td class="fw-semibold">@p.Amount.ToString("0.00") @p.Currency</td>
+                                            <td><span class="badge @PaymentRecordBadge(p.Status)">@p.Status</span></td>
+                                            <td class="text-muted text-nowrap">@p.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="fw-bold mb-0"><i class="bi bi-activity me-2 text-info"></i>Historia zdarzen</h6>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="LoadEvents" disabled="@_loadingEvents">
+                            @if (_loadingEvents) { <span class="spinner-border spinner-border-sm"></span> } else { <i class="bi bi-arrow-clockwise"></i> }
+                        </button>
+                    </div>
+                    @if (_tenantEvents is null)
+                    {
+                        <button class="btn btn-sm btn-outline-dark" @onclick="LoadEvents" disabled="@_loadingEvents">
+                            @if (_loadingEvents) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            Zaladuj zdarzenia
+                        </button>
+                    }
+                    else if (_tenantEvents.Count == 0)
+                    {
+                        <p class="text-muted small mb-0">Brak zdarzen.</p>
+                    }
+                    else
+                    {
+                        <div class="d-flex flex-column gap-2" style="max-height:400px;overflow-y:auto">
+                            @foreach (var ev in _tenantEvents)
+                            {
+                                <div class="d-flex align-items-start gap-2 small border-bottom pb-2">
+                                    <span class="badge @EventBadge(ev.EventType) mt-1" style="min-width:24px;text-align:center">
+                                        <i class="bi @EventIcon(ev.EventType)"></i>
+                                    </span>
+                                    <div class="flex-grow-1">
+                                        <div class="d-flex justify-content-between">
+                                            <span class="fw-semibold">@EventLabel(ev.EventType)</span>
+                                            <span class="text-muted">@ev.OccurredAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+                                        </div>
+                                        @if (!string.IsNullOrWhiteSpace(ev.Detail))
+                                        {
+                                            <div class="text-muted small font-monospace">@ev.Detail</div>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
         <!-- Delete section -->
         <div class="col-12">
             <div class="card border-0 shadow-sm border-danger">
@@ -502,6 +702,15 @@ else
     private TenantMetrics? _metrics;
     private bool _loadingMetrics;
     private string? _metricsError;
+    private AdminInfo? _adminInfo;
+    private bool _loadingAdmin;
+    private string? _adminError;
+    private string _newAdminEmail = "";
+    private string _newAdminPassword = "";
+    private bool _showNewAdminPassword;
+    private bool _resettingAdmin;
+    private string? _adminResetMessage;
+    private bool _adminResetError;
 
     protected override async Task OnInitializedAsync()
     {
@@ -744,5 +953,215 @@ else
         public int OrdersTotal { get; init; }
         public decimal Revenue { get; init; }
         public DateTime Timestamp { get; init; }
+    }
+
+    private async Task LoadAdminInfo()
+    {
+        if (_tenant is null || _tenant.Status != TenantStatus.Active) return;
+        _loadingAdmin = true;
+        _adminError = null;
+        try
+        {
+            var forwardHost = Config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220";
+            var secret = Config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"http://{forwardHost}:{_tenant.Port}/internal/admin-info");
+            if (!string.IsNullOrEmpty(secret))
+                req.Headers.Add("X-Internal-Secret", secret);
+            var resp = await http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) { _adminError = $"HTTP {(int)resp.StatusCode}"; return; }
+            var json = await resp.Content.ReadAsStringAsync();
+            _adminInfo = System.Text.Json.JsonSerializer.Deserialize<AdminInfo>(json,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (_adminInfo?.Found == true)
+                _newAdminEmail = _adminInfo.Email ?? "";
+        }
+        catch (Exception ex) { _adminError = ex.Message; }
+        finally { _loadingAdmin = false; }
+    }
+
+    private async Task ResetAdmin()
+    {
+        if (_tenant is null) return;
+        _resettingAdmin = true;
+        _adminResetMessage = null;
+        try
+        {
+            var forwardHost = Config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220";
+            var secret = Config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"http://{forwardHost}:{_tenant.Port}/internal/admin-reset");
+            if (!string.IsNullOrEmpty(secret))
+                req.Headers.Add("X-Internal-Secret", secret);
+
+            var payload = new Dictionary<string, string?>();
+            if (!string.IsNullOrWhiteSpace(_newAdminEmail) && _newAdminEmail != _adminInfo?.Email)
+                payload["email"] = _newAdminEmail;
+            if (!string.IsNullOrWhiteSpace(_newAdminPassword))
+                payload["password"] = _newAdminPassword;
+
+            if (payload.Count == 0)
+            {
+                _adminResetMessage = "Nie wprowadzono zmian.";
+                _adminResetError = true;
+                return;
+            }
+
+            req.Content = new StringContent(
+                System.Text.Json.JsonSerializer.Serialize(payload),
+                System.Text.Encoding.UTF8, "application/json");
+            var resp = await http.SendAsync(req);
+            var json = await resp.Content.ReadAsStringAsync();
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("success", out var s) && s.GetBoolean())
+            {
+                _adminResetMessage = "Dane admina zaktualizowane.";
+                _adminResetError = false;
+                _newAdminPassword = "";
+                await LoadAdminInfo();
+            }
+            else
+            {
+                var error = root.TryGetProperty("error", out var e) ? e.GetString() : "Nieznany błąd";
+                _adminResetMessage = error;
+                _adminResetError = true;
+            }
+        }
+        catch (Exception ex) { _adminResetMessage = ex.Message; _adminResetError = true; }
+        finally { _resettingAdmin = false; }
+    }
+
+    private string _newDomain = "";
+    private bool _changingDomain;
+    private string? _domainMessage;
+    private bool _domainError;
+    private List<TenantEvent>? _tenantEvents;
+    private bool _loadingEvents;
+    private List<PaymentRecord>? _paymentRecords;
+    private bool _loadingPayments;
+
+    private async Task ChangeDomain()
+    {
+        if (_tenant is null || string.IsNullOrWhiteSpace(_newDomain)) return;
+        _changingDomain = true;
+        _domainMessage = null;
+        try
+        {
+            var oldDomain = _tenant.Domain;
+            var forwardHost = Config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220";
+
+            await using var db = DbFactory.CreateDbContext();
+            var tenant = await db.Tenants.FindAsync(_tenant.Id);
+            if (tenant is null) { _domainMessage = "Tenant nie znaleziony."; _domainError = true; return; }
+
+            tenant.Domain = _newDomain.Trim();
+
+            db.TenantEvents.Add(new TenantEvent
+            {
+                TenantId = tenant.Id,
+                EventType = TenantEventTypes.DomainChanged,
+                Detail = $"{oldDomain} -> {_newDomain.Trim()}"
+            });
+
+            await db.SaveChangesAsync();
+
+            if (!string.IsNullOrWhiteSpace(oldDomain))
+                try { await NpmSvc.DeleteProxyHostByDomainAsync(oldDomain); } catch { }
+
+            var (npmOk, npmMsg) = await NpmSvc.RegisterProxyHostAsync(_newDomain.Trim(), forwardHost, _tenant.Port);
+
+            _domainMessage = npmOk
+                ? $"Domena zmieniona na {_newDomain.Trim()}. NPM: {npmMsg}"
+                : $"Domena zmieniona, ale NPM: {npmMsg} — dodaj recznie.";
+            _domainError = !npmOk;
+
+            _tenant = await TenantSvc.GetAsync(Id);
+        }
+        catch (Exception ex) { _domainMessage = ex.Message; _domainError = true; }
+        finally { _changingDomain = false; }
+    }
+
+    private async Task LoadEvents()
+    {
+        _loadingEvents = true;
+        _tenantEvents = await TenantSvc.GetRecentEventsAsync(30, _tenant?.Id);
+        _loadingEvents = false;
+    }
+
+    private async Task LoadPaymentRecords()
+    {
+        _loadingPayments = true;
+        _paymentRecords = await TenantSvc.GetRecentPaymentsAsync(20, _tenant?.Id);
+        _loadingPayments = false;
+    }
+
+    private static string EventLabel(string type) => type switch
+    {
+        TenantEventTypes.Created => "Utworzony",
+        TenantEventTypes.Provisioned => "Provisioned",
+        TenantEventTypes.Suspended => "Zawieszony",
+        TenantEventTypes.Resumed => "Wznowiony",
+        TenantEventTypes.Deleted => "Usuniety",
+        TenantEventTypes.PlanChanged => "Zmiana planu",
+        TenantEventTypes.PaymentReceived => "Platnosc otrzymana",
+        TenantEventTypes.PaymentFailed => "Platnosc nieudana",
+        TenantEventTypes.TrialStarted => "Trial rozpoczety",
+        TenantEventTypes.TrialExpired => "Trial wygasl",
+        TenantEventTypes.TrialWarning => "Ostrzezenie trial",
+        TenantEventTypes.DomainChanged => "Zmiana domeny",
+        TenantEventTypes.HealthDown => "Awaria",
+        TenantEventTypes.HealthRecovered => "Przywrocony",
+        _ => type
+    };
+
+    private static string EventIcon(string type) => type switch
+    {
+        TenantEventTypes.Created => "bi-plus-circle",
+        TenantEventTypes.Provisioned => "bi-rocket",
+        TenantEventTypes.Suspended => "bi-pause-circle",
+        TenantEventTypes.Resumed => "bi-play-circle",
+        TenantEventTypes.Deleted => "bi-trash",
+        TenantEventTypes.PlanChanged => "bi-arrow-repeat",
+        TenantEventTypes.PaymentReceived => "bi-cash-stack",
+        TenantEventTypes.PaymentFailed => "bi-exclamation-circle",
+        TenantEventTypes.TrialStarted => "bi-clock",
+        TenantEventTypes.TrialExpired => "bi-clock-history",
+        TenantEventTypes.TrialWarning => "bi-exclamation-triangle",
+        TenantEventTypes.DomainChanged => "bi-globe",
+        TenantEventTypes.HealthDown => "bi-heart-pulse",
+        TenantEventTypes.HealthRecovered => "bi-heart",
+        _ => "bi-circle"
+    };
+
+    private static string EventBadge(string type) => type switch
+    {
+        TenantEventTypes.Created or TenantEventTypes.Provisioned or TenantEventTypes.Resumed => "bg-success",
+        TenantEventTypes.PaymentReceived or TenantEventTypes.HealthRecovered => "bg-success",
+        TenantEventTypes.Suspended or TenantEventTypes.Deleted => "bg-danger",
+        TenantEventTypes.PaymentFailed or TenantEventTypes.TrialExpired or TenantEventTypes.HealthDown => "bg-danger",
+        TenantEventTypes.TrialWarning => "bg-warning text-dark",
+        TenantEventTypes.PlanChanged or TenantEventTypes.DomainChanged or TenantEventTypes.TrialStarted => "bg-info",
+        _ => "bg-secondary"
+    };
+
+    private static string PaymentRecordBadge(PaymentRecordStatus s) => s switch
+    {
+        PaymentRecordStatus.Paid => "bg-success",
+        PaymentRecordStatus.Failed => "bg-danger",
+        PaymentRecordStatus.Refunded => "bg-warning text-dark",
+        PaymentRecordStatus.Pending => "bg-secondary",
+        _ => "bg-secondary"
+    };
+
+    private record AdminInfo
+    {
+        public bool Found { get; init; }
+        public string? Email { get; init; }
+        public string? FirstName { get; init; }
+        public string? LastName { get; init; }
+        public bool EmailConfirmed { get; init; }
+        public string? LockoutEnd { get; init; }
     }
 }

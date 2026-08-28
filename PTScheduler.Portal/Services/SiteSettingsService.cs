@@ -38,6 +38,10 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string BackupDir = "backup_dir";
         public const string BackupSchedule = "backup_schedule"; // "daily" | "off"
         public const string BackupRetentionDays = "backup_retention_days";
+        public const string GithubToken = "github_token";
+        public const string GithubOwner = "github_owner";
+        public const string GithubRepo = "github_repo";
+        public const string GithubBranch = "github_branch";
     }
 
     private static readonly Dictionary<string, string> Defaults = new()
@@ -58,6 +62,9 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         [Keys.CtaButton] = "Załóż darmowe konto",
         [Keys.SmtpPort] = "587",
         [Keys.SmtpSsl] = "true",
+        [Keys.GithubOwner] = "graba994",
+        [Keys.GithubRepo] = "ptscheduler.web",
+        [Keys.GithubBranch] = "master",
     };
 
     public async Task<string> GetAsync(string key)

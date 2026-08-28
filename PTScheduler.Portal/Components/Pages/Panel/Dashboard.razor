@@ -34,14 +34,45 @@ else
             <div class="portal-stat">
                 <div class="portal-stat-icon bg-warning bg-opacity-10 text-warning"><i class="bi bi-hourglass-split"></i></div>
                 <div class="portal-stat-val">@_stats.PendingTenants</div>
-                <div class="portal-stat-label">Oczekujących</div>
+                <div class="portal-stat-label">Oczekujacych</div>
             </div>
         </div>
         <div class="col-6 col-lg-3">
             <div class="portal-stat">
                 <div class="portal-stat-icon bg-info bg-opacity-10 text-info"><i class="bi bi-currency-exchange"></i></div>
-                <div class="portal-stat-val">@_stats.TotalRevenue.ToString("0") zł</div>
+                <div class="portal-stat-val">@_stats.TotalRevenue.ToString("0") zl</div>
                 <div class="portal-stat-label">MRR</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-lg-3">
+            <div class="portal-stat">
+                <div class="portal-stat-icon bg-success bg-opacity-10 text-success"><i class="bi bi-cash-stack"></i></div>
+                <div class="portal-stat-val">@_stats.MonthlyPaymentsTotal.ToString("0") zl</div>
+                <div class="portal-stat-label">Platnosci (ten mies.)</div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="portal-stat">
+                <div class="portal-stat-icon bg-primary bg-opacity-10 text-primary"><i class="bi bi-person-plus"></i></div>
+                <div class="portal-stat-val">@_stats.NewTenantsThisMonth</div>
+                <div class="portal-stat-label">Nowi (ten mies.)</div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="portal-stat">
+                <div class="portal-stat-icon bg-info bg-opacity-10 text-info"><i class="bi bi-clock-history"></i></div>
+                <div class="portal-stat-val">@_stats.TrialingTenants</div>
+                <div class="portal-stat-label">Na trialu</div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="portal-stat">
+                <div class="portal-stat-icon bg-danger bg-opacity-10 text-danger"><i class="bi bi-person-dash"></i></div>
+                <div class="portal-stat-val">@_stats.ChurnedThisMonth</div>
+                <div class="portal-stat-label">Churn (ten mies.)</div>
             </div>
         </div>
     </div>
@@ -100,11 +131,11 @@ else
                                 var capacityPct = maxTenants > 0 ? (_stats.ActiveTenants * 100 / maxTenants) : 0;
                             }
                             <div class="d-flex justify-content-between small">
-                                <span class="text-muted">Max trenerów (est.)</span>
+                                <span class="text-muted">Max trenerow (est.)</span>
                                 <span class="fw-semibold">~@maxTenants</span>
                             </div>
                             <div class="d-flex justify-content-between small">
-                                <span class="text-muted">Zajęte sloty</span>
+                                <span class="text-muted">Zajete sloty</span>
                                 <span class="fw-semibold">@_stats.ActiveTenants / @maxTenants</span>
                             </div>
                             <div class="progress mt-2" style="height:20px">
@@ -118,6 +149,19 @@ else
                                 <span class="text-muted">Aktywne subskrypcje</span>
                                 <span class="fw-semibold">@_stats.ActiveSubscriptions</span>
                             </div>
+
+                            @if (_stats.PrevMonthPaymentsTotal > 0)
+                            {
+                                var growth = _stats.PrevMonthPaymentsTotal > 0
+                                    ? (int)((_stats.MonthlyPaymentsTotal - _stats.PrevMonthPaymentsTotal) * 100 / _stats.PrevMonthPaymentsTotal)
+                                    : 0;
+                                <div class="d-flex justify-content-between small mt-1">
+                                    <span class="text-muted">Wzrost przychodu m/m</span>
+                                    <span class="fw-semibold @(growth >= 0 ? "text-success" : "text-danger")">
+                                        @(growth >= 0 ? "+" : "")@growth%
+                                    </span>
+                                </div>
+                            }
                         </div>
                     </div>
                 </div>
@@ -133,7 +177,7 @@ else
         <div class="card border-danger border-2 shadow-sm mb-3">
             <div class="card-body">
                 <h6 class="fw-bold mb-3 text-danger">
-                    <i class="bi bi-exclamation-triangle-fill me-2"></i>@unhealthy.Count aktywny(ch) trener(ów) nie odpowiada
+                    <i class="bi bi-exclamation-triangle-fill me-2"></i>@unhealthy.Count aktywny(ch) trener(ow) nie odpowiada
                 </h6>
                 <div class="row g-2">
                     @foreach (var t in unhealthy)
@@ -160,52 +204,144 @@ else
     {
         <div class="alert alert-success py-2 mb-3">
             <i class="bi bi-check-circle-fill me-1"></i>
-            Wszyscy aktywni trenerzy (@healthyCount) odpowiadają na health check.
+            Wszyscy aktywni trenerzy (@healthyCount) odpowiadaja na health check.
         </div>
     }
 
-    <div class="card border-0 shadow-sm">
-        <div class="card-body">
-            <div class="d-flex align-items-center justify-content-between mb-3">
-                <h6 class="fw-bold mb-0"><i class="bi bi-building me-2"></i>Ostatni trenerzy</h6>
-                <a href="/panel/tenants" class="btn btn-sm btn-outline-primary">Wszyscy</a>
-            </div>
-            @if (_tenants.Count == 0)
-            {
-                <p class="text-muted small">Brak trenerów. <a href="/panel/provision">Dodaj pierwszego</a>.</p>
-            }
-            else
-            {
-                <div class="table-responsive">
-                    <table class="table table-hover align-middle mb-0 small">
-                        <thead class="table-light">
-                            <tr>
-                                <th>Trener</th>
-                                <th>Domena</th>
-                                <th>Plan</th>
-                                <th>Status</th>
-                                <th>Data</th>
-                            </tr>
-                        </thead>
-                        <tbody>
-                            @foreach (var t in _tenants.Take(10))
-                            {
-                                <tr>
-                                    <td>
-                                        <a href="/panel/tenants/@t.Id" class="fw-semibold text-decoration-none">@t.CompanyName</a>
-                                        <div class="text-muted small">@t.OwnerEmail</div>
-                                    </td>
-                                    <td class="text-muted">@t.Domain</td>
-                                    <td><span class="badge bg-primary-subtle text-primary-emphasis">@(t.Plan?.Name ?? t.PlanId)</span></td>
-                                    <td><span class="badge @StatusBadge(t.Status)">@StatusLabel(t.Status)</span></td>
-                                    <td class="text-muted text-nowrap">@t.CreatedAt.ToString("dd.MM.yyyy")</td>
-                                </tr>
-                            }
-                        </tbody>
-                    </table>
+    <div class="row g-3">
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between mb-3">
+                        <h6 class="fw-bold mb-0"><i class="bi bi-building me-2"></i>Ostatni trenerzy</h6>
+                        <a href="/panel/tenants" class="btn btn-sm btn-outline-primary">Wszyscy</a>
+                    </div>
+                    @if (_tenants.Count == 0)
+                    {
+                        <p class="text-muted small">Brak trenerow. <a href="/panel/provision">Dodaj pierwszego</a>.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0 small">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Trener</th>
+                                        <th>Plan</th>
+                                        <th>Status</th>
+                                        <th>Data</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var t in _tenants.Take(8))
+                                    {
+                                        <tr>
+                                            <td>
+                                                <a href="/panel/tenants/@t.Id" class="fw-semibold text-decoration-none">@t.CompanyName</a>
+                                                <div class="text-muted small">@t.OwnerEmail</div>
+                                            </td>
+                                            <td><span class="badge bg-primary-subtle text-primary-emphasis">@(t.Plan?.Name ?? t.PlanId)</span></td>
+                                            <td><span class="badge @StatusBadge(t.Status)">@StatusLabel(t.Status)</span></td>
+                                            <td class="text-muted text-nowrap">@t.CreatedAt.ToString("dd.MM.yyyy")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
                 </div>
-            }
+            </div>
         </div>
+
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <h6 class="fw-bold mb-3"><i class="bi bi-activity me-2 text-info"></i>Ostatnie zdarzenia</h6>
+                    @if (_events.Count == 0)
+                    {
+                        <p class="text-muted small mb-0">Brak zdarzen.</p>
+                    }
+                    else
+                    {
+                        <div class="d-flex flex-column gap-2" style="max-height:400px;overflow-y:auto">
+                            @foreach (var ev in _events)
+                            {
+                                <div class="d-flex align-items-start gap-2 small border-bottom pb-2">
+                                    <span class="badge @EventBadge(ev.EventType) mt-1" style="min-width:24px;text-align:center">
+                                        <i class="bi @EventIcon(ev.EventType)"></i>
+                                    </span>
+                                    <div class="flex-grow-1">
+                                        <div class="d-flex justify-content-between">
+                                            <span class="fw-semibold">
+                                                @if (ev.Tenant is not null)
+                                                {
+                                                    <a href="/panel/tenants/@ev.TenantId" class="text-decoration-none">@ev.Tenant.CompanyName</a>
+                                                }
+                                                else
+                                                {
+                                                    <text>Tenant #@ev.TenantId</text>
+                                                }
+                                            </span>
+                                            <span class="text-muted">@ev.OccurredAt.ToLocalTime().ToString("dd.MM HH:mm")</span>
+                                        </div>
+                                        <div class="text-muted">@EventLabel(ev.EventType)</div>
+                                        @if (!string.IsNullOrWhiteSpace(ev.Detail))
+                                        {
+                                            <div class="text-muted small font-monospace">@ev.Detail</div>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        @if (_payments.Count > 0)
+        {
+            <div class="col-12">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-body">
+                        <h6 class="fw-bold mb-3"><i class="bi bi-credit-card me-2 text-success"></i>Ostatnie platnosci</h6>
+                        <div class="table-responsive">
+                            <table class="table table-sm mb-0 small align-middle">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Trener</th>
+                                        <th>Kwota</th>
+                                        <th>Status</th>
+                                        <th>Zrodlo</th>
+                                        <th>Data</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var p in _payments.Take(10))
+                                    {
+                                        <tr>
+                                            <td>
+                                                @if (p.Tenant is not null)
+                                                {
+                                                    <a href="/panel/tenants/@p.TenantId" class="text-decoration-none">@p.Tenant.CompanyName</a>
+                                                }
+                                                else
+                                                {
+                                                    <text>#@p.TenantId</text>
+                                                }
+                                            </td>
+                                            <td class="fw-semibold">@p.Amount.ToString("0.00") @p.Currency</td>
+                                            <td><span class="badge @PaymentBadge(p.Status)">@p.Status</span></td>
+                                            <td class="text-muted">@p.Source</td>
+                                            <td class="text-muted text-nowrap">@p.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
     </div>
 }
 
@@ -242,11 +378,15 @@ else
     private DashboardStats _stats = new();
     private SystemInfo? _system;
     private List<Tenant> _tenants = [];
+    private List<TenantEvent> _events = [];
+    private List<PaymentRecord> _payments = [];
 
     protected override async Task OnInitializedAsync()
     {
-        _stats = await TenantSvc.GetStatsAsync();
+        _stats = await TenantSvc.GetExtendedStatsAsync();
         _tenants = await TenantSvc.GetAllAsync();
+        _events = await TenantSvc.GetRecentEventsAsync(15);
+        _payments = await TenantSvc.GetRecentPaymentsAsync(10);
 
         try { _system = await DockerSvc.GetSystemInfoAsync(); }
         catch { }
@@ -260,7 +400,7 @@ else
         TenantStatus.Pending => "Oczekuje",
         TenantStatus.Provisioning => "Tworzenie...",
         TenantStatus.Suspended => "Zawieszony",
-        TenantStatus.Destroyed => "Usunięty",
+        TenantStatus.Destroyed => "Usuniety",
         _ => s.ToString()
     };
 
@@ -271,6 +411,66 @@ else
         TenantStatus.Provisioning => "bg-info",
         TenantStatus.Suspended => "bg-danger",
         TenantStatus.Destroyed => "bg-secondary",
+        _ => "bg-secondary"
+    };
+
+    private static string EventLabel(string type) => type switch
+    {
+        TenantEventTypes.Created => "Utworzony",
+        TenantEventTypes.Provisioned => "Provisioned",
+        TenantEventTypes.Suspended => "Zawieszony",
+        TenantEventTypes.Resumed => "Wznowiony",
+        TenantEventTypes.Deleted => "Usuniety",
+        TenantEventTypes.PlanChanged => "Zmiana planu",
+        TenantEventTypes.PaymentReceived => "Platnosc otrzymana",
+        TenantEventTypes.PaymentFailed => "Platnosc nieudana",
+        TenantEventTypes.TrialStarted => "Trial rozpoczety",
+        TenantEventTypes.TrialExpired => "Trial wygasl",
+        TenantEventTypes.TrialWarning => "Ostrzezenie trial",
+        TenantEventTypes.DomainChanged => "Zmiana domeny",
+        TenantEventTypes.HealthDown => "Awaria",
+        TenantEventTypes.HealthRecovered => "Przywrocony",
+        _ => type
+    };
+
+    private static string EventIcon(string type) => type switch
+    {
+        TenantEventTypes.Created => "bi-plus-circle",
+        TenantEventTypes.Provisioned => "bi-rocket",
+        TenantEventTypes.Suspended => "bi-pause-circle",
+        TenantEventTypes.Resumed => "bi-play-circle",
+        TenantEventTypes.Deleted => "bi-trash",
+        TenantEventTypes.PlanChanged => "bi-arrow-repeat",
+        TenantEventTypes.PaymentReceived => "bi-cash-stack",
+        TenantEventTypes.PaymentFailed => "bi-exclamation-circle",
+        TenantEventTypes.TrialStarted => "bi-clock",
+        TenantEventTypes.TrialExpired => "bi-clock-history",
+        TenantEventTypes.TrialWarning => "bi-exclamation-triangle",
+        TenantEventTypes.DomainChanged => "bi-globe",
+        TenantEventTypes.HealthDown => "bi-heart-pulse",
+        TenantEventTypes.HealthRecovered => "bi-heart",
+        _ => "bi-circle"
+    };
+
+    private static string EventBadge(string type) => type switch
+    {
+        TenantEventTypes.Created or TenantEventTypes.Provisioned or TenantEventTypes.Resumed => "bg-success",
+        TenantEventTypes.PaymentReceived => "bg-success",
+        TenantEventTypes.Suspended or TenantEventTypes.Deleted => "bg-danger",
+        TenantEventTypes.PaymentFailed or TenantEventTypes.TrialExpired or TenantEventTypes.HealthDown => "bg-danger",
+        TenantEventTypes.TrialWarning => "bg-warning text-dark",
+        TenantEventTypes.PlanChanged or TenantEventTypes.DomainChanged => "bg-info",
+        TenantEventTypes.TrialStarted => "bg-info",
+        TenantEventTypes.HealthRecovered => "bg-success",
+        _ => "bg-secondary"
+    };
+
+    private static string PaymentBadge(PaymentRecordStatus s) => s switch
+    {
+        PaymentRecordStatus.Paid => "bg-success",
+        PaymentRecordStatus.Failed => "bg-danger",
+        PaymentRecordStatus.Refunded => "bg-warning text-dark",
+        PaymentRecordStatus.Pending => "bg-secondary",
         _ => "bg-secondary"
     };
 }

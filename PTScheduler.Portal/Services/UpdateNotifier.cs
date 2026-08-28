@@ -26,7 +26,7 @@ public class UpdatePollerService(
             {
                 using var scope = scopeFactory.CreateScope();
                 var svc = scope.ServiceProvider.GetRequiredService<UpdateService>();
-                var current = svc.GetCurrent();
+                var current = await svc.GetCurrentAsync();
                 var remote = await svc.CheckRemoteAsync();
 
                 notifier.LastCheckedAt = DateTime.UtcNow;

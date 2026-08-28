@@ -9,6 +9,7 @@ namespace PTScheduler.Portal.Services;
 public class UpdateService(
     IConfiguration config,
     IDbContextFactory<PortalDbContext> dbFactory,
+    SiteSettingsService siteSettings,
     TenantService tenants,
     DockerService docker,
     ILogger<UpdateService> logger)
@@ -20,27 +21,66 @@ public class UpdateService(
     };
 
     private string RepoDir => config.GetValue<string>("Portal:RepoDir") ?? "/opt/ptscheduler/repo";
-    private string GitHubOwner => config.GetValue<string>("Portal:GitHubOwner") ?? "graba994";
-    private string GitHubRepo => config.GetValue<string>("Portal:GitHubRepo") ?? "ptscheduler.web";
-    private string DefaultBranch => Environment.GetEnvironmentVariable("PTS_BUILD_BRANCH") ?? "main";
     private string TenantImage => config.GetValue<string>("Portal:TenantImage") ?? "ptscheduler-web:latest";
     private string PortalContainerName => config.GetValue<string>("Portal:ContainerName") ?? "ptportal";
     private string PortalImage => config.GetValue<string>("Portal:PortalImage") ?? "ptportal:latest";
 
-    public VersionInfo GetCurrent() => new()
+    private async Task<(string Owner, string Repo, string Branch, string? Token)> GetGitHubConfigAsync()
     {
-        Commit = Environment.GetEnvironmentVariable("PTS_BUILD_COMMIT") ?? "unknown",
-        BuildTime = Environment.GetEnvironmentVariable("PTS_BUILD_TIME") ?? "unknown",
-        Branch = DefaultBranch
-    };
+        var s = await siteSettings.GetAllAsync(
+            SiteSettingsService.Keys.GithubOwner,
+            SiteSettingsService.Keys.GithubRepo,
+            SiteSettingsService.Keys.GithubBranch,
+            SiteSettingsService.Keys.GithubToken);
+
+        var owner = s[SiteSettingsService.Keys.GithubOwner];
+        var repo = s[SiteSettingsService.Keys.GithubRepo];
+        var branch = s[SiteSettingsService.Keys.GithubBranch];
+        var token = s[SiteSettingsService.Keys.GithubToken];
+
+        if (string.IsNullOrWhiteSpace(branch))
+            branch = Environment.GetEnvironmentVariable("PTS_BUILD_BRANCH") ?? "master";
+
+        return (owner, repo, branch, string.IsNullOrWhiteSpace(token) ? null : token);
+    }
+
+    public async Task<VersionInfo> GetCurrentAsync()
+    {
+        var (_, _, branch, _) = await GetGitHubConfigAsync();
+        return new VersionInfo
+        {
+            Commit = Environment.GetEnvironmentVariable("PTS_BUILD_COMMIT") ?? "unknown",
+            BuildTime = Environment.GetEnvironmentVariable("PTS_BUILD_TIME") ?? "unknown",
+            Branch = branch
+        };
+    }
+
+    public VersionInfo GetCurrent()
+    {
+        return new VersionInfo
+        {
+            Commit = Environment.GetEnvironmentVariable("PTS_BUILD_COMMIT") ?? "unknown",
+            BuildTime = Environment.GetEnvironmentVariable("PTS_BUILD_TIME") ?? "unknown",
+            Branch = Environment.GetEnvironmentVariable("PTS_BUILD_BRANCH") ?? "master"
+        };
+    }
 
     public async Task<RemoteInfo?> CheckRemoteAsync()
     {
         try
         {
-            var url = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/commits/{DefaultBranch}";
-            using var resp = await _http.GetAsync(url);
-            if (!resp.IsSuccessStatusCode) return null;
+            var (owner, repo, branch, token) = await GetGitHubConfigAsync();
+            var url = $"https://api.github.com/repos/{owner}/{repo}/commits/{branch}";
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            if (!string.IsNullOrEmpty(token))
+                req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+            using var resp = await _http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode)
+            {
+                logger.LogWarning("GitHub API returned {Status} for {Url}", (int)resp.StatusCode, url);
+                return null;
+            }
 
             var body = await resp.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(body);
@@ -61,6 +101,48 @@ public class UpdateService(
         }
     }
 
+    public async Task<(bool Ok, string Message)> TestConnectionAsync()
+    {
+        try
+        {
+            var (owner, repo, branch, token) = await GetGitHubConfigAsync();
+            var url = $"https://api.github.com/repos/{owner}/{repo}/commits/{branch}";
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            if (!string.IsNullOrEmpty(token))
+                req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+
+            using var resp = await _http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var status = (int)resp.StatusCode;
+                var hint = status switch
+                {
+                    401 => "Token jest nieprawidłowy lub wygasł.",
+                    403 => "Token nie ma uprawnień do tego repozytorium.",
+                    404 => $"Repo '{owner}/{repo}' lub branch '{branch}' nie istnieje, albo brak tokenu dla prywatnego repo.",
+                    _ => $"Nieoczekiwany status HTTP."
+                };
+                return (false, $"HTTP {status} — {hint}");
+            }
+
+            var body = await resp.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(body);
+            var sha = doc.RootElement.GetProperty("sha").GetString() ?? "";
+            var msg = doc.RootElement.GetProperty("commit").GetProperty("message").GetString() ?? "";
+            var shortMsg = msg.Length > 60 ? msg[..60] + "…" : msg;
+
+            return (true, $"Połączono! Najnowszy commit: {sha[..7]} — {shortMsg}");
+        }
+        catch (TaskCanceledException)
+        {
+            return (false, "Timeout — GitHub API nie odpowiedziało w 15 sekund.");
+        }
+        catch (Exception ex)
+        {
+            return (false, $"Błąd: {ex.Message}");
+        }
+    }
+
     public bool IsBehind(VersionInfo current, RemoteInfo? remote) =>
         remote is not null
         && !string.IsNullOrEmpty(remote.Commit)
@@ -73,6 +155,8 @@ public class UpdateService(
         var log = new List<string>();
         try
         {
+            var (_, _, branch, _) = await GetGitHubConfigAsync();
+
             if (!Directory.Exists(RepoDir))
                 return new UpgradeResult(false,
                     $"Katalog repo '{RepoDir}' nie zamontowany. Dodaj -v /mnt/user/appdata/ptscheduler-repo:/opt/ptscheduler/repo",
@@ -83,8 +167,8 @@ public class UpdateService(
             log.Add(fetchOut);
             if (!fetchOk) return new UpgradeResult(false, "git fetch nie powiódł się", log);
 
-            var (pullOk, pullOut) = await RunAsync("git", $"pull origin {DefaultBranch}", RepoDir);
-            log.Add($"git pull origin {DefaultBranch}: {(pullOk ? "OK" : "FAIL")}");
+            var (pullOk, pullOut) = await RunAsync("git", $"pull origin {branch}", RepoDir);
+            log.Add($"git pull origin {branch}: {(pullOk ? "OK" : "FAIL")}");
             log.Add(pullOut);
             if (!pullOk) return new UpgradeResult(false, "git pull nie powiódł się", log);
 
@@ -94,7 +178,7 @@ public class UpdateService(
 
             log.Add("→ Building portal image (ptportal:pending)...");
             var (buildOk, buildOut) = await RunAsync("docker",
-                $"build --build-arg BUILD_COMMIT={newCommit} --build-arg BUILD_TIME={now} --build-arg BUILD_BRANCH={DefaultBranch} -t ptportal:pending -f PTScheduler.Portal/Dockerfile .",
+                $"build --build-arg BUILD_COMMIT={newCommit} --build-arg BUILD_TIME={now} --build-arg BUILD_BRANCH={branch} -t ptportal:pending -f PTScheduler.Portal/Dockerfile .",
                 RepoDir, timeoutMinutes: 20);
             log.Add(buildOut);
             if (!buildOk) return new UpgradeResult(false, "Build portalu nie powiódł się", log);
@@ -139,13 +223,25 @@ public class UpdateService(
                 portArgs = string.Join(" ", parts);
             }
 
+            var runCmd = $"docker run -d --name {PortalContainerName} --network {netMode} --restart {restart} {envArgs} {bindArgs} {portArgs} {PortalImage}";
+
             var script =
                 "set -e\n" +
                 "sleep 5\n" +
+                $"docker tag {PortalImage} ptportal:previous 2>/dev/null || true\n" +
                 $"docker stop {PortalContainerName} 2>/dev/null || true\n" +
                 $"docker rm {PortalContainerName} 2>/dev/null || true\n" +
                 $"docker tag ptportal:pending {PortalImage}\n" +
-                $"docker run -d --name {PortalContainerName} --network {netMode} --restart {restart} {envArgs} {bindArgs} {portArgs} {PortalImage}\n";
+                $"{runCmd}\n" +
+                "sleep 12\n" +
+                $"if ! docker inspect --format='{{{{.State.Running}}}}' {PortalContainerName} 2>/dev/null | grep -q true; then\n" +
+                $"  echo 'New container failed — rolling back to ptportal:previous'\n" +
+                $"  docker stop {PortalContainerName} 2>/dev/null || true\n" +
+                $"  docker rm {PortalContainerName} 2>/dev/null || true\n" +
+                $"  docker tag ptportal:previous {PortalImage}\n" +
+                $"  {runCmd}\n" +
+                "fi\n" +
+                "docker rmi ptportal:pending 2>/dev/null || true\n";
 
             log.Add("→ Sprawdzam obraz docker:cli dla pomocnika-restartera...");
             await docker.EnsureImagePulledAsync("docker:cli");
@@ -186,6 +282,8 @@ public class UpdateService(
 
         try
         {
+            var (_, _, branch, _) = await GetGitHubConfigAsync();
+
             if (!Directory.Exists(RepoDir))
             {
                 return new UpgradeResult(false,
@@ -200,13 +298,16 @@ public class UpdateService(
             log.Add(fetchOut);
             if (!fetchOk) return new UpgradeResult(false, "git fetch nie powiódł się", log);
 
-            var (pullOk, pullOut) = await RunAsync("git", $"pull origin {DefaultBranch}", RepoDir);
-            log.Add($"git pull origin {DefaultBranch}: {(pullOk ? "OK" : "FAIL")}");
+            var (pullOk, pullOut) = await RunAsync("git", $"pull origin {branch}", RepoDir);
+            log.Add($"git pull origin {branch}: {(pullOk ? "OK" : "FAIL")}");
             log.Add(pullOut);
             if (!pullOk) return new UpgradeResult(false, "git pull nie powiódł się", log);
 
             if (rebuildTenantImage)
             {
+                log.Add($"→ Zachowuję poprzedni obraz jako {TenantImage.Replace(":latest", ":previous")}...");
+                await RunAsync("docker", $"tag {TenantImage} {TenantImage.Replace(":latest", ":previous")}", RepoDir);
+
                 log.Add("→ Building tenant image: ptscheduler-web:latest");
                 var (buildOk, buildOut) = await RunAsync("docker",
                     $"build -t {TenantImage} .", RepoDir, timeoutMinutes: 20);
@@ -214,7 +315,8 @@ public class UpdateService(
                 if (!buildOk)
                 {
                     ok = false;
-                    log.Add("✖ Build obrazu trenera nie powiódł się.");
+                    log.Add("✖ Build obrazu trenera nie powiódł się — przywracam poprzedni obraz.");
+                    await RunAsync("docker", $"tag {TenantImage.Replace(":latest", ":previous")} {TenantImage}", RepoDir);
                     return new UpgradeResult(false, "docker build zakończył się błędem", log);
                 }
                 log.Add("✓ Nowy obraz trenera zbudowany");
@@ -286,7 +388,7 @@ public class VersionInfo
 {
     public string Commit { get; set; } = "unknown";
     public string BuildTime { get; set; } = "unknown";
-    public string Branch { get; set; } = "main";
+    public string Branch { get; set; } = "master";
     public string CommitShort => Commit.Length > 7 ? Commit[..7] : Commit;
 }
 

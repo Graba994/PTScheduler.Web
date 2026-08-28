@@ -166,6 +166,9 @@ public class StripeService(
             case EventTypes.InvoicePaymentFailed:
                 await HandlePaymentFailedAsync((Invoice)stripeEvent.Data.Object);
                 break;
+            case EventTypes.InvoicePaymentSucceeded:
+                await HandlePaymentSucceededAsync((Invoice)stripeEvent.Data.Object);
+                break;
         }
 
         return (true, stripeEvent.Type);
@@ -185,6 +188,14 @@ public class StripeService(
 
         tenant.StripeSubscriptionId = session.SubscriptionId;
         tenant.BillingStatus = "trialing";
+        await db.SaveChangesAsync();
+
+        db.TenantEvents.Add(new TenantEvent
+        {
+            TenantId = tenant.Id,
+            EventType = TenantEventTypes.TrialStarted,
+            Detail = $"Checkout session: {session.Id}"
+        });
         await db.SaveChangesAsync();
 
         if (tenant.Status == TenantStatus.Pending)
@@ -230,9 +241,20 @@ public class StripeService(
         if (tenant is null) return;
 
         tenant.BillingStatus = "canceled";
+
+        db.TenantEvents.Add(new TenantEvent
+        {
+            TenantId = tenant.Id,
+            EventType = TenantEventTypes.Suspended,
+            Detail = "Subskrypcja Stripe anulowana"
+        });
+
         await db.SaveChangesAsync();
 
         try { await tenants.SuspendAsync(tenant.Id); } catch { }
+
+        var body = email.SuspensionEmailBody(tenant.OwnerName, "Subskrypcja została anulowana.");
+        _ = email.SendAsync(tenant.OwnerEmail, "Twoje konto PTScheduler zostalo zawieszone", body);
     }
 
     private async Task HandlePaymentFailedAsync(Invoice invoice)
@@ -243,8 +265,63 @@ public class StripeService(
         if (tenant is null) return;
 
         tenant.BillingStatus = "past_due";
+
+        db.PaymentRecords.Add(new PaymentRecord
+        {
+            TenantId = tenant.Id,
+            StripeInvoiceId = invoice.Id,
+            StripePaymentIntentId = invoice.PaymentIntentId,
+            Amount = (invoice.AmountDue ?? 0) / 100m,
+            Currency = (invoice.Currency ?? "pln").ToUpperInvariant(),
+            Status = PaymentRecordStatus.Failed,
+            Description = invoice.Description ?? $"Faktura {invoice.Number}"
+        });
+
+        db.TenantEvents.Add(new TenantEvent
+        {
+            TenantId = tenant.Id,
+            EventType = TenantEventTypes.PaymentFailed,
+            Detail = $"Kwota: {(invoice.AmountDue ?? 0) / 100m:0.00} {(invoice.Currency ?? "PLN").ToUpperInvariant()}, faktura: {invoice.Number}"
+        });
+
         await db.SaveChangesAsync();
         logger.LogWarning("Payment failed for tenant {Slug} — customer {Customer}", tenant.Slug, invoice.CustomerId);
+
+        var body = email.PaymentFailedEmailBody(tenant.OwnerName, (invoice.AmountDue ?? 0) / 100m, invoice.Number ?? "—");
+        _ = email.SendAsync(tenant.OwnerEmail, "Nieudana platnosc — PTScheduler", body);
+    }
+
+    private async Task HandlePaymentSucceededAsync(Invoice invoice)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var tenant = await db.Tenants
+            .FirstOrDefaultAsync(t => t.StripeCustomerId == invoice.CustomerId);
+        if (tenant is null) return;
+
+        db.PaymentRecords.Add(new PaymentRecord
+        {
+            TenantId = tenant.Id,
+            StripeInvoiceId = invoice.Id,
+            StripePaymentIntentId = invoice.PaymentIntentId,
+            Amount = (invoice.AmountPaid > 0 ? invoice.AmountPaid : invoice.AmountDue ?? 0) / 100m,
+            Currency = (invoice.Currency ?? "pln").ToUpperInvariant(),
+            Status = PaymentRecordStatus.Paid,
+            Description = invoice.Description ?? $"Faktura {invoice.Number}"
+        });
+
+        db.TenantEvents.Add(new TenantEvent
+        {
+            TenantId = tenant.Id,
+            EventType = TenantEventTypes.PaymentReceived,
+            Detail = $"Kwota: {(invoice.AmountPaid > 0 ? invoice.AmountPaid : invoice.AmountDue ?? 0) / 100m:0.00} {(invoice.Currency ?? "PLN").ToUpperInvariant()}, faktura: {invoice.Number}"
+        });
+
+        await db.SaveChangesAsync();
+        logger.LogInformation("Payment succeeded for tenant {Slug} — invoice {Number}", tenant.Slug, invoice.Number);
+
+        var amount = (invoice.AmountPaid > 0 ? invoice.AmountPaid : invoice.AmountDue ?? 0) / 100m;
+        var body = email.PaymentReceivedEmailBody(tenant.OwnerName, amount, invoice.Number ?? "—");
+        _ = email.SendAsync(tenant.OwnerEmail, "Potwierdzenie platnosci — PTScheduler", body);
     }
 
     public async Task<List<InvoiceInfo>> ListInvoicesAsync(string customerId, int limit = 12)

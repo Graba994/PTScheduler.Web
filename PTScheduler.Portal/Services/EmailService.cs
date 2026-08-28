@@ -97,6 +97,89 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         </html>
         """;
 
+    public string TrialWarningEmailBody(string trainerName, int daysLeft) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h1 style="color: #f59e0b;">Twoj okres probny konczy sie za {daysLeft} dni</h1>
+            </div>
+            <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>Twoj darmowy okres probny PTScheduler konczy sie za <strong>{daysLeft} dni</strong>.</p>
+            <p>Aby kontynuowac korzystanie z platformy, dodaj metode platnosci lub wybierz plan subskrypcji.</p>
+            <p>Jesli nie podejmiesz zadnej akcji, Twoje konto zostanie automatycznie zawieszone po zakonczeniu okresu probnego.</p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
+                Masz pytania? Odpisz na tego maila.<br>
+                PTScheduler
+            </p>
+        </body>
+        </html>
+        """;
+
+    public string PaymentReceivedEmailBody(string trainerName, decimal amount, string invoiceNumber) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h1 style="color: #10b981;">Platnosc otrzymana</h1>
+            </div>
+            <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>Potwierdzamy otrzymanie platnosci.</p>
+            <div style="background: #f0fdf4; border-radius: 12px; padding: 20px; margin: 20px 0;">
+                <div style="margin-bottom: 8px;"><strong>Kwota:</strong> {amount:0.00} PLN</div>
+                <div><strong>Faktura:</strong> {WebUtility.HtmlEncode(invoiceNumber)}</div>
+            </div>
+            <p>Dziekujemy za korzystanie z PTScheduler!</p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">PTScheduler</p>
+        </body>
+        </html>
+        """;
+
+    public string PaymentFailedEmailBody(string trainerName, decimal amount, string invoiceNumber) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h1 style="color: #ef4444;">Platnosc nieudana</h1>
+            </div>
+            <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>Nie udalo sie pobrac platnosci za Twoja subskrypcje PTScheduler.</p>
+            <div style="background: #fef2f2; border-radius: 12px; padding: 20px; margin: 20px 0;">
+                <div style="margin-bottom: 8px;"><strong>Kwota:</strong> {amount:0.00} PLN</div>
+                <div><strong>Faktura:</strong> {WebUtility.HtmlEncode(invoiceNumber)}</div>
+            </div>
+            <p>Prosimy o aktualizacje metody platnosci. Jesli platnosc nie zostanie zrealizowana, Twoje konto moze zostac zawieszone.</p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">PTScheduler</p>
+        </body>
+        </html>
+        """;
+
+    public string SuspensionEmailBody(string trainerName, string reason) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h1 style="color: #ef4444;">Konto zawieszone</h1>
+            </div>
+            <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>Twoje konto PTScheduler zostalo zawieszone.</p>
+            <div style="background: #fef2f2; border-radius: 12px; padding: 20px; margin: 20px 0;">
+                <strong>Powod:</strong> {WebUtility.HtmlEncode(reason)}
+            </div>
+            <p>Aby przywrocic dostep, skontaktuj sie z nami lub odnow subskrypcje.</p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">PTScheduler</p>
+        </body>
+        </html>
+        """;
+
     public string PendingPaymentEmailBody(string trainerName, string planName, decimal price) =>
         $"""
         <!DOCTYPE html>
