@@ -347,7 +347,7 @@ public class TenantService(
     public async Task<List<TenantEvent>> GetRecentEventsAsync(int limit = 20, int? tenantId = null)
     {
         await using var db = dbFactory.CreateDbContext();
-        var q = db.TenantEvents.AsNoTracking().Include(e => e.Tenant);
+        IQueryable<TenantEvent> q = db.TenantEvents.AsNoTracking().Include(e => e.Tenant);
         if (tenantId.HasValue)
             q = q.Where(e => e.TenantId == tenantId.Value);
         return await q.OrderByDescending(e => e.OccurredAt).Take(limit).ToListAsync();
