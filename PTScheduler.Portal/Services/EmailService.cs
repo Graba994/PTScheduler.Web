@@ -180,6 +180,87 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         </html>
         """;
 
+    public string InactivityWarningEmailBody(string trainerName, int inactiveDays, int daysUntilSuspend) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h1 style="color: #f59e0b;">Twoje konto jest nieaktywne</h1>
+            </div>
+            <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>Zauazylismy, ze Twoje konto PTScheduler nie bylo uzywane od <strong>{inactiveDays} dni</strong>.</p>
+            <p>Jesli nie zalogujesz sie w ciagu <strong>{daysUntilSuspend} dni</strong>, Twoje konto zostanie automatycznie zawieszone.</p>
+            <p>Wystarczy sie zalogowac, zeby konto pozostalo aktywne.</p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
+                Masz pytania? Odpisz na tego maila.<br>
+                PTScheduler
+            </p>
+        </body>
+        </html>
+        """;
+
+    public string CleanupWarningEmailBody(string trainerName, int daysLeft) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h1 style="color: #ef4444;">Twoje konto zostanie usuniete</h1>
+            </div>
+            <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>Twoje konto PTScheduler jest zawieszone i zostanie <strong>trwale usuniete za {daysLeft} dni</strong>.</p>
+            <p>Po usunieciu wszystkie Twoje dane (klienci, sesje, pakiety, kursy) zostana bezpowrotnie skasowane.</p>
+            <p>Aby temu zapobiec, skontaktuj sie z nami lub odnow subskrypcje.</p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
+                Masz pytania? Odpisz na tego maila.<br>
+                PTScheduler
+            </p>
+        </body>
+        </html>
+        """;
+
+    public string CleanupDeletionEmailBody(string trainerName, int suspendedDays) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h1 style="color: #ef4444;">Konto zostalo usuniete</h1>
+            </div>
+            <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>Twoje konto PTScheduler bylo zawieszone przez {suspendedDays} dni i zostalo trwale usuniete.</p>
+            <p>Wszystkie dane zostaly skasowane. Jesli chcesz wrocic do PTScheduler, mozesz zalozyc nowe konto w kazdej chwili.</p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
+                PTScheduler — Platforma dla trenerow personalnych
+            </p>
+        </body>
+        </html>
+        """;
+
+    public string GraceExtendedEmailBody(string trainerName, int graceDays) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h1 style="color: #10b981;">Przedluzono okres ochrony konta</h1>
+            </div>
+            <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>Administrator przedluzyl okres ochrony Twojego konta o <strong>{graceDays} dni</strong>.</p>
+            <p>W tym czasie Twoje dane sa bezpieczne i nie zostana usuniete. Prosimy o uregulowanie subskrypcji w tym okresie.</p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
+                Masz pytania? Odpisz na tego maila.<br>
+                PTScheduler
+            </p>
+        </body>
+        </html>
+        """;
+
     public string PendingPaymentEmailBody(string trainerName, string planName, decimal price) =>
         $"""
         <!DOCTYPE html>

@@ -54,6 +54,18 @@ public class HealthMonitorService(
             t.LastHealthResponseMs = ms;
             t.LastHealthError = ok ? null : error;
 
+            if (ok)
+            {
+                try
+                {
+                    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+                    var activityDate = await FetchLastActivityAsync(forwardHost, t.Port, secret, ct);
+                    if (activityDate.HasValue)
+                        t.LastActivityAt = activityDate.Value;
+                }
+                catch { }
+            }
+
             if (!ok)
             {
                 t.UnhealthySinceUtc ??= DateTime.UtcNow;
@@ -111,6 +123,21 @@ public class HealthMonitorService(
         }
         catch (TaskCanceledException) { return (false, (int)sw.ElapsedMilliseconds, "timeout"); }
         catch (Exception ex) { return (false, (int)sw.ElapsedMilliseconds, ex.Message); }
+    }
+
+    private static async Task<DateTime?> FetchLastActivityAsync(
+        string host, int port, string secret, CancellationToken ct)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"http://{host}:{port}/internal/last-activity");
+        if (!string.IsNullOrEmpty(secret))
+            req.Headers.Add("X-Internal-Secret", secret);
+        using var resp = await _http.SendAsync(req, ct);
+        if (!resp.IsSuccessStatusCode) return null;
+        var json = await resp.Content.ReadAsStringAsync(ct);
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        if (doc.RootElement.TryGetProperty("lastActivity", out var val) && val.ValueKind == System.Text.Json.JsonValueKind.String)
+            return DateTime.Parse(val.GetString()!, null, System.Globalization.DateTimeStyles.RoundtripKind);
+        return null;
     }
 
     private static string BuildDownAlert(Tenant t, string? error) =>

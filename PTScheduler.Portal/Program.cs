@@ -52,6 +52,7 @@ builder.Services.AddSingleton<UpdateNotifier>();
 builder.Services.AddHostedService<UpdatePollerService>();
 builder.Services.AddHostedService<TrialExpirationService>();
 builder.Services.AddHostedService<HealthMonitorService>();
+builder.Services.AddHostedService<TenantCleanupService>();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();

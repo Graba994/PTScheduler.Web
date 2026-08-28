@@ -758,6 +758,9 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<DateTime?>("ExpiresAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("GraceUntil")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<bool?>("IsHealthy")
                         .HasColumnType("boolean");
 
@@ -769,6 +772,9 @@ namespace PTScheduler.Portal.Data.Migrations
 
                     b.Property<int?>("LastHealthResponseMs")
                         .HasColumnType("integer");
+
+                    b.Property<DateTime?>("LastActivityAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Notes")
                         .HasColumnType("text");

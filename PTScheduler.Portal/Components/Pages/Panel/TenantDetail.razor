@@ -8,6 +8,7 @@
 @inject NpmService NpmSvc
 @inject NavigationManager Nav
 @inject IConfiguration Config
+@inject EmailService EmailSvc
 @rendermode InteractiveServer
 
 <PageTitle>@(_tenant?.CompanyName ?? "Trener") — PTScheduler Portal</PageTitle>
@@ -58,6 +59,17 @@ else
                         <dd class="col-7">@_tenant.CreatedAt.ToString("dd.MM.yyyy HH:mm")</dd>
                         <dt class="col-5 text-muted">Provisioned</dt>
                         <dd class="col-7">@(_tenant.ProvisionedAt?.ToString("dd.MM.yyyy HH:mm") ?? "—")</dd>
+                        <dt class="col-5 text-muted">Ostatnia aktywnosc</dt>
+                        <dd class="col-7">@(_tenant.LastActivityAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—")</dd>
+                        @if (_tenant.GraceUntil.HasValue)
+                        {
+                            <dt class="col-5 text-muted">Ochrona do</dt>
+                            <dd class="col-7">
+                                <span class="badge @(_tenant.GraceUntil.Value > DateTime.UtcNow ? "bg-info" : "bg-secondary")">
+                                    @_tenant.GraceUntil.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                                </span>
+                            </dd>
+                        }
                     </dl>
 
                     <hr class="my-3" />
@@ -270,6 +282,26 @@ else
                             <i class="bi bi-box-arrow-up-right me-1"></i>Otwórz
                         </a>
                     </div>
+
+                    @if (_tenant.GraceUntil.HasValue && _tenant.GraceUntil.Value > DateTime.UtcNow)
+                    {
+                        <div class="alert alert-info py-2 small mt-2 mb-0">
+                            <i class="bi bi-shield-check me-1"></i>
+                            Okres ochrony aktywny do <strong>@_tenant.GraceUntil.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</strong>
+                            — dane nie zostana usuniete do tego czasu.
+                        </div>
+                    }
+
+                    <hr class="my-3" />
+                    <h6 class="fw-bold mb-2 small text-muted"><i class="bi bi-hourglass-split me-1"></i>Przedluz ochrone</h6>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button class="btn btn-sm btn-outline-info" @onclick="() => ExtendGrace(7)" disabled="@_extending">+7 dni</button>
+                        <button class="btn btn-sm btn-outline-info" @onclick="() => ExtendGrace(14)" disabled="@_extending">+14 dni</button>
+                        <button class="btn btn-sm btn-outline-info" @onclick="() => ExtendGrace(30)" disabled="@_extending">+30 dni</button>
+                    </div>
+                    <p class="text-muted small mb-0 mt-1">
+                        <i class="bi bi-info-circle me-1"></i>Przedluza okres ochrony — konto nie zostanie automatycznie usuniete w tym czasie.
+                    </p>
 
                     <hr class="my-3" />
                     <h6 class="fw-bold mb-2 small text-muted">
@@ -1033,6 +1065,43 @@ else
         finally { _resettingAdmin = false; }
     }
 
+    private bool _extending;
+
+    private async Task ExtendGrace(int days)
+    {
+        if (_tenant is null) return;
+        _extending = true;
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            var tenant = await db.Tenants.FindAsync(_tenant.Id);
+            if (tenant is null) { ShowMessage("Tenant nie znaleziony.", true); return; }
+
+            var now = DateTime.UtcNow;
+            var baseDate = tenant.GraceUntil.HasValue && tenant.GraceUntil.Value > now
+                ? tenant.GraceUntil.Value
+                : now;
+            tenant.GraceUntil = baseDate.AddDays(days);
+
+            db.TenantEvents.Add(new TenantEvent
+            {
+                TenantId = tenant.Id,
+                EventType = TenantEventTypes.GraceExtended,
+                Detail = $"+{days} dni (do {tenant.GraceUntil.Value:dd.MM.yyyy HH:mm})"
+            });
+
+            await db.SaveChangesAsync();
+
+            var body = EmailSvc.GraceExtendedEmailBody(tenant.OwnerName, days);
+            _ = EmailSvc.SendAsync(tenant.OwnerEmail, $"Przedluzono ochrone konta PTScheduler o {days} dni", body);
+
+            ShowMessage($"Przedluzono ochrone o {days} dni (do {tenant.GraceUntil.Value.ToLocalTime():dd.MM.yyyy HH:mm}).");
+            _tenant = await TenantSvc.GetAsync(Id);
+        }
+        catch (Exception ex) { ShowMessage($"Blad: {ex.Message}", true); }
+        finally { _extending = false; }
+    }
+
     private string _newDomain = "";
     private bool _changingDomain;
     private string? _domainMessage;
@@ -1113,6 +1182,11 @@ else
         TenantEventTypes.DomainChanged => "Zmiana domeny",
         TenantEventTypes.HealthDown => "Awaria",
         TenantEventTypes.HealthRecovered => "Przywrocony",
+        TenantEventTypes.InactivityWarning => "Ostrzezenie nieaktywnosc",
+        TenantEventTypes.InactivitySuspended => "Zawieszony (nieaktywnosc)",
+        TenantEventTypes.GraceExtended => "Przedluzono ochrone",
+        TenantEventTypes.CleanupWarning => "Ostrzezenie usuniecie",
+        TenantEventTypes.CleanupDeleted => "Usuniety automatycznie",
         _ => type
     };
 
@@ -1132,6 +1206,11 @@ else
         TenantEventTypes.DomainChanged => "bi-globe",
         TenantEventTypes.HealthDown => "bi-heart-pulse",
         TenantEventTypes.HealthRecovered => "bi-heart",
+        TenantEventTypes.InactivityWarning => "bi-hourglass-split",
+        TenantEventTypes.InactivitySuspended => "bi-moon",
+        TenantEventTypes.GraceExtended => "bi-shield-check",
+        TenantEventTypes.CleanupWarning => "bi-trash",
+        TenantEventTypes.CleanupDeleted => "bi-trash-fill",
         _ => "bi-circle"
     };
 
@@ -1141,7 +1220,9 @@ else
         TenantEventTypes.PaymentReceived or TenantEventTypes.HealthRecovered => "bg-success",
         TenantEventTypes.Suspended or TenantEventTypes.Deleted => "bg-danger",
         TenantEventTypes.PaymentFailed or TenantEventTypes.TrialExpired or TenantEventTypes.HealthDown => "bg-danger",
-        TenantEventTypes.TrialWarning => "bg-warning text-dark",
+        TenantEventTypes.TrialWarning or TenantEventTypes.InactivityWarning or TenantEventTypes.CleanupWarning => "bg-warning text-dark",
+        TenantEventTypes.InactivitySuspended or TenantEventTypes.CleanupDeleted => "bg-danger",
+        TenantEventTypes.GraceExtended => "bg-info",
         TenantEventTypes.PlanChanged or TenantEventTypes.DomainChanged or TenantEventTypes.TrialStarted => "bg-info",
         _ => "bg-secondary"
     };

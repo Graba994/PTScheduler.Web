@@ -27,4 +27,9 @@ public static class TenantEventTypes
     public const string DomainChanged = "domain_changed";
     public const string HealthDown = "health_down";
     public const string HealthRecovered = "health_recovered";
+    public const string InactivityWarning = "inactivity_warning";
+    public const string InactivitySuspended = "inactivity_suspended";
+    public const string GraceExtended = "grace_extended";
+    public const string CleanupWarning = "cleanup_warning";
+    public const string CleanupDeleted = "cleanup_deleted";
 }
