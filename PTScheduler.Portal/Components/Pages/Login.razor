@@ -3,61 +3,271 @@
 
 <PageTitle>Logowanie — PTScheduler Portal</PageTitle>
 
-<section class="py-5">
-    <div class="container">
-        <div class="row justify-content-center">
-            <div class="col-md-5">
-                <div class="text-center mb-4">
-                    <h3 class="fw-bold">Panel administracyjny</h3>
-                    <p class="text-muted">Zaloguj się aby zarządzać instancjami</p>
+<section class="login-page">
+    <div class="login-container">
+        <div class="login-card">
+            <div class="login-header">
+                <div class="login-logo">
+                    <span class="material-symbols-rounded" style="font-size:24px">calendar_month</span>
                 </div>
+                <h2>Panel administracyjny</h2>
+                <p>Zaloguj się aby zarządzać platformą</p>
+            </div>
 
-                <div class="card border-0 shadow-sm">
-                    <div class="card-body p-4">
-                        <form method="post" action="/api/account/login">
-                            <input type="hidden" name="returnUrl" value="/panel" />
-                            <AntiforgeryToken />
+            <form method="post" action="/api/account/login" data-enhance="false">
+                <input type="hidden" name="returnUrl" value="/panel" />
+                <AntiforgeryToken />
 
-                            <div class="mb-3">
-                                <label class="form-label fw-semibold">Email</label>
-                                <input class="form-control" type="email" name="email" placeholder="admin@ptscheduler.pl" required />
-                            </div>
+                @if (Error == "locked")
+                {
+                    <div class="login-alert login-alert-danger">
+                        <span class="material-symbols-rounded" style="font-size:18px">lock</span>
+                        Konto zablokowane po zbyt wielu próbach. Spróbuj za 15 minut.
+                    </div>
+                }
+                else if (_error)
+                {
+                    <div class="login-alert login-alert-danger">
+                        <span class="material-symbols-rounded" style="font-size:18px">error</span>
+                        Nieprawidłowy email lub hasło.
+                    </div>
+                }
 
-                            <div class="mb-3">
-                                <label class="form-label fw-semibold">Hasło</label>
-                                <input class="form-control" type="password" name="password" required />
-                            </div>
-
-                            <div class="form-check mb-3">
-                                <input class="form-check-input" type="checkbox" name="rememberMe" value="true" id="rememberMe" />
-                                <label class="form-check-label" for="rememberMe">Zapamiętaj mnie</label>
-                            </div>
-
-                            @if (Error == "locked")
-                            {
-                                <div class="alert alert-danger py-2 small">
-                                    <i class="bi bi-lock me-1"></i>Konto zablokowane po zbyt wielu próbach. Spróbuj za 15 minut.
-                                </div>
-                            }
-                            else if (_error)
-                            {
-                                <div class="alert alert-danger py-2 small">Nieprawidłowy email lub hasło.</div>
-                            }
-
-                            <button type="submit" class="btn btn-primary w-100">
-                                <i class="bi bi-box-arrow-in-right me-1"></i>Zaloguj się
-                            </button>
-                        </form>
-
-                        <p class="text-muted text-center small mt-3 mb-0">
-                            <a href="/">Wróć na stronę główną</a>
-                        </p>
+                <div class="login-field">
+                    <label for="email">Email</label>
+                    <div class="login-input-wrap">
+                        <span class="material-symbols-rounded login-input-icon">mail</span>
+                        <input id="email" type="email" name="email" placeholder="admin@@ptscheduler.pl" required autofocus />
                     </div>
                 </div>
+
+                <div class="login-field">
+                    <label for="password">Hasło</label>
+                    <div class="login-input-wrap">
+                        <span class="material-symbols-rounded login-input-icon">lock</span>
+                        <input id="password" type="password" name="password" placeholder="Twoje hasło" required />
+                    </div>
+                </div>
+
+                <div class="login-remember">
+                    <input type="checkbox" name="rememberMe" value="true" id="rememberMe" />
+                    <label for="rememberMe">Zapamiętaj mnie</label>
+                </div>
+
+                <button type="submit" class="login-submit">
+                    <span class="material-symbols-rounded" style="font-size:20px">login</span>
+                    Zaloguj się
+                </button>
+            </form>
+
+            <div class="login-footer">
+                <a href="/">
+                    <span class="material-symbols-rounded" style="font-size:16px;vertical-align:middle">arrow_back</span>
+                    Wróć na stronę główną
+                </a>
             </div>
         </div>
     </div>
 </section>
+
+<style>
+    .login-page {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 120px 24px 60px;
+        font-family: var(--pts-font-body);
+        color: var(--pts-text);
+        background: var(--pts-bg);
+        position: relative;
+        overflow: hidden;
+    }
+    .login-page::before {
+        content: '';
+        position: absolute;
+        top: -300px; right: -200px;
+        width: 700px; height: 700px;
+        background: radial-gradient(circle, var(--pts-glow) 0%, transparent 70%);
+        pointer-events: none;
+    }
+    .login-page::after {
+        content: '';
+        position: absolute;
+        bottom: -200px; left: -150px;
+        width: 500px; height: 500px;
+        background: radial-gradient(circle, rgba(6, 214, 160, 0.08) 0%, transparent 70%);
+        pointer-events: none;
+    }
+
+    .login-container {
+        width: 100%;
+        max-width: 420px;
+        position: relative;
+        z-index: 1;
+    }
+
+    .login-card {
+        background: var(--pts-surface);
+        border: 1px solid var(--pts-border);
+        border-radius: 20px;
+        padding: 40px 36px;
+        box-shadow: var(--pts-shadow-lg);
+    }
+
+    .login-header {
+        text-align: center;
+        margin-bottom: 32px;
+    }
+    .login-logo {
+        width: 52px; height: 52px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, var(--pts-primary), var(--pts-accent));
+        display: inline-flex;
+        align-items: center; justify-content: center;
+        color: #fff;
+        margin-bottom: 16px;
+    }
+    .login-header h2 {
+        font-family: var(--pts-font-display);
+        font-size: 1.4rem;
+        font-weight: 800;
+        margin: 0 0 6px;
+        letter-spacing: -0.02em;
+    }
+    .login-header p {
+        font-size: 0.88rem;
+        color: var(--pts-text-secondary);
+        margin: 0;
+    }
+
+    .login-alert {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 12px 16px;
+        border-radius: var(--pts-radius-sm);
+        font-size: 0.85rem;
+        font-weight: 500;
+        margin-bottom: 20px;
+    }
+    .login-alert-danger {
+        background: rgba(239, 68, 68, 0.08);
+        color: #DC2626;
+        border: 1px solid rgba(239, 68, 68, 0.15);
+    }
+
+    .login-field {
+        margin-bottom: 18px;
+    }
+    .login-field label {
+        display: block;
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: var(--pts-text);
+        margin-bottom: 6px;
+    }
+    .login-input-wrap {
+        position: relative;
+    }
+    .login-input-icon {
+        position: absolute;
+        left: 14px; top: 50%;
+        transform: translateY(-50%);
+        font-size: 20px;
+        color: var(--pts-text-secondary);
+        pointer-events: none;
+        opacity: 0.5;
+    }
+    .login-input-wrap input {
+        width: 100%;
+        padding: 12px 16px 12px 44px;
+        border: 2px solid var(--pts-border);
+        border-radius: var(--pts-radius-sm);
+        font-family: var(--pts-font-body);
+        font-size: 0.92rem;
+        color: var(--pts-text);
+        background: var(--pts-bg);
+        outline: none;
+        transition: border-color 0.2s, box-shadow 0.2s;
+        box-sizing: border-box;
+    }
+    .login-input-wrap input::placeholder {
+        color: var(--pts-text-secondary);
+        opacity: 0.5;
+    }
+    .login-input-wrap input:focus {
+        border-color: var(--pts-primary);
+        box-shadow: 0 0 0 3px var(--pts-glow);
+    }
+
+    .login-remember {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        margin-bottom: 24px;
+    }
+    .login-remember input[type="checkbox"] {
+        width: 16px; height: 16px;
+        accent-color: var(--pts-primary);
+        cursor: pointer;
+    }
+    .login-remember label {
+        font-size: 0.85rem;
+        color: var(--pts-text-secondary);
+        cursor: pointer;
+    }
+
+    .login-submit {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 14px 24px;
+        border: none;
+        border-radius: 12px;
+        background: var(--pts-primary);
+        color: #fff;
+        font-family: var(--pts-font-body);
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.25s;
+        box-shadow: 0 4px 16px rgba(124, 58, 237, 0.35);
+    }
+    .login-submit:hover {
+        background: var(--pts-primary-dark);
+        box-shadow: 0 6px 24px rgba(124, 58, 237, 0.45);
+        transform: translateY(-1px);
+    }
+
+    .login-footer {
+        text-align: center;
+        margin-top: 24px;
+        padding-top: 20px;
+        border-top: 1px solid var(--pts-border);
+    }
+    .login-footer a {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 0.85rem;
+        color: var(--pts-text-secondary);
+        text-decoration: none;
+        transition: color 0.2s;
+    }
+    .login-footer a:hover {
+        color: var(--pts-primary);
+    }
+
+    @@media (max-width: 480px) {
+        .login-card {
+            padding: 32px 24px;
+            border-radius: 16px;
+        }
+    }
+</style>
 
 @code {
     [SupplyParameterFromQuery] public string? Error { get; set; }
