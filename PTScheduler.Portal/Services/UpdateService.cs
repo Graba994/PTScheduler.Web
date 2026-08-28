@@ -22,7 +22,8 @@ public class UpdateService(
     private string RepoDir => config.GetValue<string>("Portal:RepoDir") ?? "/opt/ptscheduler/repo";
     private string GitHubOwner => config.GetValue<string>("Portal:GitHubOwner") ?? "graba994";
     private string GitHubRepo => config.GetValue<string>("Portal:GitHubRepo") ?? "ptscheduler.web";
-    private string DefaultBranch => Environment.GetEnvironmentVariable("PTS_BUILD_BRANCH") ?? "main";
+    private string DefaultBranch => Environment.GetEnvironmentVariable("PTS_BUILD_BRANCH") ?? "master";
+    private string? GitHubToken => config.GetValue<string>("Portal:GitHubToken");
     private string TenantImage => config.GetValue<string>("Portal:TenantImage") ?? "ptscheduler-web:latest";
     private string PortalContainerName => config.GetValue<string>("Portal:ContainerName") ?? "ptportal";
     private string PortalImage => config.GetValue<string>("Portal:PortalImage") ?? "ptportal:latest";
@@ -39,8 +40,16 @@ public class UpdateService(
         try
         {
             var url = $"https://api.github.com/repos/{GitHubOwner}/{GitHubRepo}/commits/{DefaultBranch}";
-            using var resp = await _http.GetAsync(url);
-            if (!resp.IsSuccessStatusCode) return null;
+            using var req = new HttpRequestMessage(HttpMethod.Get, url);
+            if (!string.IsNullOrEmpty(GitHubToken))
+                req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", GitHubToken);
+
+            using var resp = await _http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode)
+            {
+                logger.LogWarning("GitHub API returned {Status} for {Url}", (int)resp.StatusCode, url);
+                return null;
+            }
 
             var body = await resp.Content.ReadAsStringAsync();
             using var doc = JsonDocument.Parse(body);
@@ -302,7 +311,7 @@ public class VersionInfo
 {
     public string Commit { get; set; } = "unknown";
     public string BuildTime { get; set; } = "unknown";
-    public string Branch { get; set; } = "main";
+    public string Branch { get; set; } = "master";
     public string CommitShort => Commit.Length > 7 ? Commit[..7] : Commit;
 }
 
