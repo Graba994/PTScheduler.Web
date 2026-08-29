@@ -37,6 +37,8 @@ public class Entitlements
     public bool AuditLog { get; set; }
     public bool TwoFactorAuth { get; set; } = true;
 
+    // "preview" | "basic" | "full" | "premium"
+    public string BrandingTier { get; set; } = "preview";
     public bool CustomLogo { get; set; } = true;
     public bool CustomFavicon { get; set; } = true;
     public bool CustomEmailTemplates { get; set; }
@@ -59,6 +61,7 @@ public class Entitlements
     {
         Id = "unlimited",
         Name = "Bez ograniczeń",
+        BrandingTier = "premium",
         MaxClients = int.MaxValue,
         MaxCourses = int.MaxValue,
         MaxSessionsPerMonth = int.MaxValue,

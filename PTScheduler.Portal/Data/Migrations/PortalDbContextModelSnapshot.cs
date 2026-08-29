@@ -314,6 +314,10 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<bool>("BodyMeasurements")
                         .HasColumnType("boolean");
 
+                    b.Property<string>("BrandingTier")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<bool>("ClientReports")
                         .HasColumnType("boolean");
 
@@ -446,15 +450,16 @@ namespace PTScheduler.Portal.Data.Migrations
                             AuditLog = false,
                             BasicAnalytics = true,
                             BodyMeasurements = true,
+                            BrandingTier = "preview",
                             ClientReports = false,
                             Coupons = false,
                             CoursesEnabled = false,
                             Currency = "PLN",
                             CustomEmailTemplates = false,
-                            CustomFavicon = true,
-                            CustomLogo = true,
+                            CustomFavicon = false,
+                            CustomLogo = false,
                             DataExport = false,
-                            Description = "Dla trenera, który zaczyna",
+                            Description = "Testuj za darmo przez 7 dni",
                             EmailReminders = true,
                             FinancialReports = false,
                             IntegrationGoogleMeet = false,
@@ -479,9 +484,55 @@ namespace PTScheduler.Portal.Data.Migrations
                             RoleBasedAccess = false,
                             SmsReminders = false,
                             SortOrder = 1,
-                            TrialDays = 14,
+                            TrialDays = 7,
                             TwoFactorAuth = true,
                             VideoProvider = "youtube"
+                        },
+                        new
+                        {
+                            Id = "starter",
+                            AdvancedAnalytics = false,
+                            AuditLog = false,
+                            BasicAnalytics = true,
+                            BodyMeasurements = true,
+                            BrandingTier = "basic",
+                            ClientReports = false,
+                            Coupons = false,
+                            CoursesEnabled = false,
+                            Currency = "PLN",
+                            CustomEmailTemplates = false,
+                            CustomFavicon = true,
+                            CustomLogo = true,
+                            DataExport = false,
+                            Description = "Podstawowe narzędzia dla trenera",
+                            EmailReminders = true,
+                            FinancialReports = true,
+                            IntegrationGoogleMeet = false,
+                            IntegrationPayU = true,
+                            IntegrationPrzelewy24 = false,
+                            IsActive = true,
+                            IsFeatured = false,
+                            MaxClients = 15,
+                            MaxCourses = 3,
+                            MaxSessionsPerMonth = 200,
+                            MaxSmsPerMonth = 0,
+                            MaxStorageGB = 5,
+                            MaxSubordinates = 0,
+                            MaxTrainers = 0,
+                            MaxVideoBandwidthGBPerMonth = 0,
+                            MaxVideoStorageGB = 5,
+                            MonthlyPrice = 49m,
+                            Name = "Starter",
+                            PaymentsEnabled = true,
+                            PushNotifications = false,
+                            RecurringSessions = true,
+                            RoleBasedAccess = false,
+                            SmsReminders = false,
+                            SortOrder = 2,
+                            TrialDays = 14,
+                            TwoFactorAuth = true,
+                            VideoProvider = "youtube",
+                            YearlyPrice = 490m
                         },
                         new
                         {
@@ -490,6 +541,7 @@ namespace PTScheduler.Portal.Data.Migrations
                             AuditLog = false,
                             BasicAnalytics = true,
                             BodyMeasurements = true,
+                            BrandingTier = "full",
                             ClientReports = true,
                             Coupons = true,
                             CoursesEnabled = true,
@@ -515,18 +567,18 @@ namespace PTScheduler.Portal.Data.Migrations
                             MaxTrainers = 2,
                             MaxVideoBandwidthGBPerMonth = 100,
                             MaxVideoStorageGB = 20,
-                            MonthlyPrice = 79m,
+                            MonthlyPrice = 99m,
                             Name = "Pro",
                             PaymentsEnabled = true,
                             PushNotifications = true,
                             RecurringSessions = true,
                             RoleBasedAccess = false,
                             SmsReminders = true,
-                            SortOrder = 2,
+                            SortOrder = 3,
                             TrialDays = 14,
                             TwoFactorAuth = true,
                             VideoProvider = "bunny",
-                            YearlyPrice = 790m
+                            YearlyPrice = 990m
                         },
                         new
                         {
@@ -535,6 +587,7 @@ namespace PTScheduler.Portal.Data.Migrations
                             AuditLog = true,
                             BasicAnalytics = true,
                             BodyMeasurements = true,
+                            BrandingTier = "premium",
                             ClientReports = true,
                             Coupons = true,
                             CoursesEnabled = true,
@@ -560,18 +613,18 @@ namespace PTScheduler.Portal.Data.Migrations
                             MaxTrainers = 10,
                             MaxVideoBandwidthGBPerMonth = 1000,
                             MaxVideoStorageGB = 200,
-                            MonthlyPrice = 149m,
-                            Name = "Studio",
+                            MonthlyPrice = 199m,
+                            Name = "Business",
                             PaymentsEnabled = true,
                             PushNotifications = true,
                             RecurringSessions = true,
                             RoleBasedAccess = true,
                             SmsReminders = true,
-                            SortOrder = 3,
+                            SortOrder = 4,
                             TrialDays = 14,
                             TwoFactorAuth = true,
                             VideoProvider = "bunny",
-                            YearlyPrice = 1490m
+                            YearlyPrice = 1990m
                         });
                 });
 

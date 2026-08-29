@@ -50,6 +50,8 @@ public class Plan
     public bool TwoFactorAuth { get; set; } = true;
 
     // ── Branding ─────────────────────────────────
+    // "preview" | "basic" | "full" | "premium"
+    public string BrandingTier { get; set; } = "preview";
     public bool CustomLogo { get; set; } = true;
     public bool CustomFavicon { get; set; } = true;
     public bool CustomEmailTemplates { get; set; }

@@ -334,7 +334,14 @@
                     <div class="lp-price-desc">@(plan.Description ?? "")</div>
                     <div class="lp-price-amount">@plan.MonthlyPrice.ToString("0") <span style="font-size:1rem;font-weight:500">zł</span></div>
                     <div class="lp-price-period">
-                        @(plan.MonthlyPrice == 0 ? "za darmo, na zawsze" : $"miesięcznie{(plan.TrialDays > 0 ? $" · {plan.TrialDays} dni za darmo" : "")}")
+                        @if (plan.MonthlyPrice == 0)
+                        {
+                            @($"{plan.TrialDays} dni za darmo")
+                        }
+                        else
+                        {
+                            @($"miesięcznie{(plan.TrialDays > 0 ? $" · {plan.TrialDays} dni trialu" : "")}")
+                        }
                     </div>
                     <ul class="lp-price-features">
                         <li>
@@ -352,13 +359,28 @@
                                 Przypomnienia email
                             </li>
                         }
-                        @if (plan.BodyMeasurements)
-                        {
-                            <li>
-                                <span class="material-symbols-rounded lp-pf-check">check</span>
-                                Pomiary ciała
-                            </li>
+                        @{
+                            var brandLabel = plan.BrandingTier switch
+                            {
+                                "preview" => "Podgląd brandingu",
+                                "basic" => "Podstawowy branding",
+                                "full" => "Pełny branding",
+                                "premium" => "Branding premium",
+                                _ => "Branding"
+                            };
+                            var brandIsEnabled = plan.BrandingTier != "preview";
                         }
+                        <li>
+                            <span class="material-symbols-rounded @(brandIsEnabled ? "lp-pf-check" : "lp-pf-x")">@(brandIsEnabled ? "check" : "close")</span>
+                            @if (brandIsEnabled)
+                            {
+                                @brandLabel
+                            }
+                            else
+                            {
+                                <span style="opacity:0.5">@brandLabel</span>
+                            }
+                        </li>
                         @if (plan.PaymentsEnabled)
                         {
                             <li>
@@ -371,6 +393,13 @@
                             <li>
                                 <span class="material-symbols-rounded lp-pf-x">close</span>
                                 <span style="opacity:0.5">Płatności online</span>
+                            </li>
+                        }
+                        @if (plan.FinancialReports)
+                        {
+                            <li>
+                                <span class="material-symbols-rounded lp-pf-check">check</span>
+                                Raporty finansowe
                             </li>
                         }
                         @if (plan.CoursesEnabled)
@@ -394,11 +423,32 @@
                                 SMS-y i push
                             </li>
                         }
+                        @if (plan.IntegrationGoogleMeet)
+                        {
+                            <li>
+                                <span class="material-symbols-rounded lp-pf-check">check</span>
+                                Google Meet
+                            </li>
+                        }
                         @if (plan.Coupons)
                         {
                             <li>
                                 <span class="material-symbols-rounded lp-pf-check">check</span>
                                 Kupony i rabaty
+                            </li>
+                        }
+                        @if (plan.AdvancedAnalytics)
+                        {
+                            <li>
+                                <span class="material-symbols-rounded lp-pf-check">check</span>
+                                Zaawansowane statystyki
+                            </li>
+                        }
+                        @if (plan.DataExport)
+                        {
+                            <li>
+                                <span class="material-symbols-rounded lp-pf-check">check</span>
+                                Eksport danych
                             </li>
                         }
                         @if (plan.MaxTrainers > 1)
@@ -423,8 +473,8 @@
                             </li>
                         }
                     </ul>
-                    <a href="/register" class="lp-btn @(plan.IsFeatured ? "lp-btn-primary" : "lp-btn-outline") lp-price-cta">
-                        @(plan.MonthlyPrice == 0 ? "Zacznij za darmo" : $"Wybierz {plan.Name}")
+                    <a href="/register?plan=@plan.Id" class="lp-btn @(plan.IsFeatured ? "lp-btn-primary" : "lp-btn-outline") lp-price-cta">
+                        @(plan.MonthlyPrice == 0 ? "Testuj za darmo" : $"Wybierz {plan.Name}")
                     </a>
                 </div>
             }
@@ -848,7 +898,7 @@
     .lp-step p { font-size: 0.9rem; color: var(--pts-text-secondary); line-height: 1.6; margin: 0; }
 
     /* ===== PRICING ===== */
-    .lp-pricing-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 24px; align-items: start; }
+    .lp-pricing-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; align-items: start; }
     .lp-price-card {
         background: var(--pts-surface);
         border: 2px solid var(--pts-border);
@@ -937,6 +987,9 @@
     .lp-cta-inner p { color: rgba(255,255,255,0.7); font-size: 1.1rem; margin-bottom: 32px; }
 
     /* ===== RESPONSIVE ===== */
+    @@media (max-width: 1100px) {
+        .lp-pricing-grid { grid-template-columns: repeat(2, 1fr) !important; max-width: 700px !important; margin: 0 auto !important; }
+    }
     @@media (max-width: 900px) {
         .lp-hero-inner { grid-template-columns: 1fr; gap: 40px; }
         .lp-hero-device { max-width: 500px; margin: 0 auto; }

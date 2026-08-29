@@ -28,22 +28,70 @@ else
             <div class="card h-100">
                 <div class="card-header"><i class="bi bi-palette me-2"></i>Motyw kolorystyczny</div>
                 <div class="card-body">
-                    <p class="text-muted small mb-2 fw-semibold">Akcent kolorystyczny</p>
-                    <div class="theme-grid">
-                        @foreach (var t in _themes)
+                    @if (_brandingTier == "preview")
+                    {
+                        <div class="position-relative">
+                            <div class="branding-preview-overlay">
+                                <div class="branding-preview-badge">
+                                    <i class="bi bi-lock-fill me-1"></i>Podgląd
+                                </div>
+                                <p class="small mb-2 fw-semibold">Zmiana wyglądu dostępna w płatnych planach</p>
+                                <p class="small text-muted mb-0">Wybierz plan Starter lub wyższy, aby zmienić kolorystykę aplikacji.</p>
+                            </div>
+                            <div style="filter:blur(1px);opacity:0.5;pointer-events:none">
+                                <p class="text-muted small mb-2 fw-semibold">Akcent kolorystyczny</p>
+                                <div class="theme-grid">
+                                    @foreach (var t in _themes)
+                                    {
+                                        <button type="button" class="theme-swatch" disabled>
+                                            <div class="theme-dot" style="background:linear-gradient(135deg,@t.Value.Primary,@t.Value.Secondary)"></div>
+                                            <span>@t.Value.Label</span>
+                                        </button>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="text-muted small mb-2 fw-semibold">Akcent kolorystyczny</p>
+                        <div class="theme-grid">
+                            @foreach (var t in _themes)
+                            {
+                                var isLocked = !IsThemeAvailable(t.Key);
+                                <button type="button"
+                                        class="theme-swatch @(_branding.ThemeName == t.Key ? "selected" : "") @(isLocked ? "theme-locked" : "")"
+                                        @onclick="@(() => { if (!isLocked) SelectTheme(t.Key); })"
+                                        disabled="@isLocked">
+                                    <div class="theme-dot" style="background:linear-gradient(135deg,@t.Value.Primary,@t.Value.Secondary)">
+                                        @if (isLocked)
+                                        {
+                                            <i class="bi bi-lock-fill" style="color:#fff;font-size:12px"></i>
+                                        }
+                                    </div>
+                                    <span>@t.Value.Label</span>
+                                    @if (t.Value.Tier == "premium")
+                                    {
+                                        <span class="theme-tier-badge">Premium</span>
+                                    }
+                                </button>
+                            }
+                        </div>
+                        @if (_brandingTier == "basic")
                         {
-                            <button type="button"
-                                    class="theme-swatch @(_branding.ThemeName == t.Key ? "selected" : "")"
-                                    @onclick="@(() => SelectTheme(t.Key))">
-                                <div class="theme-dot" style="background:linear-gradient(135deg,@t.Value.Primary,@t.Value.Secondary)"></div>
-                                <span>@t.Value.Label</span>
-                            </button>
+                            <p class="text-muted small mt-3 mb-0">
+                                <i class="bi bi-info-circle me-1"></i>
+                                Twój plan zawiera podstawowe kolory. Przejdź na plan Pro, aby odblokować wszystkie motywy.
+                            </p>
                         }
-                    </div>
-                    <p class="text-muted small mt-3 mb-0">
-                        <i class="bi bi-info-circle me-1"></i>
-                        Tryb jasny / ciemny każdy użytkownik wybiera samodzielnie z menu w lewym dolnym rogu.
-                    </p>
+                        else
+                        {
+                            <p class="text-muted small mt-3 mb-0">
+                                <i class="bi bi-info-circle me-1"></i>
+                                Tryb jasny / ciemny każdy użytkownik wybiera samodzielnie z menu w lewym dolnym rogu.
+                            </p>
+                        }
+                    }
                 </div>
             </div>
         </div>
@@ -85,8 +133,8 @@ else
                         }
                         else
                         {
-                            <FeatureGate Flag="CustomLogo" RequiredPlan="Pro" ShowLock="true"
-                                         Title="Własne logo dostępne w planie Pro" />
+                            <FeatureGate Flag="CustomLogo" RequiredPlan="Starter" ShowLock="true"
+                                         Title="Własne logo dostępne od planu Starter" />
                         }
                     </div>
 
@@ -114,8 +162,8 @@ else
                         }
                         else
                         {
-                            <FeatureGate Flag="CustomFavicon" RequiredPlan="Pro" ShowLock="true"
-                                         Title="Własny favicon dostępny w planie Pro" />
+                            <FeatureGate Flag="CustomFavicon" RequiredPlan="Starter" ShowLock="true"
+                                         Title="Własny favicon dostępny od planu Starter" />
                         }
                     </div>
 
@@ -268,24 +316,40 @@ else
     private string _message = string.Empty;
     private string _error   = string.Empty;
 
-    private record ThemeInfo(string Label, string Primary, string Secondary);
+    private string _brandingTier = "preview";
+
+    private record ThemeInfo(string Label, string Primary, string Secondary, string Tier = "basic");
 
     private readonly Dictionary<string, ThemeInfo> _themes = new()
     {
-        ["ocean"]    = new("Ocean",    "#0284C7", "#06B6D4"),
-        ["forest"]   = new("Forest",   "#16A34A", "#10B981"),
-        ["sunset"]   = new("Sunset",   "#EA580C", "#FBBF24"),
-        ["crimson"]  = new("Crimson",  "#DC2626", "#F97316"),
-        ["lavender"] = new("Lavender", "#9333EA", "#EC4899"),
-        ["slate"]    = new("Slate",    "#475569", "#64748B"),
-        ["rose"]     = new("Rose",     "#E11D48", "#F43F5E"),
-        ["teal"]     = new("Teal",     "#0D9488", "#06B6D4"),
-        ["amber"]    = new("Amber",    "#D97706", "#F59E0B"),
-        ["indigo"]   = new("Indigo",   "#4F46E5", "#7C3AED"),
+        ["ocean"]    = new("Ocean",    "#0284C7", "#06B6D4", "basic"),
+        ["forest"]   = new("Forest",   "#16A34A", "#10B981", "basic"),
+        ["slate"]    = new("Slate",    "#475569", "#64748B", "basic"),
+        ["teal"]     = new("Teal",     "#0D9488", "#06B6D4", "basic"),
+        ["sunset"]   = new("Sunset",   "#EA580C", "#FBBF24", "full"),
+        ["crimson"]  = new("Crimson",  "#DC2626", "#F97316", "full"),
+        ["lavender"] = new("Lavender", "#9333EA", "#EC4899", "full"),
+        ["amber"]    = new("Amber",    "#D97706", "#F59E0B", "full"),
+        ["indigo"]   = new("Indigo",   "#4F46E5", "#7C3AED", "full"),
+        ["rose"]     = new("Rose",     "#E11D48", "#F43F5E", "premium"),
     };
+
+    private bool IsThemeAvailable(string themeKey)
+    {
+        if (!_themes.TryGetValue(themeKey, out var info)) return false;
+        return _brandingTier switch
+        {
+            "basic"   => info.Tier == "basic",
+            "full"    => info.Tier is "basic" or "full",
+            "premium" => true,
+            _ => false
+        };
+    }
 
     protected override async Task OnInitializedAsync()
     {
+        _brandingTier = Entitlements.Current.BrandingTier;
+
         var dto = await BrandingService.GetAsync();
         _branding = new SaveBrandingDto
         {
@@ -387,4 +451,60 @@ else
         _pwaIconPath = null;
     }
 }
+
+<style>
+    .branding-preview-overlay {
+        position: absolute;
+        inset: 0;
+        z-index: 2;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        text-align: center;
+        background: rgba(255,255,255,0.85);
+        border-radius: 8px;
+        padding: 24px;
+    }
+    [data-theme$="-dark"] .branding-preview-overlay {
+        background: rgba(15,23,42,0.85);
+    }
+    .branding-preview-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 6px 16px;
+        border-radius: 20px;
+        background: var(--c-primary-light, #EEF2FF);
+        color: var(--c-primary, #4F46E5);
+        font-size: 0.82rem;
+        font-weight: 700;
+        margin-bottom: 12px;
+    }
+    .theme-swatch.theme-locked {
+        opacity: 0.45;
+        cursor: not-allowed;
+    }
+    .theme-swatch.theme-locked:hover {
+        transform: none;
+        border-color: #E5E7EB;
+        background: transparent;
+    }
+    .theme-swatch .theme-dot {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+    }
+    .theme-tier-badge {
+        font-size: 0.6rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.05em;
+        color: #9333EA;
+        background: rgba(147,51,234,0.08);
+        padding: 1px 6px;
+        border-radius: 4px;
+        margin-top: -2px;
+    }
+</style>
 
