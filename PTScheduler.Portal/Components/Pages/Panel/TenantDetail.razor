@@ -620,6 +620,79 @@ else
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="fw-bold mb-0"><i class="bi bi-shop me-2 text-primary"></i>Cennik usług (indywidualny)</h6>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="LoadServicePricing" disabled="@_loadingPricing">
+                            @if (_loadingPricing) { <span class="spinner-border spinner-border-sm"></span> } else { <i class="bi bi-arrow-clockwise"></i> }
+                        </button>
+                    </div>
+                    @if (_serviceItems is null)
+                    {
+                        <button class="btn btn-sm btn-outline-dark" @onclick="LoadServicePricing" disabled="@_loadingPricing">
+                            @if (_loadingPricing) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            Załaduj cennik
+                        </button>
+                    }
+                    else if (_serviceItems.Count == 0)
+                    {
+                        <p class="text-muted small mb-0">Brak usług w katalogu.</p>
+                    }
+                    else
+                    {
+                        @if (_pricingMessage is not null)
+                        {
+                            <div class="alert @(_pricingError ? "alert-danger" : "alert-success") py-2 small mb-2">@_pricingMessage</div>
+                        }
+                        <p class="text-muted small mb-2">Ustaw indywidualne ceny lub ukryj usługi dla tego trenera. Puste = cena domyślna.</p>
+                        <div class="table-responsive">
+                            <table class="table table-sm small align-middle mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Usługa</th>
+                                        <th>Cena domyślna</th>
+                                        <th style="width:140px">Cena indywidualna</th>
+                                        <th style="width:80px">Ukryj</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in _serviceItems)
+                                    {
+                                        var ov = _tenantPrices.GetValueOrDefault(item.Id);
+                                        <tr class="@(ov?.IsHidden == true ? "text-muted" : "")">
+                                            <td>
+                                                <i class="bi @(item.Icon ?? "bi-box") me-1 text-primary"></i>
+                                                @item.Name
+                                                @if (item.PriceType == "monthly") { <span class="text-muted">/ @(item.Unit ?? "mies.")</span> }
+                                            </td>
+                                            <td>@item.DefaultPrice.ToString("0") zł</td>
+                                            <td>
+                                                <input type="number" class="form-control form-control-sm"
+                                                       value="@(ov?.CustomPrice)"
+                                                       placeholder="@item.DefaultPrice.ToString("0")"
+                                                       @onchange="(e) => SetCustomPrice(item.Id, e.Value?.ToString())" />
+                                            </td>
+                                            <td class="text-center">
+                                                <input type="checkbox" class="form-check-input"
+                                                       checked="@(ov?.IsHidden == true)"
+                                                       @onchange="(e) => ToggleHidden(item.Id, (bool)(e.Value ?? false))" />
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <button class="btn btn-primary btn-sm mt-2" @onclick="SaveServicePricing" disabled="@_savingPricing">
+                            @if (_savingPricing) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            <i class="bi bi-floppy me-1"></i>Zapisz cennik
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
                         <h6 class="fw-bold mb-0"><i class="bi bi-activity me-2 text-info"></i>Historia zdarzen</h6>
                         <button class="btn btn-sm btn-outline-secondary" @onclick="LoadEvents" disabled="@_loadingEvents">
                             @if (_loadingEvents) { <span class="spinner-border spinner-border-sm"></span> } else { <i class="bi bi-arrow-clockwise"></i> }
@@ -1244,5 +1317,109 @@ else
         public string? LastName { get; init; }
         public bool EmailConfirmed { get; init; }
         public string? LockoutEnd { get; init; }
+    }
+
+    private List<ServiceItem>? _serviceItems;
+    private Dictionary<int, TenantServicePrice> _tenantPrices = new();
+    private Dictionary<int, PriceEdit> _priceEdits = new();
+    private bool _loadingPricing;
+    private bool _savingPricing;
+    private string? _pricingMessage;
+    private bool _pricingError;
+
+    private async Task LoadServicePricing()
+    {
+        if (_tenant is null) return;
+        _loadingPricing = true;
+        _pricingMessage = null;
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            _serviceItems = await db.ServiceItems.AsNoTracking().OrderBy(s => s.SortOrder).ToListAsync();
+            _tenantPrices = await db.TenantServicePrices.AsNoTracking()
+                .Where(p => p.TenantId == _tenant.Id)
+                .ToDictionaryAsync(p => p.ServiceItemId);
+            _priceEdits.Clear();
+            foreach (var item in _serviceItems)
+            {
+                var ov = _tenantPrices.GetValueOrDefault(item.Id);
+                _priceEdits[item.Id] = new PriceEdit
+                {
+                    CustomPrice = ov?.CustomPrice,
+                    IsHidden = ov?.IsHidden ?? false
+                };
+            }
+        }
+        catch (Exception ex) { _pricingMessage = ex.Message; _pricingError = true; }
+        finally { _loadingPricing = false; }
+    }
+
+    private void SetCustomPrice(int serviceItemId, string? value)
+    {
+        if (!_priceEdits.ContainsKey(serviceItemId)) return;
+        _priceEdits[serviceItemId].CustomPrice = decimal.TryParse(value, out var d) ? d : null;
+    }
+
+    private void ToggleHidden(int serviceItemId, bool hidden)
+    {
+        if (!_priceEdits.ContainsKey(serviceItemId)) return;
+        _priceEdits[serviceItemId].IsHidden = hidden;
+    }
+
+    private async Task SaveServicePricing()
+    {
+        if (_tenant is null || _serviceItems is null) return;
+        _savingPricing = true;
+        _pricingMessage = null;
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            var existing = await db.TenantServicePrices.Where(p => p.TenantId == _tenant.Id).ToListAsync();
+
+            foreach (var item in _serviceItems)
+            {
+                var edit = _priceEdits.GetValueOrDefault(item.Id);
+                if (edit is null) continue;
+
+                var hasOverride = edit.CustomPrice.HasValue || edit.IsHidden;
+                var record = existing.FirstOrDefault(e => e.ServiceItemId == item.Id);
+
+                if (hasOverride)
+                {
+                    if (record is null)
+                    {
+                        db.TenantServicePrices.Add(new TenantServicePrice
+                        {
+                            TenantId = _tenant.Id,
+                            ServiceItemId = item.Id,
+                            CustomPrice = edit.CustomPrice ?? item.DefaultPrice,
+                            IsHidden = edit.IsHidden
+                        });
+                    }
+                    else
+                    {
+                        record.CustomPrice = edit.CustomPrice ?? item.DefaultPrice;
+                        record.IsHidden = edit.IsHidden;
+                    }
+                }
+                else if (record is not null)
+                {
+                    db.TenantServicePrices.Remove(record);
+                }
+            }
+
+            await db.SaveChangesAsync();
+            _pricingMessage = "Cennik zapisany.";
+            _pricingError = false;
+            await LoadServicePricing();
+        }
+        catch (Exception ex) { _pricingMessage = ex.Message; _pricingError = true; }
+        finally { _savingPricing = false; }
+    }
+
+    private class PriceEdit
+    {
+        public decimal? CustomPrice { get; set; }
+        public bool IsHidden { get; set; }
     }
 }

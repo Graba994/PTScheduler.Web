@@ -1,0 +1,276 @@
+@page "/admin/sklep"
+@using PTScheduler.Domain.Constants
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@inject IConfiguration Config
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Sklep usług" />
+
+<div class="page-header">
+    <h4 class="page-title"><i class="bi bi-shop me-2" style="color:var(--c-primary)"></i>Sklep usług</h4>
+</div>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-2"></i>@_error</div>
+}
+
+@if (_success is not null)
+{
+    <div class="alert alert-success alert-dismissible">
+        <i class="bi bi-check-circle me-2"></i>@_success
+        <button type="button" class="btn-close" @onclick="() => _success = null"></button>
+    </div>
+}
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_catalog.Count == 0 && _error is null)
+{
+    <div class="card">
+        <div class="card-body text-center text-muted py-5">
+            <i class="bi bi-shop fs-1 d-block mb-2"></i>
+            <p class="mb-0">Brak dostępnych usług w katalogu.</p>
+        </div>
+    </div>
+}
+else
+{
+    <p class="text-muted mb-3">Wybierz usługi, które chcesz zamówić, i kliknij „Zamów".</p>
+
+    @foreach (var group in _catalog.GroupBy(c => c.Category))
+    {
+        <div class="mb-4">
+            <h6 class="fw-semibold text-muted text-uppercase small mb-2">
+                <i class="bi @CategoryIcon(group.Key) me-1"></i>@CategoryLabel(group.Key)
+            </h6>
+            <div class="row g-3">
+                @foreach (var item in group)
+                {
+                    var isSelected = _selected.Contains(item.Id);
+                    <div class="col-md-6 col-lg-4">
+                        <div class="card h-100 @(isSelected ? "border-primary" : "")" style="cursor:pointer" @onclick="() => Toggle(item.Id)">
+                            <div class="card-body d-flex flex-column">
+                                <div class="d-flex align-items-center gap-2 mb-2">
+                                    <div class="form-check m-0">
+                                        <input class="form-check-input" type="checkbox" checked="@isSelected" @onclick:stopPropagation @onclick="() => Toggle(item.Id)" />
+                                    </div>
+                                    <i class="bi @(item.Icon ?? "bi-box")" style="color:var(--c-primary);font-size:1.2rem"></i>
+                                    <span class="fw-semibold">@item.Name</span>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(item.Description))
+                                {
+                                    <p class="text-muted small mb-2 flex-grow-1">@item.Description</p>
+                                }
+                                <div class="mt-auto">
+                                    <span class="fw-bold" style="color:var(--c-primary)">@item.Price.ToString("0") zł</span>
+                                    @if (item.PriceType == "monthly")
+                                    {
+                                        <span class="text-muted small"> / @(item.Unit ?? "mies.")</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted small"> jednorazowo</span>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                }
+            </div>
+        </div>
+    }
+
+    @if (_selected.Count > 0)
+    {
+        <div class="card border-primary mt-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                    <div>
+                        <span class="fw-semibold">Wybrano: @_selected.Count @(_selected.Count == 1 ? "usługa" : _selected.Count < 5 ? "usługi" : "usług")</span>
+                        <span class="text-muted ms-2">Razem: <strong>@Total().ToString("0") zł</strong></span>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => _selected.Clear()">
+                            <i class="bi bi-x-lg me-1"></i>Wyczyść
+                        </button>
+                        <button class="btn btn-primary" @onclick="PlaceOrder" disabled="@_ordering">
+                            @if (_ordering) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                            <i class="bi bi-bag-check me-1"></i>Zamów
+                        </button>
+                    </div>
+                </div>
+
+                <div class="mt-3">
+                    <label class="form-label small fw-semibold">Uwagi do zamówienia (opcjonalnie)</label>
+                    <textarea class="form-control" rows="2" @bind="_notes" placeholder="np. preferowana data realizacji..."></textarea>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private List<StoreItem> _catalog = new();
+    private HashSet<int> _selected = new();
+    private string? _notes;
+    private bool _loading = true;
+    private bool _ordering;
+    private string? _error;
+    private string? _success;
+
+    protected override async Task OnInitializedAsync() => await LoadCatalog();
+
+    private async Task LoadCatalog()
+    {
+        _loading = true;
+        _error = null;
+
+        var portalUrl = Environment.GetEnvironmentVariable("PORTAL_URL");
+        var slug = Environment.GetEnvironmentVariable("TENANT_SLUG");
+        var secret = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+
+        if (string.IsNullOrEmpty(portalUrl) || string.IsNullOrEmpty(slug))
+        {
+            _error = "Sklep usług nie jest skonfigurowany. Skontaktuj się z administratorem portalu.";
+            _loading = false;
+            return;
+        }
+
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"{portalUrl.TrimEnd('/')}/api/store/{slug}");
+            if (!string.IsNullOrEmpty(secret))
+                req.Headers.TryAddWithoutValidation("X-Internal-Secret", secret);
+
+            var resp = await http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _error = $"Nie udało się pobrać katalogu usług (HTTP {(int)resp.StatusCode}).";
+                _loading = false;
+                return;
+            }
+
+            var json = await resp.Content.ReadAsStringAsync();
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            _catalog.Clear();
+            if (root.TryGetProperty("catalog", out var catalogEl))
+            {
+                foreach (var el in catalogEl.EnumerateArray())
+                {
+                    _catalog.Add(new StoreItem
+                    {
+                        Id = el.GetProperty("id").GetInt32(),
+                        Name = el.GetProperty("name").GetString() ?? "",
+                        Description = el.TryGetProperty("description", out var d) ? d.GetString() : null,
+                        Category = el.GetProperty("category").GetString() ?? "",
+                        Icon = el.TryGetProperty("icon", out var ic) ? ic.GetString() : null,
+                        Price = el.GetProperty("price").GetDecimal(),
+                        PriceType = el.GetProperty("priceType").GetString() ?? "one_time",
+                        Unit = el.TryGetProperty("unit", out var u) ? u.GetString() : null
+                    });
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _error = $"Błąd połączenia ze sklepem: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Toggle(int id)
+    {
+        if (!_selected.Remove(id))
+            _selected.Add(id);
+    }
+
+    private decimal Total() => _catalog.Where(c => _selected.Contains(c.Id)).Sum(c => c.Price);
+
+    private async Task PlaceOrder()
+    {
+        if (_selected.Count == 0) return;
+        _ordering = true;
+        _error = null;
+        _success = null;
+
+        var portalUrl = Environment.GetEnvironmentVariable("PORTAL_URL");
+        var slug = Environment.GetEnvironmentVariable("TENANT_SLUG");
+        var secret = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            var payload = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                items = _selected.ToArray(),
+                notes = _notes
+            });
+
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"{portalUrl!.TrimEnd('/')}/api/store/{slug}/order");
+            req.Content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+            if (!string.IsNullOrEmpty(secret))
+                req.Headers.TryAddWithoutValidation("X-Internal-Secret", secret);
+
+            var resp = await http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var body = await resp.Content.ReadAsStringAsync();
+                _error = $"Nie udało się złożyć zamówienia (HTTP {(int)resp.StatusCode}). {body}";
+                return;
+            }
+
+            _selected.Clear();
+            _notes = null;
+            _success = "Zamówienie zostało złożone. Administrator portalu zostanie powiadomiony.";
+        }
+        catch (Exception ex)
+        {
+            _error = $"Błąd: {ex.Message}";
+        }
+        finally
+        {
+            _ordering = false;
+        }
+    }
+
+    private static string CategoryLabel(string c) => c switch
+    {
+        "branding" => "Branding",
+        "setup" => "Konfiguracja",
+        "training" => "Szkolenie",
+        "support" => "Wsparcie",
+        "addon" => "Dodatek",
+        _ => c
+    };
+
+    private static string CategoryIcon(string c) => c switch
+    {
+        "branding" => "bi-palette",
+        "setup" => "bi-gear",
+        "training" => "bi-mortarboard",
+        "support" => "bi-headset",
+        "addon" => "bi-puzzle",
+        _ => "bi-box"
+    };
+
+    private class StoreItem
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+        public string Category { get; set; } = "";
+        public string? Icon { get; set; }
+        public decimal Price { get; set; }
+        public string PriceType { get; set; } = "one_time";
+        public string? Unit { get; set; }
+    }
+}

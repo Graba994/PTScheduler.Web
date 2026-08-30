@@ -166,6 +166,106 @@ app.MapGet("/api/backups/{id:int}/download", async (
     return Results.File(entry.FilePath, "application/gzip", Path.GetFileName(entry.FilePath));
 }).RequireAuthorization();
 
+// ---- Store API ----
+// Tenant apps call these endpoints to fetch their service catalog and place orders.
+// Secured by the same shared secret used for internal endpoints.
+app.MapGet("/api/store/{slug}", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config) =>
+{
+    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+    if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
+        return Results.Unauthorized();
+
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null) return Results.NotFound();
+
+    var items = await db.ServiceItems.AsNoTracking()
+        .Where(s => s.IsActive)
+        .OrderBy(s => s.SortOrder)
+        .ToListAsync();
+
+    var overrides = await db.TenantServicePrices.AsNoTracking()
+        .Where(p => p.TenantId == tenant.Id)
+        .ToDictionaryAsync(p => p.ServiceItemId);
+
+    var catalog = items
+        .Where(s => !overrides.TryGetValue(s.Id, out var ov) || !ov.IsHidden)
+        .Select(s =>
+        {
+            var price = overrides.TryGetValue(s.Id, out var ov) ? ov.CustomPrice : s.DefaultPrice;
+            return new
+            {
+                s.Id, s.Name, s.Description, s.Category, s.Icon,
+                Price = price, s.PriceType, s.Unit
+            };
+        })
+        .ToList();
+
+    return Results.Json(new { tenantId = tenant.Id, companyName = tenant.CompanyName, catalog });
+});
+
+app.MapPost("/api/store/{slug}/order", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config) =>
+{
+    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+    if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
+        return Results.Unauthorized();
+
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null) return Results.NotFound();
+
+    using var reader = new StreamReader(ctx.Request.Body);
+    var body = await reader.ReadToEndAsync();
+    using var doc = System.Text.Json.JsonDocument.Parse(body);
+    var root = doc.RootElement;
+
+    if (!root.TryGetProperty("items", out var itemsEl) || itemsEl.ValueKind != System.Text.Json.JsonValueKind.Array)
+        return Results.BadRequest(new { error = "Brak elementów zamówienia." });
+
+    var notes = root.TryGetProperty("notes", out var n) ? n.GetString() : null;
+
+    var overrides = await db.TenantServicePrices.AsNoTracking()
+        .Where(p => p.TenantId == tenant.Id)
+        .ToDictionaryAsync(p => p.ServiceItemId);
+
+    var orders = new List<ServiceOrder>();
+    foreach (var itemEl in itemsEl.EnumerateArray())
+    {
+        var serviceItemId = itemEl.GetInt32();
+        var serviceItem = await db.ServiceItems.AsNoTracking().FirstOrDefaultAsync(s => s.Id == serviceItemId && s.IsActive);
+        if (serviceItem is null) continue;
+
+        if (overrides.TryGetValue(serviceItemId, out var ov) && ov.IsHidden) continue;
+
+        var price = overrides.TryGetValue(serviceItemId, out var ovp) ? ovp.CustomPrice : serviceItem.DefaultPrice;
+
+        orders.Add(new ServiceOrder
+        {
+            TenantId = tenant.Id,
+            ServiceItemId = serviceItemId,
+            Price = price,
+            Notes = notes,
+            CreatedAt = DateTime.UtcNow
+        });
+    }
+
+    if (orders.Count == 0)
+        return Results.BadRequest(new { error = "Żaden z wybranych elementów nie jest dostępny." });
+
+    db.ServiceOrders.AddRange(orders);
+    await db.SaveChangesAsync();
+
+    return Results.Json(new { success = true, count = orders.Count, orderIds = orders.Select(o => o.Id).ToArray() });
+});
+
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();

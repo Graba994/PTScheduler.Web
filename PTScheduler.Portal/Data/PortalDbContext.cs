@@ -16,6 +16,9 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<BackupEntry> BackupEntries => Set<BackupEntry>();
     public DbSet<PaymentRecord> PaymentRecords => Set<PaymentRecord>();
     public DbSet<TenantEvent> TenantEvents => Set<TenantEvent>();
+    public DbSet<ServiceItem> ServiceItems => Set<ServiceItem>();
+    public DbSet<TenantServicePrice> TenantServicePrices => Set<TenantServicePrice>();
+    public DbSet<ServiceOrder> ServiceOrders => Set<ServiceOrder>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -73,7 +76,30 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId);
         });
 
+        b.Entity<ServiceItem>(e =>
+        {
+            e.HasIndex(x => x.Category);
+            e.HasIndex(x => x.IsActive);
+        });
+
+        b.Entity<TenantServicePrice>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.ServiceItemId }).IsUnique();
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId);
+            e.HasOne(x => x.ServiceItem).WithMany().HasForeignKey(x => x.ServiceItemId);
+        });
+
+        b.Entity<ServiceOrder>(e =>
+        {
+            e.HasIndex(x => x.TenantId);
+            e.HasIndex(x => x.CreatedAt);
+            e.HasIndex(x => x.Status);
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId);
+            e.HasOne(x => x.ServiceItem).WithMany().HasForeignKey(x => x.ServiceItemId);
+        });
+
         SeedPlans(b);
+        SeedServiceItems(b);
     }
 
     private static void SeedPlans(ModelBuilder b)
@@ -214,6 +240,102 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
                 VideoProvider = "bunny",
                 SortOrder = 4,
                 IsFeatured = false
+            }
+        );
+    }
+
+    private static void SeedServiceItems(ModelBuilder b)
+    {
+        b.Entity<ServiceItem>().HasData(
+            new ServiceItem
+            {
+                Id = 1,
+                Name = "Zmiana logo / kolorów strony",
+                Description = "Wymiana logo, dopasowanie kolorystyki i motywu strony trenera.",
+                Category = "branding",
+                DefaultPrice = 30,
+                PriceType = "one_time",
+                Icon = "bi-palette",
+                SortOrder = 1
+            },
+            new ServiceItem
+            {
+                Id = 2,
+                Name = "Konfiguracja grafiku zajęć",
+                Description = "Ustawienie typów wizyt, godzin pracy, cyklicznych zajęć.",
+                Category = "setup",
+                DefaultPrice = 30,
+                PriceType = "one_time",
+                Icon = "bi-calendar-week",
+                SortOrder = 2
+            },
+            new ServiceItem
+            {
+                Id = 3,
+                Name = "Ustawienie płatności online",
+                Description = "Konfiguracja PayU lub Przelewy24, testowanie procesu płatności.",
+                Category = "setup",
+                DefaultPrice = 50,
+                PriceType = "one_time",
+                Icon = "bi-credit-card",
+                SortOrder = 3
+            },
+            new ServiceItem
+            {
+                Id = 4,
+                Name = "Import bazy klientów",
+                Description = "Import listy klientów z pliku Excel/CSV do systemu.",
+                Category = "setup",
+                DefaultPrice = 50,
+                PriceType = "one_time",
+                Icon = "bi-people",
+                SortOrder = 4
+            },
+            new ServiceItem
+            {
+                Id = 5,
+                Name = "Szkolenie 1:1 (30 min)",
+                Description = "Indywidualne szkolenie wideo z obsługi systemu.",
+                Category = "training",
+                DefaultPrice = 80,
+                PriceType = "one_time",
+                Icon = "bi-camera-video",
+                SortOrder = 5
+            },
+            new ServiceItem
+            {
+                Id = 6,
+                Name = "Pełna konfiguracja strony",
+                Description = "Kompleksowe ustawienie strony: branding, grafik, usługi, płatności.",
+                Category = "setup",
+                DefaultPrice = 150,
+                PriceType = "one_time",
+                Icon = "bi-wrench-adjustable",
+                SortOrder = 6
+            },
+            new ServiceItem
+            {
+                Id = 7,
+                Name = "Pakiet Wsparcie Podstawowy",
+                Description = "2 drobne zmiany/mies., email 24h, 1 szkolenie/kwartał.",
+                Category = "support",
+                DefaultPrice = 29,
+                PriceType = "monthly",
+                Unit = "miesiąc",
+                Icon = "bi-headset",
+                SortOrder = 10
+            },
+            new ServiceItem
+            {
+                Id = 8,
+                Name = "Pakiet Wsparcie Premium",
+                Description = "Bez limitu drobnych zmian, priorytet + telefon, 1 szkolenie/mies.",
+                Category = "support",
+                DefaultPrice = 79,
+                PriceType = "monthly",
+                Unit = "miesiąc",
+                Icon = "bi-star",
+                SortOrder = 11
             }
         );
     }

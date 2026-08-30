@@ -16,6 +16,8 @@ public class TenantService(
 {
     private string TenantImage => config.GetValue<string>("Portal:TenantImage") ?? "ptscheduler-web:latest";
     private string ForwardHost => config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220";
+    private string PortalUrl => config.GetValue<string>("Portal:PublicUrl") ?? $"http://{ForwardHost}:8081";
+    private string InternalSecret => config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
 
     public async Task<List<Tenant>> GetAllAsync()
     {
@@ -117,7 +119,9 @@ public class TenantService(
                 tenant.Port,
                 TenantImage,
                 tenant.Domain,
-                entitlementsJson);
+                entitlementsJson,
+                PortalUrl,
+                InternalSecret);
 
             tenant.Status = TenantStatus.Active;
             tenant.ProvisionedAt = DateTime.UtcNow;
@@ -277,7 +281,8 @@ public class TenantService(
             var entitlements = SerializePlan(plan);
             await docker.RecreateWebContainerAsync(
                 tenant.Slug, tenant.DbPassword, tenant.Port,
-                TenantImage, tenant.Domain, entitlements);
+                TenantImage, tenant.Domain, entitlements,
+                PortalUrl, InternalSecret);
             return (true, $"Web container '{tenant.WebContainerName}' zrestartowany z nowym planem '{plan.Name}'.");
         }
         catch (Exception ex)
