@@ -53,6 +53,7 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string P24Crc = "p24_crc";
         public const string P24Sandbox = "p24_sandbox";
         public const string StorePaymentGateway = "store_payment_gateway";
+        public const string AdminNotificationEmail = "admin_notification_email";
     }
 
     private static readonly Dictionary<string, string> Defaults = new()

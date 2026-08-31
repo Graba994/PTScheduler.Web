@@ -33,6 +33,103 @@ else
         </div>
     }
 
+    @if (_tenant.Status == TenantStatus.Pending)
+    {
+        <div class="card border-warning border-2 shadow-sm mb-4">
+            <div class="card-header bg-warning-subtle d-flex align-items-center gap-2">
+                <i class="bi bi-person-check fs-5 text-warning"></i>
+                <h5 class="fw-bold mb-0">Akceptacja trenera</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6">
+                        <dl class="row mb-0 small">
+                            <dt class="col-5 text-muted">Imie i nazwisko</dt>
+                            <dd class="col-7 fw-semibold">@_tenant.OwnerName</dd>
+                            <dt class="col-5 text-muted">Email</dt>
+                            <dd class="col-7"><a href="mailto:@_tenant.OwnerEmail">@_tenant.OwnerEmail</a></dd>
+                            <dt class="col-5 text-muted">Telefon</dt>
+                            <dd class="col-7">@(_tenant.Phone ?? "—")</dd>
+                            <dt class="col-5 text-muted">Firma</dt>
+                            <dd class="col-7">@_tenant.CompanyName</dd>
+                            <dt class="col-5 text-muted">Plan</dt>
+                            <dd class="col-7"><span class="badge bg-primary-subtle text-primary-emphasis">@(_tenant.Plan?.Name ?? _tenant.PlanId)</span></dd>
+                            <dt class="col-5 text-muted">Setup</dt>
+                            <dd class="col-7">@(_tenant.SetupMode == "admin" ? "Przez nasz zespol" : "Samodzielna konfiguracja")</dd>
+                            <dt class="col-5 text-muted">Rejestracja</dt>
+                            <dd class="col-7">@_tenant.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</dd>
+                        </dl>
+                    </div>
+                    <div class="col-md-6">
+                        <h6 class="fw-bold mb-2 small"><i class="bi bi-tags me-1 text-primary"></i>Zmien plan (opcjonalnie)</h6>
+                        <select class="form-select form-select-sm mb-3" @bind="_selectedPlanId">
+                            @foreach (var p in _availablePlans)
+                            {
+                                <option value="@p.Id">@p.Name — @p.MonthlyPrice.ToString("0") zl</option>
+                            }
+                        </select>
+
+                        <h6 class="fw-bold mb-2 small"><i class="bi bi-sticky me-1"></i>Notatka admina (opcjonalnie)</h6>
+                        <textarea class="form-control form-control-sm" rows="2" @bind="_approvalNotes" placeholder="Notatka wewnetrzna..."></textarea>
+                    </div>
+                </div>
+
+                @if (_approvalServiceItems is not null && _approvalServiceItems.Count > 0)
+                {
+                    <hr class="my-3" />
+                    <h6 class="fw-bold mb-2"><i class="bi bi-shop me-2 text-primary"></i>Cennik uslug (indywidualny)</h6>
+                    <p class="text-muted small mb-2">Ustaw indywidualne ceny lub ukryj uslugi dla tego trenera. Puste = cena domyslna.</p>
+                    <div class="table-responsive">
+                        <table class="table table-sm small align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Usluga</th>
+                                    <th>Cena domyslna</th>
+                                    <th style="width:140px">Cena indywidualna</th>
+                                    <th style="width:80px">Ukryj</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var item in _approvalServiceItems)
+                                {
+                                    <tr>
+                                        <td>
+                                            <i class="bi @(item.Icon ?? "bi-box") me-1 text-primary"></i>
+                                            @item.Name
+                                            @if (item.PriceType == "monthly") { <span class="text-muted">/ @(item.Unit ?? "mies.")</span> }
+                                        </td>
+                                        <td>@item.DefaultPrice.ToString("0") zl</td>
+                                        <td>
+                                            <input type="number" class="form-control form-control-sm"
+                                                   placeholder="@item.DefaultPrice.ToString("0")"
+                                                   @onchange="(e) => SetApprovalPrice(item.Id, e.Value?.ToString())" />
+                                        </td>
+                                        <td class="text-center">
+                                            <input type="checkbox" class="form-check-input"
+                                                   @onchange="(e) => ToggleApprovalHidden(item.Id, (bool)(e.Value ?? false))" />
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+
+                <hr class="my-3" />
+                <div class="d-flex gap-2">
+                    <button class="btn btn-success" @onclick="ApproveAndProvision" disabled="@_approving">
+                        @if (_approving) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        <i class="bi bi-check-circle me-1"></i>Zaakceptuj i uruchom instancje
+                    </button>
+                    <button class="btn btn-outline-danger" @onclick="RejectRegistration" disabled="@_rejecting">
+                        @if (_rejecting) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        <i class="bi bi-x-circle me-1"></i>Odrzuc
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+
     <div class="row g-3">
         <div class="col-md-6">
             <div class="card border-0 shadow-sm h-100">
@@ -828,6 +925,9 @@ else
             await using var db = DbFactory.CreateDbContext();
             _availablePlans = await db.Plans.AsNoTracking()
                 .Where(p => p.IsActive).OrderBy(p => p.SortOrder).ToListAsync();
+
+            if (_tenant.Status == TenantStatus.Pending)
+                await LoadApprovalPricing();
         }
     }
 
@@ -1421,5 +1521,128 @@ else
     {
         public decimal? CustomPrice { get; set; }
         public bool IsHidden { get; set; }
+    }
+
+    private List<ServiceItem>? _approvalServiceItems;
+    private Dictionary<int, PriceEdit> _approvalPriceEdits = new();
+    private string _approvalNotes = "";
+    private bool _approving;
+    private bool _rejecting;
+
+    private async Task LoadApprovalPricing()
+    {
+        await using var db = DbFactory.CreateDbContext();
+        _approvalServiceItems = await db.ServiceItems.AsNoTracking()
+            .Where(s => s.IsActive).OrderBy(s => s.SortOrder).ToListAsync();
+        _approvalPriceEdits.Clear();
+        foreach (var item in _approvalServiceItems)
+            _approvalPriceEdits[item.Id] = new PriceEdit();
+    }
+
+    private void SetApprovalPrice(int serviceItemId, string? value)
+    {
+        if (!_approvalPriceEdits.ContainsKey(serviceItemId)) return;
+        _approvalPriceEdits[serviceItemId].CustomPrice = decimal.TryParse(value, out var d) ? d : null;
+    }
+
+    private void ToggleApprovalHidden(int serviceItemId, bool hidden)
+    {
+        if (!_approvalPriceEdits.ContainsKey(serviceItemId)) return;
+        _approvalPriceEdits[serviceItemId].IsHidden = hidden;
+    }
+
+    private async Task ApproveAndProvision()
+    {
+        if (_tenant is null) return;
+        _approving = true;
+        try
+        {
+            if (_selectedPlanId != _tenant.PlanId)
+                await TenantSvc.UpdatePlanAsync(_tenant.Id, _selectedPlanId);
+
+            if (!string.IsNullOrWhiteSpace(_approvalNotes))
+            {
+                await using var ndb = DbFactory.CreateDbContext();
+                var t = await ndb.Tenants.FindAsync(_tenant.Id);
+                if (t is not null) { t.Notes = _approvalNotes.Trim(); await ndb.SaveChangesAsync(); }
+            }
+
+            if (_approvalServiceItems is not null)
+            {
+                await using var db = DbFactory.CreateDbContext();
+                foreach (var item in _approvalServiceItems)
+                {
+                    var edit = _approvalPriceEdits.GetValueOrDefault(item.Id);
+                    if (edit is null) continue;
+                    var hasOverride = edit.CustomPrice.HasValue || edit.IsHidden;
+                    if (!hasOverride) continue;
+                    db.TenantServicePrices.Add(new TenantServicePrice
+                    {
+                        TenantId = _tenant.Id,
+                        ServiceItemId = item.Id,
+                        CustomPrice = edit.CustomPrice ?? item.DefaultPrice,
+                        IsHidden = edit.IsHidden
+                    });
+                }
+                await db.SaveChangesAsync();
+            }
+
+            var (ok, output) = await TenantSvc.ProvisionAsync(_tenant.Id);
+            _provisionOutput = output;
+
+            if (ok)
+            {
+                _tenant = await TenantSvc.GetAsync(Id);
+                var planName = _availablePlans.FirstOrDefault(p => p.Id == _selectedPlanId)?.Name ?? _selectedPlanId;
+                var body = EmailSvc.TenantApprovedEmailBody(
+                    _tenant!.OwnerName, _tenant.Domain, _tenant.Port.ToString(), planName);
+                _ = EmailSvc.SendAsync(_tenant.OwnerEmail, "PTScheduler — Twoje konto zostalo zaakceptowane!", body);
+                ShowMessage("Tenant zaakceptowany i uruchomiony. Email wyslany.");
+            }
+            else
+            {
+                ShowMessage($"Provisioning nie powiodl sie: {output}", true);
+            }
+
+            _tenant = await TenantSvc.GetAsync(Id);
+            await RefreshContainers();
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Blad: {ex.Message}", true);
+        }
+        finally { _approving = false; }
+    }
+
+    private async Task RejectRegistration()
+    {
+        if (_tenant is null) return;
+        _rejecting = true;
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            var tenant = await db.Tenants.FindAsync(_tenant.Id);
+            if (tenant is null) { ShowMessage("Tenant nie znaleziony.", true); return; }
+
+            tenant.Status = TenantStatus.Suspended;
+            if (!string.IsNullOrWhiteSpace(_approvalNotes))
+                tenant.Notes = _approvalNotes.Trim();
+
+            db.TenantEvents.Add(new TenantEvent
+            {
+                TenantId = tenant.Id,
+                EventType = TenantEventTypes.Suspended,
+                Detail = "Rejestracja odrzucona przez admina"
+            });
+            await db.SaveChangesAsync();
+
+            ShowMessage("Rejestracja odrzucona.");
+            _tenant = await TenantSvc.GetAsync(Id);
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Blad: {ex.Message}", true);
+        }
+        finally { _rejecting = false; }
     }
 }

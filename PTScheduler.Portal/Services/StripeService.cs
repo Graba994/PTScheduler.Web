@@ -198,22 +198,7 @@ public class StripeService(
         });
         await db.SaveChangesAsync();
 
-        if (tenant.Status == TenantStatus.Pending)
-        {
-            var (ok, output) = await tenants.ProvisionAsync(tenant.Id);
-            if (ok)
-            {
-                logger.LogInformation("Auto-provisioned tenant {Slug} after Stripe payment", tenant.Slug);
-                var body = email.WelcomeEmailBody(
-                    tenant.OwnerName, tenant.Domain, tenant.Port.ToString(),
-                    tenant.Plan?.Name ?? tenant.PlanId);
-                _ = email.SendAsync(tenant.OwnerEmail, "Twoja instancja PTScheduler jest gotowa!", body);
-            }
-            else
-            {
-                logger.LogError("Provisioning failed after Stripe payment for {Slug}: {Msg}", tenant.Slug, output);
-            }
-        }
+        logger.LogInformation("Stripe checkout completed for tenant {Slug}, awaiting manual approval", tenant.Slug);
     }
 
     private async Task HandleSubscriptionChangeAsync(Stripe.Subscription sub)
