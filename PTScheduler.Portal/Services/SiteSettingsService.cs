@@ -43,6 +43,16 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string GithubRepo = "github_repo";
         public const string GithubBranch = "github_branch";
         public const string FeaturedTrainers = "featured_trainers";
+        public const string PayuPosId = "payu_pos_id";
+        public const string PayuClientSecret = "payu_client_secret";
+        public const string PayuSecondKey = "payu_second_key";
+        public const string PayuSandbox = "payu_sandbox";
+        public const string P24MerchantId = "p24_merchant_id";
+        public const string P24PosId = "p24_pos_id";
+        public const string P24ApiKey = "p24_api_key";
+        public const string P24Crc = "p24_crc";
+        public const string P24Sandbox = "p24_sandbox";
+        public const string StorePaymentGateway = "store_payment_gateway";
     }
 
     private static readonly Dictionary<string, string> Defaults = new()

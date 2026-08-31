@@ -2,6 +2,7 @@
 @using PTScheduler.Domain.Constants
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
 @inject IConfiguration Config
+@inject NavigationManager Nav
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Sklep usług" />
@@ -9,6 +10,21 @@
 <div class="page-header">
     <h4 class="page-title"><i class="bi bi-shop me-2" style="color:var(--c-primary)"></i>Sklep usług</h4>
 </div>
+
+@if (_paymentResult == "success")
+{
+    <div class="alert alert-success alert-dismissible">
+        <i class="bi bi-check-circle me-2"></i>Płatność zakończona pomyślnie! Zamówienie zostało przyjęte.
+        <button type="button" class="btn-close" @onclick="() => _paymentResult = null"></button>
+    </div>
+}
+else if (_paymentResult == "cancel")
+{
+    <div class="alert alert-warning alert-dismissible">
+        <i class="bi bi-x-circle me-2"></i>Płatność została anulowana. Możesz spróbować ponownie.
+        <button type="button" class="btn-close" @onclick="() => _paymentResult = null"></button>
+    </div>
+}
 
 @if (_error is not null)
 {
@@ -96,10 +112,6 @@ else
                         <button class="btn btn-outline-secondary btn-sm" @onclick="() => _selected.Clear()">
                             <i class="bi bi-x-lg me-1"></i>Wyczyść
                         </button>
-                        <button class="btn btn-primary" @onclick="PlaceOrder" disabled="@_ordering">
-                            @if (_ordering) { <span class="spinner-border spinner-border-sm me-2"></span> }
-                            <i class="bi bi-bag-check me-1"></i>Zamów
-                        </button>
                     </div>
                 </div>
 
@@ -107,21 +119,65 @@ else
                     <label class="form-label small fw-semibold">Uwagi do zamówienia (opcjonalnie)</label>
                     <textarea class="form-control" rows="2" @bind="_notes" placeholder="np. preferowana data realizacji..."></textarea>
                 </div>
+
+                @if (_gateways.Count > 0)
+                {
+                    <div class="mt-3">
+                        <label class="form-label small fw-semibold">Metoda płatności</label>
+                        <div class="d-flex flex-wrap gap-2">
+                            @foreach (var gw in _gateways)
+                            {
+                                var isActive = _selectedGateway == gw;
+                                <button class="btn btn-sm @(isActive ? "btn-primary" : "btn-outline-secondary")"
+                                        @onclick="() => _selectedGateway = gw">
+                                    <i class="bi @GatewayIcon(gw) me-1"></i>@GatewayLabel(gw)
+                                </button>
+                            }
+                        </div>
+                    </div>
+                }
+
+                <div class="mt-3 d-flex gap-2">
+                    @if (_gateways.Count > 0 && !string.IsNullOrEmpty(_selectedGateway))
+                    {
+                        <button class="btn btn-primary" @onclick="PlaceOrderWithPayment" disabled="@_ordering">
+                            @if (_ordering) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                            <i class="bi bi-credit-card me-1"></i>Zamów i zapłać (@Total().ToString("0") zł)
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-primary" @onclick="PlaceOrder" disabled="@_ordering">
+                            @if (_ordering) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                            <i class="bi bi-bag-check me-1"></i>Zamów
+                        </button>
+                    }
+                </div>
             </div>
         </div>
     }
 }
 
 @code {
+    [SupplyParameterFromQuery(Name = "payment")]
+    public string? PaymentQuery { get; set; }
+
     private List<StoreItem> _catalog = new();
+    private List<string> _gateways = new();
     private HashSet<int> _selected = new();
     private string? _notes;
+    private string? _selectedGateway;
     private bool _loading = true;
     private bool _ordering;
     private string? _error;
     private string? _success;
+    private string? _paymentResult;
 
-    protected override async Task OnInitializedAsync() => await LoadCatalog();
+    protected override async Task OnInitializedAsync()
+    {
+        _paymentResult = PaymentQuery;
+        await LoadCatalog();
+    }
 
     private async Task LoadCatalog()
     {
@@ -176,6 +232,20 @@ else
                     });
                 }
             }
+
+            _gateways.Clear();
+            if (root.TryGetProperty("gateways", out var gwEl))
+            {
+                foreach (var gw in gwEl.EnumerateArray())
+                {
+                    var val = gw.GetString();
+                    if (!string.IsNullOrEmpty(val))
+                        _gateways.Add(val);
+                }
+            }
+
+            if (_gateways.Count == 1)
+                _selectedGateway = _gateways[0];
         }
         catch (Exception ex)
         {
@@ -242,6 +312,70 @@ else
         }
     }
 
+    private async Task PlaceOrderWithPayment()
+    {
+        if (_selected.Count == 0 || string.IsNullOrEmpty(_selectedGateway)) return;
+        _ordering = true;
+        _error = null;
+        _success = null;
+
+        var portalUrl = Environment.GetEnvironmentVariable("PORTAL_URL");
+        var slug = Environment.GetEnvironmentVariable("TENANT_SLUG");
+        var secret = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+        var returnUrl = Nav.BaseUri.TrimEnd('/') + "/admin/sklep";
+
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            var payload = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                items = _selected.ToArray(),
+                notes = _notes,
+                gateway = _selectedGateway,
+                returnUrl
+            });
+
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"{portalUrl!.TrimEnd('/')}/api/store/{slug}/order");
+            req.Content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+            if (!string.IsNullOrEmpty(secret))
+                req.Headers.TryAddWithoutValidation("X-Internal-Secret", secret);
+
+            var resp = await http.SendAsync(req);
+            var body = await resp.Content.ReadAsStringAsync();
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                _error = $"Nie udało się złożyć zamówienia (HTTP {(int)resp.StatusCode}). {body}";
+                return;
+            }
+
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("paymentUrl", out var urlEl))
+            {
+                var paymentUrl = urlEl.GetString();
+                if (!string.IsNullOrWhiteSpace(paymentUrl))
+                {
+                    Nav.NavigateTo(paymentUrl, forceLoad: true);
+                    return;
+                }
+            }
+
+            _selected.Clear();
+            _notes = null;
+            _success = "Zamówienie zostało złożone. Administrator portalu zostanie powiadomiony.";
+        }
+        catch (Exception ex)
+        {
+            _error = $"Błąd: {ex.Message}";
+        }
+        finally
+        {
+            _ordering = false;
+        }
+    }
+
     private static string CategoryLabel(string c) => c switch
     {
         "branding" => "Branding",
@@ -260,6 +394,22 @@ else
         "support" => "bi-headset",
         "addon" => "bi-puzzle",
         _ => "bi-box"
+    };
+
+    private static string GatewayLabel(string gw) => gw switch
+    {
+        "stripe" => "Karta (Stripe)",
+        "payu" => "PayU",
+        "przelewy24" => "Przelewy24",
+        _ => gw
+    };
+
+    private static string GatewayIcon(string gw) => gw switch
+    {
+        "stripe" => "bi-credit-card",
+        "payu" => "bi-wallet2",
+        "przelewy24" => "bi-bank",
+        _ => "bi-cash"
     };
 
     private class StoreItem

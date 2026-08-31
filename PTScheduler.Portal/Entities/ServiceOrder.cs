@@ -13,6 +13,10 @@ public class ServiceOrder
     public DateTime? AcceptedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
     public string? StripePaymentIntentId { get; set; }
+    public string? OrderGroupId { get; set; }
+    public string? PaymentGateway { get; set; }
+    public string? PaymentExternalId { get; set; }
+    public DateTime? PaidAt { get; set; }
 
     public Tenant Tenant { get; set; } = null!;
     public ServiceItem ServiceItem { get; set; } = null!;
@@ -20,9 +24,10 @@ public class ServiceOrder
 
 public enum ServiceOrderStatus
 {
-    Pending,
-    Accepted,
-    InProgress,
-    Completed,
-    Cancelled
+    Pending = 0,
+    Accepted = 1,
+    InProgress = 2,
+    Completed = 3,
+    Cancelled = 4,
+    AwaitingPayment = 5
 }

@@ -65,7 +65,9 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.HasIndex(p => p.TenantId);
             e.HasIndex(p => p.CreatedAt);
             e.HasIndex(p => p.StripeInvoiceId);
+            e.HasIndex(p => p.ExternalPaymentId);
             e.HasOne(p => p.Tenant).WithMany().HasForeignKey(p => p.TenantId);
+            e.HasOne(p => p.ServiceOrder).WithMany().HasForeignKey(p => p.ServiceOrderId);
         });
 
         b.Entity<TenantEvent>(e =>
@@ -94,6 +96,8 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.HasIndex(x => x.TenantId);
             e.HasIndex(x => x.CreatedAt);
             e.HasIndex(x => x.Status);
+            e.HasIndex(x => x.OrderGroupId);
+            e.HasIndex(x => x.PaymentExternalId);
             e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId);
             e.HasOne(x => x.ServiceItem).WithMany().HasForeignKey(x => x.ServiceItemId);
         });

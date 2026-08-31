@@ -11,6 +11,7 @@
     <div class="d-flex gap-2">
         <select class="form-select form-select-sm" style="width:auto" @bind="_statusFilter" @bind:after="Load">
             <option value="">Wszystkie</option>
+            <option value="AwaitingPayment">Oczekuje na płatność</option>
             <option value="Pending">Oczekujące</option>
             <option value="Accepted">Zaakceptowane</option>
             <option value="InProgress">W realizacji</option>
@@ -70,6 +71,15 @@ else
                             <div class="text-end">
                                 <div class="fw-bold text-primary">@order.Price.ToString("0") PLN</div>
                                 <div class="text-muted small">@order.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</div>
+                                @if (!string.IsNullOrWhiteSpace(order.PaymentGateway))
+                                {
+                                    <div class="small mt-1">
+                                        <span class="badge @(order.PaidAt.HasValue ? "bg-success-subtle text-success-emphasis" : "bg-warning-subtle text-warning-emphasis")">
+                                            <i class="bi @(order.PaidAt.HasValue ? "bi-check-circle" : "bi-hourglass-split") me-1"></i>
+                                            @GatewayLabel(order.PaymentGateway) @(order.PaidAt.HasValue ? "— opłacone" : "— nieopłacone")
+                                        </span>
+                                    </div>
+                                }
                             </div>
                         </div>
 
@@ -165,6 +175,7 @@ else
 
     private static string StatusLabel(ServiceOrderStatus s) => s switch
     {
+        ServiceOrderStatus.AwaitingPayment => "Oczekuje na płatność",
         ServiceOrderStatus.Pending => "Oczekuje",
         ServiceOrderStatus.Accepted => "Zaakceptowane",
         ServiceOrderStatus.InProgress => "W realizacji",
@@ -175,11 +186,20 @@ else
 
     private static string StatusBadge(ServiceOrderStatus s) => s switch
     {
+        ServiceOrderStatus.AwaitingPayment => "bg-danger-subtle text-danger-emphasis",
         ServiceOrderStatus.Pending => "bg-warning text-dark",
         ServiceOrderStatus.Accepted => "bg-info text-dark",
         ServiceOrderStatus.InProgress => "bg-primary",
         ServiceOrderStatus.Completed => "bg-success",
         ServiceOrderStatus.Cancelled => "bg-secondary",
         _ => "bg-light text-dark"
+    };
+
+    private static string GatewayLabel(string gw) => gw switch
+    {
+        "stripe" => "Stripe",
+        "payu" => "PayU",
+        "przelewy24" => "Przelewy24",
+        _ => gw
     };
 }

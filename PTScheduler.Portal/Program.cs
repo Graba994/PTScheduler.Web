@@ -46,6 +46,7 @@ builder.Services.AddScoped<NpmService>();
 builder.Services.AddScoped<UpdateService>();
 builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<StripeService>();
+builder.Services.AddScoped<StorePaymentService>();
 builder.Services.AddScoped<BackupService>();
 builder.Services.AddHostedService<BackupScheduler>();
 builder.Services.AddSingleton<UpdateNotifier>();
@@ -148,6 +149,121 @@ app.MapPost("/api/webhooks/stripe", async (HttpContext ctx, StripeService stripe
     return handled ? Results.Ok(new { received = true, type = msg }) : Results.BadRequest(new { error = msg });
 });
 
+// Stripe checkout.session.completed for store one-time payments
+app.MapPost("/api/webhooks/stripe/store", async (HttpContext ctx, StorePaymentService storePayment, SiteSettingsService siteSettings) =>
+{
+    using var reader = new StreamReader(ctx.Request.Body);
+    var payload = await reader.ReadToEndAsync();
+    var sig = ctx.Request.Headers["Stripe-Signature"].ToString();
+
+    var webhookSecret = await siteSettings.GetAsync(SiteSettingsService.Keys.StripeWebhookSecret);
+    if (string.IsNullOrWhiteSpace(webhookSecret))
+        return Results.BadRequest(new { error = "Webhook secret not configured" });
+
+    Stripe.Event stripeEvent;
+    try
+    {
+        stripeEvent = Stripe.EventUtility.ConstructEvent(payload, sig, webhookSecret);
+    }
+    catch (Stripe.StripeException)
+    {
+        return Results.BadRequest(new { error = "Invalid signature" });
+    }
+
+    if (stripeEvent.Type == Stripe.EventTypes.CheckoutSessionCompleted)
+    {
+        var session = (Stripe.Checkout.Session)stripeEvent.Data.Object;
+        if (session.Metadata.TryGetValue("source", out var source) && source == "store"
+            && session.Metadata.TryGetValue("orderGroupId", out _))
+        {
+            await storePayment.HandlePaymentConfirmationAsync("stripe", session.Id);
+        }
+    }
+
+    return Results.Ok(new { received = true });
+});
+
+// PayU notification webhook
+app.MapPost("/api/webhooks/payu", async (HttpContext ctx, StorePaymentService storePayment, ILogger<Program> logger) =>
+{
+    using var reader = new StreamReader(ctx.Request.Body);
+    var body = await reader.ReadToEndAsync();
+    var signature = ctx.Request.Headers["OpenPayU-Signature"].ToString();
+
+    if (!await storePayment.VerifyPayuNotification(body, signature))
+    {
+        logger.LogWarning("PayU webhook signature verification failed");
+        return Results.BadRequest(new { error = "Invalid signature" });
+    }
+
+    try
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(body);
+        var root = doc.RootElement;
+
+        if (root.TryGetProperty("order", out var order))
+        {
+            var status = order.GetProperty("status").GetString();
+            var orderId = order.GetProperty("orderId").GetString();
+
+            if (status == "COMPLETED" && !string.IsNullOrWhiteSpace(orderId))
+            {
+                await storePayment.HandlePaymentConfirmationAsync("payu", orderId);
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "PayU webhook processing failed");
+    }
+
+    return Results.Ok();
+});
+
+// Przelewy24 notification webhook
+app.MapPost("/api/webhooks/przelewy24", async (HttpContext ctx, StorePaymentService storePayment, ILogger<Program> logger) =>
+{
+    using var reader = new StreamReader(ctx.Request.Body);
+    var body = await reader.ReadToEndAsync();
+
+    try
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(body);
+        var root = doc.RootElement;
+
+        if (!await storePayment.VerifyP24Notification(root))
+        {
+            logger.LogWarning("P24 webhook signature verification failed");
+            return Results.BadRequest(new { error = "Invalid signature" });
+        }
+
+        if (await storePayment.ConfirmP24Transaction(root))
+        {
+            var sessionId = root.GetProperty("sessionId").GetString();
+            if (!string.IsNullOrWhiteSpace(sessionId))
+            {
+                await using var db = ctx.RequestServices.GetRequiredService<IDbContextFactory<PortalDbContext>>().CreateDbContext();
+                var orders = await db.ServiceOrders
+                    .Where(o => o.OrderGroupId == sessionId && o.PaymentGateway == "przelewy24")
+                    .ToListAsync();
+
+                if (orders.Count > 0)
+                {
+                    var externalId = orders[0].PaymentExternalId;
+                    if (!string.IsNullOrWhiteSpace(externalId))
+                        await storePayment.HandlePaymentConfirmationAsync("przelewy24", externalId);
+                }
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "P24 webhook processing failed");
+    }
+
+    return Results.Ok();
+});
+
 // Backup file download — admin only. The BackupEntry.Id determines
 // which file to stream; the path is stored in the entry so nothing
 // user-controlled hits the filesystem.
@@ -173,7 +289,8 @@ app.MapGet("/api/store/{slug}", async (
     string slug,
     HttpContext ctx,
     IDbContextFactory<PortalDbContext> dbFactory,
-    IConfiguration config) =>
+    IConfiguration config,
+    StorePaymentService storePayment) =>
 {
     var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
     if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
@@ -205,14 +322,17 @@ app.MapGet("/api/store/{slug}", async (
         })
         .ToList();
 
-    return Results.Json(new { tenantId = tenant.Id, companyName = tenant.CompanyName, catalog });
+    var gateways = await storePayment.GetAvailableGatewaysAsync();
+
+    return Results.Json(new { tenantId = tenant.Id, companyName = tenant.CompanyName, catalog, gateways });
 });
 
 app.MapPost("/api/store/{slug}/order", async (
     string slug,
     HttpContext ctx,
     IDbContextFactory<PortalDbContext> dbFactory,
-    IConfiguration config) =>
+    IConfiguration config,
+    StorePaymentService storePayment) =>
 {
     var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
     if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
@@ -231,10 +351,15 @@ app.MapPost("/api/store/{slug}/order", async (
         return Results.BadRequest(new { error = "Brak elementów zamówienia." });
 
     var notes = root.TryGetProperty("notes", out var n) ? n.GetString() : null;
+    var gateway = root.TryGetProperty("gateway", out var gw) ? gw.GetString() : null;
+    var returnUrl = root.TryGetProperty("returnUrl", out var ru) ? ru.GetString() : null;
 
     var overrides = await db.TenantServicePrices.AsNoTracking()
         .Where(p => p.TenantId == tenant.Id)
         .ToDictionaryAsync(p => p.ServiceItemId);
+
+    var orderGroupId = Guid.NewGuid().ToString("N");
+    var usePayment = !string.IsNullOrWhiteSpace(gateway);
 
     var orders = new List<ServiceOrder>();
     foreach (var itemEl in itemsEl.EnumerateArray())
@@ -253,6 +378,9 @@ app.MapPost("/api/store/{slug}/order", async (
             ServiceItemId = serviceItemId,
             Price = price,
             Notes = notes,
+            OrderGroupId = orderGroupId,
+            PaymentGateway = usePayment ? gateway : null,
+            Status = usePayment ? ServiceOrderStatus.AwaitingPayment : ServiceOrderStatus.Pending,
             CreatedAt = DateTime.UtcNow
         });
     }
@@ -262,6 +390,39 @@ app.MapPost("/api/store/{slug}/order", async (
 
     db.ServiceOrders.AddRange(orders);
     await db.SaveChangesAsync();
+
+    if (usePayment && !string.IsNullOrWhiteSpace(returnUrl))
+    {
+        var totalAmount = orders.Sum(o => o.Price);
+        var description = orders.Count == 1
+            ? orders[0].Notes ?? "Zamówienie usługi PTScheduler"
+            : $"Zamówienie {orders.Count} usług PTScheduler";
+
+        var portalUrl = config.GetValue<string>("Portal:PublicUrl") ?? "";
+        var (paymentUrl, externalId, error) = await storePayment.CreatePaymentAsync(
+            gateway!, totalAmount, description, orderGroupId, returnUrl, portalUrl, tenant.OwnerEmail);
+
+        if (error is not null)
+        {
+            foreach (var o in orders) db.ServiceOrders.Remove(o);
+            await db.SaveChangesAsync();
+            return Results.Json(new { success = false, error = $"Błąd bramki płatności: {error}" },
+                statusCode: 502);
+        }
+
+        foreach (var o in orders)
+            o.PaymentExternalId = externalId;
+        await db.SaveChangesAsync();
+
+        return Results.Json(new
+        {
+            success = true,
+            count = orders.Count,
+            orderIds = orders.Select(o => o.Id).ToArray(),
+            paymentUrl,
+            paymentGateway = gateway
+        });
+    }
 
     return Results.Json(new { success = true, count = orders.Count, orderIds = orders.Select(o => o.Id).ToArray() });
 });
