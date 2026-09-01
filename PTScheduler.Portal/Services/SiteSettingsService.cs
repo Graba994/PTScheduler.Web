@@ -54,6 +54,15 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string P24Sandbox = "p24_sandbox";
         public const string StorePaymentGateway = "store_payment_gateway";
         public const string AdminNotificationEmail = "admin_notification_email";
+
+        // Centralized SMS (SMSAPI.pl platform account)
+        public const string PlatformSmsApiToken = "platform_sms_api_token";
+        public const string PlatformSmsSenderName = "platform_sms_sender_name";
+
+        // Centralized Bunny CDN (platform account)
+        public const string PlatformBunnyApiKey = "platform_bunny_api_key";
+        public const string PlatformBunnyLibraryId = "platform_bunny_library_id";
+        public const string PlatformBunnyCdnHostname = "platform_bunny_cdn_hostname";
     }
 
     private static readonly Dictionary<string, string> Defaults = new()

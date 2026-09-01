@@ -46,6 +46,7 @@ builder.Services.AddScoped<NpmService>();
 builder.Services.AddScoped<UpdateService>();
 builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<StripeService>();
+builder.Services.AddScoped<CreditService>();
 builder.Services.AddScoped<StorePaymentService>();
 builder.Services.AddScoped<BackupService>();
 builder.Services.AddHostedService<BackupScheduler>();
@@ -425,6 +426,145 @@ app.MapPost("/api/store/{slug}/order", async (
     }
 
     return Results.Json(new { success = true, count = orders.Count, orderIds = orders.Select(o => o.Id).ToArray() });
+});
+
+// ---- Credits API ----
+// Tenant apps call these to check credit balances and deduct SMS credits.
+app.MapGet("/api/credits/{slug}", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config,
+    CreditService creditService) =>
+{
+    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+    if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
+        return Results.Unauthorized();
+
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null) return Results.NotFound();
+
+    var balances = await creditService.GetBalancesAsync(tenant.Id);
+
+    var platformSmsConfigured = !string.IsNullOrWhiteSpace(
+        await db.Set<SiteSetting>().Where(s => s.Key == "platform_sms_api_token")
+            .Select(s => s.Value).FirstOrDefaultAsync());
+    var platformBunnyConfigured = !string.IsNullOrWhiteSpace(
+        await db.Set<SiteSetting>().Where(s => s.Key == "platform_bunny_api_key")
+            .Select(s => s.Value).FirstOrDefaultAsync());
+
+    return Results.Json(new
+    {
+        sms = balances.GetValueOrDefault("sms", 0),
+        cdnStorageGb = balances.GetValueOrDefault("cdn_storage_gb", 0),
+        cdnBandwidthGb = balances.GetValueOrDefault("cdn_bandwidth_gb", 0),
+        platformSmsEnabled = platformSmsConfigured,
+        platformCdnEnabled = platformBunnyConfigured
+    });
+});
+
+app.MapPost("/api/credits/{slug}/sms/send", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config,
+    CreditService creditService) =>
+{
+    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+    if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
+        return Results.Unauthorized();
+
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null) return Results.NotFound();
+
+    using var reader = new StreamReader(ctx.Request.Body);
+    var body = await reader.ReadToEndAsync();
+    using var doc = System.Text.Json.JsonDocument.Parse(body);
+    var root = doc.RootElement;
+
+    var phone = root.GetProperty("phone").GetString() ?? "";
+    var message = root.GetProperty("message").GetString() ?? "";
+
+    var (success, error) = await creditService.SendSmsCentralizedAsync(tenant.Id, phone, message);
+
+    var balances = await creditService.GetBalancesAsync(tenant.Id);
+
+    return Results.Json(new
+    {
+        success,
+        error,
+        remaining = balances.GetValueOrDefault("sms", 0)
+    });
+});
+
+app.MapPost("/api/credits/{slug}/sms/test", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config,
+    SiteSettingsService settingsService) =>
+{
+    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+    if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
+        return Results.Unauthorized();
+
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null) return Results.NotFound();
+
+    var token = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformSmsApiToken);
+    if (string.IsNullOrWhiteSpace(token))
+        return Results.Json(new { success = false, error = "Platforma SMS nie skonfigurowana." });
+
+    using var reader = new StreamReader(ctx.Request.Body);
+    var body = await reader.ReadToEndAsync();
+    using var doc = System.Text.Json.JsonDocument.Parse(body);
+    var phone = doc.RootElement.GetProperty("phone").GetString() ?? "";
+
+    var senderName = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformSmsSenderName);
+
+    var digits = new string(phone.Where(char.IsDigit).ToArray());
+    var normalized = digits.Length switch
+    {
+        9 => "48" + digits,
+        11 when digits.StartsWith("48") => digits,
+        _ when digits.Length > 9 => digits,
+        _ => (string?)null
+    };
+
+    if (normalized is null)
+        return Results.Json(new { success = false, error = "Nieprawidłowy numer telefonu." });
+
+    try
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        using var req = new HttpRequestMessage(HttpMethod.Post, "https://api.smsapi.pl/sms.do");
+        req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        var fields = new Dictionary<string, string>
+        {
+            ["to"] = normalized,
+            ["message"] = "Test SMS PTScheduler — konfiguracja dziala poprawnie.",
+            ["format"] = "json"
+        };
+        if (!string.IsNullOrWhiteSpace(senderName))
+            fields["from"] = senderName;
+        req.Content = new FormUrlEncodedContent(fields);
+        var resp = await http.SendAsync(req);
+        var respBody = await resp.Content.ReadAsStringAsync();
+        using var respDoc = System.Text.Json.JsonDocument.Parse(respBody);
+        if (respDoc.RootElement.TryGetProperty("error", out _))
+        {
+            var msg = respDoc.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Błąd SMSAPI";
+            return Results.Json(new { success = false, error = msg });
+        }
+        return Results.Json(new { success = true });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { success = false, error = ex.Message });
+    }
 });
 
 app.MapStaticAssets();

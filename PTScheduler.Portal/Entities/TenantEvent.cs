@@ -32,4 +32,6 @@ public static class TenantEventTypes
     public const string GraceExtended = "grace_extended";
     public const string CleanupWarning = "cleanup_warning";
     public const string CleanupDeleted = "cleanup_deleted";
+    public const string CreditAdded = "credit_added";
+    public const string CreditDeducted = "credit_deducted";
 }

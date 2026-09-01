@@ -12,5 +12,7 @@ public class ServiceItem
     public int SortOrder { get; set; }
     public bool IsActive { get; set; } = true;
     public string? Icon { get; set; }
+    public string FulfillmentType { get; set; } = "manual"; // "manual" | "credit_sms" | "credit_cdn_storage" | "credit_cdn_bandwidth"
+    public int CreditAmount { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

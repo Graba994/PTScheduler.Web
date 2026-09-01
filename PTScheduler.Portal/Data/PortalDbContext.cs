@@ -19,6 +19,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<ServiceItem> ServiceItems => Set<ServiceItem>();
     public DbSet<TenantServicePrice> TenantServicePrices => Set<TenantServicePrice>();
     public DbSet<ServiceOrder> ServiceOrders => Set<ServiceOrder>();
+    public DbSet<TenantCredit> TenantCredits => Set<TenantCredit>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -82,6 +83,13 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
         {
             e.HasIndex(x => x.Category);
             e.HasIndex(x => x.IsActive);
+            e.HasIndex(x => x.FulfillmentType);
+        });
+
+        b.Entity<TenantCredit>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.CreditType }).IsUnique();
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId);
         });
 
         b.Entity<TenantServicePrice>(e =>
@@ -340,6 +348,93 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
                 Unit = "miesiąc",
                 Icon = "bi-star",
                 SortOrder = 11
+            },
+            // SMS credit packs
+            new ServiceItem
+            {
+                Id = 100,
+                Name = "Pakiet 50 SMS",
+                Description = "50 wiadomości SMS do wysyłania przypomnień klientom.",
+                Category = "addon",
+                DefaultPrice = 15,
+                PriceType = "one_time",
+                Unit = "50 szt.",
+                Icon = "bi-chat-dots",
+                FulfillmentType = "credit_sms",
+                CreditAmount = 50,
+                SortOrder = 20
+            },
+            new ServiceItem
+            {
+                Id = 101,
+                Name = "Pakiet 200 SMS",
+                Description = "200 wiadomości SMS — najlepsza wartość dla aktywnych trenerów.",
+                Category = "addon",
+                DefaultPrice = 50,
+                PriceType = "one_time",
+                Unit = "200 szt.",
+                Icon = "bi-chat-dots",
+                FulfillmentType = "credit_sms",
+                CreditAmount = 200,
+                SortOrder = 21
+            },
+            new ServiceItem
+            {
+                Id = 102,
+                Name = "Pakiet 500 SMS",
+                Description = "500 wiadomości SMS — dla dużych studiów treningowych.",
+                Category = "addon",
+                DefaultPrice = 100,
+                PriceType = "one_time",
+                Unit = "500 szt.",
+                Icon = "bi-chat-dots",
+                FulfillmentType = "credit_sms",
+                CreditAmount = 500,
+                SortOrder = 22
+            },
+            // CDN storage packs
+            new ServiceItem
+            {
+                Id = 110,
+                Name = "Dodatkowe 10 GB wideo",
+                Description = "Rozszerzenie przestrzeni na kursy wideo o 10 GB.",
+                Category = "addon",
+                DefaultPrice = 20,
+                PriceType = "one_time",
+                Unit = "10 GB",
+                Icon = "bi-cloud-upload",
+                FulfillmentType = "credit_cdn_storage",
+                CreditAmount = 10,
+                SortOrder = 30
+            },
+            new ServiceItem
+            {
+                Id = 111,
+                Name = "Dodatkowe 50 GB wideo",
+                Description = "Rozszerzenie przestrzeni na kursy wideo o 50 GB.",
+                Category = "addon",
+                DefaultPrice = 80,
+                PriceType = "one_time",
+                Unit = "50 GB",
+                Icon = "bi-cloud-upload",
+                FulfillmentType = "credit_cdn_storage",
+                CreditAmount = 50,
+                SortOrder = 31
+            },
+            // CDN bandwidth packs
+            new ServiceItem
+            {
+                Id = 120,
+                Name = "Dodatkowe 100 GB transferu wideo",
+                Description = "Dodatkowy miesięczny transfer dla odtwarzania kursów wideo.",
+                Category = "addon",
+                DefaultPrice = 25,
+                PriceType = "one_time",
+                Unit = "100 GB",
+                Icon = "bi-speedometer2",
+                FulfillmentType = "credit_cdn_bandwidth",
+                CreditAmount = 100,
+                SortOrder = 32
             }
         );
     }

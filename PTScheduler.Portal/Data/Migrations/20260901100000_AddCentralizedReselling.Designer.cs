@@ -2,6 +2,7 @@
 using System;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Infrastructure;
+using Microsoft.EntityFrameworkCore.Migrations;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using Npgsql.EntityFrameworkCore.PostgreSQL.Metadata;
 using PTScheduler.Portal.Data;
@@ -11,9 +12,10 @@ using PTScheduler.Portal.Data;
 namespace PTScheduler.Portal.Data.Migrations
 {
     [DbContext(typeof(PortalDbContext))]
-    partial class PortalDbContextModelSnapshot : ModelSnapshot
+    [Migration("20260901100000_AddCentralizedReselling")]
+    partial class AddCentralizedReselling
     {
-        protected override void BuildModel(ModelBuilder modelBuilder)
+        protected override void BuildTargetModel(ModelBuilder modelBuilder)
         {
 #pragma warning disable 612, 618
             modelBuilder
@@ -701,10 +703,17 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int>("CreditAmount")
+                        .HasColumnType("integer");
+
                     b.Property<decimal>("DefaultPrice")
                         .HasColumnType("numeric");
 
                     b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<string>("FulfillmentType")
+                        .IsRequired()
                         .HasColumnType("text");
 
                     b.Property<string>("Icon")
@@ -728,15 +737,6 @@ namespace PTScheduler.Portal.Data.Migrations
                         .HasColumnType("text");
 
                     b.HasKey("Id");
-
-                    b.Property<int>("CreditAmount")
-                        .HasColumnType("integer");
-
-                    b.Property<string>("FulfillmentType")
-                        .IsRequired()
-                        .ValueGeneratedOnAdd()
-                        .HasColumnType("text")
-                        .HasDefaultValue("manual");
 
                     b.HasIndex("Category");
 
@@ -1432,7 +1432,7 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
-            modelBuilder.Entity("PTScheduler.Portal.Entities.TenantEvent", b =>
+            modelBuilder.Entity("PTScheduler.Portal.Entities.TenantCredit", b =>
                 {
                     b.HasOne("PTScheduler.Portal.Entities.Tenant", "Tenant")
                         .WithMany()
@@ -1443,7 +1443,7 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
-            modelBuilder.Entity("PTScheduler.Portal.Entities.TenantCredit", b =>
+            modelBuilder.Entity("PTScheduler.Portal.Entities.TenantEvent", b =>
                 {
                     b.HasOne("PTScheduler.Portal.Entities.Tenant", "Tenant")
                         .WithMany()

@@ -12,6 +12,7 @@ namespace PTScheduler.Portal.Services;
 public class StorePaymentService(
     SiteSettingsService settings,
     IDbContextFactory<PortalDbContext> dbFactory,
+    CreditService creditService,
     ILogger<StorePaymentService> logger)
 {
     public async Task<List<string>> GetAvailableGatewaysAsync()
@@ -86,6 +87,23 @@ public class StorePaymentService(
         await db.SaveChangesAsync();
         logger.LogInformation("Payment confirmed: {Gateway} {ExternalId}, {Count} orders updated",
             gateway, externalId, orders.Count);
+
+        // Auto-fulfill credit-based orders (SMS packs, CDN packs)
+        var paidOrders = orders.Where(o => o.PaidAt == now).ToList();
+        var serviceItemIds = paidOrders.Select(o => o.ServiceItemId).Distinct().ToList();
+        var serviceItems = await db.ServiceItems.AsNoTracking()
+            .Where(s => serviceItemIds.Contains(s.Id))
+            .ToDictionaryAsync(s => s.Id);
+
+        foreach (var order in paidOrders)
+        {
+            if (serviceItems.TryGetValue(order.ServiceItemId, out var item) && item.FulfillmentType != "manual")
+            {
+                try { await creditService.FulfillOrderAsync(order, item); }
+                catch (Exception ex) { logger.LogError(ex, "Auto-fulfill failed for order {Id}", order.Id); }
+            }
+        }
+
         return true;
     }
 
