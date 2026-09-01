@@ -2,6 +2,8 @@ using PTScheduler.Application.DTOs;
 
 namespace PTScheduler.Application.Interfaces;
 
+public record CentralizedCdnStatus(bool PlatformCdnEnabled, decimal StorageCredits, decimal BandwidthCredits);
+
 public interface IBunnyService
 {
     Task<BunnySettingsDto> GetSettingsAsync();
@@ -9,7 +11,6 @@ public interface IBunnyService
 
     Task<(bool Ok, string Message)> TestConnectionAsync(BunnySettingsDto dto);
 
-    // Create a video record in Bunny (returns the GUID), then upload the file bytes
     Task<(bool Ok, string? VideoId, string? Error)> CreateAndUploadAsync(
         string title, Stream file, CancellationToken ct = default);
 
@@ -18,6 +19,8 @@ public interface IBunnyService
     Task<BunnyVideoInfo?> GetVideoInfoAsync(string videoId);
 
     string BuildEmbedUrl(string videoId);
+
+    Task<CentralizedCdnStatus?> GetCentralizedStatusAsync();
 }
 
 public class BunnyVideoInfo

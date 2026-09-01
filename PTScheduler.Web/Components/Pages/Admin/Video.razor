@@ -38,43 +38,64 @@ else
         </div>
     }
 
-    <div class="card mb-3">
-        <div class="card-header"><i class="bi bi-gear me-1"></i>Konfiguracja Bunny Stream</div>
-        <div class="card-body">
-            <div class="form-check mb-3">
-                <input class="form-check-input" type="checkbox" @bind="_settings.Enabled" id="en" />
-                <label class="form-check-label fw-semibold" for="en">Włącz hosting Bunny.net</label>
-            </div>
-            <div class="row g-3">
-                <div class="col-md-6">
-                    <label class="form-label small fw-semibold">Library ID</label>
-                    <input class="form-control font-monospace" @bind="_settings.LibraryId" placeholder="123456" />
-                    <div class="form-text small">Znajdziesz w Bunny Dashboard → Stream → Video Libraries</div>
-                </div>
-                <div class="col-md-6">
-                    <label class="form-label small fw-semibold">API Key</label>
-                    <input type="password" class="form-control font-monospace" @bind="_settings.ApiKey" />
-                    <div class="form-text small">Library API Key (zakładka "API")</div>
-                </div>
-                <div class="col-md-6">
-                    <label class="form-label small fw-semibold">CDN Hostname</label>
-                    <input class="form-control font-monospace" @bind="_settings.CdnHostname" placeholder="vz-abcd1234-xxx.b-cdn.net" />
-                </div>
-                <div class="col-md-6">
-                    <label class="form-label small fw-semibold">Pull Zone URL (opcjonalne)</label>
-                    <input class="form-control font-monospace" @bind="_settings.PullZoneUrl" placeholder="https://..." />
-                </div>
-            </div>
+    @if (_cdnStatus is { PlatformCdnEnabled: true } && !_hasLocalSettings)
+    {
+        <!-- Centralized CDN mode -->
+        <div class="alert alert-success small">
+            <i class="bi bi-check-circle-fill me-2"></i>
+            <strong>CDN centralne</strong> — Twoje konto korzysta z centralnego hostingu wideo.
+            Nie musisz konfigurować własnego konta Bunny.net. Kupuj dodatkową przestrzeń i transfer w sklepie usług.
+        </div>
 
-            <div class="mt-3 d-flex gap-2">
-                <button class="btn btn-primary" @onclick="Save"><i class="bi bi-floppy me-1"></i>Zapisz</button>
-                <button class="btn btn-outline-secondary" @onclick="Test" disabled="@_testing">
-                    @if (_testing) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                    <i class="bi bi-wifi me-1"></i>Testuj połączenie
-                </button>
+        <div class="row g-3 mb-4">
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center gap-3">
+                            <i class="bi bi-cloud-upload fs-1 text-primary"></i>
+                            <div>
+                                <div class="text-muted small">Dodatkowa przestrzeń (kredyty)</div>
+                                <div class="fs-3 fw-bold">@_cdnStatus.StorageCredits GB</div>
+                            </div>
+                        </div>
+                        <div class="text-muted small mt-2">
+                            Limit planu: <strong>@Entitlements.Current.MaxVideoStorageGB GB</strong>
+                            @if (_cdnStatus.StorageCredits > 0)
+                            {
+                                <span> + <strong>@_cdnStatus.StorageCredits GB</strong> z kredytów</span>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="card h-100">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center gap-3">
+                            <i class="bi bi-speedometer2 fs-1 text-primary"></i>
+                            <div>
+                                <div class="text-muted small">Dodatkowy transfer (kredyty)</div>
+                                <div class="fs-3 fw-bold">@_cdnStatus.BandwidthCredits GB</div>
+                            </div>
+                        </div>
+                        <div class="text-muted small mt-2">
+                            Limit planu: <strong>@Entitlements.Current.MaxVideoBandwidthGBPerMonth GB</strong>/mies.
+                            @if (_cdnStatus.BandwidthCredits > 0)
+                            {
+                                <span> + <strong>@_cdnStatus.BandwidthCredits GB</strong> z kredytów</span>
+                            }
+                        </div>
+                    </div>
+                </div>
             </div>
         </div>
-    </div>
+
+        <div class="mb-4">
+            <a href="/admin/store" class="btn btn-outline-primary">
+                <i class="bi bi-cart-plus me-1"></i>Kup dodatkową przestrzeń / transfer
+            </a>
+        </div>
+    }
 
     <div class="card mb-3">
         <div class="card-header"><i class="bi bi-hdd me-1"></i>Zużycie video storage</div>
@@ -92,6 +113,10 @@ else
                 <div class="small text-muted">
                     Limit planu: <strong>@(Entitlements.Current.MaxVideoStorageGB) GB</strong> storage,
                     <strong>@(Entitlements.Current.MaxVideoBandwidthGBPerMonth) GB</strong> transfer/mies.
+                    @if (_cdnStatus is { PlatformCdnEnabled: true, StorageCredits: > 0 })
+                    {
+                        <span> + <strong>@_cdnStatus.StorageCredits GB</strong> dodatkowej przestrzeni z kredytów</span>
+                    }
                 </div>
             }
             else
@@ -101,32 +126,118 @@ else
         </div>
     </div>
 
+    @if (_cdnStatus is { PlatformCdnEnabled: true } && !_hasLocalSettings)
+    {
+        <details class="card mb-3">
+            <summary class="card-header fw-semibold" style="cursor:pointer;list-style:none">
+                <i class="bi bi-gear me-1"></i>Konfiguracja własnego konta Bunny.net (opcjonalne)
+            </summary>
+            <div class="card-body">
+                <p class="small text-muted mb-3">
+                    Jeśli chcesz korzystać z własnego konta Bunny.net zamiast centralnego hostingu, uzupełnij dane poniżej.
+                    Własne konto ma pierwszeństwo.
+                </p>
+                @RenderBunnyForm()
+            </div>
+        </details>
+    }
+    else
+    {
+        <div class="card mb-3">
+            <div class="card-header"><i class="bi bi-gear me-1"></i>Konfiguracja Bunny Stream</div>
+            <div class="card-body">
+                @RenderBunnyForm()
+            </div>
+        </div>
+    }
+
     <div class="alert alert-info small">
         <i class="bi bi-info-circle me-1"></i>
         <strong>Jak zacząć:</strong>
         <ol class="mb-0 mt-2">
-            <li>Załóż konto w <a href="https://bunny.net" target="_blank">bunny.net</a> (test 500MB gratis)</li>
-            <li>Utwórz Video Library w sekcji Stream</li>
-            <li>Skopiuj Library ID + API Key + CDN Hostname i wklej powyżej</li>
-            <li>Kliknij "Testuj połączenie" — potwierdzi że komunikacja działa</li>
+            @if (_cdnStatus is { PlatformCdnEnabled: true } && !_hasLocalSettings)
+            {
+                <li>Hosting wideo jest już skonfigurowany centralnie — możesz od razu dodawać kursy z wideo!</li>
+                <li>Jeśli potrzebujesz więcej miejsca, kup pakiet w <a href="/admin/store">sklepie usług</a></li>
+            }
+            else
+            {
+                <li>Załóż konto w <a href="https://bunny.net" target="_blank">bunny.net</a> (test 500MB gratis)</li>
+                <li>Utwórz Video Library w sekcji Stream</li>
+                <li>Skopiuj Library ID + API Key + CDN Hostname i wklej powyżej</li>
+                <li>Kliknij "Testuj połączenie" — potwierdzi że komunikacja działa</li>
+            }
             <li>W kursach dodawaj lekcje z uploadem wideo — pliki wylatują prosto do Bunny.net</li>
         </ol>
     </div>
 }
 
 @code {
+    private RenderFragment RenderBunnyForm() => __builder =>
+    {
+        <div class="form-check mb-3">
+            <input class="form-check-input" type="checkbox" @bind="_settings!.Enabled" id="en" />
+            <label class="form-check-label fw-semibold" for="en">Włącz hosting Bunny.net</label>
+        </div>
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label small fw-semibold">Library ID</label>
+                <input class="form-control font-monospace" @bind="_settings!.LibraryId" placeholder="123456" />
+                <div class="form-text small">Znajdziesz w Bunny Dashboard &rarr; Stream &rarr; Video Libraries</div>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label small fw-semibold">API Key</label>
+                <input type="password" class="form-control font-monospace" @bind="_settings!.ApiKey" />
+                <div class="form-text small">Library API Key (zakładka "API")</div>
+            </div>
+            <div class="col-md-6">
+                <label class="form-label small fw-semibold">CDN Hostname</label>
+                <input class="form-control font-monospace" @bind="_settings!.CdnHostname" placeholder="vz-abcd1234-xxx.b-cdn.net" />
+            </div>
+            <div class="col-md-6">
+                <label class="form-label small fw-semibold">Pull Zone URL (opcjonalne)</label>
+                <input class="form-control font-monospace" @bind="_settings!.PullZoneUrl" placeholder="https://..." />
+            </div>
+        </div>
+
+        <div class="mt-3 d-flex gap-2">
+            <button class="btn btn-primary" @onclick="Save"><i class="bi bi-floppy me-1"></i>Zapisz</button>
+            <button class="btn btn-outline-secondary" @onclick="Test" disabled="@_testing">
+                @if (_testing) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                <i class="bi bi-wifi me-1"></i>Testuj połączenie
+            </button>
+        </div>
+    };
+
     private BunnySettingsDto? _settings;
     private string? _message;
     private bool _msgError;
     private bool _testing;
     private long _storageUsedBytes;
     private long _storageMaxBytes;
+    private CentralizedCdnStatus? _cdnStatus;
+    private bool _hasLocalSettings;
     private int StoragePct => _storageMaxBytes > 0 ? Math.Min(100, (int)(100.0 * _storageUsedBytes / _storageMaxBytes)) : 0;
 
     protected override async Task OnInitializedAsync()
     {
         if (Entitlements.Current.VideoProvider == "bunny")
         {
+            _cdnStatus = await Bunny.GetCentralizedStatusAsync();
+
+            _hasLocalSettings = false;
+            try
+            {
+                var filePath = Path.Combine("wwwroot", "branding", "bunny-settings.json");
+                if (File.Exists(filePath))
+                {
+                    var json = await File.ReadAllTextAsync(filePath);
+                    var local = System.Text.Json.JsonSerializer.Deserialize<BunnySettingsDto>(json);
+                    _hasLocalSettings = local is not null && !string.IsNullOrWhiteSpace(local.ApiKey);
+                }
+            }
+            catch { }
+
             _settings = await Bunny.GetSettingsAsync();
             var (_, used, maxB) = await Entitlements.CheckVideoStorageAsync(CourseService);
             _storageUsedBytes = used;

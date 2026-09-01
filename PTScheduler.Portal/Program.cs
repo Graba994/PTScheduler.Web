@@ -567,6 +567,38 @@ app.MapPost("/api/credits/{slug}/sms/test", async (
     }
 });
 
+// ---- Bunny CDN credentials API ----
+app.MapGet("/api/credits/{slug}/bunny", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config,
+    SiteSettingsService settingsService) =>
+{
+    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+    if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
+        return Results.Unauthorized();
+
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null) return Results.NotFound();
+
+    var apiKey = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformBunnyApiKey);
+    var libraryId = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformBunnyLibraryId);
+    var cdnHostname = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformBunnyCdnHostname);
+
+    if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(libraryId))
+        return Results.Json(new { enabled = false });
+
+    return Results.Json(new
+    {
+        enabled = true,
+        apiKey,
+        libraryId,
+        cdnHostname
+    });
+});
+
 app.MapStaticAssets();
 app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
