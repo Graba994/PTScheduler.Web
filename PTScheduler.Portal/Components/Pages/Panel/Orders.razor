@@ -2,6 +2,8 @@
 @layout AdminLayout
 @attribute [Authorize(Roles = "Admin")]
 @inject IDbContextFactory<PortalDbContext> DbFactory
+@inject EmailService EmailService
+@inject SiteSettingsService SiteSettings
 @rendermode InteractiveServer
 
 <PageTitle>Zamówienia — PTScheduler Portal</PageTitle>
@@ -114,12 +116,33 @@ else
                             </div>
                         }
 
-                        @if (!string.IsNullOrWhiteSpace(order.AdminNotes))
-                        {
-                            <div class="small text-muted mt-2 fst-italic">
-                                <i class="bi bi-sticky me-1"></i>@order.AdminNotes
-                            </div>
-                        }
+                        <div class="mt-2">
+                            @if (_editingNotesId == order.Id)
+                            {
+                                <div class="d-flex gap-2 align-items-center">
+                                    <input class="form-control form-control-sm" style="max-width:400px"
+                                           @bind="_editingNotesValue" placeholder="Notatka admina..." />
+                                    <button class="btn btn-sm btn-primary" @onclick="() => SaveAdminNotes(order.Id)">
+                                        <i class="bi bi-check-lg"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => _editingNotesId = 0">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
+                                </div>
+                            }
+                            else
+                            {
+                                @if (!string.IsNullOrWhiteSpace(order.AdminNotes))
+                                {
+                                    <div class="small text-muted fst-italic d-inline">
+                                        <i class="bi bi-sticky me-1"></i>@order.AdminNotes
+                                    </div>
+                                }
+                                <button class="btn btn-sm btn-link text-muted p-0 ms-2" @onclick='() => { _editingNotesId = order.Id; _editingNotesValue = order.AdminNotes ?? ""; }'>
+                                    <i class="bi bi-pencil small"></i>
+                                </button>
+                            }
+                        </div>
                     </div>
                 </div>
             </div>
@@ -132,6 +155,8 @@ else
     private string _statusFilter = "";
     private string? _message;
     private bool _msgError;
+    private int _editingNotesId;
+    private string _editingNotesValue = "";
 
     protected override async Task OnInitializedAsync() => await Load();
 
@@ -156,7 +181,10 @@ else
         try
         {
             await using var db = DbFactory.CreateDbContext();
-            var order = await db.ServiceOrders.FindAsync(orderId);
+            var order = await db.ServiceOrders
+                .Include(o => o.Tenant)
+                .Include(o => o.ServiceItem)
+                .FirstOrDefaultAsync(o => o.Id == orderId);
             if (order is null) return;
 
             order.Status = newStatus;
@@ -164,8 +192,45 @@ else
             if (newStatus == ServiceOrderStatus.Completed) order.CompletedAt = DateTime.UtcNow;
 
             await db.SaveChangesAsync();
+
+            if (order.Tenant?.OwnerEmail is { Length: > 0 } email)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var html = EmailService.OrderStatusChangedEmailBody(
+                            order.Tenant.OwnerName ?? "Trenerze",
+                            order.ServiceItem?.Name ?? "usługa",
+                            StatusLabel(newStatus),
+                            order.AdminNotes);
+                        await EmailService.SendAsync(email, $"Zamówienie #{order.Id} — {StatusLabel(newStatus)}", html);
+                    }
+                    catch { }
+                });
+            }
+
             await Load();
             _message = $"Status zmieniony na \"{StatusLabel(newStatus)}\"."; _msgError = false;
+        }
+        catch (Exception ex)
+        {
+            _message = ex.Message; _msgError = true;
+        }
+    }
+
+    private async Task SaveAdminNotes(int orderId)
+    {
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            var order = await db.ServiceOrders.FindAsync(orderId);
+            if (order is null) return;
+            order.AdminNotes = string.IsNullOrWhiteSpace(_editingNotesValue) ? null : _editingNotesValue.Trim();
+            await db.SaveChangesAsync();
+            _editingNotesId = 0;
+            await Load();
+            _message = "Notatka zapisana."; _msgError = false;
         }
         catch (Exception ex)
         {

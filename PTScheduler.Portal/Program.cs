@@ -376,7 +376,9 @@ app.MapPost("/api/store/{slug}/order", async (
     HttpContext ctx,
     IDbContextFactory<PortalDbContext> dbFactory,
     IConfiguration config,
-    StorePaymentService storePayment) =>
+    StorePaymentService storePayment,
+    EmailService emailService,
+    SiteSettingsService siteSettings) =>
 {
     var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
     if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
@@ -434,6 +436,24 @@ app.MapPost("/api/store/{slug}/order", async (
 
     db.ServiceOrders.AddRange(orders);
     await db.SaveChangesAsync();
+
+    _ = Task.Run(async () =>
+    {
+        try
+        {
+            var adminEmail = await siteSettings.GetAsync(SiteSettingsService.Keys.AdminNotificationEmail);
+            if (string.IsNullOrWhiteSpace(adminEmail)) return;
+            foreach (var o in orders)
+            {
+                var si = await dbFactory.CreateDbContext().ServiceItems.AsNoTracking().FirstOrDefaultAsync(s => s.Id == o.ServiceItemId);
+                var html = emailService.NewServiceOrderAdminEmailBody(
+                    tenant.OwnerName ?? "—", tenant.CompanyName ?? "—",
+                    si?.Name ?? "—", o.Price, o.Id, o.Notes);
+                await emailService.SendAsync(adminEmail, $"Nowe zamówienie: {si?.Name ?? "usługa"} — {tenant.CompanyName ?? tenant.OwnerName}", html);
+            }
+        }
+        catch { }
+    });
 
     if (usePayment && !string.IsNullOrWhiteSpace(returnUrl))
     {

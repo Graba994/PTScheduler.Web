@@ -358,6 +358,62 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         </html>
         """;
 
+    public string NewServiceOrderAdminEmailBody(string trainerName, string companyName, string serviceName, decimal price, int orderId, string? notes) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h1 style="color: #6366f1;">Nowe zamowienie uslugi</h1>
+            </div>
+            <p>Trener zlozyl nowe zamowienie w sklepie uslug.</p>
+
+            <div style="background: #eff6ff; border-radius: 12px; padding: 20px; margin: 20px 0;">
+                <div style="margin-bottom: 8px;"><strong>Usluga:</strong> {WebUtility.HtmlEncode(serviceName)}</div>
+                <div style="margin-bottom: 8px;"><strong>Trener:</strong> {WebUtility.HtmlEncode(trainerName)}</div>
+                <div style="margin-bottom: 8px;"><strong>Firma:</strong> {WebUtility.HtmlEncode(companyName)}</div>
+                <div style="margin-bottom: 8px;"><strong>Kwota:</strong> {price:0.00} PLN</div>
+                <div><strong>Nr zamowienia:</strong> #{orderId}</div>
+                {(string.IsNullOrWhiteSpace(notes) ? "" : $"<div style=\"margin-top: 8px;\"><strong>Notatka:</strong> {WebUtility.HtmlEncode(notes)}</div>")}
+            </div>
+
+            <p style="text-align: center; margin: 30px 0;">
+                <a href="/panel/orders" style="background: #6366f1; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">
+                    Przejdz do zamowien
+                </a>
+            </p>
+
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">PTScheduler Portal</p>
+        </body>
+        </html>
+        """;
+
+    public string OrderStatusChangedEmailBody(string trainerName, string serviceName, string newStatusLabel, string? adminNotes) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h1 style="color: #6366f1;">Zmiana statusu zamowienia</h1>
+            </div>
+            <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>Status Twojego zamowienia zostal zmieniony.</p>
+
+            <div style="background: #f0fdf4; border-radius: 12px; padding: 20px; margin: 20px 0;">
+                <div style="margin-bottom: 8px;"><strong>Usluga:</strong> {WebUtility.HtmlEncode(serviceName)}</div>
+                <div><strong>Nowy status:</strong> {WebUtility.HtmlEncode(newStatusLabel)}</div>
+                {(string.IsNullOrWhiteSpace(adminNotes) ? "" : $"<div style=\"margin-top: 8px;\"><strong>Uwagi:</strong> {WebUtility.HtmlEncode(adminNotes)}</div>")}
+            </div>
+
+            <p>Jesli masz pytania, skontaktuj sie z administratorem platformy.</p>
+
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">PTScheduler</p>
+        </body>
+        </html>
+        """;
+
     public string PendingPaymentEmailBody(string trainerName, string planName, decimal price) =>
         $"""
         <!DOCTYPE html>
