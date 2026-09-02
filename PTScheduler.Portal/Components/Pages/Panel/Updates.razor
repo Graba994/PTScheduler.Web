@@ -12,27 +12,46 @@
 </div>
 
 <div class="row g-3 mb-3">
-    <div class="col-md-6">
+    <div class="col-md-4">
         <div class="card border-0 shadow-sm h-100">
             <div class="card-body">
-                <h6 class="fw-bold mb-3"><i class="bi bi-hdd me-2 text-secondary"></i>Aktualnie zainstalowane</h6>
+                <h6 class="fw-bold mb-3"><i class="bi bi-boxes me-2 text-secondary"></i>Portal</h6>
                 <dl class="row small mb-0">
                     <dt class="col-4 text-muted">Commit</dt>
-                    <dd class="col-8 font-monospace">@_current.CommitShort</dd>
+                    <dd class="col-8 font-monospace">@_portal.CommitShort</dd>
                     <dt class="col-4 text-muted">Build</dt>
-                    <dd class="col-8">@_current.BuildTime</dd>
-                    <dt class="col-4 text-muted">Branch</dt>
-                    <dd class="col-8 font-monospace">@_current.Branch</dd>
+                    <dd class="col-8">@_portal.BuildTime</dd>
                 </dl>
             </div>
         </div>
     </div>
 
-    <div class="col-md-6">
-        <div class="card border-0 shadow-sm h-100 @(_behind ? "border-warning border-2" : "")">
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm h-100">
+            <div class="card-body">
+                <h6 class="fw-bold mb-3"><i class="bi bi-people me-2 text-secondary"></i>Obraz trenera</h6>
+                @if (_tenant.Commit == "unknown")
+                {
+                    <p class="text-muted small mb-0">Nie zbudowano jeszcze z tego portalu.</p>
+                }
+                else
+                {
+                    <dl class="row small mb-0">
+                        <dt class="col-4 text-muted">Commit</dt>
+                        <dd class="col-8 font-monospace">@_tenant.CommitShort</dd>
+                        <dt class="col-4 text-muted">Build</dt>
+                        <dd class="col-8">@_tenant.BuildTime</dd>
+                    </dl>
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="col-md-4">
+        <div class="card border-0 shadow-sm h-100">
             <div class="card-body">
                 <h6 class="fw-bold mb-3">
-                    <i class="bi bi-github me-2"></i>Najnowsza w GitHub
+                    <i class="bi bi-folder2-open me-2"></i>Lokalne repo
                     <button class="btn btn-sm btn-outline-secondary float-end" @onclick="Refresh" disabled="@_checking">
                         @if (_checking)
                         {
@@ -44,21 +63,22 @@
                         }
                     </button>
                 </h6>
-                @if (_remote is null)
+                @if (_repoHead is null)
                 {
-                    <p class="text-muted small mb-0">Kliknij odśwież żeby sprawdzić.</p>
+                    <p class="text-muted small mb-0">Repo niedostępne.</p>
                 }
                 else
                 {
                     <dl class="row small mb-0">
                         <dt class="col-4 text-muted">Commit</dt>
-                        <dd class="col-8 font-monospace">@_remote.CommitShort</dd>
-                        <dt class="col-4 text-muted">Autor</dt>
-                        <dd class="col-8">@_remote.Author</dd>
-                        <dt class="col-4 text-muted">Data</dt>
-                        <dd class="col-8">@_remote.Date</dd>
-                        <dt class="col-4 text-muted">Wiadomość</dt>
-                        <dd class="col-8"><em>@Truncate(_remote.Message, 80)</em></dd>
+                        <dd class="col-8 font-monospace">@_repoHead.CommitShort</dd>
+                        <dt class="col-4 text-muted">Branch</dt>
+                        <dd class="col-8 font-monospace">@_repoHead.Branch</dd>
+                        @if (!string.IsNullOrEmpty(_repoHead.Message))
+                        {
+                            <dt class="col-4 text-muted">Msg</dt>
+                            <dd class="col-8"><em>@Truncate(_repoHead.Message, 60)</em></dd>
+                        }
                     </dl>
                 }
             </div>
@@ -66,22 +86,56 @@
     </div>
 </div>
 
-@if (_behind)
+@if (_remote is not null)
+{
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body py-2 px-3">
+            <div class="d-flex align-items-center gap-2 small">
+                <i class="bi bi-github"></i>
+                <span class="text-muted">GitHub (@_portal.Branch):</span>
+                <span class="font-monospace">@_remote.CommitShort</span>
+                <span class="text-muted">—</span>
+                <em class="text-truncate" style="max-width:300px">@Truncate(_remote.Message, 60)</em>
+                <span class="text-muted ms-auto">@_remote.Author</span>
+                @if (_repoBehindRemote)
+                {
+                    <span class="badge bg-warning text-dark">repo nie ma najnowszych z GitHub</span>
+                }
+                else
+                {
+                    <span class="badge bg-success">repo aktualne</span>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@if (_tenantBehindRepo)
 {
     <div class="alert alert-warning">
         <div class="d-flex align-items-center gap-2">
             <i class="bi bi-exclamation-triangle-fill fs-4"></i>
             <div class="flex-grow-1">
-                <strong>Nowa wersja jest dostępna.</strong>
-                <span class="small text-muted d-block">Instalka jest za @_current.CommitShort → @_remote?.CommitShort.</span>
+                <strong>Obraz trenera wymaga przebudowy.</strong>
+                <span class="small text-muted d-block">
+                    Obraz: @_tenant.CommitShort → Repo: @(_repoHead?.CommitShort ?? "?")
+                </span>
             </div>
         </div>
     </div>
 }
-else if (_remote is not null)
+else if (_repoHead is not null && _tenant.Commit != "unknown")
 {
     <div class="alert alert-success py-2">
-        <i class="bi bi-check-circle me-1"></i>Masz najnowszą wersję.
+        <i class="bi bi-check-circle me-1"></i>Obraz trenera jest aktualny z repozytorium.
+    </div>
+}
+
+@if (_portalBehind)
+{
+    <div class="alert alert-info py-2">
+        <i class="bi bi-info-circle me-1"></i>
+        Portal jest na starszym commicie niż repo (@_portal.CommitShort). Zaktualizuj portal poniżej.
     </div>
 }
 
@@ -172,10 +226,14 @@ else if (_remote is not null)
 }
 
 @code {
-    private VersionInfo _current = new();
+    private VersionInfo _portal = new();
+    private VersionInfo _tenant = new();
+    private VersionInfo? _repoHead;
     private RemoteInfo? _remote;
     private bool _checking;
-    private bool _behind;
+    private bool _tenantBehindRepo;
+    private bool _repoBehindRemote;
+    private bool _portalBehind;
     private bool _upgrading;
     private bool _upgradingPortal;
     private bool _rebuildImage = true;
@@ -184,15 +242,22 @@ else if (_remote is not null)
 
     protected override async Task OnInitializedAsync()
     {
-        _current = await UpdateSvc.GetCurrentAsync();
+        _portal = await UpdateSvc.GetCurrentAsync();
+        _tenant = await UpdateSvc.GetTenantBuildAsync();
         await Refresh();
     }
 
     private async Task Refresh()
     {
         _checking = true;
+        _repoHead = await UpdateSvc.GetLocalRepoHeadAsync();
         _remote = await UpdateSvc.CheckRemoteAsync();
-        _behind = UpdateSvc.IsBehind(_current, _remote);
+        _tenantBehindRepo = UpdateSvc.IsTenantBehindRepo(_tenant, _repoHead);
+        _repoBehindRemote = UpdateSvc.IsRepoBehindRemote(_repoHead, _remote);
+        _portalBehind = _repoHead is not null
+            && _portal.Commit != "unknown"
+            && !_repoHead.Commit.StartsWith(_portal.Commit)
+            && !_portal.Commit.StartsWith(_repoHead.Commit);
         _checking = false;
     }
 
@@ -202,7 +267,8 @@ else if (_remote is not null)
         _result = null;
         _result = await UpdateSvc.RunUpgradeAsync(_rebuildImage, _reprovision);
         _upgrading = false;
-        _current = await UpdateSvc.GetCurrentAsync();
+        _portal = await UpdateSvc.GetCurrentAsync();
+        _tenant = await UpdateSvc.GetTenantBuildAsync();
         await Refresh();
     }
 

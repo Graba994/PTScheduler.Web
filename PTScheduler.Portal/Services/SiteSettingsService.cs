@@ -55,6 +55,10 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string StorePaymentGateway = "store_payment_gateway";
         public const string AdminNotificationEmail = "admin_notification_email";
 
+        // Update tracking
+        public const string LastTenantBuildCommit = "last_tenant_build_commit";
+        public const string LastTenantBuildTime = "last_tenant_build_time";
+
         // Centralized SMS (SMSAPI.pl platform account)
         public const string PlatformSmsApiToken = "platform_sms_api_token";
         public const string PlatformSmsSenderName = "platform_sms_sender_name";

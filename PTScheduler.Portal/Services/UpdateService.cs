@@ -150,6 +150,57 @@ public class UpdateService(
         && !remote.Commit.StartsWith(current.Commit)
         && !current.Commit.StartsWith(remote.Commit);
 
+    public async Task<VersionInfo> GetTenantBuildAsync()
+    {
+        var s = await siteSettings.GetAllAsync(
+            SiteSettingsService.Keys.LastTenantBuildCommit,
+            SiteSettingsService.Keys.LastTenantBuildTime);
+        var (_, _, branch, _) = await GetGitHubConfigAsync();
+        return new VersionInfo
+        {
+            Commit = s[SiteSettingsService.Keys.LastTenantBuildCommit] ?? "unknown",
+            BuildTime = s[SiteSettingsService.Keys.LastTenantBuildTime] ?? "unknown",
+            Branch = branch
+        };
+    }
+
+    public async Task<VersionInfo?> GetLocalRepoHeadAsync()
+    {
+        if (!Directory.Exists(RepoDir)) return null;
+        try
+        {
+            var (ok, sha) = await RunAsync("git", "rev-parse HEAD", RepoDir);
+            if (!ok) return null;
+            var (_, logOut) = await RunAsync("git", "log -1 --format=%s", RepoDir);
+            var (_, dateOut) = await RunAsync("git", "log -1 --format=%ci", RepoDir);
+            var (_, branchOut) = await RunAsync("git", "rev-parse --abbrev-ref HEAD", RepoDir);
+            return new VersionInfo
+            {
+                Commit = sha.Trim(),
+                BuildTime = dateOut.Trim(),
+                Branch = branchOut.Trim(),
+                Message = logOut.Trim()
+            };
+        }
+        catch { return null; }
+    }
+
+    public bool IsRepoBehindRemote(VersionInfo? repoHead, RemoteInfo? remote)
+    {
+        if (repoHead is null || remote is null) return false;
+        if (string.IsNullOrEmpty(remote.Commit) || repoHead.Commit == "unknown") return false;
+        return !remote.Commit.StartsWith(repoHead.Commit)
+            && !repoHead.Commit.StartsWith(remote.Commit);
+    }
+
+    public bool IsTenantBehindRepo(VersionInfo tenantBuild, VersionInfo? repoHead)
+    {
+        if (repoHead is null) return false;
+        if (tenantBuild.Commit == "unknown") return true;
+        return !repoHead.Commit.StartsWith(tenantBuild.Commit)
+            && !tenantBuild.Commit.StartsWith(repoHead.Commit);
+    }
+
     public async Task<UpgradeResult> UpgradePortalAsync()
     {
         var log = new List<string>();
@@ -320,6 +371,16 @@ public class UpdateService(
                     return new UpgradeResult(false, "docker build zakończył się błędem", log);
                 }
                 log.Add("✓ Nowy obraz trenera zbudowany");
+
+                var (commitOk2, builtCommit) = await RunAsync("git", "rev-parse HEAD", RepoDir);
+                if (commitOk2)
+                {
+                    var trimmed = builtCommit.Trim();
+                    var now = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                    await siteSettings.SetAsync(SiteSettingsService.Keys.LastTenantBuildCommit, trimmed);
+                    await siteSettings.SetAsync(SiteSettingsService.Keys.LastTenantBuildTime, now);
+                    log.Add($"✓ Zapisano wersję: {trimmed[..7]}");
+                }
             }
 
             if (reprovisionTenants)
@@ -389,6 +450,7 @@ public class VersionInfo
     public string Commit { get; set; } = "unknown";
     public string BuildTime { get; set; } = "unknown";
     public string Branch { get; set; } = "master";
+    public string Message { get; set; } = "";
     public string CommitShort => Commit.Length > 7 ? Commit[..7] : Commit;
 }
 
