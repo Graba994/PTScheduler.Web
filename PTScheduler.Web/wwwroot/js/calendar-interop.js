@@ -34,6 +34,10 @@ export function initCalendar(dotnetRef, el, canEdit) {
             day: 'Dzień',
             list: 'Lista'
         },
+        views: {
+            listDay: { buttonText: 'Dzień' },
+            listWeek: { buttonText: 'Tydzień' }
+        },
         events: async (info, success, failure) => {
             try {
                 const events = await dotnetRef.invokeMethodAsync('GetEvents', info.startStr, info.endStr);
