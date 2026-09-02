@@ -196,7 +196,7 @@ else if (client is not null)
                         {
                             <div class="mt-2 small text-muted">
                                 <i class="bi bi-file-earmark-pdf me-1"></i>Raport PDF
-                                <PlanBadge Flag="ClientReports" RequiredPlan="Studio" />
+                                <PlanBadge Flag="ClientReports" RequiredPlan="Business" />
                             </div>
                         }
                         <div class="d-flex align-items-center justify-content-between mt-3 pt-2 border-top">
@@ -802,9 +802,7 @@ else if (client is not null)
                         </div>
                         <div class="col-6">
                             <label class="form-label">Godzina <span class="text-danger">*</span></label>
-                            <input type="time" class="form-control"
-                                   value="@bookingTime"
-                                   @onchange="e => bookingTime = e.Value?.ToString() ?? bookingTime" />
+                            <TimePicker @bind-Value="bookingTime" />
                         </div>
                         <div class="col-12">
                             <label class="form-label">Notatki</label>
@@ -849,7 +847,7 @@ else if (client is not null)
     private bool bookingOpen;
     private CreateSessionDto bookingDto = new();
     private string bookingDate = string.Empty;
-    private string bookingTime = string.Empty;
+    private TimeOnly bookingTime;
     private string bookingError = string.Empty;
     private List<SessionTypeDto> sessionTypes = [];
 
@@ -1304,7 +1302,7 @@ else if (client is not null)
         };
         var now = DateTime.Now.AddHours(1);
         bookingDate = now.ToString("yyyy-MM-dd");
-        bookingTime = now.ToString("HH:00");
+        bookingTime = new TimeOnly(now.Hour, 0);
         bookingError = string.Empty;
         bookingOpen = true;
     }
@@ -1314,7 +1312,7 @@ else if (client is not null)
     private async Task SubmitBooking()
     {
         if (bookingDto.SessionTypeId == 0) { bookingError = "Wybierz typ sesji."; return; }
-        if (!DateTime.TryParse($"{bookingDate} {bookingTime}", out var startTime))
+        if (!DateTime.TryParse($"{bookingDate} {bookingTime:HH:mm}", out var startTime))
         { bookingError = "Nieprawidłowa data lub godzina."; return; }
 
         bookingDto.StartTime = startTime;

@@ -10,173 +10,463 @@
 
 <PageTitle>Rejestracja — PTScheduler</PageTitle>
 
-<section class="py-5">
-    <div class="container">
-        <div class="row justify-content-center">
-            <div class="col-lg-7">
+<section class="reg-page">
+    <div class="reg-container">
 
-                @if (_done)
-                {
-                    <div class="text-center py-4">
-                        @if (_provisioned)
-                        {
-                            <div style="width:70px;height:70px;border-radius:50%;background:#198754;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:2rem" class="mb-3">
-                                <i class="bi bi-check-lg"></i>
-                            </div>
-                            <h3 class="fw-bold">Instancja gotowa!</h3>
-                            <p class="text-muted">
-                                Twoja aplikacja PTScheduler jest uruchomiona.
-                            </p>
-                            <div class="alert alert-success text-start">
-                                <div class="mb-2"><strong>Link do Twojej aplikacji:</strong></div>
-                                <a href="@_instanceUrl" target="_blank" class="btn btn-success btn-sm">
-                                    <i class="bi bi-box-arrow-up-right me-1"></i>Otwórz @_form.CompanyName
-                                </a>
-                                <div class="small mt-2 text-muted">
-                                    @_instanceUrl
-                                </div>
-                            </div>
-                            <div class="alert alert-info small text-start">
-                                <i class="bi bi-info-circle me-1"></i>
-                                Po otwarciu przejdź przez <strong>kreator konfiguracji</strong> — utworzysz w nim konto admina i skonfigurujesz aplikację.
-                                Link wysłaliśmy też na <strong>@_form.Email</strong>.
-                            </div>
-                        }
-                        else if (_pendingPayment)
-                        {
-                            <div style="width:70px;height:70px;border-radius:50%;background:#f59e0b;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:2rem" class="mb-3">
-                                <i class="bi bi-hourglass-split"></i>
-                            </div>
-                            <h3 class="fw-bold">Rejestracja przyjęta</h3>
-                            <p class="text-muted">
-                                Wybrałeś plan <strong>@(_selectedPlan?.Name)</strong> (@(_selectedPlan?.MonthlyPrice.ToString("0")) zł/mies.).
-                            </p>
-                            <div class="alert alert-warning text-start">
-                                <i class="bi bi-envelope me-1"></i>
-                                Skontaktujemy się z Tobą w ciągu 24h na <strong>@_form.Email</strong> z linkiem do płatności.
-                                Po opłaceniu Twoja instancja zostanie uruchomiona automatycznie.
-                            </div>
-                        }
-                        else
-                        {
-                            <div style="width:70px;height:70px;border-radius:50%;background:#dc2626;color:#fff;display:inline-flex;align-items:center;justify-content:center;font-size:2rem" class="mb-3">
-                                <i class="bi bi-exclamation-triangle"></i>
-                            </div>
-                            <h3 class="fw-bold">Rejestracja zapisana</h3>
-                            <p class="text-muted">
-                                Twoje dane zostały zapisane, ale uruchomienie instancji nie powiodło się.
-                                Nasz zespół skontaktuje się z Tobą.
-                            </p>
-                            @if (!string.IsNullOrEmpty(_provisionError))
-                            {
-                                <div class="alert alert-danger small text-start">
-                                    <strong>Szczegóły:</strong> @_provisionError
-                                </div>
-                            }
-                        }
+        @if (_done)
+        {
+            <div class="reg-card reg-result">
+                <div class="reg-result-icon reg-result-pending">
+                    <span class="material-symbols-rounded" style="font-size:32px">hourglass_top</span>
+                </div>
+                <h2>Rejestracja przyjeta!</h2>
+                <p class="reg-result-sub">
+                    Wybrales plan <strong>@(_selectedPlan?.Name)</strong>.
+                </p>
+                <div class="reg-alert reg-alert-info">
+                    <span class="material-symbols-rounded" style="font-size:18px">verified</span>
+                    <div>
+                        Twoje zgloszenie zostalo przyjete i oczekuje na weryfikacje.
+                        Skontaktujemy sie z Toba najszybciej jak to mozliwe na <strong>@_form.Email</strong>.
+                        Po akceptacji otrzymasz dane dostepu do Twojej instancji.
                     </div>
-                }
-                else
-                {
-                    <div class="text-center mb-4">
-                        <h2 class="fw-bold">Załóż konto trenera</h2>
-                        <p class="text-muted">Wypełnij formularz — instancja będzie gotowa w kilka minut</p>
+                </div>
+                <div class="reg-alert reg-alert-success">
+                    <span class="material-symbols-rounded" style="font-size:18px">schedule</span>
+                    <div>Zwykle weryfikacja trwa do <strong>24 godzin</strong> w dni robocze.</div>
+                </div>
+            </div>
+        }
+        else
+        {
+            <div class="reg-card">
+                <div class="reg-header">
+                    <div class="reg-logo">
+                        <span class="material-symbols-rounded" style="font-size:24px">rocket_launch</span>
                     </div>
+                    <h2>Załóż konto trenera</h2>
+                    <p>Wypełnij formularz — instancja będzie gotowa w kilka minut</p>
+                </div>
 
-                    <div class="card border-0 shadow-sm">
-                        <div class="card-body p-4">
-                            <EditForm Model="_form" OnValidSubmit="Submit" FormName="register">
-                                <DataAnnotationsValidator />
+                <EditForm Model="_form" OnValidSubmit="Submit" FormName="register">
+                    <DataAnnotationsValidator />
 
-                                <div class="row g-3">
-                                    <div class="col-md-6">
-                                        <label class="form-label fw-semibold">Imię i nazwisko</label>
-                                        <InputText class="form-control" @bind-Value="_form.FullName" placeholder="Jan Kowalski" />
-                                        <ValidationMessage For="() => _form.FullName" />
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label fw-semibold">Email</label>
-                                        <InputText class="form-control" type="email" @bind-Value="_form.Email" placeholder="jan@email.pl" />
-                                        <ValidationMessage For="() => _form.Email" />
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label fw-semibold">Nazwa studia / firmy</label>
-                                        <InputText class="form-control" @bind-Value="_form.CompanyName" placeholder="FitStudio Jan" />
-                                        <ValidationMessage For="() => _form.CompanyName" />
-                                    </div>
-                                    <div class="col-md-6">
-                                        <label class="form-label fw-semibold">Telefon <span class="text-muted">(opcjonalnie)</span></label>
-                                        <InputText class="form-control" @bind-Value="_form.Phone" placeholder="+48 600 123 456" />
-                                    </div>
-                                    <div class="col-12">
-                                        <label class="form-label fw-semibold">Plan</label>
-                                        <div class="row g-2">
-                                            @foreach (var p in _plans)
-                                            {
-                                                <div class="col-md-4">
-                                                    <div class="plan-option @(_form.PlanId == p.Id ? "selected" : "")" @onclick="() => _form.PlanId = p.Id">
-                                                        <div class="fw-bold">@p.Name</div>
-                                                        <div class="small text-muted">
-                                                            @(p.MonthlyPrice == 0 ? "0 zł" : $"{p.MonthlyPrice:0} zł/mies.") — @(p.MaxClients == int.MaxValue ? "bez limitu" : $"{p.MaxClients}") klientów
-                                                        </div>
-                                                    </div>
-                                                </div>
-                                            }
-                                        </div>
-                                    </div>
-
-                                    <div class="col-12">
-                                        <label class="form-label fw-semibold">Jak chcesz skonfigurować?</label>
-                                        <div class="row g-2">
-                                            <div class="col-md-6">
-                                                <div class="plan-option @(_form.SetupMode == "self" ? "selected" : "")" @onclick='() => _form.SetupMode = "self"'>
-                                                    <div class="fw-bold"><i class="bi bi-tools me-1"></i>Sam/sama</div>
-                                                    <div class="small text-muted">Kreator krok po kroku — bezpłatnie</div>
-                                                </div>
-                                            </div>
-                                            <div class="col-md-6">
-                                                <div class="plan-option @(_form.SetupMode == "admin" ? "selected" : "")" @onclick='() => _form.SetupMode = "admin"'>
-                                                    <div class="fw-bold"><i class="bi bi-headset me-1"></i>Nasz zespół</div>
-                                                    <div class="small text-muted">Wszystko robimy za Ciebie — płatne</div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
+                    <div class="reg-fields">
+                        <div class="reg-row">
+                            <div class="reg-field">
+                                <label for="fullname">Imię i nazwisko</label>
+                                <div class="reg-input-wrap">
+                                    <span class="material-symbols-rounded reg-input-icon">person</span>
+                                    <InputText id="fullname" class="reg-input" @bind-Value="_form.FullName" placeholder="Jan Kowalski" />
                                 </div>
+                                <ValidationMessage For="() => _form.FullName" />
+                            </div>
+                            <div class="reg-field">
+                                <label for="email">Email</label>
+                                <div class="reg-input-wrap">
+                                    <span class="material-symbols-rounded reg-input-icon">mail</span>
+                                    <InputText id="email" class="reg-input" type="email" @bind-Value="_form.Email" placeholder="twoj-email" />
+                                </div>
+                                <ValidationMessage For="() => _form.Email" />
+                            </div>
+                        </div>
 
-                                @if (_error is not null)
+                        <div class="reg-row">
+                            <div class="reg-field">
+                                <label for="company">Nazwa studia / firmy</label>
+                                <div class="reg-input-wrap">
+                                    <span class="material-symbols-rounded reg-input-icon">storefront</span>
+                                    <InputText id="company" class="reg-input" @bind-Value="_form.CompanyName" placeholder="FitStudio Jan" />
+                                </div>
+                                <ValidationMessage For="() => _form.CompanyName" />
+                            </div>
+                            <div class="reg-field">
+                                <label for="phone">Telefon <span class="reg-optional">(opcjonalnie)</span></label>
+                                <div class="reg-input-wrap">
+                                    <span class="material-symbols-rounded reg-input-icon">phone</span>
+                                    <InputText id="phone" class="reg-input" @bind-Value="_form.Phone" placeholder="+48 600 123 456" />
+                                </div>
+                            </div>
+                        </div>
+
+                        <div class="reg-field">
+                            <label>Plan</label>
+                            <div class="reg-plans">
+                                @foreach (var p in _plans)
                                 {
-                                    <div class="alert alert-danger py-2 small mt-3">@_error</div>
+                                    <div class="reg-plan @(_form.PlanId == p.Id ? "reg-plan-active" : "")" @onclick="() => _form.PlanId = p.Id">
+                                        <div class="reg-plan-name">@p.Name</div>
+                                        <div class="reg-plan-price">
+                                            @(p.MonthlyPrice == 0 ? "0 zł" : $"{p.MonthlyPrice:0} zł/mies.")
+                                        </div>
+                                        <div class="reg-plan-desc">
+                                            @(p.MaxClients == int.MaxValue ? "bez limitu" : $"{p.MaxClients}") klientów
+                                        </div>
+                                    </div>
                                 }
+                            </div>
+                        </div>
 
-                                <button type="submit" class="btn btn-primary btn-lg w-100 mt-4" disabled="@_saving">
-                                    @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                                    <i class="bi bi-rocket-takeoff me-2"></i>Zarejestruj się
-                                </button>
-
-                                <p class="text-muted text-center small mt-3 mb-0">
-                                    Masz już konto? <a href="/panel">Zaloguj się</a>
-                                </p>
-                            </EditForm>
+                        <div class="reg-field">
+                            <label>Jak chcesz skonfigurować?</label>
+                            <div class="reg-setup-row">
+                                <div class="reg-plan @(_form.SetupMode == "self" ? "reg-plan-active" : "")" @onclick='() => _form.SetupMode = "self"'>
+                                    <div class="reg-plan-name">
+                                        <span class="material-symbols-rounded" style="font-size:18px;vertical-align:-3px">build</span>
+                                        Sam/sama
+                                    </div>
+                                    <div class="reg-plan-desc">Kreator krok po kroku — bezpłatnie</div>
+                                </div>
+                                <div class="reg-plan @(_form.SetupMode == "admin" ? "reg-plan-active" : "")" @onclick='() => _form.SetupMode = "admin"'>
+                                    <div class="reg-plan-name">
+                                        <span class="material-symbols-rounded" style="font-size:18px;vertical-align:-3px">support_agent</span>
+                                        Nasz zespół
+                                    </div>
+                                    <div class="reg-plan-desc">Wszystko robimy za Ciebie — płatne</div>
+                                </div>
+                            </div>
                         </div>
                     </div>
-                }
+
+                    @if (_error is not null)
+                    {
+                        <div class="reg-alert reg-alert-danger" style="margin-top:16px">@_error</div>
+                    }
+
+                    <button type="submit" class="reg-submit" disabled="@_saving">
+                        @if (_saving)
+                        {
+                            <span class="reg-spinner"></span>
+                        }
+                        <span class="material-symbols-rounded" style="font-size:20px">rocket_launch</span>
+                        Zarejestruj się
+                    </button>
+
+                    <div class="reg-footer">
+                        Masz już konto? <a href="/login">Zaloguj się</a>
+                    </div>
+                </EditForm>
             </div>
-        </div>
+        }
     </div>
 </section>
 
 <style>
-    .plan-option {
-        border: 2px solid #e5e7eb;
-        border-radius: .6rem;
-        padding: .75rem 1rem;
+    .reg-page {
+        min-height: 100vh;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 120px 24px 60px;
+        font-family: var(--pts-font-body);
+        color: var(--pts-text);
+        background: var(--pts-bg);
+        position: relative;
+        overflow: hidden;
+    }
+    .reg-page::before {
+        content: '';
+        position: absolute;
+        top: -300px; right: -200px;
+        width: 700px; height: 700px;
+        background: radial-gradient(circle, var(--pts-glow) 0%, transparent 70%);
+        pointer-events: none;
+    }
+    .reg-page::after {
+        content: '';
+        position: absolute;
+        bottom: -200px; left: -150px;
+        width: 500px; height: 500px;
+        background: radial-gradient(circle, rgba(6, 214, 160, 0.08) 0%, transparent 70%);
+        pointer-events: none;
+    }
+
+    .reg-container {
+        width: 100%;
+        max-width: 580px;
+        position: relative;
+        z-index: 1;
+    }
+
+    .reg-card {
+        background: var(--pts-surface);
+        border: 1px solid var(--pts-border);
+        border-radius: 20px;
+        padding: 40px 36px;
+        box-shadow: var(--pts-shadow-lg);
+    }
+
+    .reg-header {
+        text-align: center;
+        margin-bottom: 32px;
+    }
+    .reg-logo {
+        width: 52px; height: 52px;
+        border-radius: 14px;
+        background: linear-gradient(135deg, var(--pts-primary), var(--pts-accent));
+        display: inline-flex;
+        align-items: center; justify-content: center;
+        color: #fff;
+        margin-bottom: 16px;
+    }
+    .reg-header h2 {
+        font-family: var(--pts-font-display);
+        font-size: 1.4rem;
+        font-weight: 800;
+        margin: 0 0 6px;
+        letter-spacing: -0.02em;
+    }
+    .reg-header p {
+        font-size: 0.88rem;
+        color: var(--pts-text-secondary);
+        margin: 0;
+    }
+
+    .reg-fields { display: flex; flex-direction: column; gap: 18px; }
+
+    .reg-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 16px;
+    }
+
+    .reg-field label {
+        display: block;
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: var(--pts-text);
+        margin-bottom: 6px;
+    }
+    .reg-optional {
+        font-weight: 400;
+        color: var(--pts-text-secondary);
+    }
+
+    .reg-input-wrap {
+        position: relative;
+    }
+    .reg-input-icon {
+        position: absolute;
+        left: 14px; top: 50%;
+        transform: translateY(-50%);
+        font-size: 20px;
+        color: var(--pts-text-secondary);
+        pointer-events: none;
+        opacity: 0.5;
+    }
+    .reg-input {
+        width: 100%;
+        padding: 12px 16px 12px 44px;
+        border: 2px solid var(--pts-border);
+        border-radius: var(--pts-radius-sm);
+        font-family: var(--pts-font-body);
+        font-size: 0.92rem;
+        color: var(--pts-text);
+        background: var(--pts-bg);
+        outline: none;
+        transition: border-color 0.2s, box-shadow 0.2s;
+        box-sizing: border-box;
+    }
+    .reg-input::placeholder {
+        color: var(--pts-text-secondary);
+        opacity: 0.5;
+    }
+    .reg-input:focus {
+        border-color: var(--pts-primary);
+        box-shadow: 0 0 0 3px var(--pts-glow);
+    }
+
+    .reg-plans {
+        display: grid;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 10px;
+    }
+    .reg-setup-row {
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+    }
+    .reg-plan {
+        border: 2px solid var(--pts-border);
+        border-radius: var(--pts-radius-sm);
+        padding: 14px 12px;
         cursor: pointer;
-        transition: border-color .2s, background .2s;
+        transition: border-color 0.2s, background 0.2s;
         text-align: center;
     }
-    .plan-option:hover { border-color: #6366f1; }
-    .plan-option.selected { border-color: #6366f1; background: rgba(99,102,241,.05); }
+    .reg-plan:hover {
+        border-color: var(--pts-primary);
+    }
+    .reg-plan-active {
+        border-color: var(--pts-primary);
+        background: var(--pts-glow);
+    }
+    .reg-plan-name {
+        font-weight: 700;
+        font-size: 0.9rem;
+        margin-bottom: 4px;
+    }
+    .reg-plan-price {
+        font-size: 0.82rem;
+        font-weight: 600;
+        color: var(--pts-primary);
+    }
+    .reg-plan-desc {
+        font-size: 0.78rem;
+        color: var(--pts-text-secondary);
+        margin-top: 2px;
+    }
+
+    .reg-submit {
+        width: 100%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 8px;
+        padding: 14px 24px;
+        margin-top: 24px;
+        border: none;
+        border-radius: 12px;
+        background: var(--pts-primary);
+        color: #fff;
+        font-family: var(--pts-font-body);
+        font-size: 0.95rem;
+        font-weight: 600;
+        cursor: pointer;
+        transition: all 0.25s;
+        box-shadow: 0 4px 16px rgba(124, 58, 237, 0.35);
+    }
+    .reg-submit:hover {
+        background: var(--pts-primary-dark);
+        box-shadow: 0 6px 24px rgba(124, 58, 237, 0.45);
+        transform: translateY(-1px);
+    }
+    .reg-submit:disabled {
+        opacity: 0.6;
+        cursor: not-allowed;
+        transform: none;
+    }
+
+    .reg-spinner {
+        width: 18px; height: 18px;
+        border: 2px solid rgba(255,255,255,0.3);
+        border-top-color: #fff;
+        border-radius: 50%;
+        animation: reg-spin 0.6s linear infinite;
+    }
+    @@keyframes reg-spin { to { transform: rotate(360deg); } }
+
+    .reg-footer {
+        text-align: center;
+        margin-top: 20px;
+        font-size: 0.85rem;
+        color: var(--pts-text-secondary);
+    }
+    .reg-footer a {
+        color: var(--pts-primary);
+        text-decoration: none;
+        font-weight: 600;
+    }
+    .reg-footer a:hover {
+        text-decoration: underline;
+    }
+
+    /* Result states */
+    .reg-result {
+        text-align: center;
+    }
+    .reg-result h2 {
+        font-family: var(--pts-font-display);
+        font-size: 1.4rem;
+        font-weight: 800;
+        margin: 0 0 8px;
+    }
+    .reg-result-sub {
+        color: var(--pts-text-secondary);
+        font-size: 0.92rem;
+        margin: 0 0 24px;
+    }
+    .reg-result-icon {
+        width: 64px; height: 64px;
+        border-radius: 50%;
+        display: inline-flex;
+        align-items: center; justify-content: center;
+        margin-bottom: 16px;
+        color: #fff;
+    }
+    .reg-result-success { background: #16a34a; }
+    .reg-result-pending { background: #f59e0b; }
+    .reg-result-error { background: #dc2626; }
+
+    .reg-alert {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 14px 18px;
+        border-radius: var(--pts-radius-sm);
+        font-size: 0.85rem;
+        margin-bottom: 16px;
+        text-align: left;
+        line-height: 1.5;
+    }
+    .reg-alert-success {
+        background: rgba(22, 163, 74, 0.08);
+        border: 1px solid rgba(22, 163, 74, 0.15);
+        color: #16a34a;
+        flex-direction: column;
+    }
+    .reg-alert-info {
+        background: rgba(59, 130, 246, 0.08);
+        border: 1px solid rgba(59, 130, 246, 0.15);
+        color: #2563eb;
+    }
+    .reg-alert-warning {
+        background: rgba(245, 158, 11, 0.08);
+        border: 1px solid rgba(245, 158, 11, 0.15);
+        color: #d97706;
+    }
+    .reg-alert-danger {
+        background: rgba(239, 68, 68, 0.08);
+        border: 1px solid rgba(239, 68, 68, 0.15);
+        color: #dc2626;
+    }
+    .reg-alert-title {
+        font-weight: 600;
+        margin-bottom: 8px;
+    }
+    .reg-instance-link {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 8px 16px;
+        background: #16a34a;
+        color: #fff;
+        border-radius: 8px;
+        text-decoration: none;
+        font-weight: 600;
+        font-size: 0.88rem;
+        transition: background 0.2s;
+    }
+    .reg-instance-link:hover { background: #15803d; color: #fff; }
+    .reg-instance-url {
+        font-size: 0.8rem;
+        color: var(--pts-text-secondary);
+        margin-top: 8px;
+        word-break: break-all;
+    }
+
+    .validation-message {
+        color: #dc2626;
+        font-size: 0.78rem;
+        margin-top: 4px;
+    }
+
+    @@media (max-width: 600px) {
+        .reg-card { padding: 32px 24px; border-radius: 16px; }
+        .reg-row { grid-template-columns: 1fr; }
+        .reg-plans { grid-template-columns: repeat(2, 1fr); }
+        .reg-setup-row { grid-template-columns: 1fr; }
+    }
 </style>
 
 @code {
@@ -185,11 +475,7 @@
     private List<Plan> _plans = [];
     private bool _saving;
     private bool _done;
-    private bool _provisioned;
-    private bool _pendingPayment;
     private string? _error;
-    private string? _provisionError;
-    private string? _instanceUrl;
     private Plan? _selectedPlan;
     private string _mainDomain = "ptscheduler.pl";
     private RegisterForm _form = new();
@@ -234,43 +520,18 @@
                 _form.PlanId,
                 _form.SetupMode);
 
-            // For free plans — provision immediately and email the trainer
-            if (_selectedPlan.MonthlyPrice == 0)
+            var pendingBody = EmailSvc.RegistrationPendingReviewEmailBody(
+                _form.FullName, _selectedPlan.Name);
+            _ = EmailSvc.SendAsync(_form.Email, "PTScheduler — rejestracja przyjeta", pendingBody);
+
+            var adminEmail = await Settings.GetAsync(SiteSettingsService.Keys.AdminNotificationEmail);
+            if (!string.IsNullOrWhiteSpace(adminEmail))
             {
-                var (ok, output) = await TenantSvc.ProvisionAsync(tenant.Id);
-                if (ok)
-                {
-                    _instanceUrl = $"http://192.168.0.220:{tenant.Port}";
-                    _provisioned = true;
-
-                    var body = EmailSvc.WelcomeEmailBody(
-                        _form.FullName, domain, tenant.Port.ToString(), _selectedPlan.Name);
-                    _ = EmailSvc.SendAsync(_form.Email, "Twoja instancja PTScheduler jest gotowa!", body);
-                }
-                else
-                {
-                    _provisionError = output;
-                }
-                _done = true;
-                return;
+                var adminBody = EmailSvc.AdminNewRegistrationEmailBody(
+                    _form.FullName, _form.Email, _form.CompanyName,
+                    _selectedPlan.Name, _form.Phone, tenant.Id);
+                _ = EmailSvc.SendAsync(adminEmail, $"Nowa rejestracja: {_form.CompanyName}", adminBody);
             }
-
-            // For paid plans — try Stripe checkout; if not configured, fall back to "we'll contact you"
-            if (await StripeSvc.IsConfiguredAsync())
-            {
-                var (ok, checkoutUrl, err) = await StripeSvc.StartSubscriptionCheckoutAsync(tenant.Id, "monthly");
-                if (ok && !string.IsNullOrEmpty(checkoutUrl))
-                {
-                    Nav.NavigateTo(checkoutUrl, forceLoad: true);
-                    return;
-                }
-                _provisionError = err ?? "Nie udało się utworzyć sesji płatności.";
-            }
-
-            _pendingPayment = true;
-            var body2 = EmailSvc.PendingPaymentEmailBody(
-                _form.FullName, _selectedPlan.Name, _selectedPlan.MonthlyPrice);
-            _ = EmailSvc.SendAsync(_form.Email, "PTScheduler — dziękujemy za rejestrację", body2);
 
             _done = true;
         }

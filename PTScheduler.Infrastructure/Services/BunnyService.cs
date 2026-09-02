@@ -3,13 +3,19 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using PTScheduler.Application.DTOs;
 using PTScheduler.Application.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace PTScheduler.Infrastructure.Services;
 
-public class BunnyService(IWebRootPathProvider webRoot, IHttpClientFactory httpFactory)
+public class BunnyService(IWebRootPathProvider webRoot, IHttpClientFactory httpFactory, ILogger<BunnyService> logger)
     : IBunnyService
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
+    private static readonly HttpClient PortalHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
+
+    private string? PortalUrl => Environment.GetEnvironmentVariable("PORTAL_URL");
+    private string? TenantSlug => Environment.GetEnvironmentVariable("TENANT_SLUG");
+    private string? InternalSecret => Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
 
     private string FilePath =>
         Path.Combine(webRoot.WebRootPath, "branding", "bunny-settings.json");
@@ -22,10 +28,16 @@ public class BunnyService(IWebRootPathProvider webRoot, IHttpClientFactory httpF
             {
                 await using var fs = File.OpenRead(FilePath);
                 var dto = await JsonSerializer.DeserializeAsync<BunnySettingsDto>(fs);
-                if (dto is not null) return dto;
+                if (dto is not null && !string.IsNullOrWhiteSpace(dto.ApiKey))
+                    return dto;
             }
         }
         catch { }
+
+        var platform = await FetchPlatformBunnySettingsAsync();
+        if (platform is not null)
+            return platform;
+
         return new BunnySettingsDto();
     }
 
@@ -73,7 +85,6 @@ public class BunnyService(IWebRootPathProvider webRoot, IHttpClientFactory httpF
         {
             var http = httpFactory.CreateClient();
 
-            // Step 1: create video → get GUID
             var createReq = new HttpRequestMessage(HttpMethod.Post,
                 $"https://video.bunnycdn.com/library/{s.LibraryId}/videos")
             {
@@ -91,7 +102,6 @@ public class BunnyService(IWebRootPathProvider webRoot, IHttpClientFactory httpF
             var guid = created.GetProperty("guid").GetString();
             if (string.IsNullOrEmpty(guid)) return (false, null, "Brak GUID w odpowiedzi.");
 
-            // Step 2: upload binary
             var uploadReq = new HttpRequestMessage(HttpMethod.Put,
                 $"https://video.bunnycdn.com/library/{s.LibraryId}/videos/{guid}")
             {
@@ -166,9 +176,74 @@ public class BunnyService(IWebRootPathProvider webRoot, IHttpClientFactory httpF
 
     public string BuildEmbedUrl(string videoId)
     {
-        // Async load — trainer will paste libraryId separately at settings time
-        // We can't easily get sync here without settings; fall back to relative iframe path.
         var settings = GetSettingsAsync().GetAwaiter().GetResult();
         return $"https://iframe.mediadelivery.net/embed/{settings.LibraryId}/{videoId}";
+    }
+
+    public async Task<CentralizedCdnStatus?> GetCentralizedStatusAsync()
+    {
+        if (string.IsNullOrEmpty(PortalUrl) || string.IsNullOrEmpty(TenantSlug))
+            return null;
+
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get,
+                $"{PortalUrl.TrimEnd('/')}/api/credits/{TenantSlug}");
+            if (!string.IsNullOrEmpty(InternalSecret))
+                req.Headers.TryAddWithoutValidation("X-Internal-Secret", InternalSecret);
+
+            var resp = await PortalHttp.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) return null;
+
+            var body = await resp.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+
+            return new CentralizedCdnStatus(
+                PlatformCdnEnabled: root.GetProperty("platformCdnEnabled").GetBoolean(),
+                StorageCredits: root.GetProperty("cdnStorageGb").GetDecimal(),
+                BandwidthCredits: root.GetProperty("cdnBandwidthGb").GetDecimal());
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to fetch centralized CDN status from portal");
+            return null;
+        }
+    }
+
+    private async Task<BunnySettingsDto?> FetchPlatformBunnySettingsAsync()
+    {
+        if (string.IsNullOrEmpty(PortalUrl) || string.IsNullOrEmpty(TenantSlug))
+            return null;
+
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get,
+                $"{PortalUrl.TrimEnd('/')}/api/credits/{TenantSlug}/bunny");
+            if (!string.IsNullOrEmpty(InternalSecret))
+                req.Headers.TryAddWithoutValidation("X-Internal-Secret", InternalSecret);
+
+            var resp = await PortalHttp.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) return null;
+
+            var body = await resp.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(body);
+            var root = doc.RootElement;
+
+            if (!root.GetProperty("enabled").GetBoolean()) return null;
+
+            return new BunnySettingsDto
+            {
+                Enabled = true,
+                ApiKey = root.GetProperty("apiKey").GetString(),
+                LibraryId = root.GetProperty("libraryId").GetString(),
+                CdnHostname = root.TryGetProperty("cdnHostname", out var h) ? h.GetString() : null
+            };
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to fetch platform Bunny settings from portal");
+            return null;
+        }
     }
 }

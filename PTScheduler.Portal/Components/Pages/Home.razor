@@ -1,176 +1,1128 @@
 @page "/"
+@rendermode InteractiveServer
 @layout PublicLayout
 @inject SiteSettingsService Settings
 @inject IDbContextFactory<PortalDbContext> DbFactory
+@using System.Text.Json
 
 <PageTitle>PTScheduler — Platforma dla trenerów personalnych</PageTitle>
 
-<!-- Hero -->
-<section class="hero-section">
-    <div class="container">
-        <div class="row align-items-center" style="min-height:75vh">
-            <div class="col-lg-6">
-                <div class="hero-badge">@_s("hero_badge")</div>
-                <h1 class="hero-title">@_s("hero_title")</h1>
-                <p class="hero-sub">@_s("hero_subtitle")</p>
-                <div class="d-flex gap-2 flex-wrap">
-                    <a href="@_s("hero_cta_url")" class="btn btn-primary btn-lg">
-                        <i class="bi bi-rocket-takeoff me-2"></i>@_s("hero_cta")
-                    </a>
-                    <a href="/pricing" class="btn btn-outline-primary btn-lg">
-                        <i class="bi bi-tag me-2"></i>Zobacz cennik
-                    </a>
-                </div>
+<!-- HERO -->
+<section class="lp-hero">
+    <div class="lp-container lp-hero-inner">
+        <div>
+            <div class="lp-hero-badge">
+                <span class="lp-hero-badge-dot"></span>
+                @_s("hero_badge", "Nowa era zarządzania treningami")
             </div>
-            <div class="col-lg-6 d-none d-lg-block text-center">
-                <div class="hero-mockup">
-                    <div class="mockup-header">
-                        <span class="mockup-dot" style="background:#ff5f57"></span>
-                        <span class="mockup-dot" style="background:#febc2e"></span>
-                        <span class="mockup-dot" style="background:#28c840"></span>
-                    </div>
-                    <div class="mockup-body">
-                        <div class="mockup-sidebar"></div>
-                        <div class="mockup-content">
-                            <div class="mockup-card"></div>
-                            <div class="mockup-card" style="width:75%"></div>
-                            <div class="mockup-card" style="width:50%"></div>
-                        </div>
-                    </div>
-                </div>
+            <h1 class="lp-hero-h1">@_s("hero_title", "Wszystko do prowadzenia")<br><span class="lp-gradient">treningow online.</span></h1>
+            <p class="lp-hero-sub">
+                @_s("hero_subtitle", "Grafik, klienci, pakiety, platnosci, kursy wideo i panel dla klientow — jedna aplikacja pod Twoja marka. Zarejestruj sie i zacznij w 5 minut.")
+            </p>
+            <div class="lp-hero-ctas">
+                <a href="@_s("hero_cta_url", "/register")" class="lp-btn lp-btn-energy lp-btn-lg">
+                    <span class="material-symbols-rounded">rocket_launch</span>
+                    @_s("hero_cta", "Wypróbuj za darmo")
+                </a>
+                <a href="#video" class="lp-btn lp-btn-outline lp-btn-lg">
+                    <span class="material-symbols-rounded">play_circle</span>
+                    Obejrzyj demo
+                </a>
             </div>
-        </div>
-    </div>
-</section>
-
-<!-- Features -->
-<section class="py-5" style="background:#f8f9fa">
-    <div class="container">
-        <h2 class="text-center fw-bold mb-5">@_s("section_title")</h2>
-        <div class="row g-4">
-            @foreach (var f in _features)
-            {
-                <div class="col-md-4">
-                    <div class="feature-card">
-                        <div class="feature-icon" style="background:@f.BgColor;color:@f.IconColor">
-                            <i class="bi @f.Icon"></i>
-                        </div>
-                        <h5 class="fw-bold">@f.Title</h5>
-                        <p class="text-muted small mb-0">@f.Text</p>
-                    </div>
-                </div>
-            }
-        </div>
-    </div>
-</section>
-
-<!-- Pricing -->
-<section class="py-5" id="pricing">
-    <div class="container">
-        <h2 class="text-center fw-bold mb-5">Cennik</h2>
-        <div class="row g-4 justify-content-center">
-            @foreach (var p in _plans)
-            {
-                <div class="col-md-4">
-                    <div class="card border-0 shadow-sm h-100 @(p.IsFeatured ? "border-primary border-2" : "")">
-                        @if (p.IsFeatured)
+            <div class="lp-hero-proof">
+                <div class="lp-hero-proof-avatars">
+                    @if (_trainers.Count > 0)
+                    {
+                        @foreach (var t in _trainers)
                         {
-                            <div class="text-center pt-2">
-                                <span class="badge bg-primary">Najpopularniejszy</span>
-                            </div>
+                            <a href="@t.Instagram" target="_blank" rel="noopener" class="lp-hero-proof-avatar" style="background:@t.Color" title="@t.Name">@t.Initials</a>
                         }
-                        <div class="card-body text-center p-4">
-                            <h5 class="fw-bold">@p.Name</h5>
-                            <p class="text-muted small">@p.Description</p>
-                            <div class="my-3">
-                                <span class="fs-2 fw-bold">@p.MonthlyPrice.ToString("0")</span>
-                                <span class="text-muted">zł/mies.</span>
-                            </div>
-                            <ul class="list-unstyled text-start small">
-                                <li class="mb-1"><i class="bi bi-check text-success me-1"></i>Max @(p.MaxClients == int.MaxValue ? "∞" : p.MaxClients.ToString()) klientów</li>
-                                <li class="mb-1"><i class="bi @(p.PaymentsEnabled ? "bi-check text-success" : "bi-x text-muted") me-1"></i>Płatności online</li>
-                                <li class="mb-1"><i class="bi @(p.CoursesEnabled ? "bi-check text-success" : "bi-x text-muted") me-1"></i>Kursy wideo</li>
-                                <li class="mb-1"><i class="bi @(p.SmsReminders ? "bi-check text-success" : "bi-x text-muted") me-1"></i>Przypomnienia SMS</li>
-                                <li class="mb-1"><i class="bi @(p.AuditLog ? "bi-check text-success" : "bi-x text-muted") me-1"></i>Audit log i RBAC</li>
-                            </ul>
-                            <a href="/register" class="btn @(p.IsFeatured ? "btn-primary" : "btn-outline-primary") w-100">
-                                @(p.MonthlyPrice == 0 ? "Zacznij za darmo" : "Wybierz plan")
-                            </a>
-                        </div>
+                    }
+                    else
+                    {
+                        <div class="lp-hero-proof-avatar" style="background:#7C3AED">PG</div>
+                        <div class="lp-hero-proof-avatar" style="background:#06D6A0">MK</div>
+                        <div class="lp-hero-proof-avatar" style="background:#FF6B35">AS</div>
+                        <div class="lp-hero-proof-avatar" style="background:#3B82F6">JN</div>
+                    }
+                </div>
+                <span>Dołącz do trenerów, którzy już testują PTScheduler</span>
+            </div>
+        </div>
+        <div class="lp-hero-device">
+            <div class="lp-device-frame">
+                <div class="lp-device-bar">
+                    <div class="lp-device-dot" style="background:#FF5F57"></div>
+                    <div class="lp-device-dot" style="background:#FEBC2E"></div>
+                    <div class="lp-device-dot" style="background:#28C840"></div>
+                    <div class="lp-device-url">twoja-nazwa.ptscheduler.pl</div>
+                </div>
+                <div class="lp-screenshot-placeholder">
+                    <div class="lp-screenshot-label">Dashboard Trenera</div>
+                    <p class="lp-screenshot-desc">
+                        Kalendarz tygodniowy z kolorowymi blokami sesji.
+                        Menu: Grafik, Klienci, Pakiety, Finanse.
+                        Na górze statystyki: sesje, klienci, przychód.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- TRUST BAR -->
+<section class="lp-trust lp-reveal">
+    <div class="lp-container lp-trust-inner">
+        <div class="lp-trust-item lp-reveal-child">
+            <div class="lp-trust-icon"><span class="material-symbols-rounded">shield</span></div>
+            <span>Szyfrowanie SSL</span>
+        </div>
+        <div class="lp-trust-item lp-reveal-child">
+            <div class="lp-trust-icon"><span class="material-symbols-rounded">cloud_done</span></div>
+            <span>Własna subdomena</span>
+        </div>
+        <div class="lp-trust-item lp-reveal-child">
+            <div class="lp-trust-icon"><span class="material-symbols-rounded">smartphone</span></div>
+            <span>Dziala na telefonie</span>
+        </div>
+        <div class="lp-trust-item lp-reveal-child">
+            <div class="lp-trust-icon"><span class="material-symbols-rounded">palette</span></div>
+            <span>Twoje logo i kolory</span>
+        </div>
+        <div class="lp-trust-item lp-reveal-child">
+            <div class="lp-trust-icon"><span class="material-symbols-rounded">lock</span></div>
+            <span>Bezpieczne dane</span>
+        </div>
+    </div>
+</section>
+
+<!-- FEATURE SHOWCASES -->
+<section class="lp-section lp-reveal" id="features">
+    <div class="lp-container">
+        <div class="lp-section-head">
+            <div class="lp-section-eyebrow">Co dostajesz</div>
+            <h2 class="lp-section-title">Wszystko czego potrzebujesz,<br>w jednym miejscu</h2>
+            <p class="lp-section-sub">Koniec z Excelem, notatnikiem i dziesiecia aplikacjami. PTScheduler zastepuje je jedna, prosta platforma.</p>
+        </div>
+
+        <!-- Grafik -->
+        <div class="lp-showcase lp-reveal-child">
+            <div class="lp-showcase-content">
+                <div class="lp-showcase-icon" style="background: linear-gradient(135deg, #3B82F6, #1D4ED8)">
+                    <span class="material-symbols-rounded">calendar_month</span>
+                </div>
+                <h3 class="lp-showcase-title">Inteligentny grafik</h3>
+                <p class="lp-showcase-text">
+                    Ustaw dostępność, a system sam wygeneruje sloty. Klienci rezerwują online
+                    lub Ty planujesz za nich. Przerwy, blokady i serie treningów — automatycznie.
+                </p>
+                <ul class="lp-showcase-list">
+                    <li><span class="lp-showcase-check">&#10003;</span> Reguły dostępności (cykliczne i jednorazowe)</li>
+                    <li><span class="lp-showcase-check">&#10003;</span> Rezerwacja online przez klientów</li>
+                    <li><span class="lp-showcase-check">&#10003;</span> Automatyczne przypomnienia email i SMS</li>
+                    <li><span class="lp-showcase-check">&#10003;</span> Integracja z Google Meet</li>
+                </ul>
+            </div>
+            <div class="lp-showcase-screen">
+                <div class="lp-screenshot-placeholder" style="aspect-ratio:4/3">
+                    <div class="lp-screenshot-label">Kalendarz tygodniowy</div>
+                    <p class="lp-screenshot-desc">
+                        Kolorowe bloki sesji z imieniem klienta, typem treningu i statusem.
+                        Przełącznik: Dzień / Tydzień / Miesiąc.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Pakiety -->
+        <div class="lp-showcase lp-showcase-reverse lp-reveal-child">
+            <div class="lp-showcase-content">
+                <div class="lp-showcase-icon" style="background: linear-gradient(135deg, var(--pts-accent), var(--pts-accent-dark))">
+                    <span class="material-symbols-rounded">inventory_2</span>
+                </div>
+                <h3 class="lp-showcase-title">Pakiety i rozliczenia</h3>
+                <p class="lp-showcase-text">
+                    Sprzedawaj pakiety sesji online. System automatycznie liczy zużyte sesje,
+                    rozlicza anulacje i powiadamia gdy pakiet się kończy lub wygasa.
+                </p>
+                <ul class="lp-showcase-list">
+                    <li><span class="lp-showcase-check">&#10003;</span> Automatyczne odliczanie sesji z paczki</li>
+                    <li><span class="lp-showcase-check">&#10003;</span> Kupony rabatowe i kody zniżkowe</li>
+                    <li><span class="lp-showcase-check">&#10003;</span> Płatności online PayU i Przelewy24</li>
+                    <li><span class="lp-showcase-check">&#10003;</span> Faktury i historia transakcji</li>
+                </ul>
+            </div>
+            <div class="lp-showcase-screen">
+                <div class="lp-screenshot-placeholder" style="aspect-ratio:4/3">
+                    <div class="lp-screenshot-label">Lista pakietów klienta</div>
+                    <p class="lp-screenshot-desc">
+                        Pakiety z paskiem postępu, data wygaśnięcia, badge statusu.
+                        Kalkulator ceny z polem na kod rabatowy.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Dashboard klienta -->
+        <div class="lp-showcase lp-reveal-child">
+            <div class="lp-showcase-content">
+                <div class="lp-showcase-icon" style="background: linear-gradient(135deg, #F59E0B, #D97706)">
+                    <span class="material-symbols-rounded">person</span>
+                </div>
+                <h3 class="lp-showcase-title">Panel klienta</h3>
+                <p class="lp-showcase-text">
+                    Kazdy klient ma wlasny panel — widzi nadchodzace treningi, pakiet,
+                    postepy wagi i moze szybko zapisac pomiary. Moze dodac aplikacje na telefon jak zwykla apke.
+                </p>
+                <ul class="lp-showcase-list">
+                    <li><span class="lp-showcase-check">&#10003;</span> Odliczanie do nastepnego treningu</li>
+                    <li><span class="lp-showcase-check">&#10003;</span> Wykres postepow wagi</li>
+                    <li><span class="lp-showcase-check">&#10003;</span> Historia wszystkich sesji</li>
+                    <li><span class="lp-showcase-check">&#10003;</span> Dziala na telefonie jak zwykla aplikacja</li>
+                </ul>
+            </div>
+            <div class="lp-showcase-screen">
+                <div class="lp-screenshot-placeholder" style="aspect-ratio:9/16; max-width:280px; margin: 0 auto;">
+                    <div class="lp-screenshot-label">Widok mobilny klienta</div>
+                    <p class="lp-screenshot-desc">
+                        Powitanie, odliczanie, karta treningu,
+                        statystyki, mini-wykres wagi, szybki wpis.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Kursy -->
+        <div class="lp-showcase lp-showcase-reverse lp-reveal-child">
+            <div class="lp-showcase-content">
+                <div class="lp-showcase-icon" style="background: linear-gradient(135deg, #EC4899, #BE185D)">
+                    <span class="material-symbols-rounded">play_circle</span>
+                </div>
+                <h3 class="lp-showcase-title">Kursy wideo i mentoring</h3>
+                <p class="lp-showcase-text">
+                    Stwórz kursy treningowe, dietetyczne lub mentoringowe.
+                    Lekcje wideo, materiały PDF, śledzenie postępu uczniów.
+                    Sprzedawaj jako produkt cyfrowy lub dodawaj do pakietów.
+                </p>
+                <ul class="lp-showcase-list">
+                    <li><span class="lp-showcase-check">&#10003;</span> Moduły z lekcjami wideo (YouTube / Bunny)</li>
+                    <li><span class="lp-showcase-check">&#10003;</span> Śledzenie postępu kursanta</li>
+                    <li><span class="lp-showcase-check">&#10003;</span> Sprzedaż online z płatnościami</li>
+                    <li><span class="lp-showcase-check">&#10003;</span> Landing page kursu z opisem i ceną</li>
+                </ul>
+            </div>
+            <div class="lp-showcase-screen">
+                <div class="lp-screenshot-placeholder" style="aspect-ratio:4/3">
+                    <div class="lp-screenshot-label">Strona kursu</div>
+                    <p class="lp-screenshot-desc">
+                        Landing page kursu z banerem, ceną, spisem modułów
+                        i paskiem postępu kursanta.
+                    </p>
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- ALL FEATURES GRID -->
+<section class="lp-section lp-section-alt lp-reveal" id="all-features">
+    <div class="lp-container">
+        <div class="lp-section-head">
+            <div class="lp-section-eyebrow">Pelna lista</div>
+            <h2 class="lp-section-title">Wszystkie funkcje, ktore ulatwiaja prace</h2>
+            <p class="lp-section-sub">Kazda funkcja zaprojektowana tak, zebys mogl skupic sie na treningu, a nie na papierkowej robocie.</p>
+        </div>
+        <div class="lp-features-grid">
+            @foreach (var f in _featureCards)
+            {
+                <div class="lp-feature-card lp-reveal-child">
+                    <div class="lp-feature-card-icon" style="background:@f.BgColor;color:@f.IconColor">
+                        <span class="material-symbols-rounded">@f.Icon</span>
                     </div>
+                    <h4>@f.Title</h4>
+                    <p>@f.Text</p>
                 </div>
             }
         </div>
     </div>
 </section>
 
-<!-- How it works -->
-<section class="py-5" style="background:#f8f9fa">
-    <div class="container">
-        <h2 class="text-center fw-bold mb-5">Jak to działa?</h2>
-        <div class="row g-4 justify-content-center">
-            <div class="col-md-4 text-center">
-                <div class="step-num">1</div>
-                <h6 class="fw-bold">Załóż konto</h6>
-                <p class="text-muted small">Rejestracja i wybór planu. Start jest bezpłatny.</p>
+<!-- VIDEO CONCEPT -->
+<section class="lp-video-section lp-reveal" id="video">
+    <div class="lp-container lp-video-inner">
+        <div class="lp-section-head">
+            <div class="lp-section-eyebrow" style="color:var(--pts-accent)">Obejrzyj demo</div>
+            <h2 class="lp-section-title" style="color:#F0EEF5">Zobacz PTScheduler w akcji</h2>
+            <p class="lp-section-sub" style="color:#9B95AD">90-sekundowe demo pokazujące pełną ścieżkę — od dodania klienta po rozliczenie pakietu.</p>
+        </div>
+        <div class="lp-video-frame">
+            <div class="lp-video-play">
+                <span class="material-symbols-rounded" style="font-size:36px;margin-left:4px">play_arrow</span>
             </div>
-            <div class="col-md-4 text-center">
-                <div class="step-num">2</div>
-                <h6 class="fw-bold">Skonfiguruj</h6>
-                <p class="text-muted small">Sam lub z naszą pomocą — logo, kolory, płatności, domena.</p>
+            <div class="lp-video-label">Film promocyjny · 1:30 min</div>
+        </div>
+        <div class="lp-video-storyboard">
+            <div class="lp-storyboard-item">
+                <div class="lp-storyboard-num">1</div>
+                <div class="lp-storyboard-title">Problem trenera</div>
+                <div class="lp-storyboard-desc">Notes, Excel, WhatsApp. Chaos i pomyłki.</div>
             </div>
-            <div class="col-md-4 text-center">
-                <div class="step-num">3</div>
-                <h6 class="fw-bold">Zarabiaj</h6>
-                <p class="text-muted small">Twoi klienci rezerwują, płacą i trenują. Ty zarządzasz z jednego miejsca.</p>
+            <div class="lp-storyboard-item">
+                <div class="lp-storyboard-num">2</div>
+                <div class="lp-storyboard-title">Wejście PTScheduler</div>
+                <div class="lp-storyboard-desc">Dashboard, dodanie klienta, rezerwacja przez telefon.</div>
+            </div>
+            <div class="lp-storyboard-item">
+                <div class="lp-storyboard-num">3</div>
+                <div class="lp-storyboard-title">Kluczowe funkcje</div>
+                <div class="lp-storyboard-desc">Pakiety, płatności, kursy wideo, branding.</div>
+            </div>
+            <div class="lp-storyboard-item">
+                <div class="lp-storyboard-num">4</div>
+                <div class="lp-storyboard-title">Wezwanie do akcji</div>
+                <div class="lp-storyboard-desc">’Zacznij za darmo — bez karty kredytowej."</div>
             </div>
         </div>
     </div>
 </section>
 
-<!-- CTA -->
-<section style="padding:4rem 0;background:linear-gradient(135deg,#6366f1,#4f46e5)">
-    <div class="container text-center">
-        <h2 class="fw-bold text-white mb-3">@_s("cta_title")</h2>
-        <p class="text-white-50 mb-4">@_s("cta_subtitle")</p>
-        <a href="/register" class="btn btn-light btn-lg fw-semibold">
-            <i class="bi bi-rocket-takeoff me-2"></i>@_s("cta_button")
+<!-- HOW IT WORKS -->
+<section class="lp-section lp-reveal">
+    <div class="lp-container">
+        <div class="lp-section-head">
+            <div class="lp-section-eyebrow">Jak zacząć</div>
+            <h2 class="lp-section-title">Gotowe w 5 minut</h2>
+            <p class="lp-section-sub">Nie musisz niczego instalowac. Rejestrujesz sie, konfigurujesz i zaczynasz.</p>
+        </div>
+        <div class="lp-steps">
+            <div class="lp-step lp-reveal-child">
+                <div class="lp-step-num">1</div>
+                <h4>Załóż konto</h4>
+                <p>Wypełnij formularz — imię, email, nazwa studia. Wybierz plan lub zacznij za darmo.</p>
+            </div>
+            <div class="lp-step lp-reveal-child">
+                <div class="lp-step-num">2</div>
+                <h4>Skonfiguruj</h4>
+                <p>Kreator przeprowadzi Cię krok po kroku — logo, kolory, typy sesji, dostępność, płatności.</p>
+            </div>
+            <div class="lp-step lp-reveal-child">
+                <div class="lp-step-num">3</div>
+                <h4>Zapraszaj klientów</h4>
+                <p>Wyślij link. Klienci rejestrują się, rezerwują treningi i płacą online. Ty zarządzasz z jednego miejsca.</p>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- PRICING -->
+<section class="lp-section lp-section-alt lp-reveal" id="pricing">
+    <div class="lp-container">
+        <div class="lp-section-head">
+            <div class="lp-section-eyebrow">Cennik</div>
+            <h2 class="lp-section-title">Prosty cennik, zero ukrytych opłat</h2>
+            <p class="lp-section-sub">Zacznij od darmowego planu. Ulepszaj gdy będziesz potrzebować więcej.</p>
+        </div>
+        <div class="lp-pricing-grid" style="@(_plans.Count == 2 ? "max-width:700px;margin:0 auto;grid-template-columns:repeat(2,1fr)" : _plans.Count == 1 ? "max-width:400px;margin:0 auto;grid-template-columns:1fr" : "")">
+            @foreach (var plan in _plans)
+            {
+                <div class="lp-price-card @(plan.IsFeatured ? "lp-price-featured" : "")">
+                    @if (plan.IsFeatured)
+                    {
+                        <div class="lp-price-badge">Najpopularniejszy</div>
+                    }
+                    <div class="lp-price-name">@plan.Name</div>
+                    <div class="lp-price-desc">@(plan.Description ?? "")</div>
+                    <div class="lp-price-amount">@plan.MonthlyPrice.ToString("0") <span style="font-size:1rem;font-weight:500">zł</span></div>
+                    <div class="lp-price-period">
+                        @if (plan.MonthlyPrice == 0)
+                        {
+                            @($"{plan.TrialDays} dni za darmo")
+                        }
+                        else
+                        {
+                            @($"miesięcznie{(plan.TrialDays > 0 ? $" · {plan.TrialDays} dni trialu" : "")}")
+                        }
+                    </div>
+                    <ul class="lp-price-features">
+                        <li>
+                            <span class="material-symbols-rounded lp-pf-check">check</span>
+                            @(plan.MaxClients >= 9999 ? "Nielimitowani klienci" : $"Do {plan.MaxClients} klientów")
+                        </li>
+                        <li>
+                            <span class="material-symbols-rounded lp-pf-check">check</span>
+                            Grafik i rezerwacje
+                        </li>
+                        @if (plan.EmailReminders)
+                        {
+                            <li>
+                                <span class="material-symbols-rounded lp-pf-check">check</span>
+                                Przypomnienia email
+                            </li>
+                        }
+                        @{
+                            var brandLabel = plan.BrandingTier switch
+                            {
+                                "preview" => "Podgląd brandingu",
+                                "basic" => "Podstawowy branding",
+                                "full" => "Pełny branding",
+                                "premium" => "Branding premium",
+                                _ => "Branding"
+                            };
+                            var brandIsEnabled = plan.BrandingTier != "preview";
+                        }
+                        <li>
+                            <span class="material-symbols-rounded @(brandIsEnabled ? "lp-pf-check" : "lp-pf-x")">@(brandIsEnabled ? "check" : "close")</span>
+                            @if (brandIsEnabled)
+                            {
+                                @brandLabel
+                            }
+                            else
+                            {
+                                <span style="opacity:0.5">@brandLabel</span>
+                            }
+                        </li>
+                        @if (plan.PaymentsEnabled)
+                        {
+                            <li>
+                                <span class="material-symbols-rounded lp-pf-check">check</span>
+                                Płatności online
+                            </li>
+                        }
+                        else
+                        {
+                            <li>
+                                <span class="material-symbols-rounded lp-pf-x">close</span>
+                                <span style="opacity:0.5">Płatności online</span>
+                            </li>
+                        }
+                        @if (plan.FinancialReports)
+                        {
+                            <li>
+                                <span class="material-symbols-rounded lp-pf-check">check</span>
+                                Raporty finansowe
+                            </li>
+                        }
+                        @if (plan.CoursesEnabled)
+                        {
+                            <li>
+                                <span class="material-symbols-rounded lp-pf-check">check</span>
+                                @(plan.MaxCourses >= 9999 ? "Nielimitowane kursy" : plan.MaxCourses > 0 ? $"{plan.MaxCourses} kursów wideo" : "Kursy wideo")
+                            </li>
+                        }
+                        else
+                        {
+                            <li>
+                                <span class="material-symbols-rounded lp-pf-x">close</span>
+                                <span style="opacity:0.5">Kursy wideo</span>
+                            </li>
+                        }
+                        @if (plan.SmsReminders)
+                        {
+                            <li>
+                                <span class="material-symbols-rounded lp-pf-check">check</span>
+                                SMS-y i push
+                            </li>
+                        }
+                        @if (plan.IntegrationGoogleMeet)
+                        {
+                            <li>
+                                <span class="material-symbols-rounded lp-pf-check">check</span>
+                                Google Meet
+                            </li>
+                        }
+                        @if (plan.Coupons)
+                        {
+                            <li>
+                                <span class="material-symbols-rounded lp-pf-check">check</span>
+                                Kupony i rabaty
+                            </li>
+                        }
+                        @if (plan.AdvancedAnalytics)
+                        {
+                            <li>
+                                <span class="material-symbols-rounded lp-pf-check">check</span>
+                                Zaawansowane statystyki
+                            </li>
+                        }
+                        @if (plan.DataExport)
+                        {
+                            <li>
+                                <span class="material-symbols-rounded lp-pf-check">check</span>
+                                Eksport danych
+                            </li>
+                        }
+                        @if (plan.MaxTrainers > 1)
+                        {
+                            <li>
+                                <span class="material-symbols-rounded lp-pf-check">check</span>
+                                @(plan.MaxTrainers >= 9999 ? "Nielimitowani trenerzy" : $"{plan.MaxTrainers} trenerów")
+                            </li>
+                        }
+                        @if (plan.RoleBasedAccess)
+                        {
+                            <li>
+                                <span class="material-symbols-rounded lp-pf-check">check</span>
+                                Role i uprawnienia
+                            </li>
+                        }
+                        @if (plan.AuditLog)
+                        {
+                            <li>
+                                <span class="material-symbols-rounded lp-pf-check">check</span>
+                                Audit log
+                            </li>
+                        }
+                    </ul>
+                    <a href="/register?plan=@plan.Id" class="lp-btn @(plan.IsFeatured ? "lp-btn-primary" : "lp-btn-outline") lp-price-cta">
+                        @(plan.MonthlyPrice == 0 ? "Testuj za darmo" : $"Wybierz {plan.Name}")
+                    </a>
+                </div>
+            }
+        </div>
+    </div>
+</section>
+
+<!-- FAQ -->
+<section class="lp-section lp-reveal" id="faq">
+    <div class="lp-container">
+        <div class="lp-section-head">
+            <div class="lp-section-eyebrow">FAQ</div>
+            <h2 class="lp-section-title">Najczęstsze pytania</h2>
+        </div>
+        <div class="lp-faq-list">
+            @for (int i = 0; i < _faqs.Length; i++)
+            {
+                var idx = i;
+                <div class="lp-faq-item @(_openFaq == idx ? "lp-faq-open" : "")">
+                    <div class="lp-faq-q" @onclick="() => ToggleFaq(idx)">
+                        @_faqs[idx].Question
+                        <span class="material-symbols-rounded">expand_more</span>
+                    </div>
+                    <div class="lp-faq-a">@_faqs[idx].Answer</div>
+                </div>
+            }
+        </div>
+    </div>
+</section>
+
+<!-- FINAL CTA -->
+<section class="lp-cta-section lp-reveal">
+    <div class="lp-container lp-cta-inner">
+        <h2>@_s("cta_title", "Gotowy na profesjonalną platformę?")</h2>
+        <p>@_s("cta_subtitle", "Dołącz do PTScheduler i zarządzaj treningami jak pro. Bez karty kredytowej, bez ryzyka.")</p>
+        <a href="/register" class="lp-btn lp-btn-white lp-btn-lg">
+            <span class="material-symbols-rounded">rocket_launch</span>
+            @_s("cta_button", "Zacznij za darmo")
         </a>
     </div>
 </section>
 
 <style>
-    .hero-section { padding:4rem 0 3rem; background:linear-gradient(135deg,#f8f9ff,#e8f0fe); }
-    .hero-badge { display:inline-block; padding:.35rem .85rem; background:rgba(99,102,241,.1); color:#6366f1; border-radius:2rem; font-size:.8rem; font-weight:600; margin-bottom:1rem; }
-    .hero-title { font-size:2.5rem; font-weight:800; line-height:1.15; margin-bottom:1.25rem; }
-    .hero-sub { font-size:1.1rem; color:#6b7280; margin-bottom:2rem; max-width:500px; }
-    .hero-mockup { background:#fff; border-radius:1rem; box-shadow:0 20px 60px rgba(0,0,0,.12); overflow:hidden; max-width:400px; margin:0 auto; }
-    .mockup-header { background:#f1f3f5; padding:.6rem 1rem; display:flex; gap:6px; }
-    .mockup-dot { width:10px; height:10px; border-radius:50%; }
-    .mockup-body { display:flex; min-height:250px; }
-    .mockup-sidebar { width:60px; background:#1a1d23; }
-    .mockup-content { flex:1; padding:1rem; display:flex; flex-direction:column; gap:.75rem; }
-    .mockup-card { height:40px; background:#e8f0fe; border-radius:.5rem; }
-    .feature-card { background:#fff; border-radius:.75rem; padding:1.5rem; height:100%; box-shadow:0 1px 4px rgba(0,0,0,.06); transition:transform .2s,box-shadow .2s; }
-    .feature-card:hover { transform:translateY(-3px); box-shadow:0 6px 20px rgba(0,0,0,.1); }
-    .feature-icon { width:48px; height:48px; border-radius:.6rem; display:flex; align-items:center; justify-content:center; font-size:1.3rem; margin-bottom:1rem; }
-    .step-num { width:48px; height:48px; border-radius:50%; background:#6366f1; color:#fff; display:inline-flex; align-items:center; justify-content:center; font-size:1.2rem; font-weight:700; margin-bottom:.75rem; }
+    /* ===== SHARED TOKENS (reuse from PublicLayout) ===== */
+    .lp-container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+
+    .lp-btn {
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 12px 24px; border-radius: 12px; font-size: 0.95rem;
+        font-weight: 600; font-family: var(--pts-font-body);
+        border: none; cursor: pointer; transition: all 0.25s;
+        text-decoration: none;
+    }
+    .lp-btn-primary {
+        background: var(--pts-primary); color: #fff;
+        box-shadow: 0 4px 16px rgba(124, 58, 237, 0.35);
+    }
+    .lp-btn-primary:hover {
+        background: var(--pts-primary-dark); color: #fff;
+        box-shadow: 0 6px 24px rgba(124, 58, 237, 0.45);
+        transform: translateY(-1px);
+    }
+    .lp-btn-energy {
+        background: var(--pts-energy); color: #fff;
+        box-shadow: 0 4px 16px rgba(255, 107, 53, 0.35);
+    }
+    .lp-btn-energy:hover {
+        background: var(--pts-energy-dark); color: #fff;
+        transform: translateY(-1px);
+    }
+    .lp-btn-outline {
+        background: transparent; color: var(--pts-text);
+        border: 2px solid var(--pts-border);
+    }
+    .lp-btn-outline:hover { border-color: var(--pts-primary); color: var(--pts-primary); }
+    .lp-btn-lg { padding: 16px 32px; font-size: 1.05rem; border-radius: 14px; }
+    .lp-btn-white {
+        background: #fff; color: var(--pts-primary);
+        font-weight: 700;
+        box-shadow: 0 4px 16px rgba(0,0,0,0.15);
+    }
+    .lp-btn-white:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.2); color: var(--pts-primary); }
+
+    /* ===== HERO ===== */
+    .lp-hero {
+        padding: 140px 0 80px;
+        position: relative;
+        overflow: hidden;
+        font-family: var(--pts-font-body);
+        color: var(--pts-text);
+        background: var(--pts-bg);
+    }
+    .lp-hero::before {
+        content: '';
+        position: absolute; top: -200px; right: -200px;
+        width: 600px; height: 600px;
+        background: radial-gradient(circle, var(--pts-glow) 0%, transparent 70%);
+        pointer-events: none;
+    }
+    .lp-hero::after {
+        content: '';
+        position: absolute; bottom: -100px; left: -100px;
+        width: 400px; height: 400px;
+        background: radial-gradient(circle, rgba(6, 214, 160, 0.08) 0%, transparent 70%);
+        pointer-events: none;
+    }
+    .lp-hero-inner { display: grid; grid-template-columns: 1fr 1fr; gap: 60px; align-items: center; position: relative; }
+    .lp-hero-badge {
+        display: inline-flex; align-items: center; gap: 8px;
+        padding: 6px 16px 6px 8px; border-radius: 100px;
+        background: var(--pts-surface-alt); border: 1px solid var(--pts-border);
+        font-size: 0.8rem; font-weight: 600; color: var(--pts-primary);
+        margin-bottom: 24px;
+    }
+    .lp-hero-badge-dot {
+        width: 8px; height: 8px; border-radius: 50%;
+        background: var(--pts-accent);
+        animation: lp-pulse 2s ease-in-out infinite;
+    }
+    @@keyframes lp-pulse {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.5; transform: scale(1.3); }
+    }
+    .lp-hero-h1 {
+        font-family: var(--pts-font-display);
+        font-size: clamp(2.5rem, 5vw, 3.8rem);
+        font-weight: 800;
+        margin-bottom: 20px;
+        letter-spacing: -0.03em;
+        line-height: 1.15;
+        text-wrap: balance;
+    }
+    .lp-gradient {
+        background: linear-gradient(135deg, var(--pts-primary), var(--pts-accent));
+        -webkit-background-clip: text; background-clip: text;
+        -webkit-text-fill-color: transparent;
+    }
+    .lp-hero-sub {
+        font-size: 1.15rem; color: var(--pts-text-secondary);
+        max-width: 480px; margin-bottom: 32px; line-height: 1.7;
+    }
+    .lp-hero-ctas { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 40px; }
+    .lp-hero-proof {
+        display: flex; align-items: center; gap: 16px;
+        font-size: 0.85rem; color: var(--pts-text-secondary);
+    }
+    .lp-hero-proof-avatars { display: flex; }
+    .lp-hero-proof-avatar {
+        width: 36px; height: 36px; border-radius: 50%;
+        border: 3px solid var(--pts-bg);
+        margin-left: -10px;
+        display: flex; align-items: center; justify-content: center;
+        font-weight: 700; font-size: 0.7rem; color: #fff;
+        text-decoration: none;
+        transition: transform 0.2s, box-shadow 0.2s;
+    }
+    a.lp-hero-proof-avatar:hover {
+        transform: translateY(-3px) scale(1.12);
+        box-shadow: 0 4px 12px rgba(0,0,0,0.2);
+        z-index: 2;
+    }
+    .lp-hero-proof-avatar:first-child { margin-left: 0; }
+
+    /* Device mockup */
+    .lp-hero-device { position: relative; perspective: 1200px; }
+    .lp-device-frame {
+        background: var(--pts-surface);
+        border: 1px solid var(--pts-border);
+        border-radius: 20px;
+        overflow: hidden;
+        box-shadow: var(--pts-shadow-lg), 0 0 0 1px var(--pts-border);
+        transform: rotateY(-5deg) rotateX(2deg);
+        transition: transform 0.5s ease;
+    }
+    .lp-device-frame:hover { transform: rotateY(0) rotateX(0); }
+    .lp-device-bar {
+        display: flex; align-items: center; gap: 8px;
+        padding: 12px 16px;
+        background: var(--pts-surface-alt);
+        border-bottom: 1px solid var(--pts-border);
+    }
+    .lp-device-dot { width: 10px; height: 10px; border-radius: 50%; }
+    .lp-device-url {
+        flex: 1; background: var(--pts-bg); border-radius: 6px;
+        padding: 4px 12px; font-size: 0.75rem; color: var(--pts-text-secondary);
+    }
+    .lp-screenshot-placeholder {
+        aspect-ratio: 16/10;
+        background: linear-gradient(135deg, var(--pts-surface-alt), var(--pts-bg));
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+        padding: 40px; text-align: center;
+        position: relative; overflow: hidden;
+    }
+    .lp-screenshot-placeholder::before {
+        content: '';
+        position: absolute; inset: 0;
+        background:
+            repeating-linear-gradient(0deg, transparent, transparent 40px, var(--pts-border) 40px, var(--pts-border) 41px),
+            repeating-linear-gradient(90deg, transparent, transparent 40px, var(--pts-border) 40px, var(--pts-border) 41px);
+        opacity: 0.3;
+    }
+    .lp-screenshot-label {
+        position: relative;
+        background: var(--pts-primary);
+        color: #fff;
+        padding: 8px 20px;
+        border-radius: 8px;
+        font-size: 0.85rem;
+        font-weight: 600;
+        margin-bottom: 12px;
+    }
+    .lp-screenshot-desc {
+        position: relative;
+        font-size: 0.8rem;
+        color: var(--pts-text-secondary);
+        max-width: 360px;
+        line-height: 1.5;
+    }
+
+    /* ===== TRUST BAR ===== */
+    .lp-trust {
+        padding: 40px 0;
+        border-top: 1px solid var(--pts-border);
+        border-bottom: 1px solid var(--pts-border);
+        background: var(--pts-bg);
+        font-family: var(--pts-font-body);
+        color: var(--pts-text);
+    }
+    .lp-trust-inner {
+        display: flex; align-items: center; justify-content: center;
+        gap: 48px; flex-wrap: wrap;
+    }
+    .lp-trust-item {
+        display: flex; align-items: center; gap: 8px;
+        font-size: 0.9rem; color: var(--pts-text-secondary); font-weight: 500;
+    }
+    .lp-trust-icon {
+        width: 40px; height: 40px; border-radius: 10px;
+        background: var(--pts-surface-alt);
+        display: flex; align-items: center; justify-content: center;
+        color: var(--pts-primary); font-size: 20px;
+    }
+
+    /* ===== SECTIONS ===== */
+    .lp-section {
+        padding: 100px 0;
+        font-family: var(--pts-font-body);
+        color: var(--pts-text);
+        background: var(--pts-bg);
+    }
+    .lp-section-alt { background: var(--pts-surface-alt); }
+    .lp-section-head {
+        text-align: center; max-width: 640px; margin: 0 auto 64px;
+    }
+    .lp-section-eyebrow {
+        font-size: 0.8rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.12em; color: var(--pts-primary);
+        margin-bottom: 16px;
+    }
+    .lp-section-title {
+        font-family: var(--pts-font-display);
+        font-size: clamp(1.8rem, 3.5vw, 2.6rem);
+        font-weight: 800; margin-bottom: 16px;
+        letter-spacing: -0.02em;
+        line-height: 1.15;
+        text-wrap: balance;
+    }
+    .lp-section-sub {
+        font-size: 1.05rem; color: var(--pts-text-secondary); line-height: 1.7;
+    }
+
+    /* ===== FEATURE SHOWCASES ===== */
+    .lp-showcase {
+        display: grid; grid-template-columns: 1fr 1fr;
+        gap: 40px; align-items: center;
+        margin-bottom: 80px;
+    }
+    .lp-showcase-reverse { direction: rtl; }
+    .lp-showcase-reverse > * { direction: ltr; }
+    .lp-showcase-content { padding: 20px 0; }
+    .lp-showcase-icon {
+        width: 52px; height: 52px; border-radius: 14px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 24px; margin-bottom: 20px; color: #fff;
+    }
+    .lp-showcase-title {
+        font-family: var(--pts-font-display);
+        font-size: 1.6rem; font-weight: 700; margin-bottom: 12px;
+        letter-spacing: -0.01em;
+    }
+    .lp-showcase-text {
+        color: var(--pts-text-secondary); margin-bottom: 24px; line-height: 1.7;
+    }
+    .lp-showcase-list { list-style: none; display: flex; flex-direction: column; gap: 10px; padding: 0; margin: 0; }
+    .lp-showcase-list li {
+        display: flex; align-items: center; gap: 10px;
+        font-size: 0.9rem; color: var(--pts-text);
+    }
+    .lp-showcase-check {
+        width: 22px; height: 22px; border-radius: 50%;
+        background: rgba(6, 214, 160, 0.15); color: var(--pts-accent);
+        display: flex; align-items: center; justify-content: center;
+        font-size: 14px; flex-shrink: 0;
+    }
+    .lp-showcase-screen {
+        border-radius: var(--pts-radius);
+        overflow: hidden;
+        border: 1px solid var(--pts-border);
+        box-shadow: var(--pts-shadow-lg);
+    }
+
+    /* ===== FEATURES GRID ===== */
+    .lp-features-grid {
+        display: grid; grid-template-columns: repeat(4, 1fr); gap: 24px;
+    }
+    .lp-feature-card {
+        background: var(--pts-surface);
+        border: 1px solid var(--pts-border);
+        border-radius: var(--pts-radius);
+        padding: 32px 28px;
+        transition: all 0.3s ease;
+    }
+    .lp-feature-card:hover {
+        border-color: var(--pts-primary-light);
+        box-shadow: 0 0 0 1px var(--pts-primary-light), var(--pts-shadow);
+        transform: translateY(-4px);
+    }
+    .lp-feature-card-icon {
+        width: 44px; height: 44px; border-radius: 12px;
+        display: flex; align-items: center; justify-content: center;
+        font-size: 22px; margin-bottom: 16px;
+    }
+    .lp-feature-card h4 {
+        font-family: var(--pts-font-display);
+        font-size: 1.05rem; font-weight: 700; margin-bottom: 8px;
+    }
+    .lp-feature-card p {
+        font-size: 0.88rem; color: var(--pts-text-secondary); line-height: 1.6; margin: 0;
+    }
+
+    /* ===== VIDEO ===== */
+    .lp-video-section {
+        padding: 100px 0;
+        background: var(--pts-dark-bg);
+        position: relative; overflow: hidden;
+    }
+    .lp-video-section::before {
+        content: '';
+        position: absolute; inset: 0;
+        background: radial-gradient(ellipse at center, rgba(124,58,237,0.12) 0%, transparent 70%);
+    }
+    .lp-video-inner { position: relative; text-align: center; }
+    .lp-video-frame {
+        max-width: 800px; margin: 0 auto;
+        border-radius: 20px; overflow: hidden;
+        border: 1px solid rgba(255,255,255,0.08);
+        box-shadow: 0 24px 80px rgba(0,0,0,0.5);
+        aspect-ratio: 16/9;
+        background: #15121E;
+        display: flex; flex-direction: column;
+        align-items: center; justify-content: center;
+    }
+    .lp-video-play {
+        width: 80px; height: 80px; border-radius: 50%;
+        background: var(--pts-primary);
+        display: flex; align-items: center; justify-content: center;
+        color: #fff; font-size: 32px;
+        box-shadow: 0 8px 32px rgba(124, 58, 237, 0.5);
+        margin-bottom: 24px;
+        cursor: pointer; transition: all 0.3s;
+    }
+    .lp-video-play:hover {
+        transform: scale(1.1);
+        box-shadow: 0 12px 40px rgba(124, 58, 237, 0.6);
+    }
+    .lp-video-label { color: #9B95AD; font-size: 0.85rem; }
+    .lp-video-storyboard {
+        max-width: 800px; margin: 40px auto 0;
+        display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px;
+    }
+    .lp-storyboard-item {
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.06);
+        border-radius: 12px;
+        padding: 20px 16px;
+        text-align: center;
+    }
+    .lp-storyboard-num {
+        width: 28px; height: 28px; border-radius: 50%;
+        background: var(--pts-primary);
+        color: #fff; font-size: 0.75rem; font-weight: 700;
+        display: inline-flex; align-items: center; justify-content: center;
+        margin-bottom: 10px;
+    }
+    .lp-storyboard-title {
+        color: #F0EEF5; font-size: 0.8rem; font-weight: 600;
+        margin-bottom: 6px;
+    }
+    .lp-storyboard-desc {
+        color: #9B95AD; font-size: 0.72rem; line-height: 1.5;
+    }
+
+    /* ===== HOW IT WORKS ===== */
+    .lp-steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 32px; }
+    .lp-step {
+        text-align: center; padding: 32px 24px;
+    }
+    .lp-step-num {
+        width: 56px; height: 56px; border-radius: 16px;
+        background: linear-gradient(135deg, var(--pts-primary), var(--pts-primary-dark));
+        color: #fff; font-family: var(--pts-font-display);
+        font-size: 1.3rem; font-weight: 800;
+        display: inline-flex; align-items: center; justify-content: center;
+        margin-bottom: 20px;
+    }
+    .lp-step h4 {
+        font-family: var(--pts-font-display);
+        font-size: 1.15rem; font-weight: 700; margin-bottom: 10px;
+    }
+    .lp-step p { font-size: 0.9rem; color: var(--pts-text-secondary); line-height: 1.6; margin: 0; }
+
+    /* ===== PRICING ===== */
+    .lp-pricing-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 20px; align-items: start; }
+    .lp-price-card {
+        background: var(--pts-surface);
+        border: 2px solid var(--pts-border);
+        border-radius: 20px;
+        padding: 36px 28px;
+        position: relative;
+        transition: all 0.3s;
+    }
+    .lp-price-featured {
+        border-color: var(--pts-primary);
+        box-shadow: 0 0 0 1px var(--pts-primary), 0 20px 60px rgba(124, 58, 237, 0.15);
+        transform: scale(1.03);
+    }
+    .lp-price-badge {
+        position: absolute; top: -14px; left: 50%; transform: translateX(-50%);
+        background: linear-gradient(135deg, var(--pts-primary), var(--pts-accent));
+        color: #fff; padding: 4px 20px; border-radius: 100px;
+        font-size: 0.75rem; font-weight: 700; white-space: nowrap;
+    }
+    .lp-price-name {
+        font-family: var(--pts-font-display);
+        font-size: 1.3rem; font-weight: 700; margin-bottom: 6px;
+    }
+    .lp-price-desc { font-size: 0.85rem; color: var(--pts-text-secondary); margin-bottom: 24px; }
+    .lp-price-amount {
+        font-family: var(--pts-font-display);
+        font-size: 3rem; font-weight: 800;
+        letter-spacing: -0.03em;
+        line-height: 1; margin-bottom: 4px;
+    }
+    .lp-price-period { font-size: 0.85rem; color: var(--pts-text-secondary); margin-bottom: 28px; }
+    .lp-price-features { list-style: none; margin-bottom: 28px; padding: 0; }
+    .lp-price-features li {
+        display: flex; align-items: center; gap: 10px;
+        padding: 8px 0; font-size: 0.88rem;
+        border-bottom: 1px solid var(--pts-border);
+    }
+    .lp-price-features li:last-child { border-bottom: none; }
+    .lp-pf-check { color: var(--pts-accent); font-size: 18px; }
+    .lp-pf-x { color: var(--pts-text-secondary); opacity: 0.4; font-size: 18px; }
+    .lp-price-cta { width: 100%; justify-content: center; }
+
+    /* ===== FAQ ===== */
+    .lp-faq-list { max-width: 720px; margin: 0 auto; }
+    .lp-faq-item {
+        border-bottom: 1px solid var(--pts-border);
+        padding: 20px 0;
+    }
+    .lp-faq-q {
+        font-family: var(--pts-font-display);
+        font-weight: 600; font-size: 1.05rem;
+        cursor: pointer; display: flex; align-items: center; justify-content: space-between;
+        background: none; border: none; width: 100%; text-align: left;
+        color: var(--pts-text); padding: 0;
+    }
+    .lp-faq-q .material-symbols-rounded { font-size: 24px; color: var(--pts-text-secondary); transition: transform 0.3s; }
+    .lp-faq-open .lp-faq-q .material-symbols-rounded { transform: rotate(180deg); }
+    .lp-faq-a {
+        max-height: 0; overflow: hidden; transition: max-height 0.4s ease, padding 0.3s;
+        font-size: 0.92rem; color: var(--pts-text-secondary); line-height: 1.7;
+    }
+    .lp-faq-open .lp-faq-a { max-height: 200px; padding-top: 12px; }
+
+    /* ===== CTA ===== */
+    .lp-cta-section {
+        padding: 100px 0;
+        background: linear-gradient(135deg, var(--pts-primary), var(--pts-primary-dark));
+        position: relative; overflow: hidden;
+    }
+    .lp-cta-section::before {
+        content: '';
+        position: absolute; top: -50%; right: -20%;
+        width: 600px; height: 600px;
+        background: radial-gradient(circle, rgba(6,214,160,0.2), transparent 70%);
+    }
+    .lp-cta-inner {
+        position: relative; text-align: center;
+        max-width: 600px; margin: 0 auto;
+    }
+    .lp-cta-inner h2 {
+        font-family: var(--pts-font-display);
+        color: #fff; font-size: clamp(2rem, 4vw, 2.8rem);
+        font-weight: 800; margin-bottom: 16px;
+        line-height: 1.15; text-wrap: balance;
+    }
+    .lp-cta-inner p { color: rgba(255,255,255,0.7); font-size: 1.1rem; margin-bottom: 32px; }
+
+    /* ===== RESPONSIVE ===== */
+    @@media (max-width: 1100px) {
+        .lp-pricing-grid { grid-template-columns: repeat(2, 1fr) !important; max-width: 700px !important; margin: 0 auto !important; }
+    }
+    @@media (max-width: 900px) {
+        .lp-hero-inner { grid-template-columns: 1fr; gap: 40px; }
+        .lp-hero-device { max-width: 500px; margin: 0 auto; }
+        .lp-showcase { grid-template-columns: 1fr; }
+        .lp-showcase-reverse { direction: ltr; }
+        .lp-features-grid { grid-template-columns: repeat(2, 1fr) !important; }
+        .lp-pricing-grid { grid-template-columns: 1fr !important; max-width: 400px !important; margin: 0 auto !important; }
+        .lp-price-featured { transform: none; }
+        .lp-steps { grid-template-columns: 1fr; }
+        .lp-video-storyboard { grid-template-columns: repeat(2, 1fr); }
+        .lp-trust-inner { gap: 24px; }
+    }
+    @@media (max-width: 600px) {
+        .lp-features-grid { grid-template-columns: 1fr; }
+        .lp-video-storyboard { grid-template-columns: 1fr 1fr; }
+        .lp-hero-ctas { flex-direction: column; }
+        .lp-hero-ctas .lp-btn { width: 100%; justify-content: center; }
+    }
+
+    /* ===== SCROLL REVEAL ANIMATIONS ===== */
+    .lp-reveal {
+        opacity: 0;
+        transform: translateY(32px);
+        transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .lp-reveal.lp-visible {
+        opacity: 1;
+        transform: translateY(0);
+    }
+    .lp-reveal-child {
+        opacity: 0;
+        transform: translateY(24px);
+        transition: opacity 0.5s cubic-bezier(0.16, 1, 0.3, 1), transform 0.5s cubic-bezier(0.16, 1, 0.3, 1);
+    }
+    .lp-reveal-child.lp-visible {
+        opacity: 1;
+        transform: translateY(0);
+    }
+
+    /* Hero entrance animation */
+    .lp-hero { animation: lp-hero-enter 0.8s cubic-bezier(0.16, 1, 0.3, 1) both; }
+    @@keyframes lp-hero-enter {
+        from { opacity: 0; transform: translateY(20px); }
+        to { opacity: 1; transform: translateY(0); }
+    }
+    .lp-hero-device { animation: lp-device-enter 1s cubic-bezier(0.16, 1, 0.3, 1) 0.3s both; }
+    @@keyframes lp-device-enter {
+        from { opacity: 0; transform: translateX(40px) rotateY(-5deg) rotateX(2deg); }
+        to { opacity: 1; transform: translateX(0) rotateY(-5deg) rotateX(2deg); }
+    }
+
+    @@media (prefers-reduced-motion: reduce) {
+        .lp-reveal, .lp-reveal-child { opacity: 1; transform: none; transition: none; }
+        .lp-hero, .lp-hero-device { animation: none; }
+    }
 </style>
+
+<script suppress-error="BL9992">
+    (function() {
+        function initReveal() {
+            var sections = document.querySelectorAll('.lp-reveal');
+            if (!sections.length) return;
+            if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+                sections.forEach(function(s) { s.classList.add('lp-visible'); });
+                document.querySelectorAll('.lp-reveal-child').forEach(function(c) { c.classList.add('lp-visible'); });
+                return;
+            }
+            var observer = new IntersectionObserver(function(entries) {
+                entries.forEach(function(entry) {
+                    if (entry.isIntersecting) {
+                        entry.target.classList.add('lp-visible');
+                        var children = entry.target.querySelectorAll('.lp-reveal-child');
+                        children.forEach(function(child, i) {
+                            setTimeout(function() { child.classList.add('lp-visible'); }, 80 + i * 90);
+                        });
+                        observer.unobserve(entry.target);
+                    }
+                });
+            }, { threshold: 0.08, rootMargin: '0px 0px -40px 0px' });
+            sections.forEach(function(s) { observer.observe(s); });
+        }
+        if (document.readyState === 'loading') {
+            document.addEventListener('DOMContentLoaded', initReveal);
+        } else {
+            initReveal();
+        }
+        document.addEventListener('enhanced-nav-end', initReveal);
+    })();
+</script>
 
 @code {
     private Dictionary<string, string> _settings = new();
     private List<Plan> _plans = [];
+    private List<FeaturedTrainer> _trainers = [];
+    private int? _openFaq = 0;
 
-    private record FeatureInfo(string Icon, string Title, string Text, string BgColor, string IconColor);
+    private class FeaturedTrainer
+    {
+        public string Name { get; set; } = "";
+        public string Initials { get; set; } = "";
+        public string Instagram { get; set; } = "";
+        public string Color { get; set; } = "#7C3AED";
+    }
 
-    private readonly FeatureInfo[] _features =
+    private record FeatureCard(string Icon, string Title, string Text, string BgColor, string IconColor);
+
+    private readonly FeatureCard[] _featureCards =
     [
-        new("bi-calendar-check", "Grafik i rezerwacje", "Kalendarz, dostępność, rezerwacje online. Serie treningów i sesje wstępne.", "rgba(13,110,253,.1)", "#0d6efd"),
-        new("bi-credit-card", "Płatności online", "PayU, Przelewy24, Klarna, AutoPay — klienci płacą online, Ty dostajesz pieniądze.", "rgba(25,135,84,.1)", "#198754"),
-        new("bi-collection-play", "Kursy i mentoring", "Sprzedawaj kursy wideo, materiały treningowe i plany dietetyczne.", "rgba(13,202,240,.1)", "#0dcaf0"),
-        new("bi-box-seam", "Pakiety treningowe", "Pakiety sesji z automatycznym rozliczaniem. Klient kupuje online.", "rgba(255,193,7,.1)", "#ffc107"),
-        new("bi-palette", "Twój branding", "Logo, kolory, domena, landing page — wygląda jak Twoja własna apka.", "rgba(220,53,69,.1)", "#dc3545"),
-        new("bi-phone", "PWA — jak apka", "Klienci instalują aplikację na telefonie prosto z przeglądarki.", "rgba(108,117,125,.1)", "#6c757d"),
+        new("group", "Baza klientow", "Profil kazdego klienta, historia sesji, pomiary ciala, pakiety i notatki. Wszystko w jednym miejscu.", "rgba(59,130,246,0.1)", "#3B82F6"),
+        new("payments", "Platnosci online", "Klienci placa za pakiety i kursy jednym kliknieciem przez PayU lub Przelewy24. Pieniadze trafiaja na Twoje konto.", "rgba(6,214,160,0.1)", "#06D6A0"),
+        new("confirmation_number", "Kupony i rabaty", "Tworzysz kody rabatowe procentowe lub kwotowe. Ustawiasz limity uzyc i daty waznosci.", "rgba(245,158,11,0.1)", "#F59E0B"),
+        new("monitoring", "Pomiary ciala", "Waga, obwody, BMI, tkanka tluszczowa. Wykresy postepow widoczne dla Ciebie i klienta.", "rgba(236,72,153,0.1)", "#EC4899"),
+        new("email", "Przypomnienia", "Automatyczne emaile i SMS-y przed sesja. Mozesz edytowac tresci wiadomosci po polsku.", "rgba(124,58,237,0.1)", "#7C3AED"),
+        new("video_call", "Treningi online", "Automatyczne linki do Google Meet dla sesji online. Klient dolacza jednym kliknieciem.", "rgba(34,197,94,0.1)", "#22C55E"),
+        new("brush", "Twoja marka", "Wlasne logo, kolory, favicon i domena. Klienci widza Twoja marke, nie nasza.", "rgba(239,68,68,0.1)", "#EF4444"),
+        new("bar_chart", "Raporty", "Ile zarabiasz, ilu masz klientow, ktore sesje sa najpopularniejsze. Eksport do CSV.", "rgba(99,102,241,0.1)", "#6366F1"),
+        new("calendar_month", "Dodaj do kalendarza", "Klienci moga dodac swoje sesje do Google Calendar, Outlook lub pobrać plik .ics.", "rgba(14,165,233,0.1)", "#0EA5E9"),
+        new("smartphone", "Aplikacja mobilna", "Klienci dodaja apke na telefon prosto z przegladarki. Dziala jak zwykla aplikacja.", "rgba(245,158,11,0.1)", "#F59E0B"),
+        new("inventory_2", "Pakiety sesji", "Sprzedawaj pakiety 5, 10, 20 sesji. System automatycznie odlicza zuzycie i przypomina o koncu.", "rgba(124,58,237,0.1)", "#7C3AED"),
+        new("admin_panel_settings", "Wiele osob", "Mozesz dodac drugiego trenera lub pracownika. Kazdy ma swoje uprawnienia i widzi tylko to co potrzebuje.", "rgba(14,165,233,0.1)", "#0EA5E9"),
+    ];
+
+    private record FaqItem(string Question, string Answer);
+
+    private readonly FaqItem[] _faqs =
+    [
+        new("Czy musze miec wlasny serwer?", "Nie. Po rejestracji dostajesz gotowa aplikacje pod wlasnym adresem (twoja-nazwa.ptscheduler.pl). Nie musisz niczego instalowac ani konfigurowac serwera."),
+        new("Czy moge podpiac wlasna domene?", "Tak. W ustawieniach mozesz podpiac swoja domene (np. app.moj-trener.pl). Certyfikat bezpieczenstwa konfiguruje sie automatycznie."),
+        new("Jak dzialaja platnosci online?", "Wpisujesz dane do PayU lub Przelewy24 w ustawieniach. Klienci placa za pakiety i kursy online — pieniadze trafiaja bezposrednio na Twoje konto."),
+        new("Czy to dziala na telefonie?", "Tak! Twoi klienci moga dodac aplikacje na telefon prosto z przegladarki (Dodaj do ekranu glownego). Wyglada i dziala jak zwykla aplikacja z App Store, ale nie trzeba jej pobierac."),
+        new("Czy moge zaczac za darmo?", "Oczywiscie. Plan Start jest darmowy bez limitu czasowego. Gdy bedziesz potrzebowac wiecej klientow lub platnosci online, przechodzisz na Pro jednym kliknieciem."),
+        new("Czy dane moich klientow sa bezpieczne?", "Kazdy trener ma osobna baze danych i oddzielna aplikacje. Dane sa szyfrowane i przechowywane na serwerach w Europie. Nikt inny nie ma do nich dostepu."),
+        new("Co jesli nie chce kontynuowac?", "Nic sie nie stanie. Mozesz zrezygnowac w kazdej chwili. Nie ma zadnych umow ani zobowiazan. Plan darmowy dziala bez ograniczen czasowych."),
     ];
 
     protected override async Task OnInitializedAsync()
@@ -186,6 +1138,17 @@
             SiteSettingsService.Keys.CtaSubtitle,
             SiteSettingsService.Keys.CtaButton);
 
+        var trainersJson = await Settings.GetAsync(SiteSettingsService.Keys.FeaturedTrainers);
+        if (!string.IsNullOrWhiteSpace(trainersJson) && trainersJson != "[]")
+        {
+            try
+            {
+                _trainers = JsonSerializer.Deserialize<List<FeaturedTrainer>>(trainersJson,
+                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
+            }
+            catch { _trainers = []; }
+        }
+
         await using var db = DbFactory.CreateDbContext();
         _plans = await db.Plans
             .AsNoTracking()
@@ -194,5 +1157,8 @@
             .ToListAsync();
     }
 
-    private string _s(string key) => _settings.GetValueOrDefault(key, "");
+    private string _s(string key, string fallback = "") =>
+        _settings.TryGetValue(key, out var val) && !string.IsNullOrWhiteSpace(val) ? val : fallback;
+
+    private void ToggleFaq(int index) => _openFaq = _openFaq == index ? null : index;
 }

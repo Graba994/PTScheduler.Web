@@ -6,6 +6,8 @@ public class PaymentRecord
     public int TenantId { get; set; }
     public string? StripeInvoiceId { get; set; }
     public string? StripePaymentIntentId { get; set; }
+    public string? ExternalPaymentId { get; set; }
+    public int? ServiceOrderId { get; set; }
     public decimal Amount { get; set; }
     public string Currency { get; set; } = "PLN";
     public PaymentRecordStatus Status { get; set; }
@@ -14,6 +16,7 @@ public class PaymentRecord
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public Tenant? Tenant { get; set; }
+    public ServiceOrder? ServiceOrder { get; set; }
 }
 
 public enum PaymentRecordStatus

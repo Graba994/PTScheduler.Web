@@ -79,6 +79,27 @@ services:
     networks:
       - ptscheduler
 
+  guardian:
+    build:
+      context: .
+      dockerfile: PTScheduler.Guardian/Dockerfile
+    image: ptguardian:latest
+    container_name: ptguardian
+    restart: unless-stopped
+    ports:
+      - "${GUARDIAN_PORT:-9090}:9090"
+    environment:
+      GUARDIAN_SECRET: ${GUARDIAN_SECRET:?Set GUARDIAN_SECRET in .env.prod}
+      GUARDIAN_PORTAL_URL: http://ptportal:8081
+      GUARDIAN_BRANCH: ${BUILD_BRANCH:-master}
+      GUARDIAN_LOG_DIR: /opt/ptscheduler/guardian/logs
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${REPO_DIR:-./}:/opt/ptscheduler/repo
+      - guardian-logs:/opt/ptscheduler/guardian/logs
+    networks:
+      - ptscheduler
+
   # Pre-build the tenant image so provisioning is instant
   tenant-image:
     build:
@@ -95,6 +116,7 @@ volumes:
   portal-pgdata:
   portal-dataprotection:
   portal-backups:
+  guardian-logs:
 
 networks:
   ptscheduler:

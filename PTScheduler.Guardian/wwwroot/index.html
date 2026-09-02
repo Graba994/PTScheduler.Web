@@ -1,0 +1,233 @@
+<title>PTScheduler Guardian</title>
+<style>
+:root {
+    --bg: #0f1923;
+    --surface: #1a2733;
+    --border: #2a3a4a;
+    --text: #d4dce4;
+    --muted: #6b7d8d;
+    --success: #34d399;
+    --warning: #fbbf24;
+    --danger: #f87171;
+    --info: #60a5fa;
+    --accent: #818cf8;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+    background: var(--bg); color: var(--text);
+    font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
+    font-size: 13px; line-height: 1.6; padding: 24px; max-width: 900px; margin: 0 auto;
+}
+h1 { font-size: 18px; font-weight: 600; margin-bottom: 20px; color: var(--accent); }
+h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
+.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+.row { display: flex; gap: 12px; flex-wrap: wrap; }
+.row > * { flex: 1; min-width: 200px; }
+.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
+.badge-ok { background: #064e3b; color: var(--success); }
+.badge-warn { background: #78350f; color: var(--warning); }
+.badge-err { background: #7f1d1d; color: var(--danger); }
+.badge-run { background: #1e3a5f; color: var(--info); animation: pulse 2s infinite; }
+@@keyframes pulse { 50% { opacity: .6; } }
+label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 2px; }
+input[type=password] {
+    background: var(--bg); color: var(--text); border: 1px solid var(--border);
+    padding: 8px 12px; border-radius: 6px; font-family: inherit; font-size: 13px; width: 260px;
+}
+button {
+    background: var(--accent); color: #fff; border: none; padding: 8px 16px;
+    border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 600;
+    transition: opacity .2s;
+}
+button:hover { opacity: .85; }
+button:disabled { opacity: .4; cursor: not-allowed; }
+button.danger { background: var(--danger); }
+button.warn { background: #b45309; }
+.log-box {
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 12px; max-height: 400px; overflow: auto; font-size: 12px; line-height: 1.5;
+    white-space: pre-wrap; word-break: break-all;
+}
+.log-entry { margin-bottom: 2px; }
+.log-entry .ts { color: var(--muted); }
+.log-entry .stg { color: var(--accent); }
+.log-entry.success { color: var(--success); }
+.log-entry.error { color: var(--danger); }
+.log-entry.warn { color: var(--warning); }
+.status-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+#auth { text-align: center; margin-top: 100px; }
+#auth h1 { margin-bottom: 24px; font-size: 22px; }
+#main { display: none; }
+.history-item { cursor: pointer; padding: 8px; border-bottom: 1px solid var(--border); transition: background .15s; }
+.history-item:hover { background: rgba(129,140,248,.08); }
+.history-item:last-child { border-bottom: none; }
+</style>
+
+<div id="auth">
+    <h1>PTScheduler Guardian</h1>
+    <div style="margin-bottom:12px">
+        <input type="password" id="secret" placeholder="Guardian Secret" onkeydown="if(event.key==='Enter')connect()">
+    </div>
+    <button onclick="connect()">Autoryzuj</button>
+    <p id="auth-err" style="color:var(--danger);margin-top:12px"></p>
+</div>
+
+<div id="main">
+    <h1>PTScheduler Guardian</h1>
+
+    <div class="row">
+        <div class="card">
+            <h2>Status</h2>
+            <div class="status-row">
+                <label>Guardian:</label>
+                <span class="badge badge-ok" id="g-status">OK</span>
+                <span id="g-uptime" style="color:var(--muted)"></span>
+            </div>
+            <div class="status-row">
+                <label>Portal:</label>
+                <span id="p-status"></span>
+                <span id="p-checked" style="color:var(--muted)"></span>
+            </div>
+        </div>
+        <div class="card" id="active-card" style="display:none">
+            <h2>Aktywna operacja</h2>
+            <div class="status-row">
+                <span id="a-target"></span>
+                <span id="a-stage"></span>
+                <span id="a-status"></span>
+            </div>
+            <div id="a-progress" style="color:var(--muted);font-size:12px"></div>
+        </div>
+    </div>
+
+    <div class="card">
+        <h2>Akcje</h2>
+        <div style="display:flex;gap:10px;flex-wrap:wrap">
+            <button onclick="upgradePortal()" id="btn-portal">Aktualizuj Portal</button>
+            <button onclick="upgradeTenant()" id="btn-tenant">Aktualizuj Obraz Trenera</button>
+            <button onclick="rollback()" id="btn-rollback" class="warn">Rollback Portal</button>
+        </div>
+    </div>
+
+    <div class="card" id="job-card" style="display:none">
+        <h2>Log operacji <span id="job-title"></span></h2>
+        <div class="log-box" id="job-log"></div>
+    </div>
+
+    <div class="card">
+        <h2>Historia</h2>
+        <div id="history">(wczytywanie...)</div>
+    </div>
+</div>
+
+<script>
+let secret = '', pollId = null;
+
+async function api(path, method) {
+    const r = await fetch(path, { method: method || 'GET', headers: { 'X-Guardian-Secret': secret } });
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    return r.json();
+}
+
+async function connect() {
+    secret = document.getElementById('secret').value;
+    try {
+        await api('/api/status');
+        document.getElementById('auth').style.display = 'none';
+        document.getElementById('main').style.display = 'block';
+        refresh();
+        pollId = setInterval(refresh, 5000);
+    } catch (e) {
+        document.getElementById('auth-err').textContent = 'Nieprawidlowy secret lub Guardian niedostepny';
+    }
+}
+
+async function refresh() {
+    try {
+        const s = await api('/api/status');
+        document.getElementById('g-uptime').textContent = 'uptime: ' + s.uptime;
+        const ps = document.getElementById('p-status');
+        ps.className = 'badge ' + (s.portalHealthy ? 'badge-ok' : 'badge-err');
+        ps.textContent = s.portalHealthy ? 'HEALTHY' : 'DOWN';
+        if (s.portalLastChecked) {
+            document.getElementById('p-checked').textContent = 'checked: ' + new Date(s.portalLastChecked).toLocaleTimeString();
+        }
+        const ac = document.getElementById('active-card');
+        if (s.activeJob) {
+            ac.style.display = 'block';
+            document.getElementById('a-target').textContent = s.activeJob.target;
+            document.getElementById('a-stage').className = 'badge badge-run';
+            document.getElementById('a-stage').textContent = s.activeJob.stage;
+            renderJobLog(s.activeJob);
+        } else {
+            ac.style.display = 'none';
+        }
+        const hist = await api('/api/upgrade/history?limit=10');
+        renderHistory(hist);
+    } catch {}
+}
+
+function renderJobLog(job) {
+    const jc = document.getElementById('job-card');
+    jc.style.display = 'block';
+    document.getElementById('job-title').textContent = '(' + job.target + ' ' + job.id + ')';
+    const box = document.getElementById('job-log');
+    box.innerHTML = job.log.map(e =>
+        '<div class="log-entry ' + e.level + '">' +
+        '<span class="ts">' + new Date(e.timestamp).toLocaleTimeString() + '</span> ' +
+        '<span class="stg">[' + e.stage + ']</span> ' +
+        e.message + '</div>'
+    ).join('');
+    box.scrollTop = box.scrollHeight;
+}
+
+function renderHistory(jobs) {
+    const el = document.getElementById('history');
+    if (!jobs.length) { el.textContent = 'Brak historii.'; return; }
+    el.innerHTML = jobs.map(j => {
+        const badge = j.status === 'Success' ? 'badge-ok' : j.status === 'Failed' ? 'badge-err' :
+            j.status === 'RolledBack' ? 'badge-warn' : 'badge-run';
+        const date = new Date(j.startedAt).toLocaleString();
+        return '<div class="history-item" onclick="showJob(\'' + j.id + '\')">' +
+            '<span class="badge ' + badge + '">' + j.status + '</span> ' +
+            '<strong>' + j.target + '</strong> ' +
+            '<span style="color:var(--muted)">' + date + '</span> ' +
+            (j.commitBefore ? '<span style="color:var(--muted)">' + j.commitBefore.substring(0,7) + ' → ' + (j.commitAfter||'?').substring(0,7) + '</span>' : '') +
+            '</div>';
+    }).join('');
+}
+
+async function showJob(id) {
+    try {
+        const job = await api('/api/upgrade/jobs/' + id);
+        renderJobLog(job);
+    } catch {}
+}
+
+async function upgradePortal() {
+    if (!confirm('Rozpoczac aktualizacje portalu? Portal zostanie zrestartowany.')) return;
+    try {
+        const r = await api('/api/upgrade/portal', 'POST');
+        if (r.started) { clearInterval(pollId); pollId = setInterval(refresh, 2000); }
+        else alert(r.error || 'Blad');
+    } catch (e) { alert('Blad: ' + e.message); }
+}
+
+async function upgradeTenant() {
+    if (!confirm('Rozpoczac rebuild obrazu trenera?')) return;
+    try {
+        const r = await api('/api/upgrade/tenant', 'POST');
+        if (r.started) { clearInterval(pollId); pollId = setInterval(refresh, 2000); }
+        else alert(r.error || 'Blad');
+    } catch (e) { alert('Blad: ' + e.message); }
+}
+
+async function rollback() {
+    if (!confirm('Przywrocic portal do poprzedniej wersji?')) return;
+    try {
+        const r = await api('/api/rollback/portal', 'POST');
+        if (r.started) { clearInterval(pollId); pollId = setInterval(refresh, 2000); }
+        else alert(r.error || 'Blad');
+    } catch (e) { alert('Blad: ' + e.message); }
+}
+</script>

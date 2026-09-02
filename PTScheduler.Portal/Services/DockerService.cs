@@ -138,7 +138,8 @@ public class DockerService : IDisposable
     }
 
     public async Task ProvisionTenantAsync(string slug, string dbPassword, int appPort,
-        string webImage, string tenantDomain, string? entitlementsJson = null)
+        string webImage, string tenantDomain, string? entitlementsJson = null,
+        string? portalUrl = null, string? internalSecret = null)
     {
         var webName = $"pt-{slug}-web";
         var dbName = $"pt-{slug}-db";
@@ -218,6 +219,10 @@ public class DockerService : IDisposable
             };
             if (!string.IsNullOrWhiteSpace(entitlementsJson))
                 env.Add($"TENANT_ENTITLEMENTS={entitlementsJson}");
+            if (!string.IsNullOrWhiteSpace(portalUrl))
+                env.Add($"PORTAL_URL={portalUrl}");
+            if (!string.IsNullOrWhiteSpace(internalSecret))
+                env.Add($"TENANT_INTERNAL_SECRET={internalSecret}");
 
             await _client.Containers.CreateContainerAsync(new CreateContainerParameters
             {
@@ -262,12 +267,13 @@ public class DockerService : IDisposable
     }
 
     public async Task RecreateWebContainerAsync(string slug, string dbPassword, int appPort,
-        string webImage, string tenantDomain, string entitlementsJson)
+        string webImage, string tenantDomain, string entitlementsJson,
+        string? portalUrl = null, string? internalSecret = null)
     {
         var webName = $"pt-{slug}-web";
         try { await _client.Containers.StopContainerAsync(webName, new ContainerStopParameters()); } catch { }
         try { await _client.Containers.RemoveContainerAsync(webName, new ContainerRemoveParameters { Force = true }); } catch { }
-        await ProvisionTenantAsync(slug, dbPassword, appPort, webImage, tenantDomain, entitlementsJson);
+        await ProvisionTenantAsync(slug, dbPassword, appPort, webImage, tenantDomain, entitlementsJson, portalUrl, internalSecret);
     }
 
     /// <summary>

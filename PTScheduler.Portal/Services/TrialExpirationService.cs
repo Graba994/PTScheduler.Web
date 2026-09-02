@@ -86,6 +86,12 @@ public class TrialExpirationService(
 
         foreach (var t in expired)
         {
+            if (t.GraceUntil.HasValue && t.GraceUntil.Value > now)
+            {
+                logger.LogInformation("Trial expired for {Slug} but grace period active until {Until}", t.Slug, t.GraceUntil.Value);
+                continue;
+            }
+
             logger.LogInformation("Trial expired for tenant {Slug} — suspending", t.Slug);
             try
             {

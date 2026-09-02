@@ -12,6 +12,8 @@ builder.Services.AddDbContextFactory<PortalDbContext>(options =>
     var conn = builder.Configuration.GetConnectionString("DefaultConnection")
         ?? "Host=localhost;Port=5432;Database=ptportal;Username=ptportal;Password=ptportal";
     options.UseNpgsql(conn);
+    options.ConfigureWarnings(w =>
+        w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
 });
 
 builder.Services.AddScoped(sp =>
@@ -46,12 +48,15 @@ builder.Services.AddScoped<NpmService>();
 builder.Services.AddScoped<UpdateService>();
 builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<StripeService>();
+builder.Services.AddScoped<CreditService>();
+builder.Services.AddScoped<StorePaymentService>();
 builder.Services.AddScoped<BackupService>();
 builder.Services.AddHostedService<BackupScheduler>();
 builder.Services.AddSingleton<UpdateNotifier>();
 builder.Services.AddHostedService<UpdatePollerService>();
 builder.Services.AddHostedService<TrialExpirationService>();
 builder.Services.AddHostedService<HealthMonitorService>();
+builder.Services.AddHostedService<TenantCleanupService>();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
@@ -87,6 +92,20 @@ app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages:
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
+
+app.MapGet("/health", async (IDbContextFactory<PortalDbContext> dbFactory) =>
+{
+    try
+    {
+        await using var db = dbFactory.CreateDbContext();
+        await db.Database.CanConnectAsync();
+        return Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow });
+    }
+    catch
+    {
+        return Results.Json(new { status = "unhealthy", timestamp = DateTime.UtcNow }, statusCode: 503);
+    }
+});
 
 app.MapPost("/api/account/login", async (
     HttpContext ctx,
@@ -147,6 +166,121 @@ app.MapPost("/api/webhooks/stripe", async (HttpContext ctx, StripeService stripe
     return handled ? Results.Ok(new { received = true, type = msg }) : Results.BadRequest(new { error = msg });
 });
 
+// Stripe checkout.session.completed for store one-time payments
+app.MapPost("/api/webhooks/stripe/store", async (HttpContext ctx, StorePaymentService storePayment, SiteSettingsService siteSettings) =>
+{
+    using var reader = new StreamReader(ctx.Request.Body);
+    var payload = await reader.ReadToEndAsync();
+    var sig = ctx.Request.Headers["Stripe-Signature"].ToString();
+
+    var webhookSecret = await siteSettings.GetAsync(SiteSettingsService.Keys.StripeWebhookSecret);
+    if (string.IsNullOrWhiteSpace(webhookSecret))
+        return Results.BadRequest(new { error = "Webhook secret not configured" });
+
+    Stripe.Event stripeEvent;
+    try
+    {
+        stripeEvent = Stripe.EventUtility.ConstructEvent(payload, sig, webhookSecret);
+    }
+    catch (Stripe.StripeException)
+    {
+        return Results.BadRequest(new { error = "Invalid signature" });
+    }
+
+    if (stripeEvent.Type == Stripe.EventTypes.CheckoutSessionCompleted)
+    {
+        var session = (Stripe.Checkout.Session)stripeEvent.Data.Object;
+        if (session.Metadata.TryGetValue("source", out var source) && source == "store"
+            && session.Metadata.TryGetValue("orderGroupId", out _))
+        {
+            await storePayment.HandlePaymentConfirmationAsync("stripe", session.Id);
+        }
+    }
+
+    return Results.Ok(new { received = true });
+});
+
+// PayU notification webhook
+app.MapPost("/api/webhooks/payu", async (HttpContext ctx, StorePaymentService storePayment, ILogger<Program> logger) =>
+{
+    using var reader = new StreamReader(ctx.Request.Body);
+    var body = await reader.ReadToEndAsync();
+    var signature = ctx.Request.Headers["OpenPayU-Signature"].ToString();
+
+    if (!await storePayment.VerifyPayuNotification(body, signature))
+    {
+        logger.LogWarning("PayU webhook signature verification failed");
+        return Results.BadRequest(new { error = "Invalid signature" });
+    }
+
+    try
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(body);
+        var root = doc.RootElement;
+
+        if (root.TryGetProperty("order", out var order))
+        {
+            var status = order.GetProperty("status").GetString();
+            var orderId = order.GetProperty("orderId").GetString();
+
+            if (status == "COMPLETED" && !string.IsNullOrWhiteSpace(orderId))
+            {
+                await storePayment.HandlePaymentConfirmationAsync("payu", orderId);
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "PayU webhook processing failed");
+    }
+
+    return Results.Ok();
+});
+
+// Przelewy24 notification webhook
+app.MapPost("/api/webhooks/przelewy24", async (HttpContext ctx, StorePaymentService storePayment, ILogger<Program> logger) =>
+{
+    using var reader = new StreamReader(ctx.Request.Body);
+    var body = await reader.ReadToEndAsync();
+
+    try
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(body);
+        var root = doc.RootElement;
+
+        if (!await storePayment.VerifyP24Notification(root))
+        {
+            logger.LogWarning("P24 webhook signature verification failed");
+            return Results.BadRequest(new { error = "Invalid signature" });
+        }
+
+        if (await storePayment.ConfirmP24Transaction(root))
+        {
+            var sessionId = root.GetProperty("sessionId").GetString();
+            if (!string.IsNullOrWhiteSpace(sessionId))
+            {
+                await using var db = ctx.RequestServices.GetRequiredService<IDbContextFactory<PortalDbContext>>().CreateDbContext();
+                var orders = await db.ServiceOrders
+                    .Where(o => o.OrderGroupId == sessionId && o.PaymentGateway == "przelewy24")
+                    .ToListAsync();
+
+                if (orders.Count > 0)
+                {
+                    var externalId = orders[0].PaymentExternalId;
+                    if (!string.IsNullOrWhiteSpace(externalId))
+                        await storePayment.HandlePaymentConfirmationAsync("przelewy24", externalId);
+                }
+            }
+        }
+    }
+    catch (Exception ex)
+    {
+        logger.LogError(ex, "P24 webhook processing failed");
+    }
+
+    return Results.Ok();
+});
+
 // Backup file download — admin only. The BackupEntry.Id determines
 // which file to stream; the path is stored in the entry so nothing
 // user-controlled hits the filesystem.
@@ -164,6 +298,322 @@ app.MapGet("/api/backups/{id:int}/download", async (
 
     return Results.File(entry.FilePath, "application/gzip", Path.GetFileName(entry.FilePath));
 }).RequireAuthorization();
+
+// ---- Store API ----
+// Tenant apps call these endpoints to fetch their service catalog and place orders.
+// Secured by the same shared secret used for internal endpoints.
+app.MapGet("/api/store/{slug}", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config,
+    StorePaymentService storePayment) =>
+{
+    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+    if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
+        return Results.Unauthorized();
+
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null) return Results.NotFound();
+
+    var items = await db.ServiceItems.AsNoTracking()
+        .Where(s => s.IsActive)
+        .OrderBy(s => s.SortOrder)
+        .ToListAsync();
+
+    var overrides = await db.TenantServicePrices.AsNoTracking()
+        .Where(p => p.TenantId == tenant.Id)
+        .ToDictionaryAsync(p => p.ServiceItemId);
+
+    var catalog = items
+        .Where(s => !overrides.TryGetValue(s.Id, out var ov) || !ov.IsHidden)
+        .Select(s =>
+        {
+            var price = overrides.TryGetValue(s.Id, out var ov) ? ov.CustomPrice : s.DefaultPrice;
+            return new
+            {
+                s.Id, s.Name, s.Description, s.Category, s.Icon,
+                Price = price, s.PriceType, s.Unit
+            };
+        })
+        .ToList();
+
+    var gateways = await storePayment.GetAvailableGatewaysAsync();
+
+    return Results.Json(new { tenantId = tenant.Id, companyName = tenant.CompanyName, catalog, gateways });
+});
+
+app.MapPost("/api/store/{slug}/order", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config,
+    StorePaymentService storePayment) =>
+{
+    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+    if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
+        return Results.Unauthorized();
+
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null) return Results.NotFound();
+
+    using var reader = new StreamReader(ctx.Request.Body);
+    var body = await reader.ReadToEndAsync();
+    using var doc = System.Text.Json.JsonDocument.Parse(body);
+    var root = doc.RootElement;
+
+    if (!root.TryGetProperty("items", out var itemsEl) || itemsEl.ValueKind != System.Text.Json.JsonValueKind.Array)
+        return Results.BadRequest(new { error = "Brak elementów zamówienia." });
+
+    var notes = root.TryGetProperty("notes", out var n) ? n.GetString() : null;
+    var gateway = root.TryGetProperty("gateway", out var gw) ? gw.GetString() : null;
+    var returnUrl = root.TryGetProperty("returnUrl", out var ru) ? ru.GetString() : null;
+
+    var overrides = await db.TenantServicePrices.AsNoTracking()
+        .Where(p => p.TenantId == tenant.Id)
+        .ToDictionaryAsync(p => p.ServiceItemId);
+
+    var orderGroupId = Guid.NewGuid().ToString("N");
+    var usePayment = !string.IsNullOrWhiteSpace(gateway);
+
+    var orders = new List<ServiceOrder>();
+    foreach (var itemEl in itemsEl.EnumerateArray())
+    {
+        var serviceItemId = itemEl.GetInt32();
+        var serviceItem = await db.ServiceItems.AsNoTracking().FirstOrDefaultAsync(s => s.Id == serviceItemId && s.IsActive);
+        if (serviceItem is null) continue;
+
+        if (overrides.TryGetValue(serviceItemId, out var ov) && ov.IsHidden) continue;
+
+        var price = overrides.TryGetValue(serviceItemId, out var ovp) ? ovp.CustomPrice : serviceItem.DefaultPrice;
+
+        orders.Add(new ServiceOrder
+        {
+            TenantId = tenant.Id,
+            ServiceItemId = serviceItemId,
+            Price = price,
+            Notes = notes,
+            OrderGroupId = orderGroupId,
+            PaymentGateway = usePayment ? gateway : null,
+            Status = usePayment ? ServiceOrderStatus.AwaitingPayment : ServiceOrderStatus.Pending,
+            CreatedAt = DateTime.UtcNow
+        });
+    }
+
+    if (orders.Count == 0)
+        return Results.BadRequest(new { error = "Żaden z wybranych elementów nie jest dostępny." });
+
+    db.ServiceOrders.AddRange(orders);
+    await db.SaveChangesAsync();
+
+    if (usePayment && !string.IsNullOrWhiteSpace(returnUrl))
+    {
+        var totalAmount = orders.Sum(o => o.Price);
+        var description = orders.Count == 1
+            ? orders[0].Notes ?? "Zamówienie usługi PTScheduler"
+            : $"Zamówienie {orders.Count} usług PTScheduler";
+
+        var portalUrl = config.GetValue<string>("Portal:PublicUrl") ?? "";
+        var (paymentUrl, externalId, error) = await storePayment.CreatePaymentAsync(
+            gateway!, totalAmount, description, orderGroupId, returnUrl, portalUrl, tenant.OwnerEmail);
+
+        if (error is not null)
+        {
+            foreach (var o in orders) db.ServiceOrders.Remove(o);
+            await db.SaveChangesAsync();
+            return Results.Json(new { success = false, error = $"Błąd bramki płatności: {error}" },
+                statusCode: 502);
+        }
+
+        foreach (var o in orders)
+            o.PaymentExternalId = externalId;
+        await db.SaveChangesAsync();
+
+        return Results.Json(new
+        {
+            success = true,
+            count = orders.Count,
+            orderIds = orders.Select(o => o.Id).ToArray(),
+            paymentUrl,
+            paymentGateway = gateway
+        });
+    }
+
+    return Results.Json(new { success = true, count = orders.Count, orderIds = orders.Select(o => o.Id).ToArray() });
+});
+
+// ---- Credits API ----
+// Tenant apps call these to check credit balances and deduct SMS credits.
+app.MapGet("/api/credits/{slug}", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config,
+    CreditService creditService) =>
+{
+    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+    if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
+        return Results.Unauthorized();
+
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null) return Results.NotFound();
+
+    var balances = await creditService.GetBalancesAsync(tenant.Id);
+
+    var platformSmsConfigured = !string.IsNullOrWhiteSpace(
+        await db.Set<SiteSetting>().Where(s => s.Key == "platform_sms_api_token")
+            .Select(s => s.Value).FirstOrDefaultAsync());
+    var platformBunnyConfigured = !string.IsNullOrWhiteSpace(
+        await db.Set<SiteSetting>().Where(s => s.Key == "platform_bunny_api_key")
+            .Select(s => s.Value).FirstOrDefaultAsync());
+
+    return Results.Json(new
+    {
+        sms = balances.GetValueOrDefault("sms", 0),
+        cdnStorageGb = balances.GetValueOrDefault("cdn_storage_gb", 0),
+        cdnBandwidthGb = balances.GetValueOrDefault("cdn_bandwidth_gb", 0),
+        platformSmsEnabled = platformSmsConfigured,
+        platformCdnEnabled = platformBunnyConfigured
+    });
+});
+
+app.MapPost("/api/credits/{slug}/sms/send", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config,
+    CreditService creditService) =>
+{
+    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+    if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
+        return Results.Unauthorized();
+
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null) return Results.NotFound();
+
+    using var reader = new StreamReader(ctx.Request.Body);
+    var body = await reader.ReadToEndAsync();
+    using var doc = System.Text.Json.JsonDocument.Parse(body);
+    var root = doc.RootElement;
+
+    var phone = root.GetProperty("phone").GetString() ?? "";
+    var message = root.GetProperty("message").GetString() ?? "";
+
+    var (success, error) = await creditService.SendSmsCentralizedAsync(tenant.Id, phone, message);
+
+    var balances = await creditService.GetBalancesAsync(tenant.Id);
+
+    return Results.Json(new
+    {
+        success,
+        error,
+        remaining = balances.GetValueOrDefault("sms", 0)
+    });
+});
+
+app.MapPost("/api/credits/{slug}/sms/test", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config,
+    SiteSettingsService settingsService) =>
+{
+    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+    if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
+        return Results.Unauthorized();
+
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null) return Results.NotFound();
+
+    var token = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformSmsApiToken);
+    if (string.IsNullOrWhiteSpace(token))
+        return Results.Json(new { success = false, error = "Platforma SMS nie skonfigurowana." });
+
+    using var reader = new StreamReader(ctx.Request.Body);
+    var body = await reader.ReadToEndAsync();
+    using var doc = System.Text.Json.JsonDocument.Parse(body);
+    var phone = doc.RootElement.GetProperty("phone").GetString() ?? "";
+
+    var senderName = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformSmsSenderName);
+
+    var digits = new string(phone.Where(char.IsDigit).ToArray());
+    var normalized = digits.Length switch
+    {
+        9 => "48" + digits,
+        11 when digits.StartsWith("48") => digits,
+        _ when digits.Length > 9 => digits,
+        _ => (string?)null
+    };
+
+    if (normalized is null)
+        return Results.Json(new { success = false, error = "Nieprawidłowy numer telefonu." });
+
+    try
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        using var req = new HttpRequestMessage(HttpMethod.Post, "https://api.smsapi.pl/sms.do");
+        req.Headers.Authorization = new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", token);
+        var fields = new Dictionary<string, string>
+        {
+            ["to"] = normalized,
+            ["message"] = "Test SMS PTScheduler — konfiguracja dziala poprawnie.",
+            ["format"] = "json"
+        };
+        if (!string.IsNullOrWhiteSpace(senderName))
+            fields["from"] = senderName;
+        req.Content = new FormUrlEncodedContent(fields);
+        var resp = await http.SendAsync(req);
+        var respBody = await resp.Content.ReadAsStringAsync();
+        using var respDoc = System.Text.Json.JsonDocument.Parse(respBody);
+        if (respDoc.RootElement.TryGetProperty("error", out _))
+        {
+            var msg = respDoc.RootElement.TryGetProperty("message", out var m) ? m.GetString() : "Błąd SMSAPI";
+            return Results.Json(new { success = false, error = msg });
+        }
+        return Results.Json(new { success = true });
+    }
+    catch (Exception ex)
+    {
+        return Results.Json(new { success = false, error = ex.Message });
+    }
+});
+
+// ---- Bunny CDN credentials API ----
+app.MapGet("/api/credits/{slug}/bunny", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config,
+    SiteSettingsService settingsService) =>
+{
+    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+    if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
+        return Results.Unauthorized();
+
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null) return Results.NotFound();
+
+    var apiKey = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformBunnyApiKey);
+    var libraryId = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformBunnyLibraryId);
+    var cdnHostname = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformBunnyCdnHostname);
+
+    if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(libraryId))
+        return Results.Json(new { enabled = false });
+
+    return Results.Json(new
+    {
+        enabled = true,
+        apiKey,
+        libraryId,
+        cdnHostname
+    });
+});
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()

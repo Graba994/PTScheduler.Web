@@ -2,21 +2,25 @@
 @inject IJSRuntime JS
 
 <div class="atc-wrap">
-    <button class="@ButtonClass" @onclick="Toggle" type="button">
-        <i class="bi bi-calendar-plus me-1"></i>@(Compact ? "" : "Dodaj do kalendarza")
+    <button class="@ButtonClass" @onclick="Toggle" @onclick:stopPropagation type="button">
+        <i class="bi bi-calendar-plus"></i>@(Compact ? "" : " Dodaj do kalendarza")
     </button>
     @if (_open)
     {
         <div class="atc-backdrop" @onclick="Close"></div>
         <div class="atc-menu">
+            <div class="atc-header">Dodaj do kalendarza</div>
             <a href="@_googleUrl" target="_blank" rel="noopener" class="atc-item" @onclick="Close">
-                <i class="bi bi-google me-2"></i>Google Calendar
+                <span class="atc-icon" style="background:#4285f4"><i class="bi bi-google"></i></span>
+                Google Calendar
             </a>
             <a href="@_outlookUrl" target="_blank" rel="noopener" class="atc-item" @onclick="Close">
-                <i class="bi bi-microsoft me-2"></i>Outlook.com
+                <span class="atc-icon" style="background:#0078d4"><i class="bi bi-microsoft"></i></span>
+                Outlook.com
             </a>
             <button class="atc-item" @onclick="DownloadIcsAsync" type="button">
-                <i class="bi bi-file-earmark-arrow-down me-2"></i>Pobierz .ics (Apple/Outlook)
+                <span class="atc-icon" style="background:#6b7280"><i class="bi bi-file-earmark-arrow-down"></i></span>
+                Pobierz .ics
             </button>
         </div>
     }
@@ -58,17 +62,47 @@
 
 <style>
     .atc-wrap { position: relative; display: inline-block; }
-    .atc-backdrop { position: fixed; inset: 0; z-index: 1040; background: transparent; }
+    .atc-backdrop { position: fixed; inset: 0; z-index: 1040; background: rgba(0,0,0,.15); }
     .atc-menu {
-        position: absolute; top: calc(100% + 4px); right: 0; z-index: 1050;
-        background: var(--bs-body-bg); border: 1px solid var(--bs-border-color);
-        border-radius: .5rem; box-shadow: 0 8px 24px -8px rgba(0,0,0,.25);
-        min-width: 220px; padding: .35rem; display: flex; flex-direction: column; gap: .15rem;
+        position: absolute; bottom: calc(100% + 8px); right: 0; z-index: 1050;
+        background: var(--bs-body-bg, #fff);
+        border: 1px solid var(--bs-border-color, #e5e7eb);
+        border-radius: .75rem;
+        box-shadow: 0 12px 32px -8px rgba(0,0,0,.2), 0 0 0 1px rgba(0,0,0,.04);
+        min-width: 230px;
+        padding: .5rem;
+        display: flex; flex-direction: column; gap: .25rem;
+        animation: atcIn .18s cubic-bezier(.4,0,.2,1) both;
+    }
+    @@keyframes atcIn {
+        from { opacity: 0; transform: translateY(6px) scale(.97); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+    .atc-header {
+        padding: .35rem .5rem .25rem;
+        font-size: .7rem;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: .04em;
+        color: var(--bs-secondary-color, #9ca3af);
     }
     .atc-item {
-        display: flex; align-items: center; padding: .45rem .6rem; border-radius: .4rem;
-        font-size: .85rem; color: var(--bs-body-color); text-decoration: none;
+        display: flex; align-items: center; gap: .6rem;
+        padding: .5rem .6rem;
+        border-radius: .5rem;
+        font-size: .85rem; font-weight: 500;
+        color: var(--bs-body-color, #111827);
+        text-decoration: none;
         border: none; background: none; text-align: left; width: 100%;
+        cursor: pointer;
+        transition: background .12s;
     }
-    .atc-item:hover { background: var(--bs-tertiary-bg); color: var(--bs-body-color); }
+    .atc-item:hover { background: var(--bs-tertiary-bg, #f3f4f6); color: var(--bs-body-color, #111827); }
+    .atc-icon {
+        width: 28px; height: 28px;
+        border-radius: .4rem;
+        display: flex; align-items: center; justify-content: center;
+        color: #fff; font-size: .75rem;
+        flex-shrink: 0;
+    }
 </style>

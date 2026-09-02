@@ -180,6 +180,184 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         </html>
         """;
 
+    public string InactivityWarningEmailBody(string trainerName, int inactiveDays, int daysUntilSuspend) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h1 style="color: #f59e0b;">Twoje konto jest nieaktywne</h1>
+            </div>
+            <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>Zauazylismy, ze Twoje konto PTScheduler nie bylo uzywane od <strong>{inactiveDays} dni</strong>.</p>
+            <p>Jesli nie zalogujesz sie w ciagu <strong>{daysUntilSuspend} dni</strong>, Twoje konto zostanie automatycznie zawieszone.</p>
+            <p>Wystarczy sie zalogowac, zeby konto pozostalo aktywne.</p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
+                Masz pytania? Odpisz na tego maila.<br>
+                PTScheduler
+            </p>
+        </body>
+        </html>
+        """;
+
+    public string CleanupWarningEmailBody(string trainerName, int daysLeft) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h1 style="color: #ef4444;">Twoje konto zostanie usuniete</h1>
+            </div>
+            <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>Twoje konto PTScheduler jest zawieszone i zostanie <strong>trwale usuniete za {daysLeft} dni</strong>.</p>
+            <p>Po usunieciu wszystkie Twoje dane (klienci, sesje, pakiety, kursy) zostana bezpowrotnie skasowane.</p>
+            <p>Aby temu zapobiec, skontaktuj sie z nami lub odnow subskrypcje.</p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
+                Masz pytania? Odpisz na tego maila.<br>
+                PTScheduler
+            </p>
+        </body>
+        </html>
+        """;
+
+    public string CleanupDeletionEmailBody(string trainerName, int suspendedDays) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h1 style="color: #ef4444;">Konto zostalo usuniete</h1>
+            </div>
+            <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>Twoje konto PTScheduler bylo zawieszone przez {suspendedDays} dni i zostalo trwale usuniete.</p>
+            <p>Wszystkie dane zostaly skasowane. Jesli chcesz wrocic do PTScheduler, mozesz zalozyc nowe konto w kazdej chwili.</p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
+                PTScheduler — Platforma dla trenerow personalnych
+            </p>
+        </body>
+        </html>
+        """;
+
+    public string GraceExtendedEmailBody(string trainerName, int graceDays) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h1 style="color: #10b981;">Przedluzono okres ochrony konta</h1>
+            </div>
+            <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>Administrator przedluzyl okres ochrony Twojego konta o <strong>{graceDays} dni</strong>.</p>
+            <p>W tym czasie Twoje dane sa bezpieczne i nie zostana usuniete. Prosimy o uregulowanie subskrypcji w tym okresie.</p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
+                Masz pytania? Odpisz na tego maila.<br>
+                PTScheduler
+            </p>
+        </body>
+        </html>
+        """;
+
+    public string RegistrationPendingReviewEmailBody(string trainerName, string planName) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h1 style="color: #6366f1;">Dziekujemy za rejestracje!</h1>
+            </div>
+            <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>Twoje zgloszenie w PTScheduler zostalo przyjete i oczekuje na weryfikacje.</p>
+
+            <div style="background: #eff6ff; border-radius: 12px; padding: 20px; margin: 20px 0;">
+                <strong>Plan:</strong> {WebUtility.HtmlEncode(planName)}<br>
+                <strong>Status:</strong> Oczekuje na akceptacje
+            </div>
+
+            <p>Nasz zespol zweryfikuje Twoje zgloszenie i skontaktuje sie z Toba najszybciej jak to mozliwe. Po akceptacji otrzymasz email z danymi dostepu do Twojej instancji.</p>
+
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
+                Masz pytania? Odpisz na tego maila.<br>
+                PTScheduler
+            </p>
+        </body>
+        </html>
+        """;
+
+    public string AdminNewRegistrationEmailBody(string trainerName, string email, string companyName, string planName, string phone, int tenantId) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h1 style="color: #f59e0b;">Nowa rejestracja trenera</h1>
+            </div>
+            <p>Nowy trener zarejestrował się w PTScheduler i czeka na akceptację.</p>
+
+            <div style="background: #fef3c7; border-radius: 12px; padding: 20px; margin: 20px 0;">
+                <div style="margin-bottom: 8px;"><strong>Imie i nazwisko:</strong> {WebUtility.HtmlEncode(trainerName)}</div>
+                <div style="margin-bottom: 8px;"><strong>Email:</strong> {WebUtility.HtmlEncode(email)}</div>
+                <div style="margin-bottom: 8px;"><strong>Firma:</strong> {WebUtility.HtmlEncode(companyName)}</div>
+                <div style="margin-bottom: 8px;"><strong>Telefon:</strong> {WebUtility.HtmlEncode(phone ?? "—")}</div>
+                <div><strong>Plan:</strong> {WebUtility.HtmlEncode(planName)}</div>
+            </div>
+
+            <p style="text-align: center; margin: 30px 0;">
+                <a href="/panel/tenants/{tenantId}" style="background: #6366f1; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">
+                    Przejdz do akceptacji
+                </a>
+            </p>
+
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">PTScheduler Portal</p>
+        </body>
+        </html>
+        """;
+
+    public string TenantApprovedEmailBody(string trainerName, string domain, string port, string planName) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h1 style="color: #10b981;">Twoje konto zostalo zaakceptowane!</h1>
+            </div>
+            <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>Twoja rejestracja w PTScheduler zostala zaakceptowana. Twoja instancja jest gotowa do uzytku!</p>
+
+            <div style="background: #f0fdf4; border-radius: 12px; padding: 20px; margin: 20px 0;">
+                <div style="margin-bottom: 12px;"><strong>Plan:</strong> {WebUtility.HtmlEncode(planName)}</div>
+                <div style="margin-bottom: 12px;"><strong>Twoja domena:</strong> <a href="https://{domain}" style="color: #6366f1;">{domain}</a></div>
+                <div><strong>Dostep lokalny:</strong> <code>http://192.168.0.220:{port}</code></div>
+            </div>
+
+            <h2 style="color: #374151;">Co dalej?</h2>
+            <ol style="line-height: 1.8;">
+                <li>Otworz swoja instancje pod powyzszym linkiem</li>
+                <li>Przejdz przez kreator konfiguracji (Setup)</li>
+                <li>Utworz konto administratora</li>
+                <li>Dodaj klientow, ustaw grafik, skonfiguruj branding</li>
+            </ol>
+
+            <p style="text-align: center; margin: 30px 0;">
+                <a href="https://{domain}" style="background: #10b981; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">
+                    Otworz moja instancje
+                </a>
+            </p>
+
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
+                Masz pytania? Odpisz na tego maila.<br>
+                PTScheduler — Platforma dla trenerow personalnych
+            </p>
+        </body>
+        </html>
+        """;
+
     public string PendingPaymentEmailBody(string trainerName, string planName, decimal price) =>
         $"""
         <!DOCTYPE html>

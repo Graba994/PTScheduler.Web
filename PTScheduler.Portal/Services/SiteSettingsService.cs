@@ -42,6 +42,35 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string GithubOwner = "github_owner";
         public const string GithubRepo = "github_repo";
         public const string GithubBranch = "github_branch";
+        public const string FeaturedTrainers = "featured_trainers";
+        public const string PayuPosId = "payu_pos_id";
+        public const string PayuClientSecret = "payu_client_secret";
+        public const string PayuSecondKey = "payu_second_key";
+        public const string PayuSandbox = "payu_sandbox";
+        public const string P24MerchantId = "p24_merchant_id";
+        public const string P24PosId = "p24_pos_id";
+        public const string P24ApiKey = "p24_api_key";
+        public const string P24Crc = "p24_crc";
+        public const string P24Sandbox = "p24_sandbox";
+        public const string StorePaymentGateway = "store_payment_gateway";
+        public const string AdminNotificationEmail = "admin_notification_email";
+
+        // Update tracking
+        public const string LastTenantBuildCommit = "last_tenant_build_commit";
+        public const string LastTenantBuildTime = "last_tenant_build_time";
+
+        // Centralized SMS (SMSAPI.pl platform account)
+        public const string PlatformSmsApiToken = "platform_sms_api_token";
+        public const string PlatformSmsSenderName = "platform_sms_sender_name";
+
+        // Centralized Bunny CDN (platform account)
+        public const string PlatformBunnyApiKey = "platform_bunny_api_key";
+        public const string PlatformBunnyLibraryId = "platform_bunny_library_id";
+        public const string PlatformBunnyCdnHostname = "platform_bunny_cdn_hostname";
+
+        // Guardian (upgrade orchestrator)
+        public const string GuardianUrl = "guardian_url";
+        public const string GuardianSecret = "guardian_secret";
     }
 
     private static readonly Dictionary<string, string> Defaults = new()
@@ -65,6 +94,7 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         [Keys.GithubOwner] = "graba994",
         [Keys.GithubRepo] = "ptscheduler.web",
         [Keys.GithubBranch] = "master",
+        [Keys.FeaturedTrainers] = "[]",
     };
 
     public async Task<string> GetAsync(string key)

@@ -398,6 +398,42 @@ app.MapPost("/internal/admin-reset",
     return Results.Json(new { success = true, email = admin.Email });
 });
 
+app.MapGet("/internal/last-activity",
+    async (HttpContext ctx, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+{
+    var expected = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+    if (string.IsNullOrEmpty(expected)) return Results.NotFound();
+    if (ctx.Request.Headers["X-Internal-Secret"].ToString() != expected)
+        return Results.Unauthorized();
+
+    await using var db = dbFactory.CreateDbContext();
+    var lastSession = await db.Sessions
+        .OrderByDescending(s => s.CreatedAt)
+        .Select(s => s.CreatedAt)
+        .FirstOrDefaultAsync();
+    var lastClient = await db.Clients
+        .OrderByDescending(c => c.CreatedAt)
+        .Select(c => c.CreatedAt)
+        .FirstOrDefaultAsync();
+    var lastOrder = await db.Orders
+        .OrderByDescending(o => o.CreatedAt)
+        .Select(o => o.CreatedAt)
+        .FirstOrDefaultAsync();
+
+    var dates = new[] { lastSession, lastClient, lastOrder }
+        .Where(d => d != default)
+        .ToList();
+
+    return Results.Json(new
+    {
+        lastActivity = dates.Count > 0 ? dates.Max().ToString("o") : null as string,
+        lastSession = lastSession != default ? lastSession.ToString("o") : null,
+        lastClient = lastClient != default ? lastClient.ToString("o") : null,
+        lastOrder = lastOrder != default ? lastOrder.ToString("o") : null,
+        timestamp = DateTime.UtcNow.ToString("o")
+    });
+});
+
 // Google Meet OAuth callback — exchanges the authorization code for a refresh token.
 app.MapGet("/api/google-meet/callback", async (HttpContext ctx, PTScheduler.Application.Interfaces.IGoogleMeetService meet) =>
 {

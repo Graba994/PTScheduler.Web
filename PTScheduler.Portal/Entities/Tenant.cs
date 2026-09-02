@@ -22,6 +22,10 @@ public class Tenant
     public DateTime? ExpiresAt { get; set; }
     public DateTime? TrialEndsAt { get; set; }
 
+    // Lifecycle management
+    public DateTime? LastActivityAt { get; set; }
+    public DateTime? GraceUntil { get; set; }
+
     // Stripe subscription lifecycle
     public string? StripeCustomerId { get; set; }
     public string? StripeSubscriptionId { get; set; }
