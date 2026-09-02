@@ -516,10 +516,15 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
                     _upgrading = false;
                     _upgradingPortal = false;
 
-                    if (job.Target == "Tenant" && job.Status == "Success" && _reprovision)
+                    if (job.Target == "Tenant" && job.Status == "Success")
                     {
-                        _activeGuardianJob = null;
-                        _result = await UpdateSvc.RunUpgradeAsync(false, true);
+                        await UpdateSvc.SaveTenantBuildInfoAsync(job.CommitAfter);
+
+                        if (_reprovision)
+                        {
+                            _activeGuardianJob = null;
+                            _result = await UpdateSvc.RunUpgradeAsync(false, true);
+                        }
                     }
 
                     _portal = await UpdateSvc.GetCurrentAsync();

@@ -164,6 +164,14 @@ public class UpdateService(
         };
     }
 
+    public async Task SaveTenantBuildInfoAsync(string? commit)
+    {
+        var c = string.IsNullOrWhiteSpace(commit) ? "unknown" : commit.Trim();
+        var now = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+        await siteSettings.SetAsync(SiteSettingsService.Keys.LastTenantBuildCommit, c);
+        await siteSettings.SetAsync(SiteSettingsService.Keys.LastTenantBuildTime, now);
+    }
+
     public async Task<VersionInfo?> GetLocalRepoHeadAsync()
     {
         if (!Directory.Exists(RepoDir)) return null;
