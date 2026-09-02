@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 using Docker.DotNet;
 using Docker.DotNet.Models;
 
@@ -18,6 +19,8 @@ public sealed class UpgradeOrchestrator : IDisposable
     private readonly string _tenantImage;
     private readonly string _branch;
     private readonly int _portalPort;
+    private readonly string _portalUrl;
+    private readonly string _guardianSecret;
 
     private volatile UpgradeJob? _activeJob;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
@@ -38,6 +41,8 @@ public sealed class UpgradeOrchestrator : IDisposable
         _tenantImage = Cfg("GUARDIAN_TENANT_IMAGE", config["Guardian:TenantImage"], "ptscheduler-web:latest");
         _branch = Cfg("GUARDIAN_BRANCH", config["Guardian:Branch"], "master");
         _portalPort = int.TryParse(Cfg("GUARDIAN_PORTAL_PORT", config["Guardian:PortalPort"], "8081"), out var p) ? p : 8081;
+        _portalUrl = Cfg("GUARDIAN_PORTAL_URL", config["Guardian:PortalUrl"], "http://ptportal:8081");
+        _guardianSecret = Environment.GetEnvironmentVariable("GUARDIAN_SECRET") ?? config["Guardian:Secret"] ?? "";
     }
 
     public string? ActiveJobId => _activeJob?.Id;
@@ -436,6 +441,8 @@ public sealed class UpgradeOrchestrator : IDisposable
 
     private async Task<bool> GitPull(UpgradeJob job)
     {
+        await SyncGitCredentials(job);
+
         Log(job, "info", "Pulling", "git fetch origin...");
         var (fetchOk, fetchOut) = await Cli("git", "fetch origin", _repoDir);
         if (!fetchOk)
@@ -454,6 +461,33 @@ public sealed class UpgradeOrchestrator : IDisposable
         }
         Log(job, "success", "Pulling", "git pull OK");
         return true;
+    }
+
+    private async Task SyncGitCredentials(UpgradeJob job)
+    {
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"{_portalUrl}/api/internal/git-config");
+            req.Headers.Add("X-Guardian-Secret", _guardianSecret);
+            using var resp = await _healthHttp.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) return;
+
+            var json = await resp.Content.ReadAsStringAsync();
+            using var doc = JsonDocument.Parse(json);
+            var token = doc.RootElement.GetProperty("token").GetString();
+            var owner = doc.RootElement.GetProperty("owner").GetString();
+            var repo = doc.RootElement.GetProperty("repo").GetString();
+
+            if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(owner)) return;
+
+            var remoteUrl = $"https://{token}@github.com/{owner}/{repo}.git";
+            await Cli("git", $"remote set-url origin {remoteUrl}", _repoDir);
+            Log(job, "info", "Pulling", "Git credentials zsynchronizowane z Portalu.");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Could not sync git credentials from Portal");
+        }
     }
 
     private async Task PerformRollback(UpgradeJob job, ContainerInspectResponse originalInspect)

@@ -107,6 +107,33 @@ app.MapGet("/health", async (IDbContextFactory<PortalDbContext> dbFactory) =>
     }
 });
 
+app.MapGet("/api/internal/git-config", async (HttpContext ctx, SiteSettingsService siteSettings) =>
+{
+    var guardianSecret = Environment.GetEnvironmentVariable("GUARDIAN_SECRET") ?? "";
+    if (string.IsNullOrEmpty(guardianSecret))
+    {
+        var s = await siteSettings.GetAsync(SiteSettingsService.Keys.GuardianSecret);
+        guardianSecret = s;
+    }
+    var provided = ctx.Request.Headers["X-Guardian-Secret"].FirstOrDefault();
+    if (string.IsNullOrEmpty(guardianSecret) || provided != guardianSecret)
+        return Results.Unauthorized();
+
+    var settings = await siteSettings.GetAllAsync(
+        SiteSettingsService.Keys.GithubToken,
+        SiteSettingsService.Keys.GithubOwner,
+        SiteSettingsService.Keys.GithubRepo,
+        SiteSettingsService.Keys.GithubBranch);
+
+    return Results.Ok(new
+    {
+        token = settings[SiteSettingsService.Keys.GithubToken],
+        owner = settings[SiteSettingsService.Keys.GithubOwner],
+        repo = settings[SiteSettingsService.Keys.GithubRepo],
+        branch = settings[SiteSettingsService.Keys.GithubBranch]
+    });
+});
+
 app.MapPost("/api/account/login", async (
     HttpContext ctx,
     SignInManager<IdentityUser> signIn,
