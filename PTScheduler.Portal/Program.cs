@@ -12,6 +12,8 @@ builder.Services.AddDbContextFactory<PortalDbContext>(options =>
     var conn = builder.Configuration.GetConnectionString("DefaultConnection")
         ?? "Host=localhost;Port=5432;Database=ptportal;Username=ptportal;Password=ptportal";
     options.UseNpgsql(conn);
+    options.ConfigureWarnings(w =>
+        w.Ignore(Microsoft.EntityFrameworkCore.Diagnostics.RelationalEventId.PendingModelChangesWarning));
 });
 
 builder.Services.AddScoped(sp =>
