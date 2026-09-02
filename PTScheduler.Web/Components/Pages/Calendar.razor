@@ -6,6 +6,7 @@
 @inject IClientService ClientService
 @inject IAuditLogService AuditLogService
 @inject ISessionInvitationService InvitationService
+@inject ITrainerAvailabilityService AvailabilityService
 @inject ITrainerConfigService TrainerConfigService
 @inject AuthenticationStateProvider AuthState
 @inject ILogger<Calendar> Logger
@@ -358,11 +359,6 @@
                 </div>
                 <div class="cal-panel-body">
 
-                    <div class="p-2 rounded mb-3" style="background:var(--bs-tertiary-bg)">
-                        <div class="small text-muted">Wybrany termin</div>
-                        <div class="fw-semibold">@_bookingDateTime.ToString("dddd, d MMMM yyyy HH:mm", new CultureInfo("pl-PL"))</div>
-                    </div>
-
                     @if (!string.IsNullOrEmpty(_bookingError))
                     {
                         <div class="alert alert-danger py-2 small">@_bookingError</div>
@@ -381,7 +377,8 @@
 
                     <div class="mb-3">
                         <label class="form-label small fw-semibold mb-1">Rodzaj sesji</label>
-                        <select class="form-select form-select-sm" @bind="_bookingSessionTypeId">
+                        <select class="form-select form-select-sm" @bind="_bookingSessionTypeId"
+                                @bind:after="LoadBookingSlotsAsync">
                             @foreach (var t in _sessionTypes)
                             {
                                 <option value="@t.Id">@t.Name (@t.DurationMinutes min)</option>
@@ -390,9 +387,46 @@
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label small fw-semibold mb-1">Korekta godziny</label>
-                        <input type="datetime-local" class="form-control form-control-sm"
-                               @bind="_bookingDateTime" @bind:format="yyyy-MM-ddTHH:mm" />
+                        <label class="form-label small fw-semibold mb-1">Termin</label>
+                        <div class="slot-day-nav">
+                            <button class="slot-nav-btn" @onclick="BookingPrevDay"
+                                    disabled="@(_bookingSlotDate <= DateOnly.FromDateTime(DateTime.Today))">
+                                <i class="bi bi-chevron-left"></i>
+                            </button>
+                            <div class="slot-nav-center">
+                                <div class="slot-nav-weekday">@_bookingSlotDate.ToString("dddd", new CultureInfo("pl-PL"))</div>
+                                <div class="slot-nav-full">@_bookingSlotDate.ToString("d MMMM yyyy", new CultureInfo("pl-PL"))</div>
+                            </div>
+                            <button class="slot-nav-btn" @onclick="BookingNextDay">
+                                <i class="bi bi-chevron-right"></i>
+                            </button>
+                        </div>
+
+                        @if (_loadingBookingSlots)
+                        {
+                            <div class="text-center py-2"><span class="spinner-border spinner-border-sm text-primary"></span></div>
+                        }
+                        else if (_bookingAvailableSlots.Count > 0)
+                        {
+                            <div class="slot-tile-grid">
+                                @foreach (var slot in _bookingAvailableSlots)
+                                {
+                                    var sel = _bookingDateTime != default && slot.Start == _bookingDateTime;
+                                    <button type="button" class="slot-tile @(sel ? "slot-tile-active" : "")"
+                                            @onclick="() => _bookingDateTime = slot.Start">
+                                        <div class="slot-tile-time">@slot.Start.ToString("HH:mm")</div>
+                                        <div class="slot-tile-end">— @slot.End.ToString("HH:mm")</div>
+                                    </button>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="slot-empty">
+                                <i class="bi bi-calendar-x"></i>
+                                Brak wolnych terminów w tym dniu
+                            </div>
+                        }
                     </div>
 
                     <div class="mb-4">
@@ -403,7 +437,7 @@
 
                     <div class="d-grid gap-2">
                         <button class="btn btn-primary btn-sm" @onclick="ConfirmBooking"
-                                disabled="@(_bookingBusy || _bookingClientId == 0)">
+                                disabled="@(_bookingBusy || _bookingClientId == 0 || _bookingDateTime == default)">
                             @if (_bookingBusy) { <span class="spinner-border spinner-border-sm me-1" /> }
                             <i class="bi bi-check-circle me-1"></i>Utwórz sesję
                         </button>
@@ -449,6 +483,11 @@
     private string _bookingNotes = string.Empty;
     private List<ClientSummaryDto> _allClients = [];
     private List<SessionTypeDto> _sessionTypes = [];
+
+    // Slot picker for booking panel
+    private DateOnly _bookingSlotDate;
+    private List<AvailableSlotDto> _bookingAvailableSlots = [];
+    private bool _loadingBookingSlots;
 
     private string _userId = string.Empty;
     private string _userEmail = string.Empty;
@@ -584,9 +623,12 @@
         _bookingNotes   = string.Empty;
         _bookingClientId = 0;
         _bookingSessionTypeId = _sessionTypes.FirstOrDefault()?.Id ?? 0;
-        _bookingDateTime = DateTime.TryParse(dateStr, out var dt) ? dt : DateTime.Now;
+        _bookingDateTime = default;
+        var dt = DateTime.TryParse(dateStr, out var parsed) ? parsed : DateTime.Now;
+        _bookingSlotDate = DateOnly.FromDateTime(dt);
         _bookingOpen    = true;
         await InvokeAsync(StateHasChanged);
+        await LoadBookingSlotsAsync();
     }
 
     private void ClosePanel()
@@ -607,6 +649,48 @@
     {
         _bookingOpen  = false;
         _bookingError = string.Empty;
+        _bookingAvailableSlots = [];
+        _bookingSlotDate = default;
+        _bookingDateTime = default;
+    }
+
+    private async Task LoadBookingSlotsAsync()
+    {
+        var sessionType = _sessionTypes.FirstOrDefault(t => t.Id == _bookingSessionTypeId);
+        if (sessionType is null || _bookingSlotDate == default) return;
+
+        _loadingBookingSlots = true;
+        _bookingDateTime = default;
+        StateHasChanged();
+        try
+        {
+            var slots = await AvailabilityService.GetAvailableSlotsAsync(
+                _userId, _bookingSlotDate, sessionType.DurationMinutes);
+            _bookingAvailableSlots = slots
+                .Where(s => s.IsAvailable && s.Start > DateTime.Now)
+                .ToList();
+        }
+        catch
+        {
+            _bookingAvailableSlots = [];
+        }
+        finally
+        {
+            _loadingBookingSlots = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task BookingPrevDay()
+    {
+        _bookingSlotDate = _bookingSlotDate.AddDays(-1);
+        await LoadBookingSlotsAsync();
+    }
+
+    private async Task BookingNextDay()
+    {
+        _bookingSlotDate = _bookingSlotDate.AddDays(1);
+        await LoadBookingSlotsAsync();
     }
 
     private async Task ToggleFilter(string status)

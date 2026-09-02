@@ -273,40 +273,47 @@ else
 
                         @if (_bookingMode == "single")
                         {
-                            <!-- Date picker + slot list -->
                             <div class="mb-3">
-                                <label class="form-label small fw-semibold mb-1">Data</label>
-                                <input type="date" class="form-control form-control-sm"
-                                       @bind="_bookingDate" @bind:after="LoadSlotsAsync"
-                                       min="@DateTime.Today.ToString("yyyy-MM-dd")" />
+                                <label class="form-label small fw-semibold mb-1">Termin</label>
+                                <div class="slot-day-nav">
+                                    <button class="slot-nav-btn" @onclick="BookingSlotPrevDay"
+                                            disabled="@(_bookingDate <= DateOnly.FromDateTime(DateTime.Today))">
+                                        <i class="bi bi-chevron-left"></i>
+                                    </button>
+                                    <div class="slot-nav-center">
+                                        <div class="slot-nav-weekday">@_bookingDate.ToString("dddd", new System.Globalization.CultureInfo("pl-PL"))</div>
+                                        <div class="slot-nav-full">@_bookingDate.ToString("d MMMM yyyy", new System.Globalization.CultureInfo("pl-PL"))</div>
+                                    </div>
+                                    <button class="slot-nav-btn" @onclick="BookingSlotNextDay">
+                                        <i class="bi bi-chevron-right"></i>
+                                    </button>
+                                </div>
                             </div>
 
                             @if (_loadingSlots)
                             {
                                 <div class="text-center py-2"><span class="spinner-border spinner-border-sm text-primary"></span></div>
                             }
-                            else if (_availableSlots.Count > 0)
+                            else if (_availableSlots.Any(s => s.IsAvailable))
                             {
-                                <div class="mb-3">
-                                    <label class="form-label small fw-semibold mb-1">Dostępne terminy</label>
-                                    <div class="d-flex flex-wrap gap-2">
-                                        @foreach (var slot in _availableSlots.Where(s => s.IsAvailable))
-                                        {
-                                            <button class="btn btn-sm @(IsSelectedSlot(slot) ? "btn-primary" : "btn-outline-primary")"
-                                                    @onclick="() => SelectSlot(slot)">
-                                                @slot.Start.ToString("HH:mm")
-                                            </button>
-                                        }
-                                    </div>
-                                    @if (!_availableSlots.Any(s => s.IsAvailable))
+                                <div class="slot-tile-grid mb-3">
+                                    @foreach (var slot in _availableSlots.Where(s => s.IsAvailable))
                                     {
-                                        <div class="text-muted small mt-1">Brak wolnych terminów w tym dniu.</div>
+                                        var sel = IsSelectedSlot(slot);
+                                        <button type="button" class="slot-tile @(sel ? "slot-tile-active" : "")"
+                                                @onclick="() => SelectSlot(slot)">
+                                            <div class="slot-tile-time">@slot.Start.ToString("HH:mm")</div>
+                                            <div class="slot-tile-end">— @slot.End.ToString("HH:mm")</div>
+                                        </button>
                                     }
                                 </div>
                             }
                             else if (_bookingDate != default && !_loadingSlots)
                             {
-                                <div class="text-muted small mb-3">Trener nie ma dostępności w tym dniu.</div>
+                                <div class="slot-empty">
+                                    <i class="bi bi-calendar-x"></i>
+                                    Brak wolnych terminów w tym dniu
+                                </div>
                             }
 
                             <div class="mb-4">
@@ -856,6 +863,20 @@ else
 
     private async Task OnSessionTypeChangedAsync()
     {
+        _bookingDateTime = default;
+        await LoadSlotsAsync();
+    }
+
+    private async Task BookingSlotPrevDay()
+    {
+        _bookingDate = _bookingDate.AddDays(-1);
+        _bookingDateTime = default;
+        await LoadSlotsAsync();
+    }
+
+    private async Task BookingSlotNextDay()
+    {
+        _bookingDate = _bookingDate.AddDays(1);
         _bookingDateTime = default;
         await LoadSlotsAsync();
     }
