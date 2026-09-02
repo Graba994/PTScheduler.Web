@@ -90,6 +90,25 @@ app.MapPost("/api/upgrade/tenant", async (HttpContext ctx) =>
         : Results.Conflict(new { started, error });
 });
 
+app.MapPost("/api/upgrade/tenants/rolling", async (HttpContext ctx) =>
+{
+    TenantRollingRequest? request;
+    try
+    {
+        request = await ctx.Request.ReadFromJsonAsync<TenantRollingRequest>(
+            new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+    }
+    catch { return Results.BadRequest(new { error = "Nieprawidłowy JSON." }); }
+
+    if (request is null || request.Tenants.Count == 0)
+        return Results.BadRequest(new { error = "Brak tenantów." });
+
+    var (started, jobId, error) = await orchestrator.StartTenantRollingUpdateAsync(request);
+    return started
+        ? Results.Ok(new { started, jobId })
+        : Results.Conflict(new { started, error });
+});
+
 app.MapGet("/api/upgrade/jobs/{id}", (string id) =>
 {
     var job = orchestrator.GetJob(id);

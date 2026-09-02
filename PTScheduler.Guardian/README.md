@@ -200,6 +200,7 @@ Wszystkie endpointy `/api/*` wymagaja naglowka `X-Guardian-Secret`.
 | POST | `/api/upgrade/portal` | Rozpocznij aktualizacje portalu |
 | POST | `/api/upgrade/tenant` | Rozpocznij rebuild obrazu trenera |
 | POST | `/api/upgrade/tenant?rebuild=false` | Tylko git pull, bez buildu |
+| POST | `/api/upgrade/tenants/rolling` | Rolling update kontenerow trenerskich (JSON body) |
 | GET | `/api/upgrade/active` | Aktywna operacja (jesli jest) |
 | GET | `/api/upgrade/jobs/{id}` | Szczegoly konkretnej operacji |
 | GET | `/api/upgrade/history?limit=20` | Historia operacji |
@@ -257,6 +258,33 @@ PTScheduler.Guardian/
 1. Kliknij **"Buduj Obraz Trenera (Guardian)"** w Portalu
 2. Guardian zbuduje nowy obraz `ptscheduler-web:latest`
 3. Zaznacz "Reprovisioning po zakonczeniu" zeby zaktualizowac dzialajace kontenery trenerow
+
+### Rolling update tenantow (10-30+ trenerow)
+
+Bezpieczna aktualizacja wielu kontenerow trenerskich jednoczesnie:
+
+1. Zbuduj nowy obraz trenera (opcja powyzej)
+2. Zaznacz **"Rolling update"** w sekcji trenera
+3. Ustaw concurrency (ile rownoczesnie, domyslnie 3)
+4. Opcjonalnie zaznacz "Zatrzymaj po pierwszym bledzie"
+5. Kliknij **"Aktualizuj aplikacje trenera"**
+
+Guardian dla kazdego tenanta:
+- Zapisuje konfiguracje kontenera (env, porty, sieci, mounty)
+- Zatrzymuje i usuwa stary kontener
+- Tworzy nowy z tym samym configiem ale nowym obrazem
+- Sprawdza `/health` (max 60s)
+- Jesli health check nie przejdzie — **automatyczny rollback** do poprzedniego obrazu
+
+Wynik: per-tenant status (OK / Rollback / Blad / Pominieto) z progressem na zywo.
+
+```bash
+# Przyklad z CLI
+curl -X POST -H "X-Guardian-Secret: $SECRET" \
+     -H "Content-Type: application/json" \
+     -d '{"tenants":[{"slug":"jan","port":5001},{"slug":"anna","port":5002}],"concurrency":3}' \
+     http://localhost:9090/api/upgrade/tenants/rolling
+```
 
 ### Rollback portalu
 

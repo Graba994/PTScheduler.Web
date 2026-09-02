@@ -545,6 +545,47 @@ public class UpdateService(
         return JsonSerializer.Deserialize<GuardianStartResponse>(json, _jsonOpts);
     }
 
+    public async Task<GuardianStartResponse?> StartTenantRollingUpdateViaGuardianAsync(
+        int concurrency = 3, bool stopOnFirstFailure = false)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var activeTenants = await db.Tenants
+            .AsNoTracking()
+            .Where(t => t.Status == Entities.TenantStatus.Active)
+            .Select(t => new { t.Slug, t.Port })
+            .ToListAsync();
+
+        if (activeTenants.Count == 0)
+            return new GuardianStartResponse(false, null, "Brak aktywnych tenantów.");
+
+        var request = new
+        {
+            tenants = activeTenants.Select(t => new { slug = t.Slug, port = t.Port }).ToList(),
+            concurrency,
+            stopOnFirstFailure
+        };
+
+        var (url, secret) = await GetGuardianConfigAsync();
+        using var req = new HttpRequestMessage(HttpMethod.Post, $"{url}/api/upgrade/tenants/rolling");
+        req.Headers.Add("X-Guardian-Secret", secret);
+        req.Content = new StringContent(
+            JsonSerializer.Serialize(request, _jsonOpts),
+            System.Text.Encoding.UTF8, "application/json");
+
+        try
+        {
+            using var resp = await _guardianHttp.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) return null;
+            var json = await resp.Content.ReadAsStringAsync();
+            return JsonSerializer.Deserialize<GuardianStartResponse>(json, _jsonOpts);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Guardian rolling update call failed");
+            return null;
+        }
+    }
+
     private static readonly JsonSerializerOptions _jsonOpts = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -577,6 +618,19 @@ public class GuardianJobDto
     public string CommitAfter { get; set; } = "";
     public string? Error { get; set; }
     public List<GuardianLogEntryDto> Log { get; set; } = [];
+    public List<GuardianTenantResultDto>? TenantResults { get; set; }
+    public int TenantsTotal { get; set; }
+    public int TenantsCompleted { get; set; }
+    public int Concurrency { get; set; }
+}
+
+public class GuardianTenantResultDto
+{
+    public string Slug { get; set; } = "";
+    public string Status { get; set; } = "";
+    public string? Error { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
 }
 
 public class GuardianLogEntryDto

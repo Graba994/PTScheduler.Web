@@ -297,6 +297,274 @@ public sealed class UpgradeOrchestrator : IDisposable
             $"Obraz trenera zaktualizowany ({Short(job.CommitAfter)}). Przeprowadź reprovisioning z portalu.");
     }
 
+    // ── Tenant rolling update ───────────────────────────────────────
+
+    public async Task<(bool Started, string JobId, string? Error)> StartTenantRollingUpdateAsync(TenantRollingRequest request)
+    {
+        if (request.Tenants.Count == 0)
+            return (false, "", "Brak tenantów do aktualizacji.");
+
+        if (!await _semaphore.WaitAsync(0))
+            return (false, "", "Inna aktualizacja jest w toku.");
+
+        var job = NewJob("tenant-rolling", UpgradeTarget.TenantRolling);
+        job.Concurrency = Math.Clamp(request.Concurrency, 1, 10);
+        job.TenantsTotal = request.Tenants.Count;
+        job.TenantResults = request.Tenants.Select(t => new TenantUpdateResult { Slug = t.Slug }).ToList();
+
+        _ = RunInBackground(job, j => ExecuteTenantRollingUpdateAsync(j, request));
+        return (true, job.Id, null);
+    }
+
+    private async Task ExecuteTenantRollingUpdateAsync(UpgradeJob job, TenantRollingRequest request)
+    {
+        Log(job, "info", "Queued", $"Rolling update {request.Tenants.Count} tenantów (concurrency={job.Concurrency})...");
+
+        var tenantImage = _tenantImage.Split(':')[0];
+        try
+        {
+            await _docker.Images.InspectImageAsync(_tenantImage);
+        }
+        catch
+        {
+            Fail(job, "Queued", $"Obraz '{_tenantImage}' nie istnieje. Najpierw zbuduj obraz trenera.");
+            return;
+        }
+
+        SetStage(job, UpgradeStage.Swapping);
+
+        var semaphore = new SemaphoreSlim(job.Concurrency);
+        var stopRequested = false;
+        var tasks = new List<Task>();
+
+        foreach (var tenant in request.Tenants)
+        {
+            var result = job.TenantResults!.First(r => r.Slug == tenant.Slug);
+
+            if (stopRequested)
+            {
+                result.Status = TenantUpdateStatus.Skipped;
+                result.Error = "Pominięto — poprzedni tenant nie przeszedł aktualizacji.";
+                job.TenantsCompleted++;
+                Log(job, "warn", "Swapping", $"[{tenant.Slug}] Pominięto (stop-on-failure).");
+                _logStore.Save(job);
+                continue;
+            }
+
+            await semaphore.WaitAsync();
+
+            tasks.Add(Task.Run(async () =>
+            {
+                try
+                {
+                    await UpdateSingleTenantAsync(job, tenant, result);
+                }
+                finally
+                {
+                    if (request.StopOnFirstFailure && result.Status == TenantUpdateStatus.Failed)
+                        stopRequested = true;
+                    semaphore.Release();
+                }
+            }));
+        }
+
+        await Task.WhenAll(tasks);
+
+        var succeeded = job.TenantResults!.Count(r => r.Status == TenantUpdateStatus.Success);
+        var failed = job.TenantResults!.Count(r => r.Status == TenantUpdateStatus.Failed);
+        var rolledBack = job.TenantResults!.Count(r => r.Status == TenantUpdateStatus.RolledBack);
+        var skipped = job.TenantResults!.Count(r => r.Status == TenantUpdateStatus.Skipped);
+
+        job.Stage = UpgradeStage.Done;
+
+        if (failed == 0 && rolledBack == 0 && skipped == 0)
+        {
+            job.Status = UpgradeStatus.Success;
+            Log(job, "success", "Done", $"Wszystkie {succeeded} tenantów zaktualizowane pomyślnie.");
+        }
+        else if (succeeded == 0)
+        {
+            job.Status = UpgradeStatus.Failed;
+            Log(job, "error", "Done", $"Aktualizacja nie powiodła się. Failed: {failed}, RolledBack: {rolledBack}, Skipped: {skipped}.");
+        }
+        else
+        {
+            job.Status = UpgradeStatus.PartialSuccess;
+            Log(job, "warn", "Done", $"Częściowy sukces. OK: {succeeded}, Failed: {failed}, RolledBack: {rolledBack}, Skipped: {skipped}.");
+        }
+    }
+
+    private async Task UpdateSingleTenantAsync(UpgradeJob job, TenantInfo tenant, TenantUpdateResult result)
+    {
+        var containerName = $"pt-{tenant.Slug}-web";
+        result.StartedAt = DateTime.UtcNow;
+        result.Status = TenantUpdateStatus.Updating;
+        Log(job, "info", "Swapping", $"[{tenant.Slug}] Rozpoczynam aktualizację...");
+        _logStore.Save(job);
+
+        ContainerInspectResponse? originalInspect = null;
+        try
+        {
+            originalInspect = await _docker.Containers.InspectContainerAsync(containerName);
+        }
+        catch
+        {
+            result.Status = TenantUpdateStatus.Failed;
+            result.Error = $"Kontener '{containerName}' nie istnieje.";
+            result.CompletedAt = DateTime.UtcNow;
+            job.TenantsCompleted++;
+            Log(job, "error", "Swapping", $"[{tenant.Slug}] {result.Error}");
+            _logStore.Save(job);
+            return;
+        }
+
+        try
+        {
+            await _docker.Containers.StopContainerAsync(containerName,
+                new ContainerStopParameters { WaitBeforeKillSeconds = 10 });
+        }
+        catch { }
+
+        try
+        {
+            await _docker.Containers.RemoveContainerAsync(containerName,
+                new ContainerRemoveParameters { Force = true });
+        }
+        catch { }
+
+        try
+        {
+            var cfg = CloneTenantConfig(originalInspect, _tenantImage);
+            var resp = await _docker.Containers.CreateContainerAsync(
+                new CreateContainerParameters
+                {
+                    Name = containerName,
+                    Image = cfg.Image,
+                    Env = cfg.Env,
+                    ExposedPorts = cfg.ExposedPorts,
+                    HostConfig = cfg.HostConfig
+                });
+            await _docker.Containers.StartContainerAsync(resp.ID, new ContainerStartParameters());
+            await ReconnectToNetworks(originalInspect, resp.ID);
+        }
+        catch (Exception ex)
+        {
+            Log(job, "error", "Swapping", $"[{tenant.Slug}] Nie udało się uruchomić nowego kontenera: {ex.Message}");
+            await RollbackTenant(job, tenant.Slug, containerName, originalInspect, result);
+            return;
+        }
+
+        result.Status = TenantUpdateStatus.HealthCheck;
+        Log(job, "info", "Swapping", $"[{tenant.Slug}] Health check (max 60s)...");
+        _logStore.Save(job);
+
+        var healthy = await WaitForTenantHealth(containerName, tenant.Port, TimeSpan.FromSeconds(60));
+
+        if (!healthy)
+        {
+            Log(job, "warn", "Swapping", $"[{tenant.Slug}] Health check nie przeszedł — rollback...");
+            await RollbackTenant(job, tenant.Slug, containerName, originalInspect, result);
+            return;
+        }
+
+        result.Status = TenantUpdateStatus.Success;
+        result.CompletedAt = DateTime.UtcNow;
+        job.TenantsCompleted++;
+        Log(job, "success", "Swapping", $"[{tenant.Slug}] Zaktualizowany pomyślnie.");
+        _logStore.Save(job);
+    }
+
+    private async Task RollbackTenant(UpgradeJob job, string slug, string containerName,
+        ContainerInspectResponse originalInspect, TenantUpdateResult result)
+    {
+        try
+        {
+            await SafeStopAndRemove(containerName);
+
+            var cfg = CloneTenantConfig(originalInspect, originalInspect.Config.Image);
+            var resp = await _docker.Containers.CreateContainerAsync(
+                new CreateContainerParameters
+                {
+                    Name = containerName,
+                    Image = cfg.Image,
+                    Env = cfg.Env,
+                    ExposedPorts = cfg.ExposedPorts,
+                    HostConfig = cfg.HostConfig
+                });
+            await _docker.Containers.StartContainerAsync(resp.ID, new ContainerStartParameters());
+            await ReconnectToNetworks(originalInspect, resp.ID);
+
+            result.Status = TenantUpdateStatus.RolledBack;
+            result.Error = "Health check nie przeszedł — przywrócono poprzednią wersję.";
+            Log(job, "warn", "Swapping", $"[{slug}] Rollback OK — przywrócono poprzedni obraz.");
+        }
+        catch (Exception ex)
+        {
+            result.Status = TenantUpdateStatus.Failed;
+            result.Error = $"Rollback nie powiódł się: {ex.Message}";
+            Log(job, "error", "Swapping", $"[{slug}] Rollback FAILED: {ex.Message}");
+        }
+
+        result.CompletedAt = DateTime.UtcNow;
+        job.TenantsCompleted++;
+        _logStore.Save(job);
+    }
+
+    private ClonedConfig CloneTenantConfig(ContainerInspectResponse src, string newImage)
+    {
+        return new ClonedConfig(
+            newImage,
+            src.Config.Env ?? new List<string>(),
+            src.Config.ExposedPorts,
+            new HostConfig
+            {
+                Binds = src.HostConfig.Binds,
+                NetworkMode = src.HostConfig.NetworkMode ?? "bridge",
+                RestartPolicy = src.HostConfig.RestartPolicy
+                    ?? new RestartPolicy { Name = RestartPolicyKind.UnlessStopped },
+                PortBindings = src.HostConfig.PortBindings,
+                Mounts = src.HostConfig.Mounts
+            });
+    }
+
+    private async Task ReconnectToNetworks(ContainerInspectResponse original, string newContainerId)
+    {
+        if (original.NetworkSettings?.Networks is null) return;
+        var primaryNetwork = original.HostConfig.NetworkMode ?? "bridge";
+
+        foreach (var (netName, _) in original.NetworkSettings.Networks)
+        {
+            if (netName == primaryNetwork) continue;
+            try
+            {
+                await _docker.Networks.ConnectNetworkAsync(netName, new NetworkConnectParameters
+                {
+                    Container = newContainerId
+                });
+            }
+            catch { }
+        }
+    }
+
+    private async Task<bool> WaitForTenantHealth(string container, int hostPort, TimeSpan timeout)
+    {
+        var deadline = DateTime.UtcNow + timeout;
+        while (DateTime.UtcNow < deadline)
+        {
+            try
+            {
+                var inspect = await _docker.Containers.InspectContainerAsync(container);
+                if (!inspect.State.Running) return false;
+
+                var resp = await _healthHttp.GetAsync($"http://localhost:{hostPort}/health");
+                if (resp.IsSuccessStatusCode) return true;
+            }
+            catch { }
+            await Task.Delay(3_000);
+        }
+        return false;
+    }
+
     // ── Portal rollback ─────────────────────────────────────────────
 
     public async Task<(bool Started, string JobId, string? Error)> RollbackPortalAsync()

@@ -180,7 +180,12 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
         <div class="card-header bg-white d-flex align-items-center gap-2">
             <span class="spinner-border spinner-border-sm text-primary" style="@(_activeGuardianJob.Status == "Running" ? "" : "display:none")"></span>
             <span class="fw-semibold">
-                @(_activeGuardianJob.Target == "Portal" ? "Aktualizacja portalu" : "Aktualizacja trenera")
+                @(_activeGuardianJob.Target switch
+                {
+                    "Portal" => "Aktualizacja portalu",
+                    "TenantRolling" => "Rolling update tenantów",
+                    _ => "Aktualizacja trenera"
+                })
             </span>
             <span class="badge @StatusBadge(_activeGuardianJob.Status)">@_activeGuardianJob.Stage</span>
             <span class="text-muted small ms-auto">@_activeGuardianJob.Id</span>
@@ -205,14 +210,38 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
                         Przebuduj obraz trenera <code>ptscheduler-web:latest</code> (10-15 min)
                     </label>
                 </div>
-                <div class="form-check mb-3">
+                <div class="form-check mb-2">
                     <input class="form-check-input" type="checkbox" @bind="_reprovision" id="rp" />
                     <label class="form-check-label small" for="rp">
-                        Zrestartuj kontenery aktywnych trenerów (kilka sekund downtime/trener)
+                        Zrestartuj kontenery aktywnych trenerów
                     </label>
                 </div>
+                @if (_reprovision && _guardianAvailable)
+                {
+                    <div class="ms-4 mb-2">
+                        <div class="form-check mb-1">
+                            <input class="form-check-input" type="checkbox" @bind="_rollingUpdate" id="rolling" />
+                            <label class="form-check-label small" for="rolling">
+                                Rolling update (z health checkiem i rollbackiem per tenant)
+                            </label>
+                        </div>
+                        @if (_rollingUpdate)
+                        {
+                            <div class="d-flex align-items-center gap-2 mb-1">
+                                <label class="small text-muted" for="conc">Równolegle:</label>
+                                <input type="number" class="form-control form-control-sm" style="width:60px" min="1" max="10" @bind="_concurrency" id="conc" />
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" @bind="_stopOnFailure" id="sof" />
+                                <label class="form-check-label small" for="sof">
+                                    Zatrzymaj po pierwszym błędzie
+                                </label>
+                            </div>
+                        }
+                    </div>
+                }
 
-                <button class="btn btn-primary" @onclick="RunUpgrade" disabled="@(_upgrading || _upgradingPortal)">
+                <button class="btn btn-primary mt-2" @onclick="RunUpgrade" disabled="@(_upgrading || _upgradingPortal)">
                     @if (_upgrading)
                     {
                         <span class="spinner-border spinner-border-sm me-1"></span>
@@ -272,6 +301,46 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
         </div>
     </div>
 </div>
+
+@* ── Per-tenant rolling update progress ─────────────────── *@
+@if (_activeGuardianJob?.TenantResults is { Count: > 0 })
+{
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white d-flex align-items-center gap-2">
+            <i class="bi bi-people me-1"></i>
+            <span class="fw-semibold">Postęp aktualizacji tenantów</span>
+            <span class="text-muted small ms-auto">
+                @_activeGuardianJob.TenantsCompleted / @_activeGuardianJob.TenantsTotal
+            </span>
+        </div>
+        <div class="card-body p-0">
+            <div class="progress mx-3 mt-3" style="height:6px">
+                @{ var pct = _activeGuardianJob.TenantsTotal > 0
+                    ? (int)(100.0 * _activeGuardianJob.TenantsCompleted / _activeGuardianJob.TenantsTotal) : 0; }
+                <div class="progress-bar" style="width:@(pct)%"></div>
+            </div>
+            <table class="table table-sm table-hover mb-0 small mt-2">
+                <thead>
+                    <tr>
+                        <th style="width:30%">Tenant</th>
+                        <th style="width:25%">Status</th>
+                        <th>Szczegóły</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var tr in _activeGuardianJob.TenantResults)
+                    {
+                        <tr>
+                            <td class="font-monospace">@tr.Slug</td>
+                            <td><span class="badge @TenantStatusBadge(tr.Status)">@TenantStatusLabel(tr.Status)</span></td>
+                            <td class="text-muted">@(tr.Error ?? "")</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
 
 @* ── Fallback result (non-Guardian mode) ─────────────────── *@
 @if (_result is not null)
@@ -342,6 +411,24 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
                 <i class="bi bi-x"></i>
             </button>
         </div>
+        @if (_selectedHistoryJob.TenantResults is { Count: > 0 })
+        {
+            <div class="card-body p-0 border-bottom">
+                <table class="table table-sm mb-0 small">
+                    <thead><tr><th>Tenant</th><th>Status</th><th>Szczegóły</th></tr></thead>
+                    <tbody>
+                        @foreach (var tr in _selectedHistoryJob.TenantResults)
+                        {
+                            <tr>
+                                <td class="font-monospace">@tr.Slug</td>
+                                <td><span class="badge @TenantStatusBadge(tr.Status)">@TenantStatusLabel(tr.Status)</span></td>
+                                <td class="text-muted">@(tr.Error ?? "")</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
         <div class="card-body p-0">
             <pre class="p-3 bg-dark text-light m-0 small" style="max-height:400px;overflow:auto;font-size:.72rem;line-height:1.5">@RenderGuardianLog(_selectedHistoryJob.Log)</pre>
         </div>
@@ -384,6 +471,9 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
     private bool _upgradingPortal;
     private bool _rebuildImage = true;
     private bool _reprovision = true;
+    private bool _rollingUpdate = true;
+    private int _concurrency = 3;
+    private bool _stopOnFailure;
     private UpgradeResult? _result;
 
     private bool _guardianAvailable;
@@ -393,6 +483,7 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
     private GuardianJobDto? _selectedHistoryJob;
     private string? _currentJobId;
     private Timer? _pollTimer;
+    private bool _pendingRollingAfterBuild;
 
     protected override async Task OnInitializedAsync()
     {
@@ -464,6 +555,19 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
                 return;
             }
             _currentJobId = resp.JobId;
+            _pendingRollingAfterBuild = _reprovision && _rollingUpdate;
+            StartPolling();
+        }
+        else if (_guardianAvailable && !_rebuildImage && _reprovision && _rollingUpdate)
+        {
+            var resp = await UpdateSvc.StartTenantRollingUpdateViaGuardianAsync(_concurrency, _stopOnFailure);
+            if (resp is null || !resp.Started)
+            {
+                _result = new UpgradeResult(false, resp?.Error ?? "Guardian nie odpowiedział", []);
+                _upgrading = false;
+                return;
+            }
+            _currentJobId = resp.JobId;
             StartPolling();
         }
         else
@@ -513,20 +617,34 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
                 if (job.Status != "Running")
                 {
                     StopPolling();
-                    _upgrading = false;
-                    _upgradingPortal = false;
 
                     if (job.Target == "Tenant" && job.Status == "Success")
                     {
                         await UpdateSvc.SaveTenantBuildInfoAsync(job.CommitAfter);
 
-                        if (_reprovision)
+                        if (_pendingRollingAfterBuild)
+                        {
+                            _pendingRollingAfterBuild = false;
+                            _activeGuardianJob = null;
+                            var resp = await UpdateSvc.StartTenantRollingUpdateViaGuardianAsync(_concurrency, _stopOnFailure);
+                            if (resp is not null && resp.Started)
+                            {
+                                _currentJobId = resp.JobId;
+                                StartPolling();
+                                StateHasChanged();
+                                return;
+                            }
+                            _result = new UpgradeResult(false, resp?.Error ?? "Guardian rolling update nie odpowiedział", []);
+                        }
+                        else if (_reprovision && !_rollingUpdate)
                         {
                             _activeGuardianJob = null;
                             _result = await UpdateSvc.RunUpgradeAsync(false, true);
                         }
                     }
 
+                    _upgrading = false;
+                    _upgradingPortal = false;
                     _portal = await UpdateSvc.GetCurrentAsync();
                     _tenant = await UpdateSvc.GetTenantBuildAsync();
                     _jobHistory = await UpdateSvc.GetGuardianHistoryAsync();
@@ -575,6 +693,7 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
         "Success" => "bg-success",
         "Failed" => "bg-danger",
         "RolledBack" => "bg-warning text-dark",
+        "PartialSuccess" => "bg-warning text-dark",
         "Running" => "bg-primary",
         _ => "bg-secondary"
     };
@@ -585,7 +704,32 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
         "Success" => "border-success",
         "Failed" => "border-danger",
         "RolledBack" => "border-warning",
+        "PartialSuccess" => "border-warning",
         _ => ""
+    };
+
+    private static string TenantStatusBadge(string status) => status switch
+    {
+        "Success" => "bg-success",
+        "Failed" => "bg-danger",
+        "RolledBack" => "bg-warning text-dark",
+        "Updating" => "bg-primary",
+        "HealthCheck" => "bg-info",
+        "Pending" => "bg-secondary",
+        "Skipped" => "bg-light text-dark",
+        _ => "bg-secondary"
+    };
+
+    private static string TenantStatusLabel(string status) => status switch
+    {
+        "Success" => "OK",
+        "Failed" => "Błąd",
+        "RolledBack" => "Rollback",
+        "Updating" => "Aktualizacja…",
+        "HealthCheck" => "Health check…",
+        "Pending" => "Oczekuje",
+        "Skipped" => "Pominięto",
+        _ => status
     };
 
     public void Dispose()
