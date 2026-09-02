@@ -1,141 +1,174 @@
 @inject PTScheduler.Application.Interfaces.IPermissionService Permission
 @inject AuthenticationStateProvider AuthState
+@inject EntitlementService Entitlements
 @using PTScheduler.Domain.Constants
 
 <nav class="manage-nav">
 
-    <NavLink class="manage-nav-link manage-nav-upgrade" href="admin/upgrade">
-        <i class="bi bi-rocket-takeoff-fill"></i> Ulepsz plan
-    </NavLink>
+    @if (!_isHighestPlan)
+    {
+        <NavLink class="manage-nav-link manage-nav-upgrade" href="admin/upgrade">
+            <i class="bi bi-rocket-takeoff-fill"></i><span>Ulepsz plan</span>
+        </NavLink>
+    }
 
-    <NavLink class="manage-nav-link" href="admin/sklep">
-        <i class="bi bi-shop"></i> Sklep usług
+    <NavLink class="manage-nav-link manage-nav-standalone" href="admin/sklep">
+        <i class="bi bi-shop"></i><span>Sklep usług</span>
     </NavLink>
 
     @if (Can(Permissions.ManageUsers))
     {
-        <div class="manage-nav-section">Użytkownicy</div>
-        <NavLink class="manage-nav-link" href="admin/users"><i class="bi bi-people-fill"></i> Użytkownicy</NavLink>
-        <NavLink class="manage-nav-link" href="admin/permissions">
-            <i class="bi bi-shield-lock-fill"></i> Uprawnienia
-            <PlanBadge Flag="RoleBasedAccess" RequiredPlan="Business" />
-        </NavLink>
+        <div class="manage-nav-group">
+            <div class="manage-nav-section">Użytkownicy</div>
+            <div class="manage-nav-grid">
+                <NavLink class="manage-nav-link" href="admin/users"><i class="bi bi-people-fill"></i><span>Użytkownicy</span></NavLink>
+                <NavLink class="manage-nav-link" href="admin/permissions">
+                    <i class="bi bi-shield-lock-fill"></i><span>Uprawnienia</span>
+                    <PlanBadge Flag="RoleBasedAccess" RequiredPlan="Business" />
+                </NavLink>
+            </div>
+        </div>
     }
 
     @if (Can(Permissions.ManageBranding) || Can(Permissions.ManageEmail) || Can(Permissions.ManageSessionTypes) || Can(Permissions.ManagePayments) || Can(Permissions.ManageSms))
     {
-        <div class="manage-nav-section" style="margin-top:.75rem">Konfiguracja</div>
-        @if (Can(Permissions.ManageBranding))
-        {
-            <NavLink class="manage-nav-link" href="admin/branding"><i class="bi bi-palette-fill"></i> Wygląd</NavLink>
-            <NavLink class="manage-nav-link" href="admin/site"><i class="bi bi-globe"></i> Strona główna</NavLink>
-            <NavLink class="manage-nav-link" href="admin/modules"><i class="bi bi-toggles"></i> Moduły</NavLink>
-        }
-        @if (Can(Permissions.ManageEmail))
-        {
-            <NavLink class="manage-nav-link" href="admin/email"><i class="bi bi-envelope-fill"></i> Email</NavLink>
-            <NavLink class="manage-nav-link" href="admin/email-templates">
-                <i class="bi bi-file-earmark-richtext-fill"></i> Szablony email
-                <PlanBadge Flag="CustomEmailTemplates" RequiredPlan="Pro" />
-            </NavLink>
-            <NavLink class="manage-nav-link" href="admin/push">
-                <i class="bi bi-bell-fill"></i> Push
-                <PlanBadge Flag="PushNotifications" RequiredPlan="Pro" />
-            </NavLink>
-        }
-        @if (Can(Permissions.ManageSms))
-        {
-            <NavLink class="manage-nav-link" href="admin/sms">
-                <i class="bi bi-chat-dots-fill"></i> SMS
-                <PlanBadge Flag="SmsReminders" RequiredPlan="Pro" />
-            </NavLink>
-        }
-        @if (Can(Permissions.ManageSessionTypes))
-        {
-            <NavLink class="manage-nav-link" href="admin/session-types"><i class="bi bi-clock-fill"></i> Typy sesji</NavLink>
-        }
-        @if (Can(Permissions.ManagePackages))
-        {
-            <NavLink class="manage-nav-link" href="admin/package-offers"><i class="bi bi-box-seam-fill"></i> Pakiety na sprzedaż</NavLink>
-        }
-        @if (Can(Permissions.ManagePayments))
-        {
-            <NavLink class="manage-nav-link" href="admin/coupons">
-                <i class="bi bi-tag-fill"></i> Kupony rabatowe
-                <PlanBadge Flag="Coupons" RequiredPlan="Pro" />
-            </NavLink>
-        }
-        @if (Can(Permissions.ManagePayments))
-        {
-            <NavLink class="manage-nav-link" href="admin/payments">
-                <i class="bi bi-credit-card-fill"></i> Płatności
-                <PlanBadge Flag="PaymentsEnabled" RequiredPlan="Starter" />
-            </NavLink>
-        }
+        <div class="manage-nav-group">
+            <div class="manage-nav-section">Konfiguracja</div>
+            <div class="manage-nav-grid">
+                @if (Can(Permissions.ManageBranding))
+                {
+                    <NavLink class="manage-nav-link" href="admin/branding"><i class="bi bi-palette-fill"></i><span>Wygląd</span></NavLink>
+                    <NavLink class="manage-nav-link" href="admin/site"><i class="bi bi-globe"></i><span>Strona główna</span></NavLink>
+                    <NavLink class="manage-nav-link" href="admin/modules"><i class="bi bi-toggles"></i><span>Moduły</span></NavLink>
+                }
+                @if (Can(Permissions.ManageEmail))
+                {
+                    <NavLink class="manage-nav-link" href="admin/email"><i class="bi bi-envelope-fill"></i><span>Email</span></NavLink>
+                    <NavLink class="manage-nav-link" href="admin/email-templates">
+                        <i class="bi bi-file-earmark-richtext-fill"></i><span>Szablony email</span>
+                        <PlanBadge Flag="CustomEmailTemplates" RequiredPlan="Pro" />
+                    </NavLink>
+                    <NavLink class="manage-nav-link" href="admin/push">
+                        <i class="bi bi-bell-fill"></i><span>Push</span>
+                        <PlanBadge Flag="PushNotifications" RequiredPlan="Pro" />
+                    </NavLink>
+                }
+                @if (Can(Permissions.ManageSms))
+                {
+                    <NavLink class="manage-nav-link" href="admin/sms">
+                        <i class="bi bi-chat-dots-fill"></i><span>SMS</span>
+                        <PlanBadge Flag="SmsReminders" RequiredPlan="Pro" />
+                    </NavLink>
+                }
+                @if (Can(Permissions.ManageSessionTypes))
+                {
+                    <NavLink class="manage-nav-link" href="admin/session-types"><i class="bi bi-clock-fill"></i><span>Typy sesji</span></NavLink>
+                }
+                @if (Can(Permissions.ManagePackages))
+                {
+                    <NavLink class="manage-nav-link" href="admin/package-offers"><i class="bi bi-box-seam-fill"></i><span>Pakiety na sprzedaż</span></NavLink>
+                }
+                @if (Can(Permissions.ManagePayments))
+                {
+                    <NavLink class="manage-nav-link" href="admin/coupons">
+                        <i class="bi bi-tag-fill"></i><span>Kupony rabatowe</span>
+                        <PlanBadge Flag="Coupons" RequiredPlan="Pro" />
+                    </NavLink>
+                    <NavLink class="manage-nav-link" href="admin/payments">
+                        <i class="bi bi-credit-card-fill"></i><span>Płatności</span>
+                        <PlanBadge Flag="PaymentsEnabled" RequiredPlan="Starter" />
+                    </NavLink>
+                }
+            </div>
+        </div>
     }
 
     @if (Can(Permissions.ManageBranding))
     {
-        <div class="manage-nav-section" style="margin-top:.75rem">Integracje</div>
-        <NavLink class="manage-nav-link" href="admin/google-meet">
-            <i class="bi bi-camera-video-fill"></i> Google Meet
-            <PlanBadge Flag="IntegrationGoogleMeet" RequiredPlan="Pro" />
-        </NavLink>
+        <div class="manage-nav-group">
+            <div class="manage-nav-section">Integracje</div>
+            <div class="manage-nav-grid">
+                <NavLink class="manage-nav-link" href="admin/google-meet">
+                    <i class="bi bi-camera-video-fill"></i><span>Google Meet</span>
+                    <PlanBadge Flag="IntegrationGoogleMeet" RequiredPlan="Pro" />
+                </NavLink>
+            </div>
+        </div>
     }
 
     @if (Can(Permissions.ManageCourses))
     {
-        <div class="manage-nav-section" style="margin-top:.75rem">Portal szkoleniowy</div>
-        <NavLink class="manage-nav-link" href="admin/courses">
-            <i class="bi bi-mortarboard-fill"></i> Kursy i dostępy
-            <PlanBadge Flag="CoursesEnabled" RequiredPlan="Pro" />
-        </NavLink>
-        <NavLink class="manage-nav-link" href="admin/video">
-            <i class="bi bi-camera-video-fill"></i> Wideo (Bunny.net)
-            <PlanBadge Flag="CoursesEnabled" RequiredPlan="Pro" />
-        </NavLink>
+        <div class="manage-nav-group">
+            <div class="manage-nav-section">Portal szkoleniowy</div>
+            <div class="manage-nav-grid">
+                <NavLink class="manage-nav-link" href="admin/courses">
+                    <i class="bi bi-mortarboard-fill"></i><span>Kursy i dostępy</span>
+                    <PlanBadge Flag="CoursesEnabled" RequiredPlan="Pro" />
+                </NavLink>
+                <NavLink class="manage-nav-link" href="admin/video">
+                    <i class="bi bi-camera-video-fill"></i><span>Wideo</span>
+                    <PlanBadge Flag="CoursesEnabled" RequiredPlan="Pro" />
+                </NavLink>
+            </div>
+        </div>
     }
 
     @if (Can(Permissions.ManageBackup))
     {
-        <div class="manage-nav-section" style="margin-top:.75rem">System</div>
-        <NavLink class="manage-nav-link" href="admin/settings"><i class="bi bi-database-fill"></i> Baza danych</NavLink>
-        <NavLink class="manage-nav-link" href="admin/backup"><i class="bi bi-archive-fill"></i> Backup</NavLink>
+        <div class="manage-nav-group">
+            <div class="manage-nav-section">System</div>
+            <div class="manage-nav-grid">
+                <NavLink class="manage-nav-link" href="admin/settings"><i class="bi bi-database-fill"></i><span>Baza danych</span></NavLink>
+                <NavLink class="manage-nav-link" href="admin/backup"><i class="bi bi-archive-fill"></i><span>Backup</span></NavLink>
+            </div>
+        </div>
     }
 
     @if (Can(Permissions.DataExport))
     {
-        <div class="manage-nav-section" style="margin-top:.75rem">Dane</div>
-        <NavLink class="manage-nav-link" href="admin/export">
-            <i class="bi bi-download"></i> Eksport danych
-            <PlanBadge Flag="DataExport" RequiredPlan="Pro" />
-        </NavLink>
+        <div class="manage-nav-group">
+            <div class="manage-nav-section">Dane</div>
+            <div class="manage-nav-grid">
+                <NavLink class="manage-nav-link" href="admin/export">
+                    <i class="bi bi-download"></i><span>Eksport danych</span>
+                    <PlanBadge Flag="DataExport" RequiredPlan="Pro" />
+                </NavLink>
+            </div>
+        </div>
     }
 
     @if (Can(Permissions.ViewAuditLogs) || Can(Permissions.ManageBackup))
     {
-        <div class="manage-nav-section" style="margin-top:.75rem">Konserwacja</div>
-        @if (Can(Permissions.ViewAuditLogs))
-        {
-            <NavLink class="manage-nav-link" href="admin/audit-logs">
-                <i class="bi bi-journal-text"></i> Logi systemowe
-                <PlanBadge Flag="AuditLog" RequiredPlan="Business" />
-            </NavLink>
-        }
-        @if (Can(Permissions.ManageBackup))
-        {
-            <NavLink class="manage-nav-link" href="admin/demo"><i class="bi bi-database-fill-gear"></i> Demo i reset</NavLink>
-        }
+        <div class="manage-nav-group">
+            <div class="manage-nav-section">Konserwacja</div>
+            <div class="manage-nav-grid">
+                @if (Can(Permissions.ViewAuditLogs))
+                {
+                    <NavLink class="manage-nav-link" href="admin/audit-logs">
+                        <i class="bi bi-journal-text"></i><span>Logi systemowe</span>
+                        <PlanBadge Flag="AuditLog" RequiredPlan="Business" />
+                    </NavLink>
+                }
+                @if (Can(Permissions.ManageBackup))
+                {
+                    <NavLink class="manage-nav-link" href="admin/demo"><i class="bi bi-database-fill-gear"></i><span>Demo i reset</span></NavLink>
+                }
+            </div>
+        </div>
     }
 
 </nav>
 
 @code {
     private bool _isAdmin;
+    private bool _isHighestPlan;
     private readonly HashSet<string> _granted = new();
 
     protected override async Task OnInitializedAsync()
     {
+        var planId = Entitlements.Current.Id;
+        _isHighestPlan = planId is "studio" or "unlimited";
+
         var auth = await AuthState.GetAuthenticationStateAsync();
         if (auth.User.IsInRole(Roles.Admin)) { _isAdmin = true; return; }
 
