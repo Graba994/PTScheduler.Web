@@ -443,7 +443,6 @@ public class UpdateService(
             return (false, ex.Message);
         }
     }
-}
 
     // ── Guardian integration ───────────────────────────────────
 
