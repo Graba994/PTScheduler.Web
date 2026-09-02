@@ -538,33 +538,27 @@ public sealed class UpgradeOrchestrator : IDisposable
     {
         try
         {
-            var stream = await _docker.Containers.GetContainerLogsAsync(container,
+            var mux = await _docker.Containers.GetContainerLogsAsync(container,
                 false, new ContainerLogsParameters
                 {
                     ShowStdout = true,
                     ShowStderr = true,
                     Tail = tail.ToString()
                 });
-            using var reader = new StreamReader(stream);
-            var raw = await reader.ReadToEndAsync();
-            return CleanDockerLogs(raw);
+            var buffer = new byte[81920];
+            var sb = new System.Text.StringBuilder();
+            while (true)
+            {
+                var result = await mux.ReadOutputAsync(buffer, 0, buffer.Length, default);
+                if (result.Count == 0) break;
+                sb.Append(System.Text.Encoding.UTF8.GetString(buffer, 0, result.Count));
+            }
+            return sb.ToString();
         }
         catch { return "(nie udało się pobrać logów)"; }
     }
 
-    private static string CleanDockerLogs(string raw)
-    {
-        var lines = raw.Split('\n');
-        var cleaned = new List<string>();
-        foreach (var line in lines)
-        {
-            if (line.Length > 8)
-                cleaned.Add(line[8..]);
-            else if (!string.IsNullOrWhiteSpace(line))
-                cleaned.Add(line);
-        }
-        return string.Join('\n', cleaned);
-    }
+
 
     private async Task SafeStopAndRemove(string container)
     {
