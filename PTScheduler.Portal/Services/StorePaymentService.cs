@@ -423,13 +423,13 @@ public class StorePaymentService(
 
     private static string ComputeP24Sign(string sessionId, long merchantOrOrderId, int amount, string currency, string crc)
     {
-        var data = $"{{{\"sessionId\":\"{sessionId}\",\"merchantId\":{merchantOrOrderId},\"amount\":{amount},\"currency\":\"{currency}\",\"crc\":\"{crc}\"}}";
+        var data = $$"""{"sessionId":"{{sessionId}}","merchantId":{{merchantOrOrderId}},"amount":{{amount}},"currency":"{{currency}}","crc":"{{crc}}"}""";
         return Convert.ToHexStringLower(SHA384.HashData(Encoding.UTF8.GetBytes(data)));
     }
 
     private static string ComputeP24Sign(string sessionId, int merchantId, int amount, string currency, string crc)
     {
-        var raw = $"{{{\"sessionId\":\"{sessionId}\",\"merchantId\":{merchantId},\"amount\":{amount},\"currency\":\"{currency}\",\"crc\":\"{crc}\"}}";
-        return Convert.ToHexStringLower(SHA384.HashData(Encoding.UTF8.GetBytes(raw)));
+        var data = $$"""{"sessionId":"{{sessionId}}","merchantId":{{merchantId}},"amount":{{amount}},"currency":"{{currency}}","crc":"{{crc}}"}""";
+        return Convert.ToHexStringLower(SHA384.HashData(Encoding.UTF8.GetBytes(data)));
     }
 }
