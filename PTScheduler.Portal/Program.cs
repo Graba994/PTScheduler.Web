@@ -93,6 +93,20 @@ app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
 
+app.MapGet("/health", async (IDbContextFactory<PortalDbContext> dbFactory) =>
+{
+    try
+    {
+        await using var db = dbFactory.CreateDbContext();
+        await db.Database.CanConnectAsync();
+        return Results.Ok(new { status = "healthy", timestamp = DateTime.UtcNow });
+    }
+    catch
+    {
+        return Results.Json(new { status = "unhealthy", timestamp = DateTime.UtcNow }, statusCode: 503);
+    }
+});
+
 app.MapPost("/api/account/login", async (
     HttpContext ctx,
     SignInManager<IdentityUser> signIn,

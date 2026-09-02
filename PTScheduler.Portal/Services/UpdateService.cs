@@ -445,6 +445,141 @@ public class UpdateService(
     }
 }
 
+    // ── Guardian integration ───────────────────────────────────
+
+    private static readonly HttpClient _guardianHttp = new() { Timeout = TimeSpan.FromSeconds(30) };
+
+    private async Task<(string Url, string Secret)> GetGuardianConfigAsync()
+    {
+        var s = await siteSettings.GetAllAsync(
+            SiteSettingsService.Keys.GuardianUrl,
+            SiteSettingsService.Keys.GuardianSecret);
+
+        var url = s[SiteSettingsService.Keys.GuardianUrl];
+        var secret = s[SiteSettingsService.Keys.GuardianSecret];
+
+        if (string.IsNullOrWhiteSpace(url))
+            url = config.GetValue<string>("Portal:GuardianUrl")
+                ?? Environment.GetEnvironmentVariable("GUARDIAN_URL")
+                ?? "http://ptguardian:9090";
+
+        if (string.IsNullOrWhiteSpace(secret))
+            secret = config.GetValue<string>("Portal:GuardianSecret")
+                ?? Environment.GetEnvironmentVariable("GUARDIAN_SECRET")
+                ?? "";
+
+        return (url.TrimEnd('/'), secret);
+    }
+
+    private async Task<string?> CallGuardianAsync(HttpMethod method, string path)
+    {
+        var (url, secret) = await GetGuardianConfigAsync();
+        using var req = new HttpRequestMessage(method, $"{url}{path}");
+        req.Headers.Add("X-Guardian-Secret", secret);
+        try
+        {
+            using var resp = await _guardianHttp.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) return null;
+            return await resp.Content.ReadAsStringAsync();
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Guardian call failed: {Path}", path);
+            return null;
+        }
+    }
+
+    public async Task<GuardianStatusDto?> GetGuardianStatusAsync()
+    {
+        var json = await CallGuardianAsync(HttpMethod.Get, "/api/status");
+        if (json is null) return null;
+        return JsonSerializer.Deserialize<GuardianStatusDto>(json, _jsonOpts);
+    }
+
+    public async Task<GuardianStartResponse?> StartPortalUpgradeViaGuardianAsync()
+    {
+        var json = await CallGuardianAsync(HttpMethod.Post, "/api/upgrade/portal");
+        if (json is null) return null;
+        return JsonSerializer.Deserialize<GuardianStartResponse>(json, _jsonOpts);
+    }
+
+    public async Task<GuardianStartResponse?> StartTenantUpgradeViaGuardianAsync(bool rebuild = true)
+    {
+        var json = await CallGuardianAsync(HttpMethod.Post, $"/api/upgrade/tenant?rebuild={rebuild.ToString().ToLower()}");
+        if (json is null) return null;
+        return JsonSerializer.Deserialize<GuardianStartResponse>(json, _jsonOpts);
+    }
+
+    public async Task<GuardianJobDto?> GetGuardianJobAsync(string jobId)
+    {
+        var json = await CallGuardianAsync(HttpMethod.Get, $"/api/upgrade/jobs/{jobId}");
+        if (json is null) return null;
+        return JsonSerializer.Deserialize<GuardianJobDto>(json, _jsonOpts);
+    }
+
+    public async Task<GuardianActiveResponse?> GetGuardianActiveJobAsync()
+    {
+        var json = await CallGuardianAsync(HttpMethod.Get, "/api/upgrade/active");
+        if (json is null) return null;
+        return JsonSerializer.Deserialize<GuardianActiveResponse>(json, _jsonOpts);
+    }
+
+    public async Task<List<GuardianJobDto>> GetGuardianHistoryAsync(int limit = 10)
+    {
+        var json = await CallGuardianAsync(HttpMethod.Get, $"/api/upgrade/history?limit={limit}");
+        if (json is null) return [];
+        return JsonSerializer.Deserialize<List<GuardianJobDto>>(json, _jsonOpts) ?? [];
+    }
+
+    public async Task<GuardianStartResponse?> RollbackPortalViaGuardianAsync()
+    {
+        var json = await CallGuardianAsync(HttpMethod.Post, "/api/rollback/portal");
+        if (json is null) return null;
+        return JsonSerializer.Deserialize<GuardianStartResponse>(json, _jsonOpts);
+    }
+
+    private static readonly JsonSerializerOptions _jsonOpts = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true
+    };
+}
+
+public record GuardianStartResponse(bool Started, string? JobId, string? Error);
+public record GuardianActiveResponse(bool Active, GuardianJobDto? Job);
+
+public class GuardianStatusDto
+{
+    public bool Healthy { get; set; }
+    public string Uptime { get; set; } = "";
+    public bool PortalHealthy { get; set; }
+    public DateTime? PortalLastChecked { get; set; }
+    public GuardianJobDto? ActiveJob { get; set; }
+    public int TotalJobs { get; set; }
+}
+
+public class GuardianJobDto
+{
+    public string Id { get; set; } = "";
+    public string Target { get; set; } = "";
+    public string Stage { get; set; } = "";
+    public string Status { get; set; } = "";
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public string CommitBefore { get; set; } = "";
+    public string CommitAfter { get; set; } = "";
+    public string? Error { get; set; }
+    public List<GuardianLogEntryDto> Log { get; set; } = [];
+}
+
+public class GuardianLogEntryDto
+{
+    public DateTime Timestamp { get; set; }
+    public string Stage { get; set; } = "";
+    public string Message { get; set; } = "";
+    public string Level { get; set; } = "info";
+}
+
 public class VersionInfo
 {
     public string Commit { get; set; } = "unknown";

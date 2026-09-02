@@ -67,6 +67,10 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string PlatformBunnyApiKey = "platform_bunny_api_key";
         public const string PlatformBunnyLibraryId = "platform_bunny_library_id";
         public const string PlatformBunnyCdnHostname = "platform_bunny_cdn_hostname";
+
+        // Guardian (upgrade orchestrator)
+        public const string GuardianUrl = "guardian_url";
+        public const string GuardianSecret = "guardian_secret";
     }
 
     private static readonly Dictionary<string, string> Defaults = new()

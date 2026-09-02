@@ -2,15 +2,47 @@
 @layout AdminLayout
 @attribute [Authorize(Roles = "Admin")]
 @inject UpdateService UpdateSvc
+@implements IDisposable
 @rendermode InteractiveServer
 
 <PageTitle>Aktualizacje — PTScheduler Portal</PageTitle>
 
 <div class="mb-4">
     <h4 class="fw-bold mb-1"><i class="bi bi-cloud-arrow-down me-2 text-primary"></i>Aktualizacje</h4>
-    <p class="text-muted small mb-0">Sprawdź czy w repozytorium jest nowa wersja i zaktualizuj instalację</p>
+    <p class="text-muted small mb-0">Zarządzaj wersjami portalu i aplikacji trenera</p>
 </div>
 
+@* ── Guardian status bar ─────────────────────────────────── *@
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-body py-2 px-3">
+        <div class="d-flex align-items-center gap-2 small">
+            <i class="bi bi-shield-check"></i>
+            <span class="fw-semibold">Guardian</span>
+            @if (_guardianAvailable)
+            {
+                <span class="badge bg-success">Połączony</span>
+                <span class="text-muted">uptime: @(_guardianStatus?.Uptime ?? "?")</span>
+                <span class="text-muted">|</span>
+                <span>Portal health:</span>
+                @if (_guardianStatus?.PortalHealthy == true)
+                {
+                    <span class="badge bg-success">OK</span>
+                }
+                else
+                {
+                    <span class="badge bg-danger">DOWN</span>
+                }
+            }
+            else
+            {
+                <span class="badge bg-secondary">Niedostępny</span>
+                <span class="text-muted">— aktualizacje w trybie bezpośrednim</span>
+            }
+        </div>
+    </div>
+</div>
+
+@* ── Version cards ───────────────────────────────────────── *@
 <div class="row g-3 mb-3">
     <div class="col-md-4">
         <div class="card border-0 shadow-sm h-100">
@@ -86,6 +118,7 @@
     </div>
 </div>
 
+@* ── GitHub remote info ──────────────────────────────────── *@
 @if (_remote is not null)
 {
     <div class="card border-0 shadow-sm mb-3">
@@ -110,6 +143,7 @@
     </div>
 }
 
+@* ── Status alerts ───────────────────────────────────────── *@
 @if (_tenantBehindRepo)
 {
     <div class="alert alert-warning">
@@ -139,6 +173,25 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
     </div>
 }
 
+@* ── Active Guardian job (live progress) ─────────────────── *@
+@if (_activeGuardianJob is not null)
+{
+    <div class="card border-0 shadow-sm mb-3 border-start border-4 @StageColor(_activeGuardianJob.Status)">
+        <div class="card-header bg-white d-flex align-items-center gap-2">
+            <span class="spinner-border spinner-border-sm text-primary" style="@(_activeGuardianJob.Status == "Running" ? "" : "display:none")"></span>
+            <span class="fw-semibold">
+                @(_activeGuardianJob.Target == "Portal" ? "Aktualizacja portalu" : "Aktualizacja trenera")
+            </span>
+            <span class="badge @StatusBadge(_activeGuardianJob.Status)">@_activeGuardianJob.Stage</span>
+            <span class="text-muted small ms-auto">@_activeGuardianJob.Id</span>
+        </div>
+        <div class="card-body p-0">
+            <pre class="p-3 bg-dark text-light m-0 small" style="max-height:400px;overflow:auto;font-size:.72rem;line-height:1.5">@RenderGuardianLog(_activeGuardianJob.Log)</pre>
+        </div>
+    </div>
+}
+
+@* ── Upgrade actions ─────────────────────────────────────── *@
 <div class="row g-3 mb-3">
     <div class="col-md-6">
         <div class="card border-0 shadow-sm h-100">
@@ -181,41 +234,52 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
                 <i class="bi bi-boxes me-1"></i>Portal (ten panel)
             </div>
             <div class="card-body">
-                <p class="small text-muted mb-3">
-                    Przebuduje obraz portalu, uruchomi pomocniczy kontener który podmieni portal.
-                    Panel będzie niedostępny przez ~15 sekund — po tym czasie odśwież stronę.
-                </p>
-                <button class="btn btn-warning" @onclick="UpgradePortal" disabled="@(_upgrading || _upgradingPortal)">
-                    @if (_upgradingPortal)
+                @if (_guardianAvailable)
+                {
+                    <p class="small text-muted mb-3">
+                        Guardian bezpiecznie zaktualizuje portal: zbuduje nowy obraz, przetestuje go,
+                        podmieni kontener i zweryfikuje działanie. W razie problemów automatycznie przywróci poprzednią wersję.
+                    </p>
+                }
+                else
+                {
+                    <p class="small text-muted mb-3">
+                        Przebuduje obraz portalu, uruchomi pomocniczy kontener który podmieni portal.
+                        Panel będzie niedostępny przez ~15 sekund — po tym czasie odśwież stronę.
+                    </p>
+                }
+                <div class="d-flex gap-2">
+                    <button class="btn btn-warning" @onclick="UpgradePortal" disabled="@(_upgrading || _upgradingPortal)">
+                        @if (_upgradingPortal)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                            <span>Trwa aktualizacja…</span>
+                        }
+                        else
+                        {
+                            <i class="bi bi-arrow-repeat me-1"></i>
+                            <span>Aktualizuj portal</span>
+                        }
+                    </button>
+                    @if (_guardianAvailable)
                     {
-                        <span class="spinner-border spinner-border-sm me-1"></span>
-                        <span>Trwa restart portalu…</span>
+                        <button class="btn btn-outline-danger" @onclick="RollbackPortal" disabled="@(_upgrading || _upgradingPortal)">
+                            <i class="bi bi-arrow-counterclockwise me-1"></i>Rollback
+                        </button>
                     }
-                    else
-                    {
-                        <i class="bi bi-arrow-repeat me-1"></i>
-                        <span>Aktualizuj portal</span>
-                    }
-                </button>
+                </div>
             </div>
         </div>
     </div>
 </div>
 
-<div class="alert alert-info small">
-    <i class="bi bi-info-circle me-1"></i>
-    Wymagane volumy na kontenerze portalu:
-    <code>-v /var/run/docker.sock:/var/run/docker.sock</code> i
-    <code>-v /mnt/user/appdata/ptscheduler-repo:/opt/ptscheduler/repo</code>.
-    Bez nich upgrade zwróci błąd.
-</div>
-
+@* ── Fallback result (non-Guardian mode) ─────────────────── *@
 @if (_result is not null)
 {
     <div class="alert @(_result.Success ? "alert-success" : "alert-danger")">
         <strong>@_result.Summary</strong>
     </div>
-    <div class="card border-0 shadow-sm">
+    <div class="card border-0 shadow-sm mb-3">
         <div class="card-header bg-white fw-semibold">
             <i class="bi bi-terminal me-1"></i>Log
         </div>
@@ -224,6 +288,88 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
         </div>
     </div>
 }
+
+@* ── Guardian job history ────────────────────────────────── *@
+@if (_guardianAvailable && _jobHistory is { Count: > 0 })
+{
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white fw-semibold">
+            <i class="bi bi-clock-history me-1"></i>Historia aktualizacji (Guardian)
+        </div>
+        <div class="card-body p-0">
+            <table class="table table-sm table-hover mb-0 small">
+                <thead>
+                    <tr>
+                        <th>Data</th>
+                        <th>Typ</th>
+                        <th>Status</th>
+                        <th>Commit</th>
+                        <th>Czas</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var job in _jobHistory)
+                    {
+                        <tr class="@(job == _selectedHistoryJob ? "table-active" : "")" style="cursor:pointer" @onclick="() => SelectHistoryJob(job)">
+                            <td>@job.StartedAt.ToLocalTime().ToString("dd.MM HH:mm")</td>
+                            <td>@job.Target</td>
+                            <td><span class="badge @StatusBadge(job.Status)">@job.Status</span></td>
+                            <td class="font-monospace">
+                                @Truncate(job.CommitBefore, 7) → @Truncate(job.CommitAfter, 7)
+                            </td>
+                            <td>
+                                @if (job.CompletedAt.HasValue)
+                                {
+                                    @($"{(job.CompletedAt.Value - job.StartedAt).TotalMinutes:0.0} min")
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@* ── Selected history job log ────────────────────────────── *@
+@if (_selectedHistoryJob is not null)
+{
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white d-flex align-items-center gap-2">
+            <i class="bi bi-terminal me-1"></i>
+            <span class="fw-semibold">Log: @_selectedHistoryJob.Target @_selectedHistoryJob.Id</span>
+            <button class="btn btn-sm btn-outline-secondary ms-auto" @onclick="() => _selectedHistoryJob = null">
+                <i class="bi bi-x"></i>
+            </button>
+        </div>
+        <div class="card-body p-0">
+            <pre class="p-3 bg-dark text-light m-0 small" style="max-height:400px;overflow:auto;font-size:.72rem;line-height:1.5">@RenderGuardianLog(_selectedHistoryJob.Log)</pre>
+        </div>
+    </div>
+}
+
+@* ── Info box ────────────────────────────────────────────── *@
+<div class="alert alert-info small">
+    <i class="bi bi-info-circle me-1"></i>
+    @if (_guardianAvailable)
+    {
+        <span>
+            Guardian zarządza aktualizacjami bezpiecznie: testuje nowy obraz przed podmianą, automatycznie robi rollback
+            w razie problemów. Panel Guardian dostępny jest pod osobnym adresem (port 9090).
+        </span>
+    }
+    else
+    {
+        <span>
+            Wymagane volumy na kontenerze portalu:
+            <code>-v /var/run/docker.sock:/var/run/docker.sock</code> i
+            <code>-v /mnt/user/appdata/ptscheduler-repo:/opt/ptscheduler/repo</code>.
+            Bez nich upgrade zwróci błąd.
+            <br />
+            <strong>Zalecenie:</strong> Uruchom kontener Guardian dla bezpieczniejszych aktualizacji z automatycznym rollbackiem.
+        </span>
+    }
+</div>
 
 @code {
     private VersionInfo _portal = new();
@@ -240,10 +386,22 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
     private bool _reprovision = true;
     private UpgradeResult? _result;
 
+    private bool _guardianAvailable;
+    private GuardianStatusDto? _guardianStatus;
+    private GuardianJobDto? _activeGuardianJob;
+    private List<GuardianJobDto>? _jobHistory;
+    private GuardianJobDto? _selectedHistoryJob;
+    private string? _currentJobId;
+    private Timer? _pollTimer;
+
     protected override async Task OnInitializedAsync()
     {
         _portal = await UpdateSvc.GetCurrentAsync();
         _tenant = await UpdateSvc.GetTenantBuildAsync();
+        _guardianStatus = await UpdateSvc.GetGuardianStatusAsync();
+        _guardianAvailable = _guardianStatus is not null;
+        if (_guardianAvailable)
+            _jobHistory = await UpdateSvc.GetGuardianHistoryAsync();
         await Refresh();
     }
 
@@ -261,25 +419,172 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
         _checking = false;
     }
 
-    private async Task RunUpgrade()
-    {
-        _upgrading = true;
-        _result = null;
-        _result = await UpdateSvc.RunUpgradeAsync(_rebuildImage, _reprovision);
-        _upgrading = false;
-        _portal = await UpdateSvc.GetCurrentAsync();
-        _tenant = await UpdateSvc.GetTenantBuildAsync();
-        await Refresh();
-    }
+    // ── Portal upgrade ──────────────────────────────────────
 
     private async Task UpgradePortal()
     {
         _upgradingPortal = true;
         _result = null;
-        _result = await UpdateSvc.UpgradePortalAsync();
-        _upgradingPortal = false;
+        _activeGuardianJob = null;
+
+        if (_guardianAvailable)
+        {
+            var resp = await UpdateSvc.StartPortalUpgradeViaGuardianAsync();
+            if (resp is null || !resp.Started)
+            {
+                _result = new UpgradeResult(false, resp?.Error ?? "Guardian nie odpowiedział", []);
+                _upgradingPortal = false;
+                return;
+            }
+            _currentJobId = resp.JobId;
+            StartPolling();
+        }
+        else
+        {
+            _result = await UpdateSvc.UpgradePortalAsync();
+            _upgradingPortal = false;
+        }
+    }
+
+    // ── Tenant upgrade ──────────────────────────────────────
+
+    private async Task RunUpgrade()
+    {
+        _upgrading = true;
+        _result = null;
+        _activeGuardianJob = null;
+
+        if (_guardianAvailable && _rebuildImage)
+        {
+            var resp = await UpdateSvc.StartTenantUpgradeViaGuardianAsync(_rebuildImage);
+            if (resp is null || !resp.Started)
+            {
+                _result = new UpgradeResult(false, resp?.Error ?? "Guardian nie odpowiedział", []);
+                _upgrading = false;
+                return;
+            }
+            _currentJobId = resp.JobId;
+            StartPolling();
+        }
+        else
+        {
+            _result = await UpdateSvc.RunUpgradeAsync(_rebuildImage, _reprovision);
+            _upgrading = false;
+            _portal = await UpdateSvc.GetCurrentAsync();
+            _tenant = await UpdateSvc.GetTenantBuildAsync();
+            await Refresh();
+        }
+    }
+
+    // ── Rollback ────────────────────────────────────────────
+
+    private async Task RollbackPortal()
+    {
+        _upgradingPortal = true;
+        _result = null;
+        _activeGuardianJob = null;
+
+        var resp = await UpdateSvc.RollbackPortalViaGuardianAsync();
+        if (resp is null || !resp.Started)
+        {
+            _result = new UpgradeResult(false, resp?.Error ?? "Guardian nie odpowiedział", []);
+            _upgradingPortal = false;
+            return;
+        }
+        _currentJobId = resp.JobId;
+        StartPolling();
+    }
+
+    // ── Polling ─────────────────────────────────────────────
+
+    private void StartPolling()
+    {
+        _pollTimer?.Dispose();
+        _pollTimer = new Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                if (_currentJobId is null) return;
+                var job = await UpdateSvc.GetGuardianJobAsync(_currentJobId);
+                if (job is null) return;
+
+                _activeGuardianJob = job;
+
+                if (job.Status != "Running")
+                {
+                    StopPolling();
+                    _upgrading = false;
+                    _upgradingPortal = false;
+
+                    if (job.Target == "Tenant" && job.Status == "Success" && _reprovision)
+                    {
+                        _activeGuardianJob = null;
+                        _result = await UpdateSvc.RunUpgradeAsync(false, true);
+                    }
+
+                    _portal = await UpdateSvc.GetCurrentAsync();
+                    _tenant = await UpdateSvc.GetTenantBuildAsync();
+                    _jobHistory = await UpdateSvc.GetGuardianHistoryAsync();
+                    await Refresh();
+                }
+
+                StateHasChanged();
+            });
+        }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(3));
+    }
+
+    private void StopPolling()
+    {
+        _pollTimer?.Dispose();
+        _pollTimer = null;
+        _currentJobId = null;
+    }
+
+    // ── Helpers ──────────────────────────────────────────────
+
+    private void SelectHistoryJob(GuardianJobDto job)
+    {
+        _selectedHistoryJob = _selectedHistoryJob?.Id == job.Id ? null : job;
     }
 
     private static string Truncate(string s, int max) =>
         s.Length <= max ? s : s[..max] + "…";
+
+    private static string RenderGuardianLog(List<GuardianLogEntryDto> log)
+    {
+        return string.Join("\n", log.Select(e =>
+        {
+            var icon = e.Level switch
+            {
+                "success" => "✓",
+                "error" => "✖",
+                "warn" => "⚠",
+                _ => "→"
+            };
+            return $"{e.Timestamp:HH:mm:ss} [{e.Stage}] {icon} {e.Message}";
+        }));
+    }
+
+    private static string StatusBadge(string status) => status switch
+    {
+        "Success" => "bg-success",
+        "Failed" => "bg-danger",
+        "RolledBack" => "bg-warning text-dark",
+        "Running" => "bg-primary",
+        _ => "bg-secondary"
+    };
+
+    private static string StageColor(string status) => status switch
+    {
+        "Running" => "border-primary",
+        "Success" => "border-success",
+        "Failed" => "border-danger",
+        "RolledBack" => "border-warning",
+        _ => ""
+    };
+
+    public void Dispose()
+    {
+        _pollTimer?.Dispose();
+    }
 }
