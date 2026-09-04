@@ -182,8 +182,17 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         // z nich (lost update). xmin to systemowa kolumna Postgresa — nie dodaje
         // realnej kolumny, więc migracja nie ma DDL. Tylko dla Npgsql: prowider
         // InMemory (testy) go nie obsługuje i nie potrzebuje.
+        //
+        // Mapujemy shadow property "xmin" ręcznie przez rdzeniowe API EF zamiast
+        // rozszerzenia UseXminAsConcurrencyToken (niedostępne w tej wersji
+        // providera). Efekt jest identyczny: store-generated token współbieżności.
         if (Database.IsNpgsql())
-            builder.Entity<SessionPackage>().UseXminAsConcurrencyToken();
+            builder.Entity<SessionPackage>()
+                .Property<uint>("xmin")
+                .IsConcurrencyToken()
+                .ValueGeneratedOnAddOrUpdate()
+                .HasColumnType("xid")
+                .HasColumnName("xmin");
 
         builder.Entity<Session>()
             .HasOne(s => s.Package)
