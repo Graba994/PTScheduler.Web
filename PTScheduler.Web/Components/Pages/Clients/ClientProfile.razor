@@ -9,6 +9,7 @@
 @inject IAuditLogService AuditLogService
 @inject NavigationManager Nav
 @using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Exceptions
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
 @using PTScheduler.Domain.Enums
@@ -798,7 +799,7 @@ else if (client is not null)
                             <label class="form-label">Data <span class="text-danger">*</span></label>
                             <input type="date" class="form-control"
                                    value="@bookingDate"
-                                   @onchange="e => bookingDate = e.Value?.ToString() ?? bookingDate" />
+                                   @onchange="e => { bookingDate = e.Value?.ToString() ?? bookingDate; bookingOverlap = false; }" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Godzina <span class="text-danger">*</span></label>
@@ -812,10 +813,20 @@ else if (client is not null)
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-outline-secondary" @onclick="CloseBooking">Anuluj</button>
-                    <button class="btn btn-primary" @onclick="SubmitBooking" disabled="@isBusy">
-                        @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                        Zarezerwuj
-                    </button>
+                    @if (bookingOverlap)
+                    {
+                        <button class="btn btn-warning" @onclick="() => SubmitBooking(true)" disabled="@isBusy">
+                            @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            <i class="bi bi-exclamation-triangle me-1"></i>Nałóż mimo to
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-primary" @onclick="() => SubmitBooking(false)" disabled="@isBusy">
+                            @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            Zarezerwuj
+                        </button>
+                    }
                 </div>
             </div>
         </div>
@@ -849,6 +860,7 @@ else if (client is not null)
     private string bookingDate = string.Empty;
     private TimeOnly bookingTime;
     private string bookingError = string.Empty;
+    private bool bookingOverlap;   // kolizja terminu wykryta — czeka na potwierdzenie nałożenia
     private List<SessionTypeDto> sessionTypes = [];
 
     private List<SessionPackageDto>? packages;
@@ -1304,12 +1316,13 @@ else if (client is not null)
         bookingDate = now.ToString("yyyy-MM-dd");
         bookingTime = new TimeOnly(now.Hour, 0);
         bookingError = string.Empty;
+        bookingOverlap = false;
         bookingOpen = true;
     }
 
     private void CloseBooking() => bookingOpen = false;
 
-    private async Task SubmitBooking()
+    private async Task SubmitBooking(bool allowOverlap = false)
     {
         if (bookingDto.SessionTypeId == 0) { bookingError = "Wybierz typ sesji."; return; }
         if (!DateTime.TryParse($"{bookingDate} {bookingTime:HH:mm}", out var startTime))
@@ -1320,15 +1333,22 @@ else if (client is not null)
         bookingError = string.Empty;
         try
         {
-            var created = await SessionService.CreateSessionAsync(bookingDto);
+            var created = await SessionService.CreateSessionAsync(bookingDto, allowOverlap: allowOverlap);
             await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "SessionBooked", "Session",
-                created.Id.ToString(), $"Klient: {client?.FullName}, termin: {bookingDto.StartTime:dd.MM.yyyy HH:mm}");
+                created.Id.ToString(), $"Klient: {client?.FullName}, termin: {bookingDto.StartTime:dd.MM.yyyy HH:mm}{(allowOverlap ? " (nałożono)" : "")}");
+            bookingOverlap = false;
             bookingOpen = false;
             sessions = await SessionService.GetClientSessionsAsync(Id, 200);
             client = await ClientService.GetClientAsync(Id);
         }
+        catch (SlotConflictException ex)
+        {
+            bookingOverlap = true;
+            bookingError = ex.Message;
+        }
         catch (Exception ex)
         {
+            bookingOverlap = false;
             bookingError = ex.Message;
         }
         finally { isBusy = false; }

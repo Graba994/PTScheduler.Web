@@ -12,6 +12,7 @@
 @inject ILogger<Calendar> Logger
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Exceptions
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
 @using PTScheduler.Domain.Enums
@@ -188,15 +189,33 @@
                                 <div class="p-3 rounded border border-primary-subtle">
                                     <label class="form-label small fw-semibold mb-1">Nowy termin</label>
                                     <input type="datetime-local" class="form-control form-control-sm mb-2"
-                                           @bind="_rescheduleDateTime" @bind:format="yyyy-MM-ddTHH:mm" />
+                                           @bind="_rescheduleDateTime" @bind:format="yyyy-MM-ddTHH:mm"
+                                           @bind:after="() => _rescheduleOverlap = false" />
+                                    @if (_rescheduleOverlap)
+                                    {
+                                        <div class="alert alert-warning py-2 small mb-2">
+                                            Ten termin nachodzi na inną sesję. Możesz nałożyć terminy mimo to.
+                                        </div>
+                                    }
                                     <div class="d-flex gap-2">
-                                        <button class="btn btn-primary btn-sm flex-fill"
-                                                @onclick="ConfirmReschedule" disabled="@_busy">
-                                            @if (_busy) { <span class="spinner-border spinner-border-sm me-1" /> }
-                                            Potwierdź
-                                        </button>
+                                        @if (_rescheduleOverlap)
+                                        {
+                                            <button class="btn btn-warning btn-sm flex-fill"
+                                                    @onclick="() => ConfirmReschedule(true)" disabled="@_busy">
+                                                @if (_busy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                                                Nałóż mimo to
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-primary btn-sm flex-fill"
+                                                    @onclick="() => ConfirmReschedule(false)" disabled="@_busy">
+                                                @if (_busy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                                                Potwierdź
+                                            </button>
+                                        }
                                         <button class="btn btn-secondary btn-sm"
-                                                @onclick="() => _showRescheduleForm = false">Wróć</button>
+                                                @onclick="() => { _showRescheduleForm = false; _rescheduleOverlap = false; }">Wróć</button>
                                     </div>
                                 </div>
                             }
@@ -413,7 +432,7 @@
                                 {
                                     var sel = _bookingDateTime != default && slot.Start == _bookingDateTime;
                                     <button type="button" class="slot-tile @(sel ? "slot-tile-active" : "")"
-                                            @onclick="() => _bookingDateTime = slot.Start">
+                                            @onclick="() => { _bookingDateTime = slot.Start; _bookingOverlap = false; }">
                                         <div class="slot-tile-time">@slot.Start.ToString("HH:mm")</div>
                                         <div class="slot-tile-end">— @slot.End.ToString("HH:mm")</div>
                                     </button>
@@ -435,12 +454,29 @@
                                   placeholder="Uwagi do sesji..."></textarea>
                     </div>
 
+                    @if (_bookingOverlap)
+                    {
+                        <div class="alert alert-warning py-2 small">
+                            Ten termin nachodzi na inną sesję. Możesz nałożyć terminy mimo to.
+                        </div>
+                    }
                     <div class="d-grid gap-2">
-                        <button class="btn btn-primary btn-sm" @onclick="ConfirmBooking"
-                                disabled="@(_bookingBusy || _bookingClientId == 0 || _bookingDateTime == default)">
-                            @if (_bookingBusy) { <span class="spinner-border spinner-border-sm me-1" /> }
-                            <i class="bi bi-check-circle me-1"></i>Utwórz sesję
-                        </button>
+                        @if (_bookingOverlap)
+                        {
+                            <button class="btn btn-warning btn-sm" @onclick="() => ConfirmBooking(true)"
+                                    disabled="@(_bookingBusy || _bookingClientId == 0 || _bookingDateTime == default)">
+                                @if (_bookingBusy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                                <i class="bi bi-exclamation-triangle me-1"></i>Nałóż mimo to
+                            </button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-primary btn-sm" @onclick="() => ConfirmBooking(false)"
+                                    disabled="@(_bookingBusy || _bookingClientId == 0 || _bookingDateTime == default)">
+                                @if (_bookingBusy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                                <i class="bi bi-check-circle me-1"></i>Utwórz sesję
+                            </button>
+                        }
                         <button class="btn btn-outline-secondary btn-sm" @onclick="CloseBookingPanel">Anuluj</button>
                     </div>
                 </div>
@@ -464,6 +500,7 @@
     private string _cancelReason = string.Empty;
     private bool _showRescheduleForm;
     private DateTime _rescheduleDateTime;
+    private bool _rescheduleOverlap;   // kolizja terminu wykryta — czeka na potwierdzenie nałożenia
     private bool _showRestoreConfirm;
 
     // Invitations
@@ -477,6 +514,7 @@
     private bool _bookingOpen;
     private bool _bookingBusy;
     private string _bookingError = string.Empty;
+    private bool _bookingOverlap;   // kolizja terminu wykryta — czeka na potwierdzenie nałożenia
     private DateTime _bookingDateTime;
     private int _bookingClientId;
     private int _bookingSessionTypeId;
@@ -604,6 +642,7 @@
         _inviteSuccess      = string.Empty;
         _cancelReason       = string.Empty;
         _panelError         = string.Empty;
+        _rescheduleOverlap  = false;
         _panelOpen          = true;
         if (_selectedSession is not null)
         {
@@ -624,6 +663,7 @@
         _bookingClientId = 0;
         _bookingSessionTypeId = _sessionTypes.FirstOrDefault()?.Id ?? 0;
         _bookingDateTime = default;
+        _bookingOverlap  = false;
         var dt = DateTime.TryParse(dateStr, out var parsed) ? parsed : DateTime.Now;
         _bookingSlotDate = DateOnly.FromDateTime(dt);
         _bookingOpen    = true;
@@ -752,21 +792,23 @@
         finally { _busy = false; }
     }
 
-    private async Task ConfirmReschedule()
+    private async Task ConfirmReschedule(bool allowOverlap = false)
     {
         if (_selectedSession is null) return;
         _busy = true; _panelError = string.Empty;
         try
         {
             var oldTime = _selectedSession.StartTime;
-            await SessionService.RescheduleAsync(_selectedSession.Id, _rescheduleDateTime);
+            await SessionService.RescheduleAsync(_selectedSession.Id, _rescheduleDateTime, allowOverlap);
             await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionRescheduled", "Session",
                 _selectedSession.Id.ToString(),
-                $"Klient: {_selectedSession.ClientName}, stary: {oldTime:dd.MM.yyyy HH:mm}, nowy: {_rescheduleDateTime:dd.MM.yyyy HH:mm}");
+                $"Klient: {_selectedSession.ClientName}, stary: {oldTime:dd.MM.yyyy HH:mm}, nowy: {_rescheduleDateTime:dd.MM.yyyy HH:mm}{(allowOverlap ? " (nałożono)" : "")}");
+            _rescheduleOverlap = false;
             ClosePanel();
             if (_module is not null) await _module.InvokeVoidAsync("refetchEvents");
         }
-        catch (Exception ex) { _panelError = ex.Message; }
+        catch (SlotConflictException ex) { _rescheduleOverlap = true; _panelError = ex.Message; }
+        catch (Exception ex) { _rescheduleOverlap = false; _panelError = ex.Message; }
         finally { _busy = false; }
     }
 
@@ -787,7 +829,7 @@
         finally { _busy = false; }
     }
 
-    private async Task ConfirmBooking()
+    private async Task ConfirmBooking(bool allowOverlap = false)
     {
         if (_bookingClientId == 0 || _bookingSessionTypeId == 0) return;
         _bookingBusy = true; _bookingError = string.Empty;
@@ -801,13 +843,15 @@
                 StartTime     = _bookingDateTime,
                 Notes         = string.IsNullOrWhiteSpace(_bookingNotes) ? null : _bookingNotes.Trim()
             };
-            var created = await SessionService.CreateSessionAsync(dto);
+            var created = await SessionService.CreateSessionAsync(dto, allowOverlap: allowOverlap);
             await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionBooked", "Session",
-                created.Id.ToString(), $"Klient: {created.ClientName}, termin: {_bookingDateTime:dd.MM.yyyy HH:mm}");
+                created.Id.ToString(), $"Klient: {created.ClientName}, termin: {_bookingDateTime:dd.MM.yyyy HH:mm}{(allowOverlap ? " (nałożono)" : "")}");
+            _bookingOverlap = false;
             CloseBookingPanel();
             if (_module is not null) await _module.InvokeVoidAsync("refetchEvents");
         }
-        catch (Exception ex) { _bookingError = ex.Message; }
+        catch (SlotConflictException ex) { _bookingOverlap = true; _bookingError = ex.Message; }
+        catch (Exception ex) { _bookingOverlap = false; _bookingError = ex.Message; }
         finally { _bookingBusy = false; }
     }
 

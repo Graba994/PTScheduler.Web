@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using PTScheduler.Application.DTOs;
+using PTScheduler.Application.Exceptions;
 using PTScheduler.Application.Interfaces;
 using PTScheduler.Domain.Constants;
 using PTScheduler.Domain.Entities;
@@ -15,6 +16,7 @@ public class SessionService(
     IEmailTemplateService emailTemplateService,
     INotificationPreferencesService notificationPrefs,
     IGoogleMeetService googleMeetService,
+    ITrainerAvailabilityService availability,
     IAppClock clock,
     ILogger<SessionService> logger) : ISessionService
 {
@@ -105,7 +107,7 @@ public class SessionService(
         return MapToDto(session, new Dictionary<string, string> { [session.TrainerUserId] = trainerName });
     }
 
-    public async Task<SessionDto> CreateSessionAsync(CreateSessionDto dto, bool allowAwaitingPackage = true)
+    public async Task<SessionDto> CreateSessionAsync(CreateSessionDto dto, bool allowAwaitingPackage = true, bool allowOverlap = false)
     {
         // Godzina przychodzi z <input type="datetime-local"> jako zegar ścienny.
         // Zapisujemy ją bez konwersji — 14:00 wpisane przez trenera to 14:00
@@ -114,6 +116,15 @@ public class SessionService(
         await using var db = dbFactory.CreateDbContext();
         var sessionType = await db.SessionTypes.FindAsync(dto.SessionTypeId)
             ?? throw new InvalidOperationException("Typ sesji nie istnieje.");
+
+        // Kontrola kolizji terminów. Bez tego trener mógł po cichu umówić dwóch
+        // klientów na tę samą godzinę. allowOverlap pozwala na świadome nałożenie.
+        if (!allowOverlap)
+        {
+            var conflict = await availability.FindConflictAsync(
+                dto.TrainerUserId, dto.StartTime, sessionType.DurationMinutes);
+            if (conflict is not null) throw new SlotConflictException(conflict);
+        }
 
         var package = await db.SessionPackages
             .Where(p => p.ClientId == dto.ClientId
@@ -220,7 +231,7 @@ public class SessionService(
         }
     }
 
-    public async Task RescheduleAsync(int id, DateTime newStartTime)
+    public async Task RescheduleAsync(int id, DateTime newStartTime, bool allowOverlap = false)
     {
         newStartTime = DateTime.SpecifyKind(newStartTime, DateTimeKind.Unspecified);
         await using var db = dbFactory.CreateDbContext();
@@ -229,6 +240,17 @@ public class SessionService(
             .Include(s => s.SessionType)
             .FirstOrDefaultAsync(s => s.Id == id)
             ?? throw new InvalidOperationException("Sesja nie została znaleziona.");
+
+        // Kontrola kolizji, wykluczając samą przenoszoną sesję — inaczej jej
+        // stary rekord (wciąż w bazie) kolidowałby z nowym terminem.
+        if (!allowOverlap)
+        {
+            var conflict = await availability.FindConflictAsync(
+                session.TrainerUserId, newStartTime, session.SessionType.DurationMinutes,
+                excludeSessionId: session.Id);
+            if (conflict is not null) throw new SlotConflictException(conflict);
+        }
+
         var oldTime = session.StartTime;
         session.StartTime = newStartTime;
         await db.SaveChangesAsync();
