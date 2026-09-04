@@ -26,3 +26,22 @@ jobs:
 
       - name: Run tests
         run: dotnet test PTScheduler.Tests/ --no-build --verbosity normal
+
+      # Kontrola spójności modelu z migracjami. Wygenerowanie kandydata na
+      # nową migrację MUSI dać pustą Up() — inaczej snapshot rozjechał się
+      # z modelem (np. ręcznie pisany Designer był niekompletny). Nie łączy
+      # się z bazą: 'migrations add' buduje tylko model.
+      - name: Verify migrations in sync with model
+        run: |
+          dotnet tool install --global dotnet-ef --version "10.*"
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          dotnet ef migrations add __CiSyncCheck \
+            --project PTScheduler.Infrastructure \
+            --startup-project PTScheduler.Web
+          UP=$(ls PTScheduler.Infrastructure/Migrations/*__CiSyncCheck.cs)
+          if grep -q "migrationBuilder\." "$UP"; then
+            echo "::error::Model i migracje rozjechane — kandydat nie jest pusty:"
+            cat "$UP"
+            exit 1
+          fi
+          echo "Migracje zsynchronizowane z modelem (kandydat pusty)."
