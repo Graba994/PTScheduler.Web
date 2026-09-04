@@ -129,32 +129,37 @@ public class SessionPackageService(
     }
 
     public async Task DeductCreditAsync(int packageId)
-    {
-        await using var db = dbFactory.CreateDbContext();
-        var p = await db.SessionPackages.FindAsync(packageId);
-        if (p is null || p.Status != PackageStatus.Active) return;
+        // Retry na wypadek równoległego zapisu na tym samym pakiecie — token xmin
+        // wykryje konflikt, a my ponawiamy na świeżym stanie (bez podwójnego zliczenia,
+        // bo każda próba czyta aktualne UsedSessions).
+        => await ConcurrencyRetry.ExecuteAsync(async () =>
+        {
+            await using var db = dbFactory.CreateDbContext();
+            var p = await db.SessionPackages.FindAsync(packageId);
+            if (p is null || p.Status != PackageStatus.Active) return;
 
-        p.UsedSessions++;
-        if (p.UsedSessions >= p.TotalSessions)
-            p.Status = PackageStatus.Depleted;
+            p.UsedSessions++;
+            if (p.UsedSessions >= p.TotalSessions)
+                p.Status = PackageStatus.Depleted;
 
-        await db.SaveChangesAsync();
-    }
+            await db.SaveChangesAsync();
+        });
 
     public async Task ReturnCreditAsync(int packageId)
-    {
-        await using var db = dbFactory.CreateDbContext();
-        var p = await db.SessionPackages.FindAsync(packageId);
-        if (p is null || p.Status == PackageStatus.Cancelled) return;
+        => await ConcurrencyRetry.ExecuteAsync(async () =>
+        {
+            await using var db = dbFactory.CreateDbContext();
+            var p = await db.SessionPackages.FindAsync(packageId);
+            if (p is null || p.Status == PackageStatus.Cancelled) return;
 
-        if (p.UsedSessions > 0)
-            p.UsedSessions--;
+            if (p.UsedSessions > 0)
+                p.UsedSessions--;
 
-        if (p.Status == PackageStatus.Depleted && p.UsedSessions < p.TotalSessions)
-            p.Status = PackageStatus.Active;
+            if (p.Status == PackageStatus.Depleted && p.UsedSessions < p.TotalSessions)
+                p.Status = PackageStatus.Active;
 
-        await db.SaveChangesAsync();
-    }
+            await db.SaveChangesAsync();
+        });
 
     public async Task UpdatePackageAsync(int id, UpdateSessionPackageDto dto)
     {

@@ -176,6 +176,15 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             .Property(s => s.StartTime)
             .HasColumnType("timestamp without time zone");
 
+        // Optymistyczna współbieżność na liczniku kredytów pakietu. UsedSessions
+        // jest inkrementowane/dekrementowane z wielu ścieżek (booking, seria,
+        // anulowanie, płatność); bez tokena dwa równoległe zapisy gubiły jeden
+        // z nich (lost update). xmin to systemowa kolumna Postgresa — nie dodaje
+        // realnej kolumny, więc migracja nie ma DDL. Tylko dla Npgsql: prowider
+        // InMemory (testy) go nie obsługuje i nie potrzebuje.
+        if (Database.IsNpgsql())
+            builder.Entity<SessionPackage>().UseXminAsConcurrencyToken();
+
         builder.Entity<Session>()
             .HasOne(s => s.Package)
             .WithMany(p => p.Sessions)

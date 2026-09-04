@@ -173,6 +173,84 @@ public class SessionPackageServiceTests
         pkg!.Status.Should().Be(PackageStatus.Cancelled);
     }
 
+    [Fact]
+    public async Task DeductCredit_IncrementsAndDepletesAtCapacity()
+    {
+        var (factory, db) = TestDb.CreateFresh();
+        db.SessionPackages.Add(new SessionPackage
+        {
+            Id = 1, ClientId = 1, SessionTypeId = 1, Name = "Pak",
+            TotalSessions = 2, UsedSessions = 1, Status = PackageStatus.Active
+        });
+        await db.SaveChangesAsync();
+
+        var svc = MakeService(factory);
+        await svc.DeductCreditAsync(1);
+
+        await using var verify = factory.CreateDbContext();
+        var p = await verify.SessionPackages.FindAsync(1);
+        p!.UsedSessions.Should().Be(2);
+        p.Status.Should().Be(PackageStatus.Depleted);
+    }
+
+    [Fact]
+    public async Task DeductCredit_IgnoresNonActivePackage()
+    {
+        var (factory, db) = TestDb.CreateFresh();
+        db.SessionPackages.Add(new SessionPackage
+        {
+            Id = 1, ClientId = 1, SessionTypeId = 1, Name = "Pak",
+            TotalSessions = 5, UsedSessions = 5, Status = PackageStatus.Depleted
+        });
+        await db.SaveChangesAsync();
+
+        var svc = MakeService(factory);
+        await svc.DeductCreditAsync(1);
+
+        await using var verify = factory.CreateDbContext();
+        var p = await verify.SessionPackages.FindAsync(1);
+        p!.UsedSessions.Should().Be(5); // bez zmian — nie schodzimy poniżej zera ani powyżej limitu
+    }
+
+    [Fact]
+    public async Task ReturnCredit_DecrementsAndReactivatesDepleted()
+    {
+        var (factory, db) = TestDb.CreateFresh();
+        db.SessionPackages.Add(new SessionPackage
+        {
+            Id = 1, ClientId = 1, SessionTypeId = 1, Name = "Pak",
+            TotalSessions = 3, UsedSessions = 3, Status = PackageStatus.Depleted
+        });
+        await db.SaveChangesAsync();
+
+        var svc = MakeService(factory);
+        await svc.ReturnCreditAsync(1);
+
+        await using var verify = factory.CreateDbContext();
+        var p = await verify.SessionPackages.FindAsync(1);
+        p!.UsedSessions.Should().Be(2);
+        p.Status.Should().Be(PackageStatus.Active);
+    }
+
+    [Fact]
+    public async Task ReturnCredit_NeverGoesBelowZero()
+    {
+        var (factory, db) = TestDb.CreateFresh();
+        db.SessionPackages.Add(new SessionPackage
+        {
+            Id = 1, ClientId = 1, SessionTypeId = 1, Name = "Pak",
+            TotalSessions = 3, UsedSessions = 0, Status = PackageStatus.Active
+        });
+        await db.SaveChangesAsync();
+
+        var svc = MakeService(factory);
+        await svc.ReturnCreditAsync(1);
+
+        await using var verify = factory.CreateDbContext();
+        var p = await verify.SessionPackages.FindAsync(1);
+        p!.UsedSessions.Should().Be(0);
+    }
+
     private static SessionPackageService MakeService(
         Microsoft.EntityFrameworkCore.IDbContextFactory<Infrastructure.Data.ApplicationDbContext> factory)
     {
