@@ -15,12 +15,16 @@ public class SessionService(
     IEmailTemplateService emailTemplateService,
     INotificationPreferencesService notificationPrefs,
     IGoogleMeetService googleMeetService,
+    IAppClock clock,
     ILogger<SessionService> logger) : ISessionService
 {
     public async Task<List<SessionDto>> GetSessionsAsync(DateTime from, DateTime to, string? trainerUserId = null, int? clientId = null)
     {
-        from = DateTime.SpecifyKind(from, DateTimeKind.Utc);
-        to   = DateTime.SpecifyKind(to,   DateTimeKind.Utc);
+        // StartTime jest zegarem ściennym (kolumna timestamp without time zone),
+        // więc granice zakresu też muszą nim być. Normalizacja Kind, nie konwersja —
+        // wartość godziny pozostaje nietknięta.
+        from = DateTime.SpecifyKind(from, DateTimeKind.Unspecified);
+        to   = DateTime.SpecifyKind(to,   DateTimeKind.Unspecified);
         await using var db = dbFactory.CreateDbContext();
         var query = db.Sessions
             .AsNoTracking()
@@ -54,7 +58,9 @@ public class SessionService(
     public async Task<List<SessionDto>> GetPastSessionsAsync(string? trainerUserId = null, int? clientId = null, int count = 50)
     {
         await using var db = dbFactory.CreateDbContext();
-        var now = DateTime.UtcNow;
+        // Zegar ścienny — StartTime nim jest. UtcNow dawałoby granicę przesuniętą
+        // o offset strefy, więc sesja sprzed godziny mogła jeszcze uchodzić za przyszłą.
+        var now = clock.LocalNow;
         var query = db.Sessions
             .AsNoTracking()
             .Include(s => s.Client)
@@ -101,7 +107,10 @@ public class SessionService(
 
     public async Task<SessionDto> CreateSessionAsync(CreateSessionDto dto, bool allowAwaitingPackage = true)
     {
-        dto.StartTime = DateTime.SpecifyKind(dto.StartTime, DateTimeKind.Utc);
+        // Godzina przychodzi z <input type="datetime-local"> jako zegar ścienny.
+        // Zapisujemy ją bez konwersji — 14:00 wpisane przez trenera to 14:00
+        // w studiu, niezależnie od strefy kontenera.
+        dto.StartTime = DateTime.SpecifyKind(dto.StartTime, DateTimeKind.Unspecified);
         await using var db = dbFactory.CreateDbContext();
         var sessionType = await db.SessionTypes.FindAsync(dto.SessionTypeId)
             ?? throw new InvalidOperationException("Typ sesji nie istnieje.");
@@ -213,7 +222,7 @@ public class SessionService(
 
     public async Task RescheduleAsync(int id, DateTime newStartTime)
     {
-        newStartTime = DateTime.SpecifyKind(newStartTime, DateTimeKind.Utc);
+        newStartTime = DateTime.SpecifyKind(newStartTime, DateTimeKind.Unspecified);
         await using var db = dbFactory.CreateDbContext();
         var session = await db.Sessions
             .Include(s => s.Client)
@@ -365,7 +374,7 @@ public class SessionService(
     public async Task<List<SessionDto>> GetUpcomingAsync(string? trainerUserId = null, int? clientId = null, int count = 10)
     {
         await using var db = dbFactory.CreateDbContext();
-        var now = DateTime.UtcNow;
+        var now = clock.LocalNow;   // zegar ścienny — porównywany ze StartTime
         var query = db.Sessions
             .AsNoTracking()
             .Include(s => s.Client)
@@ -393,7 +402,7 @@ public class SessionService(
     public async Task<List<SessionDto>> GetAwaitingPackageAsync(string? trainerUserId = null)
     {
         await using var db = dbFactory.CreateDbContext();
-        var now = DateTime.UtcNow;
+        var now = clock.LocalNow;   // zegar ścienny — porównywany ze StartTime
         var query = db.Sessions
             .AsNoTracking()
             .Include(s => s.Client)

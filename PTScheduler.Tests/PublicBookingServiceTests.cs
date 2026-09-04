@@ -166,11 +166,13 @@ public class PublicBookingServiceTests
         Microsoft.EntityFrameworkCore.IDbContextFactory<ApplicationDbContext> factory,
         Mock<Microsoft.AspNetCore.Identity.UserManager<ApplicationUser>>? userManager = null,
         Mock<ITrainerAvailabilityService>? availabilityService = null,
-        Mock<IEmailService>? emailService = null)
+        Mock<IEmailService>? emailService = null,
+        IAppClock? clock = null)
     {
         userManager ??= MockUserManagerHelper.Create();
         availabilityService ??= new Mock<ITrainerAvailabilityService>();
         emailService ??= new Mock<IEmailService>();
+        clock ??= TestClock.AtWallClock(DateTime.Now);
         var emailTemplateService = new Mock<IEmailTemplateService>();
         return new PublicBookingService(
             factory,
@@ -178,6 +180,7 @@ public class PublicBookingServiceTests
             availabilityService.Object,
             emailService.Object,
             emailTemplateService.Object,
+            clock,
             NullLogger<PublicBookingService>.Instance);
     }
 }

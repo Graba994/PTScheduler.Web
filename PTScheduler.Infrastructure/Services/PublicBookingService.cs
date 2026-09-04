@@ -9,6 +9,7 @@ using PTScheduler.Application.Interfaces;
 using PTScheduler.Domain.Constants;
 using PTScheduler.Domain.Entities;
 using PTScheduler.Domain.Enums;
+using PTScheduler.Domain.Rules;
 using PTScheduler.Infrastructure.Data;
 
 namespace PTScheduler.Infrastructure.Services;
@@ -19,6 +20,7 @@ public class PublicBookingService(
     ITrainerAvailabilityService availabilityService,
     IEmailService emailService,
     IEmailTemplateService emailTemplateService,
+    IAppClock clock,
     ILogger<PublicBookingService> logger) : IPublicBookingService
 {
     private const string IntroSessionTypeName = "Sesja wstępna";
@@ -64,6 +66,7 @@ public class PublicBookingService(
             Price = cfg.Price,
             PromoPrice = cfg.PromoPrice,
             PromoValidUntil = cfg.PromoValidUntil,
+            HasActivePromo = PromoRules.IsActive(cfg.PromoPrice, cfg.PromoValidUntil, clock.Today),
             Description = cfg.Description
         };
     }
@@ -71,7 +74,7 @@ public class PublicBookingService(
     public async Task<List<BookingDayDto>> GetUpcomingSlotsAsync(string trainerUserId, int durationMinutes, int daysAhead = 14)
     {
         var result = new List<BookingDayDto>();
-        var today = DateOnly.FromDateTime(DateTime.Today);
+        var today = clock.Today;
 
         for (var i = 1; i <= daysAhead; i++)
         {
@@ -101,7 +104,10 @@ public class PublicBookingService(
             return Fail("Podaj prawidłowy adres email.");
         if (string.IsNullOrWhiteSpace(dto.TrainerUserId))
             return Fail("Brak trenera dla rezerwacji.");
-        if (dto.SlotStart < DateTime.Now.AddMinutes(15))
+        // SlotStart to zegar ścienny, więc porównanie musi iść przez zegar
+        // aplikacji. DateTime.Now dałoby czas maszyny — w kontenerze UTC,
+        // co przesuwało próg o offset strefy.
+        if (dto.SlotStart < clock.LocalNow.AddMinutes(15))
             return Fail("Wybrany termin minął lub jest zbyt blisko teraźniejszości.");
 
         await using var db = dbFactory.CreateDbContext();

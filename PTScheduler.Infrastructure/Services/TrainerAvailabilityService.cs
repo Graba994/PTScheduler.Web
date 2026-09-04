@@ -146,7 +146,8 @@ public class TrainerAvailabilityService(IDbContextFactory<ApplicationDbContext> 
 
     public async Task<bool> IsSlotFreeAsync(string trainerUserId, DateTime start, int durationMinutes)
     {
-        start = DateTime.SpecifyKind(start, DateTimeKind.Utc);
+        // Zegar ścienny — porównujemy z Session.StartTime, które też nim jest.
+        start = DateTime.SpecifyKind(start, DateTimeKind.Unspecified);
         await using var db = dbFactory.CreateDbContext();
         var cfg = await GetConfigAsync(db, trainerUserId);
         var slotEnd = start.AddMinutes(durationMinutes);

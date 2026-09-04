@@ -31,6 +31,11 @@ public static class DependencyInjection
         services.AddScoped<IDatabaseSettingsService>(sp =>
             new DatabaseSettingsService(sp.GetRequiredService<IConfiguration>(), settingsFilePath));
 
+        // Jedyne źródło czasu. Singleton — strefa jest rozwiązywana raz i nie
+        // zmienia się w trakcie życia instancji. Zob. IAppClock po opis
+        // konwencji instant / zegar ścienny.
+        services.AddSingleton<IAppClock, AppClock>();
+
         services.AddScoped<IBrandingService, BrandingService>();
         services.AddScoped<ISiteContentService, SiteContentService>();
         services.AddScoped<IModuleSettingsService, ModuleSettingsService>();

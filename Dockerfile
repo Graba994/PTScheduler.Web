@@ -22,6 +22,20 @@ RUN dotnet publish PTScheduler.Web/PTScheduler.Web.csproj \
 FROM mcr.microsoft.com/dotnet/aspnet:10.0 AS runtime
 WORKDIR /app
 
+# tzdata jest wymagane przez TimeZoneInfo.FindSystemTimeZoneById("Europe/Warsaw"),
+# którego używa IAppClock do wyznaczania zegara ściennego studia.
+# Bez tej bazy aplikacja wstanie, ale spadnie na UTC i godziny przypomnień
+# będą przesunięte — z komunikatem Error w logu.
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends tzdata \
+ && rm -rf /var/lib/apt/lists/*
+
+# UWAGA: celowo NIE ustawiamy ENV TZ. Kontener ma zostać w UTC.
+# Część kolumn to nadal timestamptz odczytywany w trybie legacy Npgsql, który
+# konwertuje odczyt na strefę maszyny — ustawienie TZ przesunęłoby te wartości.
+# Strefę studia niesie APP_TIMEZONE i obsługuje wyłącznie IAppClock.
+ENV APP_TIMEZONE=Europe/Warsaw
+
 COPY --from=build /app/publish .
 
 # HTTP only inside container — terminate TLS at reverse proxy (Nginx/Traefik)

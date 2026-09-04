@@ -298,7 +298,8 @@ public class SessionServiceTests
     }
 
     private static SessionService MakeService(
-        Microsoft.EntityFrameworkCore.IDbContextFactory<Infrastructure.Data.ApplicationDbContext> factory)
+        Microsoft.EntityFrameworkCore.IDbContextFactory<Infrastructure.Data.ApplicationDbContext> factory,
+        PTScheduler.Application.Interfaces.IAppClock? clock = null)
     {
         return new SessionService(
             factory,
@@ -306,6 +307,7 @@ public class SessionServiceTests
             new Mock<IEmailTemplateService>().Object,
             new Mock<INotificationPreferencesService>().Object,
             new Mock<IGoogleMeetService>().Object,
+            clock ?? Helpers.TestClock.AtWallClock(DateTime.Now),
             NullLogger<SessionService>.Instance);
     }
 }

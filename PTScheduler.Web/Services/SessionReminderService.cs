@@ -51,8 +51,13 @@ public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<S
 
         // 23-25h window with 1h cycle gives every session at least one chance to be picked up.
         // Persistent dedup via ReminderSentAt prevents double-sends if cycles overlap.
-        var windowStart = DateTime.Now.AddHours(23);
-        var windowEnd   = DateTime.Now.AddHours(25);
+        //
+        // Okno liczymy zegarem ściennym, bo StartTime jest zegarem ściennym.
+        // DateTime.Now dawałoby czas maszyny (w kontenerze: UTC), przez co okno
+        // przesuwało się o offset strefy i przypomnienia szły o złej porze.
+        var clock = scope.ServiceProvider.GetRequiredService<IAppClock>();
+        var windowStart = clock.LocalNow.AddHours(23);
+        var windowEnd   = clock.LocalNow.AddHours(25);
 
         var sessions = await db.Sessions
             .Include(s => s.Client)

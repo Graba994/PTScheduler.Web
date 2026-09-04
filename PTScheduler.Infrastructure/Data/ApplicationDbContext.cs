@@ -168,6 +168,14 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             .HasForeignKey(p => p.SessionTypeId)
             .OnDelete(DeleteBehavior.Restrict);
 
+        // StartTime jest zegarem ściennym, nie instantem: sesja o 14:00 odbywa się
+        // o 14:00 w studiu, niezależnie od strefy kontenera. Kolumna bez strefy
+        // wymusza to na poziomie bazy i uniezależnia godziny od ustawienia TZ.
+        // Zob. IAppClock po opis konwencji.
+        builder.Entity<Session>()
+            .Property(s => s.StartTime)
+            .HasColumnType("timestamp without time zone");
+
         builder.Entity<Session>()
             .HasOne(s => s.Package)
             .WithMany(p => p.Sessions)

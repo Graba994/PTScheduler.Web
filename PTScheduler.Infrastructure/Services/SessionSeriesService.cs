@@ -9,7 +9,8 @@ namespace PTScheduler.Infrastructure.Services;
 
 public class SessionSeriesService(
     IDbContextFactory<ApplicationDbContext> dbFactory,
-    ITrainerAvailabilityService availabilityService) : ISessionSeriesService
+    ITrainerAvailabilityService availabilityService,
+    IAppClock clock) : ISessionSeriesService
 {
     public async Task<SeriesPreviewDto> PreviewAsync(CreateSessionSeriesDto dto)
     {
@@ -157,7 +158,7 @@ public class SessionSeriesService(
 
         if (cancelFutureSessions)
         {
-            var now = DateTime.UtcNow;
+            var now = clock.LocalNow;   // zegar ścienny — porównywany ze StartTime
             var futureSessions = await db.Sessions
                 .Where(s => s.SeriesId == seriesId
                             && s.StartTime >= now
@@ -220,7 +221,7 @@ public class SessionSeriesService(
     {
         if (seriesList.Count == 0) return [];
 
-        var now = DateTime.UtcNow;
+        var now = clock.LocalNow;   // zegar ścienny — porównywany ze StartTime
         var seriesIds = seriesList.Select(s => s.Id).ToList();
         var clientIds = seriesList.Select(s => s.ClientId).Distinct().ToList();
 

@@ -13,10 +13,29 @@ using PTScheduler.Web.Components;
 using PTScheduler.Web.Components.Account;
 using PTScheduler.Web.Services;
 
-// Npgsql 6+ requires DateTime parameters for timestamptz columns to be Kind=Utc by default.
-// This app stores LOCAL time (DateTime.Now is the convention; CreatedAt/StartTime/etc).
-// The legacy switch lets Npgsql accept any DateTime kind, treating Unspecified/Local as local time.
-// Must be set BEFORE the data source is built, hence the very top of Program.cs.
+// ─── Konwencja czasu ─────────────────────────────────────────────────────────
+// Pełny opis: PTScheduler.Application/Interfaces/IAppClock.cs
+//
+// W aplikacji współistnieją dwie kategorie czasu i NIE WOLNO ich porównywać:
+//
+//   1. INSTANT — moment w czasie. Znaczniki: CreatedAt, PaidAt, Timestamp
+//      w audycie. Kolumna timestamptz, Kind=Utc, źródło: IAppClock.UtcNow.
+//
+//   2. ZEGAR ŚCIENNY — godzina widziana przez człowieka. Session.StartTime,
+//      terminy ważności. Kind=Unspecified, źródło: IAppClock.LocalNow.
+//      Session.StartTime ma już kolumnę timestamp without time zone.
+//
+// Nigdy nie używaj DateTime.Now w warstwach Infrastructure/Application —
+// zwraca czas maszyny, który w kontenerze jest UTC i nie ma związku ze
+// strefą studia. Właściwe jest wstrzyknięcie IAppClock.
+//
+// Przełącznik poniżej jest ŚWIADOMYM DŁUGIEM. Pozostałe pola zegara ściennego
+// (Coupon.ValidFrom/ValidUntil, IntroSessionConfig.PromoValidUntil,
+// SessionPackage.ExpiresAt, CourseEnrollment.StartsAt/ExpiresAt) nadal mają
+// kolumny timestamptz, a przychodzą z date-pickerów jako Kind=Unspecified.
+// Bez tego przełącznika Npgsql odrzuciłby ich zapis.
+// Usunąć dopiero po przeniesieniu ich na timestamp without time zone.
+// Musi być ustawiony PRZED zbudowaniem data source — stąd sam początek pliku.
 AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 
 var builder = WebApplication.CreateBuilder(args);

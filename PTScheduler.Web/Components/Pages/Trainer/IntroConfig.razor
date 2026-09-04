@@ -4,8 +4,10 @@
 @using Microsoft.AspNetCore.Components.Authorization
 @using Microsoft.AspNetCore.Authorization
 @using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Rules
 @attribute [Authorize(Roles = "Admin,Trainer")]
 @inject IIntroSessionService IntroService
+@inject IAppClock Clock
 @inject AuthenticationStateProvider AuthStateProvider
 @rendermode PTScheduler.Web.RenderModes.Server
 
@@ -171,7 +173,7 @@
                                 {
                                     <span class="text-success">Bezpłatnie</span>
                                 }
-                                else if (dto.PromoPrice.HasValue && dto.PromoPrice > 0 && dto.PromoValidUntil.HasValue && dto.PromoValidUntil > DateTime.Today)
+                                else if (dto.PromoPrice > 0 && PromoRules.IsActive(dto.PromoPrice, dto.PromoValidUntil, Clock.Today))
                                 {
                                     <span>
                                         <span class="text-decoration-line-through text-muted me-1">@dto.Price.ToString("0.00") zł</span>
@@ -188,9 +190,9 @@
                         {
                             <li class="list-group-item d-flex justify-content-between align-items-center px-0">
                                 <span><i class="bi bi-calendar-check me-2 text-muted"></i>Promocja do</span>
-                                <span class="fw-semibold @(dto.PromoValidUntil > DateTime.Today ? "text-success" : "text-danger")">
+                                <span class="fw-semibold @(PromoRules.IsActive(dto.PromoPrice, dto.PromoValidUntil, Clock.Today) ? "text-success" : "text-danger")">
                                     @dto.PromoValidUntil.Value.ToString("dd.MM.yyyy")
-                                    @if (dto.PromoValidUntil <= DateTime.Today)
+                                    @if (!PromoRules.IsActive(dto.PromoPrice, dto.PromoValidUntil, Clock.Today))
                                     {
                                         <span class="badge bg-danger ms-1">wygasła</span>
                                     }
