@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
+using Moq;
 using PTScheduler.Infrastructure.Services;
 using Xunit;
 
@@ -16,11 +17,12 @@ public class AppClockTests
 {
     private static AppClock Create(string? timeZoneId = null)
     {
-        var settings = new Dictionary<string, string?>();
-        if (timeZoneId is not null) settings["APP_TIMEZONE"] = timeZoneId;
-
-        var config = new ConfigurationBuilder().AddInMemoryCollection(settings).Build();
-        return new AppClock(config, NullLogger<AppClock>.Instance);
+        // Mock zamiast ConfigurationBuilder.AddInMemoryCollection — provider
+        // in-memory jest w osobnym pakiecie, którego projekt testowy nie
+        // referuje. IConfiguration jest dostępne tranzytywnie.
+        var config = new Mock<IConfiguration>();
+        config.Setup(c => c["APP_TIMEZONE"]).Returns(timeZoneId);
+        return new AppClock(config.Object, NullLogger<AppClock>.Instance);
     }
 
     [Fact]

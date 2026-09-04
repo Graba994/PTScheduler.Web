@@ -96,6 +96,7 @@ public class ClientReportService(
             Measurements: measurements,
             PreviousMeasurement: prevMeasurement,
             Notes: notes,
+            GeneratedAt: clock.LocalNow,   // zegar ścienny; statyczne Footer() nie ma dostępu do clock
             Theme: ThemePalette.For(branding.ThemeName)
         );
 
@@ -120,6 +121,7 @@ public class ClientReportService(
         List<BodyMeasurement> Measurements,
         BodyMeasurement? PreviousMeasurement,
         List<TrainerNote> Notes,
+        DateTime GeneratedAt,
         ThemePalette Theme);
 
     /// <summary>
@@ -441,7 +443,7 @@ public class ClientReportService(
             row.RelativeItem().Text(t =>
             {
                 t.Span("Wygenerowano: ").FontSize(8.5f).FontColor(Colors.Grey.Darken1);
-                t.Span(Capitalize(clock.LocalNow.ToString("d MMMM yyyy 'o' HH:mm", Pl)))
+                t.Span(Capitalize(d.GeneratedAt.ToString("d MMMM yyyy 'o' HH:mm", Pl)))
                     .FontSize(8.5f).SemiBold().FontColor(Colors.Grey.Darken3);
                 t.Span("   ·   ").FontSize(8.5f).FontColor(Colors.Grey.Lighten1);
                 t.Span(d.CompanyName).FontSize(8.5f).FontColor(Colors.Grey.Darken1);
