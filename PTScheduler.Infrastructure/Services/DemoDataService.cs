@@ -1371,6 +1371,15 @@ public class DemoDataService(
         await db.NotificationPreferences.ExecuteDeleteAsync();
         await db.RolePermissions.ExecuteDeleteAsync();
 
+        // Payments / commerce — MUSI iść przed Courses: Order ma FK do Courses
+        // (a także PackageOffers i Coupons), więc Orders trzeba skasować pierwsze,
+        // inaczej DELETE na Courses narusza FK_Orders_Courses_CourseId (23503).
+        // CouponRedemption ma FK do Coupon, więc idzie przed Coupons.
+        await db.CouponRedemptions.ExecuteDeleteAsync();
+        await db.Orders.ExecuteDeleteAsync();
+        await db.Coupons.ExecuteDeleteAsync();
+        await db.PackageOffers.ExecuteDeleteAsync();
+
         // Courses / LMS
         await db.QuizAttempts.ExecuteDeleteAsync();
         await db.LessonProgress.ExecuteDeleteAsync();
@@ -1380,12 +1389,6 @@ public class DemoDataService(
         await db.CourseModules.ExecuteDeleteAsync();
         await db.CourseEnrollments.ExecuteDeleteAsync();
         await db.Courses.ExecuteDeleteAsync();
-
-        // Payments / commerce
-        await db.CouponRedemptions.ExecuteDeleteAsync();
-        await db.Orders.ExecuteDeleteAsync();
-        await db.Coupons.ExecuteDeleteAsync();
-        await db.PackageOffers.ExecuteDeleteAsync();
 
         // Settings (reset to unconfigured)
         await db.EmailTemplates.ExecuteDeleteAsync();
