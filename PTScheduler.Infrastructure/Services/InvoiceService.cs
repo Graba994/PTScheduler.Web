@@ -3,6 +3,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using PTScheduler.Application.Interfaces;
 using PTScheduler.Domain.Entities;
+using PTScheduler.Domain.Rules;
 using PTScheduler.Infrastructure.Data;
 using QuestPDF.Fluent;
 using QuestPDF.Helpers;
@@ -71,8 +72,7 @@ public class InvoiceService(
 
         var vatEnabled = taxCfg.VatEnabled;
         var vatRate = taxCfg.VatRate;
-        var netAmount = vatEnabled && vatRate > 0 ? order.Amount / (1 + vatRate / 100) : order.Amount;
-        var vatAmount = order.Amount - netAmount;
+        var (netAmount, vatAmount) = FinanceMath.SplitVatInclusive(order.Amount, vatEnabled, vatRate);
 
         var doc = Document.Create(container =>
         {
