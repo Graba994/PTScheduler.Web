@@ -361,6 +361,17 @@ public class DemoDataService(
                 packageId: pkgEwa1.Id));
         }
 
+        // ── KOTWICA TESTOWA (P0) ─────────────────────────────────────────────
+        // Sesja jutro o 14:00 dla Alicji (Stretching, na jej aktywnym pakiecie 1/4).
+        // Służy do ręcznej weryfikacji napraw:
+        //  • T1 strefy czasowe — musi pokazywać dokładnie 14:00 (nie 12:00/16:00)
+        //  • T2 kolizje — spróbuj dodać innego klienta jutro na 14:15 → blokada +
+        //    „Nałóż mimo to"; na 14:30 (styk koniec-w-koniec, 30 min) → dozwolone
+        //  • T3 kredyty — book/anuluj sesję Alicji i patrz na licznik pakietu (x/4)
+        sessions.Add(MakeSession(cAlicja.Id, trainer.Id, stStretch.Id,
+            AtUtc(today, 1, 14), SessionStatus.Scheduled, packageId: pkgAlicja1.Id,
+            notes: "KOTWICA TESTOWA: strefa (ma być 14:00) + kolizja (dodaj komuś 14:15)."));
+
         db.Sessions.AddRange(sessions);
         await db.SaveChangesAsync();
 
