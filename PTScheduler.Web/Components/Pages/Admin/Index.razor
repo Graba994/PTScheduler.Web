@@ -118,6 +118,10 @@ else
                                 <div class="adm-sys-value"><span class="badge bg-body-secondary text-body">@_dotnetVersion</span></div>
                             </div>
                             <div class="adm-sys-item">
+                                <div class="adm-sys-label">Wersja aplikacji</div>
+                                <div class="adm-sys-value"><span class="badge bg-body-secondary text-body font-monospace">@_appVersion</span></div>
+                            </div>
+                            <div class="adm-sys-item">
                                 <div class="adm-sys-label">Płatności online</div>
                                 <div class="adm-sys-value">
                                     @if (_paymentsEnabled)
@@ -370,6 +374,7 @@ else
     private int _migrationCount;
     private string _environment = "";
     private string _dotnetVersion = "";
+    private string _appVersion = "";
     private bool _paymentsEnabled;
     private int _enabledGateways;
     private bool _coursesEnabled;
@@ -390,6 +395,22 @@ else
 
         _dotnetVersion = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription;
         _environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production";
+
+        // Wersja obrazu — z BUILD_COMMIT/BUILD_TIME wstrzykniętych przy budowie
+        // (Dockerfile ENV). Pozwala potwierdzić, że wgrany jest właściwy build.
+        var commit = Environment.GetEnvironmentVariable("BUILD_COMMIT");
+        var buildTime = Environment.GetEnvironmentVariable("BUILD_TIME");
+        if (!string.IsNullOrWhiteSpace(commit) && commit != "unknown")
+        {
+            var shortSha = commit.Length >= 7 ? commit[..7] : commit;
+            _appVersion = string.IsNullOrWhiteSpace(buildTime) || buildTime == "unknown"
+                ? shortSha
+                : $"{shortSha} · {buildTime}";
+        }
+        else
+        {
+            _appVersion = "nieznana (zbudowano bez wersji)";
+        }
 
         await LoadDataAsync();
         _loading = false;

@@ -368,8 +368,15 @@ public class UpdateService(
                 await RunAsync("docker", $"tag {TenantImage} {TenantImage.Replace(":latest", ":previous")}", RepoDir);
 
                 log.Add("→ Building tenant image: ptscheduler-web:latest");
+                // Wstrzykujemy wersję do obrazu (commit/czas/branch), żeby apka
+                // trenera mogła ją pokazać w panelu admina i dało się potwierdzić,
+                // że wgrany jest właściwy build. Dockerfile: ARG BUILD_COMMIT itd.
+                var (headOk, headSha) = await RunAsync("git", "rev-parse HEAD", RepoDir);
+                var buildCommit = headOk ? headSha.Trim() : "unknown";
+                var buildTime = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
                 var (buildOk, buildOut) = await RunAsync("docker",
-                    $"build -t {TenantImage} .", RepoDir, timeoutMinutes: 20);
+                    $"build --build-arg BUILD_COMMIT={buildCommit} --build-arg BUILD_TIME={buildTime} " +
+                    $"--build-arg BUILD_BRANCH={branch} -t {TenantImage} .", RepoDir, timeoutMinutes: 20);
                 log.Add(buildOut);
                 if (!buildOk)
                 {

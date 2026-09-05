@@ -42,6 +42,16 @@ COPY --from=build /app/publish .
 ENV ASPNETCORE_URLS=http://+:8080
 ENV ASPNETCORE_ENVIRONMENT=Production
 
+# Wersja obrazu — przekazywana przez portal/Guardian jako --build-arg przy budowie.
+# Dzięki temu apka zna commit/czas builda i pokazuje je w panelu admina.
+# Domyślnie "unknown", gdy zbudowano bez argumentów.
+ARG BUILD_COMMIT=unknown
+ARG BUILD_TIME=unknown
+ARG BUILD_BRANCH=unknown
+ENV BUILD_COMMIT=$BUILD_COMMIT
+ENV BUILD_TIME=$BUILD_TIME
+ENV BUILD_BRANCH=$BUILD_BRANCH
+
 EXPOSE 8080
 
 VOLUME /app/wwwroot/branding
