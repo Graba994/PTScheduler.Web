@@ -176,6 +176,15 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             .Property(s => s.StartTime)
             .HasColumnType("timestamp without time zone");
 
+        // StartTime to główny filtr zakresowy najgorętszych zapytań (kalendarz,
+        // statystyki, przypomnienia), a tabela nie miała na nim żadnego indeksu.
+        // (TrainerUserId, StartTime) pokrywa kalendarz trenera po dacie;
+        // (StartTime) pokrywa zapytania globalne bez filtra trenera.
+        builder.Entity<Session>()
+            .HasIndex(s => new { s.TrainerUserId, s.StartTime });
+        builder.Entity<Session>()
+            .HasIndex(s => s.StartTime);
+
         // Optymistyczna współbieżność na liczniku kredytów pakietu. UsedSessions
         // jest inkrementowane/dekrementowane z wielu ścieżek (booking, seria,
         // anulowanie, płatność); bez tokena dwa równoległe zapisy gubiły jeden
