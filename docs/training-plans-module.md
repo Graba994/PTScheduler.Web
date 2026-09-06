@@ -4,8 +4,9 @@
 > Służy jako źródło prawdy przy implementacji — kolejne sesje mają go wczytać
 > i kontynuować, zamiast odtwarzać decyzje od zera.
 >
-> **Status:** zaprojektowane, nie zaimplementowane. Decyzje poniżej są ustalone
-> z właścicielem (Patryk), chyba że oznaczono jako „otwarte".
+> **Status:** Faza 1 (fundament danych) zaimplementowana — patrz sekcja 7.
+> Pozostałe fazy zaprojektowane, nie zaimplementowane. Decyzje poniżej są
+> ustalone z właścicielem (Patryk), chyba że oznaczono jako „otwarte".
 
 ## 1. Cel i pozycjonowanie
 
@@ -119,8 +120,15 @@ To realny wyróżnik vs konkurencja. Do rozważenia w fazie 2/3, nie musi być w
 
 ## 7. Fazy implementacji
 
-1. **Fundament danych**: encje + migracje (Exercise, TrainerExercisePref, TrainingPlan/Day/Exercise,
-   WorkoutLog/SetLog) + seed Free Exercise DB (import JSON + tłumaczenia PL).
+1. **Fundament danych** ✅ (zrobione): encje (Exercise, TrainerExercisePref,
+   TrainingPlan/Day/Exercise, WorkoutLog/SetLog) + enumy (ExerciseVisibility,
+   ExerciseVideoType, ExerciseCategory, ExerciseLevel, MuscleGroup) + konfiguracja
+   EF i migracja `20260906120000_AddTrainingModule` + reguły domenowe
+   `Domain.Rules.Muscles` (parsowanie partii z CSV Free Exercise DB) i
+   `Domain.Rules.VolumeCalculator` (objętość serii/wykonania i „per partia")
+   z testami. **Do zrobienia w tej fazie osobno:** właściwy import ~870 ćwiczeń
+   z Free Exercise DB (JSON) + tłumaczenia PL jako seed — model i klucz dedup
+   (`Exercise.SourceKey`) już na to gotowe.
 2. **Katalog ćwiczeń**: przeglądanie, wyszukiwanie, filtr moje/publiczne, ulubione,
    ostatnio używane, flaga 🇬🇧 dla EN. Dodawanie własnego ćwiczenia (zdjęcie/YT/Bunny).
 3. **Kreator planu**: plan → dni → ćwiczenia (serie/powt./ciężar/tempo/przerwa),

@@ -45,6 +45,15 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<Coupon> Coupons => Set<Coupon>();
     public DbSet<CouponRedemption> CouponRedemptions => Set<CouponRedemption>();
 
+    // Moduł treningowy (kreator planów)
+    public DbSet<Exercise> Exercises => Set<Exercise>();
+    public DbSet<TrainerExercisePref> TrainerExercisePrefs => Set<TrainerExercisePref>();
+    public DbSet<TrainingPlan> TrainingPlans => Set<TrainingPlan>();
+    public DbSet<PlanDay> PlanDays => Set<PlanDay>();
+    public DbSet<PlanExercise> PlanExercises => Set<PlanExercise>();
+    public DbSet<WorkoutLog> WorkoutLogs => Set<WorkoutLog>();
+    public DbSet<WorkoutSetLog> WorkoutSetLogs => Set<WorkoutSetLog>();
+
     protected override void OnModelCreating(ModelBuilder builder)
     {
         base.OnModelCreating(builder);
@@ -284,5 +293,86 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             .Property(f => f.HealthInsuranceMonthly).HasPrecision(10, 2);
         builder.Entity<FinanceTaxConfig>()
             .Property(f => f.MonthlyFixedCosts).HasPrecision(10, 2);
+
+        // ---- Moduł treningowy (kreator planów) ----
+
+        builder.Entity<Exercise>(e =>
+        {
+            // Dedup przy (ponownym) seedzie Free Exercise DB. SourceKey null dla
+            // ćwiczeń własnych trenera; w Postgresie wiele NULL-i nie łamie unikatu.
+            e.HasIndex(x => x.SourceKey).IsUnique();
+            // Katalog filtruje po właścicielu (moje/publiczne) i widoczności.
+            e.HasIndex(x => x.OwnerTrainerUserId);
+            e.HasIndex(x => new { x.Visibility, x.Category });
+        });
+
+        builder.Entity<TrainerExercisePref>(e =>
+        {
+            e.HasOne(p => p.Exercise)
+             .WithMany()
+             .HasForeignKey(p => p.ExerciseId)
+             .OnDelete(DeleteBehavior.Cascade);
+            // Jeden wiersz preferencji na parę (trener, ćwiczenie).
+            e.HasIndex(p => new { p.TrainerUserId, p.ExerciseId }).IsUnique();
+        });
+
+        builder.Entity<TrainingPlan>(e =>
+        {
+            e.HasOne(p => p.Client)
+             .WithMany()
+             .HasForeignKey(p => p.ClientId)
+             .OnDelete(DeleteBehavior.SetNull);
+            e.HasIndex(p => p.TrainerUserId);
+        });
+
+        builder.Entity<PlanDay>(e =>
+        {
+            e.HasOne(d => d.Plan)
+             .WithMany(p => p.Days)
+             .HasForeignKey(d => d.PlanId)
+             .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<PlanExercise>(e =>
+        {
+            e.HasOne(pe => pe.PlanDay)
+             .WithMany(d => d.Exercises)
+             .HasForeignKey(pe => pe.PlanDayId)
+             .OnDelete(DeleteBehavior.Cascade);
+            // Nie kasuj pozycji planu przez usunięcie ćwiczenia — blokuj usunięcie
+            // ćwiczenia, które jest w użyciu.
+            e.HasOne(pe => pe.Exercise)
+             .WithMany()
+             .HasForeignKey(pe => pe.ExerciseId)
+             .OnDelete(DeleteBehavior.Restrict);
+            e.Property(pe => pe.TargetWeightKg).HasPrecision(6, 2);
+        });
+
+        builder.Entity<WorkoutLog>(e =>
+        {
+            e.HasOne(w => w.Client)
+             .WithMany()
+             .HasForeignKey(w => w.ClientId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(w => w.PlanExercise)
+             .WithMany()
+             .HasForeignKey(w => w.PlanExerciseId)
+             .OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(w => w.Exercise)
+             .WithMany()
+             .HasForeignKey(w => w.ExerciseId)
+             .OnDelete(DeleteBehavior.Restrict);
+            // Główne zapytania wykresów: po kliencie i dacie.
+            e.HasIndex(w => new { w.ClientId, w.WorkoutDate });
+        });
+
+        builder.Entity<WorkoutSetLog>(e =>
+        {
+            e.HasOne(s => s.WorkoutLog)
+             .WithMany(w => w.Sets)
+             .HasForeignKey(s => s.WorkoutLogId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.Property(s => s.WeightKg).HasPrecision(6, 2);
+        });
     }
 }
