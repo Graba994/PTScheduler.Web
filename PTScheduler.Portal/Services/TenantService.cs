@@ -163,8 +163,8 @@ public class TenantService(
 
         var webName = tenant.WebContainerName ?? $"pt-{tenant.Slug}-web";
         var dbName = tenant.DbContainerName ?? $"pt-{tenant.Slug}-db";
-        try { await docker.StopContainerAsync(webName); } catch { }
-        try { await docker.StopContainerAsync(dbName); } catch { }
+        try { await docker.StopContainerAsync(webName); } catch (Exception ex) { logger.LogWarning(ex, "Nie udało się zatrzymać {Container} przy zawieszaniu tenanta {Slug}.", webName, tenant.Slug); }
+        try { await docker.StopContainerAsync(dbName); } catch (Exception ex) { logger.LogWarning(ex, "Nie udało się zatrzymać {Container} przy zawieszaniu tenanta {Slug}.", dbName, tenant.Slug); }
 
         tenant.Status = TenantStatus.Suspended;
 
@@ -185,8 +185,8 @@ public class TenantService(
 
         var webName = tenant.WebContainerName ?? $"pt-{tenant.Slug}-web";
         var dbName = tenant.DbContainerName ?? $"pt-{tenant.Slug}-db";
-        try { await docker.StartContainerAsync(dbName); } catch { }
-        try { await docker.StartContainerAsync(webName); } catch { }
+        try { await docker.StartContainerAsync(dbName); } catch (Exception ex) { logger.LogWarning(ex, "Nie udało się uruchomić {Container} przy wznawianiu tenanta {Slug}.", dbName, tenant.Slug); }
+        try { await docker.StartContainerAsync(webName); } catch (Exception ex) { logger.LogWarning(ex, "Nie udało się uruchomić {Container} przy wznawianiu tenanta {Slug}.", webName, tenant.Slug); }
 
         tenant.Status = TenantStatus.Active;
 
@@ -209,14 +209,14 @@ public class TenantService(
         {
             var webName = tenant.WebContainerName ?? $"pt-{tenant.Slug}-web";
             var dbName = tenant.DbContainerName ?? $"pt-{tenant.Slug}-db";
-            try { await docker.StopContainerAsync(webName); } catch { }
-            try { await docker.StopContainerAsync(dbName); } catch { }
-            try { await docker.RemoveContainerAsync(webName); } catch { }
-            try { await docker.RemoveContainerAsync(dbName); } catch { }
+            try { await docker.StopContainerAsync(webName); } catch (Exception ex) { logger.LogWarning(ex, "Nie udało się zatrzymać {Container} przy usuwaniu tenanta {Slug}.", webName, tenant.Slug); }
+            try { await docker.StopContainerAsync(dbName); } catch (Exception ex) { logger.LogWarning(ex, "Nie udało się zatrzymać {Container} przy usuwaniu tenanta {Slug}.", dbName, tenant.Slug); }
+            try { await docker.RemoveContainerAsync(webName); } catch (Exception ex) { logger.LogWarning(ex, "Nie udało się usunąć {Container} przy usuwaniu tenanta {Slug}.", webName, tenant.Slug); }
+            try { await docker.RemoveContainerAsync(dbName); } catch (Exception ex) { logger.LogWarning(ex, "Nie udało się usunąć {Container} przy usuwaniu tenanta {Slug}.", dbName, tenant.Slug); }
             await docker.RemoveTenantResourcesAsync(tenant.Slug);
 
             if (!string.IsNullOrWhiteSpace(tenant.Domain))
-                try { await npm.DeleteProxyHostByDomainAsync(tenant.Domain); } catch { }
+                try { await npm.DeleteProxyHostByDomainAsync(tenant.Domain); } catch (Exception ex) { logger.LogWarning(ex, "Nie udało się usunąć wpisu proxy dla domeny {Domain} tenanta {Slug}.", tenant.Domain, tenant.Slug); }
         }
 
         db.TenantEvents.Add(new TenantEvent

@@ -6,10 +6,11 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using PTScheduler.Application.DTOs;
 using PTScheduler.Application.Interfaces;
+using Microsoft.Extensions.Logging;
 
 namespace PTScheduler.Infrastructure.Services;
 
-public class GoogleMeetService(IWebRootPathProvider webRoot, IHttpClientFactory httpFactory)
+public class GoogleMeetService(IWebRootPathProvider webRoot, IHttpClientFactory httpFactory, ILogger<GoogleMeetService> logger)
     : IGoogleMeetService
 {
     private static readonly JsonSerializerOptions JsonOpts =
@@ -44,7 +45,10 @@ public class GoogleMeetService(IWebRootPathProvider webRoot, IHttpClientFactory 
                 if (dto is not null) { _cached = dto; return dto; }
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Nie udało się wczytać ustawień Google Meet z {Path} — używam pustych.", FilePath);
+        }
         return new GoogleMeetSettingsDto();
     }
 
@@ -234,7 +238,10 @@ public class GoogleMeetService(IWebRootPathProvider webRoot, IHttpClientFactory 
                 if (dto is not null) { _cached = dto; return dto; }
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Nie udało się wczytać ustawień Google Meet z {Path} — używam pustych.", FilePath);
+        }
         return new GoogleMeetSettingsDto();
     }
 

@@ -32,7 +32,10 @@ public class BunnyService(IWebRootPathProvider webRoot, IHttpClientFactory httpF
                     return dto;
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Nie udało się wczytać ustawień Bunny z {Path} — próbuję ustawień platformy.", FilePath);
+        }
 
         var platform = await FetchPlatformBunnySettingsAsync();
         if (platform is not null)

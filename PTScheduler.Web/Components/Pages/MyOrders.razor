@@ -1,11 +1,13 @@
 @page "/my/orders"
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
+@using Microsoft.Extensions.Logging
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject IPaymentService PaymentService
 @inject IReceiptService ReceiptService
 @inject AuthenticationStateProvider AuthState
 @inject IJSRuntime JS
+@inject ILoggerFactory LoggerFactory
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Moje zamówienia" />
@@ -125,7 +127,11 @@ else
             var (bytes, fileName) = await ReceiptService.GenerateReceiptAsync(orderId);
             await JS.InvokeVoidAsync("PTExport.downloadCsv", fileName, bytes);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            LoggerFactory.CreateLogger("MyOrders").LogError(ex, "Nie udało się wygenerować paragonu dla zamówienia {OrderId}.", orderId);
+            await JS.InvokeVoidAsync("alert", "Nie udało się pobrać paragonu. Spróbuj ponownie za chwilę.");
+        }
         finally { _downloadingId = null; }
     }
 

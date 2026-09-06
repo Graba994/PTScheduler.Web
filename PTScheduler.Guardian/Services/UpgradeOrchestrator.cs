@@ -423,14 +423,14 @@ public sealed class UpgradeOrchestrator : IDisposable
             await _docker.Containers.StopContainerAsync(containerName,
                 new ContainerStopParameters { WaitBeforeKillSeconds = 10 });
         }
-        catch { }
+        catch (Exception ex) { _logger.LogDebug(ex, "Nie zatrzymano {Container} przed podmianą (może już nie działać).", containerName); }
 
         try
         {
             await _docker.Containers.RemoveContainerAsync(containerName,
                 new ContainerRemoveParameters { Force = true });
         }
-        catch { }
+        catch (Exception ex) { _logger.LogDebug(ex, "Nie usunięto {Container} przed podmianą (może nie istnieć).", containerName); }
 
         try
         {
@@ -542,7 +542,10 @@ public sealed class UpgradeOrchestrator : IDisposable
                     Container = newContainerId
                 });
             }
-            catch { }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex, "Nie udało się podłączyć nowego kontenera do sieci {Network} — komunikacja między kontenerami może nie działać.", netName);
+            }
         }
     }
 
@@ -559,7 +562,7 @@ public sealed class UpgradeOrchestrator : IDisposable
                 var resp = await _healthHttp.GetAsync($"http://localhost:{hostPort}/health");
                 if (resp.IsSuccessStatusCode) return true;
             }
-            catch { }
+            catch { /* kontener jeszcze wstaje — celowo cicho, pętla ponawia do deadline'u */ }
             await Task.Delay(3_000);
         }
         return false;
@@ -591,7 +594,7 @@ public sealed class UpgradeOrchestrator : IDisposable
 
         ContainerInspectResponse? inspect = null;
         try { inspect = await _docker.Containers.InspectContainerAsync(_portalContainer); }
-        catch { }
+        catch (Exception ex) { _logger.LogWarning(ex, "Nie udało się zinspekcjonować kontenera portalu {Container} — nowy kontener powstanie bez sklonowanej konfiguracji.", _portalContainer); }
 
         Log(job, "info", "Swapping", "Zatrzymuję aktualny kontener...");
         await SafeStopAndRemove(_portalContainer);
@@ -830,7 +833,7 @@ public sealed class UpgradeOrchestrator : IDisposable
                 var resp = await _healthHttp.GetAsync($"http://{container}:{port}/health");
                 if (resp.IsSuccessStatusCode) return true;
             }
-            catch { }
+            catch { /* kontener jeszcze wstaje — celowo cicho, pętla ponawia do deadline'u */ }
             await Task.Delay(3_000);
         }
         return false;
@@ -864,23 +867,23 @@ public sealed class UpgradeOrchestrator : IDisposable
 
     private async Task SafeStopAndRemove(string container)
     {
-        try { await _docker.Containers.StopContainerAsync(container, new ContainerStopParameters { WaitBeforeKillSeconds = 10 }); } catch { }
-        try { await _docker.Containers.RemoveContainerAsync(container, new ContainerRemoveParameters { Force = true }); } catch { }
+        try { await _docker.Containers.StopContainerAsync(container, new ContainerStopParameters { WaitBeforeKillSeconds = 10 }); } catch (Exception ex) { _logger.LogDebug(ex, "Nie zatrzymano {Container} (może już nie działać).", container); }
+        try { await _docker.Containers.RemoveContainerAsync(container, new ContainerRemoveParameters { Force = true }); } catch (Exception ex) { _logger.LogDebug(ex, "Nie usunięto {Container} (może nie istnieć).", container); }
     }
 
     private async Task SafeRemoveContainer(string container)
     {
-        try { await _docker.Containers.RemoveContainerAsync(container, new ContainerRemoveParameters { Force = true }); } catch { }
+        try { await _docker.Containers.RemoveContainerAsync(container, new ContainerRemoveParameters { Force = true }); } catch (Exception ex) { _logger.LogDebug(ex, "Nie usunięto {Container} (może nie istnieć).", container); }
     }
 
     private async Task SafeRemoveImage(string image)
     {
-        try { await _docker.Images.DeleteImageAsync(image, new ImageDeleteParameters()); } catch { }
+        try { await _docker.Images.DeleteImageAsync(image, new ImageDeleteParameters()); } catch (Exception ex) { _logger.LogDebug(ex, "Nie usunięto obrazu {Image} (może być używany lub nie istnieć).", image); }
     }
 
     private async Task SafeTagImage(string source, string repo, string tag)
     {
-        try { await _docker.Images.TagImageAsync(source, new ImageTagParameters { RepositoryName = repo, Tag = tag }); } catch { }
+        try { await _docker.Images.TagImageAsync(source, new ImageTagParameters { RepositoryName = repo, Tag = tag }); } catch (Exception ex) { _logger.LogWarning(ex, "Nie udało się otagować obrazu {Source} jako {Repo}:{Tag}.", source, repo, tag); }
     }
 
     private void Log(UpgradeJob job, string level, string stage, string message)

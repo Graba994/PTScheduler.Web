@@ -213,7 +213,7 @@ public class StripeService(
         // Come back to life if a past-due tenant has just been paid
         if (tenant.Status == TenantStatus.Suspended && sub.Status == "active")
         {
-            try { await tenants.ResumeAsync(tenant.Id); } catch { }
+            try { await tenants.ResumeAsync(tenant.Id); } catch (Exception ex) { logger.LogError(ex, "Płatność wznowiła tenanta {TenantId}, ale automatyczne wznowienie kontenerów się nie powiodło — wymaga ręcznej interwencji.", tenant.Id); }
         }
 
         await db.SaveChangesAsync();
@@ -236,7 +236,7 @@ public class StripeService(
 
         await db.SaveChangesAsync();
 
-        try { await tenants.SuspendAsync(tenant.Id); } catch { }
+        try { await tenants.SuspendAsync(tenant.Id); } catch (Exception ex) { logger.LogError(ex, "Subskrypcja tenanta {TenantId} anulowana, ale automatyczne zawieszenie kontenerów się nie powiodło — wymaga ręcznej interwencji.", tenant.Id); }
 
         var body = email.SuspensionEmailBody(tenant.OwnerName, "Subskrypcja została anulowana.");
         _ = email.SendAsync(tenant.OwnerEmail, "Twoje konto PTScheduler zostalo zawieszone", body);

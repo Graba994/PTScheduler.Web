@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using PTScheduler.Application.Interfaces;
 using PTScheduler.Domain.Entities;
 using PTScheduler.Domain.Rules;
@@ -16,7 +17,8 @@ public class InvoiceService(
     UserManager<ApplicationUser> userManager,
     IBrandingService brandingService,
     IFinanceService financeService,
-    IWebRootPathProvider webRootPathProvider) : IInvoiceService
+    IWebRootPathProvider webRootPathProvider,
+    ILogger<InvoiceService> logger) : IInvoiceService
 {
     private static readonly CultureInfo Pl = CultureInfo.GetCultureInfo("pl-PL");
 
@@ -63,7 +65,10 @@ public class InvoiceService(
                 if (File.Exists(abs)) logoBytes = await File.ReadAllBytesAsync(abs);
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Nie udało się wczytać logo ({LogoPath}) na fakturę zamówienia {OrderId} — generuję bez logo.", branding.LogoPath, order.Id);
+        }
 
         var companyName = branding.CompanyName ?? "PTScheduler";
         var itemName = order.Course?.Title ?? order.PackageOffer?.Name ?? order.Description ?? "Usługa";

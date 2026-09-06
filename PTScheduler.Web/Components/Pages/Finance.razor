@@ -2,6 +2,7 @@
 @rendermode PTScheduler.Web.RenderModes.Server
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.Extensions.Logging
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Finance
 @using PTScheduler.Application.Interfaces
@@ -16,6 +17,7 @@
 @inject IJSRuntime JS
 @inject AuthenticationStateProvider AuthState
 @inject EntitlementService Entitlements
+@inject ILoggerFactory LoggerFactory
 @attribute [Authorize(Roles = $"{Roles.Admin},{Roles.Trainer},{Roles.Subordinate}")]
 
 @if (!Entitlements.IsAllowed("FinancialReports"))
@@ -773,7 +775,11 @@ else
             var (bytes, fileName) = await ReceiptService.GenerateReceiptAsync(orderId);
             await JS.InvokeVoidAsync("PTExport.downloadCsv", fileName, bytes);
         }
-        catch { }
+        catch (Exception ex)
+        {
+            LoggerFactory.CreateLogger("Finance").LogError(ex, "Nie udało się wygenerować paragonu dla zamówienia {OrderId}.", orderId);
+            await JS.InvokeVoidAsync("alert", "Nie udało się pobrać paragonu. Spróbuj ponownie za chwilę.");
+        }
         finally { _downloadingReceiptId = null; }
     }
 
@@ -786,7 +792,11 @@ else
             await JS.InvokeVoidAsync("PTExport.downloadCsv", fileName, bytes);
             _taxConfig = await FinanceService.GetTaxConfigAsync("standard");
         }
-        catch { }
+        catch (Exception ex)
+        {
+            LoggerFactory.CreateLogger("Finance").LogError(ex, "Nie udało się wygenerować faktury dla zamówienia {OrderId}.", orderId);
+            await JS.InvokeVoidAsync("alert", "Nie udało się pobrać faktury. Spróbuj ponownie za chwilę.");
+        }
         finally { _downloadingInvoiceId = null; }
     }
 

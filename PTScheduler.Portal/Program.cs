@@ -378,7 +378,8 @@ app.MapPost("/api/store/{slug}/order", async (
     IConfiguration config,
     StorePaymentService storePayment,
     EmailService emailService,
-    SiteSettingsService siteSettings) =>
+    SiteSettingsService siteSettings,
+    ILoggerFactory loggerFactory) =>
 {
     var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
     if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
@@ -452,7 +453,10 @@ app.MapPost("/api/store/{slug}/order", async (
                 await emailService.SendAsync(adminEmail, $"Nowe zamówienie: {si?.Name ?? "usługa"} — {tenant.CompanyName ?? tenant.OwnerName}", html);
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            loggerFactory.CreateLogger("StoreOrders").LogError(ex, "Nie udało się wysłać powiadomienia e-mail o nowym zamówieniu tenanta {Slug}.", slug);
+        }
     });
 
     if (usePayment && !string.IsNullOrWhiteSpace(returnUrl))

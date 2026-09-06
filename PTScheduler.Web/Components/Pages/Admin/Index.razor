@@ -4,6 +4,7 @@
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
 @using Microsoft.EntityFrameworkCore
+@using Microsoft.Extensions.Logging
 @inject IDbContextFactory<PTScheduler.Infrastructure.Data.ApplicationDbContext> DbFactory
 @inject IAuditLogService AuditService
 @inject IUserManagementService UserService
@@ -11,6 +12,7 @@
 @inject IPaymentSettingsService PaymentSettings
 @inject IModuleSettingsService ModuleSettings
 @inject AuthenticationStateProvider AuthState
+@inject ILoggerFactory LoggerFactory
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Panel zarządzania" />
@@ -468,7 +470,7 @@ else
                         "SELECT COUNT(*)::int AS \"Value\" FROM information_schema.tables WHERE table_schema = 'public'")
                         .FirstOrDefaultAsync();
                 }
-                catch { }
+                catch (Exception ex) { LoggerFactory.CreateLogger("AdminDashboard").LogWarning(ex, "Nie udało się policzyć tabel bazy."); }
 
                 try
                 {
@@ -476,7 +478,7 @@ else
                         "SELECT COUNT(*)::int AS \"Value\" FROM \"__EFMigrationsHistory\"")
                         .FirstOrDefaultAsync();
                 }
-                catch { }
+                catch (Exception ex) { LoggerFactory.CreateLogger("AdminDashboard").LogWarning(ex, "Nie udało się policzyć zastosowanych migracji."); }
 
                 try
                 {
@@ -500,11 +502,13 @@ else
             _paymentsEnabled = ps.Enabled;
             _enabledGateways = ps.Providers.Count(p => p.Enabled);
         }
-        catch { }
+        catch (Exception ex) { LoggerFactory.CreateLogger("AdminDashboard").LogWarning(ex, "Nie udało się wczytać ustawień płatności na panel."); }
 
-        try { _coursesEnabled = (await ModuleSettings.GetAsync()).CoursesEnabled; } catch { }
+        try { _coursesEnabled = (await ModuleSettings.GetAsync()).CoursesEnabled; }
+        catch (Exception ex) { LoggerFactory.CreateLogger("AdminDashboard").LogWarning(ex, "Nie udało się wczytać ustawień modułów na panel."); }
 
-        try { _recentLogs = await AuditService.GetLogsAsync(count: 15); } catch { }
+        try { _recentLogs = await AuditService.GetLogsAsync(count: 15); }
+        catch (Exception ex) { LoggerFactory.CreateLogger("AdminDashboard").LogWarning(ex, "Nie udało się wczytać ostatnich logów audytu na panel."); }
     }
 
     private static string ActivityDotClass(string action)

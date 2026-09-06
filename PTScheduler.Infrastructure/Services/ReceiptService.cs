@@ -1,6 +1,7 @@
 using System.Globalization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
 using PTScheduler.Application.Interfaces;
 using PTScheduler.Domain.Entities;
 using PTScheduler.Infrastructure.Data;
@@ -14,7 +15,8 @@ public class ReceiptService(
     IDbContextFactory<ApplicationDbContext> dbFactory,
     UserManager<ApplicationUser> userManager,
     IBrandingService brandingService,
-    IWebRootPathProvider webRootPathProvider) : IReceiptService
+    IWebRootPathProvider webRootPathProvider,
+    ILogger<ReceiptService> logger) : IReceiptService
 {
     private static readonly CultureInfo Pl = CultureInfo.GetCultureInfo("pl-PL");
 
@@ -40,7 +42,10 @@ public class ReceiptService(
                 if (File.Exists(abs)) logoBytes = await File.ReadAllBytesAsync(abs);
             }
         }
-        catch { }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Nie udało się wczytać logo ({LogoPath}) na paragon zamówienia {OrderId} — generuję bez logo.", branding.LogoPath, order.Id);
+        }
 
         var companyName = branding.CompanyName ?? "PTScheduler";
         var itemName = order.Course?.Title ?? order.PackageOffer?.Name ?? order.Description ?? "Zamówienie";

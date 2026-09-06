@@ -8,6 +8,10 @@ public class DockerService : IDisposable
     private readonly DockerClient _client = new DockerClientConfiguration(
         new Uri("unix:///var/run/docker.sock")).CreateClient();
 
+    private readonly ILogger<DockerService> _logger;
+
+    public DockerService(ILogger<DockerService> logger) => _logger = logger;
+
     public async Task<ContainerInfo?> GetContainerInfoAsync(string containerName)
     {
         if (string.IsNullOrWhiteSpace(containerName)) return null;
@@ -271,8 +275,8 @@ public class DockerService : IDisposable
         string? portalUrl = null, string? internalSecret = null)
     {
         var webName = $"pt-{slug}-web";
-        try { await _client.Containers.StopContainerAsync(webName, new ContainerStopParameters()); } catch { }
-        try { await _client.Containers.RemoveContainerAsync(webName, new ContainerRemoveParameters { Force = true }); } catch { }
+        try { await _client.Containers.StopContainerAsync(webName, new ContainerStopParameters()); } catch (Exception ex) { _logger.LogDebug(ex, "Nie zatrzymano {Container} przed reprovisioningiem (może nie istnieć).", webName); }
+        try { await _client.Containers.RemoveContainerAsync(webName, new ContainerRemoveParameters { Force = true }); } catch (Exception ex) { _logger.LogDebug(ex, "Nie usunięto {Container} przed reprovisioningiem (może nie istnieć).", webName); }
         await ProvisionTenantAsync(slug, dbPassword, appPort, webImage, tenantDomain, entitlementsJson, portalUrl, internalSecret);
     }
 
@@ -336,9 +340,9 @@ public class DockerService : IDisposable
         var pgVolume = $"pt-{slug}-pgdata";
         var brandingVolume = $"pt-{slug}-branding";
 
-        try { await _client.Networks.DeleteNetworkAsync(networkName); } catch { }
-        try { await _client.Volumes.RemoveAsync(pgVolume); } catch { }
-        try { await _client.Volumes.RemoveAsync(brandingVolume); } catch { }
+        try { await _client.Networks.DeleteNetworkAsync(networkName); } catch (Exception ex) { _logger.LogDebug(ex, "Nie usunięto sieci {Network} (może nie istnieć).", networkName); }
+        try { await _client.Volumes.RemoveAsync(pgVolume); } catch (Exception ex) { _logger.LogDebug(ex, "Nie usunięto wolumenu {Volume} (może nie istnieć).", pgVolume); }
+        try { await _client.Volumes.RemoveAsync(brandingVolume); } catch (Exception ex) { _logger.LogDebug(ex, "Nie usunięto wolumenu {Volume} (może nie istnieć).", brandingVolume); }
     }
 
     public void Dispose() => _client.Dispose();

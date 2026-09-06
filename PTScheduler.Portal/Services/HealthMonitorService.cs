@@ -63,7 +63,10 @@ public class HealthMonitorService(
                     if (activityDate.HasValue)
                         t.LastActivityAt = activityDate.Value;
                 }
-                catch { }
+                catch (Exception ex)
+                {
+                    logger.LogDebug(ex, "Nie pobrano ostatniej aktywności tenanta {Slug} (port {Port}).", t.Slug, t.Port);
+                }
             }
 
             if (!ok)
