@@ -1,3 +1,5 @@
+using PTScheduler.Domain.Enums;
+
 namespace PTScheduler.Application.DTOs;
 
 public class AuditLogDto
@@ -11,4 +13,5 @@ public class AuditLogDto
     public string EntityType { get; set; } = string.Empty;
     public string? EntityId { get; set; }
     public string? Details { get; set; }
+    public AuditSeverity Severity { get; set; } = AuditSeverity.Info;
 }

@@ -1,7 +1,7 @@
 @inject PTScheduler.Application.Interfaces.IBrandingService BrandingService
 @inject IJSRuntime JS
 @implements IAsyncDisposable
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 
 @if (_show && _bannerEnabled)
 {
@@ -56,28 +56,33 @@
             _button   = !string.IsNullOrWhiteSpace(b.PwaBannerButton) ? b.PwaBannerButton : _button;
             _iconPath = b.PwaIconPath;
         }
-        catch { } // Best-effort: fall back to defaults if branding unavailable
+        catch { }
     }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender || !_bannerEnabled) return;
 
-        // Skip if user already dismissed
-        var dismissed = await JS.InvokeAsync<bool>("eval",
-            "!!localStorage.getItem('pwa-banner-dismissed')");
-        if (dismissed) return;
-
         var isStandalone = await JS.InvokeAsync<bool>("eval",
             "window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches");
         if (isStandalone) return;
+
+        // Dismiss expires after 3 days — user gets reminded periodically
+        var dismissed = await JS.InvokeAsync<bool>("eval", """
+            (function() {
+                var ts = localStorage.getItem('pwa-banner-dismissed');
+                if (!ts) return false;
+                var elapsed = Date.now() - parseInt(ts, 10);
+                return elapsed < 3 * 24 * 60 * 60 * 1000;
+            })()
+        """);
+        if (dismissed) return;
 
         var isIos = await JS.InvokeAsync<bool>("eval",
             "/iphone|ipad|ipod/i.test(navigator.userAgent.toLowerCase())");
 
         if (isIos)
         {
-            // iOS: show instructions (once per session, not localStorage so it shows fresh installs)
             var shownThisSession = await JS.InvokeAsync<bool>("eval",
                 "!!sessionStorage.getItem('pwa-ios-shown')");
             if (shownThisSession) return;
@@ -88,7 +93,7 @@
             return;
         }
 
-        // Android/Chrome: listen for the pwa-installable event dispatched by App.razor
+        // Android/Chrome: listen for beforeinstallprompt
         _ref = DotNetObjectReference.Create(this);
         await JS.InvokeVoidAsync("PTBanner.listen", _ref);
     }
@@ -107,7 +112,7 @@
         {
             _show = false;
             await JS.InvokeVoidAsync("eval",
-                "localStorage.setItem('pwa-banner-dismissed','1')");
+                "localStorage.setItem('pwa-banner-dismissed', Date.now().toString())");
         }
     }
 
@@ -115,7 +120,7 @@
     {
         _show = false;
         await JS.InvokeVoidAsync("eval",
-            "localStorage.setItem('pwa-banner-dismissed','1')");
+            "localStorage.setItem('pwa-banner-dismissed', Date.now().toString())");
     }
 
     public async ValueTask DisposeAsync()

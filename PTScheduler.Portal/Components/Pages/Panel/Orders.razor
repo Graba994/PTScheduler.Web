@@ -1,0 +1,270 @@
+@page "/panel/orders"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject EmailService EmailService
+@inject SiteSettingsService SiteSettings
+@rendermode InteractiveServer
+
+<PageTitle>Zamówienia — PTScheduler Portal</PageTitle>
+
+<div class="d-flex align-items-center justify-content-between mb-4">
+    <h4 class="fw-bold mb-0"><i class="bi bi-bag-check me-2 text-primary"></i>Zamówienia usług</h4>
+    <div class="d-flex gap-2">
+        <select class="form-select form-select-sm" style="width:auto" @bind="_statusFilter" @bind:after="Load">
+            <option value="">Wszystkie</option>
+            <option value="AwaitingPayment">Oczekuje na płatność</option>
+            <option value="Pending">Oczekujące</option>
+            <option value="Accepted">Zaakceptowane</option>
+            <option value="InProgress">W realizacji</option>
+            <option value="Completed">Zrealizowane</option>
+            <option value="Cancelled">Anulowane</option>
+        </select>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="Load">
+            <i class="bi bi-arrow-clockwise"></i>
+        </button>
+    </div>
+</div>
+
+@if (_message is not null)
+{
+    <div class="alert @(_msgError ? "alert-danger" : "alert-success") alert-dismissible py-2 small">
+        @_message
+        <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button>
+    </div>
+}
+
+@if (_orders.Count == 0)
+{
+    <div class="card border-0 shadow-sm">
+        <div class="card-body text-center text-muted py-5">
+            <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+            <p class="mb-0">Brak zamówień@(!string.IsNullOrEmpty(_statusFilter) ? $" o statusie \"{StatusLabel(Enum.Parse<ServiceOrderStatus>(_statusFilter))}\"" : "").</p>
+        </div>
+    </div>
+}
+else
+{
+    <div class="row g-3">
+        @foreach (var order in _orders)
+        {
+            <div class="col-12">
+                <div class="card border-0 shadow-sm @(order.Status == ServiceOrderStatus.Pending ? "border-start border-warning border-3" : "")">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <div class="d-flex align-items-center gap-2 mb-1">
+                                    <i class="bi @(order.ServiceItem?.Icon ?? "bi-box") text-primary"></i>
+                                    <h6 class="fw-bold mb-0">@(order.ServiceItem?.Name ?? "—")</h6>
+                                    <span class="badge @StatusBadge(order.Status)">@StatusLabel(order.Status)</span>
+                                </div>
+                                <div class="small text-muted">
+                                    <i class="bi bi-building me-1"></i>@(order.Tenant?.CompanyName ?? "—")
+                                    <span class="mx-2">|</span>
+                                    <i class="bi bi-person me-1"></i>@(order.Tenant?.OwnerName ?? "—")
+                                    <span class="mx-2">|</span>
+                                    <i class="bi bi-envelope me-1"></i>@(order.Tenant?.OwnerEmail ?? "—")
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(order.Notes))
+                                {
+                                    <div class="small mt-1"><i class="bi bi-chat-left-text me-1"></i>@order.Notes</div>
+                                }
+                            </div>
+                            <div class="text-end">
+                                <div class="fw-bold text-primary">@order.Price.ToString("0") PLN</div>
+                                <div class="text-muted small">@order.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</div>
+                                @if (!string.IsNullOrWhiteSpace(order.PaymentGateway))
+                                {
+                                    <div class="small mt-1">
+                                        <span class="badge @(order.PaidAt.HasValue ? "bg-success-subtle text-success-emphasis" : "bg-warning-subtle text-warning-emphasis")">
+                                            <i class="bi @(order.PaidAt.HasValue ? "bi-check-circle" : "bi-hourglass-split") me-1"></i>
+                                            @GatewayLabel(order.PaymentGateway) @(order.PaidAt.HasValue ? "— opłacone" : "— nieopłacone")
+                                        </span>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        @if (order.Status == ServiceOrderStatus.Pending)
+                        {
+                            <hr class="my-2" />
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-success" @onclick="() => UpdateStatus(order.Id, ServiceOrderStatus.Accepted)">
+                                    <i class="bi bi-check-lg me-1"></i>Akceptuj
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => UpdateStatus(order.Id, ServiceOrderStatus.Cancelled)">
+                                    <i class="bi bi-x-lg me-1"></i>Odrzuć
+                                </button>
+                            </div>
+                        }
+                        else if (order.Status == ServiceOrderStatus.Accepted)
+                        {
+                            <hr class="my-2" />
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-primary" @onclick="() => UpdateStatus(order.Id, ServiceOrderStatus.InProgress)">
+                                    <i class="bi bi-play me-1"></i>Rozpocznij realizację
+                                </button>
+                            </div>
+                        }
+                        else if (order.Status == ServiceOrderStatus.InProgress)
+                        {
+                            <hr class="my-2" />
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-success" @onclick="() => UpdateStatus(order.Id, ServiceOrderStatus.Completed)">
+                                    <i class="bi bi-check-circle me-1"></i>Zakończ
+                                </button>
+                            </div>
+                        }
+
+                        <div class="mt-2">
+                            @if (_editingNotesId == order.Id)
+                            {
+                                <div class="d-flex gap-2 align-items-center">
+                                    <input class="form-control form-control-sm" style="max-width:400px"
+                                           @bind="_editingNotesValue" placeholder="Notatka admina..." />
+                                    <button class="btn btn-sm btn-primary" @onclick="() => SaveAdminNotes(order.Id)">
+                                        <i class="bi bi-check-lg"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => _editingNotesId = 0">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
+                                </div>
+                            }
+                            else
+                            {
+                                @if (!string.IsNullOrWhiteSpace(order.AdminNotes))
+                                {
+                                    <div class="small text-muted fst-italic d-inline">
+                                        <i class="bi bi-sticky me-1"></i>@order.AdminNotes
+                                    </div>
+                                }
+                                <button class="btn btn-sm btn-link text-muted p-0 ms-2" @onclick='() => { _editingNotesId = order.Id; _editingNotesValue = order.AdminNotes ?? ""; }'>
+                                    <i class="bi bi-pencil small"></i>
+                                </button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<ServiceOrder> _orders = new();
+    private string _statusFilter = "";
+    private string? _message;
+    private bool _msgError;
+    private int _editingNotesId;
+    private string _editingNotesValue = "";
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        await using var db = DbFactory.CreateDbContext();
+        var query = db.ServiceOrders
+            .AsNoTracking()
+            .Include(o => o.Tenant)
+            .Include(o => o.ServiceItem)
+            .OrderByDescending(o => o.CreatedAt)
+            .AsQueryable();
+
+        if (!string.IsNullOrEmpty(_statusFilter) && Enum.TryParse<ServiceOrderStatus>(_statusFilter, out var status))
+            query = query.Where(o => o.Status == status);
+
+        _orders = await query.Take(100).ToListAsync();
+    }
+
+    private async Task UpdateStatus(int orderId, ServiceOrderStatus newStatus)
+    {
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            var order = await db.ServiceOrders
+                .Include(o => o.Tenant)
+                .Include(o => o.ServiceItem)
+                .FirstOrDefaultAsync(o => o.Id == orderId);
+            if (order is null) return;
+
+            order.Status = newStatus;
+            if (newStatus == ServiceOrderStatus.Accepted) order.AcceptedAt = DateTime.UtcNow;
+            if (newStatus == ServiceOrderStatus.Completed) order.CompletedAt = DateTime.UtcNow;
+
+            await db.SaveChangesAsync();
+
+            if (order.Tenant?.OwnerEmail is { Length: > 0 } email)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var html = EmailService.OrderStatusChangedEmailBody(
+                            order.Tenant.OwnerName ?? "Trenerze",
+                            order.ServiceItem?.Name ?? "usługa",
+                            StatusLabel(newStatus),
+                            order.AdminNotes);
+                        await EmailService.SendAsync(email, $"Zamówienie #{order.Id} — {StatusLabel(newStatus)}", html);
+                    }
+                    catch { }
+                });
+            }
+
+            await Load();
+            _message = $"Status zmieniony na \"{StatusLabel(newStatus)}\"."; _msgError = false;
+        }
+        catch (Exception ex)
+        {
+            _message = ex.Message; _msgError = true;
+        }
+    }
+
+    private async Task SaveAdminNotes(int orderId)
+    {
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            var order = await db.ServiceOrders.FindAsync(orderId);
+            if (order is null) return;
+            order.AdminNotes = string.IsNullOrWhiteSpace(_editingNotesValue) ? null : _editingNotesValue.Trim();
+            await db.SaveChangesAsync();
+            _editingNotesId = 0;
+            await Load();
+            _message = "Notatka zapisana."; _msgError = false;
+        }
+        catch (Exception ex)
+        {
+            _message = ex.Message; _msgError = true;
+        }
+    }
+
+    private static string StatusLabel(ServiceOrderStatus s) => s switch
+    {
+        ServiceOrderStatus.AwaitingPayment => "Oczekuje na płatność",
+        ServiceOrderStatus.Pending => "Oczekuje",
+        ServiceOrderStatus.Accepted => "Zaakceptowane",
+        ServiceOrderStatus.InProgress => "W realizacji",
+        ServiceOrderStatus.Completed => "Zrealizowane",
+        ServiceOrderStatus.Cancelled => "Anulowane",
+        _ => s.ToString()
+    };
+
+    private static string StatusBadge(ServiceOrderStatus s) => s switch
+    {
+        ServiceOrderStatus.AwaitingPayment => "bg-danger-subtle text-danger-emphasis",
+        ServiceOrderStatus.Pending => "bg-warning text-dark",
+        ServiceOrderStatus.Accepted => "bg-info text-dark",
+        ServiceOrderStatus.InProgress => "bg-primary",
+        ServiceOrderStatus.Completed => "bg-success",
+        ServiceOrderStatus.Cancelled => "bg-secondary",
+        _ => "bg-light text-dark"
+    };
+
+    private static string GatewayLabel(string gw) => gw switch
+    {
+        "stripe" => "Stripe",
+        "payu" => "PayU",
+        "przelewy24" => "Przelewy24",
+        _ => gw
+    };
+}

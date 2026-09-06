@@ -1,0 +1,163 @@
+@page "/admin/google-meet"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@inject IGoogleMeetService MeetService
+@inject EntitlementService Entitlements
+@inject NavigationManager Nav
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Google Meet" />
+
+<div class="page-header d-flex justify-content-between align-items-center">
+    <h4 class="page-title"><i class="bi bi-camera-video-fill me-2" style="color:var(--c-primary)"></i>Google Meet</h4>
+</div>
+
+@if (!Entitlements.IsAllowed("IntegrationGoogleMeet"))
+{
+    <FeatureGate Flag="IntegrationGoogleMeet" RequiredPlan="Pro"
+                 Title="Google Meet jest dostępne w planie Pro">
+        <Description>
+            Automatyczne tworzenie linków Google Meet przy rezerwacji sesji. Klienci otrzymują link do wideorozmowy w e-mailu. Odblokuj w planie <strong>Pro</strong> lub wyższym.
+        </Description>
+    </FeatureGate>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(_message))
+    {
+        <div class="alert @(_msgError ? "alert-danger" : "alert-success") alert-dismissible py-2 small">
+            @_message
+            <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button>
+        </div>
+    }
+
+    <div class="card mb-4">
+        <div class="card-header d-flex justify-content-between align-items-center">
+            <span>Konfiguracja OAuth2</span>
+            @if (_settings.Enabled && !string.IsNullOrWhiteSpace(_settings.RefreshToken))
+            {
+                <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Połączono</span>
+            }
+            else
+            {
+                <span class="badge bg-secondary">Niepołączono</span>
+            }
+        </div>
+        <div class="card-body">
+            <div class="alert alert-info py-2 small mb-3">
+                <i class="bi bi-info-circle me-1"></i>
+                Aby skonfigurować Google Meet:
+                <ol class="mb-0 mt-1">
+                    <li>Utwórz projekt w <a href="https://console.cloud.google.com/" target="_blank" rel="noopener">Google Cloud Console</a></li>
+                    <li>Włącz <strong>Google Calendar API</strong></li>
+                    <li>Utwórz dane logowania OAuth 2.0 (typ: Aplikacja webowa)</li>
+                    <li>Dodaj URI przekierowania: <code>@RedirectUri</code></li>
+                    <li>Skopiuj Client ID i Client Secret poniżej</li>
+                    <li>Kliknij „Zapisz", a następnie „Autoryzuj"</li>
+                </ol>
+            </div>
+
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">Client ID</label>
+                    <input class="form-control font-monospace" @bind="_settings.ClientId"
+                           placeholder="123456789-abc.apps.googleusercontent.com" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">Client Secret</label>
+                    <input type="password" class="form-control font-monospace" @bind="_settings.ClientSecret"
+                           placeholder="GOCSPX-..." />
+                </div>
+            </div>
+
+            <div class="mt-3 d-flex gap-2 flex-wrap">
+                <button class="btn btn-primary" @onclick="SaveSettings" disabled="@_busy">
+                    <i class="bi bi-save me-1"></i>Zapisz
+                </button>
+
+                @if (!string.IsNullOrWhiteSpace(_settings.ClientId) && !string.IsNullOrWhiteSpace(_settings.ClientSecret))
+                {
+                    @if (string.IsNullOrWhiteSpace(_settings.RefreshToken))
+                    {
+                        <a class="btn btn-outline-success" href="@AuthUrl" target="_blank">
+                            <i class="bi bi-google me-1"></i>Autoryzuj konto Google
+                        </a>
+                    }
+                    else
+                    {
+                        <button class="btn btn-outline-secondary" @onclick="TestConnection" disabled="@_busy">
+                            <i class="bi bi-wifi me-1"></i>Testuj połączenie
+                        </button>
+                        <a class="btn btn-outline-warning" href="@AuthUrl" target="_blank">
+                            <i class="bi bi-arrow-repeat me-1"></i>Reautoryzuj
+                        </a>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+
+    <div class="card">
+        <div class="card-header">Ustawienia</div>
+        <div class="card-body">
+            <div class="form-check">
+                <input class="form-check-input" type="checkbox" @bind="_settings.Enabled" id="meetEnabled" />
+                <label class="form-check-label small" for="meetEnabled">
+                    Automatycznie twórz link Google Meet przy rezerwacji sesji
+                </label>
+            </div>
+            <p class="text-muted small mt-2 mb-0">
+                Kiedy włączone, każda nowo utworzona sesja otrzyma automatycznie wygenerowany link do wideorozmowy Google Meet.
+                Link jest widoczny w szczegółach sesji oraz w e-mailu potwierdzającym rezerwację.
+            </p>
+            <button class="btn btn-primary mt-3" @onclick="SaveSettings" disabled="@_busy">
+                <i class="bi bi-save me-1"></i>Zapisz
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    private GoogleMeetSettingsDto _settings = new();
+    private string? _message;
+    private bool _msgError;
+    private bool _busy;
+
+    private string RedirectUri => $"{Nav.BaseUri.TrimEnd('/')}api/google-meet/callback";
+
+    private string AuthUrl => MeetService.BuildAuthorizationUrl(
+        _settings.ClientId ?? "", RedirectUri);
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (Entitlements.IsAllowed("IntegrationGoogleMeet"))
+            _settings = await MeetService.GetSettingsAsync();
+    }
+
+    private async Task SaveSettings()
+    {
+        _busy = true;
+        try
+        {
+            await MeetService.SaveSettingsAsync(_settings);
+            _message = "Zapisano ustawienia.";
+            _msgError = false;
+        }
+        catch (Exception ex) { _message = ex.Message; _msgError = true; }
+        finally { _busy = false; }
+    }
+
+    private async Task TestConnection()
+    {
+        _busy = true;
+        try
+        {
+            var (ok, msg) = await MeetService.TestConnectionAsync();
+            _message = msg;
+            _msgError = !ok;
+        }
+        catch (Exception ex) { _message = ex.Message; _msgError = true; }
+        finally { _busy = false; }
+    }
+}

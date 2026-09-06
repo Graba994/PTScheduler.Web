@@ -9,7 +9,7 @@
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
 @using System.Globalization
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Dostępność trenera" />
 
@@ -81,7 +81,8 @@
                         <div class="row g-3 align-items-end">
                             <div class="col-md-3">
                                 <label class="form-label">Typ okna <HintButton Title="Cykliczny vs jednorazowy" Text="Cykliczny powtarza się co tydzień w wybranym dniu — idealny dla stałego grafiku. Jednorazowy obowiązuje tylko konkretnego dnia, np. wyjątkowy termin w wakacje lub zastępstwo za inny dzień." /></label>
-                                <select class="form-select" @bind="_newIsRecurring">
+                                <select class="form-select" value="@(_newIsRecurring ? "true" : "false")"
+                                        @onchange="@(e => _newIsRecurring = e.Value?.ToString() == "true")">
                                     <option value="true">Cykliczny (dzień tygodnia)</option>
                                     <option value="false">Jednorazowy (data)</option>
                                 </select>
@@ -117,11 +118,11 @@
 
                             <div class="col-md-2">
                                 <label class="form-label">Od</label>
-                                <input type="time" class="form-control" @bind="_newStartTime" />
+                                <TimePicker @bind-Value="_newStartTime" />
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label">Do</label>
-                                <input type="time" class="form-control" @bind="_newEndTime" />
+                                <TimePicker @bind-Value="_newEndTime" />
                             </div>
                             <div class="col-md-3">
                                 <label class="form-label">Etykieta (opcjonalna)</label>

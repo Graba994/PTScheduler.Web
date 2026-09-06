@@ -1,0 +1,260 @@
+@page "/panel/services"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@rendermode InteractiveServer
+
+<PageTitle>Katalog usług — PTScheduler Portal</PageTitle>
+
+<div class="d-flex align-items-center justify-content-between mb-4">
+    <h4 class="fw-bold mb-0"><i class="bi bi-shop me-2 text-primary"></i>Katalog usług</h4>
+    <button class="btn btn-primary btn-sm" @onclick="NewItem">
+        <i class="bi bi-plus-lg me-1"></i>Nowa usługa
+    </button>
+</div>
+
+@if (_message is not null)
+{
+    <div class="alert @(_msgError ? "alert-danger" : "alert-success") alert-dismissible py-2 small">
+        @_message
+        <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button>
+    </div>
+}
+
+@if (_editing is not null)
+{
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <h6 class="fw-bold mb-3">
+                <i class="bi bi-pencil me-2"></i>@(_isNew ? "Nowa usługa" : $"Edycja: {_editing.Name}")
+            </h6>
+
+            <div class="row g-3 mb-3">
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">Nazwa</label>
+                    <input class="form-control" @bind="_editing.Name" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">Kategoria</label>
+                    <select class="form-select" @bind="_editing.Category">
+                        <option value="branding">Branding</option>
+                        <option value="setup">Konfiguracja</option>
+                        <option value="training">Szkolenie</option>
+                        <option value="support">Wsparcie</option>
+                        <option value="addon">Dodatek</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">Ikona (Bootstrap Icons)</label>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi @(_editing.Icon ?? "bi-question")"></i></span>
+                        <input class="form-control font-monospace" @bind="_editing.Icon" placeholder="bi-palette" />
+                    </div>
+                </div>
+                <div class="col-md-12">
+                    <label class="form-label small fw-semibold">Opis</label>
+                    <textarea class="form-control" rows="2" @bind="_editing.Description"></textarea>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">Cena domyślna (PLN)</label>
+                    <input type="number" class="form-control" @bind="_editing.DefaultPrice" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">Typ ceny</label>
+                    <select class="form-select" @bind="_editing.PriceType">
+                        <option value="one_time">Jednorazowa</option>
+                        <option value="monthly">Miesięczna</option>
+                    </select>
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold">Jednostka</label>
+                    <input class="form-control" @bind="_editing.Unit" placeholder="np. miesiąc" />
+                    <div class="form-text small">Tylko dla cen cyklicznych</div>
+                </div>
+                <div class="col-md-3 d-flex flex-column justify-content-center">
+                    <div class="form-check mt-3">
+                        <input class="form-check-input" type="checkbox" id="si-active" @bind="_editing.IsActive" />
+                        <label class="form-check-label small" for="si-active">Aktywna</label>
+                    </div>
+                </div>
+                <div class="col-md-2">
+                    <label class="form-label small fw-semibold">Kolejność</label>
+                    <input type="number" class="form-control" @bind="_editing.SortOrder" />
+                </div>
+            </div>
+
+            <div class="d-flex gap-2">
+                <button class="btn btn-primary" @onclick="Save"><i class="bi bi-floppy me-1"></i>Zapisz</button>
+                <button class="btn btn-outline-secondary" @onclick="Cancel">Anuluj</button>
+            </div>
+        </div>
+    </div>
+}
+
+<div class="card border-0 shadow-sm">
+    <div class="card-body p-0">
+        @if (_items.Count == 0)
+        {
+            <p class="text-muted small p-3 mb-0">Brak usług w katalogu.</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 small align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th></th>
+                            <th>Nazwa</th>
+                            <th>Kategoria</th>
+                            <th>Cena</th>
+                            <th>Typ</th>
+                            <th>Aktywna</th>
+                            <th>Zamówień</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var s in _items.OrderBy(x => x.SortOrder))
+                        {
+                            <tr class="@(!s.IsActive ? "text-muted" : "")">
+                                <td><i class="bi @(s.Icon ?? "bi-box") text-primary"></i></td>
+                                <td class="fw-semibold">@s.Name</td>
+                                <td><span class="badge @CategoryBadge(s.Category)">@CategoryLabel(s.Category)</span></td>
+                                <td>@s.DefaultPrice.ToString("0") zł</td>
+                                <td>@(s.PriceType == "monthly" ? $"/ {s.Unit ?? "mies."}" : "jednorazowo")</td>
+                                <td>@Yn(s.IsActive)</td>
+                                <td>@_orderCounts.GetValueOrDefault(s.Id, 0)</td>
+                                <td class="text-end">
+                                    <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => Edit(s)">
+                                        <i class="bi bi-pencil"></i>
+                                    </button>
+                                    @if (_orderCounts.GetValueOrDefault(s.Id, 0) == 0)
+                                    {
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => Delete(s.Id)">
+                                            <i class="bi bi-trash"></i>
+                                        </button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    private List<ServiceItem> _items = new();
+    private Dictionary<int, int> _orderCounts = new();
+    private ServiceItem? _editing;
+    private bool _isNew;
+    private string? _message;
+    private bool _msgError;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        await using var db = DbFactory.CreateDbContext();
+        _items = await db.ServiceItems.AsNoTracking().ToListAsync();
+        _orderCounts = await db.ServiceOrders.GroupBy(o => o.ServiceItemId)
+            .Select(g => new { g.Key, Count = g.Count() })
+            .ToDictionaryAsync(x => x.Key, x => x.Count);
+    }
+
+    private void NewItem()
+    {
+        _isNew = true;
+        _editing = new ServiceItem { IsActive = true, SortOrder = _items.Count + 1 };
+    }
+
+    private void Edit(ServiceItem s)
+    {
+        _isNew = false;
+        _editing = Clone(s);
+    }
+
+    private void Cancel() => _editing = null;
+
+    private async Task Save()
+    {
+        if (_editing is null) return;
+        if (string.IsNullOrWhiteSpace(_editing.Name))
+        {
+            _message = "Nazwa jest wymagana."; _msgError = true; return;
+        }
+
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            if (_isNew)
+            {
+                _editing.CreatedAt = DateTime.UtcNow;
+                db.ServiceItems.Add(_editing);
+            }
+            else
+            {
+                var existing = await db.ServiceItems.FindAsync(_editing.Id);
+                if (existing is null) throw new InvalidOperationException("Usługa nie istnieje.");
+                db.Entry(existing).CurrentValues.SetValues(_editing);
+            }
+            await db.SaveChangesAsync();
+            _editing = null;
+            await Load();
+            _message = "Zapisano."; _msgError = false;
+        }
+        catch (Exception ex)
+        {
+            _message = ex.Message; _msgError = true;
+        }
+    }
+
+    private async Task Delete(int id)
+    {
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            var s = await db.ServiceItems.FindAsync(id);
+            if (s is null) return;
+            db.ServiceItems.Remove(s);
+            await db.SaveChangesAsync();
+            await Load();
+            _message = "Usługa usunięta."; _msgError = false;
+        }
+        catch (Exception ex)
+        {
+            _message = ex.Message; _msgError = true;
+        }
+    }
+
+    private static ServiceItem Clone(ServiceItem s)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(s);
+        return System.Text.Json.JsonSerializer.Deserialize<ServiceItem>(json)!;
+    }
+
+    private static MarkupString Yn(bool b) => new(b
+        ? "<i class=\"bi bi-check-circle-fill text-success\"></i>"
+        : "<i class=\"bi bi-dash text-muted\"></i>");
+
+    private static string CategoryLabel(string c) => c switch
+    {
+        "branding" => "Branding",
+        "setup" => "Konfiguracja",
+        "training" => "Szkolenie",
+        "support" => "Wsparcie",
+        "addon" => "Dodatek",
+        _ => c
+    };
+
+    private static string CategoryBadge(string c) => c switch
+    {
+        "branding" => "bg-info text-dark",
+        "setup" => "bg-primary",
+        "training" => "bg-warning text-dark",
+        "support" => "bg-success",
+        "addon" => "bg-secondary",
+        _ => "bg-light text-dark"
+    };
+}

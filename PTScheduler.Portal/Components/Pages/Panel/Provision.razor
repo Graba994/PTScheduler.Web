@@ -1,0 +1,256 @@
+@page "/panel/provision"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject TenantService TenantSvc
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject SiteSettingsService Settings
+@inject NavigationManager Nav
+@rendermode InteractiveServer
+
+<PageTitle>Nowa instancja — PTScheduler Portal</PageTitle>
+
+<div class="d-flex align-items-center gap-2 mb-4">
+    <a href="/panel/tenants" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i></a>
+    <h4 class="fw-bold mb-0"><i class="bi bi-plus-circle me-2 text-primary"></i>Nowa instancja</h4>
+</div>
+
+<div class="row">
+    <div class="col-lg-8">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <EditForm Model="_form" OnValidSubmit="Submit" FormName="provision">
+                    <DataAnnotationsValidator />
+
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label fw-semibold">Plan</label>
+                            <div class="row g-2">
+                                @foreach (var p in _plans)
+                                {
+                                    <div class="col-md-4">
+                                        <div class="plan-option @(_form.PlanId == p.Id ? "selected" : "")" @onclick="() => SelectPlan(p.Id)">
+                                            <div class="fw-bold">@p.Name</div>
+                                            <div class="small text-muted">
+                                                @(p.MonthlyPrice == 0 ? "0 zł" : $"{p.MonthlyPrice:0} zł/mies.")
+                                            </div>
+                                            <div class="small text-muted mt-1">
+                                                <i class="bi bi-people me-1"></i>@(p.MaxClients == int.MaxValue ? "∞" : p.MaxClients.ToString()) klientów
+                                            </div>
+                                            <div class="small">
+                                                <i class="bi @(p.SmsReminders ? "bi-check-circle text-success" : "bi-x-circle text-muted") me-1"></i>SMS
+                                            </div>
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Slug <span class="text-danger">*</span></label>
+                            <InputText class="form-control font-monospace" @bind-Value="_form.Slug" placeholder="jan-kowalski" />
+                            <div class="form-text">Tylko małe litery, cyfry, myślniki</div>
+                            <ValidationMessage For="() => _form.Slug" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">
+                                Domena
+                                <span class="badge bg-secondary ms-1">auto</span>
+                            </label>
+                            <input class="form-control bg-light" value="@AutoDomain" readonly />
+                            <div class="form-text">Automatyczna subdomena</div>
+                        </div>
+
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Nazwa studia <span class="text-danger">*</span></label>
+                            <InputText class="form-control" @bind-Value="_form.CompanyName" placeholder="FitStudio Jan Kowalski" />
+                            <ValidationMessage For="() => _form.CompanyName" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Imię i nazwisko <span class="text-danger">*</span></label>
+                            <InputText class="form-control" @bind-Value="_form.OwnerName" />
+                            <ValidationMessage For="() => _form.OwnerName" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Email <span class="text-danger">*</span></label>
+                            <InputText class="form-control" type="email" @bind-Value="_form.OwnerEmail" />
+                            <ValidationMessage For="() => _form.OwnerEmail" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Telefon</label>
+                            <InputText class="form-control" @bind-Value="_form.Phone" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold">Tryb setup</label>
+                            <InputSelect class="form-select" @bind-Value="_form.SetupMode">
+                                <option value="admin">Konfiguracja przez admina</option>
+                                <option value="self">Samodzielna konfiguracja</option>
+                            </InputSelect>
+                        </div>
+
+                        <div class="col-12">
+                            <div class="form-check">
+                                <InputCheckbox class="form-check-input" @bind-Value="_form.AutoProvision" />
+                                <label class="form-check-label">Automatycznie uruchom provisioning po utworzeniu</label>
+                            </div>
+                        </div>
+                    </div>
+
+                    @if (_error is not null)
+                    {
+                        <div class="alert alert-danger py-2 small mt-3">@_error</div>
+                    }
+
+                    <div class="mt-4 d-flex gap-2">
+                        <button type="submit" class="btn btn-primary" disabled="@_saving">
+                            @if (_saving)
+                            {
+                                <span class="spinner-border spinner-border-sm me-1"></span>
+                            }
+                            <i class="bi bi-plus-lg me-1"></i>Utwórz instancję
+                        </button>
+                        <a href="/panel/tenants" class="btn btn-outline-secondary">Anuluj</a>
+                    </div>
+                </EditForm>
+            </div>
+        </div>
+    </div>
+
+    <div class="col-lg-4">
+        <div class="card border-0 shadow-sm bg-light">
+            <div class="card-body">
+                <h6 class="fw-bold"><i class="bi bi-info-circle me-2"></i>Info</h6>
+                <ul class="small text-muted mb-0">
+                    <li>Slug jest unikalny i niezmienialny</li>
+                    <li>Port jest przydzielany automatycznie</li>
+                    <li>Hasło DB jest generowane losowo</li>
+                    <li>Auto-provisioning tworzy kontenery i uruchamia migracje</li>
+                    <li>Domena jest generowana automatycznie jako subdomena</li>
+                </ul>
+            </div>
+        </div>
+
+        @if (_selectedPlan is not null)
+        {
+            <div class="card border-0 shadow-sm mt-3">
+                <div class="card-body">
+                    <h6 class="fw-bold mb-3">@_selectedPlan.Name</h6>
+                    <ul class="list-unstyled small mb-0">
+                        <li class="mb-1"><i class="bi bi-check text-success me-1"></i>Max @(_selectedPlan.MaxClients == int.MaxValue ? "bez limitu" : _selectedPlan.MaxClients.ToString()) klientów</li>
+                        <li class="mb-1"><i class="bi @(_selectedPlan.PaymentsEnabled ? "bi-check text-success" : "bi-x text-muted") me-1"></i>Płatności online</li>
+                        <li class="mb-1"><i class="bi @(_selectedPlan.CoursesEnabled ? "bi-check text-success" : "bi-x text-muted") me-1"></i>Kursy wideo</li>
+                        <li class="mb-1"><i class="bi @(_selectedPlan.SmsReminders ? "bi-check text-success" : "bi-x text-muted") me-1"></i>Przypomnienia SMS</li>
+                        <li class="mb-1"><i class="bi @(_selectedPlan.AuditLog ? "bi-check text-success" : "bi-x text-muted") me-1"></i>Audit log</li>
+                    </ul>
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+<style>
+    .plan-option {
+        border: 2px solid #e5e7eb;
+        border-radius: .6rem;
+        padding: .75rem 1rem;
+        cursor: pointer;
+        transition: border-color .2s, background .2s;
+        height: 100%;
+    }
+    .plan-option:hover { border-color: #6366f1; }
+    .plan-option.selected { border-color: #6366f1; background: rgba(99,102,241,.05); }
+</style>
+
+@code {
+    private bool _saving;
+    private string? _error;
+    private ProvisionForm _form = new();
+    private List<Plan> _plans = [];
+    private Plan? _selectedPlan;
+
+    private string _mainDomain = "ptscheduler.pl";
+    private string AutoDomain => string.IsNullOrWhiteSpace(_form.Slug) ? "" : $"{_form.Slug}.{_mainDomain}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = DbFactory.CreateDbContext();
+        _plans = await db.Plans
+            .AsNoTracking()
+            .Where(p => p.IsActive)
+            .OrderBy(p => p.SortOrder)
+            .ToListAsync();
+
+        if (_plans.Count > 0)
+        {
+            _form.PlanId = _plans[0].Id;
+            _selectedPlan = _plans[0];
+        }
+
+        var mainDomain = await Settings.GetAsync(SiteSettingsService.Keys.MainDomain);
+        if (!string.IsNullOrWhiteSpace(mainDomain)) _mainDomain = mainDomain;
+    }
+
+    private void SelectPlan(string planId)
+    {
+        _form.PlanId = planId;
+        _selectedPlan = _plans.FirstOrDefault(p => p.Id == planId);
+    }
+
+    private async Task Submit()
+    {
+        _error = null;
+        _saving = true;
+
+        try
+        {
+            var slug = _form.Slug.Trim().ToLowerInvariant();
+            var domain = $"{slug}.{_mainDomain}";
+
+            var tenant = await TenantSvc.CreateAsync(
+                slug,
+                domain,
+                _form.CompanyName.Trim(),
+                _form.OwnerName.Trim(),
+                _form.OwnerEmail.Trim().ToLowerInvariant(),
+                _form.Phone?.Trim(),
+                _form.PlanId,
+                _form.SetupMode);
+
+            if (_form.AutoProvision)
+                await TenantSvc.ProvisionAsync(tenant.Id);
+
+            Nav.NavigateTo($"/panel/tenants/{tenant.Id}");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+        }
+        finally
+        {
+            _saving = false;
+        }
+    }
+
+    private class ProvisionForm
+    {
+        [global::System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Wymagane")]
+        [global::System.ComponentModel.DataAnnotations.RegularExpression(@"^[a-z0-9][a-z0-9-]*[a-z0-9]$", ErrorMessage = "Tylko małe litery, cyfry, myślniki")]
+        public string Slug { get; set; } = "";
+
+        public string Domain { get; set; } = "";
+
+        [global::System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Wymagane")]
+        public string CompanyName { get; set; } = "";
+
+        [global::System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Wymagane")]
+        public string OwnerName { get; set; } = "";
+
+        [global::System.ComponentModel.DataAnnotations.Required(ErrorMessage = "Wymagane")]
+        [global::System.ComponentModel.DataAnnotations.EmailAddress(ErrorMessage = "Nieprawidłowy email")]
+        public string OwnerEmail { get; set; } = "";
+
+        public string? Phone { get; set; }
+        public string PlanId { get; set; } = "start";
+        public string SetupMode { get; set; } = "admin";
+        public bool AutoProvision { get; set; } = true;
+    }
+}

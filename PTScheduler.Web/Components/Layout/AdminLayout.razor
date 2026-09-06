@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @layout PTScheduler.Web.Components.Layout.MainLayout
+@inject AuthenticationStateProvider AuthState
 
 <div class="manage-shell admin-shell">
 
@@ -8,9 +9,9 @@
             <i class="bi bi-shield-fill-check" style="font-size:1.4rem"></i>
         </div>
         <div>
-            <div class="manage-user-name">Panel administracyjny</div>
-            <div class="manage-user-email">Zarządzanie systemem PTScheduler</div>
-            <span class="badge bg-danger mt-1" style="font-size:.7rem">Administrator</span>
+            <div class="manage-user-name">Panel zarządzania</div>
+            <div class="manage-user-email">Konfiguracja i zarządzanie</div>
+            <span class="badge @_roleBadgeClass mt-1" style="font-size:.7rem">@_roleLabel</span>
         </div>
     </div>
 
@@ -24,3 +25,16 @@
     </div>
 
 </div>
+
+@code {
+    private string _roleLabel = "Administrator";
+    private string _roleBadgeClass = "bg-danger";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        if (auth.User.IsInRole("Admin")) { _roleLabel = "Administrator"; _roleBadgeClass = "bg-danger"; }
+        else if (auth.User.IsInRole("Trainer")) { _roleLabel = "Trener"; _roleBadgeClass = "bg-primary"; }
+        else if (auth.User.IsInRole("Subordinate")) { _roleLabel = "Współtrener"; _roleBadgeClass = "bg-secondary"; }
+    }
+}

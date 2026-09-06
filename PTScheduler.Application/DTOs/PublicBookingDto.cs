@@ -19,8 +19,14 @@ public class PublicIntroOfferDto
     public DateTime? PromoValidUntil { get; set; }
     public string? Description { get; set; }
 
-    public bool HasActivePromo =>
-        PromoPrice.HasValue && PromoValidUntil.HasValue && PromoValidUntil.Value > DateTime.Now;
+    /// <summary>
+    /// Ustawiane przez serwis budujący DTO, na podstawie
+    /// <see cref="PTScheduler.Domain.Rules.PromoRules"/> i zegara aplikacji.
+    /// Świadomie nie jest liczone tutaj — DTO nie ma dostępu do strefy czasowej,
+    /// a poprzednia wersja porównywała z <c>DateTime.Now</c>, czyli z czasem
+    /// maszyny zamiast z zegarem ściennym studia.
+    /// </summary>
+    public bool HasActivePromo { get; set; }
 
     public decimal EffectivePrice => HasActivePromo ? PromoPrice!.Value : Price;
 }

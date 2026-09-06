@@ -1,0 +1,208 @@
+@page "/panel/npm"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject SiteSettingsService Settings
+@inject NpmService NpmSvc
+@rendermode InteractiveServer
+
+<PageTitle>Nginx Proxy Manager — PTScheduler Portal</PageTitle>
+
+<div class="mb-4">
+    <h4 class="fw-bold mb-1"><i class="bi bi-diagram-3 me-2 text-primary"></i>Nginx Proxy Manager</h4>
+    <p class="text-muted small mb-0">Integracja z NPM — automatyczna rejestracja domen przy provisioningu</p>
+</div>
+
+@if (_message is not null)
+{
+    <div class="alert @(_isError ? "alert-danger" : "alert-success") alert-dismissible fade show">
+        <i class="bi @(_isError ? "bi-exclamation-triangle" : "bi-check-circle") me-1"></i>@_message
+        <button type="button" class="btn-close" @onclick="() => _message = null"></button>
+    </div>
+}
+
+<EditForm Model="_form" OnValidSubmit="Save" FormName="npm-settings">
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white fw-semibold">
+            <i class="bi bi-plug me-1"></i>Połączenie z NPM
+        </div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">URL API NPM</label>
+                <input class="form-control" @bind="_form.Url" placeholder="http://192.168.0.220:81" />
+                <div class="form-text">Adres administracyjny NPM (bez końcowego /)</div>
+            </div>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">Email admina NPM</label>
+                    <input class="form-control" @bind="_form.Email" placeholder="admin@example.com" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">Hasło</label>
+                    <input type="password" class="form-control" @bind="_form.Password" />
+                </div>
+            </div>
+            <div class="form-check mt-3">
+                <input class="form-check-input" type="checkbox" @bind="_form.AutoRegister" id="autoReg" />
+                <label class="form-check-label small" for="autoReg">
+                    Automatycznie rejestruj domeny w NPM przy provisioningu nowego trenera
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <div class="d-flex gap-2 mb-4">
+        <button type="submit" class="btn btn-primary" disabled="@_saving">
+            @if (_saving)
+            {
+                <span class="spinner-border spinner-border-sm me-1"></span>
+            }
+            <i class="bi bi-floppy me-1"></i>Zapisz
+        </button>
+        <button type="button" class="btn btn-outline-secondary" @onclick="TestConnection" disabled="@_testing">
+            @if (_testing)
+            {
+                <span class="spinner-border spinner-border-sm me-1"></span>
+            }
+            <i class="bi bi-wifi me-1"></i>Testuj połączenie
+        </button>
+        <button type="button" class="btn btn-outline-secondary" @onclick="LoadHosts" disabled="@_loadingHosts">
+            @if (_loadingHosts)
+            {
+                <span class="spinner-border spinner-border-sm me-1"></span>
+            }
+            <i class="bi bi-arrow-clockwise me-1"></i>Odśwież listę
+        </button>
+    </div>
+</EditForm>
+
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-list-ul me-1"></i>Proxy hosty w NPM</span>
+        <span class="badge bg-secondary">@_hosts.Count</span>
+    </div>
+    <div class="card-body p-0">
+        @if (_hosts.Count == 0)
+        {
+            <p class="text-muted small p-3 mb-0">
+                Brak proxy hostów lub NPM jeszcze nie skonfigurowany. Kliknij "Testuj połączenie" żeby zweryfikować.
+            </p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 small align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Domena</th>
+                            <th>Backend</th>
+                            <th>SSL</th>
+                            <th>Status</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var h in _hosts)
+                        {
+                            <tr>
+                                <td class="fw-semibold">@h.Domain</td>
+                                <td class="text-muted">@h.ForwardHost:@h.ForwardPort</td>
+                                <td>
+                                    @if (h.SslForced)
+                                    {
+                                        <span class="badge bg-success"><i class="bi bi-lock-fill"></i> HTTPS</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-secondary">HTTP</span>
+                                    }
+                                </td>
+                                <td>
+                                    @if (h.Enabled)
+                                    {
+                                        <span class="badge bg-success">Aktywny</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-warning text-dark">Wyłączony</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+<div class="alert alert-info small mt-3">
+    <i class="bi bi-info-circle me-1"></i>
+    <strong>Jak działa integracja:</strong> po skonfigurowaniu NPM przy tworzeniu nowego trenera panel automatycznie doda proxy host wskazujący na <code>localhost:{port_trenera}</code>. Możesz też zarządzać hostami ręcznie w interfejsie NPM.
+</div>
+
+@code {
+    private NpmForm _form = new();
+    private bool _saving, _testing, _loadingHosts;
+    private string? _message;
+    private bool _isError;
+    private List<NpmProxyHost> _hosts = new();
+
+    private class NpmForm
+    {
+        public string Url { get; set; } = "";
+        public string Email { get; set; } = "";
+        public string Password { get; set; } = "";
+        public bool AutoRegister { get; set; } = true;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var s = await Settings.GetAllAsync(
+            SiteSettingsService.Keys.NpmUrl,
+            SiteSettingsService.Keys.NpmEmail,
+            SiteSettingsService.Keys.NpmPassword,
+            SiteSettingsService.Keys.NpmAutoRegister);
+
+        _form.Url = s[SiteSettingsService.Keys.NpmUrl];
+        _form.Email = s[SiteSettingsService.Keys.NpmEmail];
+        _form.Password = s[SiteSettingsService.Keys.NpmPassword];
+        _form.AutoRegister = s[SiteSettingsService.Keys.NpmAutoRegister] != "false";
+
+        if (!string.IsNullOrEmpty(_form.Url) && !string.IsNullOrEmpty(_form.Email))
+            _hosts = await NpmSvc.ListProxyHostsAsync();
+    }
+
+    private async Task Save()
+    {
+        _saving = true;
+        _message = null;
+        await Settings.SetManyAsync(new Dictionary<string, string>
+        {
+            [SiteSettingsService.Keys.NpmUrl] = _form.Url.Trim(),
+            [SiteSettingsService.Keys.NpmEmail] = _form.Email.Trim(),
+            [SiteSettingsService.Keys.NpmPassword] = _form.Password,
+            [SiteSettingsService.Keys.NpmAutoRegister] = _form.AutoRegister ? "true" : "false"
+        });
+        _saving = false;
+        _message = "Zapisano ustawienia NPM.";
+        _isError = false;
+    }
+
+    private async Task TestConnection()
+    {
+        _testing = true;
+        _message = null;
+        var result = await NpmSvc.TestConnectionAsync(_form.Url, _form.Email, _form.Password);
+        _testing = false;
+        _message = result.Message;
+        _isError = !result.Success;
+        if (result.Success)
+            _hosts = await NpmSvc.ListProxyHostsAsync();
+    }
+
+    private async Task LoadHosts()
+    {
+        _loadingHosts = true;
+        _hosts = await NpmSvc.ListProxyHostsAsync();
+        _loadingHosts = false;
+    }
+}

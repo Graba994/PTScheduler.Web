@@ -31,7 +31,28 @@ public static class DependencyInjection
         services.AddScoped<IDatabaseSettingsService>(sp =>
             new DatabaseSettingsService(sp.GetRequiredService<IConfiguration>(), settingsFilePath));
 
+        // Jedyne źródło czasu. Singleton — strefa jest rozwiązywana raz i nie
+        // zmienia się w trakcie życia instancji. Zob. IAppClock po opis
+        // konwencji instant / zegar ścienny.
+        services.AddSingleton<IAppClock, AppClock>();
+
         services.AddScoped<IBrandingService, BrandingService>();
+        services.AddScoped<ISiteContentService, SiteContentService>();
+        services.AddScoped<IModuleSettingsService, ModuleSettingsService>();
+        services.AddScoped<IPaymentSettingsService, PaymentSettingsService>();
+        services.AddHttpClient();
+        services.AddScoped<IBunnyService, BunnyService>();
+        services.AddScoped<IGoogleMeetService, GoogleMeetService>();
+        services.AddScoped<ICouponService, CouponService>();
+        // Payment gateways (resolved as a set by the orchestrator).
+        services.AddScoped<Services.Payments.IPaymentProvider, Services.Payments.SimulatorProvider>();
+        services.AddScoped<Services.Payments.IPaymentProvider, Services.Payments.PayUProvider>();
+        services.AddScoped<Services.Payments.IPaymentProvider, Services.Payments.Przelewy24Provider>();
+        services.AddScoped<Services.Payments.IPaymentProvider, Services.Payments.KlarnaProvider>();
+        services.AddScoped<Services.Payments.IPaymentProvider, Services.Payments.AutoPayProvider>();
+        services.AddScoped<IPaymentService, PaymentService>();
+        services.AddScoped<IPackageOfferService, PackageOfferService>();
+        services.AddScoped<ICourseService, CourseService>();
         services.AddScoped<IBackupService, BackupService>();
         services.AddScoped<IDatabaseMaintenanceService, DatabaseMaintenanceService>();
         services.AddScoped<IUserManagementService, UserManagementService>();
@@ -57,6 +78,12 @@ public static class DependencyInjection
         services.AddScoped<IEmailTemplateService, EmailTemplateService>();
         services.AddScoped<IWebPushService, WebPushService>();
         services.AddScoped<IFinanceService, FinanceService>();
+        services.AddScoped<IDataExportService, DataExportService>();
+        services.AddScoped<IReceiptService, ReceiptService>();
+        services.AddScoped<IInvoiceService, InvoiceService>();
+        services.AddScoped<ISmsSettingsService, SmsSettingsService>();
+        services.AddScoped<ISmsService, SmsApiService>();
+        services.AddScoped<ISetupService, SetupService>();
 
         // QuestPDF community license — free for orgs <$1M annual revenue.
         // Set globally; safe to call multiple times in tests.

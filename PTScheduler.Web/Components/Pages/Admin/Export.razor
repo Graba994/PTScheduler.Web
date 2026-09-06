@@ -1,0 +1,204 @@
+@page "/admin/export"
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = $"{Roles.Admin},{Roles.Trainer}")]
+@inject IDataExportService ExportService
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthState
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Eksport danych" />
+
+<div class="page-header">
+    <h4 class="page-title"><i class="bi bi-download me-2" style="color:var(--c-primary)"></i>Eksport danych</h4>
+</div>
+
+<FeatureGate Flag="DataExport" RequiredPlan="Pro"
+             Title="Eksport danych jest niedostępny"
+             ShowLock="true" ShowUpgrade="true">
+    <Description>Eksportuj dane klientów, sesji, pakietów i pomiarów do pliku CSV.</Description>
+</FeatureGate>
+
+<FeatureGate Flag="DataExport" RequiredPlan="Pro" ShowLock="false">
+
+<div class="row g-3">
+    <div class="col-12 col-md-6 col-xl-4">
+        <div class="export-card">
+            <div class="export-icon"><i class="bi bi-people-fill"></i></div>
+            <div class="export-body">
+                <h6>Klienci</h6>
+                <p>Profil, dane kontaktowe, cel treningowy, status.</p>
+            </div>
+            <button class="btn btn-sm btn-primary" @onclick="ExportClients" disabled="@_busy">
+                @if (_activeExport == "clients") { <span class="spinner-border spinner-border-sm me-1"></span> }
+                <i class="bi bi-download me-1"></i>Pobierz CSV
+            </button>
+        </div>
+    </div>
+
+    <div class="col-12 col-md-6 col-xl-4">
+        <div class="export-card">
+            <div class="export-icon" style="color:var(--c-success)"><i class="bi bi-calendar-check-fill"></i></div>
+            <div class="export-body">
+                <h6>Sesje treningowe</h6>
+                <p>Wizyty z wybranego okresu — typ, status, klient, notatki.</p>
+                <div class="d-flex gap-2 mt-2">
+                    <div>
+                        <label class="form-label mb-0" style="font-size:.75rem">Od</label>
+                        <input type="date" class="form-control form-control-sm" @bind="_sessionsFrom" />
+                    </div>
+                    <div>
+                        <label class="form-label mb-0" style="font-size:.75rem">Do</label>
+                        <input type="date" class="form-control form-control-sm" @bind="_sessionsTo" />
+                    </div>
+                </div>
+            </div>
+            <button class="btn btn-sm btn-primary" @onclick="ExportSessions" disabled="@_busy">
+                @if (_activeExport == "sessions") { <span class="spinner-border spinner-border-sm me-1"></span> }
+                <i class="bi bi-download me-1"></i>Pobierz CSV
+            </button>
+        </div>
+    </div>
+
+    <div class="col-12 col-md-6 col-xl-4">
+        <div class="export-card">
+            <div class="export-icon" style="color:var(--c-warning)"><i class="bi bi-box-seam-fill"></i></div>
+            <div class="export-body">
+                <h6>Pakiety sesji</h6>
+                <p>Wszystkie pakiety — sesje, ceny, statusy, daty.</p>
+            </div>
+            <button class="btn btn-sm btn-primary" @onclick="ExportPackages" disabled="@_busy">
+                @if (_activeExport == "packages") { <span class="spinner-border spinner-border-sm me-1"></span> }
+                <i class="bi bi-download me-1"></i>Pobierz CSV
+            </button>
+        </div>
+    </div>
+
+    <div class="col-12 col-md-6 col-xl-4">
+        <div class="export-card">
+            <div class="export-icon" style="color:#8b5cf6"><i class="bi bi-rulers"></i></div>
+            <div class="export-body">
+                <h6>Pomiary ciała</h6>
+                <p>Waga, tkanka tłuszczowa, obwody — pełna historia.</p>
+            </div>
+            <button class="btn btn-sm btn-primary" @onclick="ExportMeasurements" disabled="@_busy">
+                @if (_activeExport == "measurements") { <span class="spinner-border spinner-border-sm me-1"></span> }
+                <i class="bi bi-download me-1"></i>Pobierz CSV
+            </button>
+        </div>
+    </div>
+
+    <div class="col-12 col-md-6 col-xl-4">
+        <div class="export-card">
+            <div class="export-icon" style="color:#10b981"><i class="bi bi-receipt"></i></div>
+            <div class="export-body">
+                <h6>Zamówienia online</h6>
+                <p>Zamówienia kursów i pakietów — kwoty, kupony, statusy.</p>
+                <div class="d-flex gap-2 mt-2">
+                    <div>
+                        <label class="form-label mb-0" style="font-size:.75rem">Od</label>
+                        <input type="date" class="form-control form-control-sm" @bind="_ordersFrom" />
+                    </div>
+                    <div>
+                        <label class="form-label mb-0" style="font-size:.75rem">Do</label>
+                        <input type="date" class="form-control form-control-sm" @bind="_ordersTo" />
+                    </div>
+                </div>
+            </div>
+            <button class="btn btn-sm btn-primary" @onclick="ExportOrders" disabled="@_busy">
+                @if (_activeExport == "orders") { <span class="spinner-border spinner-border-sm me-1"></span> }
+                <i class="bi bi-download me-1"></i>Pobierz CSV
+            </button>
+        </div>
+    </div>
+</div>
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger mt-3 small">@_error</div>
+}
+
+</FeatureGate>
+
+@code {
+    private bool _busy;
+    private string? _activeExport;
+    private string? _error;
+    private string? _trainerUserId;
+
+    private DateTime _sessionsFrom = new(DateTime.Now.Year, 1, 1);
+    private DateTime _sessionsTo = DateTime.Now.Date.AddDays(1);
+    private DateTime _ordersFrom = new(DateTime.Now.Year, 1, 1);
+    private DateTime _ordersTo = DateTime.Now.Date.AddDays(1);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _trainerUserId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+    }
+
+    private async Task ExportClients() => await RunExport("clients", "klienci",
+        () => ExportService.ExportClientsCsvAsync(_trainerUserId));
+
+    private async Task ExportSessions() => await RunExport("sessions", "sesje",
+        () => ExportService.ExportSessionsCsvAsync(_sessionsFrom, _sessionsTo, _trainerUserId));
+
+    private async Task ExportPackages() => await RunExport("packages", "pakiety",
+        () => ExportService.ExportPackagesCsvAsync(_trainerUserId));
+
+    private async Task ExportMeasurements() => await RunExport("measurements", "pomiary",
+        () => ExportService.ExportMeasurementsCsvAsync(_trainerUserId));
+
+    private async Task ExportOrders() => await RunExport("orders", "zamowienia",
+        () => ExportService.ExportOrdersCsvAsync(_ordersFrom, _ordersTo));
+
+    private async Task RunExport(string key, string filePrefix, Func<Task<byte[]>> generator)
+    {
+        _busy = true;
+        _activeExport = key;
+        _error = null;
+        try
+        {
+            var data = await generator();
+            var fileName = $"{filePrefix}_{DateTime.Now:yyyyMMdd_HHmm}.csv";
+            await JS.InvokeVoidAsync("PTExport.downloadCsv", fileName, data);
+        }
+        catch (Exception ex)
+        {
+            _error = $"Błąd eksportu: {ex.Message}";
+        }
+        finally
+        {
+            _busy = false;
+            _activeExport = null;
+        }
+    }
+}
+
+<style>
+    .export-card {
+        border: 1px solid var(--bs-border-color);
+        border-radius: .75rem;
+        padding: 1.25rem;
+        background: var(--bs-body-bg);
+        display: flex;
+        flex-direction: column;
+        gap: .75rem;
+        height: 100%;
+    }
+    .export-icon {
+        font-size: 1.5rem;
+        color: var(--c-primary);
+        line-height: 1;
+    }
+    .export-body h6 {
+        font-weight: 700;
+        margin-bottom: .25rem;
+    }
+    .export-body p {
+        font-size: .82rem;
+        color: var(--bs-secondary-color);
+        margin-bottom: 0;
+    }
+    .export-card .btn { align-self: flex-start; margin-top: auto; }
+</style>

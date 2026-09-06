@@ -1,9 +1,10 @@
 @page "/admin/push"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
 @inject IWebPushService PushService
+@inject EntitlementService Entitlements
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Powiadomienia push" />
 
@@ -17,7 +18,16 @@
     <div class="cal-body">
         <div class="cal-main" style="overflow-y:auto;padding:1.5rem">
 
-            @if (_loading)
+            @if (!Entitlements.IsAllowed("PushNotifications"))
+            {
+                <FeatureGate Flag="PushNotifications" RequiredPlan="Pro"
+                             Title="Powiadomienia push są dostępne w planie Pro">
+                    <Description>
+                        Wysyłaj klientom natychmiastowe powiadomienia w przeglądarce i aplikacji PWA. Odblokuj w planie <strong>Pro</strong> lub wyższym.
+                    </Description>
+                </FeatureGate>
+            }
+            else if (_loading)
             {
                 <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
             }

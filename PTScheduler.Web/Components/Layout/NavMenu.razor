@@ -1,8 +1,9 @@
 @inject PTScheduler.Application.Interfaces.IBrandingService BrandingService
+@inject PTScheduler.Application.Interfaces.IModuleSettingsService ModuleSettings
 @using PTScheduler.Domain.Constants
 
 <!-- Sidebar brand -->
-<a href="/" class="sidebar-brand">
+<a href="/app" class="sidebar-brand">
     @if (!string.IsNullOrEmpty(_logoPath))
     {
         <img src="@_logoPath" alt="@_companyName" />
@@ -18,7 +19,7 @@
 <!-- Navigation -->
 <div class="sidebar-nav">
     <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer},{Roles.Subordinate}")">
-        <NavLink class="sidebar-link" href="" Match="NavLinkMatch.All">
+        <NavLink class="sidebar-link" href="app" Match="NavLinkMatch.All">
             <i class="bi bi-house-fill"></i><span>Dashboard</span>
         </NavLink>
         <NavLink class="sidebar-link" href="calendar">
@@ -32,17 +33,16 @@
         </NavLink>
         <NavLink class="sidebar-link" href="stats">
             <i class="bi bi-bar-chart-line-fill"></i><span>Statystyki</span>
+            <PlanBadge Flag="AdvancedAnalytics" RequiredPlan="Pro" />
         </NavLink>
         <NavLink class="sidebar-link" href="finance">
             <i class="bi bi-currency-dollar"></i><span>Finanse</span>
-        </NavLink>
-        <NavLink class="sidebar-link" href="finance/hidden">
-            <i class="bi bi-eye-slash"></i><span>Ukryte finanse</span>
+            <PlanBadge Flag="FinancialReports" RequiredPlan="Starter" />
         </NavLink>
     </AuthorizeView>
 
     <AuthorizeView Roles="@Roles.Client">
-        <NavLink class="sidebar-link" href="" Match="NavLinkMatch.All">
+        <NavLink class="sidebar-link" href="app" Match="NavLinkMatch.All">
             <i class="bi bi-house-fill"></i><span>Dashboard</span>
         </NavLink>
         <NavLink class="sidebar-link" href="my">
@@ -56,9 +56,25 @@
         </NavLink>
         <NavLink class="sidebar-link" href="my/measurements">
             <i class="bi bi-rulers"></i><span>Moje pomiary</span>
+            <PlanBadge Flag="BodyMeasurements" />
+        </NavLink>
+        <NavLink class="sidebar-link" href="packages" Match="NavLinkMatch.All">
+            <i class="bi bi-bag-check"></i><span>Kup pakiet</span>
         </NavLink>
         <NavLink class="sidebar-link" href="my/packages">
             <i class="bi bi-box-seam"></i><span>Moje pakiety</span>
+        </NavLink>
+        @if (_coursesEnabled)
+        {
+            <NavLink class="sidebar-link" href="courses" Match="NavLinkMatch.All">
+                <i class="bi bi-collection-play-fill"></i><span>Kursy</span>
+            </NavLink>
+            <NavLink class="sidebar-link" href="my/courses">
+                <i class="bi bi-mortarboard-fill"></i><span>Moje kursy</span>
+            </NavLink>
+        }
+        <NavLink class="sidebar-link" href="my/orders">
+            <i class="bi bi-receipt"></i><span>Moje zamówienia</span>
         </NavLink>
         <NavLink class="sidebar-link" href="my/stats">
             <i class="bi bi-graph-up"></i><span>Moje statystyki</span>
@@ -72,6 +88,7 @@
         </NavLink>
         <NavLink class="sidebar-link" href="trainer/series">
             <i class="bi bi-repeat"></i><span>Serie wizyt</span>
+            <PlanBadge Flag="RecurringSessions" />
         </NavLink>
         <NavLink class="sidebar-link" href="trainer/contacts">
             <i class="bi bi-people-fill"></i><span>Pary klientów</span>
@@ -81,10 +98,10 @@
         </NavLink>
     </AuthorizeView>
 
-    <AuthorizeView Roles="@Roles.Admin">
+    <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer},{Roles.Subordinate}")">
         <div class="sidebar-divider"></div>
-        <NavLink class="sidebar-link" href="admin/users">
-            <i class="bi bi-shield-fill-check"></i><span>Administracja</span>
+        <NavLink class="sidebar-link" href="admin" Match="NavLinkMatch.All">
+            <i class="bi bi-shield-fill-check"></i><span>Zarządzanie</span>
         </NavLink>
     </AuthorizeView>
 </div>
@@ -115,6 +132,7 @@
 @code {
     private string? _logoPath;
     private string _companyName = "PTScheduler";
+    private bool _coursesEnabled = true;
 
     protected override async Task OnInitializedAsync()
     {
@@ -125,6 +143,9 @@
             _companyName = branding.CompanyName ?? "PTScheduler";
         }
         catch { } // Best-effort: fall back to defaults if branding unavailable
+
+        try { _coursesEnabled = (await ModuleSettings.GetAsync()).CoursesEnabled; }
+        catch { }
     }
 
 }

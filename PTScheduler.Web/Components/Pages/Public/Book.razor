@@ -5,7 +5,7 @@
 @using PTScheduler.Application.Interfaces
 @inject IPublicBookingService BookingService
 @inject NavigationManager Nav
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <PageTitle>Umów sesję wstępną</PageTitle>
 
@@ -88,25 +88,42 @@
             }
             else
             {
-                <div class="day-list">
-                    @foreach (var day in _days)
-                    {
-                        <div class="day-block">
-                            <div class="day-header">@day.DayLabel</div>
-                            <div class="slot-grid">
-                                @foreach (var slot in day.Slots)
-                                {
-                                    var isSelected = _selectedSlot == slot.Start;
-                                    <button type="button"
-                                            class="slot-btn @(isSelected ? "slot-selected" : "")"
-                                            @onclick="() => SelectSlot(slot.Start)">
-                                        @slot.Label
-                                    </button>
-                                }
-                            </div>
-                        </div>
-                    }
+                var currentDay = _days[_dayIndex];
+                <div class="slot-day-nav">
+                    <button class="slot-nav-btn" @onclick="PublicPrevDay" disabled="@(_dayIndex <= 0)">
+                        <i class="bi bi-chevron-left"></i>
+                    </button>
+                    <div class="slot-nav-center">
+                        <div class="slot-nav-weekday">@currentDay.Date.ToString("dddd", _pl)</div>
+                        <div class="slot-nav-full">@currentDay.Date.ToString("d MMMM yyyy", _pl)</div>
+                    </div>
+                    <button class="slot-nav-btn" @onclick="PublicNextDay" disabled="@(_dayIndex >= _days.Count - 1)">
+                        <i class="bi bi-chevron-right"></i>
+                    </button>
                 </div>
+
+                @if (currentDay.Slots.Count > 0)
+                {
+                    <div class="slot-tile-grid mt-3">
+                        @foreach (var slot in currentDay.Slots)
+                        {
+                            var isSelected = _selectedSlot == slot.Start;
+                            var slotEnd = slot.Start.AddMinutes(_offer.DurationMinutes);
+                            <button type="button" class="slot-tile @(isSelected ? "slot-tile-active" : "")"
+                                    @onclick="() => SelectSlot(slot.Start)">
+                                <div class="slot-tile-time">@slot.Start.ToString("HH:mm")</div>
+                                <div class="slot-tile-end">— @slotEnd.ToString("HH:mm")</div>
+                            </button>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="slot-empty mt-3">
+                        <i class="bi bi-calendar-x"></i>
+                        Brak wolnych terminów w tym dniu
+                    </div>
+                }
             }
 
             @if (_selectedSlot.HasValue)
@@ -229,6 +246,7 @@
 
     private PublicIntroOfferDto? _offer;
     private List<BookingDayDto>? _days;
+    private int _dayIndex;
     private DateTime? _selectedSlot;
 
     private CreatePublicBookingDto _form = new();
@@ -251,6 +269,8 @@
     {
         if (_offer is null || !_offer.IsAvailable) return;
         _step = Step.Slot;
+        _dayIndex = 0;
+        _selectedSlot = null;
         if (_days is null)
         {
             _loadingSlots = true;
@@ -268,6 +288,16 @@
     private void SelectSlot(DateTime start)
     {
         _selectedSlot = start;
+    }
+
+    private void PublicPrevDay()
+    {
+        if (_dayIndex > 0) { _dayIndex--; _selectedSlot = null; }
+    }
+
+    private void PublicNextDay()
+    {
+        if (_days is not null && _dayIndex < _days.Count - 1) { _dayIndex++; _selectedSlot = null; }
     }
 
     private void GoToForm()

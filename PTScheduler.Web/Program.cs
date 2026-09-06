@@ -2,6 +2,7 @@ using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 using PTScheduler.Application;
 using PTScheduler.Application.DTOs;
 using PTScheduler.Application.Interfaces;
@@ -12,10 +13,29 @@ using PTScheduler.Web.Components;
 using PTScheduler.Web.Components.Account;
 using PTScheduler.Web.Services;
 
-// Npgsql 6+ requires DateTime parameters for timestamptz columns to be Kind=Utc by default.
-// This app stores LOCAL time (DateTime.Now is the convention; CreatedAt/StartTime/etc).
-// The legacy switch lets Npgsql accept any DateTime kind, treating Unspecified/Local as local time.
-// Must be set BEFORE the data source is built, hence the very top of Program.cs.
+// ─── Konwencja czasu ─────────────────────────────────────────────────────────
+// Pełny opis: PTScheduler.Application/Interfaces/IAppClock.cs
+//
+// W aplikacji współistnieją dwie kategorie czasu i NIE WOLNO ich porównywać:
+//
+//   1. INSTANT — moment w czasie. Znaczniki: CreatedAt, PaidAt, Timestamp
+//      w audycie. Kolumna timestamptz, Kind=Utc, źródło: IAppClock.UtcNow.
+//
+//   2. ZEGAR ŚCIENNY — godzina widziana przez człowieka. Session.StartTime,
+//      terminy ważności. Kind=Unspecified, źródło: IAppClock.LocalNow.
+//      Session.StartTime ma już kolumnę timestamp without time zone.
+//
+// Nigdy nie używaj DateTime.Now w warstwach Infrastructure/Application —
+// zwraca czas maszyny, który w kontenerze jest UTC i nie ma związku ze
+// strefą studia. Właściwe jest wstrzyknięcie IAppClock.
+//
+// Przełącznik poniżej jest ŚWIADOMYM DŁUGIEM. Pozostałe pola zegara ściennego
+// (Coupon.ValidFrom/ValidUntil, IntroSessionConfig.PromoValidUntil,
+// SessionPackage.ExpiresAt, CourseEnrollment.StartsAt/ExpiresAt) nadal mają
+// kolumny timestamptz, a przychodzą z date-pickerów jako Kind=Unspecified.
+// Bez tego przełącznika Npgsql odrzuciłby ich zapis.
+// Usunąć dopiero po przeniesieniu ich na timestamp without time zone.
+// Musi być ustawiony PRZED zbudowaniem data source — stąd sam początek pliku.
 AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 
 var builder = WebApplication.CreateBuilder(args);
@@ -24,6 +44,21 @@ builder.Configuration.AddJsonFile("connections.json", optional: true, reloadOnCh
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+
+// Raise the Blazor Server circuit's SignalR receive limit so file uploads
+// (logo, favicon, course covers) aren't truncated — the 32 KB default cut
+// larger images in half.
+builder.Services.Configure<Microsoft.AspNetCore.SignalR.HubOptions>(options =>
+{
+    options.MaximumReceiveMessageSize = 10 * 1024 * 1024; // 10 MB
+});
+
+// Surface real error details on the circuit so failures show a message
+// instead of a silent "circuit terminated" during diagnosis.
+builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions>(options =>
+{
+    options.DetailedErrors = true;
+});
 
 builder.Services.AddCascadingAuthenticationState();
 builder.Services.AddScoped<IdentityRedirectManager>();
@@ -59,6 +94,7 @@ builder.Services.AddScoped<IEmailSender<ApplicationUser>, PTScheduler.Web.Compon
 builder.Services.AddSingleton<IWebRootPathProvider, WebRootPathProvider>();
 builder.Services.AddScoped<PTScheduler.Web.Services.HintStateService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.ToastService>();
+builder.Services.AddSingleton<PTScheduler.Web.Services.EntitlementService>();
 builder.Services.AddHostedService<SessionReminderService>();
 
 // Tracks whether DB is reachable. Mutated at startup and via /db-error/retry.
@@ -158,6 +194,7 @@ app.MapGet("/reports/client/{clientId:int}/monthly", async (
     int year,
     int month,
     PTScheduler.Application.Interfaces.IClientReportService reportService,
+    PTScheduler.Web.Services.EntitlementService entitlements,
     HttpContext ctx) =>
 {
     var u = ctx.User;
@@ -165,6 +202,9 @@ app.MapGet("/reports/client/{clientId:int}/monthly", async (
        || u.IsInRole(PTScheduler.Domain.Constants.Roles.Trainer)
        || u.IsInRole(PTScheduler.Domain.Constants.Roles.Subordinate)))
         return Results.Forbid();
+
+    if (!entitlements.IsAllowed("ClientReports"))
+        return Results.StatusCode(403);
 
     if (year < 2000 || year > 2100 || month < 1 || month > 12)
         return Results.BadRequest("Nieprawidłowy rok lub miesiąc.");
@@ -218,7 +258,7 @@ app.MapGet("/manifest.webmanifest", async (PTScheduler.Application.Interfaces.IB
         short_name = short_,
         description = "System rezerwacji dla trenera personalnego",
         lang    = "pl",
-        start_url = "/",
+        start_url = "/app",
         scope   = "/",
         display = "standalone",
         background_color = color,
@@ -254,6 +294,194 @@ app.MapGet("/health", (StartupHealth h) => Results.Json(new
     database = h.DatabaseAvailable,
     timestamp = DateTime.Now.ToString("o")
 }));
+
+// Internal endpoint for the portal to push a new entitlements JSON without
+// restarting the container. Protected by a shared secret env var
+// TENANT_INTERNAL_SECRET — the portal sends it in the X-Internal-Secret header.
+app.MapPost("/internal/entitlements/reload",
+    async (HttpContext ctx, PTScheduler.Web.Services.EntitlementService svc) =>
+{
+    var expected = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+    if (string.IsNullOrEmpty(expected)) return Results.NotFound();
+    if (ctx.Request.Headers["X-Internal-Secret"].ToString() != expected)
+        return Results.Unauthorized();
+
+    using var reader = new StreamReader(ctx.Request.Body);
+    var json = await reader.ReadToEndAsync();
+    svc.ReplaceFromJson(json);
+    return Results.Ok(new { plan = svc.Current.Name });
+});
+
+app.MapGet("/internal/metrics",
+    async (HttpContext ctx, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+{
+    var expected = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+    if (string.IsNullOrEmpty(expected)) return Results.NotFound();
+    if (ctx.Request.Headers["X-Internal-Secret"].ToString() != expected)
+        return Results.Unauthorized();
+
+    await using var db = dbFactory.CreateDbContext();
+    var clientsCount = await db.Clients.CountAsync();
+    var activeClients = await db.Clients.CountAsync(c => c.Status == PTScheduler.Domain.Enums.ClientStatus.Active);
+    var sessionsTotal = await db.Sessions.CountAsync();
+    var sessionsThisMonth = await db.Sessions.CountAsync(s =>
+        s.StartTime >= new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1));
+    var packagesActive = await db.SessionPackages.CountAsync(p =>
+        p.Status == PTScheduler.Domain.Enums.PackageStatus.Active);
+    var ordersTotal = await db.Orders.CountAsync();
+    var revenue = await db.Orders
+        .Where(o => o.Status == PTScheduler.Domain.Enums.OrderStatus.Paid)
+        .SumAsync(o => (decimal?)o.Amount) ?? 0;
+
+    return Results.Json(new
+    {
+        clients = clientsCount,
+        activeClients,
+        sessionsTotal,
+        sessionsThisMonth,
+        packagesActive,
+        ordersTotal,
+        revenue,
+        timestamp = DateTime.UtcNow.ToString("o")
+    });
+});
+
+app.MapGet("/internal/admin-info",
+    async (HttpContext ctx, UserManager<ApplicationUser> userManager) =>
+{
+    var expected = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+    if (string.IsNullOrEmpty(expected)) return Results.NotFound();
+    if (ctx.Request.Headers["X-Internal-Secret"].ToString() != expected)
+        return Results.Unauthorized();
+
+    var admins = await userManager.GetUsersInRoleAsync(PTScheduler.Domain.Constants.Roles.Admin);
+    var admin = admins.FirstOrDefault();
+    if (admin is null) return Results.Json(new { found = false });
+
+    return Results.Json(new
+    {
+        found = true,
+        email = admin.Email,
+        firstName = admin.FirstName,
+        lastName = admin.LastName,
+        emailConfirmed = admin.EmailConfirmed,
+        lockoutEnd = admin.LockoutEnd?.ToString("o")
+    });
+});
+
+app.MapPost("/internal/admin-reset",
+    async (HttpContext ctx, UserManager<ApplicationUser> userManager) =>
+{
+    var expected = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+    if (string.IsNullOrEmpty(expected)) return Results.NotFound();
+    if (ctx.Request.Headers["X-Internal-Secret"].ToString() != expected)
+        return Results.Unauthorized();
+
+    using var reader = new StreamReader(ctx.Request.Body);
+    var body = await reader.ReadToEndAsync();
+    using var doc = System.Text.Json.JsonDocument.Parse(body);
+    var root = doc.RootElement;
+
+    var newPassword = root.TryGetProperty("password", out var p) ? p.GetString() : null;
+    var newEmail = root.TryGetProperty("email", out var e) ? e.GetString() : null;
+
+    var admins = await userManager.GetUsersInRoleAsync(PTScheduler.Domain.Constants.Roles.Admin);
+    var admin = admins.FirstOrDefault();
+    if (admin is null) return Results.Json(new { success = false, error = "Brak konta admin" });
+
+    if (!string.IsNullOrWhiteSpace(newEmail) && newEmail != admin.Email)
+    {
+        admin.Email = newEmail;
+        admin.NormalizedEmail = newEmail.ToUpperInvariant();
+        admin.UserName = newEmail;
+        admin.NormalizedUserName = newEmail.ToUpperInvariant();
+        var emailResult = await userManager.UpdateAsync(admin);
+        if (!emailResult.Succeeded)
+            return Results.Json(new { success = false, error = string.Join(", ", emailResult.Errors.Select(x => x.Description)) });
+    }
+
+    if (!string.IsNullOrWhiteSpace(newPassword))
+    {
+        var token = await userManager.GeneratePasswordResetTokenAsync(admin);
+        var passResult = await userManager.ResetPasswordAsync(admin, token, newPassword);
+        if (!passResult.Succeeded)
+            return Results.Json(new { success = false, error = string.Join(", ", passResult.Errors.Select(x => x.Description)) });
+    }
+
+    if (admin.LockoutEnd is not null)
+    {
+        await userManager.SetLockoutEndDateAsync(admin, null);
+        await userManager.ResetAccessFailedCountAsync(admin);
+    }
+
+    return Results.Json(new { success = true, email = admin.Email });
+});
+
+app.MapGet("/internal/last-activity",
+    async (HttpContext ctx, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+{
+    var expected = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+    if (string.IsNullOrEmpty(expected)) return Results.NotFound();
+    if (ctx.Request.Headers["X-Internal-Secret"].ToString() != expected)
+        return Results.Unauthorized();
+
+    await using var db = dbFactory.CreateDbContext();
+    var lastSession = await db.Sessions
+        .OrderByDescending(s => s.CreatedAt)
+        .Select(s => s.CreatedAt)
+        .FirstOrDefaultAsync();
+    var lastClient = await db.Clients
+        .OrderByDescending(c => c.CreatedAt)
+        .Select(c => c.CreatedAt)
+        .FirstOrDefaultAsync();
+    var lastOrder = await db.Orders
+        .OrderByDescending(o => o.CreatedAt)
+        .Select(o => o.CreatedAt)
+        .FirstOrDefaultAsync();
+
+    var dates = new[] { lastSession, lastClient, lastOrder }
+        .Where(d => d != default)
+        .ToList();
+
+    return Results.Json(new
+    {
+        lastActivity = dates.Count > 0 ? dates.Max().ToString("o") : null as string,
+        lastSession = lastSession != default ? lastSession.ToString("o") : null,
+        lastClient = lastClient != default ? lastClient.ToString("o") : null,
+        lastOrder = lastOrder != default ? lastOrder.ToString("o") : null,
+        timestamp = DateTime.UtcNow.ToString("o")
+    });
+});
+
+// Google Meet OAuth callback — exchanges the authorization code for a refresh token.
+app.MapGet("/api/google-meet/callback", async (HttpContext ctx, PTScheduler.Application.Interfaces.IGoogleMeetService meet) =>
+{
+    var code = ctx.Request.Query["code"].ToString();
+    if (string.IsNullOrEmpty(code))
+        return Results.BadRequest("Brak kodu autoryzacji.");
+
+    var scheme = ctx.Request.Scheme;
+    var host = ctx.Request.Host.ToString();
+    var redirectUri = $"{scheme}://{host}/api/google-meet/callback";
+
+    var (ok, error) = await meet.ExchangeCodeAsync(code, redirectUri);
+    var html = ok
+        ? "<html><body><h2>Połączono z Google Meet!</h2><p>Możesz zamknąć tę kartę i wrócić do panelu administracyjnego.</p></body></html>"
+        : $"<html><body><h2>Błąd</h2><p>{error}</p></body></html>";
+    return Results.Content(html, "text/html");
+});
+
+// Gateway notify (webhook): verifies the payment and fulfils the order.
+// Route carries the provider key, e.g. /payments/payu/notify, /payments/p24/notify.
+app.MapPost("/payments/{provider}/notify",
+    async (string provider, HttpContext ctx, PTScheduler.Application.Interfaces.IPaymentService payments) =>
+{
+    using var reader = new StreamReader(ctx.Request.Body);
+    var body = await reader.ReadToEndAsync();
+    var headers = ctx.Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString(), StringComparer.OrdinalIgnoreCase);
+    var ok = await payments.HandleNotifyAsync(provider, body, headers);
+    return ok ? Results.Ok() : Results.BadRequest();
+});
 
 app.Run();
 

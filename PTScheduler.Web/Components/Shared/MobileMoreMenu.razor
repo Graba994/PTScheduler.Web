@@ -1,4 +1,4 @@
-@rendermode InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 @inject IJSRuntime JS
 @inject AuthenticationStateProvider AuthState
 @using Microsoft.AspNetCore.Components.Authorization
@@ -26,6 +26,12 @@
                 <div class="fw-semibold text-truncate">@_name</div>
                 <div class="text-muted text-truncate" style="font-size:.75rem">@_email</div>
             </div>
+            @if (_canInstallPwa)
+            {
+                <button class="mobile-sheet-theme-btn" @onclick="InstallPwaAsync" title="Zainstaluj aplikację">
+                    <i class="bi bi-download"></i>
+                </button>
+            }
             <button class="mobile-sheet-theme-btn" @onclick="ToggleDarkAsync" title="@(_dark ? "Tryb jasny" : "Tryb ciemny")">
                 <i class="bi @(_dark ? "bi-sun-fill" : "bi-moon-stars-fill")"></i>
             </button>
@@ -93,6 +99,11 @@
                 <div class="mobile-sheet-section">
                     <div class="mobile-sheet-label">Moje</div>
                     <div class="mobile-sheet-grid">
+                        <a href="/my/courses" class="mobile-sheet-tile" @onclick="CloseSheet"
+                           style="background:var(--c-primary-light);color:var(--c-primary);grid-column:1 / -1">
+                            <i class="bi bi-mortarboard-fill"></i>
+                            <span>Moje kursy</span>
+                        </a>
                         <a href="/my/profile" class="mobile-sheet-tile" @onclick="CloseSheet">
                             <i class="bi bi-person-circle"></i>
                             <span>Profil</span>
@@ -143,6 +154,7 @@
     private bool _ready;
     private bool _sheetOpen;
     private bool _dark;
+    private bool _canInstallPwa;
     private string _initials = "";
     private string _name = "";
     private string _email = "";
@@ -159,7 +171,22 @@
             _initials = parts.Length >= 2
                 ? $"{parts[0][0]}{parts[^1][0]}".ToUpper()
                 : _name.Length > 0 ? _name[0].ToString().ToUpper() : "?";
-            try { _dark = await JS.InvokeAsync<bool>("PTTheme.isDark"); } catch { } // JS interop may fail during prerender
+            try { _dark = await JS.InvokeAsync<bool>("PTTheme.isDark"); } catch { }
+            try
+            {
+                var standalone = await JS.InvokeAsync<bool>("eval",
+                    "window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true");
+                if (!standalone)
+                {
+                    _canInstallPwa = await JS.InvokeAsync<bool>("eval", "!!window._installPrompt");
+                    if (!_canInstallPwa)
+                    {
+                        _canInstallPwa = await JS.InvokeAsync<bool>("eval",
+                            "/iphone|ipad|ipod/i.test(navigator.userAgent.toLowerCase())");
+                    }
+                }
+            }
+            catch { }
             _ready = true;
             StateHasChanged();
         }
@@ -170,6 +197,25 @@
 
     private async Task ToggleDarkAsync()
     {
-        try { _dark = await JS.InvokeAsync<bool>("PTTheme.toggle"); } catch { } // JS interop may fail during prerender
+        try { _dark = await JS.InvokeAsync<bool>("PTTheme.toggle"); } catch { }
+    }
+
+    private async Task InstallPwaAsync()
+    {
+        try
+        {
+            var hasPrompt = await JS.InvokeAsync<bool>("eval", "!!window._installPrompt");
+            if (hasPrompt)
+            {
+                var accepted = await JS.InvokeAsync<bool>("triggerPwaInstall");
+                if (accepted) _canInstallPwa = false;
+            }
+            else
+            {
+                await JS.InvokeVoidAsync("eval",
+                    "alert('Nacisnij przycisk Udostepnij w Safari, a nastepnie wybierz \\\"Dodaj do ekranu glownego\\\".')");
+            }
+        }
+        catch { }
     }
 }

@@ -1,13 +1,29 @@
-﻿@page "/admin/audit-logs"
+@page "/admin/audit-logs"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
 @inject IAuditLogService AuditLogService
+@inject EntitlementService Entitlements
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Enums
 @using System.Globalization
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Logi systemowe" />
 
+@if (!Entitlements.IsAllowed("AuditLog"))
+{
+    <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
+        <h4 class="mb-0 fw-bold"><i class="bi bi-journal-text me-2"></i>Logi systemowe</h4>
+    </div>
+    <FeatureGate Flag="AuditLog" RequiredPlan="Business"
+                 Title="Audit log jest dostępny w planie Business">
+        <Description>
+            Pełny dziennik akcji w aplikacji (kto, co, kiedy) — logowania, zmiany, usunięcia. Odblokuj w planie <strong>Business</strong>.
+        </Description>
+    </FeatureGate>
+}
+else
+{
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
     <h4 class="mb-0 fw-bold">
         <i class="bi bi-journal-text me-2"></i>Logi systemowe
@@ -24,10 +40,18 @@
            value="@_search"
            @oninput="OnSearchInput" />
     <select class="form-select form-select-sm w-auto" @bind="_entityTypeFilter" @bind:after="LoadLogsAsync">
-        <option value="">Wszystkie typy</option>
-        <option value="Session">Sesja</option>
-        <option value="Client">Klient</option>
-        <option value="User">Użytkownik</option>
+        <option value="">Wszystkie funkcje</option>
+        @foreach (var t in _entityTypes)
+        {
+            <option value="@t">@EntityTypeLabel(t)</option>
+        }
+    </select>
+    <select class="form-select form-select-sm w-auto" @bind="_severityFilter" @bind:after="LoadLogsAsync">
+        <option value="">Wszystkie poziomy</option>
+        <option value="Info">Informacja</option>
+        <option value="Warning">Ostrzeżenie</option>
+        <option value="Error">Błąd</option>
+        <option value="Critical">Krytyczny</option>
     </select>
 </div>
 
@@ -37,7 +61,7 @@
         <span class="spinner-border text-primary"></span>
     </div>
 }
-else if (_logs.Count == 0)
+else if (_sortedLogs.Count == 0)
 {
     <div class="text-muted py-4 text-center small">Brak wpisów spełniających kryteria.</div>
 }
@@ -47,17 +71,18 @@ else
         <table class="table table-sm table-hover align-middle">
             <thead class="table-light">
                 <tr>
-                    <th style="width:160px">Czas</th>
-                    <th>Użytkownik</th>
-                    <th style="width:100px">Rola</th>
-                    <th style="width:160px">Akcja</th>
-                    <th style="width:80px">Typ</th>
+                    <th style="width:160px;cursor:pointer" @onclick='() => ToggleSort("Timestamp")'>Czas @SortIcon("Timestamp")</th>
+                    <th style="cursor:pointer" @onclick='() => ToggleSort("UserEmail")'>Użytkownik @SortIcon("UserEmail")</th>
+                    <th style="width:100px;cursor:pointer" @onclick='() => ToggleSort("UserRole")'>Rola @SortIcon("UserRole")</th>
+                    <th style="width:100px;cursor:pointer" @onclick='() => ToggleSort("Severity")'>Poziom @SortIcon("Severity")</th>
+                    <th style="width:170px;cursor:pointer" @onclick='() => ToggleSort("Action")'>Akcja @SortIcon("Action")</th>
+                    <th style="width:110px;cursor:pointer" @onclick='() => ToggleSort("EntityType")'>Funkcja @SortIcon("EntityType")</th>
                     <th style="width:50px">ID</th>
                     <th>Szczegóły</th>
                 </tr>
             </thead>
             <tbody>
-                @foreach (var log in _logs)
+                @foreach (var log in _sortedLogs)
                 {
                     <tr>
                         <td class="text-muted small text-nowrap">
@@ -65,8 +90,9 @@ else
                         </td>
                         <td class="small">@log.UserEmail</td>
                         <td><span class="badge @RoleBadge(log.UserRole)">@log.UserRole</span></td>
+                        <td><span class="badge @SeverityBadge(log.Severity)">@SeverityLabel(log.Severity)</span></td>
                         <td><span class="badge @ActionBadge(log.Action)">@ActionLabel(log.Action)</span></td>
-                        <td class="small text-muted">@log.EntityType</td>
+                        <td class="small text-muted">@EntityTypeLabel(log.EntityType)</td>
                         <td class="small text-muted">@log.EntityId</td>
                         <td class="small text-muted" style="max-width:280px;word-break:break-word">@log.Details</td>
                     </tr>
@@ -74,24 +100,36 @@ else
             </tbody>
         </table>
     </div>
-    <div class="text-muted small mt-1">Wyświetlono @_logs.Count wpisów (max 500)</div>
+    <div class="text-muted small mt-1">Wyświetlono @_sortedLogs.Count wpisów (max 500)</div>
+}
 }
 
 @code {
     private static readonly CultureInfo _pl = new("pl-PL");
     private List<AuditLogDto> _logs = [];
+    private List<AuditLogDto> _sortedLogs = [];
+    private List<string> _entityTypes = [];
     private bool _loading = true;
     private string _search = string.Empty;
     private string _entityTypeFilter = string.Empty;
+    private string _severityFilter = string.Empty;
+    private string _sortColumn = "Timestamp";
+    private bool _sortDescending = true;
 
-    protected override async Task OnInitializedAsync() => await LoadLogsAsync();
+    protected override async Task OnInitializedAsync()
+    {
+        _entityTypes = await AuditLogService.GetDistinctEntityTypesAsync();
+        await LoadLogsAsync();
+    }
 
     private async Task LoadLogsAsync()
     {
         _loading = true;
         try
         {
-            _logs = await AuditLogService.GetLogsAsync(500, _search, _entityTypeFilter);
+            AuditSeverity? severity = Enum.TryParse<AuditSeverity>(_severityFilter, out var s) ? s : null;
+            _logs = await AuditLogService.GetLogsAsync(500, _search, _entityTypeFilter, severity);
+            ApplySort();
         }
         finally
         {
@@ -105,33 +143,107 @@ else
         await LoadLogsAsync();
     }
 
+    private void ToggleSort(string column)
+    {
+        if (_sortColumn == column) _sortDescending = !_sortDescending;
+        else { _sortColumn = column; _sortDescending = true; }
+        ApplySort();
+    }
+
+    private void ApplySort()
+    {
+        Func<AuditLogDto, object> keySelector = _sortColumn switch
+        {
+            "UserEmail"  => l => l.UserEmail,
+            "UserRole"   => l => l.UserRole,
+            "Severity"   => l => l.Severity,
+            "Action"     => l => l.Action,
+            "EntityType" => l => l.EntityType,
+            _            => l => l.Timestamp
+        };
+        _sortedLogs = _sortDescending
+            ? _logs.OrderByDescending(keySelector).ToList()
+            : _logs.OrderBy(keySelector).ToList();
+    }
+
+    private string SortIcon(string column)
+    {
+        if (_sortColumn != column) return "";
+        return _sortDescending ? "▼" : "▲";
+    }
+
     private static string RoleBadge(string role) => role switch
     {
         "Admin"      => "bg-danger",
         "Trainer"    => "bg-primary",
         "Subordinate"=> "bg-info text-dark",
         "Client"     => "bg-secondary",
+        "System"     => "bg-dark",
         _            => "bg-light text-dark border"
+    };
+
+    private static string SeverityBadge(AuditSeverity s) => s switch
+    {
+        AuditSeverity.Info     => "bg-secondary",
+        AuditSeverity.Warning  => "bg-warning text-dark",
+        AuditSeverity.Error    => "bg-danger",
+        AuditSeverity.Critical => "bg-dark",
+        _                      => "bg-secondary"
+    };
+
+    private static string SeverityLabel(AuditSeverity s) => s switch
+    {
+        AuditSeverity.Info     => "Informacja",
+        AuditSeverity.Warning  => "Ostrzeżenie",
+        AuditSeverity.Error    => "Błąd",
+        AuditSeverity.Critical => "Krytyczny",
+        _                      => s.ToString()
+    };
+
+    private static string EntityTypeLabel(string type) => type switch
+    {
+        "Session"                 => "Sesje",
+        "SessionSeries"           => "Serie wizyt",
+        "SessionPackage"          => "Pakiety",
+        "Client"                  => "Klienci",
+        "User"                    => "Użytkownicy",
+        "Order"                   => "Zamówienia",
+        "BodyMeasurement"         => "Pomiary",
+        "TrainerConfig"           => "Konfiguracja trenera",
+        "TrainerAvailability"     => "Dostępność",
+        "NotificationPreferences"=> "Powiadomienia",
+        _                         => type
     };
 
     private static string ActionBadge(string action) => action switch
     {
-        "SessionCompleted"   => "bg-success",
-        "SessionCancelled"   => "bg-danger",
-        "SessionNoShow"      => "bg-warning text-dark",
-        "SessionRescheduled" => "bg-primary",
-        "SessionRestored"    => "bg-info text-dark",
-        _                    => "bg-secondary"
+        "SessionCompleted"          => "bg-success",
+        "SessionCancelled"          => "bg-danger",
+        "SessionNoShow"             => "bg-warning text-dark",
+        "SessionRescheduled"        => "bg-primary",
+        "SessionRestored"           => "bg-info text-dark",
+        "OrderPaid"                 => "bg-success",
+        "PackagesExpired"           => "bg-warning text-dark",
+        "SmsReminderQuotaExceeded"  => "bg-warning text-dark",
+        "SmsReminderFailed"         => "bg-danger",
+        "ReminderCycleFailed"       => "bg-danger",
+        "CouponRedemptionFailed"    => "bg-danger",
+        _                           => "bg-secondary"
     };
 
     private static string ActionLabel(string action) => action switch
     {
-        "SessionCompleted"   => "Ukończono",
-        "SessionCancelled"   => "Anulowano",
-        "SessionNoShow"      => "Nieobecność",
-        "SessionRescheduled" => "Przeplanowano",
-        "SessionRestored"    => "Przywrócono",
-        _                    => action
+        "SessionCompleted"          => "Ukończono",
+        "SessionCancelled"          => "Anulowano",
+        "SessionNoShow"             => "Nieobecność",
+        "SessionRescheduled"        => "Przeplanowano",
+        "SessionRestored"           => "Przywrócono",
+        "OrderPaid"                 => "Zamówienie opłacone",
+        "PackagesExpired"           => "Pakiety wygasły",
+        "SmsReminderQuotaExceeded"  => "Limit SMS wyczerpany",
+        "SmsReminderFailed"         => "Błąd wysyłki SMS",
+        "ReminderCycleFailed"       => "Błąd przypomnienia",
+        "CouponRedemptionFailed"    => "Błąd rozliczenia kuponu",
+        _                           => action
     };
 }
-

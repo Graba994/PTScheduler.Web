@@ -1,0 +1,1648 @@
+@page "/panel/tenants/{Id:int}"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject TenantService TenantSvc
+@inject DockerService DockerSvc
+@inject StripeService StripeSvc
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject NpmService NpmSvc
+@inject NavigationManager Nav
+@inject IConfiguration Config
+@inject EmailService EmailSvc
+@rendermode InteractiveServer
+
+<PageTitle>@(_tenant?.CompanyName ?? "Trener") — PTScheduler Portal</PageTitle>
+
+@if (_tenant is null)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <div class="d-flex align-items-center gap-2 mb-4">
+        <a href="/panel/tenants" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i></a>
+        <h4 class="fw-bold mb-0">@_tenant.CompanyName</h4>
+        <span class="badge @StatusBadge(_tenant.Status) ms-2">@StatusLabel(_tenant.Status)</span>
+    </div>
+
+    @if (_actionMessage is not null)
+    {
+        <div class="alert @(_actionIsError ? "alert-danger" : "alert-success") alert-dismissible py-2 small">
+            @_actionMessage
+            <button type="button" class="btn-close btn-close-sm" @onclick="() => _actionMessage = null"></button>
+        </div>
+    }
+
+    @if (_tenant.Status == TenantStatus.Pending)
+    {
+        <div class="card border-warning border-2 shadow-sm mb-4">
+            <div class="card-header bg-warning-subtle d-flex align-items-center gap-2">
+                <i class="bi bi-person-check fs-5 text-warning"></i>
+                <h5 class="fw-bold mb-0">Akceptacja trenera</h5>
+            </div>
+            <div class="card-body">
+                <div class="row g-3 mb-3">
+                    <div class="col-md-6">
+                        <dl class="row mb-0 small">
+                            <dt class="col-5 text-muted">Imie i nazwisko</dt>
+                            <dd class="col-7 fw-semibold">@_tenant.OwnerName</dd>
+                            <dt class="col-5 text-muted">Email</dt>
+                            <dd class="col-7"><a href="mailto:@_tenant.OwnerEmail">@_tenant.OwnerEmail</a></dd>
+                            <dt class="col-5 text-muted">Telefon</dt>
+                            <dd class="col-7">@(_tenant.Phone ?? "—")</dd>
+                            <dt class="col-5 text-muted">Firma</dt>
+                            <dd class="col-7">@_tenant.CompanyName</dd>
+                            <dt class="col-5 text-muted">Plan</dt>
+                            <dd class="col-7"><span class="badge bg-primary-subtle text-primary-emphasis">@(_tenant.Plan?.Name ?? _tenant.PlanId)</span></dd>
+                            <dt class="col-5 text-muted">Setup</dt>
+                            <dd class="col-7">@(_tenant.SetupMode == "admin" ? "Przez nasz zespol" : "Samodzielna konfiguracja")</dd>
+                            <dt class="col-5 text-muted">Rejestracja</dt>
+                            <dd class="col-7">@_tenant.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</dd>
+                        </dl>
+                    </div>
+                    <div class="col-md-6">
+                        <h6 class="fw-bold mb-2 small"><i class="bi bi-tags me-1 text-primary"></i>Zmien plan (opcjonalnie)</h6>
+                        <select class="form-select form-select-sm mb-3" @bind="_selectedPlanId">
+                            @foreach (var p in _availablePlans)
+                            {
+                                <option value="@p.Id">@p.Name — @p.MonthlyPrice.ToString("0") zl</option>
+                            }
+                        </select>
+
+                        <h6 class="fw-bold mb-2 small"><i class="bi bi-sticky me-1"></i>Notatka admina (opcjonalnie)</h6>
+                        <textarea class="form-control form-control-sm" rows="2" @bind="_approvalNotes" placeholder="Notatka wewnetrzna..."></textarea>
+                    </div>
+                </div>
+
+                @if (_approvalServiceItems is not null && _approvalServiceItems.Count > 0)
+                {
+                    <hr class="my-3" />
+                    <h6 class="fw-bold mb-2"><i class="bi bi-shop me-2 text-primary"></i>Cennik uslug (indywidualny)</h6>
+                    <p class="text-muted small mb-2">Ustaw indywidualne ceny lub ukryj uslugi dla tego trenera. Puste = cena domyslna.</p>
+                    <div class="table-responsive">
+                        <table class="table table-sm small align-middle mb-0">
+                            <thead class="table-light">
+                                <tr>
+                                    <th>Usluga</th>
+                                    <th>Cena domyslna</th>
+                                    <th style="width:140px">Cena indywidualna</th>
+                                    <th style="width:80px">Ukryj</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                @foreach (var item in _approvalServiceItems)
+                                {
+                                    <tr>
+                                        <td>
+                                            <i class="bi @(item.Icon ?? "bi-box") me-1 text-primary"></i>
+                                            @item.Name
+                                            @if (item.PriceType == "monthly") { <span class="text-muted">/ @(item.Unit ?? "mies.")</span> }
+                                        </td>
+                                        <td>@item.DefaultPrice.ToString("0") zl</td>
+                                        <td>
+                                            <input type="number" class="form-control form-control-sm"
+                                                   placeholder="@item.DefaultPrice.ToString("0")"
+                                                   @onchange="(e) => SetApprovalPrice(item.Id, e.Value?.ToString())" />
+                                        </td>
+                                        <td class="text-center">
+                                            <input type="checkbox" class="form-check-input"
+                                                   @onchange="(e) => ToggleApprovalHidden(item.Id, (bool)(e.Value ?? false))" />
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+
+                <hr class="my-3" />
+                <div class="d-flex gap-2">
+                    <button class="btn btn-success" @onclick="ApproveAndProvision" disabled="@_approving">
+                        @if (_approving) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        <i class="bi bi-check-circle me-1"></i>Zaakceptuj i uruchom instancje
+                    </button>
+                    <button class="btn btn-outline-danger" @onclick="RejectRegistration" disabled="@_rejecting">
+                        @if (_rejecting) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        <i class="bi bi-x-circle me-1"></i>Odrzuc
+                    </button>
+                </div>
+            </div>
+        </div>
+    }
+
+    <div class="row g-3">
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h6 class="fw-bold mb-3"><i class="bi bi-person-badge me-2 text-primary"></i>Dane trenera</h6>
+                    <dl class="row mb-0 small">
+                        <dt class="col-5 text-muted">Właściciel</dt>
+                        <dd class="col-7">@_tenant.OwnerName</dd>
+                        <dt class="col-5 text-muted">Email</dt>
+                        <dd class="col-7"><a href="mailto:@_tenant.OwnerEmail">@_tenant.OwnerEmail</a></dd>
+                        <dt class="col-5 text-muted">Telefon</dt>
+                        <dd class="col-7">@(_tenant.Phone ?? "—")</dd>
+                        <dt class="col-5 text-muted">Slug</dt>
+                        <dd class="col-7 font-monospace">@_tenant.Slug</dd>
+                        <dt class="col-5 text-muted">Domena</dt>
+                        <dd class="col-7"><a href="https://@_tenant.Domain" target="_blank">@_tenant.Domain</a></dd>
+                        <dt class="col-5 text-muted">Port</dt>
+                        <dd class="col-7 font-monospace">@_tenant.Port</dd>
+                        <dt class="col-5 text-muted">Plan</dt>
+                        <dd class="col-7"><span class="badge bg-primary-subtle text-primary-emphasis">@(_tenant.Plan?.Name ?? _tenant.PlanId)</span></dd>
+                        <dt class="col-5 text-muted">Setup</dt>
+                        <dd class="col-7">@(_tenant.SetupMode ?? "—")</dd>
+                        <dt class="col-5 text-muted">Utworzono</dt>
+                        <dd class="col-7">@_tenant.CreatedAt.ToString("dd.MM.yyyy HH:mm")</dd>
+                        <dt class="col-5 text-muted">Provisioned</dt>
+                        <dd class="col-7">@(_tenant.ProvisionedAt?.ToString("dd.MM.yyyy HH:mm") ?? "—")</dd>
+                        <dt class="col-5 text-muted">Ostatnia aktywnosc</dt>
+                        <dd class="col-7">@(_tenant.LastActivityAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—")</dd>
+                        @if (_tenant.GraceUntil.HasValue)
+                        {
+                            <dt class="col-5 text-muted">Ochrona do</dt>
+                            <dd class="col-7">
+                                <span class="badge @(_tenant.GraceUntil.Value > DateTime.UtcNow ? "bg-info" : "bg-secondary")">
+                                    @_tenant.GraceUntil.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")
+                                </span>
+                            </dd>
+                        }
+                    </dl>
+
+                    <hr class="my-3" />
+                    <h6 class="fw-bold mb-2 small text-muted"><i class="bi bi-key me-1"></i>Poświadczenia bazy danych</h6>
+                    <dl class="row mb-0 small align-items-center">
+                        <dt class="col-5 text-muted">Użytkownik</dt>
+                        <dd class="col-7 font-monospace">ptscheduler</dd>
+                        <dt class="col-5 text-muted">Hasło</dt>
+                        <dd class="col-7">
+                            <div class="d-flex align-items-center gap-2">
+                                <code class="font-monospace">@(_showPassword ? _tenant.DbPassword : Mask(_tenant.DbPassword))</code>
+                                <button class="btn btn-sm btn-link p-0" @onclick="() => _showPassword = !_showPassword" title="Pokaż/ukryj">
+                                    <i class="bi @(_showPassword ? "bi-eye-slash" : "bi-eye")"></i>
+                                </button>
+                            </div>
+                        </dd>
+                    </dl>
+                    <button class="btn btn-sm btn-outline-secondary mt-2" @onclick="SyncPassword" disabled="@_syncingPassword">
+                        @if (_syncingPassword) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        <i class="bi bi-arrow-repeat me-1"></i>Zsynchronizuj hasło z bazą
+                    </button>
+                    <p class="text-muted small mb-0 mt-1">
+                        <i class="bi bi-info-circle me-1"></i>Użyj tego jeśli web zwraca "password authentication failed" po ręcznej ingerencji w kontenery.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="fw-bold mb-0"><i class="bi bi-person-lock me-2 text-danger"></i>Konto administratora</h6>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="LoadAdminInfo" disabled="@_loadingAdmin">
+                            @if (_loadingAdmin) { <span class="spinner-border spinner-border-sm"></span> } else { <i class="bi bi-arrow-clockwise"></i> }
+                        </button>
+                    </div>
+
+                    @if (_adminInfo is not null && _adminInfo.Found)
+                    {
+                        <dl class="row mb-0 small">
+                            <dt class="col-5 text-muted">Email (login)</dt>
+                            <dd class="col-7 font-monospace">@_adminInfo.Email</dd>
+                            <dt class="col-5 text-muted">Imię i nazwisko</dt>
+                            <dd class="col-7">@_adminInfo.FirstName @_adminInfo.LastName</dd>
+                            <dt class="col-5 text-muted">Zablokowany</dt>
+                            <dd class="col-7">
+                                @if (_adminInfo.LockoutEnd is not null)
+                                {
+                                    <span class="badge bg-danger">Tak (do @_adminInfo.LockoutEnd)</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-success">Nie</span>
+                                }
+                            </dd>
+                        </dl>
+
+                        <hr class="my-3" />
+                        <h6 class="fw-bold mb-2 small text-muted"><i class="bi bi-pencil-square me-1"></i>Zmień dane admina</h6>
+                        <div class="row g-2 mb-2">
+                            <div class="col-12">
+                                <label class="form-label small mb-1">Nowy email (login)</label>
+                                <input type="email" class="form-control form-control-sm" @bind="_newAdminEmail" placeholder="@_adminInfo.Email" />
+                            </div>
+                            <div class="col-12">
+                                <label class="form-label small mb-1">Nowe hasło</label>
+                                <div class="input-group input-group-sm">
+                                    <input type="@(_showNewAdminPassword ? "text" : "password")" class="form-control" @bind="_newAdminPassword" placeholder="Pozostaw puste aby nie zmieniać" />
+                                    <button class="btn btn-outline-secondary" type="button" @onclick="() => _showNewAdminPassword = !_showNewAdminPassword">
+                                        <i class="bi @(_showNewAdminPassword ? "bi-eye-slash" : "bi-eye")"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                        <button class="btn btn-sm btn-warning" @onclick="ResetAdmin" disabled="@_resettingAdmin">
+                            @if (_resettingAdmin) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            <i class="bi bi-shield-lock me-1"></i>Zastosuj zmiany
+                        </button>
+                        @if (!string.IsNullOrEmpty(_adminResetMessage))
+                        {
+                            <div class="alert @(_adminResetError ? "alert-danger" : "alert-success") py-1 small mt-2 mb-0">@_adminResetMessage</div>
+                        }
+                    }
+                    else if (_adminInfo is not null && !_adminInfo.Found)
+                    {
+                        <p class="text-warning small mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Brak konta admin w aplikacji tenanta.</p>
+                    }
+                    else if (_adminError is not null)
+                    {
+                        <p class="text-danger small mb-1">@_adminError</p>
+                        <button class="btn btn-sm btn-outline-primary" @onclick="LoadAdminInfo">Spróbuj ponownie</button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-sm btn-outline-dark" @onclick="LoadAdminInfo" disabled="@_loadingAdmin">
+                            @if (_loadingAdmin) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            Pobierz dane admina
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="fw-bold mb-0"><i class="bi bi-box me-2 text-info"></i>Kontenery i zdrowie</h6>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="RefreshContainers">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+
+                    @if (_containerStatus is not null && (_containerStatus.Web is not null || _containerStatus.Db is not null))
+                    {
+                        <div class="d-flex flex-column gap-3">
+                            @foreach (var (label, info, name) in new[] {
+                                ("Web", _containerStatus.Web, WebContainerName),
+                                ("DB", _containerStatus.Db, DbContainerName)
+                            })
+                            {
+                                <div class="d-flex align-items-center justify-content-between">
+                                    <div class="d-flex align-items-center gap-2">
+                                        <span class="badge @(info?.Running == true ? "bg-success" : "bg-danger")">
+                                            @(info?.Running == true ? "Running" : "Stopped")
+                                        </span>
+                                        <span class="fw-semibold small">@label</span>
+                                        <span class="text-muted small font-monospace">@name</span>
+                                        @if (info is not null)
+                                        {
+                                            <span class="text-muted small font-monospace">(@info.Id)</span>
+                                        }
+                                    </div>
+                                    @if (info is not null)
+                                    {
+                                        var containerName = name;
+                                        <button class="btn btn-sm btn-outline-warning" @onclick="() => RestartContainer(containerName)">
+                                            <i class="bi bi-arrow-repeat"></i>
+                                        </button>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="text-muted small mb-0">
+                            <i class="bi bi-info-circle me-1"></i>
+                            Nie znaleziono kontenerów <code>@WebContainerName</code> / <code>@DbContainerName</code>.
+                        </p>
+                    }
+
+                    <hr class="my-3" />
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="fw-bold mb-0 small text-muted"><i class="bi bi-activity me-1"></i>HTTP health</h6>
+                        @if (_tenant.LastHealthCheckAt is not null)
+                        {
+                            <span class="text-muted small">sprawdzone @_tenant.LastHealthCheckAt?.ToLocalTime().ToString("HH:mm:ss")</span>
+                        }
+                    </div>
+                    @if (_tenant.IsHealthy == true)
+                    {
+                        <div class="alert alert-success py-2 small mb-0">
+                            <i class="bi bi-check-circle-fill me-1"></i>
+                            OK — @_tenant.LastHealthResponseMs ms
+                        </div>
+                    }
+                    else if (_tenant.IsHealthy == false)
+                    {
+                        <div class="alert alert-danger py-2 small mb-0">
+                            <i class="bi bi-exclamation-triangle-fill me-1"></i>
+                            Down @(_tenant.UnhealthySinceUtc.HasValue ? $"od {(int)(DateTime.UtcNow - _tenant.UnhealthySinceUtc.Value).TotalMinutes} min" : "")<br />
+                            <span class="font-monospace">@_tenant.LastHealthError</span>
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="text-muted small mb-0">Jeszcze nie sprawdzono.</p>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <h6 class="fw-bold mb-3"><i class="bi bi-gear me-2 text-warning"></i>Akcje</h6>
+                    <div class="d-flex flex-wrap gap-2">
+                        @if (_tenant.Status == TenantStatus.Pending)
+                        {
+                            <button class="btn btn-primary btn-sm" @onclick="Provision" disabled="@_provisioning">
+                                @if (_provisioning) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                <i class="bi bi-rocket me-1"></i>Provisioning
+                            </button>
+                        }
+                        @if (_tenant.Status == TenantStatus.Active)
+                        {
+                            <button class="btn btn-warning btn-sm" @onclick="Suspend">
+                                <i class="bi bi-pause-circle me-1"></i>Zawieś
+                            </button>
+                        }
+                        @if (_tenant.Status == TenantStatus.Suspended)
+                        {
+                            <button class="btn btn-success btn-sm" @onclick="Resume">
+                                <i class="bi bi-play-circle me-1"></i>Wznów
+                            </button>
+                        }
+                        <a href="https://@_tenant.Domain" target="_blank" class="btn btn-outline-primary btn-sm">
+                            <i class="bi bi-box-arrow-up-right me-1"></i>Otwórz
+                        </a>
+                    </div>
+
+                    @if (_tenant.GraceUntil.HasValue && _tenant.GraceUntil.Value > DateTime.UtcNow)
+                    {
+                        <div class="alert alert-info py-2 small mt-2 mb-0">
+                            <i class="bi bi-shield-check me-1"></i>
+                            Okres ochrony aktywny do <strong>@_tenant.GraceUntil.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</strong>
+                            — dane nie zostana usuniete do tego czasu.
+                        </div>
+                    }
+
+                    <hr class="my-3" />
+                    <h6 class="fw-bold mb-2 small text-muted"><i class="bi bi-hourglass-split me-1"></i>Przedluz ochrone</h6>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button class="btn btn-sm btn-outline-info" @onclick="() => ExtendGrace(7)" disabled="@_extending">+7 dni</button>
+                        <button class="btn btn-sm btn-outline-info" @onclick="() => ExtendGrace(14)" disabled="@_extending">+14 dni</button>
+                        <button class="btn btn-sm btn-outline-info" @onclick="() => ExtendGrace(30)" disabled="@_extending">+30 dni</button>
+                    </div>
+                    <p class="text-muted small mb-0 mt-1">
+                        <i class="bi bi-info-circle me-1"></i>Przedluza okres ochrony — konto nie zostanie automatycznie usuniete w tym czasie.
+                    </p>
+
+                    <hr class="my-3" />
+                    <h6 class="fw-bold mb-2 small text-muted">
+                        <i class="bi bi-credit-card-2-front me-1"></i>Billing (Stripe)
+                    </h6>
+                    <dl class="row small mb-2">
+                        <dt class="col-5 text-muted">Status</dt>
+                        <dd class="col-7">
+                            <span class="badge @BillingBadge(_tenant.BillingStatus)">@_tenant.BillingStatus</span>
+                        </dd>
+                        @if (_tenant.TrialEndsAt is not null)
+                        {
+                            <dt class="col-5 text-muted">Trial do</dt>
+                            <dd class="col-7">@_tenant.TrialEndsAt?.ToString("dd.MM.yyyy HH:mm")</dd>
+                        }
+                        @if (!string.IsNullOrEmpty(_tenant.StripeCustomerId))
+                        {
+                            <dt class="col-5 text-muted">Customer</dt>
+                            <dd class="col-7 font-monospace small">@_tenant.StripeCustomerId</dd>
+                        }
+                        @if (!string.IsNullOrEmpty(_tenant.StripeSubscriptionId))
+                        {
+                            <dt class="col-5 text-muted">Subscription</dt>
+                            <dd class="col-7 font-monospace small">@_tenant.StripeSubscriptionId</dd>
+                        }
+                    </dl>
+                    @if (!string.IsNullOrEmpty(_tenant.StripeCustomerId))
+                    {
+                        <button class="btn btn-sm btn-outline-primary" @onclick="OpenCustomerPortal" disabled="@_openingPortal">
+                            @if (_openingPortal) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            <i class="bi bi-box-arrow-up-right me-1"></i>Otwórz Stripe Customer Portal
+                        </button>
+                    }
+                    else
+                    {
+                        <p class="text-muted small mb-0">
+                            <i class="bi bi-info-circle me-1"></i>Ten trener nie ma subskrypcji Stripe (plan darmowy lub utworzony ręcznie).
+                        </p>
+                    }
+
+                    <hr class="my-3" />
+                    <h6 class="fw-bold mb-2 small text-muted">Plan</h6>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-7">
+                            <select class="form-select form-select-sm" @bind="_selectedPlanId">
+                                @foreach (var p in _availablePlans)
+                                {
+                                    <option value="@p.Id">@p.Name — @p.MonthlyPrice.ToString("0") zł</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-5">
+                            <button class="btn btn-warning btn-sm w-100" @onclick="ApplyPlanChange" disabled="@_applyingPlan">
+                                @if (_applyingPlan) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                <i class="bi bi-arrow-repeat me-1"></i>Zastosuj (restart web)
+                            </button>
+                        </div>
+                        <div class="col-12">
+                            <p class="text-muted small mb-0 mt-1">
+                                <i class="bi bi-info-circle me-1"></i>Zmiana planu odtwarza kontener web z nowymi limitami. Baza i wolumeny pozostają.
+                            </p>
+                        </div>
+                    </div>
+
+                    @if (_provisionOutput is not null)
+                    {
+                        <pre class="mt-3 p-3 bg-dark text-light rounded small" style="max-height:300px;overflow:auto">@_provisionOutput</pre>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="fw-bold mb-0"><i class="bi bi-graph-up me-2 text-success"></i>Metryki aplikacji</h6>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="LoadMetrics" disabled="@_loadingMetrics">
+                            @if (_loadingMetrics) { <span class="spinner-border spinner-border-sm"></span> } else { <i class="bi bi-arrow-clockwise"></i> }
+                        </button>
+                    </div>
+
+                    @if (_metrics is not null)
+                    {
+                        <div class="row g-2 text-center">
+                            <div class="col-4">
+                                <div class="border rounded p-2">
+                                    <div class="fw-bold fs-5 text-primary">@_metrics.Clients</div>
+                                    <div class="text-muted" style="font-size:.7rem">Klienci</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="border rounded p-2">
+                                    <div class="fw-bold fs-5 text-info">@_metrics.SessionsTotal</div>
+                                    <div class="text-muted" style="font-size:.7rem">Sesje</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="border rounded p-2">
+                                    <div class="fw-bold fs-5 text-warning">@_metrics.SessionsThisMonth</div>
+                                    <div class="text-muted" style="font-size:.7rem">Ten miesiąc</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="border rounded p-2">
+                                    <div class="fw-bold fs-5 text-success">@_metrics.PackagesActive</div>
+                                    <div class="text-muted" style="font-size:.7rem">Aktywne pakiety</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="border rounded p-2">
+                                    <div class="fw-bold fs-5">@_metrics.OrdersTotal</div>
+                                    <div class="text-muted" style="font-size:.7rem">Zamówienia</div>
+                                </div>
+                            </div>
+                            <div class="col-4">
+                                <div class="border rounded p-2">
+                                    <div class="fw-bold fs-5 text-success">@_metrics.Revenue.ToString("N0")</div>
+                                    <div class="text-muted" style="font-size:.7rem">Przychód (PLN)</div>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="text-muted small mt-2"><i class="bi bi-clock me-1"></i>@_metrics.Timestamp.ToLocalTime().ToString("HH:mm dd.MM.yyyy")</div>
+                    }
+                    else if (_metricsError is not null)
+                    {
+                        <p class="text-danger small mb-1">@_metricsError</p>
+                        <button class="btn btn-sm btn-outline-primary" @onclick="LoadMetrics">Spróbuj ponownie</button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-sm btn-outline-dark" @onclick="LoadMetrics" disabled="@_loadingMetrics">
+                            @if (_loadingMetrics) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            Pobierz metryki
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="fw-bold mb-0"><i class="bi bi-terminal me-2 text-dark"></i>Logi (web)</h6>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="LoadLogs" disabled="@_loadingLogs">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+
+                    @if (_logs is not null)
+                    {
+                        <pre class="p-3 bg-dark text-light rounded small" style="max-height:400px;overflow:auto;font-size:.75rem">@_logs</pre>
+                    }
+                    else
+                    {
+                        <button class="btn btn-sm btn-outline-dark" @onclick="LoadLogs" disabled="@_loadingLogs">
+                            @if (_loadingLogs) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            Załaduj logi
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+
+        @if (!string.IsNullOrEmpty(_tenant.StripeCustomerId))
+        {
+            <div class="col-12">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="fw-bold mb-0"><i class="bi bi-receipt me-2 text-success"></i>Faktury</h6>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="LoadInvoices" disabled="@_loadingInvoices">
+                                @if (_loadingInvoices) { <span class="spinner-border spinner-border-sm"></span> } else { <i class="bi bi-arrow-clockwise"></i> }
+                            </button>
+                        </div>
+                        @if (_invoices is null)
+                        {
+                            <button class="btn btn-sm btn-outline-dark" @onclick="LoadInvoices" disabled="@_loadingInvoices">Załaduj faktury</button>
+                        }
+                        else if (_invoices.Count == 0)
+                        {
+                            <p class="text-muted small mb-0">Brak faktur.</p>
+                        }
+                        else
+                        {
+                            <div class="table-responsive">
+                                <table class="table table-sm mb-0 small align-middle">
+                                    <thead class="table-light">
+                                        <tr>
+                                            <th>Numer</th>
+                                            <th>Data</th>
+                                            <th>Kwota</th>
+                                            <th>Status</th>
+                                            <th></th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        @foreach (var inv in _invoices)
+                                        {
+                                            <tr>
+                                                <td class="font-monospace">@inv.Number</td>
+                                                <td>@inv.Date.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                                                <td>@inv.Amount.ToString("0.00") @inv.Currency</td>
+                                                <td><span class="badge @InvoiceBadge(inv.Status)">@inv.Status</span></td>
+                                                <td class="text-end">
+                                                    @if (!string.IsNullOrEmpty(inv.HostedInvoiceUrl))
+                                                    {
+                                                        <a href="@inv.HostedInvoiceUrl" target="_blank" class="btn btn-sm btn-outline-primary" title="Otwórz"><i class="bi bi-eye"></i></a>
+                                                    }
+                                                    @if (!string.IsNullOrEmpty(inv.InvoicePdf))
+                                                    {
+                                                        <a href="@inv.InvoicePdf" target="_blank" class="btn btn-sm btn-outline-secondary ms-1" title="PDF"><i class="bi bi-file-pdf"></i></a>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+
+        @if (!string.IsNullOrWhiteSpace(_tenant.Notes))
+        {
+            <div class="col-12">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-body">
+                        <h6 class="fw-bold mb-2"><i class="bi bi-sticky me-2"></i>Notatki</h6>
+                        <p class="small text-muted mb-0">@_tenant.Notes</p>
+                    </div>
+                </div>
+            </div>
+        }
+
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h6 class="fw-bold mb-3"><i class="bi bi-globe me-2 text-primary"></i>Domena niestandardowa</h6>
+                    <dl class="row mb-2 small">
+                        <dt class="col-5 text-muted">Aktualna domena</dt>
+                        <dd class="col-7"><a href="https://@_tenant.Domain" target="_blank">@_tenant.Domain</a></dd>
+                    </dl>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-8">
+                            <label class="form-label small mb-1">Nowa domena</label>
+                            <input type="text" class="form-control form-control-sm" @bind="_newDomain"
+                                   placeholder="np. trener.example.com" />
+                        </div>
+                        <div class="col-md-4">
+                            <button class="btn btn-sm btn-primary w-100" @onclick="ChangeDomain" disabled="@_changingDomain">
+                                @if (_changingDomain) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                Zmien
+                            </button>
+                        </div>
+                    </div>
+                    @if (_domainMessage is not null)
+                    {
+                        <div class="alert @(_domainError ? "alert-danger" : "alert-success") py-1 small mt-2 mb-0">@_domainMessage</div>
+                    }
+                    <p class="text-muted small mb-0 mt-2">
+                        <i class="bi bi-info-circle me-1"></i>Domena zostanie automatycznie zarejestrowana w NPM z certyfikatem SSL.
+                        Upewnij sie, ze rekord DNS (A/CNAME) wskazuje na serwer.
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h6 class="fw-bold mb-3"><i class="bi bi-credit-card me-2 text-success"></i>Platnosci SaaS</h6>
+                    @if (_paymentRecords is null)
+                    {
+                        <button class="btn btn-sm btn-outline-dark" @onclick="LoadPaymentRecords" disabled="@_loadingPayments">
+                            @if (_loadingPayments) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            Zaladuj platnosci
+                        </button>
+                    }
+                    else if (_paymentRecords.Count == 0)
+                    {
+                        <p class="text-muted small mb-0">Brak zarejestrowanych platnosci.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive" style="max-height:300px;overflow-y:auto">
+                            <table class="table table-sm mb-0 small align-middle">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Kwota</th>
+                                        <th>Status</th>
+                                        <th>Data</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var p in _paymentRecords)
+                                    {
+                                        <tr>
+                                            <td class="fw-semibold">@p.Amount.ToString("0.00") @p.Currency</td>
+                                            <td><span class="badge @PaymentRecordBadge(p.Status)">@p.Status</span></td>
+                                            <td class="text-muted text-nowrap">@p.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="fw-bold mb-0"><i class="bi bi-shop me-2 text-primary"></i>Cennik usług (indywidualny)</h6>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="LoadServicePricing" disabled="@_loadingPricing">
+                            @if (_loadingPricing) { <span class="spinner-border spinner-border-sm"></span> } else { <i class="bi bi-arrow-clockwise"></i> }
+                        </button>
+                    </div>
+                    @if (_serviceItems is null)
+                    {
+                        <button class="btn btn-sm btn-outline-dark" @onclick="LoadServicePricing" disabled="@_loadingPricing">
+                            @if (_loadingPricing) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            Załaduj cennik
+                        </button>
+                    }
+                    else if (_serviceItems.Count == 0)
+                    {
+                        <p class="text-muted small mb-0">Brak usług w katalogu.</p>
+                    }
+                    else
+                    {
+                        @if (_pricingMessage is not null)
+                        {
+                            <div class="alert @(_pricingError ? "alert-danger" : "alert-success") py-2 small mb-2">@_pricingMessage</div>
+                        }
+                        <p class="text-muted small mb-2">Ustaw indywidualne ceny lub ukryj usługi dla tego trenera. Puste = cena domyślna.</p>
+                        <div class="table-responsive">
+                            <table class="table table-sm small align-middle mb-0">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Usługa</th>
+                                        <th>Cena domyślna</th>
+                                        <th style="width:140px">Cena indywidualna</th>
+                                        <th style="width:80px">Ukryj</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var item in _serviceItems)
+                                    {
+                                        var ov = _tenantPrices.GetValueOrDefault(item.Id);
+                                        <tr class="@(ov?.IsHidden == true ? "text-muted" : "")">
+                                            <td>
+                                                <i class="bi @(item.Icon ?? "bi-box") me-1 text-primary"></i>
+                                                @item.Name
+                                                @if (item.PriceType == "monthly") { <span class="text-muted">/ @(item.Unit ?? "mies.")</span> }
+                                            </td>
+                                            <td>@item.DefaultPrice.ToString("0") zł</td>
+                                            <td>
+                                                <input type="number" class="form-control form-control-sm"
+                                                       value="@(ov?.CustomPrice)"
+                                                       placeholder="@item.DefaultPrice.ToString("0")"
+                                                       @onchange="(e) => SetCustomPrice(item.Id, e.Value?.ToString())" />
+                                            </td>
+                                            <td class="text-center">
+                                                <input type="checkbox" class="form-check-input"
+                                                       checked="@(ov?.IsHidden == true)"
+                                                       @onchange="(e) => ToggleHidden(item.Id, (bool)(e.Value ?? false))" />
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        <button class="btn btn-primary btn-sm mt-2" @onclick="SaveServicePricing" disabled="@_savingPricing">
+                            @if (_savingPricing) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            <i class="bi bi-floppy me-1"></i>Zapisz cennik
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="fw-bold mb-0"><i class="bi bi-activity me-2 text-info"></i>Historia zdarzen</h6>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="LoadEvents" disabled="@_loadingEvents">
+                            @if (_loadingEvents) { <span class="spinner-border spinner-border-sm"></span> } else { <i class="bi bi-arrow-clockwise"></i> }
+                        </button>
+                    </div>
+                    @if (_tenantEvents is null)
+                    {
+                        <button class="btn btn-sm btn-outline-dark" @onclick="LoadEvents" disabled="@_loadingEvents">
+                            @if (_loadingEvents) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            Zaladuj zdarzenia
+                        </button>
+                    }
+                    else if (_tenantEvents.Count == 0)
+                    {
+                        <p class="text-muted small mb-0">Brak zdarzen.</p>
+                    }
+                    else
+                    {
+                        <div class="d-flex flex-column gap-2" style="max-height:400px;overflow-y:auto">
+                            @foreach (var ev in _tenantEvents)
+                            {
+                                <div class="d-flex align-items-start gap-2 small border-bottom pb-2">
+                                    <span class="badge @EventBadge(ev.EventType) mt-1" style="min-width:24px;text-align:center">
+                                        <i class="bi @EventIcon(ev.EventType)"></i>
+                                    </span>
+                                    <div class="flex-grow-1">
+                                        <div class="d-flex justify-content-between">
+                                            <span class="fw-semibold">@EventLabel(ev.EventType)</span>
+                                            <span class="text-muted">@ev.OccurredAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+                                        </div>
+                                        @if (!string.IsNullOrWhiteSpace(ev.Detail))
+                                        {
+                                            <div class="text-muted small font-monospace">@ev.Detail</div>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <!-- Delete section -->
+        <div class="col-12">
+            <div class="card border-0 shadow-sm border-danger">
+                <div class="card-body">
+                    <h6 class="fw-bold mb-3 text-danger"><i class="bi bi-exclamation-triangle me-2"></i>Strefa zagrożenia</h6>
+                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                        @if (!_confirmDelete && !_confirmDeleteWithDocker)
+                        {
+                            <button class="btn btn-outline-danger btn-sm" @onclick="() => _confirmDelete = true">
+                                <i class="bi bi-trash me-1"></i>Usuń wpis
+                            </button>
+                            <button class="btn btn-danger btn-sm" @onclick="() => _confirmDeleteWithDocker = true">
+                                <i class="bi bi-trash-fill me-1"></i>Usuń wpis + kontenery Docker
+                            </button>
+                        }
+
+                        @if (_confirmDelete)
+                        {
+                            <div class="alert alert-warning py-2 small mb-0 d-flex align-items-center gap-2">
+                                <span>Usunąć wpis <strong>@_tenant.CompanyName</strong> z portalu? Kontenery Docker pozostaną.</span>
+                                <button class="btn btn-danger btn-sm" @onclick="DeleteEntry" disabled="@_deleting">
+                                    @if (_deleting) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                    Tak, usuń
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="() => _confirmDelete = false">Anuluj</button>
+                            </div>
+                        }
+
+                        @if (_confirmDeleteWithDocker)
+                        {
+                            <div class="alert alert-danger py-2 small mb-0 d-flex align-items-center gap-2">
+                                <span>Usunąć wpis <strong>@_tenant.CompanyName</strong> RAZEM z kontenerami Docker? To nieodwracalne!</span>
+                                <button class="btn btn-danger btn-sm" @onclick="DeleteWithDocker" disabled="@_deleting">
+                                    @if (_deleting) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                    Tak, usuń wszystko
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="() => _confirmDeleteWithDocker = false">Anuluj</button>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private Tenant? _tenant;
+    private TenantContainerStatus? _containerStatus;
+    private bool _provisioning;
+    private string? _provisionOutput;
+    private string? _logs;
+    private bool _loadingLogs;
+    private string? _actionMessage;
+    private bool _actionIsError;
+    private bool _confirmDelete;
+    private bool _confirmDeleteWithDocker;
+    private bool _deleting;
+    private List<Plan> _availablePlans = new();
+    private string _selectedPlanId = "";
+    private bool _applyingPlan;
+    private bool _openingPortal;
+    private List<InvoiceInfo>? _invoices;
+    private bool _loadingInvoices;
+    private bool _showPassword;
+    private bool _syncingPassword;
+    private TenantMetrics? _metrics;
+    private bool _loadingMetrics;
+    private string? _metricsError;
+    private AdminInfo? _adminInfo;
+    private bool _loadingAdmin;
+    private string? _adminError;
+    private string _newAdminEmail = "";
+    private string _newAdminPassword = "";
+    private bool _showNewAdminPassword;
+    private bool _resettingAdmin;
+    private string? _adminResetMessage;
+    private bool _adminResetError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _tenant = await TenantSvc.GetAsync(Id);
+        if (_tenant is not null)
+        {
+            await RefreshContainers();
+            _selectedPlanId = _tenant.PlanId;
+
+            await using var db = DbFactory.CreateDbContext();
+            _availablePlans = await db.Plans.AsNoTracking()
+                .Where(p => p.IsActive).OrderBy(p => p.SortOrder).ToListAsync();
+
+            if (_tenant.Status == TenantStatus.Pending)
+                await LoadApprovalPricing();
+        }
+    }
+
+    private async Task LoadInvoices()
+    {
+        if (_tenant is null || string.IsNullOrEmpty(_tenant.StripeCustomerId)) return;
+        _loadingInvoices = true;
+        _invoices = await StripeSvc.ListInvoicesAsync(_tenant.StripeCustomerId);
+        _loadingInvoices = false;
+    }
+
+    private static string InvoiceBadge(string status) => status switch
+    {
+        "paid" => "bg-success",
+        "open" => "bg-warning text-dark",
+        "uncollectible" => "bg-danger",
+        "void" => "bg-secondary",
+        "draft" => "bg-light text-dark",
+        _ => "bg-secondary"
+    };
+
+    private async Task OpenCustomerPortal()
+    {
+        if (_tenant is null || string.IsNullOrEmpty(_tenant.StripeCustomerId)) return;
+        _openingPortal = true;
+        try
+        {
+            var returnUrl = Nav.Uri;
+            var url = await StripeSvc.CreateCustomerPortalLinkAsync(_tenant.StripeCustomerId, returnUrl);
+            if (!string.IsNullOrEmpty(url))
+                Nav.NavigateTo(url, forceLoad: true);
+            else
+                ShowMessage("Nie udało się utworzyć linku (Stripe nie skonfigurowany?)", true);
+        }
+        catch (Exception ex) { ShowMessage($"Błąd: {ex.Message}", true); }
+        _openingPortal = false;
+    }
+
+    private static string BillingBadge(string status) => status switch
+    {
+        "active" => "bg-success",
+        "trialing" => "bg-info text-dark",
+        "past_due" => "bg-warning text-dark",
+        "canceled" => "bg-danger",
+        _ => "bg-secondary"
+    };
+
+    private async Task ApplyPlanChange()
+    {
+        if (_tenant is null || string.IsNullOrWhiteSpace(_selectedPlanId)) return;
+        _applyingPlan = true;
+        try
+        {
+            if (_selectedPlanId != _tenant.PlanId)
+                await TenantSvc.UpdatePlanAsync(_tenant.Id, _selectedPlanId);
+
+            var (ok, msg) = await TenantSvc.ReprovisionWebAsync(_tenant.Id);
+            ShowMessage(msg, !ok);
+            _tenant = await TenantSvc.GetAsync(Id);
+            await RefreshContainers();
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Błąd: {ex.Message}", true);
+        }
+        _applyingPlan = false;
+    }
+
+    private static string Mask(string s) =>
+        string.IsNullOrEmpty(s) ? "—" : new string('•', Math.Min(s.Length, 24));
+
+    private async Task SyncPassword()
+    {
+        if (_tenant is null) return;
+        _syncingPassword = true;
+        try
+        {
+            var (ok, msg) = await TenantSvc.SyncDbPasswordAsync(_tenant.Id);
+            ShowMessage(msg, !ok);
+        }
+        catch (Exception ex) { ShowMessage($"Błąd: {ex.Message}", true); }
+        _syncingPassword = false;
+    }
+
+    private string WebContainerName => _tenant?.WebContainerName ?? $"pt-{_tenant?.Slug}-web";
+    private string DbContainerName => _tenant?.DbContainerName ?? $"pt-{_tenant?.Slug}-db";
+
+    private async Task RefreshContainers()
+    {
+        if (_tenant is null) return;
+        try { _containerStatus = await DockerSvc.GetTenantStatusAsync(_tenant.Slug, _tenant.WebContainerName, _tenant.DbContainerName); }
+        catch { _containerStatus = null; }
+    }
+
+    private async Task Provision()
+    {
+        if (_tenant is null) return;
+        _provisioning = true;
+        var (_, output) = await TenantSvc.ProvisionAsync(_tenant.Id);
+        _provisionOutput = output;
+        _tenant = await TenantSvc.GetAsync(Id);
+        await RefreshContainers();
+        _provisioning = false;
+    }
+
+    private async Task Suspend()
+    {
+        if (_tenant is null) return;
+        try
+        {
+            await TenantSvc.SuspendAsync(_tenant.Id);
+            ShowMessage("Tenant zawieszony.");
+        }
+        catch (Exception ex) { ShowMessage($"Błąd: {ex.Message}", true); }
+        _tenant = await TenantSvc.GetAsync(Id);
+        await RefreshContainers();
+    }
+
+    private async Task Resume()
+    {
+        if (_tenant is null) return;
+        try
+        {
+            await TenantSvc.ResumeAsync(_tenant.Id);
+            ShowMessage("Tenant wznowiony.");
+        }
+        catch (Exception ex) { ShowMessage($"Błąd: {ex.Message}", true); }
+        _tenant = await TenantSvc.GetAsync(Id);
+        await RefreshContainers();
+    }
+
+    private async Task RestartContainer(string name)
+    {
+        try { await DockerSvc.RestartContainerAsync(name); }
+        catch { }
+        await Task.Delay(2000);
+        await RefreshContainers();
+    }
+
+    private async Task LoadLogs()
+    {
+        if (_tenant is null) return;
+        _loadingLogs = true;
+        try { _logs = await DockerSvc.GetContainerLogsAsync(WebContainerName, 200); }
+        catch (Exception ex) { _logs = $"Błąd: {ex.Message}"; }
+        _loadingLogs = false;
+    }
+
+    private async Task DeleteEntry()
+    {
+        if (_tenant is null) return;
+        _deleting = true;
+        try
+        {
+            await TenantSvc.DeleteAsync(_tenant.Id, removeContainers: false);
+            Nav.NavigateTo("/panel/tenants");
+        }
+        catch (Exception ex) { ShowMessage($"Błąd: {ex.Message}", true); }
+        _deleting = false;
+    }
+
+    private async Task DeleteWithDocker()
+    {
+        if (_tenant is null) return;
+        _deleting = true;
+        try
+        {
+            await TenantSvc.DeleteAsync(_tenant.Id, removeContainers: true);
+            Nav.NavigateTo("/panel/tenants");
+        }
+        catch (Exception ex) { ShowMessage($"Błąd: {ex.Message}", true); }
+        _deleting = false;
+    }
+
+    private void ShowMessage(string msg, bool isError = false)
+    {
+        _actionMessage = msg;
+        _actionIsError = isError;
+    }
+
+    private static string StatusLabel(TenantStatus s) => s switch
+    {
+        TenantStatus.Active => "Aktywny",
+        TenantStatus.Pending => "Oczekuje",
+        TenantStatus.Provisioning => "Tworzenie...",
+        TenantStatus.Suspended => "Zawieszony",
+        TenantStatus.Destroyed => "Usunięty",
+        _ => s.ToString()
+    };
+
+    private static string StatusBadge(TenantStatus s) => s switch
+    {
+        TenantStatus.Active => "bg-success",
+        TenantStatus.Pending => "bg-warning text-dark",
+        _ => "bg-secondary"
+    };
+
+    private async Task LoadMetrics()
+    {
+        if (_tenant is null || _tenant.Status != TenantStatus.Active) return;
+        _loadingMetrics = true;
+        _metricsError = null;
+        try
+        {
+            var forwardHost = Config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220";
+            var secret = Config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"http://{forwardHost}:{_tenant.Port}/internal/metrics");
+            if (!string.IsNullOrEmpty(secret))
+                req.Headers.Add("X-Internal-Secret", secret);
+            var resp = await http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) { _metricsError = $"HTTP {(int)resp.StatusCode}"; return; }
+            var json = await resp.Content.ReadAsStringAsync();
+            _metrics = System.Text.Json.JsonSerializer.Deserialize<TenantMetrics>(json,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        }
+        catch (Exception ex) { _metricsError = ex.Message; }
+        finally { _loadingMetrics = false; }
+    }
+
+    private record TenantMetrics
+    {
+        public int Clients { get; init; }
+        public int ActiveClients { get; init; }
+        public int SessionsTotal { get; init; }
+        public int SessionsThisMonth { get; init; }
+        public int PackagesActive { get; init; }
+        public int OrdersTotal { get; init; }
+        public decimal Revenue { get; init; }
+        public DateTime Timestamp { get; init; }
+    }
+
+    private async Task LoadAdminInfo()
+    {
+        if (_tenant is null || _tenant.Status != TenantStatus.Active) return;
+        _loadingAdmin = true;
+        _adminError = null;
+        try
+        {
+            var forwardHost = Config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220";
+            var secret = Config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"http://{forwardHost}:{_tenant.Port}/internal/admin-info");
+            if (!string.IsNullOrEmpty(secret))
+                req.Headers.Add("X-Internal-Secret", secret);
+            var resp = await http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode) { _adminError = $"HTTP {(int)resp.StatusCode}"; return; }
+            var json = await resp.Content.ReadAsStringAsync();
+            _adminInfo = System.Text.Json.JsonSerializer.Deserialize<AdminInfo>(json,
+                new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            if (_adminInfo?.Found == true)
+                _newAdminEmail = _adminInfo.Email ?? "";
+        }
+        catch (Exception ex) { _adminError = ex.Message; }
+        finally { _loadingAdmin = false; }
+    }
+
+    private async Task ResetAdmin()
+    {
+        if (_tenant is null) return;
+        _resettingAdmin = true;
+        _adminResetMessage = null;
+        try
+        {
+            var forwardHost = Config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220";
+            var secret = Config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"http://{forwardHost}:{_tenant.Port}/internal/admin-reset");
+            if (!string.IsNullOrEmpty(secret))
+                req.Headers.Add("X-Internal-Secret", secret);
+
+            var payload = new Dictionary<string, string?>();
+            if (!string.IsNullOrWhiteSpace(_newAdminEmail) && _newAdminEmail != _adminInfo?.Email)
+                payload["email"] = _newAdminEmail;
+            if (!string.IsNullOrWhiteSpace(_newAdminPassword))
+                payload["password"] = _newAdminPassword;
+
+            if (payload.Count == 0)
+            {
+                _adminResetMessage = "Nie wprowadzono zmian.";
+                _adminResetError = true;
+                return;
+            }
+
+            req.Content = new StringContent(
+                System.Text.Json.JsonSerializer.Serialize(payload),
+                System.Text.Encoding.UTF8, "application/json");
+            var resp = await http.SendAsync(req);
+            var json = await resp.Content.ReadAsStringAsync();
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("success", out var s) && s.GetBoolean())
+            {
+                _adminResetMessage = "Dane admina zaktualizowane.";
+                _adminResetError = false;
+                _newAdminPassword = "";
+                await LoadAdminInfo();
+            }
+            else
+            {
+                var error = root.TryGetProperty("error", out var e) ? e.GetString() : "Nieznany błąd";
+                _adminResetMessage = error;
+                _adminResetError = true;
+            }
+        }
+        catch (Exception ex) { _adminResetMessage = ex.Message; _adminResetError = true; }
+        finally { _resettingAdmin = false; }
+    }
+
+    private bool _extending;
+
+    private async Task ExtendGrace(int days)
+    {
+        if (_tenant is null) return;
+        _extending = true;
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            var tenant = await db.Tenants.FindAsync(_tenant.Id);
+            if (tenant is null) { ShowMessage("Tenant nie znaleziony.", true); return; }
+
+            var now = DateTime.UtcNow;
+            var baseDate = tenant.GraceUntil.HasValue && tenant.GraceUntil.Value > now
+                ? tenant.GraceUntil.Value
+                : now;
+            tenant.GraceUntil = baseDate.AddDays(days);
+
+            db.TenantEvents.Add(new TenantEvent
+            {
+                TenantId = tenant.Id,
+                EventType = TenantEventTypes.GraceExtended,
+                Detail = $"+{days} dni (do {tenant.GraceUntil.Value:dd.MM.yyyy HH:mm})"
+            });
+
+            await db.SaveChangesAsync();
+
+            var body = EmailSvc.GraceExtendedEmailBody(tenant.OwnerName, days);
+            _ = EmailSvc.SendAsync(tenant.OwnerEmail, $"Przedluzono ochrone konta PTScheduler o {days} dni", body);
+
+            ShowMessage($"Przedluzono ochrone o {days} dni (do {tenant.GraceUntil.Value.ToLocalTime():dd.MM.yyyy HH:mm}).");
+            _tenant = await TenantSvc.GetAsync(Id);
+        }
+        catch (Exception ex) { ShowMessage($"Blad: {ex.Message}", true); }
+        finally { _extending = false; }
+    }
+
+    private string _newDomain = "";
+    private bool _changingDomain;
+    private string? _domainMessage;
+    private bool _domainError;
+    private List<TenantEvent>? _tenantEvents;
+    private bool _loadingEvents;
+    private List<PaymentRecord>? _paymentRecords;
+    private bool _loadingPayments;
+
+    private async Task ChangeDomain()
+    {
+        if (_tenant is null || string.IsNullOrWhiteSpace(_newDomain)) return;
+        _changingDomain = true;
+        _domainMessage = null;
+        try
+        {
+            var oldDomain = _tenant.Domain;
+            var forwardHost = Config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220";
+
+            await using var db = DbFactory.CreateDbContext();
+            var tenant = await db.Tenants.FindAsync(_tenant.Id);
+            if (tenant is null) { _domainMessage = "Tenant nie znaleziony."; _domainError = true; return; }
+
+            tenant.Domain = _newDomain.Trim();
+
+            db.TenantEvents.Add(new TenantEvent
+            {
+                TenantId = tenant.Id,
+                EventType = TenantEventTypes.DomainChanged,
+                Detail = $"{oldDomain} -> {_newDomain.Trim()}"
+            });
+
+            await db.SaveChangesAsync();
+
+            if (!string.IsNullOrWhiteSpace(oldDomain))
+                try { await NpmSvc.DeleteProxyHostByDomainAsync(oldDomain); } catch { }
+
+            var (npmOk, npmMsg) = await NpmSvc.RegisterProxyHostAsync(_newDomain.Trim(), forwardHost, _tenant.Port);
+
+            _domainMessage = npmOk
+                ? $"Domena zmieniona na {_newDomain.Trim()}. NPM: {npmMsg}"
+                : $"Domena zmieniona, ale NPM: {npmMsg} — dodaj recznie.";
+            _domainError = !npmOk;
+
+            _tenant = await TenantSvc.GetAsync(Id);
+        }
+        catch (Exception ex) { _domainMessage = ex.Message; _domainError = true; }
+        finally { _changingDomain = false; }
+    }
+
+    private async Task LoadEvents()
+    {
+        _loadingEvents = true;
+        _tenantEvents = await TenantSvc.GetRecentEventsAsync(30, _tenant?.Id);
+        _loadingEvents = false;
+    }
+
+    private async Task LoadPaymentRecords()
+    {
+        _loadingPayments = true;
+        _paymentRecords = await TenantSvc.GetRecentPaymentsAsync(20, _tenant?.Id);
+        _loadingPayments = false;
+    }
+
+    private static string EventLabel(string type) => type switch
+    {
+        TenantEventTypes.Created => "Utworzony",
+        TenantEventTypes.Provisioned => "Provisioned",
+        TenantEventTypes.Suspended => "Zawieszony",
+        TenantEventTypes.Resumed => "Wznowiony",
+        TenantEventTypes.Deleted => "Usuniety",
+        TenantEventTypes.PlanChanged => "Zmiana planu",
+        TenantEventTypes.PaymentReceived => "Platnosc otrzymana",
+        TenantEventTypes.PaymentFailed => "Platnosc nieudana",
+        TenantEventTypes.TrialStarted => "Trial rozpoczety",
+        TenantEventTypes.TrialExpired => "Trial wygasl",
+        TenantEventTypes.TrialWarning => "Ostrzezenie trial",
+        TenantEventTypes.DomainChanged => "Zmiana domeny",
+        TenantEventTypes.HealthDown => "Awaria",
+        TenantEventTypes.HealthRecovered => "Przywrocony",
+        TenantEventTypes.InactivityWarning => "Ostrzezenie nieaktywnosc",
+        TenantEventTypes.InactivitySuspended => "Zawieszony (nieaktywnosc)",
+        TenantEventTypes.GraceExtended => "Przedluzono ochrone",
+        TenantEventTypes.CleanupWarning => "Ostrzezenie usuniecie",
+        TenantEventTypes.CleanupDeleted => "Usuniety automatycznie",
+        _ => type
+    };
+
+    private static string EventIcon(string type) => type switch
+    {
+        TenantEventTypes.Created => "bi-plus-circle",
+        TenantEventTypes.Provisioned => "bi-rocket",
+        TenantEventTypes.Suspended => "bi-pause-circle",
+        TenantEventTypes.Resumed => "bi-play-circle",
+        TenantEventTypes.Deleted => "bi-trash",
+        TenantEventTypes.PlanChanged => "bi-arrow-repeat",
+        TenantEventTypes.PaymentReceived => "bi-cash-stack",
+        TenantEventTypes.PaymentFailed => "bi-exclamation-circle",
+        TenantEventTypes.TrialStarted => "bi-clock",
+        TenantEventTypes.TrialExpired => "bi-clock-history",
+        TenantEventTypes.TrialWarning => "bi-exclamation-triangle",
+        TenantEventTypes.DomainChanged => "bi-globe",
+        TenantEventTypes.HealthDown => "bi-heart-pulse",
+        TenantEventTypes.HealthRecovered => "bi-heart",
+        TenantEventTypes.InactivityWarning => "bi-hourglass-split",
+        TenantEventTypes.InactivitySuspended => "bi-moon",
+        TenantEventTypes.GraceExtended => "bi-shield-check",
+        TenantEventTypes.CleanupWarning => "bi-trash",
+        TenantEventTypes.CleanupDeleted => "bi-trash-fill",
+        _ => "bi-circle"
+    };
+
+    private static string EventBadge(string type) => type switch
+    {
+        TenantEventTypes.Created or TenantEventTypes.Provisioned or TenantEventTypes.Resumed => "bg-success",
+        TenantEventTypes.PaymentReceived or TenantEventTypes.HealthRecovered => "bg-success",
+        TenantEventTypes.Suspended or TenantEventTypes.Deleted => "bg-danger",
+        TenantEventTypes.PaymentFailed or TenantEventTypes.TrialExpired or TenantEventTypes.HealthDown => "bg-danger",
+        TenantEventTypes.TrialWarning or TenantEventTypes.InactivityWarning or TenantEventTypes.CleanupWarning => "bg-warning text-dark",
+        TenantEventTypes.InactivitySuspended or TenantEventTypes.CleanupDeleted => "bg-danger",
+        TenantEventTypes.GraceExtended => "bg-info",
+        TenantEventTypes.PlanChanged or TenantEventTypes.DomainChanged or TenantEventTypes.TrialStarted => "bg-info",
+        _ => "bg-secondary"
+    };
+
+    private static string PaymentRecordBadge(PaymentRecordStatus s) => s switch
+    {
+        PaymentRecordStatus.Paid => "bg-success",
+        PaymentRecordStatus.Failed => "bg-danger",
+        PaymentRecordStatus.Refunded => "bg-warning text-dark",
+        PaymentRecordStatus.Pending => "bg-secondary",
+        _ => "bg-secondary"
+    };
+
+    private record AdminInfo
+    {
+        public bool Found { get; init; }
+        public string? Email { get; init; }
+        public string? FirstName { get; init; }
+        public string? LastName { get; init; }
+        public bool EmailConfirmed { get; init; }
+        public string? LockoutEnd { get; init; }
+    }
+
+    private List<ServiceItem>? _serviceItems;
+    private Dictionary<int, TenantServicePrice> _tenantPrices = new();
+    private Dictionary<int, PriceEdit> _priceEdits = new();
+    private bool _loadingPricing;
+    private bool _savingPricing;
+    private string? _pricingMessage;
+    private bool _pricingError;
+
+    private async Task LoadServicePricing()
+    {
+        if (_tenant is null) return;
+        _loadingPricing = true;
+        _pricingMessage = null;
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            _serviceItems = await db.ServiceItems.AsNoTracking().OrderBy(s => s.SortOrder).ToListAsync();
+            _tenantPrices = await db.TenantServicePrices.AsNoTracking()
+                .Where(p => p.TenantId == _tenant.Id)
+                .ToDictionaryAsync(p => p.ServiceItemId);
+            _priceEdits.Clear();
+            foreach (var item in _serviceItems)
+            {
+                var ov = _tenantPrices.GetValueOrDefault(item.Id);
+                _priceEdits[item.Id] = new PriceEdit
+                {
+                    CustomPrice = ov?.CustomPrice,
+                    IsHidden = ov?.IsHidden ?? false
+                };
+            }
+        }
+        catch (Exception ex) { _pricingMessage = ex.Message; _pricingError = true; }
+        finally { _loadingPricing = false; }
+    }
+
+    private void SetCustomPrice(int serviceItemId, string? value)
+    {
+        if (!_priceEdits.ContainsKey(serviceItemId)) return;
+        _priceEdits[serviceItemId].CustomPrice = decimal.TryParse(value, out var d) ? d : null;
+    }
+
+    private void ToggleHidden(int serviceItemId, bool hidden)
+    {
+        if (!_priceEdits.ContainsKey(serviceItemId)) return;
+        _priceEdits[serviceItemId].IsHidden = hidden;
+    }
+
+    private async Task SaveServicePricing()
+    {
+        if (_tenant is null || _serviceItems is null) return;
+        _savingPricing = true;
+        _pricingMessage = null;
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            var existing = await db.TenantServicePrices.Where(p => p.TenantId == _tenant.Id).ToListAsync();
+
+            foreach (var item in _serviceItems)
+            {
+                var edit = _priceEdits.GetValueOrDefault(item.Id);
+                if (edit is null) continue;
+
+                var hasOverride = edit.CustomPrice.HasValue || edit.IsHidden;
+                var record = existing.FirstOrDefault(e => e.ServiceItemId == item.Id);
+
+                if (hasOverride)
+                {
+                    if (record is null)
+                    {
+                        db.TenantServicePrices.Add(new TenantServicePrice
+                        {
+                            TenantId = _tenant.Id,
+                            ServiceItemId = item.Id,
+                            CustomPrice = edit.CustomPrice ?? item.DefaultPrice,
+                            IsHidden = edit.IsHidden
+                        });
+                    }
+                    else
+                    {
+                        record.CustomPrice = edit.CustomPrice ?? item.DefaultPrice;
+                        record.IsHidden = edit.IsHidden;
+                    }
+                }
+                else if (record is not null)
+                {
+                    db.TenantServicePrices.Remove(record);
+                }
+            }
+
+            await db.SaveChangesAsync();
+            _pricingMessage = "Cennik zapisany.";
+            _pricingError = false;
+            await LoadServicePricing();
+        }
+        catch (Exception ex) { _pricingMessage = ex.Message; _pricingError = true; }
+        finally { _savingPricing = false; }
+    }
+
+    private class PriceEdit
+    {
+        public decimal? CustomPrice { get; set; }
+        public bool IsHidden { get; set; }
+    }
+
+    private List<ServiceItem>? _approvalServiceItems;
+    private Dictionary<int, PriceEdit> _approvalPriceEdits = new();
+    private string _approvalNotes = "";
+    private bool _approving;
+    private bool _rejecting;
+
+    private async Task LoadApprovalPricing()
+    {
+        await using var db = DbFactory.CreateDbContext();
+        _approvalServiceItems = await db.ServiceItems.AsNoTracking()
+            .Where(s => s.IsActive).OrderBy(s => s.SortOrder).ToListAsync();
+        _approvalPriceEdits.Clear();
+        foreach (var item in _approvalServiceItems)
+            _approvalPriceEdits[item.Id] = new PriceEdit();
+    }
+
+    private void SetApprovalPrice(int serviceItemId, string? value)
+    {
+        if (!_approvalPriceEdits.ContainsKey(serviceItemId)) return;
+        _approvalPriceEdits[serviceItemId].CustomPrice = decimal.TryParse(value, out var d) ? d : null;
+    }
+
+    private void ToggleApprovalHidden(int serviceItemId, bool hidden)
+    {
+        if (!_approvalPriceEdits.ContainsKey(serviceItemId)) return;
+        _approvalPriceEdits[serviceItemId].IsHidden = hidden;
+    }
+
+    private async Task ApproveAndProvision()
+    {
+        if (_tenant is null) return;
+        _approving = true;
+        try
+        {
+            if (_selectedPlanId != _tenant.PlanId)
+                await TenantSvc.UpdatePlanAsync(_tenant.Id, _selectedPlanId);
+
+            if (!string.IsNullOrWhiteSpace(_approvalNotes))
+            {
+                await using var ndb = DbFactory.CreateDbContext();
+                var t = await ndb.Tenants.FindAsync(_tenant.Id);
+                if (t is not null) { t.Notes = _approvalNotes.Trim(); await ndb.SaveChangesAsync(); }
+            }
+
+            if (_approvalServiceItems is not null)
+            {
+                await using var db = DbFactory.CreateDbContext();
+                foreach (var item in _approvalServiceItems)
+                {
+                    var edit = _approvalPriceEdits.GetValueOrDefault(item.Id);
+                    if (edit is null) continue;
+                    var hasOverride = edit.CustomPrice.HasValue || edit.IsHidden;
+                    if (!hasOverride) continue;
+                    db.TenantServicePrices.Add(new TenantServicePrice
+                    {
+                        TenantId = _tenant.Id,
+                        ServiceItemId = item.Id,
+                        CustomPrice = edit.CustomPrice ?? item.DefaultPrice,
+                        IsHidden = edit.IsHidden
+                    });
+                }
+                await db.SaveChangesAsync();
+            }
+
+            var (ok, output) = await TenantSvc.ProvisionAsync(_tenant.Id);
+            _provisionOutput = output;
+
+            if (ok)
+            {
+                _tenant = await TenantSvc.GetAsync(Id);
+                var planName = _availablePlans.FirstOrDefault(p => p.Id == _selectedPlanId)?.Name ?? _selectedPlanId;
+                var body = EmailSvc.TenantApprovedEmailBody(
+                    _tenant!.OwnerName, _tenant.Domain, _tenant.Port.ToString(), planName);
+                _ = EmailSvc.SendAsync(_tenant.OwnerEmail, "PTScheduler — Twoje konto zostalo zaakceptowane!", body);
+                ShowMessage("Tenant zaakceptowany i uruchomiony. Email wyslany.");
+            }
+            else
+            {
+                ShowMessage($"Provisioning nie powiodl sie: {output}", true);
+            }
+
+            _tenant = await TenantSvc.GetAsync(Id);
+            await RefreshContainers();
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Blad: {ex.Message}", true);
+        }
+        finally { _approving = false; }
+    }
+
+    private async Task RejectRegistration()
+    {
+        if (_tenant is null) return;
+        _rejecting = true;
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            var tenant = await db.Tenants.FindAsync(_tenant.Id);
+            if (tenant is null) { ShowMessage("Tenant nie znaleziony.", true); return; }
+
+            tenant.Status = TenantStatus.Suspended;
+            if (!string.IsNullOrWhiteSpace(_approvalNotes))
+                tenant.Notes = _approvalNotes.Trim();
+
+            db.TenantEvents.Add(new TenantEvent
+            {
+                TenantId = tenant.Id,
+                EventType = TenantEventTypes.Suspended,
+                Detail = "Rejestracja odrzucona przez admina"
+            });
+            await db.SaveChangesAsync();
+
+            ShowMessage("Rejestracja odrzucona.");
+            _tenant = await TenantSvc.GetAsync(Id);
+        }
+        catch (Exception ex)
+        {
+            ShowMessage($"Blad: {ex.Message}", true);
+        }
+        finally { _rejecting = false; }
+    }
+}

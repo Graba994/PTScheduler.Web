@@ -1,0 +1,168 @@
+@page "/panel/system"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject DockerService DockerSvc
+@inject TenantService TenantSvc
+@rendermode InteractiveServer
+
+<PageTitle>System — PTScheduler Portal</PageTitle>
+
+<h4 class="fw-bold mb-4"><i class="bi bi-cpu me-2 text-primary"></i>System</h4>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <div class="row g-3 mb-4">
+        <div class="col-md-6 col-lg-3">
+            <div class="card border-0 shadow-sm text-center p-3">
+                <div class="fw-bold fs-3">@(_sys?.CpuCount ?? 0)</div>
+                <div class="text-muted small">CPU Cores</div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-3">
+            <div class="card border-0 shadow-sm text-center p-3">
+                <div class="fw-bold fs-3">@((_sys?.TotalMemoryMB ?? 0) / 1024) GB</div>
+                <div class="text-muted small">RAM</div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-3">
+            <div class="card border-0 shadow-sm text-center p-3">
+                <div class="fw-bold fs-3">@(_sys?.RunningContainers ?? 0)/@(_sys?.TotalContainers ?? 0)</div>
+                <div class="text-muted small">Kontenery</div>
+            </div>
+        </div>
+        <div class="col-md-6 col-lg-3">
+            <div class="card border-0 shadow-sm text-center p-3">
+                <div class="fw-bold fs-3">@_sys?.DockerVersion</div>
+                <div class="text-muted small">Docker</div>
+            </div>
+        </div>
+    </div>
+
+    <div class="row g-3">
+        <div class="col-lg-8">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3">
+                        <h6 class="fw-bold mb-0"><i class="bi bi-box me-2"></i>Kontenery trenerów</h6>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="Refresh">
+                            <i class="bi bi-arrow-clockwise"></i>
+                        </button>
+                    </div>
+
+                    @if (_statuses.Count == 0)
+                    {
+                        <p class="text-muted small">Brak aktywnych trenerów.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0 small">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Slug</th>
+                                        <th>Web</th>
+                                        <th>DB</th>
+                                        <th>Status</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var s in _statuses)
+                                    {
+                                        <tr>
+                                            <td class="font-monospace fw-semibold">@s.Slug</td>
+                                            <td>
+                                                <span class="badge @(s.Web?.Running == true ? "bg-success" : "bg-danger")">
+                                                    @(s.Web?.Running == true ? "Up" : "Down")
+                                                </span>
+                                                @if (s.Web is not null)
+                                                {
+                                                    <span class="text-muted ms-1">@s.Web.Id</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                <span class="badge @(s.Db?.Running == true ? "bg-success" : "bg-danger")">
+                                                    @(s.Db?.Running == true ? "Up" : "Down")
+                                                </span>
+                                                @if (s.Db is not null)
+                                                {
+                                                    <span class="text-muted ms-1">@s.Db.Id</span>
+                                                }
+                                            </td>
+                                            <td>
+                                                @if (s.IsHealthy)
+                                                {
+                                                    <i class="bi bi-check-circle-fill text-success"></i>
+                                                }
+                                                else
+                                                {
+                                                    <i class="bi bi-exclamation-triangle-fill text-danger"></i>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-4">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <h6 class="fw-bold mb-3"><i class="bi bi-bar-chart me-2"></i>Capacity</h6>
+                    @if (_sys is not null)
+                    {
+                        var maxTenants = (int)(_sys.TotalMemoryMB / 150);
+                        var activeTenants = _statuses.Count(s => s.IsHealthy);
+                        var pct = maxTenants > 0 ? (activeTenants * 100 / maxTenants) : 0;
+
+                        <div class="d-flex justify-content-between small mb-1">
+                            <span>@activeTenants aktywnych</span>
+                            <span>max ~@maxTenants</span>
+                        </div>
+                        <div class="progress mb-3" style="height:12px">
+                            <div class="progress-bar @(pct > 80 ? "bg-danger" : pct > 60 ? "bg-warning" : "bg-primary")"
+                                 style="width:@pct%">@pct%</div>
+                        </div>
+
+                        <div class="small text-muted">
+                            <p>Szacunek: ~150 MB / trener (app + DB).</p>
+                            <p class="mb-0">Przy upgrade do 4C/8GB: ~@((int)(8192 / 150)) trenerów.</p>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private SystemInfo? _sys;
+    private List<TenantContainerStatus> _statuses = [];
+
+    protected override async Task OnInitializedAsync() => await Refresh();
+
+    private async Task Refresh()
+    {
+        _loading = true;
+        try { _sys = await DockerSvc.GetSystemInfoAsync(); } catch { }
+
+        var tenants = await TenantSvc.GetAllAsync();
+        try
+        {
+            _statuses = await DockerSvc.GetAllTenantsStatusAsync(
+                tenants.Where(t => t.Status == TenantStatus.Active)
+                    .Select(t => (t.Slug, t.WebContainerName, t.DbContainerName)));
+        }
+        catch { }
+
+        _loading = false;
+    }
+}

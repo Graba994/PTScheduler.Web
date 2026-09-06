@@ -2,10 +2,14 @@
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Entities
+@using Microsoft.AspNetCore.Identity
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Admin)]
 @inject IUserManagementService UserService
+@inject UserManager<ApplicationUser> UserManager
+@inject EntitlementService Entitlements
 @inject NavigationManager Nav
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Użytkownicy" />
 
@@ -215,6 +219,18 @@ else
 
         if (string.IsNullOrWhiteSpace(newUser.Email))   { createError = "E-mail jest wymagany."; return; }
         if (string.IsNullOrWhiteSpace(newUser.Password)) { createError = "Hasło jest wymagane."; return; }
+
+        // Plan limit checks — trainers and subordinates are limited by the plan
+        if (newUser.Role == Roles.Trainer)
+        {
+            var (ok, cur, max) = await Entitlements.CheckTrainerLimitAsync(UserManager);
+            if (!ok) { createError = $"Osiągnięto limit trenerów w planie {Entitlements.Current.Name} ({cur}/{max}). Zwiększ plan aby dodać więcej."; return; }
+        }
+        if (newUser.Role == Roles.Subordinate)
+        {
+            var (ok, cur, max) = await Entitlements.CheckSubordinateLimitAsync(UserManager);
+            if (!ok) { createError = $"Osiągnięto limit asystentów w planie {Entitlements.Current.Name} ({cur}/{max}). Zwiększ plan aby dodać więcej."; return; }
+        }
 
         createBusy = true;
         try

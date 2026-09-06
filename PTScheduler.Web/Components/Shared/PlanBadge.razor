@@ -1,0 +1,19 @@
+@inject EntitlementService Entitlements
+
+@if (!_allowed)
+{
+    <span class="badge bg-primary-subtle text-primary-emphasis ms-1"
+          title="Dostępne w planie @RequiredPlan">
+        <i class="bi bi-lock-fill me-1" style="font-size:.7rem"></i>@RequiredPlan
+    </span>
+}
+
+@code {
+    [Parameter, EditorRequired] public string Flag { get; set; } = "";
+    [Parameter] public string RequiredPlan { get; set; } = "Pro";
+
+    private bool _allowed;
+
+    protected override void OnParametersSet() =>
+        _allowed = Entitlements.IsAllowed(Flag);
+}
