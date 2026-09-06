@@ -9,7 +9,7 @@ using PTScheduler.Infrastructure.Data;
 
 #nullable disable
 
-namespace PTScheduler.Infrastructure.Data.Migrations
+namespace PTScheduler.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
     [Migration("20260730082647_AddInvoiceAndSellerFields")]

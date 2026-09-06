@@ -9,11 +9,11 @@ using PTScheduler.Infrastructure.Data;
 
 #nullable disable
 
-namespace PTScheduler.Infrastructure.Data.Migrations
+namespace PTScheduler.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260721073434_AddMultiGatewayPayments")]
-    partial class AddMultiGatewayPayments
+    [Migration("20260724073916_AddBunnyVideoToLesson")]
+    partial class AddBunnyVideoToLesson
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -191,6 +191,15 @@ namespace PTScheduler.Infrastructure.Data.Migrations
                         .HasColumnType("text");
 
                     b.Property<string>("PwaShortName")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("SetupCompleted")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("SetupCompletedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SetupMode")
                         .HasColumnType("text");
 
                     b.Property<string>("ThemeMode")
@@ -734,6 +743,15 @@ namespace PTScheduler.Infrastructure.Data.Migrations
                         .HasColumnType("integer");
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("BunnyVideoDurationSec")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("BunnyVideoId")
+                        .HasColumnType("text");
+
+                    b.Property<long?>("BunnyVideoSizeBytes")
+                        .HasColumnType("bigint");
 
                     b.Property<string>("ContentHtml")
                         .HasColumnType("text");

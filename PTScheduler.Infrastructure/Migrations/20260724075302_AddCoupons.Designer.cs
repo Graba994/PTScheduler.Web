@@ -9,11 +9,11 @@ using PTScheduler.Infrastructure.Data;
 
 #nullable disable
 
-namespace PTScheduler.Infrastructure.Data.Migrations
+namespace PTScheduler.Infrastructure.Migrations
 {
     [DbContext(typeof(ApplicationDbContext))]
-    [Migration("20260724073916_AddBunnyVideoToLesson")]
-    partial class AddBunnyVideoToLesson
+    [Migration("20260724075302_AddCoupons")]
+    partial class AddCoupons
     {
         /// <inheritdoc />
         protected override void BuildTargetModel(ModelBuilder modelBuilder)
@@ -383,6 +383,107 @@ namespace PTScheduler.Infrastructure.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("ClientContacts");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.Coupon", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Description")
+                        .HasColumnType("text");
+
+                    b.Property<string>("DiscountType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<decimal>("DiscountValue")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<bool>("IsActive")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("MaxUses")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Scope")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<int>("UsedCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ValidFrom")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ValidUntil")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.ToTable("Coupons");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.CouponRedemption", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("CouponId")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("DiscountAmount")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<decimal>("FinalAmount")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<decimal>("OriginalAmount")
+                        .HasPrecision(10, 2)
+                        .HasColumnType("numeric(10,2)");
+
+                    b.Property<DateTime>("RedeemedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("TargetId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("TargetType")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("UserEmail")
+                        .HasColumnType("text");
+
+                    b.Property<string>("UserId")
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CouponId");
+
+                    b.HasIndex("RedeemedAt");
+
+                    b.ToTable("CouponRedemptions");
                 });
 
             modelBuilder.Entity("PTScheduler.Domain.Entities.Course", b =>
@@ -1730,6 +1831,17 @@ namespace PTScheduler.Infrastructure.Data.Migrations
                     b.Navigation("Client2");
                 });
 
+            modelBuilder.Entity("PTScheduler.Domain.Entities.CouponRedemption", b =>
+                {
+                    b.HasOne("PTScheduler.Domain.Entities.Coupon", "Coupon")
+                        .WithMany("Redemptions")
+                        .HasForeignKey("CouponId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Coupon");
+                });
+
             modelBuilder.Entity("PTScheduler.Domain.Entities.CourseEnrollment", b =>
                 {
                     b.HasOne("PTScheduler.Domain.Entities.Course", "Course")
@@ -1955,6 +2067,11 @@ namespace PTScheduler.Infrastructure.Data.Migrations
                     b.Navigation("Sessions");
 
                     b.Navigation("TrainerNotes");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.Coupon", b =>
+                {
+                    b.Navigation("Redemptions");
                 });
 
             modelBuilder.Entity("PTScheduler.Domain.Entities.Course", b =>

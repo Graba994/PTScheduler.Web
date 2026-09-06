@@ -2,7 +2,7 @@
 
 #nullable disable
 
-namespace PTScheduler.Infrastructure.Data.Migrations
+namespace PTScheduler.Infrastructure.Migrations
 {
     /// <inheritdoc />
     public partial class AddBunnyVideoToLesson : Migration
