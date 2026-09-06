@@ -253,6 +253,10 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
                         <span>Aktualizuj aplikację trenera</span>
                     }
                 </button>
+                <div class="form-text mt-1">
+                    Jeden ciąg: build obrazu → wdrożenie na kontenery (rolling z health checkiem).
+                    Nie trzeba osobno restartować — restart kontenerów jest częścią tego kroku.
+                </div>
             </div>
         </div>
     </div>
@@ -521,14 +525,17 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
         if (_guardianAvailable)
         {
             var resp = await UpdateSvc.StartPortalUpgradeViaGuardianAsync();
-            if (resp is null || !resp.Started)
+            if (resp is { Started: true, JobId: { } jobId })
             {
-                _result = new UpgradeResult(false, resp?.Error ?? "Guardian nie odpowiedział", []);
+                _currentJobId = jobId;
+                StartPolling();
+            }
+            else if (!await TryResumeActiveJobAsync())
+            {
+                _result = new UpgradeResult(false, resp?.Error ?? "Guardian nie odpowiedział (brak aktywnego zadania)", []);
                 _upgradingPortal = false;
                 return;
             }
-            _currentJobId = resp.JobId;
-            StartPolling();
         }
         else
         {
@@ -547,28 +554,35 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
 
         if (_guardianAvailable && _rebuildImage)
         {
+            _pendingRollingAfterBuild = _reprovision && _rollingUpdate;
             var resp = await UpdateSvc.StartTenantUpgradeViaGuardianAsync(_rebuildImage);
-            if (resp is null || !resp.Started)
+            if (resp is { Started: true, JobId: { } jobId })
             {
-                _result = new UpgradeResult(false, resp?.Error ?? "Guardian nie odpowiedział", []);
+                _currentJobId = jobId;
+                StartPolling();
+            }
+            else if (!await TryResumeActiveJobAsync())
+            {
+                _pendingRollingAfterBuild = false;
+                _result = new UpgradeResult(false, resp?.Error ?? "Guardian nie odpowiedział (brak aktywnego zadania)", []);
                 _upgrading = false;
                 return;
             }
-            _currentJobId = resp.JobId;
-            _pendingRollingAfterBuild = _reprovision && _rollingUpdate;
-            StartPolling();
         }
         else if (_guardianAvailable && !_rebuildImage && _reprovision && _rollingUpdate)
         {
             var resp = await UpdateSvc.StartTenantRollingUpdateViaGuardianAsync(_concurrency, _stopOnFailure);
-            if (resp is null || !resp.Started)
+            if (resp is { Started: true, JobId: { } jobId })
             {
-                _result = new UpgradeResult(false, resp?.Error ?? "Guardian nie odpowiedział", []);
+                _currentJobId = jobId;
+                StartPolling();
+            }
+            else if (!await TryResumeActiveJobAsync())
+            {
+                _result = new UpgradeResult(false, resp?.Error ?? "Guardian nie odpowiedział (brak aktywnego zadania)", []);
                 _upgrading = false;
                 return;
             }
-            _currentJobId = resp.JobId;
-            StartPolling();
         }
         else
         {
@@ -589,14 +603,17 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
         _activeGuardianJob = null;
 
         var resp = await UpdateSvc.RollbackPortalViaGuardianAsync();
-        if (resp is null || !resp.Started)
+        if (resp is { Started: true, JobId: { } jobId })
         {
-            _result = new UpgradeResult(false, resp?.Error ?? "Guardian nie odpowiedział", []);
+            _currentJobId = jobId;
+            StartPolling();
+        }
+        else if (!await TryResumeActiveJobAsync())
+        {
+            _result = new UpgradeResult(false, resp?.Error ?? "Guardian nie odpowiedział (brak aktywnego zadania)", []);
             _upgradingPortal = false;
             return;
         }
-        _currentJobId = resp.JobId;
-        StartPolling();
     }
 
     // ── Polling ─────────────────────────────────────────────
@@ -627,14 +644,21 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
                             _pendingRollingAfterBuild = false;
                             _activeGuardianJob = null;
                             var resp = await UpdateSvc.StartTenantRollingUpdateViaGuardianAsync(_concurrency, _stopOnFailure);
-                            if (resp is not null && resp.Started)
+                            if (resp is { Started: true, JobId: { } rollingJobId })
                             {
-                                _currentJobId = resp.JobId;
+                                _currentJobId = rollingJobId;
                                 StartPolling();
                                 StateHasChanged();
                                 return;
                             }
-                            _result = new UpgradeResult(false, resp?.Error ?? "Guardian rolling update nie odpowiedział", []);
+                            // Start rollingu mógł ruszyć mimo zgubionej odpowiedzi — nie zrywaj
+                            // łańcucha, jeśli Guardian faktycznie już go wykonuje.
+                            if (await TryResumeActiveJobAsync())
+                            {
+                                StateHasChanged();
+                                return;
+                            }
+                            _result = new UpgradeResult(false, resp?.Error ?? "Guardian rolling update nie odpowiedział (brak aktywnego zadania)", []);
                         }
                         else if (_reprovision && !_rollingUpdate)
                         {
@@ -661,6 +685,26 @@ else if (_repoHead is not null && _tenant.Commit != "unknown")
         _pollTimer?.Dispose();
         _pollTimer = null;
         _currentJobId = null;
+    }
+
+    // Odpowiedź startu joba potrafi zaginąć (timeout HTTP / Guardian zajęty buildem),
+    // choć Guardian faktycznie go uruchomił. Zanim ogłosimy „nie odpowiedział" —
+    // sprawdź, czy działa aktywne zadanie i je adoptuj (pollujemy jego status).
+    // Eliminuje fałszywy błąd i pęknięty łańcuch build→rolling.
+    private async Task<bool> TryResumeActiveJobAsync()
+    {
+        try
+        {
+            var active = await UpdateSvc.GetGuardianActiveJobAsync();
+            if (active is { Active: true, Job.Id: { Length: > 0 } id })
+            {
+                _currentJobId = id;
+                StartPolling();
+                return true;
+            }
+        }
+        catch { /* brak kontaktu z Guardianem — potraktuj jak brak aktywnego zadania */ }
+        return false;
     }
 
     // ── Helpers ──────────────────────────────────────────────
