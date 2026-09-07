@@ -84,6 +84,7 @@ public static class DependencyInjection
         services.AddScoped<ISmsSettingsService, SmsSettingsService>();
         services.AddScoped<ISmsService, SmsApiService>();
         services.AddScoped<ISetupService, SetupService>();
+        services.AddScoped<IExerciseCatalogService, ExerciseCatalogService>();
 
         // QuestPDF community license — free for orgs <$1M annual revenue.
         // Set globally; safe to call multiple times in tests.

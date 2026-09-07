@@ -134,8 +134,16 @@ To realny wyróżnik vs konkurencja. Do rozważenia w fazie 2/3, nie musi być w
    ćwiczeń (reszta na fallbacku do nazwy EN, opis EN zawsze dostępny), plik
    rozszerzalny. Obrazy serwowane po URL (baza konfigurowalna zmienną
    `EXERCISE_IMAGE_BASE_URL`, domyślnie repo Free Exercise DB).
-2. **Katalog ćwiczeń**: przeglądanie, wyszukiwanie, filtr moje/publiczne, ulubione,
-   ostatnio używane, flaga 🇬🇧 dla EN. Dodawanie własnego ćwiczenia (zdjęcie/YT/Bunny).
+2. **Katalog ćwiczeń** ✅ (zrobione): strona `/exercises` (rola trenera) —
+   przeglądanie kart z miniaturami, wyszukiwanie PL/EN, zakładki zakresu
+   (wszystkie/baza/moje/ulubione/ostatnie), filtry partia/kategoria/poziom/sprzęt,
+   ulubione („interesujące mnie"), widok szczegółów (obrazy, partie, opis PL +
+   EN pod flagą 🇬🇧, embed YouTube), CRUD własnych ćwiczeń (nazwy PL/EN, partie,
+   kategoria/poziom/sprzęt, URL zdjęć, wideo YouTube/Bunny), ochrona przed
+   usunięciem ćwiczenia używanego w planie/dzienniku. Warstwa: DTO +
+   `IExerciseCatalogService`/`ExerciseCatalogService` + testy. **Do dołożenia
+   później:** pełny upload plików na Bunny z poziomu formularza (na razie
+   URL/ID), gating planem (`TrainingPlansEnabled`).
 3. **Kreator planu**: plan → dni → ćwiczenia (serie/powt./ciężar/tempo/przerwa),
    przypisanie klientowi, szablony.
 4. **Logowanie wykonania (mobile-first)**: klient wpisuje serie; widok „dziś trenuję".
