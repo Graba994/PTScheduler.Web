@@ -144,21 +144,42 @@ public class TrainerAvailabilityService(IDbContextFactory<ApplicationDbContext> 
         return result;
     }
 
-    public async Task<bool> IsSlotFreeAsync(string trainerUserId, DateTime start, int durationMinutes)
+    public async Task<bool> IsSlotFreeAsync(string trainerUserId, DateTime start, int durationMinutes, int? excludeSessionId = null)
+        => await FindConflictAsync(trainerUserId, start, durationMinutes, excludeSessionId) is null;
+
+    public async Task<SlotConflictDto?> FindConflictAsync(string trainerUserId, DateTime start, int durationMinutes, int? excludeSessionId = null)
     {
-        start = DateTime.SpecifyKind(start, DateTimeKind.Utc);
+        // Zegar ścienny — porównujemy z Session.StartTime, które też nim jest.
+        start = DateTime.SpecifyKind(start, DateTimeKind.Unspecified);
         await using var db = dbFactory.CreateDbContext();
         var cfg = await GetConfigAsync(db, trainerUserId);
         var slotEnd = start.AddMinutes(durationMinutes);
 
-        return !await db.Sessions
+        // Nakładanie: istniejąca sesja zaczyna się przed końcem nowej (plus
+        // przerwa po sesji) i kończy po jej początku. Anulowane nie blokują.
+        // Projekcja na proste kolumny (pewne w tłumaczeniu na SQL); imię
+        // składamy w pamięci, żeby nie polegać na tłumaczeniu string.Trim.
+        var c = await db.Sessions
             .AsNoTracking()
-            .Include(s => s.SessionType)
             .Where(s => s.TrainerUserId == trainerUserId
                         && s.Status != SessionStatus.Cancelled
+                        && (excludeSessionId == null || s.Id != excludeSessionId)
                         && s.StartTime < slotEnd.AddMinutes(cfg.BreakAfterSessionMinutes)
                         && s.StartTime.AddMinutes(s.SessionType.DurationMinutes) > start)
-            .AnyAsync();
+            .OrderBy(s => s.StartTime)
+            .Select(s => new
+            {
+                s.Id,
+                s.Client.FirstName,
+                s.Client.LastName,
+                s.StartTime,
+                s.SessionType.DurationMinutes
+            })
+            .FirstOrDefaultAsync();
+
+        return c is null
+            ? null
+            : new SlotConflictDto(c.Id, $"{c.FirstName} {c.LastName}".Trim(), c.StartTime, c.DurationMinutes);
     }
 
     // Internal overload used within methods that already have an open db context

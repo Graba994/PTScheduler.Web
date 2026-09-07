@@ -4,13 +4,25 @@
 @inject IClientService ClientService
 @inject AuthenticationStateProvider AuthState
 @inject IJSRuntime JS
+@inject EntitlementService Entitlements
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @using System.Globalization
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Moje pomiary" />
+
+@if (!Entitlements.IsAllowed("BodyMeasurements"))
+{
+    <FeatureGate Flag="BodyMeasurements" RequiredPlan="Pro"
+                 Title="Pomiary ciała są niedostępne w Twoim planie">
+        <Description>
+            Śledź postępy klientów — waga, tkanka tłuszczowa, obwody i wykresy zmian w czasie.
+        </Description>
+    </FeatureGate>
+    return;
+}
 
 <h4 class="mb-0 fw-bold mb-4">
     <i class="bi bi-rulers me-2"></i>Moje pomiary

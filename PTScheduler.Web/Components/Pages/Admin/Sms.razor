@@ -1,0 +1,379 @@
+@page "/admin/sms"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer")]
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@inject ISmsSettingsService SettingsService
+@inject ISmsService SmsService
+@inject EntitlementService Entitlements
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Przypomnienia SMS" />
+
+<div class="page-header">
+    <h4 class="page-title"><i class="bi bi-chat-dots-fill me-2" style="color:var(--c-primary)"></i>Przypomnienia SMS</h4>
+</div>
+
+@if (!Entitlements.IsAllowed("SmsReminders"))
+{
+    <FeatureGate Flag="SmsReminders" RequiredPlan="Pro"
+                 Title="Przypomnienia SMS są dostępne w planie Pro">
+        <Description>
+            Wysyłaj automatyczne przypomnienia SMS 24h przed sesją, obok (lub zamiast) przypomnień email. Odblokuj w planie <strong>Pro</strong> lub wyższym.
+        </Description>
+    </FeatureGate>
+}
+else
+{
+    <div class="cal-shell">
+        <div class="cal-body">
+            <div class="cal-main" style="overflow-y:auto;padding:1.5rem">
+
+                @if (_loading)
+                {
+                    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+                }
+                else
+                {
+                    @if (_centralizedStatus is { PlatformSmsEnabled: true })
+                    {
+                        <!-- Centralized (platform) SMS mode -->
+                        <div class="alert alert-success small">
+                            <i class="bi bi-check-circle-fill me-2"></i>
+                            <strong>SMS centralne</strong> — Twoje konto korzysta z centralnej platformy SMS.
+                            Nie musisz konfigurować własnego konta SMSAPI.pl. Kupuj pakiety SMS w sklepie usług.
+                        </div>
+
+                        <div class="card mb-4">
+                            <div class="card-body">
+                                <div class="row align-items-center">
+                                    <div class="col-auto">
+                                        <div class="d-flex align-items-center gap-3">
+                                            <div>
+                                                <i class="bi bi-chat-dots fs-1 text-primary"></i>
+                                            </div>
+                                            <div>
+                                                <div class="text-muted small">Dostępne kredyty SMS</div>
+                                                <div class="fs-3 fw-bold">@_centralizedStatus.SmsCredits</div>
+                                            </div>
+                                        </div>
+                                    </div>
+                                    <div class="col-auto ms-auto">
+                                        <a href="/admin/store" class="btn btn-outline-primary">
+                                            <i class="bi bi-cart-plus me-1"></i>Kup pakiet SMS
+                                        </a>
+                                    </div>
+                                </div>
+                                @if (_centralizedStatus.SmsCredits <= 10 && _centralizedStatus.SmsCredits > 0)
+                                {
+                                    <div class="alert alert-warning small py-2 mt-3 mb-0">
+                                        <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                                        Niski stan kredytów SMS. Kup dodatkowy pakiet, aby zapewnić ciągłość przypomnień.
+                                    </div>
+                                }
+                                else if (_centralizedStatus.SmsCredits <= 0)
+                                {
+                                    <div class="alert alert-danger small py-2 mt-3 mb-0">
+                                        <i class="bi bi-x-circle-fill me-2"></i>
+                                        Brak kredytów SMS. Przypomnienia SMS nie będą wysyłane do czasu zakupu pakietu.
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        <!-- Test SMS for centralized mode -->
+                        <div class="card mb-4">
+                            <div class="card-header fw-semibold">
+                                <i class="bi bi-send me-2"></i>Test SMS
+                            </div>
+                            <div class="card-body">
+                                <div class="row g-3 align-items-end">
+                                    <div class="col-md-6">
+                                        <label class="form-label fw-semibold small mb-1">Testowy numer telefonu</label>
+                                        <input type="tel" class="form-control" @bind="_testPhone"
+                                               placeholder="np. 600123456" />
+                                    </div>
+                                    <div class="col-md-3">
+                                        <button class="btn btn-outline-primary w-100" @onclick="TestSmsAsync"
+                                                disabled="@(_testing || string.IsNullOrWhiteSpace(_testPhone))">
+                                            @if (_testing)
+                                            {
+                                                <span class="spinner-border spinner-border-sm me-1"></span>
+                                            }
+                                            else
+                                            {
+                                                <i class="bi bi-send me-1"></i>
+                                            }
+                                            Wyślij test
+                                        </button>
+                                    </div>
+                                </div>
+                                <div class="form-text mt-2">Test SMS nie zużywa kredytów.</div>
+
+                                @if (!string.IsNullOrEmpty(_message))
+                                {
+                                    <div class="alert @(_messageOk ? "alert-success" : "alert-danger") py-2 small mt-3 mb-0">
+                                        <i class="bi @(_messageOk ? "bi-check-circle-fill" : "bi-x-circle-fill") me-2"></i>
+                                        @_message
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        <details class="card mb-4">
+                            <summary class="card-header fw-semibold" style="cursor:pointer;list-style:none">
+                                <i class="bi bi-question-circle me-2"></i>Wolisz własne konto SMSAPI.pl?
+                            </summary>
+                            <div class="card-body small">
+                                Jeśli chcesz korzystać z własnego konta SMSAPI.pl zamiast centralnych kredytów,
+                                skonfiguruj poniżej token API. Własne konto ma pierwszeństwo — system będzie
+                                korzystał z Twoich środków SMSAPI.pl zamiast centralnych kredytów.
+                            </div>
+                        </details>
+
+                        <!-- Collapsed BYOA section when centralized is active -->
+                        <details class="card mb-4">
+                            <summary class="card-header fw-semibold" style="cursor:pointer;list-style:none">
+                                <i class="bi bi-sliders me-2"></i>Konfiguracja własnego konta SMSAPI.pl (opcjonalne)
+                            </summary>
+                            <div class="card-body">
+                                @RenderByoaForm()
+                            </div>
+                        </details>
+                    }
+                    else
+                    {
+                        <!-- BYOA (bring your own account) mode -->
+                        <div class="alert alert-info small">
+                            <i class="bi bi-info-circle-fill me-2"></i>
+                            SMS to <strong>dodatkowo płatna usługa</strong> — koszty wiadomości pokrywasz bezpośrednio w SMSAPI.pl.
+                            PTScheduler tylko wysyła wiadomości przez Twoje konto, w ramach miesięcznego limitu Twojego planu
+                            (<strong>@(_maxPerMonth == int.MaxValue ? "bez limitu" : _maxPerMonth.ToString())</strong>).
+                        </div>
+
+                        <!-- Enable toggle -->
+                        <div class="card mb-4">
+                            <div class="card-body d-flex align-items-center gap-3 flex-wrap">
+                                <div class="form-check form-switch mb-0">
+                                    <input class="form-check-input" type="checkbox" id="enableSms"
+                                           @bind="_dto.IsEnabled" style="width:2.5em;height:1.3em" />
+                                    <label class="form-check-label fw-semibold fs-6" for="enableSms">
+                                        Włącz wysyłanie SMS
+                                    </label>
+                                </div>
+                                <span class="text-muted small">
+                                    @if (_dto.IsEnabled)
+                                    {
+                                        <span class="badge bg-success">Aktywne</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="badge bg-secondary">Wyłączone</span>
+                                    }
+                                </span>
+                                <span class="ms-auto text-muted small">
+                                    Wykorzystano w tym miesiącu: <strong>@_quotaSent / @(_maxPerMonth == int.MaxValue ? "∞" : _maxPerMonth.ToString())</strong>
+                                </span>
+                            </div>
+                        </div>
+
+                        <!-- SMSAPI.pl help -->
+                        <details class="card mb-4">
+                            <summary class="card-header fw-semibold" style="cursor:pointer;list-style:none">
+                                <i class="bi bi-question-circle me-2"></i>Instrukcja: konfiguracja SMSAPI.pl
+                            </summary>
+                            <div class="card-body small">
+                                <ol class="mb-3">
+                                    <li>Załóż konto na <strong>smsapi.pl</strong> i doładuj punkty SMS (płatność bezpośrednio do SMSAPI.pl).</li>
+                                    <li>W panelu przejdź do <strong>Ustawienia &rarr; Autoryzacja OAuth</strong> i wygeneruj token dostępu.</li>
+                                    <li>(Opcjonalnie) Zgłoś <strong>własną nazwę nadawcy</strong> (np. Twoje imię lub markę) w <strong>Ustawienia &rarr; Pola nadawcy</strong> — wymaga zatwierdzenia przez SMSAPI.pl.</li>
+                                    <li>Wklej token poniżej, zapisz i wyślij SMS testowy.</li>
+                                </ol>
+                            </div>
+                        </details>
+
+                        <!-- Settings form -->
+                        <div class="card mb-4">
+                            <div class="card-header fw-semibold">
+                                <i class="bi bi-sliders me-2"></i>Dane połączenia SMSAPI.pl
+                            </div>
+                            <div class="card-body">
+                                @RenderByoaForm()
+                            </div>
+                        </div>
+
+                        <!-- Actions -->
+                        <div class="card mb-4">
+                            <div class="card-body">
+                                <div class="row g-3 align-items-end">
+                                    <div class="col-md-5">
+                                        <label class="form-label fw-semibold small mb-1">Testowy numer telefonu</label>
+                                        <input type="tel" class="form-control" @bind="_testPhone"
+                                               placeholder="np. 600123456" />
+                                    </div>
+                                    <div class="col-md-3">
+                                        <button class="btn btn-outline-primary w-100" @onclick="TestSmsAsync"
+                                                disabled="@(_saving || _testing || string.IsNullOrWhiteSpace(_testPhone))">
+                                            @if (_testing)
+                                            {
+                                                <span class="spinner-border spinner-border-sm me-1"></span>
+                                            }
+                                            else
+                                            {
+                                                <i class="bi bi-send me-1"></i>
+                                            }
+                                            Wyślij test
+                                        </button>
+                                    </div>
+                                    <div class="col-md-4">
+                                        <button class="btn btn-primary w-100" @onclick="SaveAsync"
+                                                disabled="@(_saving || _testing)">
+                                            @if (_saving)
+                                            {
+                                                <span class="spinner-border spinner-border-sm me-1"></span>
+                                            }
+                                            else
+                                            {
+                                                <i class="bi bi-floppy-fill me-1"></i>
+                                            }
+                                            Zapisz ustawienia
+                                        </button>
+                                    </div>
+                                </div>
+
+                                @if (!string.IsNullOrEmpty(_message))
+                                {
+                                    <div class="alert @(_messageOk ? "alert-success" : "alert-danger") py-2 small mt-3 mb-0">
+                                        <i class="bi @(_messageOk ? "bi-check-circle-fill" : "bi-x-circle-fill") me-2"></i>
+                                        @_message
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="card border-0" style="background:var(--bs-tertiary-bg)">
+                            <div class="card-body small text-muted">
+                                <i class="bi bi-shield-lock me-2"></i>
+                                <strong>Bezpieczeństwo:</strong> Token API jest przechowywany w bazie danych w postaci niezaszyfrowanej.
+                                Upewnij się, że dostęp do bazy danych jest odpowiednio zabezpieczony.
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private RenderFragment RenderByoaForm() => __builder =>
+    {
+        <div class="row g-3">
+            <div class="col-md-8">
+                <label class="form-label fw-semibold small mb-1">
+                    Token API <span class="text-muted fw-normal">(zostaw puste, aby nie zmieniać)</span>
+                </label>
+                <div class="input-group">
+                    <input type="@(_showToken ? "text" : "password")"
+                           class="form-control" @bind="_dto.ApiToken"
+                           placeholder="••••••••••••••••" autocomplete="new-password" />
+                    <button class="btn btn-outline-secondary" type="button"
+                            @onclick="() => _showToken = !_showToken">
+                        <i class="bi @(_showToken ? "bi-eye-slash" : "bi-eye")"></i>
+                    </button>
+                </div>
+            </div>
+            <div class="col-md-4">
+                <label class="form-label fw-semibold small mb-1">Nazwa nadawcy</label>
+                <input type="text" class="form-control" @bind="_dto.SenderName"
+                       placeholder="np. PTScheduler" />
+                <div class="form-text">Musi być zatwierdzona w panelu SMSAPI.pl</div>
+            </div>
+        </div>
+
+        @if (_centralizedStatus is { PlatformSmsEnabled: true })
+        {
+            <div class="mt-3">
+                <button class="btn btn-primary btn-sm" @onclick="SaveAsync" disabled="@(_saving)">
+                    @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                    else { <i class="bi bi-floppy-fill me-1"></i> }
+                    Zapisz
+                </button>
+
+                @if (!string.IsNullOrEmpty(_message))
+                {
+                    <span class="ms-3 small @(_messageOk ? "text-success" : "text-danger")">@_message</span>
+                }
+            </div>
+        }
+    };
+
+    private SmsSettingsDto _dto = new();
+    private bool _loading = true;
+    private bool _saving;
+    private bool _testing;
+    private bool _showToken;
+    private string _testPhone = "";
+    private string _message = "";
+    private bool _messageOk;
+    private int _quotaSent;
+    private int _maxPerMonth;
+    private CentralizedSmsStatus? _centralizedStatus;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _maxPerMonth = Entitlements.Limit("MaxSmsPerMonth");
+        _dto = await SettingsService.GetAsync();
+
+        _centralizedStatus = await SmsService.GetCentralizedStatusAsync();
+
+        if (_centralizedStatus is not { PlatformSmsEnabled: true })
+            (_quotaSent, _) = await SmsService.GetQuotaStatusAsync(_maxPerMonth);
+
+        _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        _message = "";
+        try
+        {
+            await SettingsService.SaveAsync(_dto);
+            _messageOk = true;
+            _message = "Ustawienia zapisane pomyślnie.";
+        }
+        catch (Exception ex)
+        {
+            _messageOk = false;
+            _message = $"Błąd zapisu: {ex.Message}";
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task TestSmsAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_testPhone)) return;
+        _testing = true;
+        _message = "";
+        try
+        {
+            if (_centralizedStatus is not { PlatformSmsEnabled: true }
+                || !string.IsNullOrWhiteSpace(_dto.ApiToken))
+            {
+                await SettingsService.SaveAsync(_dto);
+            }
+
+            var (success, error) = await SmsService.TestAsync(_testPhone);
+            _messageOk = success;
+            _message = success
+                ? $"Testowy SMS wysłany na {_testPhone}."
+                : $"Błąd: {error}";
+        }
+        catch (Exception ex)
+        {
+            _messageOk = false;
+            _message = $"Błąd: {ex.Message}";
+        }
+        finally { _testing = false; }
+    }
+}

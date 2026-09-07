@@ -1,0 +1,133 @@
+@page "/panel/login-logs"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@rendermode InteractiveServer
+
+<PageTitle>Logi logowań — PTScheduler Portal</PageTitle>
+
+<div class="d-flex align-items-center gap-2 mb-4">
+    <a href="/panel" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i></a>
+    <h4 class="fw-bold mb-0"><i class="bi bi-journal-text me-2 text-info"></i>Logi logowań</h4>
+    <button class="btn btn-sm btn-outline-secondary ms-auto" @onclick="Load">
+        <i class="bi bi-arrow-clockwise"></i> Odśwież
+    </button>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <div class="row g-3 mb-4">
+        <div class="col-auto">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body py-2 px-3 d-flex align-items-center gap-2">
+                    <i class="bi bi-check-circle text-success"></i>
+                    <span class="small fw-semibold">Udane: @_successCount</span>
+                </div>
+            </div>
+        </div>
+        <div class="col-auto">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body py-2 px-3 d-flex align-items-center gap-2">
+                    <i class="bi bi-x-circle text-danger"></i>
+                    <span class="small fw-semibold">Nieudane: @_failCount</span>
+                </div>
+            </div>
+        </div>
+        <div class="col-auto">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body py-2 px-3 d-flex align-items-center gap-2">
+                    <i class="bi bi-lock text-warning"></i>
+                    <span class="small fw-semibold">Blokady: @_lockoutCount</span>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0 small">
+                <thead class="table-light">
+                    <tr>
+                        <th>Data</th>
+                        <th>Email</th>
+                        <th>Wynik</th>
+                        <th>IP</th>
+                        <th>Przeglądarka</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var log in _logs)
+                    {
+                        <tr class="@(!log.Success ? "table-danger" : "")">
+                            <td class="text-nowrap">@log.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")</td>
+                            <td class="font-monospace">@log.Email</td>
+                            <td>
+                                @if (log.Success)
+                                {
+                                    <span class="badge bg-success">OK</span>
+                                }
+                                else if (log.FailureReason == "locked_out")
+                                {
+                                    <span class="badge bg-warning text-dark">Zablokowany</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-danger">Błąd</span>
+                                }
+                            </td>
+                            <td class="font-monospace text-muted">@(log.IpAddress ?? "—")</td>
+                            <td class="text-muted" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                                @(ShortenUA(log.UserAgent))
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (_logs.Count == 0)
+        {
+            <p class="text-muted text-center py-3">Brak logów.</p>
+        }
+    </div>
+}
+
+@code {
+    private List<LoginLog> _logs = [];
+    private bool _loading = true;
+    private int _successCount;
+    private int _failCount;
+    private int _lockoutCount;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        _loading = true;
+        await using var db = DbFactory.CreateDbContext();
+        _logs = await db.LoginLogs
+            .AsNoTracking()
+            .OrderByDescending(l => l.CreatedAt)
+            .Take(200)
+            .ToListAsync();
+
+        _successCount = _logs.Count(l => l.Success);
+        _failCount = _logs.Count(l => !l.Success && l.FailureReason != "locked_out");
+        _lockoutCount = _logs.Count(l => l.FailureReason == "locked_out");
+        _loading = false;
+    }
+
+    private static string ShortenUA(string? ua)
+    {
+        if (string.IsNullOrEmpty(ua)) return "—";
+        if (ua.Contains("Firefox")) return "Firefox";
+        if (ua.Contains("Edg/")) return "Edge";
+        if (ua.Contains("Chrome")) return "Chrome";
+        if (ua.Contains("Safari")) return "Safari";
+        return ua.Length > 50 ? ua[..47] + "..." : ua;
+    }
+}

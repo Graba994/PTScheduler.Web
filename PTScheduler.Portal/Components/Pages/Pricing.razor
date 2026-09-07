@@ -1,0 +1,182 @@
+@page "/pricing"
+@layout PublicLayout
+@inject IDbContextFactory<PortalDbContext> DbFactory
+
+<PageTitle>Cennik — PTScheduler</PageTitle>
+
+<section class="py-5" style="background:linear-gradient(135deg,#f8f9ff,#e8f0fe)">
+    <div class="container text-center">
+        <h1 class="fw-bold mb-2">Prosty cennik, bez haczyków</h1>
+        <p class="text-muted mb-0">Zacznij za darmo. Skaluj gdy Twój biznes rośnie.</p>
+    </div>
+</section>
+
+<section class="py-5">
+    <div class="container">
+        <div class="row g-4 justify-content-center">
+            @foreach (var plan in _plans)
+            {
+                <div class="col-md-4">
+                    <div class="pricing-card @(plan.IsFeatured ? "featured" : "")">
+                        @if (plan.IsFeatured)
+                        {
+                            <div class="pricing-popular">Najpopularniejszy</div>
+                        }
+                        <h4 class="fw-bold">@plan.Name</h4>
+                        <p class="text-muted small mb-3">@plan.Description</p>
+
+                        <div class="pricing-price">
+                            @if (plan.MonthlyPrice == 0)
+                            {
+                                <span class="price-val">0 zł</span>
+                                <span class="price-period">na zawsze</span>
+                            }
+                            else
+                            {
+                                <span class="price-val">@plan.MonthlyPrice.ToString("0") zł</span>
+                                <span class="price-period">/ miesiąc</span>
+                                @if (plan.YearlyPrice.HasValue)
+                                {
+                                    <div class="text-muted small mt-1">lub @plan.YearlyPrice.Value.ToString("0") zł/rok (oszczędzasz @((plan.MonthlyPrice * 12 - plan.YearlyPrice.Value).ToString("0")) zł)</div>
+                                }
+                            }
+                        </div>
+
+                        <ul class="pricing-features">
+                            <li>
+                                <i class="bi bi-check-lg text-success"></i>
+                                Max @(plan.MaxClients == int.MaxValue ? "bez limitu" : plan.MaxClients.ToString()) klientów
+                            </li>
+                            <li>
+                                <i class="bi bi-check-lg text-success"></i>
+                                Grafik i rezerwacje
+                            </li>
+                            <li>
+                                <i class="bi bi-check-lg text-success"></i>
+                                Pakiety treningowe
+                            </li>
+                            <li>
+                                <i class="bi bi-check-lg text-success"></i>
+                                Własny branding
+                            </li>
+                            <li class="@(plan.PaymentsEnabled ? "" : "disabled")">
+                                <i class="bi @(plan.PaymentsEnabled ? "bi-check-lg text-success" : "bi-x-lg text-muted")"></i>
+                                Płatności online
+                            </li>
+                            <li class="@(plan.CoursesEnabled ? "" : "disabled")">
+                                <i class="bi @(plan.CoursesEnabled ? "bi-check-lg text-success" : "bi-x-lg text-muted")"></i>
+                                Kursy i mentoring
+                            </li>
+                            <li class="@(plan.SmsReminders ? "" : "disabled")">
+                                <i class="bi @(plan.SmsReminders ? "bi-check-lg text-success" : "bi-x-lg text-muted")"></i>
+                                Przypomnienia SMS
+                            </li>
+                            <li class="@(plan.AuditLog ? "" : "disabled")">
+                                <i class="bi @(plan.AuditLog ? "bi-check-lg text-success" : "bi-x-lg text-muted")"></i>
+                                Audit log i RBAC
+                            </li>
+                        </ul>
+
+                        <a href="/register?plan=@plan.Id" class="btn @(plan.IsFeatured ? "btn-primary" : "btn-outline-primary") w-100">
+                            @(plan.MonthlyPrice == 0 ? "Zacznij za darmo" : "Wybierz plan")
+                        </a>
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</section>
+
+<section class="py-5" style="background:#f8f9fa">
+    <div class="container">
+        <h3 class="text-center fw-bold mb-4">Często zadawane pytania</h3>
+        <div class="row justify-content-center">
+            <div class="col-lg-8">
+                <div class="accordion" id="faqAccordion">
+                    @foreach (var (q, a, i) in _faqs.Select((x, i) => (x.Q, x.A, i)))
+                    {
+                        <div class="accordion-item border-0 mb-2 rounded overflow-hidden shadow-sm">
+                            <h2 class="accordion-header">
+                                <button class="accordion-button collapsed fw-semibold" type="button"
+                                        data-bs-toggle="collapse" data-bs-target="#faq@(i)">@q</button>
+                            </h2>
+                            <div id="faq@(i)" class="accordion-collapse collapse" data-bs-parent="#faqAccordion">
+                                <div class="accordion-body text-muted small">@a</div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<style>
+    .pricing-card {
+        background: #fff;
+        border: 2px solid #e5e7eb;
+        border-radius: 1rem;
+        padding: 2rem 1.5rem;
+        text-align: center;
+        position: relative;
+        transition: transform .2s, box-shadow .2s;
+        height: 100%;
+        display: flex;
+        flex-direction: column;
+    }
+    .pricing-card:hover { transform: translateY(-4px); box-shadow: 0 12px 40px rgba(0,0,0,.1); }
+    .pricing-card.featured { border-color: #6366f1; box-shadow: 0 8px 30px rgba(99,102,241,.15); }
+    .pricing-popular {
+        position: absolute;
+        top: -12px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: #6366f1;
+        color: #fff;
+        padding: .25rem 1rem;
+        border-radius: 2rem;
+        font-size: .75rem;
+        font-weight: 600;
+    }
+    .pricing-price { margin: 1.5rem 0; }
+    .price-val { font-size: 2.5rem; font-weight: 800; }
+    .price-period { color: #9ca3af; font-size: .9rem; }
+    .pricing-features {
+        list-style: none;
+        padding: 0;
+        text-align: left;
+        flex: 1;
+        margin-bottom: 1.5rem;
+    }
+    .pricing-features li {
+        padding: .4rem 0;
+        font-size: .875rem;
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+    }
+    .pricing-features li.disabled { color: #d1d5db; }
+</style>
+
+@code {
+    private List<Plan> _plans = [];
+
+    private readonly (string Q, string A)[] _faqs =
+    [
+        ("Czy mogę przetestować za darmo?", "Tak! Plan Start jest bezpłatny i pozwala obsługiwać 3 klientów. Nie wymagamy karty kredytowej."),
+        ("Czy mogę zmienić plan?", "Tak, w każdej chwili możesz przejść na wyższy plan. Naliczamy proporcjonalnie."),
+        ("Czy moi klienci widzą PTScheduler?", "Nie — aplikacja wygląda jak Twoja własna. Twoje logo, kolory i domena."),
+        ("Jak wygląda konfiguracja?", "Możesz skonfigurować wszystko sam (kreator krok po kroku) lub zamówić konfigurację przez nasz zespół."),
+        ("Czy dane są bezpieczne?", "Każdy trener ma osobną bazę danych i osobny kontener. Pełna izolacja. Backup codziennie."),
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = DbFactory.CreateDbContext();
+        _plans = await db.Plans
+            .AsNoTracking()
+            .Where(p => p.IsActive)
+            .OrderBy(p => p.SortOrder)
+            .ToListAsync();
+    }
+}

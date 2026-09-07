@@ -1,0 +1,63 @@
+@page "/admin/modules"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Admin)]
+@inject IModuleSettingsService ModuleSettings
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Moduły" />
+
+<div class="page-header">
+    <h4 class="page-title"><i class="bi bi-toggles me-2" style="color:var(--c-primary)"></i>Moduły</h4>
+</div>
+
+@if (_settings is null)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(_msg)) { <div class="alert alert-success"><i class="bi bi-check-circle me-2"></i>@_msg</div> }
+
+    <p class="text-muted">Włączaj i wyłączaj moduły widoczne dla klientów. Wyłączony moduł znika z ich menu i strony głównej; zarządzanie w panelu admina pozostaje dostępne.</p>
+
+    <div class="card" style="max-width:640px">
+        <div class="card-body">
+            <div class="d-flex align-items-start justify-content-between gap-3">
+                <div>
+                    <div class="fw-semibold"><i class="bi bi-mortarboard-fill me-2" style="color:var(--c-primary)"></i>Portal szkoleniowy (kursy)</div>
+                    <div class="text-muted small">Kafelek „Moje kursy" u klienta i karta kursów na stronie głównej.</div>
+                </div>
+                <div class="form-check form-switch fs-5 m-0">
+                    <input class="form-check-input" type="checkbox" role="switch" @bind="_settings.CoursesEnabled" id="mCourses" />
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <button class="btn btn-primary mt-3" @onclick="Save" disabled="@_saving">
+        @if (_saving) { <span class="spinner-border spinner-border-sm me-2"></span> }
+        <i class="bi bi-save me-1"></i>Zapisz
+    </button>
+}
+
+@code {
+    private ModuleSettingsDto? _settings;
+    private bool _saving;
+    private string _msg = string.Empty;
+
+    protected override async Task OnInitializedAsync() => _settings = await ModuleSettings.GetAsync();
+
+    private async Task Save()
+    {
+        if (_settings is null) return;
+        _saving = true; _msg = string.Empty;
+        try
+        {
+            await ModuleSettings.SaveAsync(_settings);
+            _msg = "Zapisano ustawienia modułów.";
+        }
+        finally { _saving = false; }
+    }
+}

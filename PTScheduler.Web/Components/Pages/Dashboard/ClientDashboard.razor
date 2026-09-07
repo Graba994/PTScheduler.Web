@@ -8,6 +8,7 @@
 @inject IBodyMeasurementService MeasurementService
 @inject IJSRuntime JS
 @inject NavigationManager Nav
+@inject IModuleSettingsService ModuleSettings
 
 @if (!_loaded)
 {
@@ -146,6 +147,19 @@ else
                     <span><i class="bi bi-bookmark"></i>@_nextSession.SessionTypeName</span>
                 </div>
 
+                <div class="d-flex flex-wrap justify-content-center gap-2 mt-2">
+                    @if (!string.IsNullOrEmpty(_nextSession.MeetingUrl))
+                    {
+                        <a href="@_nextSession.MeetingUrl" target="_blank" class="cd-hero-meet">
+                            <i class="bi bi-camera-video-fill me-1"></i>Dołącz do Google Meet
+                        </a>
+                    }
+                    <AddToCalendarButton Title="@($"{_nextSession.SessionTypeName} — {_nextSession.TrainerName}")"
+                                          StartTime="_nextSession.StartTime" DurationMinutes="_nextSession.DurationMinutes"
+                                          Location="@(_nextSession.MeetingUrl ?? "")" Uid="@($"session-{_nextSession.Id}")"
+                                          ButtonClass="cd-hero-meet" Compact="false" />
+                </div>
+
                 @if (_cancelConfirmId == _nextSession.Id)
                 {
                     <div class="cd-hero-confirm">
@@ -179,7 +193,7 @@ else
         <!-- Quick stats -->
         <div class="cd-stats">
             <div class="cd-stat">
-                <div class="cd-stat-val">@(_client.ActivePackage?.RemainingCredits ?? 0)</div>
+                <div class="cd-stat-val">@(_client!.ActivePackage?.RemainingCredits ?? 0)</div>
                 <div class="cd-stat-lab">Pozostałe sesje</div>
             </div>
             <div class="cd-stat">
@@ -317,6 +331,27 @@ else
             </div>
         </div>
 
+        @if (_coursesEnabled)
+        {
+            <a href="/courses" class="cd-courses-cta">
+                <div class="cd-courses-cta-icon"><i class="bi bi-collection-play-fill"></i></div>
+                <div class="cd-courses-cta-body">
+                    <div class="cd-courses-cta-title">Rozwijaj się z kursami online</div>
+                    <div class="cd-courses-cta-sub">Wiedza od trenera dostępna 24/7 — przeglądaj dostępne kursy i mentoring.</div>
+                </div>
+                <span class="cd-courses-cta-btn">Przeglądaj kursy <i class="bi bi-arrow-right"></i></span>
+            </a>
+        }
+
+        <a href="/packages" class="cd-packages-cta">
+            <div class="cd-packages-cta-icon"><i class="bi bi-box-seam-fill"></i></div>
+            <div class="cd-packages-cta-body">
+                <div class="cd-packages-cta-title">Pakiety treningowe w super cenach</div>
+                <div class="cd-packages-cta-sub">Kup pakiet sesji i oszczędzaj — im więcej treningów, tym lepsza cena za sesję.</div>
+            </div>
+            <span class="cd-packages-cta-btn">Zobacz pakiety <i class="bi bi-arrow-right"></i></span>
+        </a>
+
         <!-- Quick actions -->
         <div class="cd-actions">
             <a href="/my/profile" class="cd-action">
@@ -331,6 +366,13 @@ else
                 <i class="bi bi-box-seam"></i>
                 <span>Pakiety</span>
             </a>
+            @if (_coursesEnabled)
+            {
+                <a href="/my/courses" class="cd-action">
+                    <i class="bi bi-mortarboard-fill"></i>
+                    <span>Moje kursy</span>
+                </a>
+            }
             <a href="/my/stats" class="cd-action">
                 <i class="bi bi-graph-up"></i>
                 <span>Statystyki</span>
@@ -410,6 +452,9 @@ else
     // Chart re-render trigger
     private bool _chartNeedsRender;
 
+    // Courses module
+    private bool _coursesEnabled;
+
     private async Task RefreshAsync()
     {
         _loading = false;
@@ -425,6 +470,7 @@ else
             _loaded = false;
             _client = null;
             _errorMsg = null;
+            _coursesEnabled = (await ModuleSettings.GetAsync()).CoursesEnabled;
             try
             {
                 if (ClientIdOverride.HasValue)

@@ -1,0 +1,547 @@
+@page "/admin/courses/{CourseId:int}"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@inject ICourseService CourseService
+@inject IPermissionService Permission
+@inject IBunnyService Bunny
+@inject EntitlementService Entitlements
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Budowa kursu" />
+
+<div class="page-header d-flex align-items-center justify-content-between">
+    <h4 class="page-title">
+        <a href="/admin/courses" class="text-decoration-none text-muted me-2"><i class="bi bi-arrow-left"></i></a>
+        <i class="bi bi-diagram-3 me-2" style="color:var(--c-primary)"></i>@(_course?.Title ?? "Kurs")
+    </h4>
+</div>
+
+@if (_denied)
+{
+    <div class="alert alert-danger"><i class="bi bi-shield-lock me-2"></i>Brak uprawnień do zarządzania kursami.</div>
+}
+else if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_course is null)
+{
+    <div class="alert alert-warning">Nie znaleziono kursu.</div>
+}
+else
+{
+    <p class="text-muted">Zbuduj kurs z modułów i lekcji. W każdej lekcji dodasz wideo (YouTube / Bunny / Google Drive) oraz materiały.</p>
+
+    @foreach (var m in _modules)
+    {
+        <div class="card mb-3">
+            <div class="card-header d-flex align-items-center gap-2">
+                @if (_renameModuleId == m.Id)
+                {
+                    <input class="form-control form-control-sm" style="max-width:360px" @bind="_renameModuleTitle" />
+                    <button class="btn btn-sm btn-primary" @onclick="() => SaveModuleTitle(m.Id)"><i class="bi bi-check-lg"></i></button>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => _renameModuleId = null">Anuluj</button>
+                }
+                else
+                {
+                    <span class="fw-semibold flex-grow-1"><i class="bi bi-collection me-2"></i>@m.Title</span>
+                    <button class="btn btn-sm btn-outline-secondary" title="W górę" @onclick="() => MoveModule(m.Id, -1)"><i class="bi bi-arrow-up"></i></button>
+                    <button class="btn btn-sm btn-outline-secondary" title="W dół" @onclick="() => MoveModule(m.Id, 1)"><i class="bi bi-arrow-down"></i></button>
+                    <button class="btn btn-sm btn-outline-secondary" title="Zmień nazwę" @onclick="() => StartRenameModule(m)"><i class="bi bi-pencil"></i></button>
+                    <button class="btn btn-sm btn-outline-danger" title="Usuń moduł" @onclick="() => DeleteModule(m.Id)"><i class="bi bi-trash"></i></button>
+                }
+            </div>
+            <div class="card-body">
+                @if (m.Lessons.Count == 0)
+                {
+                    <p class="text-muted small mb-2">Brak lekcji w tym module.</p>
+                }
+                else
+                {
+                    <div class="mb-2">
+                        @foreach (var l in m.Lessons)
+                        {
+                            <div class="border rounded mb-2">
+                                <div class="d-flex align-items-center gap-2 px-2 py-2" style="cursor:pointer" @onclick="() => ToggleLesson(l)">
+                                    <i class="bi @(IsLessonOpen(l) ? "bi-chevron-down" : "bi-chevron-right") text-muted"></i>
+                                    <i class="bi @(!string.IsNullOrEmpty(l.BunnyVideoId) ? "bi-camera-video" : !string.IsNullOrEmpty(l.VideoUrl) ? "bi-play-circle" : "bi-file-text") text-muted"></i>
+                                    <span class="flex-grow-1">
+                                        @l.Title
+                                        @if (l.BunnyVideoSizeBytes > 0)
+                                        {
+                                            <span class="badge bg-secondary ms-1" style="font-size:.65rem">@FormatSize(l.BunnyVideoSizeBytes.Value)</span>
+                                        }
+                                    </span>
+                                    <button class="btn btn-sm btn-outline-secondary" title="W górę" @onclick="() => MoveLesson(l.Id, -1)" @onclick:stopPropagation="true"><i class="bi bi-arrow-up"></i></button>
+                                    <button class="btn btn-sm btn-outline-secondary" title="W dół" @onclick="() => MoveLesson(l.Id, 1)" @onclick:stopPropagation="true"><i class="bi bi-arrow-down"></i></button>
+                                    <button class="btn btn-sm btn-outline-danger" title="Usuń" @onclick="() => DeleteLesson(l.Id)" @onclick:stopPropagation="true"><i class="bi bi-trash"></i></button>
+                                </div>
+                                @if (IsLessonOpen(l))
+                                {
+                                    <div class="px-3 pb-3">
+                                        @LessonFormUi()
+                                    </div>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+
+                @if (_lessonFormModuleId == m.Id && _lessonFormId is null)
+                {
+                    @LessonFormUi()
+                }
+                else
+                {
+                    <button class="btn btn-sm btn-outline-primary" @onclick="() => StartAddLesson(m.Id)"><i class="bi bi-plus-lg me-1"></i>Dodaj lekcję</button>
+                }
+            </div>
+        </div>
+    }
+
+    @* Add module *@
+    <div class="input-group mt-3" style="max-width:520px">
+        <input class="form-control" placeholder="Nazwa nowego modułu" @bind="_newModuleTitle"
+               @onkeydown="@(e => { if (e.Key == "Enter") { _ = AddModule(); } })" />
+        <button class="btn btn-primary" @onclick="AddModule"><i class="bi bi-plus-lg me-1"></i>Dodaj moduł</button>
+    </div>
+}
+
+@code {
+    [Parameter] public int CourseId { get; set; }
+
+    private bool _loading = true;
+    private bool _denied;
+    private bool _saving;
+    private CourseDto? _course;
+    private List<ModuleDto> _modules = [];
+
+    private string _newModuleTitle = string.Empty;
+
+    private int? _renameModuleId;
+    private string _renameModuleTitle = string.Empty;
+
+    private int? _lessonFormModuleId;
+    private int? _lessonFormId;
+    private SaveLessonDto _lessonForm = new();
+    private string _videoTab = "url";
+    private bool _uploading;
+    private bool _uploadError;
+    private string? _uploadMsg;
+    private long _uploadedMB;
+
+    private QuizDto _quiz = new();
+    private bool _savingQuiz;
+    private bool _quizSaved;
+
+    private bool _bunnyAvailable;
+    private long _videoStorageUsedBytes;
+    private long _videoStorageMaxBytes;
+    private bool _deletingVideo;
+    private int VideoStoragePct => _videoStorageMaxBytes > 0 ? Math.Min(100, (int)(100.0 * _videoStorageUsedBytes / _videoStorageMaxBytes)) : 0;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var role = auth.User.IsInRole(Roles.Admin) ? Roles.Admin
+                 : auth.User.IsInRole(Roles.Trainer) ? Roles.Trainer
+                 : auth.User.IsInRole(Roles.Subordinate) ? Roles.Subordinate : string.Empty;
+        if (!await Permission.HasPermissionAsync(role, PTScheduler.Domain.Constants.Permissions.ManageCourses))
+        {
+            _denied = true; _loading = false; return;
+        }
+
+        _course = await CourseService.GetCourseAsync(CourseId);
+        if (_course is not null) await ReloadContent();
+
+        _bunnyAvailable = Entitlements.Current.VideoProvider == "bunny";
+        if (_bunnyAvailable)
+            await RefreshVideoUsage();
+
+        _loading = false;
+    }
+
+    private async Task ReloadContent() => _modules = await CourseService.GetContentAsync(CourseId);
+
+    // ---- Modules ----
+    private async Task AddModule()
+    {
+        if (string.IsNullOrWhiteSpace(_newModuleTitle)) return;
+        await CourseService.AddModuleAsync(CourseId, _newModuleTitle);
+        _newModuleTitle = string.Empty;
+        await ReloadContent();
+    }
+
+    private void StartRenameModule(ModuleDto m)
+    {
+        _renameModuleId = m.Id;
+        _renameModuleTitle = m.Title;
+    }
+
+    private async Task SaveModuleTitle(int moduleId)
+    {
+        await CourseService.UpdateModuleAsync(moduleId, _renameModuleTitle);
+        _renameModuleId = null;
+        await ReloadContent();
+    }
+
+    private async Task MoveModule(int moduleId, int direction)
+    {
+        await CourseService.MoveModuleAsync(moduleId, direction);
+        await ReloadContent();
+    }
+
+    private async Task DeleteModule(int moduleId)
+    {
+        await CourseService.DeleteModuleAsync(moduleId);
+        if (_lessonFormModuleId == moduleId) CancelLessonForm();
+        await ReloadContent();
+    }
+
+    // ---- Lessons ----
+    private void StartAddLesson(int moduleId)
+    {
+        _lessonFormModuleId = moduleId;
+        _lessonFormId = null;
+        _lessonForm = new SaveLessonDto();
+        _quiz = new QuizDto();
+        _quizSaved = false;
+    }
+
+    private async Task EditLesson(LessonDto l)
+    {
+        _lessonFormModuleId = l.ModuleId;
+        _lessonFormId = l.Id;
+        _lessonForm = new SaveLessonDto { Title = l.Title, VideoUrl = l.VideoUrl, BunnyVideoId = l.BunnyVideoId, ContentHtml = l.ContentHtml };
+        _quizSaved = false;
+        _quiz = await CourseService.GetQuizForEditAsync(l.Id);
+    }
+
+    private async Task UploadToBunny(InputFileChangeEventArgs e)
+    {
+        _uploading = true; _uploadMsg = null; _uploadError = false;
+        try
+        {
+            var f = e.File;
+            const long max = 2L * 1024 * 1024 * 1024;
+            if (f.Size > max)
+            {
+                _uploadMsg = "Plik za duży (max 2 GB w tej wersji).";
+                _uploadError = true;
+                _uploading = false;
+                return;
+            }
+
+            if (_videoStorageMaxBytes > 0 && _videoStorageUsedBytes + f.Size > _videoStorageMaxBytes)
+            {
+                var usedGB = _videoStorageUsedBytes / (1024.0 * 1024 * 1024);
+                var maxGB = _videoStorageMaxBytes / (1024.0 * 1024 * 1024);
+                _uploadMsg = $"Brak miejsca — wykorzystano {usedGB:0.#} z {maxGB:0} GB. Zmień plan, aby zwiększyć limit.";
+                _uploadError = true;
+                _uploading = false;
+                return;
+            }
+
+            _uploadedMB = f.Size / (1024 * 1024);
+            var title = string.IsNullOrWhiteSpace(_lessonForm.Title) ? f.Name : _lessonForm.Title;
+            await using var stream = f.OpenReadStream(max);
+            var (ok, id, err) = await Bunny.CreateAndUploadAsync(title, stream);
+            if (ok && !string.IsNullOrEmpty(id))
+            {
+                _lessonForm.BunnyVideoId = id;
+                _lessonForm.BunnyVideoSizeBytes = f.Size;
+
+                var info = await Bunny.GetVideoInfoAsync(id);
+                if (info is not null)
+                {
+                    _lessonForm.BunnyVideoSizeBytes = info.StorageSize > 0 ? info.StorageSize : f.Size;
+                    _lessonForm.BunnyVideoDurationSec = info.Length > 0 ? info.Length : null;
+                }
+
+                _uploadMsg = $"Wgrano — {FormatSize(f.Size)}. Wideo jest przetwarzane.";
+                _uploadError = false;
+                await RefreshVideoUsage();
+            }
+            else
+            {
+                _uploadMsg = err ?? "Upload nie powiódł się.";
+                _uploadError = true;
+            }
+        }
+        catch (Exception ex) { _uploadMsg = ex.Message; _uploadError = true; }
+        _uploading = false;
+    }
+
+    private async Task DeleteBunnyVideo()
+    {
+        if (string.IsNullOrWhiteSpace(_lessonForm.BunnyVideoId)) return;
+        _deletingVideo = true;
+        var (ok, err) = await Bunny.DeleteAsync(_lessonForm.BunnyVideoId);
+        if (ok)
+        {
+            _lessonForm.BunnyVideoId = null;
+            _lessonForm.BunnyVideoSizeBytes = null;
+            _lessonForm.BunnyVideoDurationSec = null;
+            _uploadMsg = "Wideo usunięte z Bunny.net.";
+            _uploadError = false;
+            await RefreshVideoUsage();
+        }
+        else
+        {
+            _uploadMsg = err ?? "Nie udało się usunąć wideo.";
+            _uploadError = true;
+        }
+        _deletingVideo = false;
+    }
+
+    private async Task RefreshVideoUsage()
+    {
+        var (_, used, maxB) = await Entitlements.CheckVideoStorageAsync(CourseService);
+        _videoStorageUsedBytes = used;
+        _videoStorageMaxBytes = maxB;
+    }
+
+    private static string FormatSize(long bytes)
+    {
+        if (bytes < 1024) return $"{bytes} B";
+        if (bytes < 1024 * 1024) return $"{bytes / 1024.0:0.#} KB";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):0.#} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):0.##} GB";
+    }
+
+    private void CancelLessonForm()
+    {
+        _lessonFormModuleId = null;
+        _lessonFormId = null;
+        _lessonForm = new SaveLessonDto();
+        _quiz = new QuizDto();
+    }
+
+    private async Task SaveLesson()
+    {
+        if (_lessonFormModuleId is null) return;
+        if (string.IsNullOrWhiteSpace(_lessonForm.Title)) { _lessonForm.Title = "Nowa lekcja"; }
+        _saving = true;
+        try
+        {
+            if (_lessonFormId is null)
+            {
+                await CourseService.AddLessonAsync(_lessonFormModuleId.Value, _lessonForm);
+                CancelLessonForm();
+            }
+            else
+            {
+                await CourseService.UpdateLessonAsync(_lessonFormId.Value, _lessonForm);
+            }
+            await ReloadContent();
+        }
+        finally { _saving = false; }
+    }
+
+    private void AddQuestion() =>
+        _quiz.Questions.Add(new QuizQuestionDto { Options = { new QuizOptionDto(), new QuizOptionDto() } });
+
+    private async Task SaveQuiz()
+    {
+        if (_lessonFormId is null) return;
+        _savingQuiz = true; _quizSaved = false;
+        try
+        {
+            await CourseService.SaveQuizAsync(_lessonFormId.Value, _quiz.PassThreshold, _quiz.Questions);
+            _quiz = await CourseService.GetQuizForEditAsync(_lessonFormId.Value);
+            await ReloadContent();
+            _quizSaved = true;
+        }
+        finally { _savingQuiz = false; }
+    }
+
+    private async Task MoveLesson(int lessonId, int direction)
+    {
+        await CourseService.MoveLessonAsync(lessonId, direction);
+        await ReloadContent();
+    }
+
+    private async Task DeleteLesson(int lessonId)
+    {
+        await CourseService.DeleteLessonAsync(lessonId);
+        if (_lessonFormId == lessonId) CancelLessonForm();
+        await ReloadContent();
+    }
+
+    private bool IsLessonOpen(LessonDto l) => _lessonFormId == l.Id;
+
+    private async Task ToggleLesson(LessonDto l)
+    {
+        if (_lessonFormId == l.Id) CancelLessonForm();
+        else await EditLesson(l);
+    }
+
+    private RenderFragment LessonFormUi() =>@<div class="border rounded p-3 mt-2 bg-body-tertiary">
+        <h6 class="mb-3">@(_lessonFormId is null ? "Nowa lekcja" : "Edycja lekcji")</h6>
+        <div class="mb-3">
+            <label class="form-label fw-semibold">Tytuł lekcji</label>
+            <input class="form-control" @bind="_lessonForm.Title" maxlength="160" />
+        </div>
+        <div class="row g-3">
+            <div class="col-12 col-lg-6">
+                <label class="form-label fw-semibold">Wideo</label>
+                <ul class="nav nav-tabs small mb-2">
+                    <li class="nav-item">
+                        <a class="nav-link @(_videoTab == "url" ? "active" : "")" @onclick='() => _videoTab = "url"' href="javascript:void(0)">Link (YouTube / URL)</a>
+                    </li>
+                    @if (_bunnyAvailable)
+                    {
+                        <li class="nav-item">
+                            <a class="nav-link @(_videoTab == "bunny" ? "active" : "")" @onclick='() => _videoTab = "bunny"' href="javascript:void(0)">
+                                Bunny.net Upload
+                            </a>
+                        </li>
+                    }
+                    else
+                    {
+                        <li class="nav-item">
+                            <span class="nav-link disabled text-muted">
+                                Bunny.net Upload
+                                <PlanBadge Flag="CoursesEnabled" RequiredPlan="Pro" />
+                            </span>
+                        </li>
+                    }
+                </ul>
+
+                @if (_videoTab == "url")
+                {
+                    <input class="form-control" @bind="_lessonForm.VideoUrl" @bind:event="oninput"
+                           placeholder="https://youtube.com/... lub inny link" />
+                    <div class="form-text">Wklej link do filmu — osadzimy go automatycznie.</div>
+                }
+                else if (_bunnyAvailable)
+                {
+                    @if (_videoStorageMaxBytes > 0)
+                    {
+                        <div class="small mb-2">
+                            <div class="d-flex justify-content-between text-muted mb-1">
+                                <span>Video storage</span>
+                                <span>@FormatSize(_videoStorageUsedBytes) / @FormatSize(_videoStorageMaxBytes)</span>
+                            </div>
+                            <div class="progress" style="height:6px">
+                                <div class="progress-bar @(VideoStoragePct > 90 ? "bg-danger" : VideoStoragePct > 70 ? "bg-warning" : "bg-success")"
+                                     style="width:@(VideoStoragePct)%"></div>
+                            </div>
+                        </div>
+                    }
+
+                    @if (!string.IsNullOrWhiteSpace(_lessonForm.BunnyVideoId))
+                    {
+                        <div class="d-flex align-items-center gap-2 mb-2">
+                            <input class="form-control font-monospace flex-grow-1" @bind="_lessonForm.BunnyVideoId" @bind:event="oninput"
+                                   placeholder="a1b2c3d4-e5f6-7890-abcd-ef1234567890" />
+                            <button class="btn btn-sm btn-outline-danger" title="Usuń wideo z Bunny.net"
+                                    @onclick="DeleteBunnyVideo" disabled="@_deletingVideo">
+                                @if (_deletingVideo) { <span class="spinner-border spinner-border-sm"></span> }
+                                else { <i class="bi bi-trash"></i> }
+                            </button>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="mb-2">
+                            <label class="form-label small">Bunny Video ID (GUID)</label>
+                            <input class="form-control font-monospace" @bind="_lessonForm.BunnyVideoId" @bind:event="oninput"
+                                   placeholder="a1b2c3d4-e5f6-7890-abcd-ef1234567890" />
+                        </div>
+                    }
+                    <div class="mb-2">
+                        <label class="form-label small">…lub wgraj plik MP4</label>
+                        <InputFile OnChange="UploadToBunny" accept="video/*" class="form-control form-control-sm" />
+                        @if (_uploading)
+                        {
+                            <div class="text-muted small mt-1">
+                                <span class="spinner-border spinner-border-sm me-1"></span>Wgrywam do Bunny.net (@(_uploadedMB) MB)…
+                            </div>
+                        }
+                        @if (!string.IsNullOrEmpty(_uploadMsg))
+                        {
+                            <div class="alert @(_uploadError ? "alert-danger" : "alert-success") py-1 small mt-2 mb-0">@_uploadMsg</div>
+                        }
+                    </div>
+                }
+
+                <div class="mt-2">
+                    <VideoPlayer Url="@_lessonForm.VideoUrl" BunnyVideoId="@_lessonForm.BunnyVideoId" />
+                </div>
+            </div>
+            <div class="col-12 col-lg-6">
+                <label class="form-label fw-semibold">Materiały (HTML / CSS)</label>
+                <textarea class="form-control font-monospace" rows="8" style="font-size:.82rem"
+                          @bind="_lessonForm.ContentHtml" @bind:event="oninput"></textarea>
+                <div class="border rounded p-2 mt-2" style="max-height:160px;overflow:auto">
+                    @if (string.IsNullOrWhiteSpace(_lessonForm.ContentHtml))
+                    {
+                        <span class="text-muted small">Podgląd materiałów…</span>
+                    }
+                    else
+                    {
+                        @((MarkupString)_lessonForm.ContentHtml)
+                    }
+                </div>
+            </div>
+        </div>
+        <div class="mt-3 d-flex gap-2">
+            <button class="btn btn-primary" @onclick="SaveLesson" disabled="@_saving">
+                @if (_saving) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                <i class="bi bi-save me-1"></i>Zapisz lekcję
+            </button>
+            <button class="btn btn-outline-secondary" @onclick="CancelLessonForm">Anuluj</button>
+        </div>
+
+        @if (_lessonFormId is not null)
+        {
+            <hr class="my-3" />
+            <div class="d-flex align-items-center justify-content-between mb-2 flex-wrap gap-2">
+                <h6 class="mb-0"><i class="bi bi-patch-question me-1"></i>Quiz <span class="text-muted small">(opcjonalny, auto-oceniany)</span></h6>
+                <div class="d-flex align-items-center gap-1">
+                    <label class="small text-muted mb-0">Próg zaliczenia</label>
+                    <input type="number" min="1" max="100" class="form-control form-control-sm" style="width:78px" @bind="_quiz.PassThreshold" />
+                    <span class="small text-muted">%</span>
+                </div>
+            </div>
+
+            @foreach (var q in _quiz.Questions)
+            {
+                <div class="border rounded p-2 mb-2 bg-body">
+                    <div class="d-flex gap-2 mb-2">
+                        <input class="form-control form-control-sm" placeholder="Treść pytania" @bind="q.Text" />
+                        <select class="form-select form-select-sm" style="width:auto" @bind="q.Type">
+                            <option value="@QuizQuestionType.SingleChoice">Jednokrotny wybór</option>
+                            <option value="@QuizQuestionType.MultipleChoice">Wielokrotny wybór</option>
+                        </select>
+                        <button class="btn btn-sm btn-outline-danger" title="Usuń pytanie" @onclick="() => _quiz.Questions.Remove(q)"><i class="bi bi-trash"></i></button>
+                    </div>
+                    @foreach (var o in q.Options)
+                    {
+                        <div class="d-flex align-items-center gap-2 mb-1 ms-3">
+                            <input class="form-check-input mt-0" type="checkbox" @bind="o.IsCorrect" title="Poprawna odpowiedź" />
+                            <input class="form-control form-control-sm" placeholder="Treść odpowiedzi" @bind="o.Text" />
+                            <button class="btn btn-sm btn-outline-secondary" title="Usuń odpowiedź" @onclick="() => q.Options.Remove(o)"><i class="bi bi-x-lg"></i></button>
+                        </div>
+                    }
+                    <button class="btn btn-sm btn-link px-1" @onclick="() => q.Options.Add(new QuizOptionDto())"><i class="bi bi-plus"></i> Dodaj odpowiedź</button>
+                </div>
+            }
+
+            <div class="d-flex gap-2 mt-2">
+                <button class="btn btn-sm btn-outline-primary" @onclick="AddQuestion"><i class="bi bi-plus-lg me-1"></i>Dodaj pytanie</button>
+                <button class="btn btn-sm btn-success" @onclick="SaveQuiz" disabled="@_savingQuiz">
+                    @if (_savingQuiz) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                    <i class="bi bi-save me-1"></i>Zapisz quiz
+                </button>
+                @if (_quizSaved) { <span class="text-success small align-self-center"><i class="bi bi-check-circle me-1"></i>Zapisano</span> }
+            </div>
+        }
+    </div>;
+}

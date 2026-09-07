@@ -1,0 +1,225 @@
+@page "/panel/backups"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject BackupService BackupSvc
+@inject SiteSettingsService Settings
+@rendermode InteractiveServer
+
+<PageTitle>Kopie zapasowe — PTScheduler Portal</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h4 class="fw-bold mb-0"><i class="bi bi-hdd-stack me-2 text-primary"></i>Kopie zapasowe</h4>
+    <div class="d-flex gap-2">
+        <button class="btn btn-primary btn-sm" @onclick="BackupAllNow" disabled="@_busy">
+            @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+            <i class="bi bi-download me-1"></i>Backup wszystkich (teraz)
+        </button>
+        <button class="btn btn-outline-danger btn-sm" @onclick="Cleanup" disabled="@_busy">
+            <i class="bi bi-trash3 me-1"></i>Wyczyść stare
+        </button>
+    </div>
+</div>
+
+@if (_message is not null)
+{
+    <div class="alert @(_msgError ? "alert-danger" : "alert-success") alert-dismissible py-2 small">
+        @_message
+        <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button>
+    </div>
+}
+
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-header bg-white fw-semibold"><i class="bi bi-gear me-1"></i>Ustawienia</div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-6">
+                <label class="form-label small fw-semibold">Katalog na kopie</label>
+                <input class="form-control font-monospace" @bind="_dir" />
+                <div class="form-text small">Musi być zamontowany w kontenerze portalu (np. -v /mnt/user/appdata/ptscheduler-backups:/opt/ptscheduler/backups)</div>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small fw-semibold">Harmonogram</label>
+                <select class="form-select" @bind="_schedule">
+                    <option value="daily">Codziennie 03:00 UTC</option>
+                    <option value="off">Wyłączony</option>
+                </select>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small fw-semibold">Retencja (dni)</label>
+                <input type="number" class="form-control" @bind="_retentionDays" />
+            </div>
+        </div>
+        <button class="btn btn-primary btn-sm mt-3" @onclick="SaveSettings">Zapisz ustawienia</button>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-list-ul me-1"></i>Historia (@_entries.Count)</span>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="Load"><i class="bi bi-arrow-clockwise"></i></button>
+    </div>
+    <div class="card-body p-0">
+        @if (_entries.Count == 0)
+        {
+            <p class="text-muted small p-3 mb-0">Brak kopii zapasowych.</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 small align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Data</th>
+                            <th>Slug</th>
+                            <th>Rozmiar</th>
+                            <th>Typ</th>
+                            <th>Status</th>
+                            <th>Czas</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var e in _entries.Take(200))
+                        {
+                            <tr>
+                                <td>@e.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                <td class="font-monospace">
+                                    @if (e.Slug == "portal")
+                                    {
+                                        <span class="badge bg-dark">portal</span>
+                                    }
+                                    else
+                                    {
+                                        @e.Slug
+                                    }
+                                </td>
+                                <td>@Fmt(e.SizeBytes)</td>
+                                <td><small class="text-muted">@e.Kind</small></td>
+                                <td>
+                                    <span class="badge @(e.Status == BackupStatus.Completed ? "bg-success" : e.Status == BackupStatus.Running ? "bg-info" : "bg-danger")">@e.Status</span>
+                                </td>
+                                <td class="text-muted small">@(e.Duration?.ToString("mm\\:ss") ?? "—")</td>
+                                <td class="text-end">
+                                    @if (e.Status == BackupStatus.Completed && !string.IsNullOrEmpty(e.FilePath))
+                                    {
+                                        <a href="/api/backups/@e.Id/download" class="btn btn-sm btn-outline-primary" title="Pobierz">
+                                            <i class="bi bi-download"></i>
+                                        </a>
+                                    }
+                                    else if (!string.IsNullOrEmpty(e.Error))
+                                    {
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => _shownError = e.Error" title="Zobacz błąd">
+                                            <i class="bi bi-exclamation-triangle"></i>
+                                        </button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@if (_shownError is not null)
+{
+    <div class="alert alert-danger mt-3">
+        <div class="d-flex justify-content-between align-items-start">
+            <strong><i class="bi bi-exclamation-triangle me-1"></i>Błąd backupu</strong>
+            <button class="btn-close btn-close-sm" @onclick="() => _shownError = null"></button>
+        </div>
+        <pre class="mt-2 mb-0 small">@_shownError</pre>
+    </div>
+}
+
+<div class="alert alert-info small mt-3">
+    <i class="bi bi-info-circle me-1"></i>
+    <strong>Restore:</strong> plik <code>.sql.gz</code> możesz rozpakować i przywrócić do dowolnego kontenera bazy komendą:
+    <code>gunzip -c backup.sql.gz | docker exec -i pt-slug-db psql -U ptscheduler -d ptscheduler</code>
+    (najpierw drop-and-create schema public).
+</div>
+
+@code {
+    private List<BackupEntry> _entries = new();
+    private bool _busy;
+    private string? _message;
+    private bool _msgError;
+    private string? _shownError;
+
+    private string _dir = "/opt/ptscheduler/backups";
+    private string _schedule = "daily";
+    private int _retentionDays = 14;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+        var s = await Settings.GetAllAsync(
+            SiteSettingsService.Keys.BackupDir,
+            SiteSettingsService.Keys.BackupSchedule,
+            SiteSettingsService.Keys.BackupRetentionDays);
+        _dir = s[SiteSettingsService.Keys.BackupDir];
+        _schedule = s[SiteSettingsService.Keys.BackupSchedule];
+        _retentionDays = int.TryParse(s[SiteSettingsService.Keys.BackupRetentionDays], out var d) ? d : 14;
+    }
+
+    private async Task Load()
+    {
+        await using var db = DbFactory.CreateDbContext();
+        _entries = await db.BackupEntries
+            .AsNoTracking()
+            .OrderByDescending(e => e.CreatedAt)
+            .Take(500)
+            .ToListAsync();
+    }
+
+    private async Task BackupAllNow()
+    {
+        _busy = true; _message = null;
+        try
+        {
+            var (ok, fail, portalOk) = await BackupSvc.BackupAllAsync(BackupKind.Manual);
+            _message = $"Zakończono. Trenerzy: {ok} OK / {fail} błąd. Portal: {(portalOk ? "OK" : "błąd")}.";
+            _msgError = fail > 0 || !portalOk;
+            await Load();
+        }
+        catch (Exception ex) { _message = ex.Message; _msgError = true; }
+        _busy = false;
+    }
+
+    private async Task Cleanup()
+    {
+        _busy = true; _message = null;
+        try
+        {
+            var removed = await BackupSvc.CleanupOldAsync();
+            _message = $"Usunięto {removed} starych plików kopii.";
+            _msgError = false;
+            await Load();
+        }
+        catch (Exception ex) { _message = ex.Message; _msgError = true; }
+        _busy = false;
+    }
+
+    private async Task SaveSettings()
+    {
+        await Settings.SetManyAsync(new Dictionary<string, string>
+        {
+            [SiteSettingsService.Keys.BackupDir] = _dir.Trim(),
+            [SiteSettingsService.Keys.BackupSchedule] = _schedule,
+            [SiteSettingsService.Keys.BackupRetentionDays] = _retentionDays.ToString()
+        });
+        _message = "Zapisano.";
+        _msgError = false;
+    }
+
+    private static string Fmt(long bytes)
+    {
+        string[] suffix = { "B", "KB", "MB", "GB" };
+        var i = 0;
+        double n = bytes;
+        while (n >= 1024 && i < suffix.Length - 1) { n /= 1024; i++; }
+        return $"{n:0.#} {suffix[i]}";
+    }
+}

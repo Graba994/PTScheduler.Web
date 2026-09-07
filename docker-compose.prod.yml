@@ -1,0 +1,124 @@
+# PTScheduler — Production stack for dedicated server (OVH / VPS)
+# Deploy as Portainer Stack or: docker compose -f docker-compose.prod.yml up -d
+#
+# Required: create .env.prod file with your values (see below).
+# The portal auto-creates the database schema on first boot.
+#
+# Tenants are provisioned dynamically by the portal — they get their own
+# containers (pt-{slug}-web + pt-{slug}-db) on the shared Docker network.
+# Your reverse proxy (Traefik/NPM/Caddy) routes subdomains to the right port.
+
+services:
+
+  portal-db:
+    image: postgres:17-alpine
+    container_name: ptportal-db
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${PORTAL_DB_NAME:-ptportal}
+      POSTGRES_USER: ${PORTAL_DB_USER:-ptportal}
+      POSTGRES_PASSWORD: ${PORTAL_DB_PASSWORD:?Set PORTAL_DB_PASSWORD in .env.prod}
+    volumes:
+      - portal-pgdata:/var/lib/postgresql/data
+    networks:
+      - ptscheduler
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${PORTAL_DB_USER:-ptportal} -d ${PORTAL_DB_NAME:-ptportal}"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  portal:
+    build:
+      context: .
+      dockerfile: PTScheduler.Portal/Dockerfile
+      args:
+        BUILD_COMMIT: ${BUILD_COMMIT:-unknown}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
+        BUILD_BRANCH: ${BUILD_BRANCH:-main}
+    image: ptportal:latest
+    container_name: ptportal
+    restart: unless-stopped
+    depends_on:
+      portal-db:
+        condition: service_healthy
+    ports:
+      - "${PORTAL_PORT:-8081}:8081"
+    environment:
+      ConnectionStrings__DefaultConnection: >-
+        Host=portal-db;Port=5432;Database=${PORTAL_DB_NAME:-ptportal};
+        Username=${PORTAL_DB_USER:-ptportal};Password=${PORTAL_DB_PASSWORD}
+      Portal__ForwardHost: ${FORWARD_HOST:-host.docker.internal}
+      Portal__RepoDir: /opt/ptscheduler/repo
+      Portal__ContainerName: ptportal
+      Portal__TenantImage: ptscheduler-web:latest
+      Portal__PortalImage: ptportal:latest
+      Portal__GitHubOwner: graba994
+      Portal__GitHubRepo: ptscheduler.web
+      Portal__ContactEmail: ${CONTACT_EMAIL:-kontakt@ptscheduler.pl}
+      Portal__SiteName: ${SITE_NAME:-PTScheduler}
+      # Nginx Proxy Manager (auto-register tenant subdomains)
+      Portal__NpmUrl: ${NPM_URL:-}
+      Portal__NpmUser: ${NPM_USER:-}
+      Portal__NpmPassword: ${NPM_PASSWORD:-}
+      # Stripe billing (optional)
+      Stripe__SecretKey: ${STRIPE_SECRET_KEY:-}
+      Stripe__WebhookSecret: ${STRIPE_WEBHOOK_SECRET:-}
+      Stripe__PublishableKey: ${STRIPE_PUBLISHABLE_KEY:-}
+      # Email (optional)
+      Email__SmtpHost: ${SMTP_HOST:-}
+      Email__SmtpPort: ${SMTP_PORT:-587}
+      Email__SmtpUser: ${SMTP_USER:-}
+      Email__SmtpPassword: ${SMTP_PASSWORD:-}
+      Email__FromAddress: ${SMTP_FROM:-noreply@ptscheduler.pl}
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${REPO_DIR:-./}:/opt/ptscheduler/repo
+      - portal-dataprotection:/root/.aspnet/DataProtection-Keys
+      - portal-backups:/opt/ptscheduler/backups
+    networks:
+      - ptscheduler
+
+  guardian:
+    build:
+      context: .
+      dockerfile: PTScheduler.Guardian/Dockerfile
+    image: ptguardian:latest
+    container_name: ptguardian
+    restart: unless-stopped
+    ports:
+      - "${GUARDIAN_PORT:-9090}:9090"
+    environment:
+      GUARDIAN_SECRET: ${GUARDIAN_SECRET:?Set GUARDIAN_SECRET in .env.prod}
+      GUARDIAN_PORTAL_URL: http://ptportal:8081
+      GUARDIAN_BRANCH: ${BUILD_BRANCH:-master}
+      GUARDIAN_LOG_DIR: /opt/ptscheduler/guardian/logs
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ${REPO_DIR:-./}:/opt/ptscheduler/repo
+      - guardian-logs:/opt/ptscheduler/guardian/logs
+    networks:
+      - ptscheduler
+
+  # Pre-build the tenant image so provisioning is instant
+  tenant-image:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: ptscheduler-web:latest
+    container_name: ptscheduler-web-builder
+    entrypoint: ["echo", "Image built successfully"]
+    restart: "no"
+    profiles:
+      - build
+
+volumes:
+  portal-pgdata:
+  portal-dataprotection:
+  portal-backups:
+  guardian-logs:
+
+networks:
+  ptscheduler:
+    name: ptscheduler
+    driver: bridge

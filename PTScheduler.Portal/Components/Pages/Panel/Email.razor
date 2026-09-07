@@ -1,0 +1,195 @@
+@page "/panel/email"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject SiteSettingsService Settings
+@rendermode InteractiveServer
+
+<PageTitle>Konfiguracja e-mail — PTScheduler</PageTitle>
+
+<div class="mb-4">
+    <h4 class="fw-bold mb-1">Konfiguracja e-mail</h4>
+    <p class="text-muted small mb-0">Ustawienia serwera SMTP do wysyłki wiadomości</p>
+</div>
+
+@if (!string.IsNullOrEmpty(_message))
+{
+    <div class="alert @(_isError ? "alert-danger" : "alert-success") alert-dismissible fade show">
+        <i class="bi @(_isError ? "bi-exclamation-triangle" : "bi-check-circle") me-1"></i>@_message
+        <button type="button" class="btn-close" @onclick="() => _message = null"></button>
+    </div>
+}
+
+<EditForm Model="_form" OnValidSubmit="Save" FormName="email-settings">
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white fw-semibold">
+            <i class="bi bi-hdd-network me-1"></i>Serwer SMTP
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-8">
+                    <label class="form-label small fw-semibold">Host SMTP</label>
+                    <input class="form-control" @bind="_form.SmtpHost" placeholder="smtp.gmail.com" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold">Port</label>
+                    <input class="form-control" @bind="_form.SmtpPort" placeholder="587" />
+                </div>
+            </div>
+            <div class="row g-3 mt-1">
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">Login</label>
+                    <input class="form-control" @bind="_form.SmtpUser" placeholder="user@gmail.com" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">Hasło</label>
+                    <input type="password" class="form-control" @bind="_form.SmtpPass" placeholder="hasło lub klucz aplikacji" />
+                </div>
+            </div>
+            <div class="form-check mt-3">
+                <input class="form-check-input" type="checkbox" @bind="_form.SmtpSsl" id="smtpSsl" />
+                <label class="form-check-label small" for="smtpSsl">Użyj SSL/TLS</label>
+            </div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white fw-semibold">
+            <i class="bi bi-envelope me-1"></i>Nadawca
+        </div>
+        <div class="card-body">
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">Adres e-mail nadawcy</label>
+                    <input class="form-control" @bind="_form.SmtpFrom" placeholder="noreply@ptscheduler.pl" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">Nazwa nadawcy</label>
+                    <input class="form-control" @bind="_form.SmtpFromName" placeholder="PTScheduler" />
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="d-flex gap-2">
+        <button type="submit" class="btn btn-primary" disabled="@_saving">
+            @if (_saving)
+            {
+                <span class="spinner-border spinner-border-sm me-1"></span>
+            }
+            <i class="bi bi-floppy me-1"></i>Zapisz
+        </button>
+        <button type="button" class="btn btn-outline-secondary" @onclick="SendTest" disabled="@_testing">
+            @if (_testing)
+            {
+                <span class="spinner-border spinner-border-sm me-1"></span>
+            }
+            <i class="bi bi-send me-1"></i>Wyślij testowy e-mail
+        </button>
+    </div>
+</EditForm>
+
+@code {
+    private EmailForm _form = new();
+    private bool _saving, _testing;
+    private string? _message;
+    private bool _isError;
+
+    private class EmailForm
+    {
+        public string SmtpHost { get; set; } = "";
+        public string SmtpPort { get; set; } = "587";
+        public string SmtpUser { get; set; } = "";
+        public string SmtpPass { get; set; } = "";
+        public bool SmtpSsl { get; set; } = true;
+        public string SmtpFrom { get; set; } = "";
+        public string SmtpFromName { get; set; } = "";
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var s = await Settings.GetAllAsync(
+            SiteSettingsService.Keys.SmtpHost,
+            SiteSettingsService.Keys.SmtpPort,
+            SiteSettingsService.Keys.SmtpUser,
+            SiteSettingsService.Keys.SmtpPass,
+            SiteSettingsService.Keys.SmtpFrom,
+            SiteSettingsService.Keys.SmtpFromName,
+            SiteSettingsService.Keys.SmtpSsl);
+
+        _form.SmtpHost = s[SiteSettingsService.Keys.SmtpHost];
+        _form.SmtpPort = s[SiteSettingsService.Keys.SmtpPort];
+        _form.SmtpUser = s[SiteSettingsService.Keys.SmtpUser];
+        _form.SmtpPass = s[SiteSettingsService.Keys.SmtpPass];
+        _form.SmtpFrom = s[SiteSettingsService.Keys.SmtpFrom];
+        _form.SmtpFromName = s[SiteSettingsService.Keys.SmtpFromName];
+        _form.SmtpSsl = s[SiteSettingsService.Keys.SmtpSsl] == "true";
+    }
+
+    private async Task Save()
+    {
+        _saving = true;
+        _message = null;
+
+        await Settings.SetManyAsync(new Dictionary<string, string>
+        {
+            [SiteSettingsService.Keys.SmtpHost] = _form.SmtpHost,
+            [SiteSettingsService.Keys.SmtpPort] = _form.SmtpPort,
+            [SiteSettingsService.Keys.SmtpUser] = _form.SmtpUser,
+            [SiteSettingsService.Keys.SmtpPass] = _form.SmtpPass,
+            [SiteSettingsService.Keys.SmtpFrom] = _form.SmtpFrom,
+            [SiteSettingsService.Keys.SmtpFromName] = _form.SmtpFromName,
+            [SiteSettingsService.Keys.SmtpSsl] = _form.SmtpSsl ? "true" : "false",
+        });
+
+        _saving = false;
+        _message = "Zapisano ustawienia SMTP.";
+        _isError = false;
+    }
+
+    private async Task SendTest()
+    {
+        _testing = true;
+        _message = null;
+
+        try
+        {
+            if (string.IsNullOrWhiteSpace(_form.SmtpHost) || string.IsNullOrWhiteSpace(_form.SmtpUser))
+            {
+                _message = "Najpierw uzupełnij i zapisz ustawienia SMTP.";
+                _isError = true;
+                _testing = false;
+                return;
+            }
+
+            using var smtp = new System.Net.Mail.SmtpClient(_form.SmtpHost)
+            {
+                Port = int.TryParse(_form.SmtpPort, out var port) ? port : 587,
+                Credentials = new System.Net.NetworkCredential(_form.SmtpUser, _form.SmtpPass),
+                EnableSsl = _form.SmtpSsl,
+                Timeout = 15000,
+            };
+
+            var from = string.IsNullOrWhiteSpace(_form.SmtpFrom) ? _form.SmtpUser : _form.SmtpFrom;
+            var fromName = string.IsNullOrWhiteSpace(_form.SmtpFromName) ? "PTScheduler" : _form.SmtpFromName;
+            var mail = new System.Net.Mail.MailMessage
+            {
+                From = new System.Net.Mail.MailAddress(from, fromName),
+                Subject = "PTScheduler — test SMTP",
+                Body = "Konfiguracja SMTP działa poprawnie!",
+                IsBodyHtml = false,
+            };
+            mail.To.Add(from);
+
+            await smtp.SendMailAsync(mail);
+            _message = $"Testowy e-mail wysłany na {from}.";
+            _isError = false;
+        }
+        catch (Exception ex)
+        {
+            _message = $"Błąd: {ex.Message}";
+            _isError = true;
+        }
+
+        _testing = false;
+    }
+}

@@ -14,6 +14,10 @@ public class AppBrandingDto
     public string? PwaBannerBody { get; set; }
     public string? PwaBannerButton { get; set; }
     public string? PwaIconPath { get; set; }
+
+    public bool SetupCompleted { get; set; }
+    public string? SetupMode { get; set; }
+    public DateTime? SetupCompletedAt { get; set; }
 }
 
 public class SaveBrandingDto

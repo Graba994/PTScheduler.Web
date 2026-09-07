@@ -15,6 +15,7 @@ public class ClientReportService(
     IDbContextFactory<ApplicationDbContext> dbFactory,
     UserManager<ApplicationUser> userManager,
     IBrandingService brandingService,
+    IAppClock clock,
     IWebRootPathProvider webRootPathProvider) : IClientReportService
 {
     private static readonly CultureInfo Pl = CultureInfo.GetCultureInfo("pl-PL");
@@ -29,9 +30,11 @@ public class ClientReportService(
         var user = await userManager.FindByIdAsync(client.ApplicationUserId);
         var branding = await brandingService.GetAsync();
 
-        // Kind=Local matches the DateTime.Now convention used throughout the app —
-        // Npgsql refuses Kind=Unspecified for timestamptz columns.
-        var monthStart = new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Local);
+        // Granice miesiąca to zegar ścienny, tak samo jak Session.StartTime,
+        // z którym są porównywane. Kolumna jest typu timestamp without time zone,
+        // więc Kind=Unspecified jest tu właściwy — wcześniejszy Kind=Local
+        // oznaczał strefę maszyny, czyli UTC w kontenerze.
+        var monthStart = new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Unspecified);
         var monthEnd = monthStart.AddMonths(1);
 
         var sessions = await db.Sessions
@@ -93,6 +96,7 @@ public class ClientReportService(
             Measurements: measurements,
             PreviousMeasurement: prevMeasurement,
             Notes: notes,
+            GeneratedAt: clock.LocalNow,   // zegar ścienny; statyczne Footer() nie ma dostępu do clock
             Theme: ThemePalette.For(branding.ThemeName)
         );
 
@@ -117,6 +121,7 @@ public class ClientReportService(
         List<BodyMeasurement> Measurements,
         BodyMeasurement? PreviousMeasurement,
         List<TrainerNote> Notes,
+        DateTime GeneratedAt,
         ThemePalette Theme);
 
     /// <summary>
@@ -438,7 +443,7 @@ public class ClientReportService(
             row.RelativeItem().Text(t =>
             {
                 t.Span("Wygenerowano: ").FontSize(8.5f).FontColor(Colors.Grey.Darken1);
-                t.Span(Capitalize(DateTime.Now.ToString("d MMMM yyyy 'o' HH:mm", Pl)))
+                t.Span(Capitalize(d.GeneratedAt.ToString("d MMMM yyyy 'o' HH:mm", Pl)))
                     .FontSize(8.5f).SemiBold().FontColor(Colors.Grey.Darken3);
                 t.Span("   ·   ").FontSize(8.5f).FontColor(Colors.Grey.Lighten1);
                 t.Span(d.CompanyName).FontSize(8.5f).FontColor(Colors.Grey.Darken1);

@@ -1,0 +1,284 @@
+@page "/courses"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject ICourseService CourseService
+@inject IPaymentService PaymentService
+@inject IPaymentSettingsService PaymentSettings
+@inject IModuleSettingsService ModuleSettings
+@inject AuthenticationStateProvider AuthState
+@inject ICouponService CouponSvc
+@inject NavigationManager Nav
+@inject EntitlementService Entitlements
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Kursy" />
+
+<div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <h4 class="page-title mb-0"><i class="bi bi-collection-play-fill me-2" style="color:var(--c-primary)"></i>Kursy</h4>
+    <a href="/my/courses" class="btn btn-sm btn-outline-primary"><i class="bi bi-mortarboard me-1"></i>Moje kursy</a>
+</div>
+
+@if (_moduleOff)
+{
+    <div class="alert alert-secondary"><i class="bi bi-toggle-off me-2"></i>Portal szkoleniowy jest obecnie niedostępny.</div>
+}
+else if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_catalog.Count == 0)
+{
+    <div class="text-center text-muted py-5"><i class="bi bi-collection" style="font-size:2.4rem"></i><p class="mt-2 mb-0">Brak dostępnych kursów.</p></div>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(_err)) { <div class="alert alert-danger">@_err</div> }
+
+    <div class="row g-3">
+        @foreach (var c in _catalog)
+        {
+            <div class="col-12 col-md-6 col-xl-4">
+                <div class="card h-100">
+                    @if (!string.IsNullOrEmpty(c.CoverImageUrl))
+                    {
+                        <div style="aspect-ratio:16/9;background:center/cover url('@c.CoverImageUrl');border-radius:.5rem .5rem 0 0"></div>
+                    }
+                    <div class="card-body d-flex flex-column">
+                        <div class="d-flex flex-wrap gap-1 mb-2">
+                            @if (!string.IsNullOrEmpty(c.Level)) { <span class="badge bg-body-secondary text-body">@c.Level</span> }
+                            @if (!string.IsNullOrEmpty(c.DurationText)) { <span class="badge bg-body-secondary text-body">@c.DurationText</span> }
+                        </div>
+                        <h5 class="card-title">@c.Title</h5>
+                        @if (!string.IsNullOrEmpty(c.Author)) { <div class="text-muted small mb-1"><i class="bi bi-person-circle me-1"></i>@c.Author</div> }
+                        @if (!string.IsNullOrEmpty(c.Description)) { <p class="text-muted small flex-grow-1">@c.Description</p> } else { <div class="flex-grow-1"></div> }
+
+                        <div class="d-flex align-items-center justify-content-between mt-2">
+                            <span class="fw-bold fs-5">@(c.Price > 0 ? $"{c.Price:0.00} {_currency}" : "Bezpłatny")</span>
+                            @if (_isStaff)
+                            {
+                                <a href="/admin/courses" class="btn btn-outline-secondary btn-sm"><i class="bi bi-gear me-1"></i>Zarządzaj</a>
+                            }
+                            else if (_owned.Contains(c.Id))
+                            {
+                                <a href="@($"/my/courses/{c.Id}")" class="btn btn-success"><i class="bi bi-play-fill me-1"></i>Otwórz</a>
+                            }
+                            else if (c.Price <= 0)
+                            {
+                                <button class="btn btn-primary" @onclick="() => Buy(c)" disabled="@(_buyingId == c.Id)">
+                                    @if (_buyingId == c.Id) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                                    <i class="bi bi-unlock me-1"></i>Odbierz dostęp
+                                </button>
+                            }
+                            else if (_paymentsEnabled)
+                            {
+                                <button class="btn btn-primary" @onclick="() => Buy(c)" disabled="@(_buyingId == c.Id)">
+                                    @if (_buyingId == c.Id) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                                    <i class="bi bi-bag-check me-1"></i>Kup
+                                </button>
+                            }
+                            else
+                            {
+                                <span class="badge bg-secondary">Niedostępny</span>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@if (_pickFor is not null)
+{
+    <div class="modal-backdrop-custom" @onclick="ClosePicker">
+        <div class="pay-picker" @onclick:stopPropagation="true">
+            <div class="pay-picker-head">
+                <span class="fw-semibold">Wybierz metodę płatności</span>
+                <button class="btn-close" @onclick="ClosePicker"></button>
+            </div>
+            <div class="pay-picker-sub">
+                @_pickFor.Title —
+                @if (_couponFinal.HasValue)
+                {
+                    <span class="text-muted text-decoration-line-through">@_pickFor.Price.ToString("0.00")</span>
+                    <strong class="text-success ms-1">@_couponFinal.Value.ToString("0.00") @_currency</strong>
+                    <div class="small text-success">Rabat: -@((_pickFor.Price - _couponFinal.Value).ToString("0.00")) @_currency</div>
+                }
+                else
+                {
+                    <strong>@_pickFor.Price.ToString("0.00") @_currency</strong>
+                }
+            </div>
+
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Kod rabatowy</label>
+                <div class="input-group input-group-sm">
+                    <input class="form-control font-monospace" placeholder="np. LATO20"
+                           @bind="_couponCode" @bind:event="oninput" />
+                    <button class="btn btn-outline-primary" @onclick="ApplyCoupon" disabled="@(_couponBusy || string.IsNullOrWhiteSpace(_couponCode))">
+                        @if (_couponBusy) { <span class="spinner-border spinner-border-sm"></span> } else { <span>Zastosuj</span> }
+                    </button>
+                    @if (!string.IsNullOrEmpty(_appliedCoupon))
+                    {
+                        <button class="btn btn-outline-secondary" @onclick="ClearCoupon"><i class="bi bi-x"></i></button>
+                    }
+                </div>
+                @if (!string.IsNullOrEmpty(_couponMsg))
+                {
+                    <div class="small mt-1 @(_couponError ? "text-danger" : "text-success")">
+                        <i class="bi @(_couponError ? "bi-exclamation-circle" : "bi-check-circle") me-1"></i>@_couponMsg
+                    </div>
+                }
+            </div>
+
+            @if (!string.IsNullOrEmpty(_err)) { <div class="alert alert-danger py-2 mb-2">@_err</div> }
+            <div class="d-grid gap-2">
+                @foreach (var opt in _options)
+                {
+                    <button class="pay-option" @onclick="() => StartCourse(_pickFor, opt.Key)" disabled="@_busy">
+                        <i class="bi @opt.Icon"></i><span>@opt.Name</span>
+                        <i class="bi bi-chevron-right ms-auto"></i>
+                    </button>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private bool _moduleOff;
+    private bool _paymentsEnabled;
+    private bool _isStaff;
+    private bool _busy;
+    private string _currency = "PLN";
+    private string _userId = string.Empty;
+    private string _email = string.Empty;
+    private int? _buyingId;
+    private string _err = string.Empty;
+
+    private List<CourseDto> _catalog = [];
+    private HashSet<int> _owned = [];
+    private List<PaymentOptionDto> _options = [];
+    private CourseDto? _pickFor;
+
+    private string _couponCode = string.Empty;
+    private string? _appliedCoupon;
+    private decimal? _couponFinal;
+    private bool _couponBusy;
+    private bool _couponError;
+    private string? _couponMsg;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!(await ModuleSettings.GetAsync()).CoursesEnabled) { _moduleOff = true; _loading = false; return; }
+
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        _email = auth.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+                 ?? auth.User.Identity?.Name ?? string.Empty;
+        _isStaff = auth.User.IsInRole("Admin") || auth.User.IsInRole("Trainer") || auth.User.IsInRole("Subordinate");
+
+        var settings = await PaymentSettings.GetAsync();
+        _currency = settings.Currency;
+        _options = (await PaymentService.GetEnabledOptionsAsync())
+            .Where(o => IsProviderAllowed(o.Key)).ToList();
+        _paymentsEnabled = _options.Count > 0;
+
+        _catalog = await CourseService.GetCoursesAsync(includeUnpublished: false);
+        _owned = (await CourseService.GetMyCoursesAsync(_userId)).Select(c => c.Id).ToHashSet();
+        _loading = false;
+    }
+
+    private async Task Buy(CourseDto c)
+    {
+        _err = string.Empty;
+        _buyingId = c.Id;
+
+        if (c.Price <= 0)
+        {
+            var free = await CourseService.SelfEnrollFreeAsync(_userId, c.Id);
+            if (free is null) { Nav.NavigateTo($"/my/courses/{c.Id}", forceLoad: true); return; }
+            _err = free;
+            _buyingId = null;
+            return;
+        }
+
+        ClearCoupon();
+        _pickFor = c;
+        _buyingId = null;
+    }
+
+    private async Task StartCourse(CourseDto c, string providerKey)
+    {
+        _busy = true; _err = string.Empty;
+        var res = await PaymentService.StartCourseCheckoutAsync(_userId, c.Id, providerKey, Nav.BaseUri, _email, string.Empty, _appliedCoupon);
+        if (res.Ok && res.RedirectUrl is not null) { Nav.NavigateTo(res.RedirectUrl, forceLoad: true); return; }
+        _err = res.Error ?? "Nie udało się rozpocząć płatności.";
+        _busy = false;
+    }
+
+    private async Task ApplyCoupon()
+    {
+        if (_pickFor is null || string.IsNullOrWhiteSpace(_couponCode)) return;
+        _couponBusy = true; _couponMsg = null;
+        var res = await CouponSvc.ValidateAsync(_couponCode.Trim(), _pickFor.Price, "course");
+        if (res.IsValid)
+        {
+            _appliedCoupon = res.Code;
+            _couponFinal = res.FinalAmount;
+            _couponError = false;
+            _couponMsg = $"Kod zastosowany: -{res.DiscountAmount:0.00} {_currency}";
+        }
+        else
+        {
+            _appliedCoupon = null;
+            _couponFinal = null;
+            _couponError = true;
+            _couponMsg = res.Error;
+        }
+        _couponBusy = false;
+    }
+
+    private void ClearCoupon()
+    {
+        _couponCode = string.Empty;
+        _appliedCoupon = null;
+        _couponFinal = null;
+        _couponMsg = null;
+        _couponError = false;
+    }
+
+    private void ClosePicker() { _pickFor = null; _err = string.Empty; ClearCoupon(); }
+
+    private bool IsProviderAllowed(string key) => key switch
+    {
+        "payu" => Entitlements.IsAllowed("IntegrationPayU"),
+        "p24"  => Entitlements.IsAllowed("IntegrationPrzelewy24"),
+        _      => true
+    };
+}
+
+<style>
+    .modal-backdrop-custom {
+        position: fixed; inset: 0; background: rgba(0,0,0,.45);
+        display: flex; align-items: center; justify-content: center;
+        z-index: 1080; padding: 1rem; backdrop-filter: blur(2px);
+    }
+    .pay-picker {
+        width: 100%; max-width: 380px; background: var(--bs-body-bg);
+        border: 1px solid var(--bs-border-color); border-radius: 1rem;
+        padding: 1.25rem; box-shadow: 0 20px 50px -20px rgba(0,0,0,.55);
+    }
+    .pay-picker-head { display:flex; align-items:center; justify-content:space-between; margin-bottom:.25rem; }
+    .pay-picker-sub { color: var(--bs-secondary-color); font-size:.9rem; margin-bottom:1rem; }
+    .pay-option {
+        display:flex; align-items:center; gap:.7rem; width:100%;
+        padding:.75rem .9rem; border:1px solid var(--bs-border-color);
+        border-radius:.7rem; background:var(--bs-body-bg); color:var(--bs-body-color);
+        font-weight:600; transition:border-color .15s, transform .15s;
+    }
+    .pay-option:hover:not(:disabled) { border-color: var(--c-primary); transform: translateY(-1px); }
+    .pay-option i:first-child { color: var(--c-primary); font-size:1.15rem; }
+</style>

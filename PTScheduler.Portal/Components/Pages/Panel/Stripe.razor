@@ -1,0 +1,127 @@
+@page "/panel/stripe"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject SiteSettingsService Settings
+@rendermode InteractiveServer
+
+<PageTitle>Stripe — PTScheduler Portal</PageTitle>
+
+<div class="mb-4">
+    <h4 class="fw-bold mb-1"><i class="bi bi-credit-card-2-front me-2 text-primary"></i>Stripe (płatności trenerów)</h4>
+    <p class="text-muted small mb-0">Klucze API i URLe używane do checkout + webhooka subskrypcji</p>
+</div>
+
+@if (_saved)
+{
+    <div class="alert alert-success alert-dismissible fade show">
+        <i class="bi bi-check-circle me-1"></i>Zapisano.
+        <button type="button" class="btn-close" @onclick="() => _saved = false"></button>
+    </div>
+}
+
+<EditForm Model="_form" OnValidSubmit="Save" FormName="stripe-config">
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white fw-semibold">
+            <i class="bi bi-key me-1"></i>API Keys
+        </div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Secret Key</label>
+                <input type="password" class="form-control font-monospace" @bind="_form.SecretKey" placeholder="sk_test_... lub sk_live_..." />
+                <div class="form-text">Znajdziesz w Stripe Dashboard → Developers → API keys</div>
+            </div>
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Publishable Key</label>
+                <input class="form-control font-monospace" @bind="_form.PublishableKey" placeholder="pk_test_... lub pk_live_..." />
+            </div>
+            <div class="mb-0">
+                <label class="form-label small fw-semibold">Webhook Signing Secret</label>
+                <input type="password" class="form-control font-monospace" @bind="_form.WebhookSecret" placeholder="whsec_..." />
+                <div class="form-text">
+                    Endpoint webhook: <code>https://TWÓJ_PORTAL/api/webhooks/stripe</code>.
+                    Wybierz eventy: <code>checkout.session.completed</code>, <code>customer.subscription.*</code>, <code>invoice.payment_failed</code>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white fw-semibold">
+            <i class="bi bi-link-45deg me-1"></i>URL-e po płatności
+        </div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Success URL</label>
+                <input class="form-control" @bind="_form.SuccessUrl" placeholder="https://ptscheduler.pl/register/success?session_id={CHECKOUT_SESSION_ID}" />
+                <div class="form-text">Placeholder <code>{CHECKOUT_SESSION_ID}</code> Stripe wypełni sam</div>
+            </div>
+            <div class="mb-0">
+                <label class="form-label small fw-semibold">Cancel URL</label>
+                <input class="form-control" @bind="_form.CancelUrl" placeholder="https://ptscheduler.pl/register/cancel" />
+            </div>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary" disabled="@_saving">
+        @if (_saving)
+        {
+            <span class="spinner-border spinner-border-sm me-1"></span>
+        }
+        <i class="bi bi-floppy me-1"></i>Zapisz
+    </button>
+</EditForm>
+
+<div class="alert alert-info small mt-3">
+    <i class="bi bi-info-circle me-1"></i>
+    <strong>Jak połączyć plany ze Stripe:</strong>
+    <ol class="mb-0 mt-2">
+        <li>W Stripe Dashboard utwórz <strong>Product</strong> „PTScheduler Pro" i <strong>Price</strong> (79 zł/mies., recurring)</li>
+        <li>Skopiuj Price ID (np. <code>price_1P...</code>)</li>
+        <li>W <a href="/panel/plans">/panel/plans</a> edytuj plan → wklej Price ID w polu „Stripe monthly price ID"</li>
+        <li>Powtórz dla wersji rocznej i planu Studio</li>
+    </ol>
+</div>
+
+@code {
+    private StripeForm _form = new();
+    private bool _saving, _saved;
+
+    private class StripeForm
+    {
+        public string SecretKey { get; set; } = "";
+        public string PublishableKey { get; set; } = "";
+        public string WebhookSecret { get; set; } = "";
+        public string SuccessUrl { get; set; } = "";
+        public string CancelUrl { get; set; } = "";
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var s = await Settings.GetAllAsync(
+            SiteSettingsService.Keys.StripeSecretKey,
+            SiteSettingsService.Keys.StripePublishableKey,
+            SiteSettingsService.Keys.StripeWebhookSecret,
+            SiteSettingsService.Keys.StripeSuccessUrl,
+            SiteSettingsService.Keys.StripeCancelUrl);
+
+        _form.SecretKey = s[SiteSettingsService.Keys.StripeSecretKey];
+        _form.PublishableKey = s[SiteSettingsService.Keys.StripePublishableKey];
+        _form.WebhookSecret = s[SiteSettingsService.Keys.StripeWebhookSecret];
+        _form.SuccessUrl = s[SiteSettingsService.Keys.StripeSuccessUrl];
+        _form.CancelUrl = s[SiteSettingsService.Keys.StripeCancelUrl];
+    }
+
+    private async Task Save()
+    {
+        _saving = true; _saved = false;
+        await Settings.SetManyAsync(new Dictionary<string, string>
+        {
+            [SiteSettingsService.Keys.StripeSecretKey] = _form.SecretKey.Trim(),
+            [SiteSettingsService.Keys.StripePublishableKey] = _form.PublishableKey.Trim(),
+            [SiteSettingsService.Keys.StripeWebhookSecret] = _form.WebhookSecret.Trim(),
+            [SiteSettingsService.Keys.StripeSuccessUrl] = _form.SuccessUrl.Trim(),
+            [SiteSettingsService.Keys.StripeCancelUrl] = _form.CancelUrl.Trim()
+        });
+        _saving = false; _saved = true;
+    }
+}

@@ -1,0 +1,309 @@
+@page "/admin/upgrade"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@inject EntitlementService Entitlements
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Ulepsz plan" />
+
+<div class="page-header">
+    <h4 class="page-title"><i class="bi bi-rocket-takeoff-fill me-2" style="color:var(--c-primary)"></i>Ulepsz swój plan</h4>
+</div>
+
+<div class="upgrade-current">
+    <div class="upgrade-current-badge">Twój obecny plan</div>
+    <div class="upgrade-current-name">@_currentPlan.Name</div>
+    <div class="upgrade-current-price">
+        @(_currentPlan.Price == 0 ? "Za darmo" : $"{_currentPlan.Price:0} zł/mies.")
+    </div>
+</div>
+
+@if (_higherPlans.Count == 0)
+{
+    <div class="alert alert-success">
+        <i class="bi bi-check-circle-fill me-1"></i>
+        Masz najwyższy plan — wszystkie funkcje są odblokowane!
+    </div>
+}
+else
+{
+    <div class="upgrade-grid">
+        @foreach (var plan in _higherPlans)
+        {
+            <div class="upgrade-card @(plan.Recommended ? "upgrade-recommended" : "")">
+                @if (plan.Recommended)
+                {
+                    <div class="upgrade-badge">Polecany</div>
+                }
+                <div class="upgrade-name">@plan.Name</div>
+                <div class="upgrade-price">@plan.Price.ToString("0") <span>zł/mies.</span></div>
+                <div class="upgrade-desc">@plan.Description</div>
+                <ul class="upgrade-features">
+                    @foreach (var f in plan.Features)
+                    {
+                        <li class="@(f.IsNew ? "upgrade-new" : "")">
+                            <i class="bi @(f.IsNew ? "bi-plus-circle-fill" : "bi-check-circle-fill")"></i>
+                            @f.Label
+                            @if (f.IsNew)
+                            {
+                                <span class="upgrade-new-tag">Nowe</span>
+                            }
+                        </li>
+                    }
+                </ul>
+                <a href="mailto:kontakt@@ptscheduler.pl?subject=Zmiana%20planu%20na%20@plan.Name"
+                   class="btn btn-primary w-100">
+                    <i class="bi bi-arrow-up-circle me-1"></i>Przejdź na @plan.Name
+                </a>
+            </div>
+        }
+    </div>
+
+    <div class="alert alert-info small mt-4">
+        <i class="bi bi-info-circle me-1"></i>
+        Zmiana planu następuje natychmiast po potwierdzeniu. Skontaktuj się z nami lub kliknij przycisk powyżej.
+    </div>
+}
+
+<style>
+    .upgrade-current {
+        background: var(--c-primary-light, #EEF2FF);
+        border: 2px solid var(--c-primary, #4F46E5);
+        border-radius: 12px;
+        padding: 20px 24px;
+        margin-bottom: 32px;
+        text-align: center;
+    }
+    .upgrade-current-badge {
+        display: inline-block;
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--c-primary);
+        margin-bottom: 4px;
+    }
+    .upgrade-current-name {
+        font-size: 1.4rem;
+        font-weight: 800;
+    }
+    .upgrade-current-price {
+        font-size: 0.92rem;
+        color: #6B7280;
+    }
+
+    .upgrade-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        gap: 24px;
+    }
+
+    .upgrade-card {
+        background: #fff;
+        border: 2px solid #E5E7EB;
+        border-radius: 16px;
+        padding: 28px 24px;
+        position: relative;
+        transition: border-color 0.2s, box-shadow 0.2s;
+    }
+    .upgrade-card:hover {
+        border-color: #D1D5DB;
+        box-shadow: 0 4px 24px rgba(0,0,0,0.06);
+    }
+    .upgrade-recommended {
+        border-color: var(--c-primary);
+        box-shadow: 0 4px 24px rgba(79,70,229,0.12);
+    }
+    .upgrade-badge {
+        position: absolute;
+        top: -12px;
+        left: 50%;
+        transform: translateX(-50%);
+        background: var(--c-primary);
+        color: #fff;
+        font-size: 0.72rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        padding: 4px 14px;
+        border-radius: 20px;
+    }
+    .upgrade-name {
+        font-size: 1.2rem;
+        font-weight: 800;
+        text-align: center;
+        margin-bottom: 4px;
+    }
+    .upgrade-price {
+        text-align: center;
+        font-size: 1.8rem;
+        font-weight: 800;
+        margin-bottom: 4px;
+    }
+    .upgrade-price span {
+        font-size: 0.85rem;
+        font-weight: 500;
+        color: #6B7280;
+    }
+    .upgrade-desc {
+        text-align: center;
+        font-size: 0.85rem;
+        color: #6B7280;
+        margin-bottom: 20px;
+    }
+    .upgrade-features {
+        list-style: none;
+        padding: 0;
+        margin: 0 0 24px;
+    }
+    .upgrade-features li {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 0;
+        font-size: 0.88rem;
+        color: #374151;
+        border-bottom: 1px solid #F3F4F6;
+    }
+    .upgrade-features li:last-child { border-bottom: none; }
+    .upgrade-features li i {
+        font-size: 0.92rem;
+        color: #10B981;
+        flex-shrink: 0;
+    }
+    .upgrade-features li.upgrade-new i {
+        color: var(--c-primary);
+    }
+    .upgrade-new-tag {
+        font-size: 0.65rem;
+        font-weight: 700;
+        text-transform: uppercase;
+        letter-spacing: 0.06em;
+        color: #fff;
+        background: var(--c-primary);
+        padding: 1px 6px;
+        border-radius: 4px;
+        margin-left: auto;
+    }
+
+    [data-theme$="-dark"] .upgrade-current { background: rgba(79,70,229,0.1); }
+    [data-theme$="-dark"] .upgrade-card { background: #1E293B; border-color: #334155; }
+    [data-theme$="-dark"] .upgrade-card:hover { border-color: #475569; }
+    [data-theme$="-dark"] .upgrade-recommended { border-color: var(--c-primary); }
+    [data-theme$="-dark"] .upgrade-features li { color: #CBD5E1; border-color: #334155; }
+</style>
+
+@code {
+    private PlanInfo _currentPlan = new("Start", 0, "");
+    private List<UpgradePlan> _higherPlans = [];
+
+    protected override void OnInitialized()
+    {
+        var e = Entitlements.Current;
+        _currentPlan = new PlanInfo(e.Name, e.MonthlyPrice, e.Id);
+
+        var allPlans = BuildPlanCatalog();
+        var currentOrder = allPlans.FindIndex(p => p.Id == e.Id);
+        if (currentOrder < 0) currentOrder = 0;
+
+        _higherPlans = allPlans
+            .Skip(currentOrder + 1)
+            .Select(p => ToUpgradePlan(p, e))
+            .ToList();
+
+        if (_higherPlans.Count > 0)
+        {
+            _higherPlans[0].Recommended = true;
+        }
+    }
+
+    private static List<PlanDef> BuildPlanCatalog() =>
+    [
+        new("start", "Start", 0, "Testuj za darmo przez 7 dni",
+            3, false, false, false, false, false, false, false, false, false, "preview"),
+        new("starter", "Starter", 49, "Podstawowe narzędzia dla trenera",
+            15, true, true, false, false, false, false, true, false, false, "basic"),
+        new("pro", "Pro", 99, "Pełna funkcjonalność dla aktywnych trenerów",
+            50, true, true, true, true, true, true, true, true, true, "full"),
+        new("studio", "Business", 199, "Bez limitów, pełna kontrola, priorytetowe wsparcie",
+            int.MaxValue, true, true, true, true, true, true, true, true, true, "premium"),
+    ];
+
+    private static UpgradePlan ToUpgradePlan(PlanDef plan, Entitlements current)
+    {
+        var features = new List<FeatureItem>();
+
+        var clientsLabel = plan.MaxClients >= 9999 ? "Nielimitowani klienci" : $"Do {plan.MaxClients} klientów";
+        features.Add(new(clientsLabel, plan.MaxClients > current.MaxClients));
+
+        if (plan.HasBranding)
+        {
+            var label = plan.BrandingTier switch
+            {
+                "basic" => "Podstawowy branding (kolory bazowe)",
+                "full" => "Pełny branding (wszystkie kolory)",
+                "premium" => "Branding premium (kolory premium)",
+                _ => "Branding"
+            };
+            features.Add(new(label, !HasBrandingAccess(current.BrandingTier, plan.BrandingTier)));
+        }
+
+        if (plan.HasPayments)
+            features.Add(new("Płatności online", !current.PaymentsEnabled));
+
+        if (plan.HasFinancialReports)
+            features.Add(new("Raporty finansowe", !current.FinancialReports));
+
+        if (plan.HasCourses)
+            features.Add(new("Kursy wideo", !current.CoursesEnabled));
+
+        if (plan.HasSms)
+            features.Add(new("SMS-y i push", !current.SmsReminders));
+
+        if (plan.HasGoogleMeet)
+            features.Add(new("Integracja Google Meet", !current.IntegrationGoogleMeet));
+
+        if (plan.HasAdvancedAnalytics)
+            features.Add(new("Zaawansowane statystyki", !current.AdvancedAnalytics));
+
+        if (plan.HasDataExport)
+            features.Add(new("Eksport danych (CSV/JSON)", !current.DataExport));
+
+        if (plan.HasLogo)
+            features.Add(new("Własne logo i favicon", !current.CustomLogo));
+
+        features.Add(new("Grafik i rezerwacje", false));
+        features.Add(new("Przypomnienia email", false));
+
+        return new UpgradePlan
+        {
+            Name = plan.Name,
+            Price = plan.Price,
+            Description = plan.Description,
+            Features = features
+        };
+    }
+
+    private static bool HasBrandingAccess(string currentTier, string targetTier)
+    {
+        var order = new[] { "preview", "basic", "full", "premium" };
+        return Array.IndexOf(order, currentTier) >= Array.IndexOf(order, targetTier);
+    }
+
+    private record PlanInfo(string Name, decimal Price, string Id);
+
+    private record PlanDef(string Id, string Name, decimal Price, string Description,
+        int MaxClients, bool HasPayments, bool HasLogo, bool HasCourses, bool HasSms,
+        bool HasGoogleMeet, bool HasAdvancedAnalytics, bool HasFinancialReports,
+        bool HasDataExport, bool HasBranding, string BrandingTier);
+
+    private class UpgradePlan
+    {
+        public string Name { get; set; } = "";
+        public decimal Price { get; set; }
+        public string Description { get; set; } = "";
+        public List<FeatureItem> Features { get; set; } = [];
+        public bool Recommended { get; set; }
+    }
+
+    private record FeatureItem(string Label, bool IsNew);
+}

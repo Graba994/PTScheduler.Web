@@ -1,0 +1,408 @@
+@page "/panel/finances"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@rendermode InteractiveServer
+
+<PageTitle>Finanse — PTScheduler Portal</PageTitle>
+
+<div class="d-flex align-items-center justify-content-between mb-4">
+    <h4 class="fw-bold mb-0"><i class="bi bi-cash-stack me-2 text-success"></i>Finanse</h4>
+    <button class="btn btn-sm btn-outline-secondary" @onclick="Load">
+        <i class="bi bi-arrow-clockwise"></i> Odśwież
+    </button>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <!-- Stats -->
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-lg-3">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body text-center">
+                    <div class="text-success fs-4 fw-bold">@_mrr.ToString("0") zł</div>
+                    <div class="text-muted small">MRR (przychód mies.)</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body text-center">
+                    <div class="text-primary fs-4 fw-bold">@_arr.ToString("0") zł</div>
+                    <div class="text-muted small">ARR (przychód roczny)</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body text-center">
+                    <div class="text-info fs-4 fw-bold">@_activeSubs</div>
+                    <div class="text-muted small">Aktywne subskrypcje</div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-lg-3">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body text-center">
+                    <div class="text-warning fs-4 fw-bold">@_overdue</div>
+                    <div class="text-muted small">Zaległe płatności</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Revenue by plan -->
+    <div class="row g-3 mb-4">
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h6 class="fw-bold mb-3"><i class="bi bi-pie-chart me-2 text-primary"></i>Przychód wg planu</h6>
+                    @if (_revenueByPlan.Count == 0)
+                    {
+                        <p class="text-muted small">Brak aktywnych subskrypcji.</p>
+                    }
+                    else
+                    {
+                        <div class="d-flex flex-column gap-2">
+                            @foreach (var (plan, revenue, count) in _revenueByPlan)
+                            {
+                                var pct = _mrr > 0 ? (int)(revenue * 100 / _mrr) : 0;
+                                <div>
+                                    <div class="d-flex justify-content-between small mb-1">
+                                        <span class="fw-semibold">@plan <span class="text-muted fw-normal">(@count trenerów)</span></span>
+                                        <span class="fw-bold">@revenue.ToString("0") zł/mies.</span>
+                                    </div>
+                                    <div class="progress" style="height:8px">
+                                        <div class="progress-bar bg-primary" style="width:@pct%"></div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-md-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h6 class="fw-bold mb-3"><i class="bi bi-people me-2 text-info"></i>Trenerzy wg planu</h6>
+                    @if (_tenantsByPlan.Count == 0)
+                    {
+                        <p class="text-muted small">Brak trenerów.</p>
+                    }
+                    else
+                    {
+                        <div class="d-flex flex-column gap-2">
+                            @foreach (var (plan, count, total) in _tenantsByPlan)
+                            {
+                                var pct = total > 0 ? (int)(count * 100 / total) : 0;
+                                <div>
+                                    <div class="d-flex justify-content-between small mb-1">
+                                        <span class="fw-semibold">@plan</span>
+                                        <span>@count trenerów (@pct%)</span>
+                                    </div>
+                                    <div class="progress" style="height:8px">
+                                        <div class="progress-bar bg-info" style="width:@pct%"></div>
+                                    </div>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Overdue / expiring -->
+    @if (_overdueList.Count > 0)
+    {
+        <div class="card border-0 shadow-sm border-warning mb-4">
+            <div class="card-body">
+                <h6 class="fw-bold mb-3 text-warning"><i class="bi bi-exclamation-triangle me-2"></i>Zaległe / wygasające subskrypcje</h6>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle mb-0 small">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Trener</th>
+                                <th>Plan</th>
+                                <th>Kwota</th>
+                                <th>Status</th>
+                                <th>Wygasa</th>
+                                <th>Dni</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var s in _overdueList)
+                            {
+                                var daysLeft = s.EndsAt.HasValue ? (s.EndsAt.Value - DateTime.UtcNow).Days : 0;
+                                <tr class="@(daysLeft < 0 ? "table-danger" : daysLeft < 7 ? "table-warning" : "")">
+                                    <td>
+                                        <a href="/panel/tenants/@s.TenantId" class="fw-semibold text-decoration-none">
+                                            @(s.Tenant?.CompanyName ?? $"Tenant #{s.TenantId}")
+                                        </a>
+                                    </td>
+                                    <td><span class="badge bg-primary-subtle text-primary-emphasis">@(s.Plan?.Name ?? s.PlanId)</span></td>
+                                    <td class="fw-semibold">@s.Amount.ToString("0") zł</td>
+                                    <td>
+                                        <span class="badge @SubStatusBadge(s.Status)">@SubStatusLabel(s.Status)</span>
+                                    </td>
+                                    <td class="text-nowrap">@(s.EndsAt?.ToString("dd.MM.yyyy") ?? "—")</td>
+                                    <td class="fw-bold @(daysLeft < 0 ? "text-danger" : "text-warning")">
+                                        @(daysLeft < 0 ? $"{Math.Abs(daysLeft)} dni po terminie" : $"{daysLeft} dni")
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        </div>
+    }
+
+    <!-- All subscriptions -->
+    <div class="card border-0 shadow-sm">
+        <div class="card-body">
+            <div class="d-flex justify-content-between align-items-center mb-3">
+                <h6 class="fw-bold mb-0"><i class="bi bi-list-check me-2"></i>Wszystkie subskrypcje</h6>
+                <button class="btn btn-primary btn-sm" @onclick="() => _showNewSub = true">
+                    <i class="bi bi-plus-lg me-1"></i>Dodaj subskrypcję
+                </button>
+            </div>
+
+            @if (_showNewSub)
+            {
+                <div class="card bg-light border-0 p-3 mb-3">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-3">
+                            <label class="form-label small fw-semibold">Trener</label>
+                            <select class="form-select form-select-sm" @bind="_newSub.TenantId">
+                                <option value="0">— Wybierz —</option>
+                                @foreach (var t in _allTenants)
+                                {
+                                    <option value="@t.Id">@t.CompanyName (@t.Slug)</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-semibold">Plan</label>
+                            <select class="form-select form-select-sm" @bind="_newSub.PlanId">
+                                @foreach (var p in _allPlans)
+                                {
+                                    <option value="@p.Id">@p.Name (@p.MonthlyPrice zł)</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-semibold">Kwota (zł)</label>
+                            <input type="number" class="form-control form-control-sm" @bind="_newSub.Amount" />
+                        </div>
+                        <div class="col-md-2">
+                            <label class="form-label small fw-semibold">Cykl</label>
+                            <select class="form-select form-select-sm" @bind="_newSub.BillingCycle">
+                                <option value="monthly">Miesięczny</option>
+                                <option value="yearly">Roczny</option>
+                            </select>
+                        </div>
+                        <div class="col-md-3">
+                            <div class="d-flex gap-1">
+                                <button class="btn btn-primary btn-sm" @onclick="AddSubscription">
+                                    <i class="bi bi-check-lg"></i> Dodaj
+                                </button>
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="() => _showNewSub = false">Anuluj</button>
+                            </div>
+                        </div>
+                    </div>
+                    @if (_subError is not null)
+                    {
+                        <div class="alert alert-danger py-1 small mt-2 mb-0">@_subError</div>
+                    }
+                </div>
+            }
+
+            @if (_subscriptions.Count == 0)
+            {
+                <p class="text-muted small">Brak subskrypcji. Dodaj pierwszą aby śledzić przychody.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm table-hover align-middle mb-0 small">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Trener</th>
+                                <th>Plan</th>
+                                <th>Kwota</th>
+                                <th>Cykl</th>
+                                <th>Status</th>
+                                <th>Od</th>
+                                <th>Do</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var s in _subscriptions)
+                            {
+                                <tr>
+                                    <td>
+                                        <a href="/panel/tenants/@s.TenantId" class="text-decoration-none fw-semibold">
+                                            @(s.Tenant?.CompanyName ?? $"#{s.TenantId}")
+                                        </a>
+                                    </td>
+                                    <td><span class="badge bg-primary-subtle text-primary-emphasis">@(s.Plan?.Name ?? s.PlanId)</span></td>
+                                    <td class="fw-semibold">@s.Amount.ToString("0") zł</td>
+                                    <td class="text-muted">@(s.BillingCycle == "yearly" ? "Roczny" : "Miesięczny")</td>
+                                    <td><span class="badge @SubStatusBadge(s.Status)">@SubStatusLabel(s.Status)</span></td>
+                                    <td class="text-muted text-nowrap">@s.StartsAt.ToString("dd.MM.yyyy")</td>
+                                    <td class="text-muted text-nowrap">@(s.EndsAt?.ToString("dd.MM.yyyy") ?? "—")</td>
+                                    <td>
+                                        @if (s.Status == SubscriptionStatus.Active)
+                                        {
+                                            <button class="btn btn-sm btn-outline-danger" @onclick="() => CancelSubscription(s.Id)">
+                                                <i class="bi bi-x-lg"></i>
+                                            </button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private decimal _mrr;
+    private decimal _arr;
+    private int _activeSubs;
+    private int _overdue;
+    private List<(string Plan, decimal Revenue, int Count)> _revenueByPlan = [];
+    private List<(string Plan, int Count, int Total)> _tenantsByPlan = [];
+    private List<Subscription> _overdueList = [];
+    private List<Subscription> _subscriptions = [];
+    private List<Tenant> _allTenants = [];
+    private List<Plan> _allPlans = [];
+    private bool _showNewSub;
+    private NewSubModel _newSub = new();
+    private string? _subError;
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        _loading = true;
+        await using var db = DbFactory.CreateDbContext();
+
+        _subscriptions = await db.Subscriptions
+            .AsNoTracking()
+            .Include(s => s.Tenant)
+            .Include(s => s.Plan)
+            .OrderByDescending(s => s.CreatedAt)
+            .ToListAsync();
+
+        _allTenants = await db.Tenants.AsNoTracking().OrderBy(t => t.CompanyName).ToListAsync();
+        _allPlans = await db.Plans.AsNoTracking().Where(p => p.IsActive).OrderBy(p => p.SortOrder).ToListAsync();
+
+        var active = _subscriptions.Where(s => s.Status == SubscriptionStatus.Active).ToList();
+        _activeSubs = active.Count;
+        _mrr = active.Sum(s => s.BillingCycle == "yearly" ? s.Amount / 12 : s.Amount);
+        _arr = _mrr * 12;
+
+        _revenueByPlan = active
+            .GroupBy(s => s.Plan?.Name ?? s.PlanId)
+            .Select(g => (g.Key, g.Sum(s => s.BillingCycle == "yearly" ? s.Amount / 12 : s.Amount), g.Count()))
+            .OrderByDescending(x => x.Item2)
+            .ToList();
+
+        var tenants = await db.Tenants.AsNoTracking().Include(t => t.Plan).ToListAsync();
+        var totalTenants = tenants.Count;
+        _tenantsByPlan = tenants
+            .GroupBy(t => t.Plan?.Name ?? t.PlanId)
+            .Select(g => (g.Key, g.Count(), totalTenants))
+            .OrderByDescending(x => x.Item2)
+            .ToList();
+
+        _overdueList = _subscriptions
+            .Where(s => s.Status == SubscriptionStatus.PastDue
+                || (s.Status == SubscriptionStatus.Active && s.EndsAt.HasValue && s.EndsAt.Value < DateTime.UtcNow.AddDays(14)))
+            .OrderBy(s => s.EndsAt)
+            .ToList();
+        _overdue = _subscriptions.Count(s => s.Status == SubscriptionStatus.PastDue);
+
+        _loading = false;
+    }
+
+    private async Task AddSubscription()
+    {
+        _subError = null;
+        if (_newSub.TenantId == 0) { _subError = "Wybierz trenera."; return; }
+
+        await using var db = DbFactory.CreateDbContext();
+        var plan = await db.Plans.FindAsync(_newSub.PlanId);
+        var sub = new Subscription
+        {
+            TenantId = _newSub.TenantId,
+            PlanId = _newSub.PlanId,
+            Amount = _newSub.Amount > 0 ? _newSub.Amount : plan?.MonthlyPrice ?? 0,
+            BillingCycle = _newSub.BillingCycle,
+            Status = SubscriptionStatus.Active,
+            StartsAt = DateTime.UtcNow,
+            EndsAt = _newSub.BillingCycle == "yearly"
+                ? DateTime.UtcNow.AddYears(1)
+                : DateTime.UtcNow.AddMonths(1)
+        };
+        db.Subscriptions.Add(sub);
+
+        var tenant = await db.Tenants.FindAsync(_newSub.TenantId);
+        if (tenant is not null) tenant.PlanId = _newSub.PlanId;
+
+        await db.SaveChangesAsync();
+        _showNewSub = false;
+        _newSub = new();
+        await Load();
+    }
+
+    private async Task CancelSubscription(int id)
+    {
+        await using var db = DbFactory.CreateDbContext();
+        var sub = await db.Subscriptions.FindAsync(id);
+        if (sub is null) return;
+        sub.Status = SubscriptionStatus.Cancelled;
+        sub.CancelledAt = DateTime.UtcNow;
+        await db.SaveChangesAsync();
+        await Load();
+    }
+
+    private static string SubStatusLabel(SubscriptionStatus s) => s switch
+    {
+        SubscriptionStatus.Active => "Aktywna",
+        SubscriptionStatus.PastDue => "Zaległa",
+        SubscriptionStatus.Cancelled => "Anulowana",
+        SubscriptionStatus.Expired => "Wygasła",
+        _ => s.ToString()
+    };
+
+    private static string SubStatusBadge(SubscriptionStatus s) => s switch
+    {
+        SubscriptionStatus.Active => "bg-success",
+        SubscriptionStatus.PastDue => "bg-danger",
+        SubscriptionStatus.Cancelled => "bg-secondary",
+        SubscriptionStatus.Expired => "bg-warning text-dark",
+        _ => "bg-secondary"
+    };
+
+    private class NewSubModel
+    {
+        public int TenantId { get; set; }
+        public string PlanId { get; set; } = "start";
+        public decimal Amount { get; set; }
+        public string BillingCycle { get; set; } = "monthly";
+    }
+}

@@ -1,4 +1,4 @@
-@rendermode InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 @inject IJSRuntime JS
 @inject ISessionPackageService PackageService
 @inject IClientService ClientService
@@ -78,6 +78,16 @@
                         <div class="um-pill-thumb"></div>
                     </div>
                 </button>
+
+                <!-- PWA install -->
+                @if (_canInstallPwa)
+                {
+                    <button class="um-item um-item-btn" @onclick="InstallPwaAsync">
+                        <i class="bi bi-download"
+                           style="color:var(--c-primary);font-size:1rem;flex-shrink:0"></i>
+                        <span>Zainstaluj aplikację</span>
+                    </button>
+                }
 
                 <div class="um-sep"></div>
 
@@ -264,6 +274,7 @@
     private bool _ready;
     private bool _open;
     private bool _dark;
+    private bool _canInstallPwa;
     private string _initials = "?";
     private string _name = string.Empty;
     private string _email = string.Empty;
@@ -292,7 +303,23 @@
                   : user.IsInRole(Roles.Subordinate) ? Roles.Trainer
                   : Roles.Client;
 
-            try { _dark = await JS.InvokeAsync<bool>("PTTheme.isDark"); } catch { } // JS interop may fail during prerender
+            try { _dark = await JS.InvokeAsync<bool>("PTTheme.isDark"); } catch { }
+            try
+            {
+                var standalone = await JS.InvokeAsync<bool>("eval",
+                    "window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true");
+                if (!standalone)
+                {
+                    _canInstallPwa = await JS.InvokeAsync<bool>("eval", "!!window._installPrompt");
+                    if (!_canInstallPwa)
+                    {
+                        var isIos = await JS.InvokeAsync<bool>("eval",
+                            "/iphone|ipad|ipod/i.test(navigator.userAgent.toLowerCase())");
+                        _canInstallPwa = isIos;
+                    }
+                }
+            }
+            catch { }
 
             await LoadNotifsAsync();
             _ready = true;
@@ -394,7 +421,27 @@
     private async Task ToggleDarkAsync()
     {
         try { _dark = await JS.InvokeAsync<bool>("PTTheme.toggle"); }
-        catch { } // JS interop may fail during prerender
+        catch { }
+    }
+
+    private async Task InstallPwaAsync()
+    {
+        try
+        {
+            var hasPrompt = await JS.InvokeAsync<bool>("eval", "!!window._installPrompt");
+            if (hasPrompt)
+            {
+                var accepted = await JS.InvokeAsync<bool>("triggerPwaInstall");
+                if (accepted) _canInstallPwa = false;
+            }
+            else
+            {
+                // iOS — show instructions via alert since there's no native prompt
+                await JS.InvokeVoidAsync("eval",
+                    "alert('Nacisnij przycisk Udostepnij w Safari, a nastepnie wybierz \\\"Dodaj do ekranu glownego\\\".')");
+            }
+        }
+        catch { }
     }
 
     private static string Pl(int n, string one, string many) => n == 1 ? one : many;

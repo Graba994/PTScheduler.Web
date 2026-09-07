@@ -27,4 +27,9 @@ public class FinanceTaxConfig
     public bool InvoiceNumberingEnabled { get; set; }
     public string InvoicePrefix { get; set; } = "FV";
     public int InvoiceNextNumber { get; set; } = 1;
+
+    public string? SellerNip { get; set; }
+    public string? SellerAddress { get; set; }
+    public string? SellerCity { get; set; }
+    public string? SellerPostalCode { get; set; }
 }

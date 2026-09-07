@@ -18,6 +18,7 @@ public class SessionDto
     public SessionStatus Status { get; set; }
     public string? Notes { get; set; }
     public string? CancellationReason { get; set; }
+    public string? MeetingUrl { get; set; }
 }
 
 public class CreateSessionDto

@@ -1,0 +1,508 @@
+@page "/"
+@layout PublicLayout
+@using Microsoft.AspNetCore.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@attribute [AllowAnonymous]
+@inject IBrandingService BrandingService
+@inject ISiteContentService SiteContentService
+@inject IModuleSettingsService ModuleSettings
+@inject ISetupService SetupService
+@inject NavigationManager Nav
+
+<PageTitle>@_companyName — trening personalny i mentoring</PageTitle>
+
+<div class="wp tmpl-@_content.Template" style="@WpStyle">
+
+    <!-- Top bar -->
+    <header class="wp-topbar">
+        <a href="/" class="wp-brand">
+            @if (!string.IsNullOrEmpty(_logoPath))
+            {
+                <img src="@_logoPath" alt="@_companyName" />
+            }
+            else
+            {
+                <span class="wp-brand-icon"><i class="bi bi-calendar-heart"></i></span>
+            }
+            <span class="wp-brand-name">@_companyName</span>
+        </a>
+        <nav class="wp-topnav">
+            <AuthorizeView>
+                <Authorized>
+                    <a href="/app" class="wp-btn wp-btn-primary">Przejdź do aplikacji</a>
+                </Authorized>
+                <NotAuthorized>
+                    <a href="/Account/Login" class="wp-btn wp-btn-ghost">Zaloguj się</a>
+                    <a href="@_content.PrimaryCtaUrl" class="wp-btn wp-btn-primary">@_content.PrimaryCtaLabel</a>
+                </NotAuthorized>
+            </AuthorizeView>
+        </nav>
+    </header>
+
+    <!-- Hero -->
+    <section class="wp-hero @(HeroOnDark ? "wp-hero--dark" : "")" style="@HeroStyle">
+        <div class="wp-hero-inner">
+            @if (!string.IsNullOrEmpty(_content.HeroEyebrow))
+            {
+                <span class="wp-eyebrow" style="@ColorStyle(_content.HeroEyebrowColor)">@_content.HeroEyebrow</span>
+            }
+            <h1 class="wp-hero-title" style="@ColorStyle(_content.HeroTitleColor)">@_content.HeroTitle</h1>
+            <p class="wp-hero-sub" style="@ColorStyle(_content.HeroSubtitleColor)">@_content.HeroSubtitle</p>
+            <div class="wp-hero-cta">
+                <AuthorizeView>
+                    <Authorized>
+                        <a href="/app" class="wp-btn wp-btn-primary wp-btn-lg">Otwórz aplikację</a>
+                    </Authorized>
+                    <NotAuthorized>
+                        <a href="@_content.PrimaryCtaUrl" class="wp-btn wp-btn-primary wp-btn-lg">@_content.PrimaryCtaLabel</a>
+                        @if (!string.IsNullOrEmpty(_content.SecondaryCtaLabel))
+                        {
+                            <a href="@(_content.SecondaryCtaUrl ?? "#")" class="wp-btn wp-btn-ghost wp-btn-lg">@_content.SecondaryCtaLabel</a>
+                        }
+                    </NotAuthorized>
+                </AuthorizeView>
+            </div>
+        </div>
+    </section>
+
+    @foreach (var key in _content.SectionOrder)
+    {
+        @if (key == "stats" && _content.ShowStats && _content.Stats.Count > 0)
+        {
+            <section class="wp-sec wp-stats @RevealCls">
+                <div class="wp-wrap wp-stats-grid">
+                    @foreach (var s in _content.Stats)
+                    {
+                        var parsed = ParseStat(s.Value);
+                        <div class="wp-stat">
+                            @if (_content.Animations && parsed.Num is not null)
+                            {
+                                <div class="wp-stat-value wp-count" data-count="@parsed.Num" data-suffix="@parsed.Suffix">@s.Value</div>
+                            }
+                            else
+                            {
+                                <div class="wp-stat-value">@s.Value</div>
+                            }
+                            <div class="wp-stat-label">@s.Label</div>
+                        </div>
+                    }
+                </div>
+            </section>
+        }
+
+        @if (key == "features" && _content.ShowFeatures && _content.Features.Count > 0)
+        {
+            <section class="wp-sec @RevealCls">
+                <div class="wp-wrap">
+                    <h2 class="wp-h2">@_content.FeaturesTitle</h2>
+                    <div class="wp-grid3">
+                        @foreach (var f in _content.Features)
+                        {
+                            <article class="wp-feature">
+                                <div class="wp-feature-icon"><i class="bi @f.Icon"></i></div>
+                                <h3>@f.Title</h3>
+                                <p>@f.Text</p>
+                            </article>
+                        }
+                    </div>
+                </div>
+            </section>
+        }
+
+        @if (key == "about" && _content.ShowAbout)
+        {
+            <section class="wp-sec @RevealCls">
+                <div class="wp-wrap wp-about">
+                    @if (!string.IsNullOrEmpty(_content.AboutImageUrl))
+                    {
+                        <div class="wp-about-img" style="background-image:url('@_content.AboutImageUrl')"></div>
+                    }
+                    <div class="wp-about-body">
+                        <h2 class="wp-h2 wp-h2--left">@_content.AboutTitle</h2>
+                        <div class="wp-rich">@((MarkupString)(_content.AboutHtml ?? ""))</div>
+                    </div>
+                </div>
+            </section>
+        }
+
+        @if (key == "modules" && _content.ShowModules && (_content.ShowSchedulerCard || (_content.ShowCoursesCard && _coursesEnabled) || _content.ShowPackagesCard))
+        {
+            <section class="wp-sec @RevealCls">
+                <div class="wp-wrap">
+                    <h2 class="wp-h2">@_content.SectionTitle</h2>
+                    <div class="wp-grid3">
+                        @if (_content.ShowSchedulerCard)
+                        {
+                            <article class="wp-card">
+                                <div class="wp-card-icon"><i class="bi bi-calendar2-week"></i></div>
+                                <h3>@_content.SchedulerCardTitle</h3>
+                                <p>@_content.SchedulerCardText</p>
+                                <a href="@_content.PrimaryCtaUrl" class="wp-link">Umów sesję <i class="bi bi-arrow-right"></i></a>
+                            </article>
+                        }
+                        @if (_content.ShowCoursesCard && _coursesEnabled)
+                        {
+                            <article class="wp-card">
+                                <div class="wp-card-icon"><i class="bi bi-mortarboard"></i></div>
+                                <h3>@_content.CoursesCardTitle</h3>
+                                <p>@_content.CoursesCardText</p>
+                                @if (_content.CoursesComingSoon)
+                                {
+                                    <span class="wp-link wp-soon"><i class="bi bi-hourglass-split"></i> Wkrótce</span>
+                                }
+                                else
+                                {
+                                    <a href="/courses" class="wp-link">Zobacz kursy <i class="bi bi-arrow-right"></i></a>
+                                }
+                            </article>
+                        }
+                        @if (_content.ShowPackagesCard)
+                        {
+                            <article class="wp-card">
+                                <div class="wp-card-icon"><i class="bi bi-box-seam"></i></div>
+                                <h3>@_content.PackagesCardTitle</h3>
+                                <p>@_content.PackagesCardText</p>
+                                <a href="/packages" class="wp-link">Zobacz pakiety <i class="bi bi-arrow-right"></i></a>
+                            </article>
+                        }
+                    </div>
+                </div>
+            </section>
+        }
+
+        @if (key == "offer" && _content.ShowOffer && _content.Offers.Count > 0)
+        {
+            <section class="wp-sec wp-sec--tint @RevealCls">
+                <div class="wp-wrap">
+                    <h2 class="wp-h2">@_content.OfferTitle</h2>
+                    <div class="wp-grid3">
+                        @foreach (var o in _content.Offers)
+                        {
+                            <article class="wp-price @(o.Highlighted ? "wp-price--hot" : "")">
+                                @if (o.Highlighted) { <span class="wp-price-badge">Polecany</span> }
+                                <h3>@o.Name</h3>
+                                <div class="wp-price-amount">@o.Price <small>@o.Period</small></div>
+                                @if (!string.IsNullOrEmpty(o.Description)) { <p class="wp-price-desc">@o.Description</p> }
+                                <ul class="wp-price-features">
+                                    @foreach (var feat in o.Features)
+                                    {
+                                        <li><i class="bi bi-check2"></i> @feat</li>
+                                    }
+                                </ul>
+                                <a href="@o.CtaUrl" class="wp-btn @(o.Highlighted ? "wp-btn-primary" : "wp-btn-ghost") w-100">@o.CtaLabel</a>
+                            </article>
+                        }
+                    </div>
+                </div>
+            </section>
+        }
+
+        @if (key == "testimonials" && _content.ShowTestimonials && _content.Testimonials.Count > 0)
+        {
+            <section class="wp-sec @RevealCls">
+                <div class="wp-wrap">
+                    <h2 class="wp-h2">@_content.TestimonialsTitle</h2>
+                    <div class="wp-grid3">
+                        @foreach (var t in _content.Testimonials)
+                        {
+                            <figure class="wp-quote">
+                                <div class="wp-quote-mark">"</div>
+                                <blockquote>@t.Text</blockquote>
+                                <figcaption><strong>@t.Author</strong>@if (!string.IsNullOrEmpty(t.Role)) { <span> · @t.Role</span> }</figcaption>
+                            </figure>
+                        }
+                    </div>
+                </div>
+            </section>
+        }
+
+        @if (key == "faq" && _content.ShowFaq && _content.Faqs.Count > 0)
+        {
+            <section class="wp-sec @RevealCls">
+                <div class="wp-wrap wp-faq">
+                    <h2 class="wp-h2">@_content.FaqTitle</h2>
+                    @foreach (var q in _content.Faqs)
+                    {
+                        <details class="wp-faq-item">
+                            <summary>@q.Question</summary>
+                            <div class="wp-faq-a">@q.Answer</div>
+                        </details>
+                    }
+                </div>
+            </section>
+        }
+
+        @if (key == "cta" && _content.ShowCta)
+        {
+            <section class="wp-sec @RevealCls">
+                <div class="wp-wrap">
+                    <div class="wp-cta" style="@CtaBgStyle">
+                        <h2 style="@ColorStyle(_content.CtaTextColor)">@_content.CtaTitle</h2>
+                        @if (!string.IsNullOrEmpty(_content.CtaText)) { <p style="@ColorStyle(_content.CtaTextColor)">@_content.CtaText</p> }
+                        <a href="@_content.CtaButtonUrl" class="wp-btn wp-btn-lg wp-cta-btn" style="@CtaBtnStyle">@_content.CtaButtonLabel</a>
+                    </div>
+                </div>
+            </section>
+        }
+    }
+
+    <!-- Social -->
+    @if (_content.ShowSocial && _content.Socials.Any(s => !string.IsNullOrWhiteSpace(s.Url)))
+    {
+        <div class="wp-social">
+            @foreach (var s in _content.Socials.Where(s => !string.IsNullOrWhiteSpace(s.Url)))
+            {
+                <a href="@s.Url" target="_blank" rel="noopener" class="wp-social-icon" aria-label="social"><i class="bi @s.Icon"></i></a>
+            }
+        </div>
+    }
+
+    <!-- Footer -->
+    <footer class="wp-footer">
+        <span>@(_content.FooterText ?? $"© {DateTime.Now.Year} {_companyName}")</span>
+        <span class="wp-footer-links">
+            <a href="/legal/terms">Regulamin</a>
+            <a href="/legal/privacy">Prywatność</a>
+            <a href="/legal/cookies">Cookies</a>
+        </span>
+    </footer>
+</div>
+
+<style>
+    .wp { min-height: 100vh; display: flex; flex-direction: column;
+        background: var(--bs-body-bg, #fff); color: var(--bs-body-color, #1f2937); }
+    .wp-wrap { max-width: 1140px; width: 100%; margin: 0 auto; padding: 0 clamp(1rem, 4vw, 3rem); }
+
+    /* Top bar */
+    .wp-topbar { display: flex; align-items: center; justify-content: space-between; gap: 1rem;
+        padding: 1rem clamp(1rem, 4vw, 3rem); max-width: 1140px; width: 100%; margin: 0 auto; }
+    .wp-brand { display: flex; align-items: center; gap: .6rem; text-decoration: none; color: inherit; }
+    .wp-brand img { height: 40px; width: auto; }
+    .wp-brand-icon { display: inline-flex; align-items: center; justify-content: center;
+        width: 40px; height: 40px; border-radius: 12px; background: var(--c-primary, #0284c7); color: #fff; font-size: 1.25rem; }
+    .wp-brand-name { font-weight: 700; font-size: 1.15rem; color: var(--c-primary, #0284c7); }
+    .wp-topnav { display: flex; gap: .5rem; }
+
+    /* Buttons */
+    .wp-btn { display: inline-flex; align-items: center; justify-content: center; gap: .4rem;
+        padding: .55rem 1.1rem; border-radius: 10px; font-weight: 600; text-decoration: none; cursor: pointer;
+        border: 1.5px solid transparent; transition: transform .06s ease, background .15s ease, box-shadow .15s ease; white-space: nowrap; font-size: .95rem; }
+    .wp-btn:active { transform: translateY(1px); }
+    .wp-btn-primary { background: var(--c-primary, #0284c7); color: var(--wp-btn-text, #fff); }
+    .wp-btn-primary:hover { background: var(--c-primary-hover, #0369a1); color: #fff; box-shadow: 0 6px 18px -6px var(--c-primary, #0284c7); }
+    .wp-btn-ghost { background: transparent; color: var(--c-primary, #0284c7); border-color: var(--c-primary, #0284c7); }
+    .wp-btn-ghost:hover { background: var(--c-primary-light, rgba(2,132,199,.12)); }
+    .wp-btn-lg { padding: .8rem 1.6rem; font-size: 1.05rem; border-radius: 12px; }
+    .wp-btn.w-100 { width: 100%; }
+
+    /* Hero */
+    .wp-hero { display: flex; align-items: center; justify-content: center; text-align: center;
+        padding: clamp(3rem, 9vw, 7rem) 1.5rem; position: relative; }
+    .wp-hero-inner { max-width: 780px; position: relative; z-index: 1; }
+    .wp-eyebrow { display: inline-block; font-size: .8rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase;
+        color: var(--c-primary, #0284c7); background: var(--c-primary-light, rgba(2,132,199,.14)); padding: .3rem .8rem; border-radius: 999px; margin-bottom: 1rem; }
+    .wp-hero-title { font-size: clamp(2.1rem, 6vw, 3.6rem); line-height: 1.08; font-weight: 800; margin: 0 0 1.2rem; letter-spacing: -.02em; }
+    .wp-hero-sub { font-size: clamp(1.05rem, 2.4vw, 1.3rem); color: var(--c-muted, #6b7280); max-width: 640px; margin: 0 auto 2rem; line-height: 1.6; }
+    .wp-hero-cta { display: flex; gap: .8rem; justify-content: center; flex-wrap: wrap; }
+
+    /* Hero on dark (gradient/dark/image) */
+    .wp-hero--dark { color: #fff; }
+    .wp-hero--dark .wp-hero-sub { color: rgba(255,255,255,.85); }
+    .wp-hero--dark .wp-eyebrow { color: #fff; background: rgba(255,255,255,.18); }
+    .wp-hero--dark .wp-btn-ghost { color: #fff; border-color: rgba(255,255,255,.7); }
+    .wp-hero--dark .wp-btn-ghost:hover { background: rgba(255,255,255,.15); }
+
+    /* Template hero backgrounds */
+    .tmpl-classic .wp-hero { background: radial-gradient(1200px 600px at 100% -10%, var(--c-primary-light, rgba(2,132,199,.16)), transparent 60%); }
+    .tmpl-gradient .wp-hero { background: linear-gradient(135deg, var(--c-primary, #0284c7), var(--c-primary-hover, #0369a1)); }
+    .tmpl-dark .wp-hero { background: linear-gradient(135deg, #0f172a, #1e293b); }
+    .tmpl-minimal .wp-hero { background: var(--bs-body-bg, #fff); }
+
+    /* Sections */
+    .wp-sec { padding: clamp(2.5rem, 6vw, 4.5rem) 0; }
+    .wp-sec--tint { background: var(--bs-tertiary-bg, #f8f9fa); }
+    .wp-h2 { text-align: center; font-size: clamp(1.5rem, 3vw, 2.2rem); font-weight: 800; margin: 0 0 2.2rem; letter-spacing: -.01em; color: var(--wp-heading, inherit); }
+    .wp-h2--left { text-align: left; margin-bottom: 1.2rem; }
+    .wp-grid3 { display: grid; grid-template-columns: repeat(auto-fit, minmax(270px, 1fr)); gap: 1.5rem; }
+
+    /* Scroll reveal */
+    .wp-reveal { opacity: 0; transform: translateY(26px); transition: opacity .7s ease, transform .7s cubic-bezier(.22,1,.36,1); }
+    .wp-revealed { opacity: 1; transform: none; }
+    @@media (prefers-reduced-motion: reduce) { .wp-reveal { opacity: 1; transform: none; transition: none; } }
+
+    /* Stats */
+    .wp-stats-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 1.5rem; text-align: center; }
+    .wp-stat-value { font-size: clamp(2rem, 4vw, 3rem); font-weight: 800; color: var(--c-primary, #0284c7); line-height: 1; }
+    .wp-stat-label { color: var(--c-muted, #6b7280); margin-top: .4rem; }
+
+    /* Feature / card */
+    .wp-feature, .wp-card { background: var(--bs-body-bg, #fff); border: 1px solid var(--bs-border-color, #e5e7eb);
+        border-radius: 18px; padding: 1.8rem; display: flex; flex-direction: column; transition: transform .12s ease, box-shadow .12s ease; }
+    .wp-feature:hover, .wp-card:hover { transform: translateY(-3px); box-shadow: 0 18px 40px -24px rgba(0,0,0,.5); }
+    .wp-feature-icon, .wp-card-icon { width: 54px; height: 54px; border-radius: 14px; display: inline-flex; align-items: center; justify-content: center;
+        font-size: 1.6rem; margin-bottom: 1rem; background: var(--c-primary-light, rgba(2,132,199,.14)); color: var(--c-primary, #0284c7); }
+    .wp-feature h3, .wp-card h3 { font-size: 1.25rem; font-weight: 700; margin: 0 0 .5rem; }
+    .wp-feature p, .wp-card p { color: var(--c-muted, #6b7280); line-height: 1.6; margin: 0 0 1rem; flex: 1; }
+    .wp-link { display: inline-flex; align-items: center; gap: .4rem; font-weight: 600; color: var(--c-primary, #0284c7); text-decoration: none; }
+    .wp-link:hover { gap: .6rem; }
+    .wp-soon { color: var(--c-muted, #6b7280); cursor: default; }
+
+    /* About */
+    .wp-about { display: grid; grid-template-columns: 1fr 1.4fr; gap: 2.5rem; align-items: center; }
+    .wp-about-img { border-radius: 20px; min-height: 320px; background-size: cover; background-position: center; }
+    .wp-rich { line-height: 1.7; color: var(--c-muted, #4b5563); }
+    .wp-rich :is(h1,h2,h3) { color: var(--bs-body-color); }
+    @@media (max-width: 820px) { .wp-about { grid-template-columns: 1fr; } .wp-about-img { min-height: 220px; } }
+
+    /* Pricing */
+    .wp-price { position: relative; background: var(--bs-body-bg, #fff); border: 1px solid var(--bs-border-color, #e5e7eb);
+        border-radius: 20px; padding: 1.8rem; display: flex; flex-direction: column; }
+    .wp-price--hot { border-color: var(--c-primary, #0284c7); box-shadow: 0 20px 46px -26px var(--c-primary, #0284c7); transform: translateY(-4px); }
+    .wp-price-badge { position: absolute; top: -.8rem; left: 50%; transform: translateX(-50%);
+        background: var(--c-primary, #0284c7); color: #fff; font-size: .72rem; font-weight: 700; padding: .25rem .8rem; border-radius: 999px; }
+    .wp-price h3 { font-size: 1.2rem; font-weight: 700; margin: .3rem 0 .4rem; }
+    .wp-price-amount { font-size: 2rem; font-weight: 800; color: var(--c-primary, #0284c7); margin-bottom: .6rem; }
+    .wp-price-amount small { font-size: .9rem; font-weight: 500; color: var(--c-muted, #6b7280); }
+    .wp-price-desc { color: var(--c-muted, #6b7280); margin-bottom: 1rem; }
+    .wp-price-features { list-style: none; padding: 0; margin: 0 0 1.4rem; flex: 1; }
+    .wp-price-features li { display: flex; align-items: center; gap: .5rem; padding: .35rem 0; color: var(--bs-body-color); }
+    .wp-price-features i { color: #16a34a; }
+
+    /* Testimonials */
+    .wp-quote { background: var(--bs-body-bg, #fff); border: 1px solid var(--bs-border-color, #e5e7eb); border-radius: 18px; padding: 1.6rem; margin: 0; position: relative; }
+    .wp-quote-mark { font-size: 3rem; line-height: .6; color: var(--c-primary-light, rgba(2,132,199,.5)); font-family: Georgia, serif; }
+    .wp-quote blockquote { margin: .4rem 0 1rem; line-height: 1.6; }
+    .wp-quote figcaption { color: var(--c-muted, #6b7280); font-size: .92rem; }
+
+    /* FAQ */
+    .wp-faq { max-width: 780px; }
+    .wp-faq-item { border: 1px solid var(--bs-border-color, #e5e7eb); border-radius: 12px; padding: .3rem 1rem; margin-bottom: .7rem; background: var(--bs-body-bg); }
+    .wp-faq-item summary { cursor: pointer; font-weight: 600; padding: .7rem 0; list-style: none; }
+    .wp-faq-item summary::-webkit-details-marker { display: none; }
+    .wp-faq-item[open] summary { color: var(--c-primary, #0284c7); }
+    .wp-faq-a { color: var(--c-muted, #6b7280); padding: 0 0 .8rem; line-height: 1.6; }
+
+    /* CTA banner */
+    .wp-cta { background: linear-gradient(135deg, var(--c-primary, #0284c7), var(--c-primary-hover, #0369a1)); color: #fff;
+        border-radius: 24px; padding: clamp(2rem, 5vw, 3.5rem); text-align: center; }
+    .wp-cta h2 { font-size: clamp(1.6rem, 3vw, 2.4rem); font-weight: 800; margin: 0 0 .6rem; }
+    .wp-cta p { color: rgba(255,255,255,.9); margin: 0 0 1.6rem; }
+    .wp-cta-btn { background: #fff; color: var(--c-primary, #0284c7); }
+    .wp-cta-btn:hover { background: rgba(255,255,255,.9); color: var(--c-primary, #0284c7); }
+
+    /* Social */
+    .wp-social { display: flex; justify-content: center; gap: .8rem; padding: 1.5rem 1rem .5rem; }
+    .wp-social-icon { display: inline-flex; align-items: center; justify-content: center; width: 44px; height: 44px;
+        border-radius: 50%; font-size: 1.3rem; text-decoration: none;
+        color: var(--c-primary, #0284c7); background: var(--c-primary-light, rgba(2,132,199,.12));
+        transition: transform .12s ease, background .15s ease, color .15s ease; }
+    .wp-social-icon:hover { transform: translateY(-3px); background: var(--c-primary, #0284c7); color: #fff; }
+
+    /* Footer */
+    .wp-footer { border-top: 1px solid var(--bs-border-color, #e5e7eb); padding: 1.4rem clamp(1rem, 4vw, 3rem);
+        max-width: 1140px; width: 100%; margin: 0 auto; display: flex; align-items: center; justify-content: space-between;
+        gap: 1rem; flex-wrap: wrap; color: var(--c-muted, #6b7280); font-size: .9rem; }
+    .wp-footer-links { display: flex; gap: 1.2rem; }
+    .wp-footer-links a { color: var(--c-muted, #6b7280); text-decoration: none; }
+    .wp-footer-links a:hover { color: var(--c-primary, #0284c7); }
+</style>
+
+@code {
+    private string _companyName = "PTScheduler";
+    private string? _logoPath;
+    private SiteContentDto _content = new();
+    private bool _coursesEnabled = true;
+
+    private bool HeroOnDark => _content.Template is "gradient" or "dark"
+        || (_content.HeroBackground == "image" && !string.IsNullOrEmpty(_content.HeroImageUrl));
+
+    private string HeroStyle
+    {
+        get
+        {
+            if (_content.HeroBackground == "image" && !string.IsNullOrEmpty(_content.HeroImageUrl))
+                return $"background-image:linear-gradient(rgba(0,0,0,.5),rgba(0,0,0,.55)),url('{_content.HeroImageUrl}');background-size:cover;background-position:center;";
+            if (_content.HeroBackground == "gradient"
+                && (!string.IsNullOrWhiteSpace(_content.HeroGradientFrom) || !string.IsNullOrWhiteSpace(_content.HeroGradientTo)))
+            {
+                var from = _content.HeroGradientFrom ?? _content.HeroGradientTo;
+                var to = _content.HeroGradientTo ?? _content.HeroGradientFrom;
+                return $"background:linear-gradient(135deg,{from},{to});";
+            }
+            return "";
+        }
+    }
+
+    private string WpStyle
+    {
+        get
+        {
+            var sb = new System.Text.StringBuilder();
+            if (!string.IsNullOrWhiteSpace(_content.AccentOverride)) sb.Append($"--c-primary:{_content.AccentOverride};--c-primary-hover:{_content.AccentOverride};");
+            if (!string.IsNullOrWhiteSpace(_content.BodyTextColor)) sb.Append($"--c-muted:{_content.BodyTextColor};");
+            if (!string.IsNullOrWhiteSpace(_content.HeadingColor)) sb.Append($"--wp-heading:{_content.HeadingColor};");
+            if (!string.IsNullOrWhiteSpace(_content.ButtonTextColor)) sb.Append($"--wp-btn-text:{_content.ButtonTextColor};");
+            if (!string.IsNullOrWhiteSpace(_content.PageBackground)) sb.Append($"background:{_content.PageBackground};");
+            return sb.ToString();
+        }
+    }
+
+    private string CtaBgStyle =>
+        (!string.IsNullOrWhiteSpace(_content.CtaBgFrom) || !string.IsNullOrWhiteSpace(_content.CtaBgTo))
+            ? $"background:linear-gradient(135deg,{_content.CtaBgFrom ?? _content.CtaBgTo},{_content.CtaBgTo ?? _content.CtaBgFrom});"
+            : "";
+
+    private string CtaBtnStyle
+    {
+        get
+        {
+            var sb = new System.Text.StringBuilder();
+            if (!string.IsNullOrWhiteSpace(_content.CtaButtonBg)) sb.Append($"background:{_content.CtaButtonBg};");
+            if (!string.IsNullOrWhiteSpace(_content.CtaButtonTextColor)) sb.Append($"color:{_content.CtaButtonTextColor};");
+            return sb.ToString();
+        }
+    }
+
+    private string RevealCls => _content.Animations ? "wp-reveal" : "";
+
+    private static string ColorStyle(string? c) => string.IsNullOrWhiteSpace(c) ? "" : $"color:{c}";
+
+    private static (double? Num, string Suffix) ParseStat(string? value)
+    {
+        value ??= "";
+        var m = System.Text.RegularExpressions.Regex.Match(value, @"\d[\d\s.,]*");
+        if (!m.Success) return (null, value);
+        var numStr = m.Value.Replace(" ", "").Replace(",", "").TrimEnd('.');
+        if (!double.TryParse(numStr, System.Globalization.NumberStyles.Any, System.Globalization.CultureInfo.InvariantCulture, out var n))
+            return (null, value);
+        return (n, value[(m.Index + m.Length)..]);
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            if (!await SetupService.IsSetupCompletedAsync())
+            {
+                Nav.NavigateTo("/setup", forceLoad: true);
+                return;
+            }
+        }
+        catch { }
+
+        try
+        {
+            var b = await BrandingService.GetAsync();
+            _companyName = b.CompanyName ?? "PTScheduler";
+            _logoPath = b.LogoPath;
+        }
+        catch { } // Best-effort
+
+        try { _content = await SiteContentService.GetAsync(); }
+        catch { }
+
+        try { _coursesEnabled = (await ModuleSettings.GetAsync()).CoursesEnabled; }
+        catch { }
+    }
+}

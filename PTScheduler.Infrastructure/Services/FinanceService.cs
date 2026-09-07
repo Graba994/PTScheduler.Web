@@ -1,9 +1,8 @@
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.EntityFrameworkCore;
 using PTScheduler.Application.DTOs;
 using PTScheduler.Application.Interfaces;
 using PTScheduler.Domain.Entities;
+using PTScheduler.Domain.Security;
 using PTScheduler.Infrastructure.Data;
 
 namespace PTScheduler.Infrastructure.Services;
@@ -24,7 +23,16 @@ public class FinanceService(IDbContextFactory<ApplicationDbContext> dbFactory) :
         await using var db = dbFactory.CreateDbContext();
         var fp = await db.Set<FinancePin>().FirstOrDefaultAsync();
         if (fp is null || string.IsNullOrEmpty(fp.PinHash)) return false;
-        return fp.PinHash == HashPin(pin);
+
+        if (!PinHasher.Verify(pin, fp.PinHash)) return false;
+
+        // Transparentne podniesienie starego SHA-256 na PBKDF2 przy poprawnym PIN-ie.
+        if (PinHasher.IsLegacy(fp.PinHash))
+        {
+            fp.PinHash = PinHasher.Hash(pin);
+            await db.SaveChangesAsync();
+        }
+        return true;
     }
 
     public async Task SetPinAsync(string pin)
@@ -33,12 +41,12 @@ public class FinanceService(IDbContextFactory<ApplicationDbContext> dbFactory) :
         var fp = await db.Set<FinancePin>().FirstOrDefaultAsync();
         if (fp is null)
         {
-            fp = new FinancePin { PinHash = HashPin(pin) };
+            fp = new FinancePin { PinHash = PinHasher.Hash(pin) };
             db.Set<FinancePin>().Add(fp);
         }
         else
         {
-            fp.PinHash = HashPin(pin);
+            fp.PinHash = PinHasher.Hash(pin);
         }
         await db.SaveChangesAsync();
     }
@@ -74,7 +82,11 @@ public class FinanceService(IDbContextFactory<ApplicationDbContext> dbFactory) :
             MonthlyFixedCosts = cfg.MonthlyFixedCosts,
             InvoiceNumberingEnabled = cfg.InvoiceNumberingEnabled,
             InvoicePrefix = cfg.InvoicePrefix,
-            InvoiceNextNumber = cfg.InvoiceNextNumber
+            InvoiceNextNumber = cfg.InvoiceNextNumber,
+            SellerNip = cfg.SellerNip,
+            SellerAddress = cfg.SellerAddress,
+            SellerCity = cfg.SellerCity,
+            SellerPostalCode = cfg.SellerPostalCode
         };
     }
 
@@ -104,12 +116,11 @@ public class FinanceService(IDbContextFactory<ApplicationDbContext> dbFactory) :
         cfg.InvoiceNumberingEnabled = dto.InvoiceNumberingEnabled;
         cfg.InvoicePrefix = dto.InvoicePrefix;
         cfg.InvoiceNextNumber = dto.InvoiceNextNumber;
+        cfg.SellerNip = dto.SellerNip;
+        cfg.SellerAddress = dto.SellerAddress;
+        cfg.SellerCity = dto.SellerCity;
+        cfg.SellerPostalCode = dto.SellerPostalCode;
         await db.SaveChangesAsync();
     }
 
-    private static string HashPin(string pin)
-    {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(pin));
-        return Convert.ToHexStringLower(bytes);
-    }
 }

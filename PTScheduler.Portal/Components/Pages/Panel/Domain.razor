@@ -1,0 +1,77 @@
+@page "/panel/domain"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject SiteSettingsService Settings
+@rendermode InteractiveServer
+
+<PageTitle>Domena — PTScheduler Portal</PageTitle>
+
+<div class="mb-4">
+    <h4 class="fw-bold mb-1"><i class="bi bi-globe me-2 text-primary"></i>Konfiguracja domeny</h4>
+    <p class="text-muted small mb-0">Główna domena Twojej instalacji SaaS</p>
+</div>
+
+@if (_saved)
+{
+    <div class="alert alert-success alert-dismissible fade show">
+        <i class="bi bi-check-circle me-1"></i>Zapisano.
+        <button type="button" class="btn-close" @onclick="() => _saved = false"></button>
+    </div>
+}
+
+<EditForm Model="_form" OnValidSubmit="Save" FormName="domain-settings">
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+            <label class="form-label fw-semibold">Główna domena</label>
+            <input class="form-control" @bind="_form.MainDomain" placeholder="grabowski.app" />
+            <div class="form-text">
+                Domena pod którą działa panel i landing page. Subdomeny trenerów: <code>{slug}.@(string.IsNullOrWhiteSpace(_form.MainDomain) ? "twoja-domena.pl" : _form.MainDomain)</code>
+            </div>
+        </div>
+    </div>
+
+    <div class="alert alert-info small">
+        <i class="bi bi-info-circle me-1"></i>
+        <strong>Jak skonfigurować:</strong>
+        <ol class="mb-0 mt-2">
+            <li>W DNS Twojej domeny dodaj rekord <code>A</code>: <code>@_form.MainDomain → publiczny IP Twojego routera</code></li>
+            <li>Dodaj wildcard <code>*.@_form.MainDomain → ten sam IP</code> (dla subdomen trenerów)</li>
+            <li>W routerze przekieruj porty <code>80</code> i <code>443</code> na Unraida (192.168.0.220)</li>
+            <li>Skonfiguruj NPM w zakładce <a href="/panel/npm">NPM Proxy</a> — panel automatycznie rejestruje nowych trenerów</li>
+            <li>Do lokalnych testów: dodaj wpis w <code>/etc/hosts</code> lub w Twoim DNS/Pi-hole</li>
+        </ol>
+    </div>
+
+    <button type="submit" class="btn btn-primary" disabled="@_saving">
+        @if (_saving)
+        {
+            <span class="spinner-border spinner-border-sm me-1"></span>
+        }
+        <i class="bi bi-floppy me-1"></i>Zapisz
+    </button>
+</EditForm>
+
+@code {
+    private DomainForm _form = new();
+    private bool _saving, _saved;
+
+    private class DomainForm
+    {
+        public string MainDomain { get; set; } = "";
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var s = await Settings.GetAllAsync(SiteSettingsService.Keys.MainDomain);
+        _form.MainDomain = s[SiteSettingsService.Keys.MainDomain];
+    }
+
+    private async Task Save()
+    {
+        _saving = true;
+        _saved = false;
+        await Settings.SetAsync(SiteSettingsService.Keys.MainDomain, _form.MainDomain.Trim().ToLowerInvariant());
+        _saving = false;
+        _saved = true;
+    }
+}

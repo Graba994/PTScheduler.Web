@@ -9,7 +9,8 @@ namespace PTScheduler.Infrastructure.Services;
 
 public class SessionSeriesService(
     IDbContextFactory<ApplicationDbContext> dbFactory,
-    ITrainerAvailabilityService availabilityService) : ISessionSeriesService
+    ITrainerAvailabilityService availabilityService,
+    IAppClock clock) : ISessionSeriesService
 {
     public async Task<SeriesPreviewDto> PreviewAsync(CreateSessionSeriesDto dto)
     {
@@ -121,7 +122,7 @@ public class SessionSeriesService(
 
         await db.SaveChangesAsync();
 
-        return (await BuildDtosAsync(db, [series])).First();
+        return (await BuildDtosAsync(db, [series], clock.LocalNow)).First();
     }
 
     public async Task<List<SessionSeriesDto>> GetSeriesForClientAsync(int clientId)
@@ -133,7 +134,7 @@ public class SessionSeriesService(
             .OrderByDescending(s => s.CreatedAt)
             .ToListAsync();
 
-        return await BuildDtosAsync(db, list);
+        return await BuildDtosAsync(db, list, clock.LocalNow);
     }
 
     public async Task<List<SessionSeriesDto>> GetSeriesForTrainerAsync(string trainerUserId)
@@ -145,7 +146,7 @@ public class SessionSeriesService(
             .OrderByDescending(s => s.CreatedAt)
             .ToListAsync();
 
-        return await BuildDtosAsync(db, list);
+        return await BuildDtosAsync(db, list, clock.LocalNow);
     }
 
     public async Task CancelSeriesAsync(int seriesId, bool cancelFutureSessions = true)
@@ -157,7 +158,7 @@ public class SessionSeriesService(
 
         if (cancelFutureSessions)
         {
-            var now = DateTime.UtcNow;
+            var now = clock.LocalNow;   // zegar ścienny — porównywany ze StartTime
             var futureSessions = await db.Sessions
                 .Where(s => s.SeriesId == seriesId
                             && s.StartTime >= now
@@ -216,11 +217,12 @@ public class SessionSeriesService(
         return packages.Sum(p => p.TotalSessions - p.UsedSessions);
     }
 
-    private static async Task<List<SessionSeriesDto>> BuildDtosAsync(ApplicationDbContext db, List<SessionSeries> seriesList)
+    // 'now' to zegar ścienny (clock.LocalNow), przekazywany przez metody
+    // instancyjne — statyczna metoda nie ma dostępu do parametru clock.
+    private static async Task<List<SessionSeriesDto>> BuildDtosAsync(ApplicationDbContext db, List<SessionSeries> seriesList, DateTime now)
     {
         if (seriesList.Count == 0) return [];
 
-        var now = DateTime.UtcNow;
         var seriesIds = seriesList.Select(s => s.Id).ToList();
         var clientIds = seriesList.Select(s => s.ClientId).Distinct().ToList();
 

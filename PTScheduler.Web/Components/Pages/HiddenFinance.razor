@@ -1,8 +1,9 @@
 @page "/finance/hidden"
-@rendermode InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Finance
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Enums
 @using PTScheduler.Domain.Constants
@@ -132,9 +133,10 @@ else
         </div>
     </div>
 
-    @if (_taxConfig is not null && HasAnyTaxOption(_taxConfig))
+    @if (_taxConfig is not null && TaxCalculator.HasAnyOption(_taxConfig))
     {
-        var t = ComputeTax(_displayPackages, _taxConfig, _months);
+        var gross = _displayPackages.Where(p => p.IsPaid).Sum(p => p.TotalPrice);
+        var t = TaxCalculator.Compute(_taxConfig, gross, _months);
         <div class="card mb-3">
             <div class="card-header py-2 d-flex align-items-center justify-content-between">
                 <span class="fw-semibold" style="font-size:.875rem">
@@ -630,52 +632,8 @@ else
         _showTaxSettings = false;
     }
 
-    private static bool HasAnyTaxOption(FinanceTaxConfigDto tc) =>
-        tc.VatEnabled || tc.IncomeTaxType != "none" || tc.ZusEnabled || tc.HealthInsuranceEnabled || tc.CostDeductionsEnabled;
-
-    private static (decimal Gross, decimal Vat, decimal Net, decimal IncomeTax, string TaxLabel, decimal Zus, decimal Health, decimal Costs, decimal Profit) ComputeTax(
-        List<SessionPackageDto> packages, FinanceTaxConfigDto tax, int months)
-    {
-        var gross = packages.Where(p => p.IsPaid).Sum(p => p.TotalPrice);
-        decimal vat = 0, net = gross;
-        if (tax.VatEnabled && tax.VatRate > 0)
-        {
-            vat = gross * tax.VatRate / (100 + tax.VatRate);
-            net = gross - vat;
-        }
-
-        decimal incomeTax = 0;
-        string taxLabel = "";
-        switch (tax.IncomeTaxType)
-        {
-            case "flat":
-                incomeTax = net * tax.FlatTaxRate / 100;
-                taxLabel = $"PIT liniowy ({tax.FlatTaxRate}%)";
-                break;
-            case "lump":
-                incomeTax = net * tax.LumpSumRate / 100;
-                taxLabel = $"Ryczałt ({tax.LumpSumRate}%)";
-                break;
-            case "scale":
-                if (net <= tax.ScaleTaxThreshold)
-                {
-                    incomeTax = net * tax.ScaleTaxRateLow / 100;
-                    taxLabel = $"Skala ({tax.ScaleTaxRateLow}%)";
-                }
-                else
-                {
-                    incomeTax = tax.ScaleTaxThreshold * tax.ScaleTaxRateLow / 100
-                                + (net - tax.ScaleTaxThreshold) * tax.ScaleTaxRateHigh / 100;
-                    taxLabel = $"Skala ({tax.ScaleTaxRateLow}%/{tax.ScaleTaxRateHigh}%)";
-                }
-                break;
-        }
-
-        var zus = tax.ZusEnabled ? tax.ZusMonthlyAmount * months : 0;
-        var health = tax.HealthInsuranceEnabled ? tax.HealthInsuranceMonthly * months : 0;
-        var costs = tax.CostDeductionsEnabled ? tax.MonthlyFixedCosts * months : 0;
-        return (gross, vat, net, incomeTax, taxLabel, zus, health, costs, net - incomeTax - zus - health - costs);
-    }
+    // Obliczenia podatkowe wydzielone do PTScheduler.Application.Finance.TaxCalculator
+    // (jedno źródło prawdy, wspólne z Finance, pokryte testami).
 
     private async Task RenderChartsAsync()
     {

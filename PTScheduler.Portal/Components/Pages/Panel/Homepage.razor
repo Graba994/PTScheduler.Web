@@ -1,0 +1,285 @@
+@page "/panel/homepage"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject SiteSettingsService Settings
+@rendermode InteractiveServer
+
+<PageTitle>Edycja strony — PTScheduler</PageTitle>
+
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <div>
+        <h4 class="fw-bold mb-1">Strona publiczna</h4>
+        <p class="text-muted small mb-0">Edytuj teksty wyświetlane na stronie głównej</p>
+    </div>
+    <a href="/" target="_blank" class="btn btn-outline-primary btn-sm">
+        <i class="bi bi-eye me-1"></i>Podgląd
+    </a>
+</div>
+
+@if (_saved)
+{
+    <div class="alert alert-success alert-dismissible fade show">
+        <i class="bi bi-check-circle me-1"></i>Zapisano zmiany.
+        <button type="button" class="btn-close" @onclick="() => _saved = false"></button>
+    </div>
+}
+
+<EditForm Model="_form" OnValidSubmit="Save" FormName="homepage">
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white fw-semibold">
+            <i class="bi bi-stars me-1"></i>Sekcja Hero
+        </div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Badge (mała etykieta)</label>
+                <input class="form-control" @bind="_form.HeroBadge" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Tytuł</label>
+                <input class="form-control" @bind="_form.HeroTitle" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Podtytuł</label>
+                <textarea class="form-control" rows="2" @bind="_form.HeroSubtitle"></textarea>
+            </div>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">Tekst przycisku CTA</label>
+                    <input class="form-control" @bind="_form.HeroCta" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">URL przycisku CTA</label>
+                    <input class="form-control" @bind="_form.HeroCtaUrl" />
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white fw-semibold">
+            <i class="bi bi-layout-text-window me-1"></i>Sekcja funkcji
+        </div>
+        <div class="card-body">
+            <div class="mb-0">
+                <label class="form-label small fw-semibold">Tytuł sekcji</label>
+                <input class="form-control" @bind="_form.SectionTitle" />
+            </div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header bg-white fw-semibold">
+            <i class="bi bi-megaphone me-1"></i>Sekcja CTA (dolna)
+        </div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Tytuł</label>
+                <input class="form-control" @bind="_form.CtaTitle" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Podtytuł</label>
+                <input class="form-control" @bind="_form.CtaSubtitle" />
+            </div>
+            <div class="mb-0">
+                <label class="form-label small fw-semibold">Tekst przycisku</label>
+                <input class="form-control" @bind="_form.CtaButton" />
+            </div>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary" disabled="@_saving">
+        @if (_saving)
+        {
+            <span class="spinner-border spinner-border-sm me-1"></span>
+        }
+        <i class="bi bi-floppy me-1"></i>Zapisz zmiany
+    </button>
+</EditForm>
+
+<div class="card border-0 shadow-sm mb-4 mt-4">
+    <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">
+        <span><i class="bi bi-people me-1"></i>Trenerzy na stronie głównej</span>
+        <button class="btn btn-outline-primary btn-sm" @onclick="AddTrainer">
+            <i class="bi bi-plus-lg me-1"></i>Dodaj trenera
+        </button>
+    </div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">Trenerzy wyświetlani w sekcji hero na stronie głównej. Kliknięcie w awatar prowadzi do Instagrama.</p>
+
+        @if (_trainers.Count == 0)
+        {
+            <div class="text-muted text-center py-4">
+                <i class="bi bi-person-plus" style="font-size:2rem;opacity:0.3"></i>
+                <p class="mt-2 mb-0 small">Brak trenerów. Kliknij "Dodaj trenera" aby dodać pierwszego.</p>
+            </div>
+        }
+
+        @for (int i = 0; i < _trainers.Count; i++)
+        {
+            var idx = i;
+            <div class="d-flex align-items-center gap-3 mb-3 p-3 border rounded-3">
+                <div style="width:42px;height:42px;border-radius:50%;background:@_trainers[idx].Color;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:0.8rem;flex-shrink:0">
+                    @_trainers[idx].Initials
+                </div>
+                <div class="flex-grow-1">
+                    <div class="row g-2">
+                        <div class="col-md-3">
+                            <input class="form-control form-control-sm" placeholder="Imię i nazwisko" @bind="_trainers[idx].Name" @bind:after="() => UpdateInitials(idx)" />
+                        </div>
+                        <div class="col-md-2">
+                            <input class="form-control form-control-sm" placeholder="Inicjały" @bind="_trainers[idx].Initials" maxlength="3" />
+                        </div>
+                        <div class="col-md-4">
+                            <input class="form-control form-control-sm" placeholder="Link Instagram" @bind="_trainers[idx].Instagram" />
+                        </div>
+                        <div class="col-md-2">
+                            <input type="color" class="form-control form-control-sm form-control-color" @bind="_trainers[idx].Color" style="height:31px" />
+                        </div>
+                    </div>
+                </div>
+                <button class="btn btn-outline-danger btn-sm" @onclick="() => RemoveTrainer(idx)" title="Usuń">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+        }
+
+        @if (_trainers.Count > 0)
+        {
+            <button class="btn btn-primary btn-sm mt-2" @onclick="SaveTrainers" disabled="@_savingTrainers">
+                @if (_savingTrainers)
+                {
+                    <span class="spinner-border spinner-border-sm me-1"></span>
+                }
+                <i class="bi bi-floppy me-1"></i>Zapisz trenerów
+            </button>
+        }
+
+        @if (_trainersSaved)
+        {
+            <span class="text-success small ms-2"><i class="bi bi-check-circle me-1"></i>Zapisano!</span>
+        }
+    </div>
+</div>
+
+@code {
+    private HomepageForm _form = new();
+    private bool _saving, _saved;
+    private List<TrainerEntry> _trainers = [];
+    private bool _savingTrainers, _trainersSaved;
+
+    private class HomepageForm
+    {
+        public string HeroBadge { get; set; } = "";
+        public string HeroTitle { get; set; } = "";
+        public string HeroSubtitle { get; set; } = "";
+        public string HeroCta { get; set; } = "";
+        public string HeroCtaUrl { get; set; } = "";
+        public string SectionTitle { get; set; } = "";
+        public string CtaTitle { get; set; } = "";
+        public string CtaSubtitle { get; set; } = "";
+        public string CtaButton { get; set; } = "";
+    }
+
+    private class TrainerEntry
+    {
+        public string Name { get; set; } = "";
+        public string Initials { get; set; } = "";
+        public string Instagram { get; set; } = "";
+        public string Color { get; set; } = "#7C3AED";
+    }
+
+    private static readonly string[] _defaultColors = ["#7C3AED", "#06D6A0", "#FF6B35", "#3B82F6", "#EC4899", "#F59E0B", "#EF4444", "#0EA5E9"];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var s = await Settings.GetAllAsync(
+            SiteSettingsService.Keys.HeroBadge,
+            SiteSettingsService.Keys.HeroTitle,
+            SiteSettingsService.Keys.HeroSubtitle,
+            SiteSettingsService.Keys.HeroCta,
+            SiteSettingsService.Keys.HeroCtaUrl,
+            SiteSettingsService.Keys.SectionTitle,
+            SiteSettingsService.Keys.CtaTitle,
+            SiteSettingsService.Keys.CtaSubtitle,
+            SiteSettingsService.Keys.CtaButton);
+
+        _form.HeroBadge = s[SiteSettingsService.Keys.HeroBadge];
+        _form.HeroTitle = s[SiteSettingsService.Keys.HeroTitle];
+        _form.HeroSubtitle = s[SiteSettingsService.Keys.HeroSubtitle];
+        _form.HeroCta = s[SiteSettingsService.Keys.HeroCta];
+        _form.HeroCtaUrl = s[SiteSettingsService.Keys.HeroCtaUrl];
+        _form.SectionTitle = s[SiteSettingsService.Keys.SectionTitle];
+        _form.CtaTitle = s[SiteSettingsService.Keys.CtaTitle];
+        _form.CtaSubtitle = s[SiteSettingsService.Keys.CtaSubtitle];
+        _form.CtaButton = s[SiteSettingsService.Keys.CtaButton];
+
+        var trainersJson = await Settings.GetAsync(SiteSettingsService.Keys.FeaturedTrainers);
+        if (!string.IsNullOrWhiteSpace(trainersJson) && trainersJson != "[]")
+        {
+            try
+            {
+                _trainers = System.Text.Json.JsonSerializer.Deserialize<List<TrainerEntry>>(trainersJson,
+                    new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
+            }
+            catch { _trainers = []; }
+        }
+    }
+
+    private async Task Save()
+    {
+        _saving = true;
+        _saved = false;
+
+        await Settings.SetManyAsync(new Dictionary<string, string>
+        {
+            [SiteSettingsService.Keys.HeroBadge] = _form.HeroBadge,
+            [SiteSettingsService.Keys.HeroTitle] = _form.HeroTitle,
+            [SiteSettingsService.Keys.HeroSubtitle] = _form.HeroSubtitle,
+            [SiteSettingsService.Keys.HeroCta] = _form.HeroCta,
+            [SiteSettingsService.Keys.HeroCtaUrl] = _form.HeroCtaUrl,
+            [SiteSettingsService.Keys.SectionTitle] = _form.SectionTitle,
+            [SiteSettingsService.Keys.CtaTitle] = _form.CtaTitle,
+            [SiteSettingsService.Keys.CtaSubtitle] = _form.CtaSubtitle,
+            [SiteSettingsService.Keys.CtaButton] = _form.CtaButton,
+        });
+
+        _saving = false;
+        _saved = true;
+    }
+
+    private void AddTrainer()
+    {
+        var color = _defaultColors[_trainers.Count % _defaultColors.Length];
+        _trainers.Add(new TrainerEntry { Color = color });
+        _trainersSaved = false;
+    }
+
+    private void RemoveTrainer(int index)
+    {
+        _trainers.RemoveAt(index);
+        _trainersSaved = false;
+    }
+
+    private void UpdateInitials(int index)
+    {
+        var name = _trainers[index].Name?.Trim() ?? "";
+        if (string.IsNullOrEmpty(name)) return;
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        _trainers[index].Initials = parts.Length >= 2
+            ? $"{parts[0][0]}{parts[^1][0]}".ToUpper()
+            : (parts.Length == 1 ? parts[0][..Math.Min(2, parts[0].Length)].ToUpper() : "");
+    }
+
+    private async Task SaveTrainers()
+    {
+        _savingTrainers = true;
+        _trainersSaved = false;
+
+        var json = System.Text.Json.JsonSerializer.Serialize(_trainers.Where(t =>
+            !string.IsNullOrWhiteSpace(t.Name) && !string.IsNullOrWhiteSpace(t.Instagram)).ToList());
+        await Settings.SetAsync(SiteSettingsService.Keys.FeaturedTrainers, json);
+
+        _savingTrainers = false;
+        _trainersSaved = true;
+    }
+}
