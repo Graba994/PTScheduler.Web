@@ -166,8 +166,20 @@ To realny wyróżnik vs konkurencja. Do rozważenia w fazie 2/3, nie musi być w
    klienta (`GetClientPlansAsync`, `GetForWorkoutAsync`) + testy.
    Do rozważenia dalej (Faza 6): przyrostowy sync serwerowy w tle i pełne PWA
    offline (na razie bufor jest per-urządzenie, commit na „Zakończ").
-5. **Wykresy objętości + dziennik aktywności**: objętość w czasie, rekordy,
-   centralny widok aktywności podopiecznych.
+5. **Wykresy objętości + dziennik aktywności** ✅ (zrobione): strona
+   `/my/workouts` (klient) — wykres liniowy objętości w czasie (90 dni),
+   pierścieniowy „objętość na partie", kafle rekordów (max ciężar / najlepsza
+   seria) i rozwijany dziennik (dni → ćwiczenia → serie). Strona
+   `/trainer/activity` (trener) — tabela aktywności podopiecznych (ostatni
+   trening, liczba treningów i objętość w oknie 30 dni, link do profilu).
+   Wykresy przez istniejący `PTChart` (Chart.js). Warstwa: DTO + rozszerzenie
+   `IWorkoutLogService` (VolumeOverTime, VolumeByMuscle, PersonalRecords,
+   Journal, ClientsActivity) na bazie `VolumeCalculator` + testy.
+
+   **MVP modułu treningowego (fazy 1–5 + seed) kompletne.** Dalej opcjonalnie:
+   Faza 6 (przyrostowy sync serwerowy + pełne PWA offline), pełny upload media
+   na Bunny z formularza ćwiczenia, gating planem `TrainingPlansEnabled`,
+   marketplace szablonów, model 3D mięśni.
 6. **Limit GB Bunny + entitlement** + ewentualnie offline PWA sync.
 
 ## 8. Licencje i zgodność — checklista
