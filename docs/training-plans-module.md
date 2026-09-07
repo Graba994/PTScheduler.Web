@@ -144,8 +144,14 @@ To realny wyróżnik vs konkurencja. Do rozważenia w fazie 2/3, nie musi być w
    `IExerciseCatalogService`/`ExerciseCatalogService` + testy. **Do dołożenia
    później:** pełny upload plików na Bunny z poziomu formularza (na razie
    URL/ID), gating planem (`TrainingPlansEnabled`).
-3. **Kreator planu**: plan → dni → ćwiczenia (serie/powt./ciężar/tempo/przerwa),
-   przypisanie klientowi, szablony.
+3. **Kreator planu** ✅ (zrobione): strony `/plans` (lista: szablony + plany
+   klientów, duplikuj/usuń) i `/plans/new` + `/plans/edit/{id}` (kreator:
+   plan → dni → ćwiczenia z seriami/powt./ciężarem/tempem/przerwą/uwagami,
+   reorder dni i ćwiczeń, wybór ćwiczeń z katalogu przez modal wyszukiwarki,
+   przypisanie klientowi lub oznaczenie jako szablon). Warstwa: DTO +
+   `ITrainingPlanService`/`TrainingPlanService` (zapis grafu z dopasowaniem po
+   Id — dodanie/edycja/usunięcie, duplikacja, odświeżanie „ostatnio używane")
+   + testy.
 4. **Logowanie wykonania (mobile-first)**: klient wpisuje serie; widok „dziś trenuję".
 5. **Wykresy objętości + dziennik aktywności**: objętość w czasie, rekordy,
    centralny widok aktywności podopiecznych.
