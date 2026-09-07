@@ -126,9 +126,14 @@ To realny wyróżnik vs konkurencja. Do rozważenia w fazie 2/3, nie musi być w
    EF i migracja `20260906120000_AddTrainingModule` + reguły domenowe
    `Domain.Rules.Muscles` (parsowanie partii z CSV Free Exercise DB) i
    `Domain.Rules.VolumeCalculator` (objętość serii/wykonania i „per partia")
-   z testami. **Do zrobienia w tej fazie osobno:** właściwy import ~870 ćwiczeń
-   z Free Exercise DB (JSON) + tłumaczenia PL jako seed — model i klucz dedup
-   (`Exercise.SourceKey`) już na to gotowe.
+   z testami. **Seed bazy ćwiczeń zrobiony:** ~876 ćwiczeń z Free Exercise DB
+   (Unlicense) osadzone jako zasób (`Data/SeedData/free-exercise-db.json`),
+   ładowane idempotentnie przez `DbInitializer.SeedExerciseCatalogAsync` po
+   `MigrateAsync` (dokłada tylko brakujące po `SourceKey`). Warstwa nazw PL:
+   `Data/SeedData/exercise-names-pl.json` — kuratorowany zestaw najczęstszych
+   ćwiczeń (reszta na fallbacku do nazwy EN, opis EN zawsze dostępny), plik
+   rozszerzalny. Obrazy serwowane po URL (baza konfigurowalna zmienną
+   `EXERCISE_IMAGE_BASE_URL`, domyślnie repo Free Exercise DB).
 2. **Katalog ćwiczeń**: przeglądanie, wyszukiwanie, filtr moje/publiczne, ulubione,
    ostatnio używane, flaga 🇬🇧 dla EN. Dodawanie własnego ćwiczenia (zdjęcie/YT/Bunny).
 3. **Kreator planu**: plan → dni → ćwiczenia (serie/powt./ciężar/tempo/przerwa),
