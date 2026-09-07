@@ -23,6 +23,13 @@ public sealed class LogSetDto
     public decimal WeightKg { get; set; }
 }
 
+/// <summary>Serwerowy backup trwającego treningu (draft) do sync między urządzeniami.</summary>
+public sealed class WorkoutSessionDraftDto
+{
+    public string DraftJson { get; set; } = string.Empty;
+    public DateTime UpdatedAt { get; set; }
+}
+
 /// <summary>Pozycja historii treningów klienta (pod dziennik i wykresy).</summary>
 public sealed class WorkoutHistoryItemDto
 {

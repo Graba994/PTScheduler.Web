@@ -176,10 +176,21 @@ To realny wyróżnik vs konkurencja. Do rozważenia w fazie 2/3, nie musi być w
    `IWorkoutLogService` (VolumeOverTime, VolumeByMuscle, PersonalRecords,
    Journal, ClientsActivity) na bazie `VolumeCalculator` + testy.
 
-   **MVP modułu treningowego (fazy 1–5 + seed) kompletne.** Dalej opcjonalnie:
-   Faza 6 (przyrostowy sync serwerowy + pełne PWA offline), pełny upload media
-   na Bunny z formularza ćwiczenia, gating planem `TrainingPlansEnabled`,
-   marketplace szablonów, model 3D mięśni.
+   **MVP modułu treningowego (fazy 1–5 + seed) kompletne.**
+
+6. **Sync serwerowy trwającego treningu** ✅ (zrobione): obok bufora
+   localStorage draft treningu jest zapisywany także na serwerze
+   (`WorkoutSession`, jeden otwarty na klienta, upsert przy każdej zmianie).
+   Daje to odporność na utratę urządzenia i **wznowienie na innym urządzeniu**;
+   przy wejściu na `/train` wygrywa nowsza wersja (po `SavedAt`). Zapis do bazy
+   i tak dopiero na „Zakończ" (WorkoutLog), draft usuwany po zakończeniu/
+   odrzuceniu. Warstwa: encja + migracja `20260907120000_AddWorkoutSession` +
+   `IWorkoutSessionService`/`WorkoutSessionService` + testy.
+
+   Dalej opcjonalnie: pełne **PWA offline** (service worker cache app-shell +
+   kolejka wysyłki, by UI działał bez sieci — w Blazor Server ograniczone),
+   pełny upload media na Bunny z formularza ćwiczenia, gating planem
+   `TrainingPlansEnabled`, marketplace szablonów, model 3D mięśni.
 6. **Limit GB Bunny + entitlement** + ewentualnie offline PWA sync.
 
 ## 8. Licencje i zgodność — checklista

@@ -8,6 +8,7 @@
 @attribute [Authorize(Roles = Roles.Client + "," + Roles.Admin + "," + Roles.Trainer + "," + Roles.Subordinate)]
 @inject ITrainingPlanService PlanService
 @inject IWorkoutLogService WorkoutLog
+@inject IWorkoutSessionService Session
 @inject IClientService ClientService
 @inject IAppClock Clock
 @inject AuthenticationStateProvider AuthState
@@ -30,7 +31,7 @@ else if (_draft is not null)
     <!-- ===== Tryb treningu ===== -->
     <div class="alert alert-success py-2 d-flex align-items-center gap-2 small">
         <i class="bi bi-shield-check"></i>
-        <span>Trening jest zapisywany na tym urządzeniu — nie zniknie po zamknięciu przeglądarki, uśpieniu telefonu ani zaniku sieci. Trwa do „Zakończ trening".</span>
+        <span>Trening jest zapisywany na bieżąco — na tym urządzeniu i na serwerze — więc nie zniknie po zamknięciu przeglądarki, uśpieniu telefonu ani zaniku sieci, a w razie potrzeby wznowisz go na innym urządzeniu. Trwa do „Zakończ trening".</span>
     </div>
 
     <div class="card mb-3">
@@ -210,14 +211,43 @@ else
         _draftLoaded = true;
         try
         {
+            // Lokalny bufor (localStorage) — natychmiastowy, odporny offline.
+            WorkoutDraft? local = null;
             var json = await JS.InvokeAsync<string?>("PTWorkout.load", _storeKey);
-            if (!string.IsNullOrWhiteSpace(json))
+            if (!string.IsNullOrWhiteSpace(json)) local = Deserialize(json);
+
+            // Backup serwerowy — pozwala wznowić na innym urządzeniu / po utracie telefonu.
+            WorkoutDraft? server = null;
+            try
             {
-                _draft = JsonSerializer.Deserialize<WorkoutDraft>(json);
+                var s = await Session.GetOpenDraftAsync(_clientId.Value);
+                if (s is not null && !string.IsNullOrWhiteSpace(s.DraftJson)) server = Deserialize(s.DraftJson);
+            }
+            catch (Exception ex) { LoggerFactory.CreateLogger("Train").LogError(ex, "Nie udało się pobrać treningu z serwera."); }
+
+            // Wygrywa nowsza wersja (po SavedAt).
+            _draft = (local, server) switch
+            {
+                (null, null) => null,
+                (not null, null) => local,
+                (null, not null) => server,
+                _ => server!.SavedAt > local!.SavedAt ? server : local
+            };
+
+            if (_draft is not null)
+            {
+                // Ujednolić oba magazyny na wybranej wersji.
+                await PersistDraftAsync();
                 StateHasChanged();
             }
         }
-        catch (Exception ex) { LoggerFactory.CreateLogger("Train").LogError(ex, "Nie udało się wczytać treningu z pamięci urządzenia."); }
+        catch (Exception ex) { LoggerFactory.CreateLogger("Train").LogError(ex, "Nie udało się wczytać trwającego treningu."); }
+    }
+
+    private static WorkoutDraft? Deserialize(string json)
+    {
+        try { return JsonSerializer.Deserialize<WorkoutDraft>(json); }
+        catch { return null; }
     }
 
     private async Task SelectPlan(int planId)
@@ -275,12 +305,20 @@ else
     private async Task SaveDraft()
     {
         if (_draft is null) return;
-        try
-        {
-            var json = JsonSerializer.Serialize(_draft);
-            await JS.InvokeVoidAsync("PTWorkout.save", _storeKey, json);
-        }
+        _draft.SavedAt = Clock.LocalNow;
+        await PersistDraftAsync();
+    }
+
+    private async Task PersistDraftAsync()
+    {
+        if (_draft is null || _clientId is null) return;
+        var json = JsonSerializer.Serialize(_draft);
+        // 1) localStorage — natychmiast, działa też bez sieci.
+        try { await JS.InvokeVoidAsync("PTWorkout.save", _storeKey, json); }
         catch (Exception ex) { LoggerFactory.CreateLogger("Train").LogError(ex, "Nie udało się zapisać treningu w pamięci urządzenia."); }
+        // 2) serwer — backup i sync między urządzeniami (best-effort, gdy online).
+        try { await Session.SaveDraftAsync(_clientId.Value, json); }
+        catch (Exception ex) { LoggerFactory.CreateLogger("Train").LogError(ex, "Nie udało się zsynchronizować treningu z serwerem."); }
     }
 
     private async Task DiscardDraft()
@@ -293,6 +331,11 @@ else
     private async Task ClearDraftStore()
     {
         try { await JS.InvokeVoidAsync("PTWorkout.clear", _storeKey); } catch { /* best-effort */ }
+        if (_clientId is not null)
+        {
+            try { await Session.DiscardAsync(_clientId.Value); }
+            catch (Exception ex) { LoggerFactory.CreateLogger("Train").LogError(ex, "Nie udało się usunąć draftu treningu z serwera."); }
+        }
     }
 
     private async Task Finish()
@@ -340,6 +383,7 @@ else
         public string DayLabel { get; set; } = "";
         public DateOnly Date { get; set; }
         public DateTime StartedAt { get; set; }
+        public DateTime SavedAt { get; set; }
         public List<DraftExercise> Exercises { get; set; } = [];
     }
 

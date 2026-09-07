@@ -87,6 +87,7 @@ public static class DependencyInjection
         services.AddScoped<IExerciseCatalogService, ExerciseCatalogService>();
         services.AddScoped<ITrainingPlanService, TrainingPlanService>();
         services.AddScoped<IWorkoutLogService, WorkoutLogService>();
+        services.AddScoped<IWorkoutSessionService, WorkoutSessionService>();
 
         // QuestPDF community license — free for orgs <$1M annual revenue.
         // Set globally; safe to call multiple times in tests.

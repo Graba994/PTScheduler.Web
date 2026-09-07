@@ -53,6 +53,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<PlanExercise> PlanExercises => Set<PlanExercise>();
     public DbSet<WorkoutLog> WorkoutLogs => Set<WorkoutLog>();
     public DbSet<WorkoutSetLog> WorkoutSetLogs => Set<WorkoutSetLog>();
+    public DbSet<WorkoutSession> WorkoutSessions => Set<WorkoutSession>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -373,6 +374,16 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
              .HasForeignKey(s => s.WorkoutLogId)
              .OnDelete(DeleteBehavior.Cascade);
             e.Property(s => s.WeightKg).HasPrecision(6, 2);
+        });
+
+        builder.Entity<WorkoutSession>(e =>
+        {
+            e.HasOne(s => s.Client)
+             .WithMany()
+             .HasForeignKey(s => s.ClientId)
+             .OnDelete(DeleteBehavior.Cascade);
+            // Jeden otwarty draft na klienta (upsert po ClientId).
+            e.HasIndex(s => s.ClientId).IsUnique();
         });
     }
 }
