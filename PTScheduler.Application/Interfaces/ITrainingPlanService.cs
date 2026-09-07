@@ -24,4 +24,12 @@ public interface ITrainingPlanService
 
     /// <summary>Kopiuje plan (opcjonalnie jako szablon, bez przypisania klienta). Zwraca Id kopii.</summary>
     Task<int> DuplicateAsync(string trainerUserId, int planId, bool asTemplate);
+
+    // --- Widok klienta (do trenowania) ---
+
+    /// <summary>Plany przypisane danemu klientowi (do wyboru „co trenuję").</summary>
+    Task<List<TrainingPlanListItemDto>> GetClientPlansAsync(int clientId);
+
+    /// <summary>Plan do wykonania przez klienta; null jeśli nie jest do niego przypisany.</summary>
+    Task<PlanEditDto?> GetForWorkoutAsync(int clientId, int planId);
 }

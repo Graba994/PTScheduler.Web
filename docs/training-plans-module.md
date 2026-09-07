@@ -152,7 +152,20 @@ To realny wyróżnik vs konkurencja. Do rozważenia w fazie 2/3, nie musi być w
    `ITrainingPlanService`/`TrainingPlanService` (zapis grafu z dopasowaniem po
    Id — dodanie/edycja/usunięcie, duplikacja, odświeżanie „ostatnio używane")
    + testy.
-4. **Logowanie wykonania (mobile-first)**: klient wpisuje serie; widok „dziś trenuję".
+4. **Logowanie wykonania (mobile-first)** ✅ (zrobione): strona `/train` (rola
+   klienta) — wybór przypisanego planu → dnia → wpisywanie serii (powt. + ciężar
+   + odhaczanie), „Dodaj serię", „Zakończ trening". **Ochrona przed utratą
+   danych:** postęp treningu jest autozapisywany do `localStorage` przy każdej
+   zmianie (JS `PTWorkout` + `/js/workout-store.js`), więc przetrwa wyłączenie
+   telefonu, zamknięcie przeglądarki i zanik sieci; sesja trwa aż do jawnego
+   „Zakończ" (wtedy zapis do bazy przez `IWorkoutLogService` i wyczyszczenie
+   bufora). Po ponownym wejściu trening sam się wznawia. Krótkie zerwania sieci
+   w Blazor Server obsługuje wbudowany reconnect, a stan i tak jest w
+   localStorage. Warstwa: DTO + `IWorkoutLogService`/`WorkoutLogService`
+   (zapis + historia z objętością) + rozszerzenie `ITrainingPlanService` o widok
+   klienta (`GetClientPlansAsync`, `GetForWorkoutAsync`) + testy.
+   Do rozważenia dalej (Faza 6): przyrostowy sync serwerowy w tle i pełne PWA
+   offline (na razie bufor jest per-urządzenie, commit na „Zakończ").
 5. **Wykresy objętości + dziennik aktywności**: objętość w czasie, rekordy,
    centralny widok aktywności podopiecznych.
 6. **Limit GB Bunny + entitlement** + ewentualnie offline PWA sync.

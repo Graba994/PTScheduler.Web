@@ -37,7 +37,40 @@ public class TrainingPlanService(
             .Include(p => p.Days).ThenInclude(d => d.Exercises)
             .FirstOrDefaultAsync(p => p.Id == planId && p.TrainerUserId == trainerUserId);
         if (plan is null) return null;
+        return await BuildEditDtoAsync(db, plan);
+    }
 
+    public async Task<List<TrainingPlanListItemDto>> GetClientPlansAsync(int clientId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        return await db.TrainingPlans.AsNoTracking()
+            .Where(p => p.ClientId == clientId)
+            .OrderByDescending(p => p.CreatedAt)
+            .Select(p => new TrainingPlanListItemDto
+            {
+                Id = p.Id,
+                Name = p.Name,
+                IsTemplate = p.IsTemplate,
+                ClientId = p.ClientId,
+                DayCount = p.Days.Count,
+                ExerciseCount = p.Days.SelectMany(d => d.Exercises).Count(),
+                CreatedAt = p.CreatedAt
+            })
+            .ToListAsync();
+    }
+
+    public async Task<PlanEditDto?> GetForWorkoutAsync(int clientId, int planId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var plan = await db.TrainingPlans.AsNoTracking()
+            .Include(p => p.Days).ThenInclude(d => d.Exercises)
+            .FirstOrDefaultAsync(p => p.Id == planId && p.ClientId == clientId);
+        if (plan is null) return null;
+        return await BuildEditDtoAsync(db, plan);
+    }
+
+    private static async Task<PlanEditDto> BuildEditDtoAsync(ApplicationDbContext db, TrainingPlan plan)
+    {
         var exIds = plan.Days.SelectMany(d => d.Exercises).Select(e => e.ExerciseId).Distinct().ToList();
         var exInfo = await db.Exercises.AsNoTracking()
             .Where(e => exIds.Contains(e.Id))
