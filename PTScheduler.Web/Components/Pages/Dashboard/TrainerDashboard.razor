@@ -5,6 +5,8 @@
 @inject ISessionService SessionService
 @inject IClientService ClientService
 @inject ISessionPackageService PackageService
+@inject IClientAttentionService Attention
+@inject EntitlementService Entitlements
 
 @if (!_loaded)
 {
@@ -258,41 +260,54 @@ else
     </div>
 
     <div class="row g-3">
-        <!-- Expiring packages -->
+        <!-- Needs attention: retention signals from sessions, packages and workouts -->
         <div class="col-12 col-lg-7">
             <div class="card">
                 <div class="card-header d-flex align-items-center justify-content-between">
-                    <span><i class="bi bi-exclamation-triangle me-2" style="color:var(--c-warning)"></i>Pakiety wygasające (14 dni)</span>
-                    @if (_expiring.Any())
+                    <span><i class="bi bi-bell me-2" style="color:var(--c-warning)"></i>Wymaga uwagi</span>
+                    @if (_attention.Any())
                     {
-                        <span class="badge bg-warning text-dark">@_expiring.Count</span>
+                        <span class="badge bg-warning text-dark">@_attention.Count</span>
                     }
                 </div>
                 <div class="card-body p-0">
-                    @if (!_expiring.Any())
+                    @if (!_attention.Any())
                     {
                         <div class="empty-state">
                             <div class="empty-state-icon">✅</div>
                             <div class="empty-state-title">Wszystko w porządku</div>
-                            <div class="empty-state-desc">Żaden pakiet nie wygasa w ciągu najbliższych 14 dni.</div>
+                            <div class="empty-state-desc">Klienci są w rytmie: mają pakiety, wizyty i trenują.</div>
                         </div>
                     }
                     else
                     {
                         <div class="list-group list-group-flush">
-                            @foreach (var p in _expiring)
+                            @foreach (var a in _attention.Take(_attentionExpanded ? int.MaxValue : 6))
                             {
-                                <a href="/clients/@p.ClientId" class="list-group-item list-group-item-action d-flex align-items-center gap-3 px-3 py-2">
+                                <a href="@(a.Reasons.FirstOrDefault(r => r.Link is not null)?.Link ?? $"/clients/{a.ClientId}")"
+                                   class="list-group-item list-group-item-action d-flex align-items-start gap-3 px-3 py-2">
+                                    <span class="attention-dot attention-@a.Severity.ToString().ToLowerInvariant() mt-2 flex-shrink-0"></span>
                                     <div class="flex-grow-1 overflow-hidden">
-                                        <div class="fw-semibold text-truncate" style="font-size:.875rem">@p.ClientName</div>
-                                        <div class="text-muted" style="font-size:.75rem">@p.PackageName · @p.RemainingCredits pozostałych</div>
+                                        <div class="fw-semibold text-truncate" style="font-size:.875rem">@a.ClientName</div>
+                                        @foreach (var r in a.Reasons)
+                                        {
+                                            <div class="text-muted" style="font-size:.75rem">
+                                                <i class="bi @ReasonIcon(r.Kind) me-1"></i>@r.Text
+                                            </div>
+                                        }
                                     </div>
-                                    <span class="badge rounded-pill @(p.DaysLeft <= 3 ? "bg-danger" : p.DaysLeft <= 7 ? "bg-warning text-dark" : "bg-secondary")">
-                                        @(p.DaysLeft == 0 ? "dziś" : $"{p.DaysLeft} d.")
-                                    </span>
+                                    <i class="bi bi-chevron-right text-muted mt-1" style="font-size:.7rem"></i>
                                 </a>
                             }
                         </div>
+                        @if (_attention.Count > 6)
+                        {
+                            <div class="text-center py-2 border-top">
+                                <button class="btn btn-link btn-sm" @onclick="() => _attentionExpanded = !_attentionExpanded">
+                                    @(_attentionExpanded ? "Pokaż mniej" : $"Pokaż wszystkich ({_attention.Count})")
+                                </button>
+                            </div>
+                        }
                     }
                 </div>
             </div>
@@ -348,6 +363,8 @@ else
     private List<SessionDto> _upcoming = [];
     private List<SessionDto> _awaiting = [];
     private List<ExpiringPackageDto> _expiring = [];
+    private List<ClientAttentionDto> _attention = [];
+    private bool _attentionExpanded;
     private List<ClientDto> _pending = [];
 
     private int _thisWeekCount;
@@ -377,6 +394,8 @@ else
                             .Where(s => s.StartTime.Date > DateTime.Now.Date).ToList();
             _awaiting = await SessionService.GetAwaitingPackageAsync(TrainerUserId);
             _expiring = await PackageService.GetExpiringAsync(14, TrainerUserId);
+            try { _attention = await Attention.GetAsync(TrainerUserId, Entitlements.IsAllowed("TrainingPlansEnabled")); }
+            catch { _attention = []; } // Lista pomocnicza — nie blokuje pulpitu.
             _pending  = await ClientService.GetPendingClientsAsync(TrainerUserId);
 
             // Stats
@@ -406,6 +425,17 @@ else
             _loading = false;
         }
     }
+
+    private static string ReasonIcon(AttentionKind k) => k switch
+    {
+        AttentionKind.NoVisit         => "bi-calendar-x",
+        AttentionKind.PackageEmpty    => "bi-box-seam",
+        AttentionKind.LowCredits      => "bi-hourglass-split",
+        AttentionKind.PackageExpiring => "bi-clock-history",
+        AttentionKind.NotTraining     => "bi-lightning-charge",
+        AttentionKind.NewWorkout      => "bi-chat-dots",
+        _ => "bi-dot"
+    };
 
     private static string MonthLocative(int m) => m switch
     {

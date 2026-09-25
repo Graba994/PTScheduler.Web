@@ -8,4 +8,7 @@ public class ModuleSettingsDto
 {
     // Training portal (courses) visible to clients.
     public bool CoursesEnabled { get; set; } = true;
+
+    // Automatyczne przypomnienia klientom o kończącym się / wygasającym pakiecie.
+    public bool PackageRemindersEnabled { get; set; } = true;
 }

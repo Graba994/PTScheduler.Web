@@ -74,6 +74,7 @@ public static class DependencyInjection
         services.AddScoped<INotificationPreferencesService, NotificationPreferencesService>();
         services.AddScoped<IPublicBookingService, PublicBookingService>();
         services.AddScoped<IClientInvitationService, ClientInvitationService>();
+        services.AddScoped<IClientAttentionService, ClientAttentionService>();
         services.AddScoped<IClientReportService, ClientReportService>();
         services.AddScoped<IPermissionService, PermissionService>();
         services.AddScoped<IEmailTemplateService, EmailTemplateService>();

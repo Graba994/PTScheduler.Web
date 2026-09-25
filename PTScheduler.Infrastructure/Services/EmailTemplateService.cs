@@ -285,6 +285,38 @@ public class EmailTemplateService(
             "Wiadomość automatyczna — w razie pytań odpisz na ten email.",
             ["ClientName", "TrainerName", "SessionDate", "Duration", "Price", "SetPasswordLink", "AccentColor"]),
 
+        ["package-low-credits"] = new(
+            "package-low-credits", "Kończący się pakiet", "bi-hourglass-split",
+            "Zostały Ci {{Remaining}} — czas na kolejny pakiet",
+            "Zostały Ci {{Remaining}} 💪",
+            """
+            <p style="color:#374151;font-size:15px">Cześć <strong>{{ClientName}}</strong>!</p>
+            <p style="color:#374151;font-size:15px">W pakiecie <strong>{{PackageName}}</strong> zostały Ci <strong>{{Remaining}}</strong>. Żeby nie wypaść z rytmu, zadbaj o kolejny pakiet już teraz.</p>
+            <div style="text-align:center;margin:24px 0">
+              <a href="{{ShopLink}}" style="background:{{AccentColor}};color:white;text-decoration:none;padding:12px 32px;border-radius:6px;font-weight:600;font-size:15px;display:inline-block">{{ShopButton}}</a>
+            </div>
+            <p style="color:#6b7280;font-size:13px">Trener: {{TrainerName}}</p>
+            """,
+            "#0284C7",
+            "Przypomnienia o pakietach wyłączysz w ustawieniach konta → Powiadomienia.",
+            ["ClientName", "PackageName", "Remaining", "ShopLink", "ShopButton", "TrainerName", "CompanyName", "AccentColor"]),
+
+        ["package-expiring"] = new(
+            "package-expiring", "Wygasający pakiet", "bi-calendar-x",
+            "Twój pakiet wygasa {{ExpiresAt}}",
+            "Pakiet wkrótce wygaśnie ⏳",
+            """
+            <p style="color:#374151;font-size:15px">Cześć <strong>{{ClientName}}</strong>!</p>
+            <p style="color:#374151;font-size:15px">Pakiet <strong>{{PackageName}}</strong> wygasa <strong>{{ExpiresAt}}</strong>, a zostały w nim jeszcze <strong>{{Remaining}}</strong>. Umów je, zanim przepadną — albo przedłuż współpracę kolejnym pakietem.</p>
+            <div style="text-align:center;margin:24px 0">
+              <a href="{{ShopLink}}" style="background:{{AccentColor}};color:white;text-decoration:none;padding:12px 32px;border-radius:6px;font-weight:600;font-size:15px;display:inline-block">{{ShopButton}}</a>
+            </div>
+            <p style="color:#6b7280;font-size:13px">Trener: {{TrainerName}}</p>
+            """,
+            "#D97706",
+            "Przypomnienia o pakietach wyłączysz w ustawieniach konta → Powiadomienia.",
+            ["ClientName", "PackageName", "Remaining", "ExpiresAt", "ShopLink", "ShopButton", "TrainerName", "CompanyName", "AccentColor"]),
+
         ["client-invite"] = new(
             "client-invite", "Zaproszenie klienta", "bi-envelope-heart",
             "Zaproszenie do {{CompanyName}}",
