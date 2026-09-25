@@ -19,7 +19,8 @@
 
 <PageTitle>Logowanie</PageTitle>
 
-<div class="card" style="border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,0.10)">
+<div class="card" style="border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,0.10)"
+     data-login-card data-login-error="@(string.IsNullOrEmpty(errorMessage) ? null : "1")">
     <div class="card-body p-4">
         <h5 class="fw-bold mb-1 text-center">@(string.IsNullOrWhiteSpace(Branding?.LoginTitle) ? "Zaloguj się" : Branding?.LoginTitle)</h5>
         <p class="text-muted small text-center mb-4">@(string.IsNullOrWhiteSpace(Branding?.LoginSubtitle) ? "Wpisz swoje dane dostępowe" : Branding?.LoginSubtitle)</p>
@@ -30,6 +31,8 @@
             <DataAnnotationsValidator />
             <ValidationSummary class="text-danger small mb-3" role="alert" />
 
+            <div class="login-stack">
+            <div class="login-password-part">
             <div class="mb-3">
                 <label class="form-label" for="Input.Email">Email</label>
                 <div class="input-group">
@@ -66,13 +69,20 @@
             <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold mb-3" data-busy-text="Logowanie…">
                 <i class="bi bi-box-arrow-in-right me-1"></i>Zaloguj się
             </button>
+            </div>
 
-            @* Passkey — subtle secondary option *@
-            <div class="text-center">
+            @* Klucz dostępu: zwykle dyskretna opcja; na urządzeniu z kluczem (js/auth-forms.js
+               dodaje .passkey-first) — główny przycisk, a hasło chowa się pod „Zaloguj hasłem”. *@
+            <div class="login-passkey text-center">
                 <PasskeySubmit Operation="PasskeyOperation.Request" Name="Input.Passkey" EmailName="Input.Email"
-                               class="btn btn-sm btn-link text-muted">
-                    <i class="bi bi-key me-1"></i>Zaloguj przez klucz dostępu
+                               class="btn btn-sm btn-link text-muted login-passkey-btn">
+                    <span class="pk-label-default"><i class="bi bi-key me-1"></i>Zaloguj przez klucz dostępu</span>
+                    <span class="pk-label-hero"><i class="bi bi-fingerprint me-1"></i>Zaloguj odciskiem palca / Face ID</span>
                 </PasskeySubmit>
+            </div>
+            <div class="login-password-toggle text-center">
+                <button type="button" class="btn btn-link btn-sm text-muted" data-show-password-login>Zaloguj hasłem</button>
+            </div>
             </div>
         </EditForm>
     </div>
