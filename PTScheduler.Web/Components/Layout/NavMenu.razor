@@ -1,3 +1,4 @@
+@inject PTScheduler.Web.Services.EntitlementService Entitlements
 @inject PTScheduler.Application.Interfaces.IBrandingService BrandingService
 @inject PTScheduler.Application.Interfaces.IModuleSettingsService ModuleSettings
 @using PTScheduler.Domain.Constants
@@ -48,9 +49,12 @@
         <NavLink class="sidebar-link" href="my">
             <i class="bi bi-calendar-week-fill"></i><span>Mój grafik</span>
         </NavLink>
-        <NavLink class="sidebar-link" href="train">
-            <i class="bi bi-lightning-charge-fill"></i><span>Trenuj</span>
-        </NavLink>
+        @if (Entitlements.IsAllowed("TrainingPlansEnabled"))
+        {
+            <NavLink class="sidebar-link" href="train">
+                <i class="bi bi-lightning-charge-fill"></i><span>Trenuj</span>
+            </NavLink>
+        }
         <NavLink class="sidebar-link" href="sessions">
             <i class="bi bi-calendar-check"></i><span>Wizyty</span>
         </NavLink>
@@ -82,9 +86,12 @@
         <NavLink class="sidebar-link" href="my/stats">
             <i class="bi bi-graph-up"></i><span>Moje statystyki</span>
         </NavLink>
-        <NavLink class="sidebar-link" href="my/workouts">
-            <i class="bi bi-graph-up-arrow"></i><span>Moje postępy</span>
-        </NavLink>
+        @if (Entitlements.IsAllowed("TrainingPlansEnabled"))
+        {
+            <NavLink class="sidebar-link" href="my/workouts">
+                <i class="bi bi-graph-up-arrow"></i><span>Moje postępy</span>
+            </NavLink>
+        }
     </AuthorizeView>
 
     <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer},{Roles.Subordinate}")">
@@ -104,12 +111,15 @@
         </NavLink>
         <NavLink class="sidebar-link" href="exercises">
             <i class="bi bi-clipboard-pulse"></i><span>Ćwiczenia</span>
+            <PlanBadge Flag="TrainingPlansEnabled" RequiredPlan="Pro" />
         </NavLink>
         <NavLink class="sidebar-link" href="plans">
             <i class="bi bi-list-check"></i><span>Plany</span>
+            <PlanBadge Flag="TrainingPlansEnabled" RequiredPlan="Pro" />
         </NavLink>
         <NavLink class="sidebar-link" href="trainer/activity">
             <i class="bi bi-people"></i><span>Aktywność</span>
+            <PlanBadge Flag="TrainingPlansEnabled" RequiredPlan="Pro" />
         </NavLink>
     </AuthorizeView>
 

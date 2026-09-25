@@ -45,3 +45,18 @@ jobs:
             exit 1
           fi
           echo "Migracje zsynchronizowane z modelem (kandydat pusty)."
+
+      - name: Verify portal migrations in sync with model
+        run: |
+          export PATH="$PATH:$HOME/.dotnet/tools"
+          dotnet ef migrations add __CiSyncCheck \
+            --project PTScheduler.Portal \
+            --startup-project PTScheduler.Portal \
+            --output-dir Data/Migrations
+          UP=$(ls PTScheduler.Portal/Data/Migrations/*__CiSyncCheck.cs)
+          if grep -q "migrationBuilder\." "$UP"; then
+            echo "::error::Model portalu i migracje rozjechane — kandydat nie jest pusty:"
+            cat "$UP"
+            exit 1
+          fi
+          echo "Migracje portalu zsynchronizowane z modelem (kandydat pusty)."

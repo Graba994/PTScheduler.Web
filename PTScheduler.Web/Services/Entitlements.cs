@@ -25,6 +25,12 @@ public class Entitlements
     public bool Coupons { get; set; }
 
     public bool CoursesEnabled { get; set; }
+
+    // Moduł treningowy: katalog ćwiczeń, plany, trening klienta, postępy.
+    // Domyślnie true: JSON planu sprzed wprowadzenia tej flagi nie ma klucza,
+    // a nie odbieramy modułu tenantom, zanim portal wyśle aktualne uprawnienia
+    // (przy zapisie planu, zmianie planu i starcie tenanta).
+    public bool TrainingPlansEnabled { get; set; } = true;
     public bool BodyMeasurements { get; set; } = true;
 
     public bool EmailReminders { get; set; } = true;

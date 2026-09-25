@@ -219,13 +219,13 @@ else
     private static List<PlanDef> BuildPlanCatalog() =>
     [
         new("start", "Start", 0, "Testuj za darmo przez 7 dni",
-            3, false, false, false, false, false, false, false, false, false, "preview"),
+            3, false, false, false, false, false, false, false, false, false, "preview", false),
         new("starter", "Starter", 49, "Podstawowe narzędzia dla trenera",
-            15, true, true, false, false, false, false, true, false, false, "basic"),
+            15, true, true, false, false, false, false, true, false, false, "basic", false),
         new("pro", "Pro", 99, "Pełna funkcjonalność dla aktywnych trenerów",
-            50, true, true, true, true, true, true, true, true, true, "full"),
+            50, true, true, true, true, true, true, true, true, true, "full", true),
         new("studio", "Business", 199, "Bez limitów, pełna kontrola, priorytetowe wsparcie",
-            int.MaxValue, true, true, true, true, true, true, true, true, true, "premium"),
+            int.MaxValue, true, true, true, true, true, true, true, true, true, "premium", true),
     ];
 
     private static UpgradePlan ToUpgradePlan(PlanDef plan, Entitlements current)
@@ -255,6 +255,9 @@ else
 
         if (plan.HasCourses)
             features.Add(new("Kursy wideo", !current.CoursesEnabled));
+
+        if (plan.HasTrainingPlans)
+            features.Add(new("Moduł treningowy (plany, trening, postępy)", !current.TrainingPlansEnabled));
 
         if (plan.HasSms)
             features.Add(new("SMS-y i push", !current.SmsReminders));
@@ -294,7 +297,7 @@ else
     private record PlanDef(string Id, string Name, decimal Price, string Description,
         int MaxClients, bool HasPayments, bool HasLogo, bool HasCourses, bool HasSms,
         bool HasGoogleMeet, bool HasAdvancedAnalytics, bool HasFinancialReports,
-        bool HasDataExport, bool HasBranding, string BrandingTier);
+        bool HasDataExport, bool HasBranding, string BrandingTier, bool HasTrainingPlans);
 
     private class UpgradePlan
     {

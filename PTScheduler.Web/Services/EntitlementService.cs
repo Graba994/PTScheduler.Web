@@ -8,8 +8,8 @@ using PTScheduler.Infrastructure.Data;
 namespace PTScheduler.Web.Services;
 
 // Singleton — parses TENANT_ENTITLEMENTS once at startup and answers
-// entitlement questions for the rest of the process lifetime. Container
-// restart (triggered by portal on plan change) reloads it.
+// entitlement questions. The portal pushes plan changes via /internal/entitlements/reload
+// and EntitlementSyncService re-pulls the plan at startup and every 15 minutes.
 public class EntitlementService
 {
     private Entitlements _current;

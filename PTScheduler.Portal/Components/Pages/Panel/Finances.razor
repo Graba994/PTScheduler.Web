@@ -2,6 +2,7 @@
 @layout AdminLayout
 @attribute [Authorize(Roles = "Admin")]
 @inject IDbContextFactory<PortalDbContext> DbFactory
+@inject PTScheduler.Portal.Services.TenantService TenantService
 @rendermode InteractiveServer
 
 <PageTitle>Finanse — PTScheduler Portal</PageTitle>
@@ -364,6 +365,7 @@ else
         if (tenant is not null) tenant.PlanId = _newSub.PlanId;
 
         await db.SaveChangesAsync();
+        if (tenant is not null) await TenantService.PushEntitlementsAsync(tenant.Id);
         _showNewSub = false;
         _newSub = new();
         await Load();

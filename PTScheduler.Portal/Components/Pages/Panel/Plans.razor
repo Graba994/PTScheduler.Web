@@ -2,6 +2,7 @@
 @layout AdminLayout
 @attribute [Authorize(Roles = "Admin")]
 @inject IDbContextFactory<PortalDbContext> DbFactory
+@inject PTScheduler.Portal.Services.TenantService TenantService
 @rendermode InteractiveServer
 
 <PageTitle>Plany cenowe — PTScheduler Portal</PageTitle>
@@ -97,6 +98,7 @@
                     return
                     @<div class="row g-2">
                         @Flag("Kursy wideo", () => _editing!.CoursesEnabled, v => _editing!.CoursesEnabled = v)
+                        @Flag("Moduł treningowy (plany, trening, postępy)", () => _editing!.TrainingPlansEnabled, v => _editing!.TrainingPlansEnabled = v)
                         @Flag("Pomiary ciała", () => _editing!.BodyMeasurements, v => _editing!.BodyMeasurements = v)
                     </div>;
                 })
@@ -240,6 +242,7 @@
                             <th>Trenerów</th>
                             <th>Płatności</th>
                             <th>Kursy</th>
+                            <th>Trening</th>
                             <th>SMS</th>
                             <th>Branding</th>
                             <th>Aktywny</th>
@@ -258,6 +261,7 @@
                                 <td>@Fmt(p.MaxTrainers)</td>
                                 <td>@Yn(p.PaymentsEnabled)</td>
                                 <td>@Yn(p.CoursesEnabled)</td>
+                                <td>@Yn(p.TrainingPlansEnabled)</td>
                                 <td>@Yn(p.SmsReminders)</td>
                                 <td><span class="badge bg-secondary">@p.BrandingTier</span></td>
                                 <td>@Yn(p.IsActive)</td>
@@ -339,9 +343,14 @@
                 db.Entry(existing).CurrentValues.SetValues(_editing);
             }
             await db.SaveChangesAsync();
+            var planId = _editing.Id;
             _editing = null;
             await Load();
-            _message = "Zapisano."; _msgError = false;
+            var (pushed, total) = await TenantService.PushPlanToTenantsAsync(planId);
+            _message = total == 0 ? "Zapisano."
+                : pushed == total ? $"Zapisano. Uprawnienia odświeżone u {total} trenerów."
+                : $"Zapisano. Uprawnienia odświeżone u {pushed}/{total} trenerów — pozostali dostaną je przy następnym starcie.";
+            _msgError = false;
         }
         catch (Exception ex)
         {

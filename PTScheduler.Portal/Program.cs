@@ -340,6 +340,27 @@ app.MapGet("/api/backups/{id:int}/download", async (
     return Results.File(entry.FilePath, "application/gzip", Path.GetFileName(entry.FilePath));
 }).RequireAuthorization();
 
+// Tenant apps pull their current plan at startup, so a restart (or Guardian rolling
+// update, which clones the old container env) never runs on stale entitlements.
+app.MapGet("/api/internal/tenants/{slug}/entitlements", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config) =>
+{
+    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+    if (string.IsNullOrEmpty(secret)) return Results.NotFound();
+    if (ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
+        return Results.Unauthorized();
+
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null) return Results.NotFound();
+    var plan = await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == tenant.PlanId);
+    if (plan is null) return Results.NotFound();
+    return Results.Content(TenantService.SerializePlan(plan), "application/json");
+});
+
 // ---- Store API ----
 // Tenant apps call these endpoints to fetch their service catalog and place orders.
 // Secured by the same shared secret used for internal endpoints.

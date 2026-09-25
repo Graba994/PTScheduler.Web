@@ -128,6 +128,7 @@ builder.Services.AddScoped<PTScheduler.Web.Services.HintStateService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.ToastService>();
 builder.Services.AddSingleton<PTScheduler.Web.Services.EntitlementService>();
 builder.Services.AddHostedService<SessionReminderService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.EntitlementSyncService>();
 
 // Tracks whether DB is reachable. Mutated at startup and via /db-error/retry.
 builder.Services.AddSingleton<StartupHealth>();

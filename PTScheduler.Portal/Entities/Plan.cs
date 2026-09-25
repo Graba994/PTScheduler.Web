@@ -34,6 +34,7 @@ public class Plan
 
     // ── Materiały ─────────────────────────────────
     public bool CoursesEnabled { get; set; }
+    public bool TrainingPlansEnabled { get; set; }
     public bool BodyMeasurements { get; set; } = true;
 
     // ── Komunikacja ─────────────────────────────────

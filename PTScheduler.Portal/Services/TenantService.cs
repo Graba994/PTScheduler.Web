@@ -19,6 +19,8 @@ public class TenantService(
     private string PortalUrl => config.GetValue<string>("Portal:PublicUrl") ?? $"http://{ForwardHost}:8081";
     private string InternalSecret => config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
 
+    private static readonly HttpClient PushClient = new() { Timeout = TimeSpan.FromSeconds(5) };
+
     public async Task<List<Tenant>> GetAllAsync()
     {
         await using var db = dbFactory.CreateDbContext();
@@ -246,6 +248,55 @@ public class TenantService(
         });
 
         await db.SaveChangesAsync();
+
+        var plan = await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == planId);
+        if (plan is not null) await PushEntitlementsAsync(tenant, plan);
+    }
+
+    /// <summary>
+    /// Pushes the current plan definition to every tenant on it, so flag changes made in
+    /// the Plans panel take effect without a container restart. Best-effort: a tenant that
+    /// is down picks the plan up from the portal on its next start (see /api/internal/tenants/{slug}/entitlements).
+    /// </summary>
+    public async Task<(int Pushed, int Total)> PushPlanToTenantsAsync(string planId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var plan = await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == planId);
+        if (plan is null) return (0, 0);
+        var tenants = await db.Tenants.AsNoTracking().Where(t => t.PlanId == planId).ToListAsync();
+        var results = await Task.WhenAll(tenants.Select(t => PushEntitlementsAsync(t, plan)));
+        return (results.Count(ok => ok), tenants.Count);
+    }
+
+    public async Task<bool> PushEntitlementsAsync(int tenantId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Id == tenantId);
+        if (tenant is null) return false;
+        var plan = await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == tenant.PlanId);
+        return plan is not null && await PushEntitlementsAsync(tenant, plan);
+    }
+
+    private async Task<bool> PushEntitlementsAsync(Tenant tenant, Plan plan)
+    {
+        if (string.IsNullOrEmpty(InternalSecret) || tenant.Port <= 0) return false;
+        try
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post,
+                $"http://{ForwardHost}:{tenant.Port}/internal/entitlements/reload")
+            {
+                Content = new StringContent(SerializePlan(plan), System.Text.Encoding.UTF8, "application/json")
+            };
+            req.Headers.Add("X-Internal-Secret", InternalSecret);
+            using var resp = await PushClient.SendAsync(req);
+            if (resp.IsSuccessStatusCode) return true;
+            logger.LogWarning("Entitlements push to tenant {Slug} returned {Status}", tenant.Slug, (int)resp.StatusCode);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Entitlements push to tenant {Slug} failed", tenant.Slug);
+        }
+        return false;
     }
 
     /// <summary>
