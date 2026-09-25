@@ -5,24 +5,31 @@
 
 @if (_show && _bannerEnabled)
 {
-    <div class="pwa-banner @(_ios ? "pwa-banner--ios" : "")" role="dialog" aria-label="Zainstaluj aplikację">
+    <div class="pwa-banner @(_mode == Mode.Ios ? "pwa-banner--ios" : "")" role="dialog" aria-label="Zainstaluj aplikację">
         <img class="pwa-banner-icon" src="@(_iconPath ?? "/icons/icon-96.png")" alt="" width="48" height="48" />
         <div class="pwa-banner-text">
             <div class="pwa-banner-title">@_title</div>
-            @if (_ios)
+            @switch (_mode)
             {
-                <div class="pwa-banner-body">
-                    Naciśnij <span class="pwa-share-icon" title="Udostępnij">&#8679;</span>
-                    i wybierz <strong>Dodaj do ekranu głównego</strong>
-                </div>
-            }
-            else
-            {
-                <div class="pwa-banner-body">@_body</div>
+                case Mode.Ios:
+                    <div class="pwa-banner-body">
+                        Naciśnij <span class="pwa-share-icon" title="Udostępnij"><i class="bi bi-box-arrow-up"></i></span>
+                        i wybierz <strong>Dodaj do ekranu głównego</strong>
+                    </div>
+                    break;
+                case Mode.Manual:
+                    <div class="pwa-banner-body">
+                        Otwórz menu przeglądarki <strong>⋮</strong> i wybierz <strong>Zainstaluj aplikację</strong>
+                        albo <strong>Dodaj do ekranu głównego</strong>
+                    </div>
+                    break;
+                default:
+                    <div class="pwa-banner-body">@_body</div>
+                    break;
             }
         </div>
         <div class="pwa-banner-actions">
-            @if (!_ios)
+            @if (_mode == Mode.Prompt)
             {
                 <button class="btn btn-primary btn-sm" @onclick="InstallAsync">@_button</button>
             }
@@ -34,8 +41,10 @@
 }
 
 @code {
+    private enum Mode { Prompt, Ios, Manual }
+
     private bool _show;
-    private bool _ios;
+    private Mode _mode = Mode.Prompt;
     private bool _bannerEnabled = true;
     private string _title   = "Zainstaluj aplikację";
     private string _body    = "Dodaj do ekranu głównego — działa jak natywna, bez przeglądarki.";
@@ -43,6 +52,12 @@
     private string? _iconPath;
 
     private DotNetObjectReference<PwaInstallBanner>? _ref;
+    private CancellationTokenSource? _fallbackCts;
+
+    // Ile czekamy na beforeinstallprompt, zanim pokażemy instrukcję ręczną. Chrome wysyła je
+    // dopiero po spełnieniu warunków (HTTPS, interakcja + ~30 s na stronie), Firefox/Samsung
+    // czasem wcale — bez tego baner na Androidzie mógł się nigdy nie pojawić.
+    private static readonly TimeSpan ManualFallbackDelay = TimeSpan.FromSeconds(8);
 
     protected override async Task OnInitializedAsync()
     {
@@ -63,69 +78,74 @@
     {
         if (!firstRender || !_bannerEnabled) return;
 
-        var isStandalone = await JS.InvokeAsync<bool>("eval",
-            "window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches");
-        if (isStandalone) return;
-
-        // Dismiss expires after 3 days — user gets reminded periodically
-        var dismissed = await JS.InvokeAsync<bool>("eval", """
-            (function() {
-                var ts = localStorage.getItem('pwa-banner-dismissed');
-                if (!ts) return false;
-                var elapsed = Date.now() - parseInt(ts, 10);
-                return elapsed < 3 * 24 * 60 * 60 * 1000;
-            })()
-        """);
-        if (dismissed) return;
-
-        var isIos = await JS.InvokeAsync<bool>("eval",
-            "/iphone|ipad|ipod/i.test(navigator.userAgent.toLowerCase())");
-
-        if (isIos)
+        // Wyjątek JS (np. zablokowany localStorage) nie może zerwać połączenia Blazora.
+        try
         {
-            var shownThisSession = await JS.InvokeAsync<bool>("eval",
-                "!!sessionStorage.getItem('pwa-ios-shown')");
-            if (shownThisSession) return;
-            await JS.InvokeVoidAsync("eval", "sessionStorage.setItem('pwa-ios-shown','1')");
-            _ios = true;
-            _show = true;
-            StateHasChanged();
-            return;
-        }
+            var env = await JS.InvokeAsync<string>("PTBanner.environment");
+            if (env is "standalone" or "dismissed") return;
 
-        // Android/Chrome: listen for beforeinstallprompt
-        _ref = DotNetObjectReference.Create(this);
-        await JS.InvokeVoidAsync("PTBanner.listen", _ref);
+            if (env == "ios")
+            {
+                _mode = Mode.Ios;
+                _show = true;
+                StateHasChanged();
+                return;
+            }
+
+            // Android / inne mobilne: przycisk „Zainstaluj”, gdy przeglądarka da zdarzenie;
+            // w przeciwnym razie po chwili instrukcja z menu przeglądarki.
+            _ref = DotNetObjectReference.Create(this);
+            await JS.InvokeVoidAsync("PTBanner.listen", _ref);
+            // Komputer: baner tylko po zdarzeniu z przeglądarki, bez instrukcji ręcznej.
+            if (_show || env == "desktop") return;
+
+            _fallbackCts = new CancellationTokenSource();
+            await Task.Delay(ManualFallbackDelay, _fallbackCts.Token);
+            if (!_show)
+            {
+                _mode = Mode.Manual;
+                _show = true;
+                StateHasChanged();
+            }
+        }
+        catch (TaskCanceledException) { }
+        catch { }
     }
 
     [JSInvokable]
     public void OnInstallAvailable()
     {
+        _fallbackCts?.Cancel();
+        _mode = Mode.Prompt;
         _show = true;
         InvokeAsync(StateHasChanged);
     }
 
     private async Task InstallAsync()
     {
-        var accepted = await JS.InvokeAsync<bool>("triggerPwaInstall");
-        if (accepted)
+        try
         {
-            _show = false;
-            await JS.InvokeVoidAsync("eval",
-                "localStorage.setItem('pwa-banner-dismissed', Date.now().toString())");
+            var accepted = await JS.InvokeAsync<bool>("triggerPwaInstall");
+            if (accepted)
+            {
+                _show = false;
+                await JS.InvokeVoidAsync("PTBanner.dismiss");
+            }
         }
+        catch { }
     }
 
     private async Task Dismiss()
     {
         _show = false;
-        await JS.InvokeVoidAsync("eval",
-            "localStorage.setItem('pwa-banner-dismissed', Date.now().toString())");
+        try { await JS.InvokeVoidAsync("PTBanner.dismiss"); } catch { }
     }
 
-    public async ValueTask DisposeAsync()
+    public ValueTask DisposeAsync()
     {
+        _fallbackCts?.Cancel();
+        _fallbackCts?.Dispose();
         _ref?.Dispose();
-        await Task.CompletedTask;
+        return ValueTask.CompletedTask;
     }
 }

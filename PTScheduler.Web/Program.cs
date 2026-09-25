@@ -283,7 +283,7 @@ app.MapGet("/manifest.webmanifest", async (PTScheduler.Application.Interfaces.IB
     };
     var icons = string.IsNullOrEmpty(customIcon)
         ? defaultIcons
-        : (object[])[ new { src = customIcon, sizes = "512x512", type = "image/png", purpose = "any maskable" }, ..defaultIcons ];
+        : (object[])[ new { src = customIcon, sizes = "512x512", type = IconMimeType(customIcon), purpose = "any" }, ..defaultIcons ];
 
     var shortcutIcon = string.IsNullOrEmpty(customIcon) ? "/icons/icon-96.png" : customIcon;
 
@@ -522,6 +522,15 @@ app.MapPost("/payments/{provider}/notify",
 app.Run();
 
 // ---- helpers ----
+
+// Własna ikona PWA może być JPG/WebP — zły typ w manifeście psuje wybór ikony w Chrome.
+static string IconMimeType(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+{
+    ".jpg" or ".jpeg" => "image/jpeg",
+    ".webp" => "image/webp",
+    ".svg" => "image/svg+xml",
+    _ => "image/png"
+};
 
 static bool IsAllowedWhenDbDown(string path) =>
        path.StartsWith("/db-error", StringComparison.OrdinalIgnoreCase)

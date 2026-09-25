@@ -1,4 +1,4 @@
-const CACHE = 'ptscheduler-v4';
+const CACHE = 'ptscheduler-v5';
 const PRECACHE = [
     '/',
     '/offline.html',
@@ -69,20 +69,25 @@ self.addEventListener('fetch', e => {
         return;
     }
 
-    // Static assets with known extensions — cache-first
+    // Static assets with known extensions — stale-while-revalidate: szybko z cache, a w tle
+    // pobieramy nową wersję. Pliki bez odcisku w nazwie (/js/*.js, /branding/logo.png,
+    // manifest) przy cache-first zostawały na telefonach w starej wersji na zawsze.
     const isStatic = /\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|webmanifest)(\?.*)?$/.test(url.pathname);
     if (isStatic) {
         e.respondWith(
-            caches.match(request).then(cached => {
-                if (cached) return cached;
-                return fetch(request).then(res => {
-                    if (res.ok) {
-                        const clone = res.clone();
-                        caches.open(CACHE).then(c => c.put(request, clone));
+            caches.open(CACHE).then(cache =>
+                cache.match(request).then(cached => {
+                    const network = fetch(request).then(res => {
+                        if (res.ok) cache.put(request, res.clone());
+                        return res;
+                    });
+                    if (cached) {
+                        e.waitUntil(network.catch(() => {}));
+                        return cached;
                     }
-                    return res;
-                });
-            })
+                    return network;
+                })
+            )
         );
         return;
     }
