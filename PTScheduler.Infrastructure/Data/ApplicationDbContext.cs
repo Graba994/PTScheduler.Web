@@ -393,6 +393,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             e.HasIndex(s => s.ClientId).IsUnique();
         });
 
+        builder.Entity<TrainerConfig>(e => e.HasIndex(c => c.CalendarFeedToken).IsUnique());
+
         builder.Entity<WorkoutComment>(e =>
         {
             e.HasOne(c => c.Client)

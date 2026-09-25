@@ -257,6 +257,63 @@ app.MapGet("/reports/client/{clientId:int}/monthly", async (
     }
 }).RequireAuthorization();
 
+// Subskrypcja kalendarza trenera (Google/Apple/Outlook): wszystkie wizyty w jednym pliku ICS.
+// Bez logowania — kalendarze nie wysyłają ciasteczek — więc dostęp wyłącznie po sekretnym
+// tokenie z TrainerConfig. Nowy token (Kalendarz → „W telefonie”) unieważnia stary link.
+app.MapGet("/calendar/feed/{token}.ics", async (
+    string token,
+    ITrainerConfigService trainerConfig,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    IAppClock clock,
+    IBrandingService branding) =>
+{
+    var trainerUserId = await trainerConfig.FindTrainerByCalendarFeedTokenAsync(token);
+    if (trainerUserId is null) return Results.NotFound();
+
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var from = clock.LocalNow.Date.AddDays(-60);
+    var to = clock.LocalNow.Date.AddDays(366);
+    var sessions = await db.Sessions.AsNoTracking()
+        .Where(s => s.TrainerUserId == trainerUserId && s.StartTime >= from && s.StartTime < to)
+        .Select(s => new
+        {
+            s.Id, s.StartTime, s.Status, s.MeetingUrl,
+            TypeName = s.SessionType.Name, s.SessionType.DurationMinutes,
+            s.Client.FirstName, s.Client.LastName, s.Client.Phone
+        })
+        .ToListAsync();
+
+    string company;
+    try { company = (await branding.GetAsync()).CompanyName ?? "PTScheduler"; }
+    catch { company = "PTScheduler"; }
+
+    var events = sessions.Select(s =>
+    {
+        var start = DateTime.SpecifyKind(clock.ToUtc(s.StartTime), DateTimeKind.Utc);
+        var client = $"{s.FirstName} {s.LastName}".Trim();
+        var cancelled = s.Status is PTScheduler.Domain.Enums.SessionStatus.Cancelled;
+        var description = string.Join("\n", new[]
+        {
+            $"Klient: {client}",
+            string.IsNullOrWhiteSpace(s.Phone) ? null : $"Telefon: {s.Phone}",
+            string.IsNullOrWhiteSpace(s.MeetingUrl) ? null : $"Spotkanie online: {s.MeetingUrl}",
+            s.Status == PTScheduler.Domain.Enums.SessionStatus.AwaitingPackage ? "Czeka na pakiet" : null
+        }.Where(l => l is not null));
+        return new CalendarLinks.FeedEvent(
+            Uid: $"session-{s.Id}@{company.Replace(" ", "")}.ptscheduler",
+            StartUtc: start,
+            EndUtc: start.AddMinutes(s.DurationMinutes > 0 ? s.DurationMinutes : 60),
+            Title: cancelled ? $"[Odwołana] {s.TypeName} — {client}" : $"{s.TypeName} — {client}",
+            Description: description,
+            Location: null,
+            Url: s.MeetingUrl,
+            Cancelled: cancelled);
+    });
+
+    var ics = CalendarLinks.BuildFeed($"{company} — wizyty", events);
+    return Results.File(ics, "text/calendar; charset=utf-8");
+});
+
 // Dynamic PWA manifest — reads branding from DB so name/theme follow admin settings.
 // Served as application/manifest+json; browsers prefer .webmanifest over .json.
 app.MapGet("/manifest.webmanifest", async (PTScheduler.Application.Interfaces.IBrandingService branding) =>

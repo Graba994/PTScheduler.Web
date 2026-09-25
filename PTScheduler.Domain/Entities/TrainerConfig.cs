@@ -18,4 +18,10 @@ public class TrainerConfig
     // If true: every client of this trainer can see every other client in contacts
     public bool AllowClientsDiscoverPeers { get; set; } = false;
     public int CancellationWindowHours { get; set; } = 24;
+
+    /// <summary>
+    /// Sekretny token adresu subskrypcji kalendarza (ICS) z wizytami trenera.
+    /// Null = subskrypcja jeszcze niewłączona. Zmiana tokenu unieważnia stary link.
+    /// </summary>
+    public string? CalendarFeedToken { get; set; }
 }
