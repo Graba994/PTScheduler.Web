@@ -120,7 +120,9 @@ builder.Services.AddIdentityCore<ApplicationUser>(options =>
     .AddEntityFrameworkStores<ApplicationDbContext>()
     .AddSignInManager()
     .AddErrorDescriber<PolishIdentityErrorDescriber>()
-    .AddDefaultTokenProviders();
+    .AddDefaultTokenProviders()
+    .AddTokenProvider<PTScheduler.Web.Components.Account.ClientInviteTokenProvider<ApplicationUser>>(
+        PTScheduler.Application.Interfaces.ClientInvite.TokenProvider);
 
 builder.Services.AddScoped<IEmailSender<ApplicationUser>, PTScheduler.Web.Components.Account.IdentityEmailSender>();
 builder.Services.AddSingleton<IWebRootPathProvider, WebRootPathProvider>();
@@ -141,7 +143,8 @@ builder.Services.AddRateLimiter(options =>
         var path = ctx.Request.Path.Value ?? "";
         if (ctx.Request.Method == "POST" &&
             (path.StartsWith("/Account/Login", StringComparison.OrdinalIgnoreCase) ||
-             path.StartsWith("/Account/Register", StringComparison.OrdinalIgnoreCase)))
+             path.StartsWith("/Account/Register", StringComparison.OrdinalIgnoreCase) ||
+             path.StartsWith("/Account/Invite", StringComparison.OrdinalIgnoreCase)))
         {
             var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
             return RateLimitPartition.GetFixedWindowLimiter(ip, _ => new FixedWindowRateLimiterOptions

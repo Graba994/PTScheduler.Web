@@ -257,16 +257,10 @@ public class PublicBookingService(
 
     // ---- helpers ----
 
-    private async Task<string> BuildSetPasswordLinkAsync(ApplicationUser user, string appBaseUrl)
-    {
-        var token = await userManager.GeneratePasswordResetTokenAsync(user);
-        var encoded = Base64UrlEncode(Encoding.UTF8.GetBytes(token));
-        return $"{appBaseUrl.TrimEnd('/')}/Account/ResetPassword?code={encoded}";
-    }
-
-    /// <summary>RFC 4648 §5 base64url (no padding) — matches Microsoft.AspNetCore.WebUtilities.WebEncoders.</summary>
-    private static string Base64UrlEncode(byte[] data) =>
-        Convert.ToBase64String(data).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    // Ten sam link co zaproszenie od trenera: strona „ustaw hasło” bez wpisywania e-maila,
+    // ważny 7 dni zamiast 1 dnia jak reset hasła.
+    private Task<string> BuildSetPasswordLinkAsync(ApplicationUser user, string appBaseUrl) =>
+        ClientInvitationService.BuildLinkAsync(userManager, user, appBaseUrl);
 
     private static string ResolveTrainerName(ApplicationUser trainer)
     {

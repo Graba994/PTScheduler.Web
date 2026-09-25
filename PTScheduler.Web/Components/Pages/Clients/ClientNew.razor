@@ -1,6 +1,7 @@
 ﻿@page "/clients/new"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
 @inject IClientService ClientService
+@inject IClientInvitationService Invitations
 @inject EntitlementService Entitlements
 @inject NavigationManager Nav
 @using PTScheduler.Application.DTOs
@@ -73,6 +74,13 @@
                         <textarea class="form-control" rows="2" @bind="dto.TrainingGoal"
                                   placeholder="np. Redukcja wagi, budowa masy, poprawa kondycji..."></textarea>
                     </div>
+                    <div class="col-12">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="sendInvite" @bind="_sendInvite" />
+                            <label class="form-check-label" for="sendInvite">Wyślij klientowi zaproszenie e-mailem</label>
+                        </div>
+                        <div class="form-text">Klient dostanie link do ustawienia hasła (ważny @ClientInvite.ValidDays dni). Link możesz też skopiować później w profilu klienta.</div>
+                    </div>
                 </div>
 
                 <div class="d-flex gap-2 mt-4">
@@ -97,6 +105,7 @@
     private bool _limitReached;
     private int _clientCount;
     private int _maxClients;
+    private bool _sendInvite = true;
 
     protected override async Task OnInitializedAsync()
     {
@@ -123,7 +132,13 @@
         try
         {
             var client = await ClientService.CreateClientAsync(dto);
-            Nav.NavigateTo($"/clients/{client.Id}");
+            var invite = "";
+            if (_sendInvite)
+            {
+                var r = await Invitations.SendInviteAsync(client.Id, Nav.BaseUri);
+                invite = r.EmailSent ? "?invite=sent" : "?invite=failed";
+            }
+            Nav.NavigateTo($"/clients/{client.Id}{invite}");
         }
         catch (Exception ex)
         {
