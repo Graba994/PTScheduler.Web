@@ -84,40 +84,7 @@ else
     @if (_journal.Count > 0)
     {
         <h6 class="text-muted mt-4 mb-2"><i class="bi bi-journal-text me-1"></i>Dziennik</h6>
-        <div class="d-flex flex-column gap-2">
-            @for (var i = 0; i < _journal.Count; i++)
-            {
-                var day = _journal[i];
-                var idx = i;
-                var open = _openDays.Contains(idx);
-                <div class="card">
-                    <button class="btn text-start d-flex justify-content-between align-items-center p-3" @onclick="() => ToggleDay(idx)">
-                        <span>
-                            <span class="fw-semibold me-2">@day.Date.ToString("yyyy-MM-dd")</span>
-                            <span class="text-muted small">@day.Exercises.Count ćw. · @day.SetCount serii · @day.TotalVolume.ToString("0") kg obj.</span>
-                        </span>
-                        <i class="bi @(open ? "bi-chevron-up" : "bi-chevron-down") text-muted"></i>
-                    </button>
-                    @if (open)
-                    {
-                        <div class="card-body pt-0">
-                            @foreach (var ex in day.Exercises)
-                            {
-                                <div class="mb-2">
-                                    <div class="fw-semibold small">@ex.ExerciseName <span class="text-muted fw-normal">· @ex.Volume.ToString("0") kg</span></div>
-                                    <div class="d-flex flex-wrap gap-1 mt-1">
-                                        @foreach (var s in ex.Sets)
-                                        {
-                                            <span class="badge bg-light text-dark border">@s.Reps × @s.WeightKg.ToString("0.##") kg</span>
-                                        }
-                                    </div>
-                                </div>
-                            }
-                        </div>
-                    }
-                </div>
-            }
-        </div>
+        <WorkoutJournal ClientId="_clientId.Value" Days="_journal" AsTrainer="false" CurrentUserId="@_userId" />
     }
 }
 </ChildContent>
@@ -131,12 +98,7 @@ else
     private List<MuscleVolumeDto> _muscles = [];
     private List<PersonalRecordDto> _records = [];
     private List<WorkoutJournalDayDto> _journal = [];
-    private readonly HashSet<int> _openDays = [0];
-
-    private void ToggleDay(int i)
-    {
-        if (!_openDays.Add(i)) _openDays.Remove(i);
-    }
+    private string _userId = string.Empty;
 
     private static readonly string[] Palette =
     [
@@ -148,8 +110,8 @@ else
     protected override async Task OnInitializedAsync()
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
-        var userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
-        var client = await ClientService.GetClientByUserIdAsync(userId);
+        _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        var client = await ClientService.GetClientByUserIdAsync(_userId);
         if (client is null) { _loading = false; return; }
         _clientId = client.Id;
         try

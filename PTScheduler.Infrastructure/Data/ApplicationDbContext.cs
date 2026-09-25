@@ -60,6 +60,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<WorkoutLog> WorkoutLogs => Set<WorkoutLog>();
     public DbSet<WorkoutSetLog> WorkoutSetLogs => Set<WorkoutSetLog>();
     public DbSet<WorkoutSession> WorkoutSessions => Set<WorkoutSession>();
+    public DbSet<WorkoutComment> WorkoutComments => Set<WorkoutComment>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -390,6 +391,16 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
              .OnDelete(DeleteBehavior.Cascade);
             // Jeden otwarty draft na klienta (upsert po ClientId).
             e.HasIndex(s => s.ClientId).IsUnique();
+        });
+
+        builder.Entity<WorkoutComment>(e =>
+        {
+            e.HasOne(c => c.Client)
+             .WithMany()
+             .HasForeignKey(c => c.ClientId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.Property(c => c.Text).HasMaxLength(1000);
+            e.HasIndex(c => new { c.ClientId, c.WorkoutDate });
         });
     }
 }

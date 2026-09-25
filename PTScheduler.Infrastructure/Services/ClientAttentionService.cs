@@ -45,6 +45,7 @@ public class ClientAttentionService(
 
         Dictionary<int, DateTime> planAssigned = [];
         Dictionary<int, DateOnly> lastWorkout = [];
+        Dictionary<int, List<DateOnly>> uncommented = [];
         if (includeTraining)
         {
             planAssigned = (await db.TrainingPlans.AsNoTracking()
@@ -58,6 +59,24 @@ public class ClientAttentionService(
                     .Select(g => new { ClientId = g.Key, Last = g.Max(w => w.WorkoutDate) })
                     .ToListAsync())
                 .ToDictionary(x => x.ClientId, x => x.Last);
+
+            // Świeże treningi (ostatnie dni) bez komentarza trenera — okazja do informacji zwrotnej.
+            var since = clock.Today.AddDays(-AttentionRules.NewWorkoutDays);
+            var recentDays = await db.WorkoutLogs.AsNoTracking()
+                .Where(w => ids.Contains(w.ClientId) && w.WorkoutDate >= since)
+                .Select(w => new { w.ClientId, w.WorkoutDate })
+                .Distinct()
+                .ToListAsync();
+            var commented = (await db.WorkoutComments.AsNoTracking()
+                    .Where(c => ids.Contains(c.ClientId) && c.ByTrainer && c.WorkoutDate >= since)
+                    .Select(c => new { c.ClientId, c.WorkoutDate })
+                    .Distinct()
+                    .ToListAsync())
+                .Select(x => (x.ClientId, x.WorkoutDate)).ToHashSet();
+            uncommented = recentDays
+                .Where(d => !commented.Contains((d.ClientId, d.WorkoutDate)))
+                .GroupBy(d => d.ClientId)
+                .ToDictionary(g => g.Key, g => g.Select(d => d.WorkoutDate).OrderByDescending(d => d).ToList());
         }
 
         var result = new List<ClientAttentionDto>();
@@ -115,15 +134,25 @@ public class ClientAttentionService(
                     var days = today.DayNumber - lw.DayNumber;
                     if (days >= AttentionRules.NotTrainingDays)
                         reasons.Add(new(AttentionKind.NotTraining, AttentionSeverity.Warning,
-                            $"Nie ćwiczy według planu od {AttentionRules.Days(days)}"));
+                            $"Nie ćwiczy według planu od {AttentionRules.Days(days)}",
+                            $"/trainer/activity/{c.Id}"));
                 }
                 else
                 {
                     var days = (clock.UtcNow - assignedAt).Days;
                     if (days >= AttentionRules.NotTrainingDays)
                         reasons.Add(new(AttentionKind.NotTraining, AttentionSeverity.Warning,
-                            $"Plan przypisany {AttentionRules.Days(days)} temu — brak treningów"));
+                            $"Plan przypisany {AttentionRules.Days(days)} temu — brak treningów",
+                            $"/trainer/activity/{c.Id}"));
                 }
+            }
+
+            if (uncommented.TryGetValue(c.Id, out var fresh) && fresh.Count > 0)
+            {
+                var label = fresh.Count == 1
+                    ? $"Nowy trening {fresh[0]:dd.MM} — dodaj komentarz"
+                    : $"{fresh.Count} nowe treningi bez komentarza";
+                reasons.Add(new(AttentionKind.NewWorkout, AttentionSeverity.Info, label, $"/trainer/activity/{c.Id}"));
             }
 
             if (reasons.Count > 0)

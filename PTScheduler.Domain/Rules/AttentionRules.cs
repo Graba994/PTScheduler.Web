@@ -18,6 +18,9 @@ public static class AttentionRules
     /// <summary>Tyle dni bez treningu przy przypisanym planie.</summary>
     public const int NotTrainingDays = 7;
 
+    /// <summary>Treningi z tylu ostatnich dni bez komentarza trenera trafiają na listę.</summary>
+    public const int NewWorkoutDays = 3;
+
     /// <summary>Pakiet zakończony w tym oknie bez następnego = „brak aktywnego pakietu”.</summary>
     public const int PackageEndedLookbackDays = 60;
 

@@ -59,3 +59,15 @@ public sealed class ClientActivityDto
     public int WorkoutsInWindow { get; set; }
     public decimal VolumeInWindow { get; set; }
 }
+
+public sealed class WorkoutCommentDto
+{
+    public int Id { get; set; }
+    public DateOnly WorkoutDate { get; set; }
+    public string AuthorUserId { get; set; } = string.Empty;
+    public string AuthorName { get; set; } = string.Empty;
+    public bool ByTrainer { get; set; }
+    public string Text { get; set; } = string.Empty;
+    public DateTime CreatedAtUtc { get; set; }
+    public bool IsRead { get; set; }
+}
