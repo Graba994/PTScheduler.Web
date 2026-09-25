@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using PTScheduler.Portal.Components;
@@ -37,7 +38,20 @@ builder.Services.ConfigureApplicationCookie(o =>
 {
     o.LoginPath = "/login";
     o.LogoutPath = "/logout";
+    // Portal i tenanci mogą działać pod tym samym hostem (różne porty), a
+    // przeglądarka nie rozróżnia ciasteczek po porcie. Własna nazwa zapobiega
+    // nadpisywaniu ciasteczka logowania przez aplikację trenera i odwrotnie.
+    o.Cookie.Name = ".PTPortal.Auth";
+    o.ExpireTimeSpan = TimeSpan.FromDays(30);
+    o.SlidingExpiration = true;
 });
+builder.Services.AddAntiforgery(o => o.Cookie.Name = ".PTPortal.AF");
+
+// Klucze szyfrujące ciasteczka w bazie portalu, a nie w kontenerze — inaczej
+// każda aktualizacja portalu wylogowywała administratorów.
+builder.Services.AddDataProtection()
+    .SetApplicationName("PTScheduler.Portal")
+    .PersistKeysToDbContext<PortalDbContext>();
 
 builder.Services.AddAuthorization();
 

@@ -1,5 +1,6 @@
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
@@ -58,6 +59,11 @@ builder.Services.Configure<Microsoft.AspNetCore.SignalR.HubOptions>(options =>
 builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions>(options =>
 {
     options.DetailedErrors = true;
+    // Aplikacja działa głównie jako PWA: telefon usypia kartę/aplikację, a
+    // przeglądarka zamraża schowane zakładki. Dłuższe podtrzymanie rozłączonego
+    // obwodu pozwala po powrocie wznowić stan bez przeładowania strony
+    // (domyślnie 3 minuty).
+    options.DisconnectedCircuitRetentionPeriod = TimeSpan.FromMinutes(10);
 });
 
 builder.Services.AddCascadingAuthenticationState();
@@ -70,6 +76,32 @@ builder.Services.AddAuthentication(options =>
         options.DefaultSignInScheme = IdentityConstants.ExternalScheme;
     })
     .AddIdentityCookies();
+
+// ─── Sesja logowania: trwała i odizolowana per tenant ───────────────────────
+// Portal i tenanci mogą działać pod tym samym hostem na różnych portach
+// (np. 192.168.0.220:8081 i :9001). Przeglądarka NIE rozróżnia ciasteczek po
+// porcie, więc przy domyślnej nazwie `.AspNetCore.Identity.Application`
+// aplikacje nadpisywały sobie nawzajem ciasteczko logowania i wylogowywały
+// użytkownika przy przełączaniu zakładek. Nazwy zawierają więc slug tenanta.
+var cookieScope = System.Text.RegularExpressions.Regex.Replace(
+    Environment.GetEnvironmentVariable("TENANT_SLUG") ?? "", "[^A-Za-z0-9_-]", "");
+if (cookieScope.Length == 0) cookieScope = "app";
+
+// Klucze szyfrujące ciasteczka trzymamy w bazie tenanta (tabela
+// DataProtectionKeys), a nie w systemie plików kontenera — inaczej każde
+// odtworzenie kontenera przy aktualizacji wylogowywało wszystkich.
+builder.Services.AddDataProtection()
+    .SetApplicationName($"PTScheduler.Web.{cookieScope}")
+    .PersistKeysToDbContext<ApplicationDbContext>();
+
+builder.Services.ConfigureApplicationCookie(options =>
+{
+    options.Cookie.Name = $".PTS.{cookieScope}.Auth";
+    // PWA ma nie wylogowywać: 30 dni, odnawiane przy każdym użyciu.
+    options.ExpireTimeSpan = TimeSpan.FromDays(30);
+    options.SlidingExpiration = true;
+});
+builder.Services.AddAntiforgery(options => options.Cookie.Name = $".PTS.{cookieScope}.AF");
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration, builder.Environment.ContentRootPath);

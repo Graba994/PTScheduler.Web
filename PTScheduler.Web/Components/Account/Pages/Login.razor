@@ -52,8 +52,8 @@
             </div>
 
             <div class="form-check mb-4">
-                <InputCheckbox @bind-Value="Input.RememberMe" class="form-check-input" id="rememberMe" />
-                <label class="form-check-label small text-muted" for="rememberMe">Zapamiętaj mnie</label>
+                <InputCheckbox @bind-Value="Input.PublicDevice" class="form-check-input" id="publicDevice" />
+                <label class="form-check-label small text-muted" for="publicDevice">Urządzenie publiczne — nie zapamiętuj logowania</label>
             </div>
 
             <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold mb-3">
@@ -116,7 +116,7 @@
         else
         {
             if (!editContext.Validate()) return;
-            result = await SignInManager.PasswordSignInAsync(Input.Email, Input.Password, Input.RememberMe, lockoutOnFailure: true);
+            result = await SignInManager.PasswordSignInAsync(Input.Email, Input.Password, isPersistent: !Input.PublicDevice, lockoutOnFailure: true);
         }
 
         var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
@@ -134,7 +134,7 @@
         else if (result.RequiresTwoFactor)
         {
             RedirectManager.RedirectTo("Account/LoginWith2fa",
-                new() { ["returnUrl"] = ReturnUrl, ["rememberMe"] = Input.RememberMe });
+                new() { ["returnUrl"] = ReturnUrl, ["rememberMe"] = !Input.PublicDevice });
         }
         else if (result.IsLockedOut)
         {
@@ -182,8 +182,11 @@
         [DataType(DataType.Password)]
         public string Password { get; set; } = "";
 
-        [Display(Name = "Zapamiętaj mnie")]
-        public bool RememberMe { get; set; }
+        // Logowanie jest domyślnie zapamiętane (trwałe ciasteczko), bo aplikacja
+        // działa głównie jako PWA, które po uśpieniu nie może gubić sesji.
+        // Użytkownik na cudzym/publicznym komputerze może z tego zrezygnować.
+        [Display(Name = "Urządzenie publiczne")]
+        public bool PublicDevice { get; set; }
 
         public PasskeyInputModel? Passkey { get; set; }
     }

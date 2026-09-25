@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
@@ -6,8 +7,12 @@ using PTScheduler.Portal.Entities;
 namespace PTScheduler.Portal.Data;
 
 public class PortalDbContext(DbContextOptions<PortalDbContext> options)
-    : IdentityDbContext<IdentityUser>(options)
+    : IdentityDbContext<IdentityUser>(options), IDataProtectionKeyContext
 {
+    // Klucze ASP.NET Data Protection w bazie — aktualizacja portalu (odtworzenie
+    // kontenera przez Guardiana) nie wylogowuje administratorów.
+    public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
+
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<Plan> Plans => Set<Plan>();
     public DbSet<Subscription> Subscriptions => Set<Subscription>();

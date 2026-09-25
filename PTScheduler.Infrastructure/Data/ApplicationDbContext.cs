@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.DataProtection.EntityFrameworkCore;
 using Microsoft.AspNetCore.Identity.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore;
 using PTScheduler.Domain.Entities;
@@ -5,8 +6,13 @@ using PTScheduler.Domain.Entities;
 namespace PTScheduler.Infrastructure.Data;
 
 public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options)
-    : IdentityDbContext<ApplicationUser>(options)
+    : IdentityDbContext<ApplicationUser>(options), IDataProtectionKeyContext
 {
+    // Klucze ASP.NET Data Protection (szyfrują ciasteczka logowania i tokeny
+    // antiforgery). Trzymane w bazie tenanta, a nie w systemie plików kontenera,
+    // żeby odtworzenie kontenera przy aktualizacji nie wylogowywało użytkowników.
+    public DbSet<DataProtectionKey> DataProtectionKeys => Set<DataProtectionKey>();
+
     public DbSet<Client> Clients => Set<Client>();
     public DbSet<Session> Sessions => Set<Session>();
     public DbSet<SessionType> SessionTypes => Set<SessionType>();
