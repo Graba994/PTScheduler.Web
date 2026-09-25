@@ -278,6 +278,74 @@ else
         </div>
     </div>
 
+    <!-- Login page -->
+    <div class="row g-4 mt-0">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-header"><i class="bi bi-box-arrow-in-right me-2"></i>Strona logowania</div>
+                <div class="card-body">
+                    <div class="row g-4">
+                        <div class="col-12 col-lg-6 d-flex flex-column gap-3">
+                            <div>
+                                <label class="form-label">Nagłówek</label>
+                                <input class="form-control" @bind="_branding.LoginTitle" @bind:event="oninput" maxlength="60"
+                                       placeholder="Zaloguj się" />
+                                <div class="form-text">Np. „Witaj w @_branding.CompanyName”.</div>
+                            </div>
+                            <div>
+                                <label class="form-label">Tekst pod nagłówkiem</label>
+                                <textarea class="form-control" rows="2" @bind="_branding.LoginSubtitle" @bind:event="oninput" maxlength="160"
+                                          placeholder="Wpisz swoje dane dostępowe"></textarea>
+                            </div>
+                            <div>
+                                <label class="form-label">Tło <span class="text-muted fw-normal">(JPG, PNG, WebP — maks. 4 MB)</span></label>
+                                @if (Entitlements.IsAllowed("CustomLogo"))
+                                {
+                                    @if (!string.IsNullOrEmpty(_loginBgPath))
+                                    {
+                                        <div class="d-flex align-items-center gap-2 mb-2">
+                                            <img src="@_loginBgPath" alt="Tło logowania"
+                                                 style="height:48px;width:80px;object-fit:cover;border-radius:6px;border:1px solid var(--c-border,#E5E7EB)" />
+                                            <button class="btn btn-sm btn-outline-danger" @onclick="DeleteLoginBackground">
+                                                <i class="bi bi-trash me-1"></i>Usuń
+                                            </button>
+                                        </div>
+                                    }
+                                    <label class="upload-zone d-block" for="loginBgFile">
+                                        <i class="bi bi-image fs-4 text-muted d-block mb-1"></i>
+                                        <span class="text-muted small">Kliknij aby wybrać zdjęcie (zalecane: poziome, min. 1600 px)</span>
+                                    </label>
+                                    <InputFile id="loginBgFile" style="display:none" accept="image/png,image/jpeg,image/webp"
+                                               OnChange="UploadLoginBackground" />
+                                    <div class="form-text">Bez zdjęcia tło to delikatny gradient w kolorze motywu.</div>
+                                }
+                                else
+                                {
+                                    <FeatureGate Flag="CustomLogo" RequiredPlan="Starter" ShowLock="true"
+                                                 Title="Własne tło logowania dostępne od planu Starter" />
+                                }
+                            </div>
+                        </div>
+                        <div class="col-12 col-lg-6">
+                            <p class="text-muted small fw-semibold mb-2">Podgląd</p>
+                            <div class="login-preview @(string.IsNullOrEmpty(_loginBgPath) ? "" : "login-preview-photo")"
+                                 style="@(string.IsNullOrEmpty(_loginBgPath) ? "" : $"background-image:url('{_loginBgPath}')")">
+                                <div class="login-preview-brand">@_branding.CompanyName</div>
+                                <div class="login-preview-card">
+                                    <div class="fw-bold">@(string.IsNullOrWhiteSpace(_branding.LoginTitle) ? "Zaloguj się" : _branding.LoginTitle)</div>
+                                    <div class="text-muted" style="font-size:.7rem">@(string.IsNullOrWhiteSpace(_branding.LoginSubtitle) ? "Wpisz swoje dane dostępowe" : _branding.LoginSubtitle)</div>
+                                    <div class="login-preview-field"></div>
+                                    <div class="login-preview-field"></div>
+                                    <div class="login-preview-btn"></div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <!-- Save bar -->
     <div class="mt-4 d-flex align-items-center gap-2 flex-wrap">
         <button class="btn btn-primary" @onclick="Save" disabled="@_saving">
@@ -312,6 +380,7 @@ else
     private string? _logoPath;
     private string? _faviconPath;
     private string? _pwaIconPath;
+    private string? _loginBgPath;
     private bool _saving;
     private string _message = string.Empty;
     private string _error   = string.Empty;
@@ -361,10 +430,13 @@ else
             PwaBannerTitle = dto.PwaBannerTitle,
             PwaBannerBody  = dto.PwaBannerBody,
             PwaBannerButton = dto.PwaBannerButton,
+            LoginTitle     = dto.LoginTitle,
+            LoginSubtitle  = dto.LoginSubtitle,
         };
         _logoPath    = dto.LogoPath;
         _faviconPath = dto.FaviconPath;
         _pwaIconPath = dto.PwaIconPath;
+        _loginBgPath = dto.LoginBackgroundPath;
     }
 
     private void SelectTheme(string key)
@@ -445,6 +517,27 @@ else
         catch (Exception ex) { _error = $"Błąd ikony: {ex.Message}"; }
     }
 
+    private async Task UploadLoginBackground(InputFileChangeEventArgs e)
+    {
+        if (_branding is null) return;
+        _error = string.Empty;
+        try
+        {
+            await using var stream = e.File.OpenReadStream(4 * 1024 * 1024);
+            _loginBgPath = await BrandingService.UploadLoginBackgroundAsync(stream, e.File.Name);
+            await BrandingService.SaveAsync(_branding);
+            // Ta sama nazwa pliku po podmianie — parametr omija cache przeglądarki w podglądzie.
+            _loginBgPath += $"?v={DateTime.UtcNow.Ticks}";
+        }
+        catch (Exception ex) { _error = $"Błąd tła: {ex.Message}"; }
+    }
+
+    private async Task DeleteLoginBackground()
+    {
+        await BrandingService.DeleteLoginBackgroundAsync();
+        _loginBgPath = null;
+    }
+
     private async Task DeletePwaIcon()
     {
         await BrandingService.DeletePwaIconAsync();
@@ -495,6 +588,49 @@ else
         align-items: center;
         justify-content: center;
     }
+    .login-preview {
+        position: relative;
+        border-radius: 12px;
+        min-height: 230px;
+        padding: 18px;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        gap: 10px;
+        overflow: hidden;
+        background: linear-gradient(150deg, var(--c-primary-light) 0%, var(--c-bg, #F8FAFC) 60%);
+        border: 1px solid var(--c-border, #E5E7EB);
+        background-size: cover;
+        background-position: center;
+    }
+    .login-preview-photo::before {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: linear-gradient(160deg, rgba(15,23,42,.35), rgba(15,23,42,.65));
+    }
+    .login-preview > * { position: relative; }
+    .login-preview-brand {
+        font-weight: 700;
+        color: var(--c-primary);
+    }
+    .login-preview-photo .login-preview-brand { color: #fff; text-shadow: 0 1px 6px rgba(0,0,0,.35); }
+    .login-preview-card {
+        width: 100%;
+        max-width: 220px;
+        background: var(--bs-body-bg, #fff);
+        border-radius: 10px;
+        padding: 12px;
+        box-shadow: 0 6px 20px rgba(0,0,0,.12);
+        text-align: center;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        font-size: .8rem;
+    }
+    .login-preview-field { height: 16px; border-radius: 4px; background: var(--bs-secondary-bg, #F1F5F9); }
+    .login-preview-btn { height: 18px; border-radius: 4px; background: var(--c-primary); }
     .theme-tier-badge {
         font-size: 0.6rem;
         font-weight: 700;

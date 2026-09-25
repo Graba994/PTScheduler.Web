@@ -4,6 +4,7 @@
 @using System.ComponentModel.DataAnnotations
 @using Microsoft.AspNetCore.Authentication
 @using Microsoft.AspNetCore.Identity
+@using PTScheduler.Web.Components.Account
 @using PTScheduler.Web.Components.Account.Shared
 
 @using PTScheduler.Domain.Entities
@@ -14,17 +15,18 @@
 @inject NavigationManager NavigationManager
 @inject IdentityRedirectManager RedirectManager
 @inject PTScheduler.Infrastructure.Data.ApplicationDbContext DbContext
+@inject PTScheduler.Application.Interfaces.IAppClock Clock
 
 <PageTitle>Logowanie</PageTitle>
 
 <div class="card" style="border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,0.10)">
     <div class="card-body p-4">
-        <h5 class="fw-bold mb-1 text-center">Zaloguj się</h5>
-        <p class="text-muted small text-center mb-4">Wpisz swoje dane dostępowe</p>
+        <h5 class="fw-bold mb-1 text-center">@(string.IsNullOrWhiteSpace(Branding?.LoginTitle) ? "Zaloguj się" : Branding?.LoginTitle)</h5>
+        <p class="text-muted small text-center mb-4">@(string.IsNullOrWhiteSpace(Branding?.LoginSubtitle) ? "Wpisz swoje dane dostępowe" : Branding?.LoginSubtitle)</p>
 
         <StatusMessage Message="@errorMessage" />
 
-        <EditForm EditContext="editContext" method="post" OnSubmit="LoginUser" FormName="login">
+        <EditForm EditContext="editContext" method="post" OnSubmit="LoginUser" FormName="login" data-busy-on-submit>
             <DataAnnotationsValidator />
             <ValidationSummary class="text-danger small mb-3" role="alert" />
 
@@ -33,7 +35,8 @@
                 <div class="input-group">
                     <span class="input-group-text"><i class="bi bi-envelope"></i></span>
                     <InputText @bind-Value="Input.Email" id="Input.Email" class="form-control"
-                               autocomplete="username webauthn" placeholder="jan@example.com" />
+                               type="email" inputmode="email" autocapitalize="none" autocorrect="off" spellcheck="false"
+                               autocomplete="username webauthn" placeholder="jan@example.com" autofocus />
                 </div>
                 <ValidationMessage For="() => Input.Email" class="text-danger small" />
             </div>
@@ -47,6 +50,10 @@
                     <span class="input-group-text"><i class="bi bi-lock"></i></span>
                     <InputText type="password" @bind-Value="Input.Password" id="Input.Password"
                                class="form-control" autocomplete="current-password" placeholder="••••••••" />
+                    <button type="button" class="btn btn-outline-secondary" data-toggle-password="Input.Password"
+                            aria-label="Pokaż hasło" title="Pokaż hasło">
+                        <i class="bi bi-eye"></i>
+                    </button>
                 </div>
                 <ValidationMessage For="() => Input.Password" class="text-danger small" />
             </div>
@@ -56,7 +63,7 @@
                 <label class="form-check-label small text-muted" for="publicDevice">Urządzenie publiczne — nie zapamiętuj logowania</label>
             </div>
 
-            <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold mb-3">
+            <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold mb-3" data-busy-text="Logowanie…">
                 <i class="bi bi-box-arrow-in-right me-1"></i>Zaloguj się
             </button>
 
@@ -71,7 +78,7 @@
     </div>
 </div>
 
-<div class="text-center mt-3 small">
+<div class="text-center mt-3 small auth-below-card">
     Nie masz konta?
     <a href="@(NavigationManager.GetUriWithQueryParameters("Account/Register", new Dictionary<string, object?> { ["ReturnUrl"] = ReturnUrl }))">
         Zarejestruj się
@@ -84,6 +91,9 @@
 
     [CascadingParameter]
     private HttpContext HttpContext { get; set; } = default!;
+
+    [CascadingParameter]
+    private PTScheduler.Application.DTOs.AppBrandingDto? Branding { get; set; }
 
     [SupplyParameterFromForm]
     private InputModel Input { get; set; } = default!;
@@ -108,69 +118,86 @@
             return;
         }
 
-        SignInResult result;
+        var target = LoginSupport.SafeReturnUrl(ReturnUrl, NavigationManager.BaseUri);
+
         if (!string.IsNullOrEmpty(Input.Passkey?.CredentialJson))
         {
-            result = await SignInManager.PasskeySignInAsync(Input.Passkey.CredentialJson);
-        }
-        else
-        {
-            if (!editContext.Validate()) return;
-            result = await SignInManager.PasswordSignInAsync(Input.Email, Input.Password, isPersistent: !Input.PublicDevice, lockoutOnFailure: true);
+            await LoginWithPasskeyAsync(Input.Passkey.CredentialJson, target);
+            return;
         }
 
-        var ip = HttpContext.Connection.RemoteIpAddress?.ToString();
-        var ua = HttpContext.Request.Headers.UserAgent.ToString();
+        if (!editContext.Validate()) return;
+
+        var user = await UserManager.FindByEmailAsync(Input.Email);
+        var result = await SignInManager.PasswordSignInAsync(Input.Email, Input.Password, isPersistent: !Input.PublicDevice, lockoutOnFailure: true);
 
         if (result.Succeeded)
         {
-            var loggedUser = await UserManager.FindByEmailAsync(Input.Email);
-            if (loggedUser != null)
-                await RecordLoginAsync(loggedUser.Id, ip, ua, true);
-
+            if (user != null) await Record(user.Id, true);
             Logger.LogInformation("User logged in.");
-            RedirectManager.RedirectTo("/app");
+            RedirectManager.RedirectTo(target);
         }
         else if (result.RequiresTwoFactor)
         {
             RedirectManager.RedirectTo("Account/LoginWith2fa",
-                new() { ["returnUrl"] = ReturnUrl, ["rememberMe"] = !Input.PublicDevice });
+                new() { ["returnUrl"] = target, ["rememberMe"] = !Input.PublicDevice });
         }
         else if (result.IsLockedOut)
         {
-            var lockedUser = await UserManager.FindByEmailAsync(Input.Email);
-            if (lockedUser != null)
-                await RecordLoginAsync(lockedUser.Id, ip, ua, false);
-
+            if (user != null) await Record(user.Id, false);
             Logger.LogWarning("User account locked out.");
-            RedirectManager.RedirectTo("Account/Lockout");
+            errorMessage = "Błąd: " + LoginSupport.LockoutMessage(
+                user is null ? null : await UserManager.GetLockoutEndDateAsync(user), Clock.UtcNow);
         }
         else
         {
-            var failedUser = await UserManager.FindByEmailAsync(Input.Email);
-            if (failedUser != null)
-                await RecordLoginAsync(failedUser.Id, ip, ua, false);
-
+            if (user != null) await Record(user.Id, false);
             errorMessage = "Błąd: Nieprawidłowy email lub hasło.";
         }
     }
 
-    private async Task RecordLoginAsync(string userId, string? ip, string? ua, bool success)
+    // Odpowiednik SignInManager.PasskeySignInAsync, ale z trwałym ciasteczkiem (PWA nie może
+    // gubić sesji po uśpieniu) i z zapisem w logu logowań — przy kluczu dostępu pole e-mail
+    // bywa puste, więc użytkownika bierzemy z wyniku weryfikacji, nie z formularza.
+    private async Task LoginWithPasskeyAsync(string credentialJson, string target)
     {
-        try
+        var assertion = await SignInManager.PerformPasskeyAssertionAsync(credentialJson);
+        if (!assertion.Succeeded)
         {
-            DbContext.LoginLogs.Add(new LoginLog
-            {
-                UserId = userId,
-                LoginTime = DateTime.Now,
-                IpAddress = ip,
-                UserAgent = ua?.Length > 500 ? ua[..500] : ua,
-                Success = success
-            });
-            await DbContext.SaveChangesAsync();
+            errorMessage = "Błąd: Nie udało się zalogować kluczem dostępu. Spróbuj ponownie albo użyj hasła.";
+            return;
         }
-        catch { }
+
+        var user = assertion.User;
+        if (await UserManager.IsLockedOutAsync(user))
+        {
+            await Record(user.Id, false);
+            errorMessage = "Błąd: " + LoginSupport.LockoutMessage(await UserManager.GetLockoutEndDateAsync(user), Clock.UtcNow);
+            return;
+        }
+        if (!await SignInManager.CanSignInAsync(user))
+        {
+            await Record(user.Id, false);
+            errorMessage = "Błąd: To konto nie może się jeszcze zalogować (np. niepotwierdzony e-mail).";
+            return;
+        }
+
+        // Aktualny licznik podpisów klucza — ochrona przed sklonowanym kluczem.
+        var update = await UserManager.AddOrUpdatePasskeyAsync(user, assertion.Passkey);
+        if (!update.Succeeded)
+        {
+            errorMessage = "Błąd: Nie udało się zalogować kluczem dostępu.";
+            return;
+        }
+
+        await SignInManager.SignInAsync(user, isPersistent: !Input.PublicDevice, authenticationMethod: "passkey");
+        await Record(user.Id, true);
+        Logger.LogInformation("User logged in with a passkey.");
+        RedirectManager.RedirectTo(target);
     }
+
+    private Task Record(string userId, bool success) =>
+        LoginSupport.RecordAsync(DbContext, Clock, Logger, HttpContext, userId, success);
 
     private sealed class InputModel
     {

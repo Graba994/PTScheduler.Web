@@ -33,6 +33,8 @@ public class BrandingService(IDbContextFactory<ApplicationDbContext> dbFactory, 
         b.PwaBannerTitle = string.IsNullOrWhiteSpace(dto.PwaBannerTitle) ? null : dto.PwaBannerTitle.Trim();
         b.PwaBannerBody = string.IsNullOrWhiteSpace(dto.PwaBannerBody) ? null : dto.PwaBannerBody.Trim();
         b.PwaBannerButton = string.IsNullOrWhiteSpace(dto.PwaBannerButton) ? null : dto.PwaBannerButton.Trim();
+        b.LoginTitle = string.IsNullOrWhiteSpace(dto.LoginTitle) ? null : dto.LoginTitle.Trim();
+        b.LoginSubtitle = string.IsNullOrWhiteSpace(dto.LoginSubtitle) ? null : dto.LoginSubtitle.Trim();
         if (!db.AppBrandings.Local.Contains(b))
             db.AppBrandings.Add(b);
         await db.SaveChangesAsync();
@@ -63,6 +65,24 @@ public class BrandingService(IDbContextFactory<ApplicationDbContext> dbFactory, 
         await using var db = dbFactory.CreateDbContext();
         await UpdatePath(db, b => b.PwaIconPath = path);
         return path;
+    }
+
+    public async Task<string> UploadLoginBackgroundAsync(Stream stream, string fileName)
+    {
+        var path = await SaveFileAsync(stream, fileName, "login-bg");
+        await using var db = dbFactory.CreateDbContext();
+        await UpdatePath(db, b => b.LoginBackgroundPath = path);
+        return path;
+    }
+
+    public async Task DeleteLoginBackgroundAsync()
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var b = await db.AppBrandings.FirstOrDefaultAsync();
+        if (b is null) return;
+        DeleteFile(b.LoginBackgroundPath);
+        b.LoginBackgroundPath = null;
+        await db.SaveChangesAsync();
     }
 
     public async Task DeleteLogoAsync()
@@ -136,6 +156,9 @@ public class BrandingService(IDbContextFactory<ApplicationDbContext> dbFactory, 
         PwaBannerBody = b.PwaBannerBody,
         PwaBannerButton = b.PwaBannerButton,
         PwaIconPath = ResolveFilePath(b.PwaIconPath),
+        LoginTitle = b.LoginTitle,
+        LoginSubtitle = b.LoginSubtitle,
+        LoginBackgroundPath = ResolveFilePath(b.LoginBackgroundPath),
         SetupCompleted = b.SetupCompleted,
         SetupMode = b.SetupMode,
         SetupCompletedAt = b.SetupCompletedAt

@@ -1,33 +1,42 @@
-﻿@page "/Account/LoginWithRecoveryCode"
+@page "/Account/LoginWithRecoveryCode"
+@layout PTScheduler.Web.Components.Layout.AuthLayout
 
 @using System.ComponentModel.DataAnnotations
 @using Microsoft.AspNetCore.Identity
+@using PTScheduler.Web.Components.Account
 
 @inject SignInManager<ApplicationUser> SignInManager
 @inject UserManager<ApplicationUser> UserManager
 @inject IdentityRedirectManager RedirectManager
+@inject NavigationManager NavigationManager
 @inject ILogger<LoginWithRecoveryCode> Logger
+@inject PTScheduler.Infrastructure.Data.ApplicationDbContext DbContext
+@inject PTScheduler.Application.Interfaces.IAppClock Clock
 
-<PageTitle>Recovery code verification</PageTitle>
+<PageTitle>Kod odzyskiwania</PageTitle>
 
-<h1>Recovery code verification</h1>
-<hr />
-<StatusMessage Message="@message" />
-<p>
-    You have requested to log in with a recovery code. This login will not be remembered until you provide
-    an authenticator app code at log in or disable 2FA and log in again.
-</p>
-<div class="row">
-    <div class="col-md-4">
-        <EditForm Model="Input" FormName="login-with-recovery-code" OnValidSubmit="OnValidSubmitAsync" method="post">
+<div class="card" style="border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,0.10)">
+    <div class="card-body p-4">
+        <h5 class="fw-bold mb-1 text-center">Kod odzyskiwania</h5>
+        <p class="text-muted small text-center mb-4">
+            Wpisz jeden z kodów odzyskiwania zapisanych przy włączaniu weryfikacji dwuetapowej.
+            Każdy kod działa tylko raz.
+        </p>
+
+        <StatusMessage Message="@message" />
+
+        <EditForm Model="Input" FormName="login-with-recovery-code" OnValidSubmit="OnValidSubmitAsync" method="post" data-busy-on-submit>
             <DataAnnotationsValidator />
-            <ValidationSummary class="text-danger" role="alert" />
-            <div class="form-floating mb-3">
-                <InputText @bind-Value="Input.RecoveryCode" id="Input.RecoveryCode" class="form-control" autocomplete="off" placeholder="RecoveryCode" />
-                <label for="Input.RecoveryCode" class="form-label">Recovery Code</label>
-                <ValidationMessage For="() => Input.RecoveryCode" class="text-danger" />
+            <ValidationSummary class="text-danger small mb-3" role="alert" />
+            <div class="mb-4">
+                <label class="form-label" for="Input.RecoveryCode">Kod odzyskiwania</label>
+                <InputText @bind-Value="Input.RecoveryCode" id="Input.RecoveryCode" class="form-control text-center"
+                           autocomplete="off" autocapitalize="none" spellcheck="false" placeholder="XXXXX-XXXXX" autofocus />
+                <ValidationMessage For="() => Input.RecoveryCode" class="text-danger small" />
             </div>
-            <button type="submit" class="w-100 btn btn-lg btn-primary">Log in</button>
+            <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold" data-busy-text="Sprawdzanie…">
+                <i class="bi bi-key me-1"></i>Zaloguj się
+            </button>
         </EditForm>
     </div>
 </div>
@@ -35,6 +44,9 @@
 @code {
     private string? message;
     private ApplicationUser user = default!;
+
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
 
     [SupplyParameterFromForm]
     private InputModel Input { get; set; } = default!;
@@ -61,26 +73,29 @@
 
         if (result.Succeeded)
         {
+            await LoginSupport.RecordAsync(DbContext, Clock, Logger, HttpContext, userId, true);
             Logger.LogInformation("User with ID '{UserId}' logged in with a recovery code.", userId);
-            RedirectManager.RedirectTo(ReturnUrl);
+            RedirectManager.RedirectTo(LoginSupport.SafeReturnUrl(ReturnUrl, NavigationManager.BaseUri));
         }
         else if (result.IsLockedOut)
         {
+            await LoginSupport.RecordAsync(DbContext, Clock, Logger, HttpContext, userId, false);
             Logger.LogWarning("User account locked out.");
             RedirectManager.RedirectTo("Account/Lockout");
         }
         else
         {
+            await LoginSupport.RecordAsync(DbContext, Clock, Logger, HttpContext, userId, false);
             Logger.LogWarning("Invalid recovery code entered for user with ID '{UserId}' ", userId);
-            message = "Error: Invalid recovery code entered.";
+            message = "Błąd: Nieprawidłowy lub już użyty kod odzyskiwania.";
         }
     }
 
     private sealed class InputModel
     {
-        [Required]
+        [Required(ErrorMessage = "Wpisz kod odzyskiwania.")]
         [DataType(DataType.Text)]
-        [Display(Name = "Recovery Code")]
+        [Display(Name = "Kod odzyskiwania")]
         public string RecoveryCode { get; set; } = "";
     }
 }

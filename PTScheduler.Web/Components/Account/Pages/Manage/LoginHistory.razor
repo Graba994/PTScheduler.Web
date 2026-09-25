@@ -9,6 +9,7 @@
 
 @inject AuthenticationStateProvider AuthState
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject PTScheduler.Application.Interfaces.IAppClock Clock
 
 <PageTitle>Historia logowań</PageTitle>
 
@@ -45,7 +46,7 @@ else
                 @foreach (var log in _logs)
                 {
                     <tr>
-                        <td>@log.LoginTime.ToString("dd.MM.yyyy HH:mm")</td>
+                        <td>@Clock.ToWallClock(log.LoginTime.ToUniversalTime()).ToString("dd.MM.yyyy HH:mm")</td>
                         <td><code style="font-size:.8rem">@(log.IpAddress ?? "—")</code></td>
                         <td class="text-truncate" style="max-width:220px" title="@log.UserAgent">@ParseBrowser(log.UserAgent)</td>
                         <td>
