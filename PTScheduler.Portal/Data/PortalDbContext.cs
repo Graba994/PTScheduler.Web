@@ -89,6 +89,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.HasIndex(x => x.Category);
             e.HasIndex(x => x.IsActive);
             e.HasIndex(x => x.FulfillmentType);
+            e.Property(x => x.FulfillmentType).HasDefaultValue("manual");
         });
 
         b.Entity<TenantCredit>(e =>
@@ -269,6 +270,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             new ServiceItem
             {
                 Id = 1,
+                CreatedAt = new DateTime(2026, 8, 29, 12, 0, 0, DateTimeKind.Utc),
                 Name = "Zmiana logo / kolorów strony",
                 Description = "Wymiana logo, dopasowanie kolorystyki i motywu strony trenera.",
                 Category = "branding",
@@ -280,6 +282,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             new ServiceItem
             {
                 Id = 2,
+                CreatedAt = new DateTime(2026, 8, 29, 12, 0, 0, DateTimeKind.Utc),
                 Name = "Konfiguracja grafiku zajęć",
                 Description = "Ustawienie typów wizyt, godzin pracy, cyklicznych zajęć.",
                 Category = "setup",
@@ -291,6 +294,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             new ServiceItem
             {
                 Id = 3,
+                CreatedAt = new DateTime(2026, 8, 29, 12, 0, 0, DateTimeKind.Utc),
                 Name = "Ustawienie płatności online",
                 Description = "Konfiguracja PayU lub Przelewy24, testowanie procesu płatności.",
                 Category = "setup",
@@ -302,6 +306,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             new ServiceItem
             {
                 Id = 4,
+                CreatedAt = new DateTime(2026, 8, 29, 12, 0, 0, DateTimeKind.Utc),
                 Name = "Import bazy klientów",
                 Description = "Import listy klientów z pliku Excel/CSV do systemu.",
                 Category = "setup",
@@ -313,6 +318,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             new ServiceItem
             {
                 Id = 5,
+                CreatedAt = new DateTime(2026, 8, 29, 12, 0, 0, DateTimeKind.Utc),
                 Name = "Szkolenie 1:1 (30 min)",
                 Description = "Indywidualne szkolenie wideo z obsługi systemu.",
                 Category = "training",
@@ -324,6 +330,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             new ServiceItem
             {
                 Id = 6,
+                CreatedAt = new DateTime(2026, 8, 29, 12, 0, 0, DateTimeKind.Utc),
                 Name = "Pełna konfiguracja strony",
                 Description = "Kompleksowe ustawienie strony: branding, grafik, usługi, płatności.",
                 Category = "setup",
@@ -335,6 +342,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             new ServiceItem
             {
                 Id = 7,
+                CreatedAt = new DateTime(2026, 8, 29, 12, 0, 0, DateTimeKind.Utc),
                 Name = "Pakiet Wsparcie Podstawowy",
                 Description = "2 drobne zmiany/mies., email 24h, 1 szkolenie/kwartał.",
                 Category = "support",
@@ -347,6 +355,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             new ServiceItem
             {
                 Id = 8,
+                CreatedAt = new DateTime(2026, 8, 29, 12, 0, 0, DateTimeKind.Utc),
                 Name = "Pakiet Wsparcie Premium",
                 Description = "Bez limitu drobnych zmian, priorytet + telefon, 1 szkolenie/mies.",
                 Category = "support",
@@ -360,6 +369,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             new ServiceItem
             {
                 Id = 100,
+                CreatedAt = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc),
                 Name = "Pakiet 50 SMS",
                 Description = "50 wiadomości SMS do wysyłania przypomnień klientom.",
                 Category = "addon",
@@ -374,6 +384,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             new ServiceItem
             {
                 Id = 101,
+                CreatedAt = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc),
                 Name = "Pakiet 200 SMS",
                 Description = "200 wiadomości SMS — najlepsza wartość dla aktywnych trenerów.",
                 Category = "addon",
@@ -388,6 +399,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             new ServiceItem
             {
                 Id = 102,
+                CreatedAt = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc),
                 Name = "Pakiet 500 SMS",
                 Description = "500 wiadomości SMS — dla dużych studiów treningowych.",
                 Category = "addon",
@@ -403,6 +415,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             new ServiceItem
             {
                 Id = 110,
+                CreatedAt = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc),
                 Name = "Dodatkowe 10 GB wideo",
                 Description = "Rozszerzenie przestrzeni na kursy wideo o 10 GB.",
                 Category = "addon",
@@ -417,6 +430,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             new ServiceItem
             {
                 Id = 111,
+                CreatedAt = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc),
                 Name = "Dodatkowe 50 GB wideo",
                 Description = "Rozszerzenie przestrzeni na kursy wideo o 50 GB.",
                 Category = "addon",
@@ -432,6 +446,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             new ServiceItem
             {
                 Id = 120,
+                CreatedAt = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc),
                 Name = "Dodatkowe 100 GB transferu wideo",
                 Description = "Dodatkowy miesięczny transfer dla odtwarzania kursów wideo.",
                 Category = "addon",
