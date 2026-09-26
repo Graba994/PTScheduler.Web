@@ -8,6 +8,7 @@
 @inject IAuditLogService AuditLogService
 @inject ISessionInvitationService InvitationService
 @inject ITrainerAvailabilityService AvailabilityService
+@inject IGoogleCalendarService GoogleCalendar
 @inject ITrainerConfigService TrainerConfigService
 @inject IAppClock Clock
 @inject AuthenticationStateProvider AuthState
@@ -615,7 +616,7 @@
             if (_activeStatuses.Count > 0)
                 sessions = sessions.Where(s => _activeStatuses.Contains(s.Status.ToString())).ToList();
 
-            return sessions.Select(s => (object)new
+            var events = sessions.Select(s => (object)new
             {
                 id    = s.Id.ToString(),
                 title = s.ClientName,
@@ -630,7 +631,24 @@
                     initials    = Initials(s.ClientName),
                     duration    = s.DurationMinutes
                 }
-            }).ToArray();
+            }).ToList();
+
+            // Zajęte terminy z Google Calendar jako tło — widać, czemu godzina nie jest do rezerwacji.
+            if (!_isClientRole)
+            {
+                var busy = await GoogleCalendar.GetBusyBlocksAsync(_userId, from, to);
+                events.AddRange(busy.Select((b, i) => (object)new
+                {
+                    id        = $"busy-{i}",
+                    start     = b.IsAllDay ? b.StartTime.ToString("yyyy-MM-dd") : b.StartTime.ToString("o"),
+                    end       = b.IsAllDay ? b.EndTime.ToString("yyyy-MM-dd") : b.EndTime.ToString("o"),
+                    allDay    = b.IsAllDay,
+                    display   = "background",
+                    classNames = new[] { "cal-busy-bg" },
+                    extendedProps = new { busy = true }
+                }));
+            }
+            return events.ToArray();
         }
         catch (Exception ex)
         {

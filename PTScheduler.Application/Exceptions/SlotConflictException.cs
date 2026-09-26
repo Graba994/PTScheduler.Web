@@ -14,9 +14,10 @@ namespace PTScheduler.Application.Exceptions;
 /// </para>
 /// </summary>
 public sealed class SlotConflictException(SlotConflictDto conflict)
-    : Exception(
-        $"Termin koliduje z inną sesją: {conflict.ClientName}, " +
-        $"{conflict.StartTime:dd.MM.yyyy HH:mm}.")
+    : Exception(conflict.SessionId == 0
+        ? $"Termin koliduje z wydarzeniem w Twoim kalendarzu Google ({conflict.StartTime:dd.MM.yyyy HH:mm}, {conflict.DurationMinutes} min)."
+        : $"Termin koliduje z inną sesją: {conflict.ClientName}, " +
+          $"{conflict.StartTime:dd.MM.yyyy HH:mm}.")
 {
     public SlotConflictDto Conflict { get; } = conflict;
 }

@@ -72,6 +72,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<WorkoutComment> WorkoutComments => Set<WorkoutComment>();
     public DbSet<SurveyTemplate> SurveyTemplates => Set<SurveyTemplate>();
     public DbSet<SurveyResponse> SurveyResponses => Set<SurveyResponse>();
+    public DbSet<CalendarConnection> CalendarConnections => Set<CalendarConnection>();
+    public DbSet<CalendarBusyBlock> CalendarBusyBlocks => Set<CalendarBusyBlock>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -350,6 +352,21 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
              .WithMany(p => p.Days)
              .HasForeignKey(d => d.PlanId)
              .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        builder.Entity<CalendarConnection>(e =>
+        {
+            e.Property(x => x.UserId).HasMaxLength(450);
+            e.Property(x => x.Mode).HasMaxLength(16);
+            e.Property(x => x.GoogleEmail).HasMaxLength(256);
+            e.Property(x => x.LastError).HasMaxLength(500);
+            e.HasIndex(x => x.UserId).IsUnique();
+        });
+
+        builder.Entity<CalendarBusyBlock>(e =>
+        {
+            e.Property(x => x.UserId).HasMaxLength(450);
+            e.HasIndex(x => new { x.UserId, x.StartTime });
         });
 
         builder.Entity<PlanExercise>(e =>

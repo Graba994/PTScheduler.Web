@@ -6,11 +6,20 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using PTScheduler.Application.DTOs;
 using PTScheduler.Application.Interfaces;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
+using PTScheduler.Domain.Entities;
+using PTScheduler.Infrastructure.Data;
+using PTScheduler.Infrastructure.Services.Google;
 
 namespace PTScheduler.Infrastructure.Services;
 
-public class GoogleMeetService(IWebRootPathProvider webRoot, IHttpClientFactory httpFactory, ILogger<GoogleMeetService> logger)
+public class GoogleMeetService(
+    IWebRootPathProvider webRoot,
+    IHttpClientFactory httpFactory,
+    IGoogleTokenBroker broker,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    ILogger<GoogleMeetService> logger)
     : IGoogleMeetService
 {
     private static readonly JsonSerializerOptions JsonOpts =
@@ -143,10 +152,30 @@ public class GoogleMeetService(IWebRootPathProvider webRoot, IHttpClientFactory 
         return (false, $"Błąd Google Calendar API: {resp.StatusCode} — {err}");
     }
 
-    public async Task<GoogleMeetResult?> CreateMeetingAsync(string summary, string description,
-        DateTime startUtc, int durationMinutes, string? attendeeEmail = null)
+    public async Task<bool> CanCreateMeetingsAsync(string trainerUserId)
     {
-        var accessToken = await GetAccessTokenAsync();
+        if (IsConfigured) return true;
+        if (!broker.IsManaged) return false;
+        await using var db = dbFactory.CreateDbContext();
+        return await db.CalendarConnections.AnyAsync(c => c.UserId == trainerUserId
+            && c.Mode == CalendarConnectionModes.Platform && c.CreateMeetLinks && !c.NeedsReconnect);
+    }
+
+    public Task<string?> GetOwnAccessTokenAsync() => GetAccessTokenAsync();
+
+    /// <summary>Token do utworzenia/usunięcia wydarzenia: konto instalacji albo kalendarz trenera z platformy.</summary>
+    private async Task<string?> TokenForAsync(string? trainerUserId)
+    {
+        if (IsConfigured) return await GetAccessTokenAsync();
+        if (trainerUserId is null || !broker.IsManaged) return null;
+        return (await broker.GetAccessTokenAsync(trainerUserId)).AccessToken;
+    }
+
+    public async Task<GoogleMeetResult?> CreateMeetingAsync(string summary, string description,
+        DateTime startUtc, int durationMinutes, string? attendeeEmail = null,
+        string? trainerUserId = null, int? sessionId = null)
+    {
+        var accessToken = await TokenForAsync(trainerUserId);
         if (accessToken is null) return null;
 
         var endUtc = startUtc.AddMinutes(durationMinutes);
@@ -170,6 +199,19 @@ public class GoogleMeetService(IWebRootPathProvider webRoot, IHttpClientFactory 
         if (!string.IsNullOrWhiteSpace(attendeeEmail))
         {
             eventObj["attendees"] = new[] { new { email = attendeeEmail } };
+        }
+
+        // Oznaczenie wizyty — synchronizacja kalendarza aktualizuje to samo wydarzenie zamiast tworzyć drugie.
+        if (sessionId is int sid)
+        {
+            eventObj["extendedProperties"] = new
+            {
+                @private = new Dictionary<string, string>
+                {
+                    [GoogleCalendarApi.AppKey] = GoogleCalendarApi.InstanceKey,
+                    [GoogleCalendarApi.SessionKey] = sid.ToString(System.Globalization.CultureInfo.InvariantCulture)
+                }
+            };
         }
 
         using var client = httpFactory.CreateClient();
@@ -214,10 +256,10 @@ public class GoogleMeetService(IWebRootPathProvider webRoot, IHttpClientFactory 
         };
     }
 
-    public async Task DeleteMeetingAsync(string calendarEventId)
+    public async Task DeleteMeetingAsync(string calendarEventId, string? trainerUserId = null)
     {
         if (string.IsNullOrWhiteSpace(calendarEventId)) return;
-        var accessToken = await GetAccessTokenAsync();
+        var accessToken = await TokenForAsync(trainerUserId);
         if (accessToken is null) return;
 
         using var client = httpFactory.CreateClient();

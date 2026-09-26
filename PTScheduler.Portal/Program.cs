@@ -67,6 +67,7 @@ builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<StripeService>();
 builder.Services.AddScoped<CreditService>();
 builder.Services.AddScoped<BunnyPlatformService>();
+builder.Services.AddScoped<GoogleOAuthBroker>();
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<StorePaymentService>();
 builder.Services.AddScoped<BackupService>();
@@ -715,6 +716,60 @@ app.MapPost("/api/credits/{slug}/sms/test", async (
     }
 });
 
+// Google Calendar / Meet trenerów przez klienta OAuth platformy. Instancja prosi
+// o adres zgody, Google wraca do Portalu, a instancja pobiera potem krótkie tokeny.
+app.MapGet("/api/internal/tenants/{slug}/google/status", async (
+    string slug, string userKey, HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config, GoogleOAuthBroker google) =>
+{
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    var grant = await google.GetGrantAsync(tenant.Id, userKey);
+    return Results.Json(new { available = await google.GetConfigAsync() is not null, connected = grant is not null, email = grant?.GoogleEmail });
+});
+
+app.MapPost("/api/internal/tenants/{slug}/google/authorize", async (
+    string slug, GoogleAuthorizeRequest body, HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config, GoogleOAuthBroker google) =>
+{
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    var (url, error) = await google.BuildAuthorizeUrlAsync(tenant, body.UserKey, body.ReturnUrl);
+    return url is null ? Results.BadRequest(new { error }) : Results.Json(new { url });
+});
+
+app.MapPost("/api/internal/tenants/{slug}/google/token", async (
+    string slug, GoogleUserRequest body, HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config, GoogleOAuthBroker google) =>
+{
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    var (token, expiresIn, email, revoked) = await google.GetAccessTokenAsync(tenant.Id, body.UserKey);
+    if (token is null)
+        return revoked ? Results.NotFound(new { connected = false }) : Results.StatusCode(StatusCodes.Status502BadGateway);
+    return Results.Json(new { accessToken = token, expiresIn, email });
+});
+
+app.MapPost("/api/internal/tenants/{slug}/google/disconnect", async (
+    string slug, GoogleUserRequest body, HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config, GoogleOAuthBroker google) =>
+{
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    await google.DisconnectAsync(tenant.Id, body.UserKey);
+    return Results.Ok();
+});
+
+app.MapGet(GoogleOAuthBroker.CallbackPath, async (string? code, string? state, string? error, GoogleOAuthBroker google) =>
+{
+    var (redirectTo, _) = await google.HandleCallbackAsync(code, state, error);
+    return Results.Redirect(redirectTo);
+});
+
 // Wspólny SMTP platformy dla instancji trenerów (trener nie konfiguruje poczty).
 app.MapGet("/api/internal/tenants/{slug}/smtp", async (
     string slug,
@@ -787,6 +842,9 @@ app.Run();
 // Wspólna kontrola nagłówka X-Internal-Secret dla wywołań tenant → Portal.
 // Pusty sekret = odmowa (wcześniej oznaczał brak jakiejkolwiek kontroli).
 record AppFeedbackRequest(int Rating, string? Text, string? ContactEmail, string? AuthorEmail);
+
+record GoogleAuthorizeRequest(string UserKey, string ReturnUrl);
+record GoogleUserRequest(string UserKey);
 
 static class InternalAuth
 {

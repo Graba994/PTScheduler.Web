@@ -125,6 +125,13 @@ public class TrainerAvailabilityService(IDbContextFactory<ApplicationDbContext> 
             .Select(s => (Start: s.StartTime, End: s.StartTime.AddMinutes(s.SessionType.DurationMinutes)))
             .ToList();
 
+        // Zajęte terminy z Google Calendar trenera (synchronizacja dwukierunkowa).
+        var busy = await db.CalendarBusyBlocks.AsNoTracking()
+            .Where(b => b.UserId == trainerUserId && b.StartTime < dayEnd && b.EndTime > dayStart)
+            .Select(b => new { b.StartTime, b.EndTime })
+            .ToListAsync();
+        bookedIntervals.AddRange(busy.Select(b => (Start: b.StartTime, End: b.EndTime)));
+
         var breakMin = cfg.BreakAfterSessionMinutes;
         var granMin  = cfg.SlotGranularityMinutes;
         var result   = new List<AvailableSlotDto>();
@@ -179,9 +186,16 @@ public class TrainerAvailabilityService(IDbContextFactory<ApplicationDbContext> 
             })
             .FirstOrDefaultAsync();
 
-        return c is null
+        if (c is not null)
+            return new SlotConflictDto(c.Id, $"{c.FirstName} {c.LastName}".Trim(), c.StartTime, c.DurationMinutes);
+
+        var busy = await db.CalendarBusyBlocks.AsNoTracking()
+            .Where(b => b.UserId == trainerUserId && b.StartTime < slotEnd && b.EndTime > start)
+            .OrderBy(b => b.StartTime)
+            .FirstOrDefaultAsync();
+        return busy is null
             ? null
-            : new SlotConflictDto(c.Id, $"{c.FirstName} {c.LastName}".Trim(), c.StartTime, c.DurationMinutes);
+            : new SlotConflictDto(0, "zajęty termin w Google Calendar", busy.StartTime, (int)(busy.EndTime - busy.StartTime).TotalMinutes);
     }
 
     // Internal overload used within methods that already have an open db context

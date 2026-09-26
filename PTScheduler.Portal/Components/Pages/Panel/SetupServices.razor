@@ -4,6 +4,8 @@
 @inject SiteSettingsService Settings
 @inject BunnyPlatformService Bunny
 @inject IDbContextFactory<PortalDbContext> DbFactory
+@inject GoogleOAuthBroker Google
+@inject NavigationManager Nav
 @rendermode InteractiveServer
 
 <PageTitle>Usługi dla trenerów — PTScheduler Portal</PageTitle>
@@ -12,7 +14,7 @@
     <a href="/panel/setup" class="btn btn-sm btn-outline-secondary" aria-label="Wróć do konfiguracji"><i class="bi bi-arrow-left"></i></a>
     <div>
         <h4 class="fw-bold mb-0">Usługi dla trenerów</h4>
-        <div class="small text-muted">SMS, wideo i poczta — konfigurujesz raz, trenerzy tylko dokupują pakiety.</div>
+        <div class="small text-muted">SMS, wideo, poczta i Google — konfigurujesz raz, trenerzy tylko dokupują pakiety.</div>
     </div>
 </div>
 
@@ -82,6 +84,49 @@ else
         </div>
     </section>
 
+    <!-- Google -->
+    <section id="google" class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <h6 class="fw-bold mb-1"><i class="bi bi-google me-2 text-primary"></i>Google Calendar i Meet</h6>
+            <p class="small text-muted">
+                Jeden klient OAuth platformy. Trener w swojej aplikacji klika tylko <strong>„Połącz z Google”</strong> — wizyty trafiają do jego kalendarza,
+                zajęte terminy z kalendarza blokują grafik, a wizyty online dostają link Meet. Tokeny trenerów zostają w Portalu (zaszyfrowane).
+            </p>
+            <details class="small mb-3">
+                <summary class="fw-semibold">Jak utworzyć klienta w Google Cloud (jednorazowo)</summary>
+                <ol class="mt-2 mb-0 ps-3">
+                    <li>Google Cloud Console → nowy projekt → <em>APIs &amp; Services → Library</em> → włącz <strong>Google Calendar API</strong>.</li>
+                    <li><em>OAuth consent screen</em>: typ „External”, nazwa aplikacji, e-mail kontaktowy, domena Portalu; zakresy: <code>openid</code>, <code>email</code>, <code>.../auth/calendar.events</code>.</li>
+                    <li><em>Credentials → Create credentials → OAuth client ID</em> → „Web application”; w <em>Authorized redirect URIs</em> wklej adres poniżej.</li>
+                    <li>Skopiuj Client ID i Client Secret tutaj.</li>
+                    <li>Zakres kalendarza jest „wrażliwy”: do czasu weryfikacji aplikacji przez Google trener zobaczy ostrzeżenie „aplikacja niezweryfikowana”, a limit to 100 kont. Weryfikację zgłaszasz w tym samym ekranie zgody (potrzebna polityka prywatności na domenie Portalu).</li>
+                </ol>
+            </details>
+            <div class="mb-3">
+                <label class="form-label small fw-semibold" for="gRedirect">Adres przekierowania (Authorized redirect URI)</label>
+                <div class="input-group input-group-sm">
+                    <input id="gRedirect" class="form-control font-monospace" @bind="_googleRedirect" />
+                    <button class="btn btn-outline-secondary" type="button" @onclick="() => _googleRedirect = SuggestedRedirect" title="Użyj adresu tego Portalu">Ten Portal</button>
+                </div>
+                <div class="form-text">Musi być publiczny (HTTPS) i identyczny jak w Google Cloud.</div>
+            </div>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold" for="gId">Client ID</label>
+                    <input id="gId" class="form-control font-monospace" @bind="_googleId" placeholder="….apps.googleusercontent.com" autocomplete="off" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold" for="gSecret">Client Secret</label>
+                    <input id="gSecret" type="password" class="form-control font-monospace" @bind="_googleSecret" placeholder="@(_googleSecretSet ? "••••••••  (zapisany — wpisz nowy, aby zmienić)" : "")" autocomplete="off" />
+                </div>
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mt-3">
+                <button class="btn btn-primary btn-sm" @onclick="SaveGoogleAsync">Zapisz i sprawdź</button>
+                <span class="small text-muted">Połączone konta trenerów: <strong>@_googleGrants</strong></span>
+            </div>
+        </div>
+    </section>
+
     <!-- Poczta -->
     <section id="email" class="card border-0 shadow-sm mb-4">
         <div class="card-body">
@@ -119,6 +164,13 @@ else
     private bool _shareSmtp;
     private bool _smtpConfigured;
 
+    private string _googleId = "";
+    private string _googleSecret = "";
+    private bool _googleSecretSet;
+    private string _googleRedirect = "";
+    private int _googleGrants;
+    private string SuggestedRedirect => Nav.BaseUri.TrimEnd('/') + GoogleOAuthBroker.CallbackPath;
+
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
     private async Task LoadAsync()
@@ -126,17 +178,24 @@ else
         var s = await Settings.GetAllAsync(
             SiteSettingsService.Keys.PlatformSmsApiToken, SiteSettingsService.Keys.PlatformSmsSenderName,
             SiteSettingsService.Keys.PlatformBunnyAccountKey, SiteSettingsService.Keys.PlatformBunnyApiKey,
-            SiteSettingsService.Keys.ShareSmtpWithTenants, SiteSettingsService.Keys.SmtpHost);
+            SiteSettingsService.Keys.ShareSmtpWithTenants, SiteSettingsService.Keys.SmtpHost,
+            SiteSettingsService.Keys.PlatformGoogleClientId, SiteSettingsService.Keys.PlatformGoogleClientSecret,
+            SiteSettingsService.Keys.PlatformGoogleRedirectUri);
         _smsTokenSet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformSmsApiToken]);
         _smsSender = s[SiteSettingsService.Keys.PlatformSmsSenderName];
         _bunnyKeySet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformBunnyAccountKey]);
         _legacyShared = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformBunnyApiKey]) && !_bunnyKeySet;
         _shareSmtp = s[SiteSettingsService.Keys.ShareSmtpWithTenants] != "false";
         _smtpConfigured = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.SmtpHost]);
+        _googleId = s[SiteSettingsService.Keys.PlatformGoogleClientId];
+        _googleSecretSet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformGoogleClientSecret]);
+        _googleRedirect = string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformGoogleRedirectUri])
+            ? SuggestedRedirect : s[SiteSettingsService.Keys.PlatformGoogleRedirectUri];
 
         await using var db = await DbFactory.CreateDbContextAsync();
         _tenantsCount = await db.Tenants.CountAsync(t => t.Status != TenantStatus.Destroyed);
         _librariesCount = await db.Tenants.CountAsync(t => t.BunnyLibraryId != null);
+        _googleGrants = await db.GoogleCalendarGrants.CountAsync();
         _loading = false;
     }
 
@@ -168,6 +227,34 @@ else
             : _bunnyKey.Trim();
         var (ok, msg) = await Bunny.TestAccountKeyAsync(key);
         Show(msg, ok);
+    }
+
+    private async Task SaveGoogleAsync()
+    {
+        var id = _googleId.Trim();
+        var secret = string.IsNullOrWhiteSpace(_googleSecret)
+            ? await Settings.GetAsync(SiteSettingsService.Keys.PlatformGoogleClientSecret)
+            : _googleSecret.Trim();
+        var redirect = _googleRedirect.Trim();
+        if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(secret)) { Show("Wpisz Client ID i Client Secret.", false); return; }
+        if (!Uri.TryCreate(redirect, UriKind.Absolute, out var uri) || !redirect.EndsWith(GoogleOAuthBroker.CallbackPath, StringComparison.Ordinal))
+        {
+            Show($"Adres przekierowania musi być pełnym adresem kończącym się na {GoogleOAuthBroker.CallbackPath}.", false);
+            return;
+        }
+        var (ok, msg) = await Google.TestClientAsync(id, secret);
+        if (!ok) { Show(msg, false); return; }
+        await Settings.SetManyAsync(new Dictionary<string, string>
+        {
+            [SiteSettingsService.Keys.PlatformGoogleClientId] = id,
+            [SiteSettingsService.Keys.PlatformGoogleClientSecret] = secret,
+            [SiteSettingsService.Keys.PlatformGoogleRedirectUri] = redirect
+        });
+        _googleSecret = "";
+        Show(uri.Scheme == Uri.UriSchemeHttps
+            ? "Zapisano. Trenerzy mogą już łączyć swoje kalendarze Google."
+            : "Zapisano, ale adres przekierowania nie jest HTTPS — Google przyjmie go tylko dla localhost.", uri.Scheme == Uri.UriSchemeHttps);
+        await LoadAsync();
     }
 
     private async Task ToggleShareSmtpAsync(ChangeEventArgs e)

@@ -167,7 +167,7 @@ public class SessionService(
 
         try
         {
-            if (googleMeetService.IsConfigured)
+            if (await googleMeetService.CanCreateMeetingsAsync(session.TrainerUserId))
             {
                 var client = await db.Clients.FindAsync(session.ClientId);
                 var clientUser = client is not null
@@ -176,9 +176,11 @@ public class SessionService(
                 var result = await googleMeetService.CreateMeetingAsync(
                     $"{sessionType.Name} — {client?.FirstName} {client?.LastName}".Trim(),
                     $"Sesja treningowa: {sessionType.Name}, {sessionType.DurationMinutes} min",
-                    session.StartTime,
+                    clock.ToUtc(session.StartTime), // StartTime to zegar ścienny, a Google dostaje UTC
                     sessionType.DurationMinutes,
-                    clientUser?.Email);
+                    clientUser?.Email,
+                    session.TrainerUserId,
+                    session.Id);
                 if (result is not null)
                 {
                     session.MeetingUrl = result.MeetingUrl;
@@ -228,7 +230,7 @@ public class SessionService(
 
         if (status == SessionStatus.Cancelled)
         {
-            try { if (session.CalendarEventId is not null) await googleMeetService.DeleteMeetingAsync(session.CalendarEventId); }
+            try { if (session.CalendarEventId is not null) await googleMeetService.DeleteMeetingAsync(session.CalendarEventId, session.TrainerUserId); }
             catch (Exception ex) { logger.LogWarning(ex, "Błąd usuwania Google Meet (SessionId={Id})", session.Id); }
 
             try { await SendCancellationEmailAsync(session, cancellationReason); }

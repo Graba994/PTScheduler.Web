@@ -150,6 +150,7 @@ builder.Services.AddHostedService<PTScheduler.Web.Services.PackageReminderServic
 builder.Services.AddHostedService<PTScheduler.Web.Services.KsefStatusService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.MembershipBillingService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.ReferralRewardService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.CalendarSyncService>();
 
 // Tracks whether DB is reachable. Mutated at startup and via /db-error/retry.
 builder.Services.AddSingleton<StartupHealth>();

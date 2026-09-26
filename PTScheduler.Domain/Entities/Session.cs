@@ -35,6 +35,8 @@ public class Session
 
     public string? MeetingUrl { get; set; }
     public string? CalendarEventId { get; set; }
+    /// <summary>Skrót stanu wysłanego do Google Calendar — zmiana = trzeba zaktualizować wydarzenie.</summary>
+    public string? CalendarSyncFingerprint { get; set; }
 
     /// <summary>
     /// Ustawiane, gdy przypomnienie 24h zostało w pełni obsłużone (oba kanały

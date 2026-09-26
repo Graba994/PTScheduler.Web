@@ -43,6 +43,9 @@ public static class DependencyInjection
         services.AddHttpClient();
         services.AddScoped<IBunnyService, BunnyService>();
         services.AddScoped<IGoogleMeetService, GoogleMeetService>();
+        services.AddSingleton<PTScheduler.Infrastructure.Services.Google.IGoogleTokenBroker, PTScheduler.Infrastructure.Services.Google.GoogleTokenBroker>();
+        services.AddSingleton<PTScheduler.Infrastructure.Services.Google.IGoogleCalendarApi, PTScheduler.Infrastructure.Services.Google.GoogleCalendarApi>();
+        services.AddScoped<IGoogleCalendarService, PTScheduler.Infrastructure.Services.Google.GoogleCalendarService>();
         services.AddScoped<ICouponService, CouponService>();
         // Payment gateways (resolved as a set by the orchestrator).
         services.AddScoped<Services.Payments.IPaymentProvider, Services.Payments.SimulatorProvider>();

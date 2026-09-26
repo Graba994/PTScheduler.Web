@@ -56,8 +56,9 @@ export function initCalendar(dotnetRef, el, canEdit) {
         eventContent: renderEventContent,
         eventClick: info => dotnetRef.invokeMethodAsync('OnEventClick', parseInt(info.event.id)),
         eventDidMount: info => {
-            info.el.style.cursor = 'pointer';
             const ep = info.event.extendedProps;
+            if (ep.busy) { info.el.title = 'Zajęte w Google Calendar'; return; }
+            info.el.style.cursor = 'pointer';
             info.el.title = `${ep.clientName} — ${ep.sessionType}`;
         },
         eventsSet: updateDaySummary
@@ -76,6 +77,7 @@ export function initCalendar(dotnetRef, el, canEdit) {
 
 function updateDaySummary(events) {
     if (!summaryEl) return;
+    events = (events || []).filter(e => !e.extendedProps.busy);
     if (!events || events.length === 0) { summaryEl.style.display = 'none'; return; }
 
     const view = calendar.view;
@@ -111,6 +113,7 @@ function updateDaySummary(events) {
 function renderEventContent(arg) {
     const { event, view } = arg;
     const ep = event.extendedProps;
+    if (ep.busy) return { html: '<span class="cal-busy-label">Google: zajęte</span>' };
     const statusCls = 'status-' + (ep.status || 'scheduled').toLowerCase();
     const isList = view.type.startsWith('list');
     const isMonth = view.type === 'dayGridMonth';
