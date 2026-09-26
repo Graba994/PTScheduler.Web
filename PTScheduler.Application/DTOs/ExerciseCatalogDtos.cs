@@ -62,6 +62,10 @@ public sealed class ExerciseDetailDto
     public bool IsMine { get; set; }
     public bool IsFavorite { get; set; }
     public ExerciseTracking Tracking { get; set; }
+    /// <summary>Autorzy i licencja (np. wger.de, CC-BY-SA) — pokazywane pod opisem.</summary>
+    public string? Attribution { get; set; }
+    /// <summary>Źródło ćwiczenia bazowego; null dla własnych ćwiczeń trenera.</summary>
+    public ExerciseSource? Source { get; set; }
 }
 
 /// <summary>Zapis własnego ćwiczenia trenera (dodanie/edycja).</summary>
@@ -81,4 +85,6 @@ public sealed class SaveExerciseDto
     public ExerciseVideoType VideoType { get; set; } = ExerciseVideoType.None;
     public string? VideoRef { get; set; }
     public ExerciseTracking Tracking { get; set; } = ExerciseTracking.WeightReps;
+    /// <summary>Przy kopii ćwiczenia z wger zachowujemy autorów i licencję (wymóg CC-BY-SA).</summary>
+    public string? Attribution { get; set; }
 }

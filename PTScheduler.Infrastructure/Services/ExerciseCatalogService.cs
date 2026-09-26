@@ -10,8 +10,33 @@ namespace PTScheduler.Infrastructure.Services;
 
 public class ExerciseCatalogService(
     IDbContextFactory<ApplicationDbContext> dbFactory,
-    IAppClock clock) : IExerciseCatalogService
+    IAppClock clock,
+    IModuleSettingsService? modules = null) : IExerciseCatalogService
 {
+    /// <summary>
+    /// Źródło katalogu publicznego wybrane przez administratora. Dopóki wger nie jest
+    /// jeszcze pobrany, pokazujemy Free Exercise DB, żeby katalog nigdy nie był pusty.
+    /// </summary>
+    private async Task<ExerciseSource> ActiveSourceAsync(ApplicationDbContext db)
+    {
+        if (modules is null) return ExerciseSource.FreeExerciseDb;
+        ExerciseSource src;
+        try { src = (await modules.GetAsync()).ExerciseCatalogSource; }
+        catch { return ExerciseSource.FreeExerciseDb; }
+        if (src == ExerciseSource.Wger
+            && !await db.Exercises.AnyAsync(e => e.Visibility == ExerciseVisibility.Public && e.Source == ExerciseSource.Wger))
+            return ExerciseSource.FreeExerciseDb;
+        return src;
+    }
+
+    /// <summary>Katalog widoczny dla trenera: publiczny z aktywnego źródła + własne ćwiczenia.</summary>
+    private async Task<IQueryable<Exercise>> VisibleAsync(ApplicationDbContext db, string trainerUserId)
+    {
+        var src = await ActiveSourceAsync(db);
+        return db.Exercises.AsNoTracking()
+            .Where(e => (e.Visibility == ExerciseVisibility.Public && e.Source == src) || e.OwnerTrainerUserId == trainerUserId);
+    }
+
     public async Task<List<ExerciseListItemDto>> SearchAsync(string trainerUserId, ExerciseFilterDto filter, int take = 300)
     {
         await using var db = dbFactory.CreateDbContext();
@@ -27,9 +52,8 @@ public class ExerciseCatalogService(
             .ToDictionary(p => p.ExerciseId, p => p.LastUsedAt!.Value);
         var recentIdList = lastUsed.Keys.ToList();
 
-        // Widoczne: baza publiczna + własne trenera.
-        var q = db.Exercises.AsNoTracking()
-            .Where(e => e.Visibility == ExerciseVisibility.Public || e.OwnerTrainerUserId == trainerUserId);
+        // Widoczne: baza publiczna (wybrane źródło) + własne trenera.
+        var q = await VisibleAsync(db, trainerUserId);
 
         q = filter.Scope switch
         {
@@ -118,7 +142,9 @@ public class ExerciseCatalogService(
             VideoRef = e.VideoRef,
             IsMine = e.OwnerTrainerUserId == trainerUserId,
             IsFavorite = isFav,
-            Tracking = e.Tracking ?? ExerciseTrackingRules.Guess(e.Category, e.Equipment, e.NameEn, e.NamePl)
+            Tracking = e.Tracking ?? ExerciseTrackingRules.Guess(e.Category, e.Equipment, e.NameEn, e.NamePl),
+            Attribution = e.Attribution,
+            Source = e.OwnerTrainerUserId is null ? e.Source : null
         };
     }
 
@@ -204,9 +230,8 @@ public class ExerciseCatalogService(
     public async Task<List<string>> GetEquipmentOptionsAsync(string trainerUserId)
     {
         await using var db = dbFactory.CreateDbContext();
-        return await db.Exercises.AsNoTracking()
-            .Where(e => (e.Visibility == ExerciseVisibility.Public || e.OwnerTrainerUserId == trainerUserId)
-                        && e.Equipment != null && e.Equipment != "")
+        return await (await VisibleAsync(db, trainerUserId))
+            .Where(e => e.Equipment != null && e.Equipment != "")
             .Select(e => e.Equipment!)
             .Distinct()
             .OrderBy(x => x)
@@ -228,7 +253,16 @@ public class ExerciseCatalogService(
             .Select(u => u.Trim()).Where(u => u.Length > 0));
         e.VideoType = dto.VideoType;
         e.VideoRef = string.IsNullOrWhiteSpace(dto.VideoRef) ? null : dto.VideoRef.Trim();
+        // Plik wideo odtwarzamy wprost w przeglądarce — tylko adres https.
+        if (e.VideoType == ExerciseVideoType.Url
+            && !(Uri.TryCreate(e.VideoRef, UriKind.Absolute, out var video) && video.Scheme == Uri.UriSchemeHttps))
+        {
+            e.VideoType = ExerciseVideoType.None;
+            e.VideoRef = null;
+        }
         e.Tracking = dto.Tracking;
+        var attribution = dto.Attribution?.Trim();
+        e.Attribution = string.IsNullOrEmpty(attribution) ? null : attribution.Length > 1000 ? attribution[..1000] : attribution;
     }
 
     private static string? FirstImage(string csv)

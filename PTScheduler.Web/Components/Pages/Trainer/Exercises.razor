@@ -184,6 +184,10 @@ else
                                     <iframe src="@yt" title="Wideo" allowfullscreen loading="lazy"></iframe>
                                 </div>
                             }
+                            else if (_detail.VideoType == ExerciseVideoType.Url && IsHttpUrl(_detail.VideoRef))
+                            {
+                                <video class="w-100 rounded border mt-2" src="@_detail.VideoRef" controls muted playsinline preload="metadata"></video>
+                            }
                             else if (_detail.VideoType == ExerciseVideoType.Bunny && !string.IsNullOrWhiteSpace(_detail.VideoRef))
                             {
                                 <div class="alert alert-light border small mt-2 mb-0"><i class="bi bi-play-circle me-1"></i>Wideo Bunny: <code>@_detail.VideoRef</code></div>
@@ -262,6 +266,16 @@ else
                             @if (descPl is null && descEn is null)
                             {
                                 <div class="text-muted small">Brak opisu.</div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(_detail.Attribution))
+                            {
+                                <div class="exercise-attribution mt-3">
+                                    <i class="bi bi-c-circle me-1"></i>@_detail.Attribution
+                                    @if (_detail.Attribution.StartsWith("wger.de"))
+                                    {
+                                        <span> · <a href="https://creativecommons.org/licenses/by-sa/4.0/deed.pl" target="_blank" rel="noopener">o licencji</a></span>
+                                    }
+                                </div>
                             }
                         </div>
                     </div>
@@ -383,11 +397,12 @@ else
                                 <option value="@ExerciseVideoType.None">brak</option>
                                 <option value="@ExerciseVideoType.YouTube">YouTube</option>
                                 <option value="@ExerciseVideoType.Bunny">Bunny</option>
+                                <option value="@ExerciseVideoType.Url">Plik wideo (link)</option>
                             </select>
                         </div>
                         <div class="col-6 col-md-8">
                             <label class="form-label">Link/ID wideo</label>
-                            <input class="form-control" @bind="_form.VideoRef" placeholder="link YouTube lub ID Bunny" />
+                            <input class="form-control" @bind="_form.VideoRef" placeholder="link YouTube, ID Bunny albo link do pliku .mp4" />
                         </div>
                     </div>
                 </div>
@@ -525,13 +540,17 @@ else
             ImageUrls = _detail.ImageUrls.ToList(),
             VideoType = _detail.VideoType,
             VideoRef = _detail.VideoRef,
-            Tracking = _detail.Tracking
+            Tracking = _detail.Tracking,
+            Attribution = _detail.Attribution
         };
         _imagesText = string.Join("\n", _detail.ImageUrls);
         _editError = null;
         _showDetail = false;
         _showEdit = true;
     }
+
+    private static bool IsHttpUrl(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Scheme == Uri.UriSchemeHttps;
 
     /// <summary>Ćwiczenie z katalogu jako własne — np. żeby dodać do niego film z YouTube.</summary>
     private void CopyDetailAsMine()

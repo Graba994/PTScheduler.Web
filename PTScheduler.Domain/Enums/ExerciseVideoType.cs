@@ -9,5 +9,7 @@ public enum ExerciseVideoType
 {
     None,
     YouTube,
-    Bunny
+    Bunny,
+    /// <summary>Plik wideo pod adresem źródła katalogu (np. wger.de) — odtwarzany bezpośrednio, bez re-hostingu.</summary>
+    Url
 }

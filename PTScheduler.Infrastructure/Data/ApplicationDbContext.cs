@@ -325,6 +325,9 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             // Katalog filtruje po właścicielu (moje/publiczne) i widoczności.
             e.HasIndex(x => x.OwnerTrainerUserId);
             e.HasIndex(x => new { x.Visibility, x.Category });
+            // Katalog publiczny pokazuje tylko wybrane źródło (Free Exercise DB albo wger).
+            e.HasIndex(x => new { x.Visibility, x.Source });
+            e.Property(x => x.Attribution).HasMaxLength(1000);
         });
 
         builder.Entity<TrainerExercisePref>(e =>

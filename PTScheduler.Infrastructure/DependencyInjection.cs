@@ -104,6 +104,7 @@ public static class DependencyInjection
         services.AddScoped<ISmsService, SmsApiService>();
         services.AddScoped<ISetupService, SetupService>();
         services.AddScoped<IExerciseCatalogService, ExerciseCatalogService>();
+        services.AddScoped<IWgerCatalogImporter, PTScheduler.Infrastructure.Services.Wger.WgerCatalogImporter>();
         services.AddScoped<ITrainingPlanService, TrainingPlanService>();
         services.AddScoped<IWorkoutLogService, WorkoutLogService>();
         services.AddScoped<IProgressionService, ProgressionService>();

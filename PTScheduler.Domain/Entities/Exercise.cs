@@ -4,7 +4,7 @@ namespace PTScheduler.Domain.Entities;
 
 /// <summary>
 /// Ćwiczenie w katalogu. Rekordy bazowe (OwnerTrainerUserId = null,
-/// Visibility = Public) pochodzą z Free Exercise DB i są współdzielone —
+/// Visibility = Public) pochodzą z Free Exercise DB albo wger.de (zob. Source) i są współdzielone —
 /// koszt właściciela ponoszony raz. Trener może dodawać własne ćwiczenia
 /// (OwnerTrainerUserId = jego id, Visibility = Mine) z własnymi mediami.
 ///
@@ -52,8 +52,14 @@ public class Exercise
     /// <summary>Dla YouTube: id/URL filmu. Dla Bunny: id wideo. Null gdy None.</summary>
     public string? VideoRef { get; set; }
 
-    /// <summary>Klucz źródłowy z Free Exercise DB — dedup przy ponownym seedzie. Unikalny gdy nie-null.</summary>
+    /// <summary>Klucz źródłowy (id Free Exercise DB albo „wger:{uuid}”) — dedup przy ponownym imporcie. Unikalny gdy nie-null.</summary>
     public string? SourceKey { get; set; }
+
+    /// <summary>Źródło rekordu bazowego; katalog pokazuje tylko ćwiczenia wybranego źródła.</summary>
+    public ExerciseSource Source { get; set; } = ExerciseSource.FreeExerciseDb;
+
+    /// <summary>Autorzy i licencja treści (wymagane przez CC-BY-SA dla wger). Null dla domeny publicznej i własnych bez źródła.</summary>
+    public string? Attribution { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }
