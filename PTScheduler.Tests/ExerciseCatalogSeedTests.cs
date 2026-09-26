@@ -80,4 +80,27 @@ public class ExerciseCatalogSeedTests
         bench.ImageUrls.Should().StartWith("http");
         bench.Category.Should().Be(ExerciseCategory.Strength);
     }
+
+    [Fact]
+    public async Task Fills_Polish_Description_And_Name_For_Already_Seeded_Rows()
+    {
+        var (_, db) = TestDb.CreateFresh();
+        await DbInitializer.SeedExerciseCatalogAsync(db);
+
+        // Symulacja starej bazy: brak opisu PL i angielska nazwa.
+        var sitUp = await db.Exercises.SingleAsync(e => e.SourceKey == "3_4_Sit-Up");
+        sitUp.DescriptionPl = null;
+        sitUp.NamePl = sitUp.NameEn;
+        // Nazwa zmieniona ręcznie nie może zostać nadpisana.
+        var roller = await db.Exercises.SingleAsync(e => e.SourceKey == "Ab_Roller");
+        roller.NamePl = "Moja nazwa";
+        await db.SaveChangesAsync();
+
+        await DbInitializer.SeedExerciseCatalogAsync(db);
+
+        sitUp = await db.Exercises.SingleAsync(e => e.SourceKey == "3_4_Sit-Up");
+        sitUp.NamePl.Should().Be("Brzuszki 3/4");
+        sitUp.DescriptionPl.Should().Contain("\n").And.Contain("kolana");
+        (await db.Exercises.SingleAsync(e => e.SourceKey == "Ab_Roller")).NamePl.Should().Be("Moja nazwa");
+    }
 }

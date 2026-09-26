@@ -122,6 +122,10 @@ else
                     </div>
                     <div class="card-body p-2">
                         <div class="fw-semibold small text-truncate" title="@e.NamePl">@e.NamePl</div>
+                        @if (!string.IsNullOrWhiteSpace(e.NameEn) && e.NameEn != e.NamePl)
+                        {
+                            <div class="text-muted text-truncate" style="font-size:.7rem" title="@e.NameEn">@e.NameEn</div>
+                        }
                         <div class="d-flex flex-wrap gap-1 mt-1">
                             @foreach (var m in Muscles.Parse(e.PrimaryMuscles).Take(3))
                             {
@@ -142,7 +146,13 @@ else
         <div class="modal-dialog modal-dialog-centered modal-lg" @onclick:stopPropagation="true">
             <div class="modal-content">
                 <div class="modal-header">
-                    <h5 class="modal-title">@_detail.NamePl</h5>
+                    <h5 class="modal-title">
+                        @_detail.NamePl
+                        @if (!string.IsNullOrWhiteSpace(_detail.NameEn) && _detail.NameEn != _detail.NamePl)
+                        {
+                            <small class="d-block text-muted fw-normal" style="font-size:.8rem">🇬🇧 @_detail.NameEn</small>
+                        }
+                    </h5>
                     <div class="d-flex align-items-center gap-2">
                         <button class="btn btn-sm @(_detail.IsFavorite ? "btn-warning" : "btn-outline-warning")"
                                 @onclick="() => ToggleFavDetail()">
@@ -220,7 +230,17 @@ else
                             }
                             @if (descPl is not null)
                             {
-                                <div class="small" style="white-space:pre-line">@descPl</div>
+                                var steps = descPl.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                                @if (steps.Length > 1)
+                                {
+                                    <ol class="small ps-3 mb-0 exercise-steps">
+                                        @foreach (var step in steps) { <li>@step</li> }
+                                    </ol>
+                                }
+                                else
+                                {
+                                    <div class="small" style="white-space:pre-line">@descPl</div>
+                                }
                             }
                             @if (descEn is not null)
                             {

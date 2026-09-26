@@ -107,8 +107,15 @@ public static class DbInitializer
         var records = ReadEmbeddedJson<List<FreeExerciseDbRecord>>(asm, "free-exercise-db.json");
         if (records is null || records.Count == 0) return;
 
+        // Stara, kuratorowana lista nazw PL (96 pozycji) — dziś tylko do rozpoznania,
+        // czy nazwa w bazie pochodzi z automatu (i można ją nadpisać nowszym tłumaczeniem).
         var plNames = ReadEmbeddedJson<Dictionary<string, string>>(asm, "exercise-names-pl.json")
                       ?? new Dictionary<string, string>();
+        // Pełne tłumaczenie katalogu: id → [nazwa PL, opis PL (kroki rozdzielone \n)].
+        var plTexts = ReadEmbeddedJson<Dictionary<string, string[]>>(asm, "exercise-pl.json")
+                      ?? new Dictionary<string, string[]>();
+
+        await ApplyPolishTranslationsAsync(db, plTexts, plNames);
 
         var have = (await db.Exercises
                 .Where(e => e.SourceKey != null)
@@ -125,8 +132,8 @@ public static class DbInitializer
         {
             if (string.IsNullOrWhiteSpace(r.Id) || have.Contains(r.Id)) continue;
 
-            var namePl = plNames.TryGetValue(r.Id, out var pl) && !string.IsNullOrWhiteSpace(pl)
-                ? pl : r.Name;
+            var namePl = PlName(plTexts, r.Id)
+                ?? (plNames.TryGetValue(r.Id, out var pl) && !string.IsNullOrWhiteSpace(pl) ? pl : r.Name);
 
             toAdd.Add(new Exercise
             {
@@ -135,7 +142,7 @@ public static class DbInitializer
                 NameEn = r.Name,
                 NamePl = namePl,
                 DescriptionEn = r.Instructions.Length > 0 ? string.Join("\n", r.Instructions) : null,
-                DescriptionPl = null,
+                DescriptionPl = PlDescription(plTexts, r.Id),
                 PrimaryMuscles = string.Join(",", r.PrimaryMuscles),
                 SecondaryMuscles = string.Join(",", r.SecondaryMuscles),
                 Category = MapCategory(r.Category),
@@ -156,6 +163,46 @@ public static class DbInitializer
             await db.SaveChangesAsync();
         }
     }
+
+    /// <summary>
+    /// Uzupełnia tłumaczenia w już zaseedowanych ćwiczeniach bazowych: brakujący opis PL
+    /// oraz nazwę PL, jeśli wciąż jest automatyczna (angielska albo ze starej listy).
+    /// Nazw i opisów zmienionych ręcznie nie ruszamy. Idempotentne.
+    /// </summary>
+    private static async Task ApplyPolishTranslationsAsync(ApplicationDbContext db,
+        Dictionary<string, string[]> plTexts, Dictionary<string, string> legacyNames)
+    {
+        if (plTexts.Count == 0) return;
+        var keys = plTexts.Keys.ToList();
+        var rows = await db.Exercises
+            .Where(e => e.OwnerTrainerUserId == null && e.SourceKey != null && keys.Contains(e.SourceKey))
+            .ToListAsync();
+
+        var changed = false;
+        foreach (var e in rows)
+        {
+            var key = e.SourceKey!;
+            if (string.IsNullOrWhiteSpace(e.DescriptionPl) && PlDescription(plTexts, key) is { } desc)
+            {
+                e.DescriptionPl = desc;
+                changed = true;
+            }
+            var autoName = e.NamePl == e.NameEn
+                || (legacyNames.TryGetValue(key, out var legacy) && e.NamePl == legacy);
+            if (autoName && PlName(plTexts, key) is { } name && name != e.NamePl)
+            {
+                e.NamePl = name;
+                changed = true;
+            }
+        }
+        if (changed) await db.SaveChangesAsync();
+    }
+
+    private static string? PlName(Dictionary<string, string[]> plTexts, string id) =>
+        plTexts.TryGetValue(id, out var t) && t.Length > 0 && !string.IsNullOrWhiteSpace(t[0]) ? t[0].Trim() : null;
+
+    private static string? PlDescription(Dictionary<string, string[]> plTexts, string id) =>
+        plTexts.TryGetValue(id, out var t) && t.Length > 1 && !string.IsNullOrWhiteSpace(t[1]) ? t[1].Trim() : null;
 
     private static T? ReadEmbeddedJson<T>(Assembly asm, string endsWith)
     {
