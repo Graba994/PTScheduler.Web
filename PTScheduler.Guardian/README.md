@@ -186,6 +186,7 @@ Logowanie: wpisz Guardian Secret i kliknij "Autoryzuj".
 | `GUARDIAN_PORTAL_IMAGE` | Obraz portalu | `ptportal:latest` |
 | `GUARDIAN_TENANT_IMAGE` | Obraz trenera | `ptscheduler-web:latest` |
 | `GUARDIAN_PORTAL_PORT` | Port wewnetrzny portalu | `8081` |
+| `GUARDIAN_TENANT_HOST` | Adres hosta, pod ktorym Guardian sprawdza porty instancji (zapas — Portal podaje swoj `Portal:ForwardHost`) | `host.docker.internal` |
 
 ---
 
@@ -198,7 +199,7 @@ Wszystkie endpointy `/api/*` wymagaja naglowka `X-Guardian-Secret`.
 | GET | `/health` | Health check (bez auth) |
 | GET | `/api/status` | Status Guardiana, portalu, aktywne operacje |
 | POST | `/api/upgrade/portal` | Rozpocznij aktualizacje portalu |
-| POST | `/api/upgrade/tenant` | Rozpocznij rebuild obrazu trenera |
+| POST | `/api/upgrade/tenant` | Rebuild obrazu trenera; z JSON-em jak w `rolling` — **budowa i wdrozenie w jednym zadaniu** (`TenantRelease`) |
 | POST | `/api/upgrade/tenant?rebuild=false` | Tylko git pull, bez buildu |
 | POST | `/api/upgrade/tenants/rolling` | Rolling update kontenerow trenerskich (JSON body) |
 | GET | `/api/upgrade/active` | Aktywna operacja (jesli jest) |
@@ -328,7 +329,11 @@ Guardian co 30 sekund sprawdza health portalu. Jesli portal przestaje odpowiadac
 
 ## Bezpieczenstwo
 
-- Cala komunikacja Guardian ↔ Portal odbywa sie przez naglowek `X-Guardian-Secret`
+- Cala komunikacja Guardian ↔ Portal odbywa sie przez naglowek `X-Guardian-Secret` (porownanie w stalym czasie, odrzucone proby i wszystkie polecenia sa logowane z adresem IP; przy kazdym zadaniu zapisujemy `requestedBy`)
+- Token GitHuba z Portalu jest trzymany tylko w pamieci i podawany gitowi jako naglowek (`-c http.extraHeader`) — nie trafia do `.git/config` ani do logow zadan; stary adres z tokenem w URL jest zastepowany czystym
+- Hasla/tokeny sa wycinane z logow zadan (widocznych w Portalu)
+- Dane z Portalu (identyfikatory instancji, porty, adres hosta, nazwa repozytorium) sa walidowane; polecenia `git`/`docker` uruchamiamy z lista argumentow, bez powloki
+- Id zadania nie moze zawierac `../` (ochrona plikow poza katalogiem logow)
 - Guardian nie ma bazy danych — zero danych wrazliwych do wycieku
 - Docker socket jest montowany read-write (niezbedny do zarzadzania kontenerami)
 - Panel awaryjny Guardiana powinien byc dostepny **tylko z sieci wewnetrznej** — nie wystawiaj portu 9090 na internet bez reverse proxy z autoryzacja
@@ -346,7 +351,20 @@ Albo w Nginx Proxy Manager: nie twórz proxy hosta dla portu 9090.
 
 ---
 
+## Jak dziala wdrozenie u trenerow
+
+1. Portal wysyla **jedno** polecenie: `POST /api/upgrade/tenant?rebuild=true` z lista aktywnych instancji i adresem hosta.
+2. Guardian pobiera zmiany (`git fetch` + `merge --ff-only` — bez tworzenia commitow scalajacych; przy rozjechanej historii zatrzymuje sie z czytelnym komunikatem), buduje obraz i od razu wdraza go na instancje.
+3. Dla kazdej instancji: stary kontener jest **zatrzymywany i przemianowywany** (`pt-slug-web-prev-…`), nowy powstaje z ta sama konfiguracja (wolumeny, porty, limity pamieci/CPU/procesow, polityka restartu, etykiety, sieci z aliasami).
+4. Nowa wersja musi odpowiedziec na `/health` pod adresem hosta (jak w Portalu). Gdy Guardian nie widzi tego adresu, wystarczy, ze aplikacja zglosi start w logach i nie restartuje sie.
+5. Sukces → stary kontener jest usuwany. Porazka → nowy jest usuwany, a stary wraca dokladnie taki, jaki byl; w logu zadania sa ostatnie linie logow aplikacji.
+6. Start nowego zadania czeka do 20 s na koniec poprzedniego; zadania przerwane restartem Guardiana sa oznaczane jako nieudane (Portal nie czeka na nie w nieskonczonosc). Historia trzyma ostatnie 300 zadan.
+
 ## Rozwiazywanie problemow
+
+### „Guardian nie odpowiedzial przy starcie wdrazania”
+
+Poprzednie wersje Portalu wysylaly wdrozenie osobnym poleceniem zaraz po budowie obrazu i trafialy na moment, gdy Guardian jeszcze trzymal blokade (409). Obraz byl gotowy, ale kontenery nie byly odtwarzane. Od tej wersji budowa i wdrozenie ida w jednym zadaniu, a Portal pokazuje prawdziwy powod odmowy. Pojedyncza instancje wdrozysz tez z karty trenera: **Wdroz najnowsza wersje**.
 
 ### Guardian nie widzi portalu
 

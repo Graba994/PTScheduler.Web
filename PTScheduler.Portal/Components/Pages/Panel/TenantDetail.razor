@@ -10,6 +10,7 @@
 @inject IConfiguration Config
 @inject EmailService EmailSvc
 @inject AddonService AddonSvc
+@inject UpdateService UpdateSvc
 @rendermode InteractiveServer
 
 <PageTitle>@(_tenant?.CompanyName ?? "Trener") — PTScheduler Portal</PageTitle>
@@ -442,6 +443,18 @@ else
                         </div>
                     }
 
+                    <hr class="my-3" />
+                    <div class="pp-label"><i class="bi bi-cloud-arrow-down me-1"></i>Wersja aplikacji</div>
+                    <div class="d-flex flex-wrap gap-2 align-items-center mb-1">
+                        <button class="btn btn-sm btn-primary" @onclick="RedeployLatest" disabled="@(_redeploying || _tenant.Status != TenantStatus.Active)">
+                            @if (_redeploying) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            <i class="bi bi-arrow-repeat me-1"></i>Wdróż najnowszą wersję
+                        </button>
+                        <a href="/panel/updates" class="small">historia i logi wdrożeń</a>
+                    </div>
+                    <p class="text-muted small mb-0">
+                        <i class="bi bi-info-circle me-1"></i>Odtwarza kontener aplikacji z najnowszym zbudowanym obrazem. Jeśli nowa wersja nie wstanie, wraca poprzednia. Dane, baza i ustawienia zostają.
+                    </p>
                     <hr class="my-3" />
                     <div class="pp-label"><i class="bi bi-hourglass-split me-1"></i>Przedłuż ochronę</div>
                     <div class="d-flex flex-wrap gap-2">
@@ -1132,6 +1145,39 @@ else
         "canceled" => "bg-danger",
         _ => "bg-secondary"
     };
+
+    private bool _redeploying;
+
+    /// <summary>
+    /// Nowa wersja tylko dla tej instancji. Przez Guardiana (z logami i automatycznym powrotem
+    /// do poprzedniej wersji), a gdy go nie ma — odtworzenie kontenera jak przy zmianie planu.
+    /// </summary>
+    private async Task RedeployLatest()
+    {
+        if (_tenant is null) return;
+        _redeploying = true;
+        try
+        {
+            if (await UpdateSvc.GetGuardianStatusAsync() is not null)
+            {
+                var resp = await UpdateSvc.StartTenantRollingUpdateViaGuardianAsync(1, false, [_tenant.Slug]);
+                if (resp is { Started: true })
+                {
+                    Nav.NavigateTo("/panel/updates");
+                    return;
+                }
+                ShowMessage(resp?.Error ?? "Guardian nie przyjął zadania.", true);
+            }
+            else
+            {
+                var (ok, msg) = await TenantSvc.ReprovisionWebAsync(_tenant.Id);
+                ShowMessage(ok ? "Kontener odtworzony z najnowszym obrazem." : msg, !ok);
+                await RefreshContainers();
+            }
+        }
+        catch (Exception ex) { ShowMessage($"Błąd: {ex.Message}", true); }
+        finally { _redeploying = false; }
+    }
 
     private async Task ApplyPlanChange()
     {

@@ -1,3 +1,6 @@
+using System.Security.Cryptography;
+using System.Text;
+using System.Text.Json;
 using Docker.DotNet;
 using PTScheduler.Guardian;
 using PTScheduler.Guardian.Services;
@@ -17,8 +20,20 @@ builder.Services.AddSingleton<UpgradeOrchestrator>();
 
 var app = builder.Build();
 
+if (guardianSecret.Length is > 0 and < 24)
+    app.Logger.LogWarning("GUARDIAN_SECRET ma tylko {Length} znaków — Guardian steruje Dockerem, użyj co najmniej 32 losowych znaków.", guardianSecret.Length);
+
+app.Services.GetRequiredService<LogStore>().RecoverInterrupted();
 var orchestrator = app.Services.GetRequiredService<UpgradeOrchestrator>();
 await orchestrator.CleanupOrphanedContainersAsync();
+
+var secretBytes = Encoding.UTF8.GetBytes(guardianSecret);
+var jsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
+static string Caller(HttpContext ctx) => ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
+static IResult StartResult(bool started, string jobId, string? error) =>
+    started ? Results.Ok(new { started, jobId })
+    : UpgradeOrchestrator.IsBusy(error) ? Results.Conflict(new { started, error })
+    : Results.BadRequest(new { started, error });
 
 app.UseStaticFiles();
 
@@ -32,13 +47,17 @@ app.Use(async (ctx, next) =>
             await ctx.Response.WriteAsync("GUARDIAN_SECRET nie ustawiony.");
             return;
         }
-        var provided = ctx.Request.Headers["X-Guardian-Secret"].FirstOrDefault();
-        if (provided != guardianSecret)
+        // Porównanie w stałym czasie — długość odpowiedzi nie zdradza, ile znaków sekretu się zgadza.
+        var provided = Encoding.UTF8.GetBytes(ctx.Request.Headers["X-Guardian-Secret"].FirstOrDefault() ?? "");
+        if (!CryptographicOperations.FixedTimeEquals(provided, secretBytes))
         {
+            app.Logger.LogWarning("Odrzucono wywołanie {Method} {Path} z {Ip} — zły sekret.", ctx.Request.Method, ctx.Request.Path, Caller(ctx));
             ctx.Response.StatusCode = 401;
             await ctx.Response.WriteAsync("Unauthorized");
             return;
         }
+        if (!HttpMethods.IsGet(ctx.Request.Method))
+            app.Logger.LogInformation("Polecenie {Method} {Path} z {Ip}.", ctx.Request.Method, ctx.Request.Path, Caller(ctx));
     }
     await next();
 });
@@ -73,44 +92,42 @@ app.MapGet("/api/status", (HealthWatcher hw) =>
     });
 });
 
-app.MapPost("/api/upgrade/portal", async () =>
+app.MapPost("/api/upgrade/portal", async (HttpContext ctx) =>
 {
-    var (started, jobId, error) = await orchestrator.StartPortalUpgradeAsync();
-    return started
-        ? Results.Ok(new { started, jobId })
-        : Results.Conflict(new { started, error });
+    var (started, jobId, error) = await orchestrator.StartPortalUpgradeAsync(Caller(ctx));
+    return StartResult(started, jobId, error);
 });
 
+// Obraz aplikacji trenerów; z listą instancji w treści — od razu wdrożenie w tym samym zadaniu.
 app.MapPost("/api/upgrade/tenant", async (HttpContext ctx) =>
 {
     var rebuild = ctx.Request.Query["rebuild"].FirstOrDefault() != "false";
-    var (started, jobId, error) = await orchestrator.StartTenantUpgradeAsync(rebuild);
-    return started
-        ? Results.Ok(new { started, jobId })
-        : Results.Conflict(new { started, error });
+    TenantRollingRequest? rollout = null;
+    if (ctx.Request.ContentLength is > 0 || ctx.Request.Headers.TransferEncoding.Count > 0)
+    {
+        try { rollout = await ctx.Request.ReadFromJsonAsync<TenantRollingRequest>(jsonOptions); }
+        catch { return Results.BadRequest(new { started = false, error = "Nieprawidłowy JSON." }); }
+    }
+    var (started, jobId, error) = await orchestrator.StartTenantUpgradeAsync(rebuild, rollout, Caller(ctx));
+    return StartResult(started, jobId, error);
 });
 
 app.MapPost("/api/upgrade/tenants/rolling", async (HttpContext ctx) =>
 {
     TenantRollingRequest? request;
-    try
-    {
-        request = await ctx.Request.ReadFromJsonAsync<TenantRollingRequest>(
-            new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-    }
-    catch { return Results.BadRequest(new { error = "Nieprawidłowy JSON." }); }
+    try { request = await ctx.Request.ReadFromJsonAsync<TenantRollingRequest>(jsonOptions); }
+    catch { return Results.BadRequest(new { started = false, error = "Nieprawidłowy JSON." }); }
 
     if (request is null || request.Tenants.Count == 0)
-        return Results.BadRequest(new { error = "Brak tenantów." });
+        return Results.BadRequest(new { started = false, error = "Brak tenantów." });
 
-    var (started, jobId, error) = await orchestrator.StartTenantRollingUpdateAsync(request);
-    return started
-        ? Results.Ok(new { started, jobId })
-        : Results.Conflict(new { started, error });
+    var (started, jobId, error) = await orchestrator.StartTenantRollingUpdateAsync(request, Caller(ctx));
+    return StartResult(started, jobId, error);
 });
 
 app.MapGet("/api/upgrade/jobs/{id}", (string id) =>
 {
+    if (!LogStore.IsSafeId(id)) return Results.BadRequest();
     var job = orchestrator.GetJob(id);
     return job is not null ? Results.Ok(job) : Results.NotFound();
 });
@@ -129,12 +146,10 @@ app.MapGet("/api/upgrade/history", (HttpContext ctx) =>
     return Results.Ok(orchestrator.GetHistory(Math.Clamp(limit, 1, 50)));
 });
 
-app.MapPost("/api/rollback/portal", async () =>
+app.MapPost("/api/rollback/portal", async (HttpContext ctx) =>
 {
-    var (started, jobId, error) = await orchestrator.RollbackPortalAsync();
-    return started
-        ? Results.Ok(new { started, jobId })
-        : Results.Conflict(new { started, error });
+    var (started, jobId, error) = await orchestrator.RollbackPortalAsync(Caller(ctx));
+    return StartResult(started, jobId, error);
 });
 
 app.Run();

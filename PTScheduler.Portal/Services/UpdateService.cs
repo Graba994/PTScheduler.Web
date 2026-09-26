@@ -510,18 +510,83 @@ public class UpdateService(
         return JsonSerializer.Deserialize<GuardianStatusDto>(json, _jsonOpts);
     }
 
-    public async Task<GuardianStartResponse?> StartPortalUpgradeViaGuardianAsync()
+    public Task<GuardianStartResponse?> StartPortalUpgradeViaGuardianAsync() =>
+        StartGuardianJobAsync("/api/upgrade/portal", null);
+
+    public Task<GuardianStartResponse?> StartTenantUpgradeViaGuardianAsync(bool rebuild = true) =>
+        StartGuardianJobAsync($"/api/upgrade/tenant?rebuild={rebuild.ToString().ToLower()}", null);
+
+    /// <summary>
+    /// Nowa wersja dla trenerów w JEDNYM zadaniu Guardiana: budowa obrazu i od razu wdrożenie
+    /// na aktywne instancje. Wcześniej Portal wysyłał drugie polecenie po zakończeniu budowy
+    /// i trafiał na moment, gdy Guardian jeszcze trzymał blokadę — stąd „nie odpowiedział”.
+    /// </summary>
+    public async Task<GuardianStartResponse?> StartTenantReleaseViaGuardianAsync(int concurrency = 3, bool stopOnFirstFailure = false)
     {
-        var json = await CallGuardianAsync(HttpMethod.Post, "/api/upgrade/portal");
-        if (json is null) return null;
-        return JsonSerializer.Deserialize<GuardianStartResponse>(json, _jsonOpts);
+        var body = await BuildRolloutAsync(concurrency, stopOnFirstFailure, null);
+        if (body is null) return await StartTenantUpgradeViaGuardianAsync(true); // brak aktywnych — sam obraz
+        return await StartGuardianJobAsync("/api/upgrade/tenant?rebuild=true", body);
     }
 
-    public async Task<GuardianStartResponse?> StartTenantUpgradeViaGuardianAsync(bool rebuild = true)
+    /// <summary>Lista instancji do wdrożenia + adres, pod którym Guardian ma je sprawdzać (ten sam co Portal).</summary>
+    private async Task<object?> BuildRolloutAsync(int concurrency, bool stopOnFirstFailure, IReadOnlyCollection<string>? onlySlugs)
     {
-        var json = await CallGuardianAsync(HttpMethod.Post, $"/api/upgrade/tenant?rebuild={rebuild.ToString().ToLower()}");
-        if (json is null) return null;
-        return JsonSerializer.Deserialize<GuardianStartResponse>(json, _jsonOpts);
+        await using var db = dbFactory.CreateDbContext();
+        var q = db.Tenants.AsNoTracking().Where(t => t.Status == Entities.TenantStatus.Active);
+        if (onlySlugs is { Count: > 0 }) q = q.Where(t => onlySlugs.Contains(t.Slug));
+        var tenants = await q.Select(t => new { slug = t.Slug, port = t.Port }).ToListAsync();
+        if (tenants.Count == 0) return null;
+        return new
+        {
+            tenants,
+            concurrency,
+            stopOnFirstFailure,
+            healthHost = config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220"
+        };
+    }
+
+    /// <summary>
+    /// Start zadania w Guardianie. Zwraca prawdziwy powód odmowy (np. „trwa inne zadanie”)
+    /// zamiast null, a przy chwilowym „w toku” ponawia przez ok. 30 s.
+    /// </summary>
+    private async Task<GuardianStartResponse?> StartGuardianJobAsync(string path, object? body)
+    {
+        var (url, secret) = await GetGuardianConfigAsync();
+        for (var attempt = 1; ; attempt++)
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"{url}{path}");
+            req.Headers.Add("X-Guardian-Secret", secret);
+            if (body is not null)
+                req.Content = new StringContent(JsonSerializer.Serialize(body, _jsonOpts), System.Text.Encoding.UTF8, "application/json");
+            try
+            {
+                using var resp = await _guardianHttp.SendAsync(req);
+                var json = await resp.Content.ReadAsStringAsync();
+                GuardianStartResponse? parsed = null;
+                try { parsed = string.IsNullOrWhiteSpace(json) ? null : JsonSerializer.Deserialize<GuardianStartResponse>(json, _jsonOpts); }
+                catch (JsonException) { /* odpowiedź nie-JSON (np. 401 „Unauthorized”) */ }
+
+                if (resp.IsSuccessStatusCode) return parsed;
+                if (resp.StatusCode == System.Net.HttpStatusCode.Conflict && attempt < 4)
+                {
+                    await Task.Delay(TimeSpan.FromSeconds(8));
+                    continue;
+                }
+                var reason = parsed?.Error ?? resp.StatusCode switch
+                {
+                    System.Net.HttpStatusCode.Unauthorized => "Guardian odrzucił sekret — sprawdź GUARDIAN_SECRET w Portalu i Guardianie.",
+                    System.Net.HttpStatusCode.ServiceUnavailable => "Guardian nie ma ustawionego sekretu (GUARDIAN_SECRET).",
+                    _ => $"Guardian odpowiedział HTTP {(int)resp.StatusCode}."
+                };
+                logger.LogWarning("Guardian odmówił startu {Path}: {Reason}", path, reason);
+                return new GuardianStartResponse(false, null, reason);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Guardian nieosiągalny: {Path}", path);
+                return new GuardianStartResponse(false, null, $"Nie mogę połączyć się z Guardianem ({url}): {ex.Message}");
+            }
+        }
     }
 
     public async Task<GuardianJobDto?> GetGuardianJobAsync(string jobId)
@@ -545,52 +610,16 @@ public class UpdateService(
         return JsonSerializer.Deserialize<List<GuardianJobDto>>(json, _jsonOpts) ?? [];
     }
 
-    public async Task<GuardianStartResponse?> RollbackPortalViaGuardianAsync()
-    {
-        var json = await CallGuardianAsync(HttpMethod.Post, "/api/rollback/portal");
-        if (json is null) return null;
-        return JsonSerializer.Deserialize<GuardianStartResponse>(json, _jsonOpts);
-    }
+    public Task<GuardianStartResponse?> RollbackPortalViaGuardianAsync() =>
+        StartGuardianJobAsync("/api/rollback/portal", null);
 
+    /// <summary>Wdrożenie gotowego obrazu na aktywne instancje (albo tylko wskazane — np. jedną z karty trenera).</summary>
     public async Task<GuardianStartResponse?> StartTenantRollingUpdateViaGuardianAsync(
-        int concurrency = 3, bool stopOnFirstFailure = false)
+        int concurrency = 3, bool stopOnFirstFailure = false, IReadOnlyCollection<string>? onlySlugs = null)
     {
-        await using var db = dbFactory.CreateDbContext();
-        var activeTenants = await db.Tenants
-            .AsNoTracking()
-            .Where(t => t.Status == Entities.TenantStatus.Active)
-            .Select(t => new { t.Slug, t.Port })
-            .ToListAsync();
-
-        if (activeTenants.Count == 0)
-            return new GuardianStartResponse(false, null, "Brak aktywnych tenantów.");
-
-        var request = new
-        {
-            tenants = activeTenants.Select(t => new { slug = t.Slug, port = t.Port }).ToList(),
-            concurrency,
-            stopOnFirstFailure
-        };
-
-        var (url, secret) = await GetGuardianConfigAsync();
-        using var req = new HttpRequestMessage(HttpMethod.Post, $"{url}/api/upgrade/tenants/rolling");
-        req.Headers.Add("X-Guardian-Secret", secret);
-        req.Content = new StringContent(
-            JsonSerializer.Serialize(request, _jsonOpts),
-            System.Text.Encoding.UTF8, "application/json");
-
-        try
-        {
-            using var resp = await _guardianHttp.SendAsync(req);
-            if (!resp.IsSuccessStatusCode) return null;
-            var json = await resp.Content.ReadAsStringAsync();
-            return JsonSerializer.Deserialize<GuardianStartResponse>(json, _jsonOpts);
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Guardian rolling update call failed");
-            return null;
-        }
+        var body = await BuildRolloutAsync(concurrency, stopOnFirstFailure, onlySlugs);
+        if (body is null) return new GuardianStartResponse(false, null, "Brak aktywnych tenantów.");
+        return await StartGuardianJobAsync("/api/upgrade/tenants/rolling", body);
     }
 
     private static readonly JsonSerializerOptions _jsonOpts = new()

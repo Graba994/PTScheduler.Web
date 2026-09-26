@@ -1,12 +1,22 @@
 using System.Diagnostics;
+using System.Text;
 using System.Text.Json;
+using System.Text.RegularExpressions;
 using Docker.DotNet;
 using Docker.DotNet.Models;
 
 namespace PTScheduler.Guardian.Services;
 
-public sealed class UpgradeOrchestrator : IDisposable
+public sealed partial class UpgradeOrchestrator : IDisposable
 {
+    /// <summary>
+    /// Ile start nowego zadania czeka na zakończenie poprzedniego. Poprzednie zadanie zapisuje
+    /// „Success” chwilę przed zwolnieniem blokady — bez czekania Portal dostawał 409
+    /// i wdrożenie po zbudowaniu obrazu nie ruszało.
+    /// </summary>
+    private static readonly TimeSpan StartWait = TimeSpan.FromSeconds(20);
+    private static readonly TimeSpan TenantReadyTimeout = TimeSpan.FromSeconds(150);
+
     private readonly DockerClient _docker;
     private readonly LogStore _logStore;
     private readonly HealthWatcher _healthWatcher;
@@ -21,6 +31,9 @@ public sealed class UpgradeOrchestrator : IDisposable
     private readonly int _portalPort;
     private readonly string _portalUrl;
     private readonly string _guardianSecret;
+    private readonly string _defaultTenantHost;
+    private string? _gitAuthHeader; // nagłówek Authorization dla gita — tylko w pamięci, nigdy w .git/config
+    private readonly List<string> _secretsToScrub = [];
 
     private volatile UpgradeJob? _activeJob;
     private readonly SemaphoreSlim _semaphore = new(1, 1);
@@ -43,6 +56,10 @@ public sealed class UpgradeOrchestrator : IDisposable
         _portalPort = int.TryParse(Cfg("GUARDIAN_PORTAL_PORT", config["Guardian:PortalPort"], "8081"), out var p) ? p : 8081;
         _portalUrl = Cfg("GUARDIAN_PORTAL_URL", config["Guardian:PortalUrl"], "http://ptportal:8081");
         _guardianSecret = Environment.GetEnvironmentVariable("GUARDIAN_SECRET") ?? config["Guardian:Secret"] ?? "";
+        _defaultTenantHost = Cfg("GUARDIAN_TENANT_HOST", config["Guardian:TenantHost"], "host.docker.internal");
+
+        if (!SafeRef().IsMatch(_branch))
+            throw new InvalidOperationException($"GUARDIAN_BRANCH '{_branch}' zawiera niedozwolone znaki.");
     }
 
     public string? ActiveJobId => _activeJob?.Id;
@@ -55,12 +72,12 @@ public sealed class UpgradeOrchestrator : IDisposable
 
     // ── Portal upgrade ──────────────────────────────────────────────
 
-    public async Task<(bool Started, string JobId, string? Error)> StartPortalUpgradeAsync()
+    public async Task<(bool Started, string JobId, string? Error)> StartPortalUpgradeAsync(string? requestedBy = null)
     {
-        if (!await _semaphore.WaitAsync(0))
-            return (false, "", "Inna aktualizacja jest w toku.");
+        if (!await _semaphore.WaitAsync(StartWait))
+            return (false, "", BusyMessage());
 
-        var job = NewJob("portal", UpgradeTarget.Portal);
+        var job = NewJob("portal", UpgradeTarget.Portal, requestedBy);
         _ = RunInBackground(job, ExecutePortalUpgradeAsync);
         return (true, job.Id, null);
     }
@@ -86,16 +103,14 @@ public sealed class UpgradeOrchestrator : IDisposable
             return;
         }
 
-        var (okC, commitBefore) = await Cli("git", "rev-parse HEAD", _repoDir);
-        job.CommitBefore = okC ? commitBefore.Trim() : "unknown";
+        job.CommitBefore = await HeadCommit();
         Log(job, "info", "Queued", $"Aktualny commit: {Short(job.CommitBefore)}");
 
         // ── PULL ────────────────────────────────────────────────
         SetStage(job, UpgradeStage.Pulling);
         if (!await GitPull(job)) return;
 
-        var (okN, commitAfter) = await Cli("git", "rev-parse HEAD", _repoDir);
-        job.CommitAfter = okN ? commitAfter.Trim() : "unknown";
+        job.CommitAfter = await HeadCommit();
         Log(job, "info", "Pulling", $"Nowy commit: {Short(job.CommitAfter)}");
 
         // ── BUILD ───────────────────────────────────────────────
@@ -103,11 +118,10 @@ public sealed class UpgradeOrchestrator : IDisposable
         var now = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
         Log(job, "info", "Building", "Buduję obraz ptportal:pending (10-15 min)...");
 
-        var buildArgs = $"build --build-arg BUILD_COMMIT={job.CommitAfter} " +
-            $"--build-arg BUILD_TIME={now} --build-arg BUILD_BRANCH={_branch} " +
-            $"-t ptportal:pending -f PTScheduler.Portal/Dockerfile .";
-
-        var (buildOk, buildOut) = await Cli("docker", buildArgs, _repoDir, 25);
+        var (buildOk, buildOut) = await Cli("docker",
+            ["build", "--build-arg", $"BUILD_COMMIT={job.CommitAfter}", "--build-arg", $"BUILD_TIME={now}",
+             "--build-arg", $"BUILD_BRANCH={_branch}", "-t", "ptportal:pending", "-f", "PTScheduler.Portal/Dockerfile", "."],
+            _repoDir, 25);
         if (!buildOk)
         {
             Log(job, "error", "Building", TrimOutput(buildOut));
@@ -232,20 +246,26 @@ public sealed class UpgradeOrchestrator : IDisposable
             $"Aktualizacja portalu zakończona pomyślnie. {Short(job.CommitBefore)} → {Short(job.CommitAfter)}");
     }
 
-    // ── Tenant upgrade ──────────────────────────────────────────────
+    // ── Tenant upgrade (obraz) + opcjonalne wdrożenie ───────────────
 
-    public async Task<(bool Started, string JobId, string? Error)> StartTenantUpgradeAsync(bool rebuildImage = true)
+    public async Task<(bool Started, string JobId, string? Error)> StartTenantUpgradeAsync(
+        bool rebuildImage = true, TenantRollingRequest? rollout = null, string? requestedBy = null)
     {
-        if (!await _semaphore.WaitAsync(0))
-            return (false, "", "Inna aktualizacja jest w toku.");
+        if (rollout is { Tenants.Count: > 0 } && ValidateRollout(rollout) is { } invalid)
+            return (false, "", invalid);
 
-        var job = NewJob("tenant", UpgradeTarget.Tenant);
+        if (!await _semaphore.WaitAsync(StartWait))
+            return (false, "", BusyMessage());
+
+        var release = rebuildImage && rollout is { Tenants.Count: > 0 };
+        var job = NewJob(release ? "release" : "tenant", release ? UpgradeTarget.TenantRelease : UpgradeTarget.Tenant, requestedBy);
         job.RebuildImage = rebuildImage;
-        _ = RunInBackground(job, ExecuteTenantUpgradeAsync);
+        if (release) PrepareRollout(job, rollout!);
+        _ = RunInBackground(job, j => ExecuteTenantUpgradeAsync(j, release ? rollout : null));
         return (true, job.Id, null);
     }
 
-    private async Task ExecuteTenantUpgradeAsync(UpgradeJob job)
+    private async Task ExecuteTenantUpgradeAsync(UpgradeJob job, TenantRollingRequest? rollout)
     {
         Log(job, "info", "Queued", "Sprawdzam warunki wstępne...");
         if (!Directory.Exists(_repoDir))
@@ -254,14 +274,12 @@ public sealed class UpgradeOrchestrator : IDisposable
             return;
         }
 
-        var (okC, cBefore) = await Cli("git", "rev-parse HEAD", _repoDir);
-        job.CommitBefore = okC ? cBefore.Trim() : "unknown";
+        job.CommitBefore = await HeadCommit();
 
         SetStage(job, UpgradeStage.Pulling);
         if (!await GitPull(job)) return;
 
-        var (okN, cAfter) = await Cli("git", "rev-parse HEAD", _repoDir);
-        job.CommitAfter = okN ? cAfter.Trim() : "unknown";
+        job.CommitAfter = await HeadCommit();
         Log(job, "info", "Pulling", $"Commit: {Short(job.CommitBefore)} → {Short(job.CommitAfter)}");
 
         if (!job.RebuildImage)
@@ -273,97 +291,131 @@ public sealed class UpgradeOrchestrator : IDisposable
         }
 
         SetStage(job, UpgradeStage.Building);
-        Log(job, "info", "Building", "Tagowanie obecnego obrazu trenera jako :previous...");
-        var prevTag = _tenantImage.Replace(":latest", ":previous");
-        await SafeTagImage(_tenantImage,
-            _tenantImage.Split(':')[0],
-            "previous");
+        var repo = _tenantImage.Split(':')[0];
+        var prevTag = $"{repo}:previous";
+        Log(job, "info", "Building", "Zapamiętuję obecny obraz aplikacji jako :previous...");
+        await SafeTagImage(_tenantImage, repo, "previous");
 
-        Log(job, "info", "Building", "Buduję nowy obraz trenera (10-15 min)...");
-        var (buildOk, buildOut) = await Cli("docker", $"build -t {_tenantImage} .", _repoDir, 25);
+        Log(job, "info", "Building", "Buduję nowy obraz aplikacji trenerów (kilka–kilkanaście minut)...");
+        var now = DateTime.UtcNow.ToString("yyyy-MM-ddTHH:mm:ssZ");
+        var (buildOk, buildOut) = await Cli("docker",
+            ["build", "--build-arg", $"BUILD_COMMIT={job.CommitAfter}", "--build-arg", $"BUILD_TIME={now}",
+             "--build-arg", $"BUILD_BRANCH={_branch}", "-t", _tenantImage, "."],
+            _repoDir, 25);
         if (!buildOk)
         {
             Log(job, "error", "Building", TrimOutput(buildOut));
             Log(job, "warn", "Building", "Przywracam poprzedni obraz...");
-            await SafeTagImage(prevTag, _tenantImage.Split(':')[0], "latest");
-            Fail(job, "Building", "Docker build trenera nie powiódł się.");
+            await SafeTagImage(prevTag, repo, "latest");
+            Fail(job, "Building", "Budowanie obrazu aplikacji trenerów nie powiodło się — instancje dalej działają na poprzedniej wersji.");
+            return;
+        }
+        Log(job, "success", "Building", $"Obraz aplikacji zbudowany ({Short(job.CommitAfter)}).");
+
+        if (rollout is null)
+        {
+            job.Stage = UpgradeStage.Done;
+            job.Status = UpgradeStatus.Success;
+            Log(job, "success", "Done", "Obraz gotowy. Instancje dostaną go przy wdrożeniu.");
             return;
         }
 
-        Log(job, "success", "Building", "Obraz trenera zbudowany.");
-        job.Stage = UpgradeStage.Done;
-        job.Status = UpgradeStatus.Success;
-        Log(job, "success", "Done",
-            $"Obraz trenera zaktualizowany ({Short(job.CommitAfter)}). Przeprowadź reprovisioning z portalu.");
+        // Wdrożenie w tym samym zadaniu — bez drugiego wywołania z Portalu, więc bez wyścigu.
+        await RolloutAsync(job, rollout);
     }
 
-    // ── Tenant rolling update ───────────────────────────────────────
+    // ── Tenant rolling update (sam obraz już jest) ───────────────────
 
-    public async Task<(bool Started, string JobId, string? Error)> StartTenantRollingUpdateAsync(TenantRollingRequest request)
+    public async Task<(bool Started, string JobId, string? Error)> StartTenantRollingUpdateAsync(
+        TenantRollingRequest request, string? requestedBy = null)
     {
         if (request.Tenants.Count == 0)
             return (false, "", "Brak tenantów do aktualizacji.");
+        if (ValidateRollout(request) is { } invalid)
+            return (false, "", invalid);
 
-        if (!await _semaphore.WaitAsync(0))
-            return (false, "", "Inna aktualizacja jest w toku.");
+        if (!await _semaphore.WaitAsync(StartWait))
+            return (false, "", BusyMessage());
 
-        var job = NewJob("tenant-rolling", UpgradeTarget.TenantRolling);
-        job.Concurrency = Math.Clamp(request.Concurrency, 1, 10);
-        job.TenantsTotal = request.Tenants.Count;
-        job.TenantResults = request.Tenants.Select(t => new TenantUpdateResult { Slug = t.Slug }).ToList();
-
-        _ = RunInBackground(job, j => ExecuteTenantRollingUpdateAsync(j, request));
+        var job = NewJob("tenant-rolling", UpgradeTarget.TenantRolling, requestedBy);
+        PrepareRollout(job, request);
+        _ = RunInBackground(job, async j =>
+        {
+            try { await _docker.Images.InspectImageAsync(_tenantImage); }
+            catch
+            {
+                Fail(j, "Queued", $"Obraz '{_tenantImage}' nie istnieje. Najpierw zbuduj aplikację trenerów.");
+                return;
+            }
+            await RolloutAsync(j, request);
+        });
         return (true, job.Id, null);
     }
 
-    private async Task ExecuteTenantRollingUpdateAsync(UpgradeJob job, TenantRollingRequest request)
+    private static void PrepareRollout(UpgradeJob job, TenantRollingRequest request)
     {
-        Log(job, "info", "Queued", $"Rolling update {request.Tenants.Count} tenantów (concurrency={job.Concurrency})...");
+        job.Concurrency = Math.Clamp(request.Concurrency, 1, 10);
+        job.TenantsTotal = request.Tenants.Count;
+        job.TenantResults = request.Tenants.Select(t => new TenantUpdateResult { Slug = t.Slug }).ToList();
+    }
 
-        var tenantImage = _tenantImage.Split(':')[0];
-        try
+    /// <summary>Dane z Portalu trafiają do nazw kontenerów i adresów — przepuszczamy tylko bezpieczne wartości.</summary>
+    private static string? ValidateRollout(TenantRollingRequest r)
+    {
+        if (r.Tenants.Count > 1000) return "Za dużo instancji w jednym zadaniu (max 1000).";
+        foreach (var t in r.Tenants)
         {
-            await _docker.Images.InspectImageAsync(_tenantImage);
+            if (!SafeSlug().IsMatch(t.Slug)) return $"Nieprawidłowy identyfikator instancji: '{t.Slug}'.";
+            if (t.Port is < 1 or > 65535) return $"Nieprawidłowy port instancji {t.Slug}: {t.Port}.";
         }
-        catch
-        {
-            Fail(job, "Queued", $"Obraz '{_tenantImage}' nie istnieje. Najpierw zbuduj obraz trenera.");
-            return;
-        }
+        if (r.Tenants.Select(t => t.Slug).Distinct().Count() != r.Tenants.Count) return "Powtórzona instancja na liście.";
+        if (!string.IsNullOrWhiteSpace(r.HealthHost) && !SafeHost().IsMatch(r.HealthHost)) return "Nieprawidłowy adres hosta do sprawdzania instancji.";
+        return null;
+    }
 
+    private async Task RolloutAsync(UpgradeJob job, TenantRollingRequest request)
+    {
+        var host = string.IsNullOrWhiteSpace(request.HealthHost) ? _defaultTenantHost : request.HealthHost.Trim();
         SetStage(job, UpgradeStage.Swapping);
+        Log(job, "info", "Swapping",
+            $"Wdrażam nową wersję na {request.Tenants.Count} {(request.Tenants.Count == 1 ? "instancję" : "instancji")} " +
+            $"(po {job.Concurrency} naraz, sprawdzanie pod {host}).");
 
-        var semaphore = new SemaphoreSlim(job.Concurrency);
-        var stopRequested = false;
+        var gate = new SemaphoreSlim(job.Concurrency);
+        var stopRequested = 0;
         var tasks = new List<Task>();
 
         foreach (var tenant in request.Tenants)
         {
             var result = job.TenantResults!.First(r => r.Slug == tenant.Slug);
+            await gate.WaitAsync();
 
-            if (stopRequested)
+            if (Volatile.Read(ref stopRequested) == 1)
             {
+                gate.Release();
                 result.Status = TenantUpdateStatus.Skipped;
-                result.Error = "Pominięto — poprzedni tenant nie przeszedł aktualizacji.";
-                job.TenantsCompleted++;
-                Log(job, "warn", "Swapping", $"[{tenant.Slug}] Pominięto (stop-on-failure).");
-                _logStore.Save(job);
+                result.Error = "Pominięto — poprzednia instancja nie przeszła aktualizacji.";
+                job.MarkTenantCompleted();
+                Log(job, "warn", "Swapping", $"[{tenant.Slug}] Pominięto (zatrzymanie po pierwszym błędzie).");
                 continue;
             }
 
-            await semaphore.WaitAsync();
-
             tasks.Add(Task.Run(async () =>
             {
-                try
+                try { await UpdateSingleTenantAsync(job, tenant, result, host); }
+                catch (Exception ex)
                 {
-                    await UpdateSingleTenantAsync(job, tenant, result);
+                    result.Status = TenantUpdateStatus.Failed;
+                    result.Error = $"Nieoczekiwany błąd: {ex.Message}";
+                    result.CompletedAt = DateTime.UtcNow;
+                    job.MarkTenantCompleted();
+                    Log(job, "error", "Swapping", $"[{tenant.Slug}] {result.Error}");
                 }
                 finally
                 {
-                    if (request.StopOnFirstFailure && result.Status == TenantUpdateStatus.Failed)
-                        stopRequested = true;
-                    semaphore.Release();
+                    if (request.StopOnFirstFailure && result.Status is TenantUpdateStatus.Failed or TenantUpdateStatus.RolledBack)
+                        Volatile.Write(ref stopRequested, 1);
+                    gate.Release();
                 }
             }));
         }
@@ -376,206 +428,218 @@ public sealed class UpgradeOrchestrator : IDisposable
         var skipped = job.TenantResults!.Count(r => r.Status == TenantUpdateStatus.Skipped);
 
         job.Stage = UpgradeStage.Done;
-
         if (failed == 0 && rolledBack == 0 && skipped == 0)
         {
             job.Status = UpgradeStatus.Success;
-            Log(job, "success", "Done", $"Wszystkie {succeeded} tenantów zaktualizowane pomyślnie.");
+            Log(job, "success", "Done", $"Gotowe — wszystkie instancje ({succeeded}) działają na nowej wersji.");
         }
         else if (succeeded == 0)
         {
             job.Status = UpgradeStatus.Failed;
-            Log(job, "error", "Done", $"Aktualizacja nie powiodła się. Failed: {failed}, RolledBack: {rolledBack}, Skipped: {skipped}.");
+            job.Error = $"Żadna instancja nie przeszła na nową wersję (wycofane: {rolledBack}, błędy: {failed}, pominięte: {skipped}).";
+            Log(job, "error", "Done", job.Error + " Instancje działają na poprzedniej wersji — szczegóły wyżej.");
         }
         else
         {
             job.Status = UpgradeStatus.PartialSuccess;
-            Log(job, "warn", "Done", $"Częściowy sukces. OK: {succeeded}, Failed: {failed}, RolledBack: {rolledBack}, Skipped: {skipped}.");
+            Log(job, "warn", "Done", $"Częściowo: nowa wersja na {succeeded}, wycofane {rolledBack}, błędy {failed}, pominięte {skipped}.");
         }
     }
 
-    private async Task UpdateSingleTenantAsync(UpgradeJob job, TenantInfo tenant, TenantUpdateResult result)
+    /// <summary>
+    /// Podmiana jednej instancji. Stary kontener nie jest usuwany, tylko zatrzymany i przemianowany —
+    /// jeśli nowa wersja nie wstanie, wraca dokładnie on (z tą samą konfiguracją, limitami i siecią).
+    /// </summary>
+    private async Task UpdateSingleTenantAsync(UpgradeJob job, TenantInfo tenant, TenantUpdateResult result, string host)
     {
-        var containerName = $"pt-{tenant.Slug}-web";
+        var name = $"pt-{tenant.Slug}-web";
         result.StartedAt = DateTime.UtcNow;
         result.Status = TenantUpdateStatus.Updating;
-        Log(job, "info", "Swapping", $"[{tenant.Slug}] Rozpoczynam aktualizację...");
-        _logStore.Save(job);
+        Log(job, "info", "Swapping", $"[{tenant.Slug}] Start aktualizacji...");
 
-        ContainerInspectResponse? originalInspect = null;
-        try
-        {
-            originalInspect = await _docker.Containers.InspectContainerAsync(containerName);
-        }
+        ContainerInspectResponse original;
+        try { original = await _docker.Containers.InspectContainerAsync(name); }
         catch
         {
-            result.Status = TenantUpdateStatus.Failed;
-            result.Error = $"Kontener '{containerName}' nie istnieje.";
-            result.CompletedAt = DateTime.UtcNow;
-            job.TenantsCompleted++;
-            Log(job, "error", "Swapping", $"[{tenant.Slug}] {result.Error}");
-            _logStore.Save(job);
+            Finish(job, result, TenantUpdateStatus.Failed, $"Kontener '{name}' nie istnieje — utwórz instancję ponownie z Portalu.");
             return;
         }
 
-        try
-        {
-            await _docker.Containers.StopContainerAsync(containerName,
-                new ContainerStopParameters { WaitBeforeKillSeconds = 10 });
-        }
-        catch (Exception ex) { _logger.LogDebug(ex, "Nie zatrzymano {Container} przed podmianą (może już nie działać).", containerName); }
+        var backupName = $"{name}-prev-{DateTime.UtcNow:yyyyMMddHHmmss}";
+        var wasRunning = original.State?.Running == true;
 
-        try
-        {
-            await _docker.Containers.RemoveContainerAsync(containerName,
-                new ContainerRemoveParameters { Force = true });
-        }
-        catch (Exception ex) { _logger.LogDebug(ex, "Nie usunięto {Container} przed podmianą (może nie istnieć).", containerName); }
+        try { await _docker.Containers.StopContainerAsync(original.ID, new ContainerStopParameters { WaitBeforeKillSeconds = 20 }); }
+        catch (Exception ex) { _logger.LogDebug(ex, "{Container} był już zatrzymany.", name); }
 
+        try { await _docker.Containers.RenameContainerAsync(original.ID, new ContainerRenameParameters { NewName = backupName }, CancellationToken.None); }
+        catch (Exception ex)
+        {
+            if (wasRunning) await SafeStart(original.ID);
+            Finish(job, result, TenantUpdateStatus.Failed, $"Nie udało się odłożyć starej wersji: {ex.Message}");
+            return;
+        }
+
+        string? newId = null;
+        var startedAt = DateTime.UtcNow;
         try
         {
-            var cfg = CloneTenantConfig(originalInspect, _tenantImage);
-            var resp = await _docker.Containers.CreateContainerAsync(
-                new CreateContainerParameters
-                {
-                    Name = containerName,
-                    Image = cfg.Image,
-                    Env = cfg.Env,
-                    ExposedPorts = cfg.ExposedPorts,
-                    HostConfig = cfg.HostConfig
-                });
-            await _docker.Containers.StartContainerAsync(resp.ID, new ContainerStartParameters());
-            await ReconnectToNetworks(originalInspect, resp.ID);
+            newId = await CreateLikeAsync(original, name, _tenantImage);
+            await _docker.Containers.StartContainerAsync(newId, new ContainerStartParameters());
         }
         catch (Exception ex)
         {
-            Log(job, "error", "Swapping", $"[{tenant.Slug}] Nie udało się uruchomić nowego kontenera: {ex.Message}");
-            await RollbackTenant(job, tenant.Slug, containerName, originalInspect, result);
+            Log(job, "error", "Swapping", $"[{tenant.Slug}] Nowy kontener nie wystartował: {ex.Message}");
+            await RestoreTenantAsync(job, tenant.Slug, name, newId, original.ID, wasRunning, result);
             return;
         }
 
         result.Status = TenantUpdateStatus.HealthCheck;
-        Log(job, "info", "Swapping", $"[{tenant.Slug}] Health check (max 60s)...");
-        _logStore.Save(job);
+        Log(job, "info", "Swapping", $"[{tenant.Slug}] Czekam, aż nowa wersja odpowie (max {(int)TenantReadyTimeout.TotalSeconds} s)...");
 
-        var healthy = await WaitForTenantHealth(containerName, tenant.Port, TimeSpan.FromSeconds(60));
-
-        if (!healthy)
+        var (ready, how) = await WaitForTenantReadyAsync(newId, host, tenant.Port, startedAt);
+        if (!ready)
         {
-            Log(job, "warn", "Swapping", $"[{tenant.Slug}] Health check nie przeszedł — rollback...");
-            await RollbackTenant(job, tenant.Slug, containerName, originalInspect, result);
+            var logs = await GetContainerLogs(newId, 40);
+            Log(job, "warn", "Swapping", $"[{tenant.Slug}] Nowa wersja nie działa ({how}). Ostatnie logi aplikacji:\n{logs}");
+            await RestoreTenantAsync(job, tenant.Slug, name, newId, original.ID, wasRunning, result, how);
             return;
         }
 
-        result.Status = TenantUpdateStatus.Success;
-        result.CompletedAt = DateTime.UtcNow;
-        job.TenantsCompleted++;
-        Log(job, "success", "Swapping", $"[{tenant.Slug}] Zaktualizowany pomyślnie.");
-        _logStore.Save(job);
+        try { await _docker.Containers.RemoveContainerAsync(original.ID, new ContainerRemoveParameters { Force = true }); }
+        catch (Exception ex) { Log(job, "warn", "Swapping", $"[{tenant.Slug}] Nie usunięto starej wersji ({backupName}): {ex.Message}"); }
+
+        result.Detail = how;
+        Finish(job, result, TenantUpdateStatus.Success, null, $"[{tenant.Slug}] Działa na nowej wersji ({how}).");
     }
 
-    private async Task RollbackTenant(UpgradeJob job, string slug, string containerName,
-        ContainerInspectResponse originalInspect, TenantUpdateResult result)
+    private async Task RestoreTenantAsync(UpgradeJob job, string slug, string name, string? newId, string originalId,
+        bool wasRunning, TenantUpdateResult result, string? reason = null)
     {
         try
         {
-            await SafeStopAndRemove(containerName);
-
-            var cfg = CloneTenantConfig(originalInspect, originalInspect.Config.Image);
-            var resp = await _docker.Containers.CreateContainerAsync(
-                new CreateContainerParameters
-                {
-                    Name = containerName,
-                    Image = cfg.Image,
-                    Env = cfg.Env,
-                    ExposedPorts = cfg.ExposedPorts,
-                    HostConfig = cfg.HostConfig
-                });
-            await _docker.Containers.StartContainerAsync(resp.ID, new ContainerStartParameters());
-            await ReconnectToNetworks(originalInspect, resp.ID);
-
-            result.Status = TenantUpdateStatus.RolledBack;
-            result.Error = "Health check nie przeszedł — przywrócono poprzednią wersję.";
-            Log(job, "warn", "Swapping", $"[{slug}] Rollback OK — przywrócono poprzedni obraz.");
+            if (newId is not null)
+                await _docker.Containers.RemoveContainerAsync(newId, new ContainerRemoveParameters { Force = true });
+            await _docker.Containers.RenameContainerAsync(originalId, new ContainerRenameParameters { NewName = name }, CancellationToken.None);
+            if (wasRunning) await _docker.Containers.StartContainerAsync(originalId, new ContainerStartParameters());
+            Finish(job, result, TenantUpdateStatus.RolledBack,
+                $"Nowa wersja nie wstała{(reason is null ? "" : $" ({reason})")} — przywrócono poprzednią.",
+                $"[{slug}] Przywrócono poprzednią wersję — instancja działa jak przed aktualizacją.");
         }
         catch (Exception ex)
         {
-            result.Status = TenantUpdateStatus.Failed;
-            result.Error = $"Rollback nie powiódł się: {ex.Message}";
-            Log(job, "error", "Swapping", $"[{slug}] Rollback FAILED: {ex.Message}");
+            Finish(job, result, TenantUpdateStatus.Failed,
+                $"Przywracanie nie powiodło się: {ex.Message}. Stara wersja leży jako zatrzymany kontener z sufiksem „-prev-”.");
         }
+    }
 
+    private void Finish(UpgradeJob job, TenantUpdateResult result, TenantUpdateStatus status, string? error, string? message = null)
+    {
+        result.Status = status;
+        result.Error = error;
         result.CompletedAt = DateTime.UtcNow;
-        job.TenantsCompleted++;
-        _logStore.Save(job);
+        job.MarkTenantCompleted();
+        var level = status switch { TenantUpdateStatus.Success => "success", TenantUpdateStatus.RolledBack => "warn", _ => "error" };
+        Log(job, level, "Swapping", message ?? $"[{result.Slug}] {error}");
     }
 
-    private ClonedConfig CloneTenantConfig(ContainerInspectResponse src, string newImage)
+    /// <summary>
+    /// Nowy kontener jak stary, ale z nowym obrazem: cała konfiguracja hosta (wolumeny, porty,
+    /// limity pamięci/CPU, polityka restartu, logi), etykiety, zmienne i sieci z aliasami.
+    /// </summary>
+    private async Task<string> CreateLikeAsync(ContainerInspectResponse src, string name, string image)
     {
-        return new ClonedConfig(
-            newImage,
-            src.Config.Env ?? new List<string>(),
-            src.Config.ExposedPorts,
-            new HostConfig
-            {
-                Binds = src.HostConfig.Binds,
-                NetworkMode = src.HostConfig.NetworkMode ?? "bridge",
-                RestartPolicy = src.HostConfig.RestartPolicy
-                    ?? new RestartPolicy { Name = RestartPolicyKind.UnlessStopped },
-                PortBindings = src.HostConfig.PortBindings,
-                Mounts = src.HostConfig.Mounts
-            });
-    }
+        var host = src.HostConfig;
+        var primary = host.NetworkMode ?? "bridge";
+        var networks = src.NetworkSettings?.Networks ?? new Dictionary<string, EndpointSettings>();
+        var shortId = src.ID.Length >= 12 ? src.ID[..12] : src.ID;
+        IList<string>? AliasesOf(EndpointSettings e) =>
+            e.Aliases?.Where(a => a != shortId && a != src.ID).ToList() is { Count: > 0 } list ? list : null;
 
-    private async Task ReconnectToNetworks(ContainerInspectResponse original, string newContainerId)
-    {
-        if (original.NetworkSettings?.Networks is null) return;
-        var primaryNetwork = original.HostConfig.NetworkMode ?? "bridge";
-
-        foreach (var (netName, _) in original.NetworkSettings.Networks)
+        var create = new CreateContainerParameters
         {
-            if (netName == primaryNetwork) continue;
+            Name = name,
+            Image = image,
+            Env = src.Config.Env ?? [],
+            ExposedPorts = src.Config.ExposedPorts,
+            Labels = src.Config.Labels,
+            HostConfig = host,
+            NetworkingConfig = networks.TryGetValue(primary, out var primaryEndpoint)
+                ? new NetworkingConfig { EndpointsConfig = new Dictionary<string, EndpointSettings> { [primary] = new() { Aliases = AliasesOf(primaryEndpoint) } } }
+                : null
+        };
+        var created = await _docker.Containers.CreateContainerAsync(create);
+
+        foreach (var (net, endpoint) in networks)
+        {
+            if (net == primary) continue;
             try
             {
-                await _docker.Networks.ConnectNetworkAsync(netName, new NetworkConnectParameters
+                await _docker.Networks.ConnectNetworkAsync(net, new NetworkConnectParameters
                 {
-                    Container = newContainerId
+                    Container = created.ID,
+                    EndpointConfig = new EndpointSettings { Aliases = AliasesOf(endpoint) }
                 });
             }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Nie udało się podłączyć nowego kontenera do sieci {Network} — komunikacja między kontenerami może nie działać.", netName);
-            }
+            catch (Exception ex) { _logger.LogWarning(ex, "Nie podłączono {Container} do sieci {Network}.", name, net); }
         }
+        return created.ID;
     }
 
-    private async Task<bool> WaitForTenantHealth(string container, int hostPort, TimeSpan timeout)
+    /// <summary>
+    /// Czy nowa wersja działa: najpierw HTTP /health pod adresem hosta (jak Portal),
+    /// a gdy Guardian w ogóle nie widzi tego adresu — kontener działa bez restartów
+    /// i aplikacja zgłosiła w logach, że wystartowała.
+    /// </summary>
+    private async Task<(bool Ok, string How)> WaitForTenantReadyAsync(string containerId, string host, int port, DateTime startedAt)
     {
-        var deadline = DateTime.UtcNow + timeout;
+        var deadline = DateTime.UtcNow + TenantReadyTimeout;
+        var httpReachable = false;
+        string? lastHttp = null;
+
         while (DateTime.UtcNow < deadline)
         {
+            ContainerInspectResponse inspect;
+            try { inspect = await _docker.Containers.InspectContainerAsync(containerId); }
+            catch (Exception ex) { return (false, $"kontener zniknął: {ex.Message}"); }
+
+            if (!inspect.State.Running)
+                return (false, $"aplikacja się zatrzymała (kod wyjścia {inspect.State.ExitCode})");
+            if (inspect.RestartCount > 0)
+                return (false, $"aplikacja restartuje się w kółko ({inspect.RestartCount}×)");
+
+            var sw = Stopwatch.StartNew();
             try
             {
-                var inspect = await _docker.Containers.InspectContainerAsync(container);
-                if (!inspect.State.Running) return false;
-
-                var resp = await _healthHttp.GetAsync($"http://localhost:{hostPort}/health");
-                if (resp.IsSuccessStatusCode) return true;
+                using var resp = await _healthHttp.GetAsync($"http://{host}:{port}/health");
+                httpReachable = true;
+                if (resp.IsSuccessStatusCode) return (true, $"odpowiada na /health w {sw.ElapsedMilliseconds} ms");
+                lastHttp = $"/health zwraca HTTP {(int)resp.StatusCode}";
             }
-            catch { /* kontener jeszcze wstaje — celowo cicho, pętla ponawia do deadline'u */ }
+            catch (HttpRequestException) { /* aplikacja jeszcze wstaje albo host niewidoczny z Guardiana */ }
+            catch (TaskCanceledException) { lastHttp = "/health nie odpowiada w 10 s"; }
+
             await Task.Delay(3_000);
         }
-        return false;
+
+        if (!httpReachable)
+        {
+            var logs = await GetContainerLogs(containerId, 300, startedAt);
+            if (logs.Contains("Application started", StringComparison.OrdinalIgnoreCase)
+                || logs.Contains("Now listening on", StringComparison.OrdinalIgnoreCase))
+                return (true, $"aplikacja wystartowała wg logów (Guardian nie widzi {host}:{port} — ustaw GUARDIAN_TENANT_HOST)");
+            return (false, $"brak odpowiedzi z {host}:{port} i brak startu w logach");
+        }
+        return (false, lastHttp ?? "brak odpowiedzi /health");
     }
 
     // ── Portal rollback ─────────────────────────────────────────────
 
-    public async Task<(bool Started, string JobId, string? Error)> RollbackPortalAsync()
+    public async Task<(bool Started, string JobId, string? Error)> RollbackPortalAsync(string? requestedBy = null)
     {
-        if (!await _semaphore.WaitAsync(0))
-            return (false, "", "Inna operacja jest w toku.");
+        if (!await _semaphore.WaitAsync(StartWait))
+            return (false, "", BusyMessage());
 
-        var job = NewJob("rollback", UpgradeTarget.Portal);
+        var job = NewJob("rollback", UpgradeTarget.Portal, requestedBy);
         job.Stage = UpgradeStage.Swapping;
         _ = RunInBackground(job, ExecuteRollbackAsync);
         return (true, job.Id, null);
@@ -672,7 +736,15 @@ public sealed class UpgradeOrchestrator : IDisposable
 
     // ── Helpers ──────────────────────────────────────────────────────
 
-    private UpgradeJob NewJob(string suffix, UpgradeTarget target)
+    private const string BusyPrefix = "Trwa inne zadanie";
+
+    /// <summary>Odmowa, bo działa inne zadanie (409 — warto ponowić), a nie błąd danych (400).</summary>
+    public static bool IsBusy(string? error) => error?.StartsWith(BusyPrefix, StringComparison.Ordinal) == true;
+
+    private string BusyMessage() =>
+        _activeJob is { } j ? $"{BusyPrefix} ({j.Target}, od {j.StartedAt:HH:mm} UTC) — poczekaj na jego koniec." : $"{BusyPrefix} — poczekaj na jego koniec.";
+
+    private UpgradeJob NewJob(string suffix, UpgradeTarget target, string? requestedBy = null)
     {
         var job = new UpgradeJob
         {
@@ -680,7 +752,8 @@ public sealed class UpgradeOrchestrator : IDisposable
             Target = target,
             Stage = UpgradeStage.Queued,
             Status = UpgradeStatus.Running,
-            StartedAt = DateTime.UtcNow
+            StartedAt = DateTime.UtcNow,
+            RequestedBy = requestedBy
         };
         _activeJob = job;
         _logStore.Save(job);
@@ -703,37 +776,53 @@ public sealed class UpgradeOrchestrator : IDisposable
                 job.CompletedAt = DateTime.UtcNow;
                 if (job.Status == UpgradeStatus.Running)
                     job.Status = UpgradeStatus.Failed;
-                _logStore.Save(job);
                 _activeJob = null;
                 _semaphore.Release();
+                _logStore.Save(job);
+                _logStore.Prune();
             }
         });
     }
 
+    private async Task<string> HeadCommit()
+    {
+        var (ok, output) = await Cli("git", ["rev-parse", "HEAD"], _repoDir);
+        return ok ? output.Trim() : "unknown";
+    }
+
+    /// <summary>
+    /// Pobranie zmian: fetch + fast-forward. Bez „git pull”, który potrafi utworzyć commit scalający
+    /// albo utknąć na konflikcie; przy rozjechanej historii dostajesz czytelny komunikat.
+    /// </summary>
     private async Task<bool> GitPull(UpgradeJob job)
     {
         await SyncGitCredentials(job);
 
-        Log(job, "info", "Pulling", "git fetch origin...");
-        var (fetchOk, fetchOut) = await Cli("git", "fetch origin", _repoDir);
+        Log(job, "info", "Pulling", $"Pobieram zmiany z gałęzi {_branch}...");
+        var (fetchOk, fetchOut) = await Git(["fetch", "--prune", "origin", _branch]);
         if (!fetchOk)
         {
-            Fail(job, "Pulling", $"git fetch failed: {fetchOut}");
+            Fail(job, "Pulling", $"Nie udało się pobrać zmian z GitHuba: {TrimOutput(fetchOut)}");
             return false;
         }
-        Log(job, "success", "Pulling", "git fetch OK");
 
-        Log(job, "info", "Pulling", $"git pull origin {_branch}...");
-        var (pullOk, pullOut) = await Cli("git", $"pull origin {_branch}", _repoDir);
-        if (!pullOk)
+        var (ffOk, ffOut) = await Git(["merge", "--ff-only", $"origin/{_branch}"]);
+        if (!ffOk)
         {
-            Fail(job, "Pulling", $"git pull failed: {pullOut}");
+            Fail(job, "Pulling",
+                "Kod na serwerze rozjechał się z GitHubem (lokalne zmiany albo inna historia) — Guardian niczego nie nadpisał. " +
+                $"Sprawdź repozytorium na serwerze (git status). Szczegóły: {TrimOutput(ffOut)}");
             return false;
         }
-        Log(job, "success", "Pulling", "git pull OK");
+        Log(job, "success", "Pulling", "Zmiany pobrane.");
         return true;
     }
 
+    /// <summary>
+    /// Token GitHuba z Portalu trzymamy tylko w pamięci i podajemy gitowi jako nagłówek
+    /// (-c http.extraHeader) — nie trafia do .git/config ani do logów zadania.
+    /// Stary adres z tokenem w URL (poprzednie wersje Guardiana) zastępujemy czystym.
+    /// </summary>
     private async Task SyncGitCredentials(UpgradeJob job)
     {
         try
@@ -743,22 +832,38 @@ public sealed class UpgradeOrchestrator : IDisposable
             using var resp = await _healthHttp.SendAsync(req);
             if (!resp.IsSuccessStatusCode) return;
 
-            var json = await resp.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(json);
-            var token = doc.RootElement.GetProperty("token").GetString();
-            var owner = doc.RootElement.GetProperty("owner").GetString();
-            var repo = doc.RootElement.GetProperty("repo").GetString();
+            using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+            var token = doc.RootElement.TryGetProperty("token", out var t) ? t.GetString() : null;
+            var owner = doc.RootElement.TryGetProperty("owner", out var o) ? o.GetString() : null;
+            var repo = doc.RootElement.TryGetProperty("repo", out var r) ? r.GetString() : null;
 
-            if (string.IsNullOrWhiteSpace(token) || string.IsNullOrWhiteSpace(owner)) return;
+            if (string.IsNullOrWhiteSpace(owner) || string.IsNullOrWhiteSpace(repo)) return;
+            if (!SafeRef().IsMatch(owner) || !SafeRef().IsMatch(repo))
+            {
+                Log(job, "warn", "Pulling", "Portal podał nieprawidłową nazwę repozytorium — pomijam synchronizację.");
+                return;
+            }
 
-            var remoteUrl = $"https://{token}@github.com/{owner}/{repo}.git";
-            await Cli("git", $"remote set-url origin {remoteUrl}", _repoDir);
-            Log(job, "info", "Pulling", "Git credentials zsynchronizowane z Portalu.");
+            await Cli("git", ["remote", "set-url", "origin", $"https://github.com/{owner}/{repo}.git"], _repoDir);
+            if (!string.IsNullOrWhiteSpace(token))
+            {
+                _gitAuthHeader = "Authorization: Basic " + Convert.ToBase64String(Encoding.UTF8.GetBytes($"x-access-token:{token}"));
+                lock (_secretsToScrub) { _secretsToScrub.Add(token); }
+            }
+            Log(job, "info", "Pulling", "Dostęp do GitHuba pobrany z Portalu.");
         }
         catch (Exception ex)
         {
-            _logger.LogWarning(ex, "Could not sync git credentials from Portal");
+            _logger.LogWarning(ex, "Nie pobrano dostępu do GitHuba z Portalu — używam ustawień repozytorium.");
         }
+    }
+
+    private Task<(bool Ok, string Output)> Git(IEnumerable<string> args)
+    {
+        var all = new List<string>();
+        if (_gitAuthHeader is not null) all.AddRange(["-c", $"http.extraHeader={_gitAuthHeader}"]);
+        all.AddRange(args);
+        return Cli("git", all, _repoDir, 5);
     }
 
     private async Task PerformRollback(UpgradeJob job, ContainerInspectResponse originalInspect)
@@ -816,10 +921,17 @@ public sealed class UpgradeOrchestrator : IDisposable
             new HostConfig
             {
                 Binds = src.HostConfig.Binds,
+                Mounts = src.HostConfig.Mounts,
                 NetworkMode = src.HostConfig.NetworkMode ?? "bridge",
                 RestartPolicy = src.HostConfig.RestartPolicy
                     ?? new RestartPolicy { Name = RestartPolicyKind.UnlessStopped },
-                PortBindings = src.HostConfig.PortBindings
+                PortBindings = src.HostConfig.PortBindings,
+                ExtraHosts = src.HostConfig.ExtraHosts,
+                LogConfig = src.HostConfig.LogConfig,
+                Memory = src.HostConfig.Memory,
+                MemorySwap = src.HostConfig.MemorySwap,
+                NanoCPUs = src.HostConfig.NanoCPUs,
+                PidsLimit = src.HostConfig.PidsLimit
             });
     }
 
@@ -839,7 +951,7 @@ public sealed class UpgradeOrchestrator : IDisposable
         return false;
     }
 
-    private async Task<string> GetContainerLogs(string container, int tail)
+    private async Task<string> GetContainerLogs(string container, int tail, DateTime? sinceUtc = null)
     {
         try
         {
@@ -848,7 +960,8 @@ public sealed class UpgradeOrchestrator : IDisposable
                 {
                     ShowStdout = true,
                     ShowStderr = true,
-                    Tail = tail.ToString()
+                    Tail = tail.ToString(),
+                    Since = sinceUtc is { } since ? new DateTimeOffset(since.AddSeconds(-2)).ToUnixTimeSeconds().ToString() : null
                 });
             var buffer = new byte[81920];
             var sb = new System.Text.StringBuilder();
@@ -858,7 +971,7 @@ public sealed class UpgradeOrchestrator : IDisposable
                 if (result.Count == 0) break;
                 sb.Append(System.Text.Encoding.UTF8.GetString(buffer, 0, result.Count));
             }
-            return sb.ToString();
+            return Scrub(sb.ToString());
         }
         catch { return "(nie udało się pobrać logów)"; }
     }
@@ -874,6 +987,12 @@ public sealed class UpgradeOrchestrator : IDisposable
     private async Task SafeRemoveContainer(string container)
     {
         try { await _docker.Containers.RemoveContainerAsync(container, new ContainerRemoveParameters { Force = true }); } catch (Exception ex) { _logger.LogDebug(ex, "Nie usunięto {Container} (może nie istnieć).", container); }
+    }
+
+    private async Task SafeStart(string container)
+    {
+        try { await _docker.Containers.StartContainerAsync(container, new ContainerStartParameters()); }
+        catch (Exception ex) { _logger.LogWarning(ex, "Nie udało się uruchomić {Container}.", container); }
     }
 
     private async Task SafeRemoveImage(string image)
@@ -895,11 +1014,11 @@ public sealed class UpgradeOrchestrator : IDisposable
                 Timestamp = DateTime.UtcNow,
                 Level = level,
                 Stage = stage,
-                Message = message
+                Message = Scrub(message)
             });
         }
         _logStore.Save(job);
-        _logger.LogInformation("[{Stage}] {Message}", stage, message);
+        _logger.LogInformation("[{Stage}] {Message}", stage, Scrub(message));
     }
 
     private void Fail(UpgradeJob job, string stage, string message)
@@ -926,30 +1045,65 @@ public sealed class UpgradeOrchestrator : IDisposable
     private static string Cfg(string envVar, string? configValue, string fallback) =>
         Environment.GetEnvironmentVariable(envVar) ?? configValue ?? fallback;
 
+    /// <summary>Hasła i tokeny nigdy nie trafiają do logów zadania (widać je w Portalu).</summary>
+    private string Scrub(string text)
+    {
+        if (string.IsNullOrEmpty(text)) return text;
+        lock (_secretsToScrub)
+        {
+            foreach (var secret in _secretsToScrub.Where(x => x.Length >= 6))
+                text = text.Replace(secret, "***");
+        }
+        if (_guardianSecret.Length >= 6) text = text.Replace(_guardianSecret, "***");
+        return TokenInUrl().Replace(text, "https://***@");
+    }
+
+    /// <summary>
+    /// Uruchamia program z listą argumentów (bez powłoki i bez sklejania stringów),
+    /// więc wartości z Portalu nie mogą dopisać własnych parametrów.
+    /// </summary>
     private static async Task<(bool Ok, string Output)> Cli(
-        string file, string args, string? workDir = null, int timeoutMin = 5)
+        string file, IEnumerable<string> args, string? workDir = null, int timeoutMin = 5)
     {
         var psi = new ProcessStartInfo
         {
             FileName = file,
-            Arguments = args,
             WorkingDirectory = workDir ?? "/tmp",
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false
         };
+        foreach (var a in args) psi.ArgumentList.Add(a);
+        psi.Environment["GIT_TERMINAL_PROMPT"] = "0"; // git nie może czekać na hasło w nieskończoność
+
         try
         {
             using var p = Process.Start(psi)!;
             using var cts = new CancellationTokenSource(TimeSpan.FromMinutes(timeoutMin));
-            var stdout = await p.StandardOutput.ReadToEndAsync(cts.Token);
-            var stderr = await p.StandardError.ReadToEndAsync(cts.Token);
-            await p.WaitForExitAsync(cts.Token);
+            var stdoutTask = p.StandardOutput.ReadToEndAsync(cts.Token);
+            var stderrTask = p.StandardError.ReadToEndAsync(cts.Token);
+            try { await p.WaitForExitAsync(cts.Token); }
+            catch (OperationCanceledException)
+            {
+                try { p.Kill(entireProcessTree: true); } catch { /* już zakończony */ }
+                return (false, $"Przekroczono limit czasu ({timeoutMin} min): {file} {string.Join(' ', psi.ArgumentList.Take(2))}");
+            }
+            var stdout = await stdoutTask;
+            var stderr = await stderrTask;
             var output = stdout + (string.IsNullOrEmpty(stderr) ? "" : "\n" + stderr);
             return (p.ExitCode == 0, output);
         }
         catch (Exception ex) { return (false, ex.Message); }
     }
+
+    [GeneratedRegex("^[a-z0-9][a-z0-9-]{0,62}$")]
+    private static partial Regex SafeSlug();
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._\-/]{0,99}$")]
+    private static partial Regex SafeRef();
+    [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9.\-]{0,252}$")]
+    private static partial Regex SafeHost();
+    [GeneratedRegex(@"https://[^@\s/]+@")]
+    private static partial Regex TokenInUrl();
 
     public void Dispose()
     {

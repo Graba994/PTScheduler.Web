@@ -3,7 +3,16 @@ using System.Text.Json.Serialization;
 namespace PTScheduler.Guardian;
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
-public enum UpgradeTarget { Portal, Tenant, TenantRolling }
+public enum UpgradeTarget
+{
+    Portal,
+    /// <summary>Sam obraz aplikacji trenerów (bez wdrażania).</summary>
+    Tenant,
+    /// <summary>Wdrożenie gotowego obrazu na instancje trenerów.</summary>
+    TenantRolling,
+    /// <summary>Obraz + wdrożenie w jednym zadaniu — Portal nie musi niczego łączyć.</summary>
+    TenantRelease
+}
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
 public enum UpgradeStage { Queued, Pulling, Building, Testing, Swapping, Verifying, Done }
@@ -30,7 +39,16 @@ public class UpgradeJob
     public List<TenantUpdateResult>? TenantResults { get; set; }
     public int Concurrency { get; set; }
     public int TenantsTotal { get; set; }
-    public int TenantsCompleted { get; set; }
+    private int _tenantsCompleted;
+    public int TenantsCompleted
+    {
+        get => Volatile.Read(ref _tenantsCompleted);
+        set => Volatile.Write(ref _tenantsCompleted, value);
+    }
+    /// <summary>Instancje aktualizują się równolegle — licznik musi być atomowy.</summary>
+    public void MarkTenantCompleted() => Interlocked.Increment(ref _tenantsCompleted);
+    /// <summary>Kto uruchomił (adres IP wywołującego) — do audytu.</summary>
+    public string? RequestedBy { get; set; }
 }
 
 public class TenantUpdateResult
@@ -40,6 +58,8 @@ public class TenantUpdateResult
     public string? Error { get; set; }
     public DateTime? StartedAt { get; set; }
     public DateTime? CompletedAt { get; set; }
+    /// <summary>Jak potwierdzono, że nowa wersja działa (HTTP /health albo start w logach).</summary>
+    public string? Detail { get; set; }
 }
 
 public class TenantRollingRequest
@@ -47,6 +67,8 @@ public class TenantRollingRequest
     public List<TenantInfo> Tenants { get; set; } = [];
     public int Concurrency { get; set; } = 3;
     public bool StopOnFirstFailure { get; set; }
+    /// <summary>Adres, pod którym Guardian widzi porty instancji (host Dockera). Pusty = GUARDIAN_TENANT_HOST / host.docker.internal.</summary>
+    public string? HealthHost { get; set; }
 }
 
 public class TenantInfo

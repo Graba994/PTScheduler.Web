@@ -457,7 +457,28 @@
         _guardianStatus = await UpdateSvc.GetGuardianStatusAsync();
         _guardianAvailable = _guardianStatus is not null;
         if (_guardianAvailable)
+        {
             _jobHistory = await UpdateSvc.GetGuardianHistoryAsync();
+
+            // Strona obiecuje „możesz ją zamknąć” — po powrocie pokaż trwające zadanie dalej.
+            if (_guardianStatus!.ActiveJob is { Status: "Running", Id: { Length: > 0 } activeId })
+            {
+                _activeGuardianJob = _guardianStatus.ActiveJob;
+                _currentJobId = activeId;
+                StartPolling();
+            }
+
+            // Wersja aplikacji trenerów z ostatniego udanego zadania — także gdy strona była zamknięta w trakcie.
+            var lastBuilt = _jobHistory.FirstOrDefault(j => j.Target is "Tenant" or "TenantRelease"
+                && j.Status is "Success" or "PartialSuccess" && !string.IsNullOrWhiteSpace(j.CommitAfter) && j.CommitAfter != "unknown");
+            var savedAt = DateTime.TryParse(_tenant.BuildTime, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var t) ? t : DateTime.MinValue;
+            if (lastBuilt is not null && !Same(_tenant.Commit, lastBuilt.CommitAfter) && (lastBuilt.CompletedAt ?? lastBuilt.StartedAt) > savedAt)
+            {
+                await UpdateSvc.SaveTenantBuildInfoAsync(lastBuilt.CommitAfter);
+                _tenant = await UpdateSvc.GetTenantBuildAsync();
+            }
+        }
         await Refresh();
     }
 
@@ -515,8 +536,12 @@
 
         if (_guardianAvailable && _rebuildImage)
         {
+            // Budowa + wdrożenie w jednym zadaniu Guardiana. Starszy Guardian zignoruje listę
+            // instancji i zrobi sam obraz — wtedy wdrożenie dołożymy po nim (_pendingRollingAfterBuild).
             _pendingRollingAfterBuild = _reprovision && _rollingUpdate;
-            var resp = await UpdateSvc.StartTenantUpgradeViaGuardianAsync(_rebuildImage);
+            var resp = _pendingRollingAfterBuild
+                ? await UpdateSvc.StartTenantReleaseViaGuardianAsync(_concurrency, _stopOnFailure)
+                : await UpdateSvc.StartTenantUpgradeViaGuardianAsync(_rebuildImage);
             if (resp is { Started: true, JobId: { } jobId })
             {
                 _currentJobId = jobId;
@@ -593,10 +618,14 @@
                 if (job is null) return;
 
                 _activeGuardianJob = job;
+                if (job.Target == "TenantRelease") _pendingRollingAfterBuild = false; // Guardian wdraża sam
 
                 if (job.Status != "Running")
                 {
                     StopPolling();
+
+                    if (job.Target == "TenantRelease" && job.Status is "Success" or "PartialSuccess")
+                        await UpdateSvc.SaveTenantBuildInfoAsync(job.CommitAfter);
 
                     if (job.Target == "Tenant" && job.Status == "Success")
                     {
@@ -735,6 +764,7 @@
     {
         "Portal" => [("Pulling", "Pobranie zmian"), ("Building", "Budowanie"), ("Testing", "Próbne uruchomienie"), ("Swapping", "Podmiana"), ("Verifying", "Sprawdzenie")],
         "Tenant" => [("Pulling", "Pobranie zmian"), ("Building", "Budowanie aplikacji")],
+        "TenantRelease" => [("Pulling", "Pobranie zmian"), ("Building", "Budowanie aplikacji"), ("Swapping", "Wdrażanie u trenerów"), ("Done", "Zakończenie")],
         _ => [("Swapping", "Wdrażanie na instancje"), ("Done", "Zakończenie")]
     };
 
@@ -755,6 +785,7 @@
         "Portal" => "Aktualizacja Portalu",
         "Tenant" => "Budowa aplikacji trenerów",
         "TenantRolling" => "Wdrażanie u trenerów",
+        "TenantRelease" => "Nowa wersja dla trenerów",
         _ => target
     };
 
