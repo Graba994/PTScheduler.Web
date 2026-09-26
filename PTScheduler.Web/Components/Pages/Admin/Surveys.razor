@@ -4,7 +4,7 @@
 @using PTScheduler.Domain.Constants
 @using PTScheduler.Domain.Enums
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Admin)]
-@inject ISurveyService Surveys
+@inject ISurveyService SurveyService
 @inject IJSRuntime JS
 @rendermode PTScheduler.Web.RenderModes.Server
 
@@ -236,7 +236,7 @@ else
         _openIndex = -1;
         _errors = [];
         _saved = null;
-        var loaded = await Surveys.GetTemplateAsync(kind);
+        var loaded = await SurveyService.GetTemplateAsync(kind);
         // Kopia robocza — edytujemy bez wpływu na obiekt z serwisu.
         _t = SurveyJson.Deserialize(SurveyJson.Serialize(loaded), loaded);
         _previewVersion++;
@@ -286,7 +286,7 @@ else
         _saved = null;
         try
         {
-            _errors = await Surveys.SaveTemplateAsync(_t);
+            _errors = await SurveyService.SaveTemplateAsync(_t);
             if (_errors.Count == 0)
             {
                 _saved = _t.IsEnabled ? "Zapisano. Ankieta jest włączona." : "Zapisano. Ankieta jest wyłączona — klienci jej nie zobaczą.";
@@ -299,7 +299,7 @@ else
     private async Task ResetAsync()
     {
         if (!await JS.InvokeAsync<bool>("confirm", "Przywrócić domyślne pytania? Twoje zmiany treści zostaną utracone (odpowiedzi klientów zostają).")) return;
-        await Surveys.ResetTemplateAsync(_kind);
+        await SurveyService.ResetTemplateAsync(_kind);
         await LoadAsync(_kind);
         _saved = "Przywrócono domyślną ankietę.";
     }
