@@ -12,7 +12,7 @@ public interface ICouponService
 
     // Called from checkout: checks scope, expiry, uses, active. Returns
     // the discount + final amount if OK.
-    Task<CouponValidationResult> ValidateAsync(string code, decimal amount, string targetType);
+    Task<CouponValidationResult> ValidateAsync(string code, decimal amount, string targetType, string? userId = null);
 
     // Registers a successful redemption and increments UsedCount.
     Task RedeemAsync(int couponId, string? userId, string? userEmail,

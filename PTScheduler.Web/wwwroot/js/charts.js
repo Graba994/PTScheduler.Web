@@ -1,6 +1,20 @@
 window.PTChart = (function () {
     var instances = {};
 
+    // Gdy biblioteka Chart.js się nie wczytała (offline, blokada), wykres jest
+    // pomijany — wyjątek z interopu wywracał cały obwód Blazora.
+    function chartAvailable(canvasId) {
+        if (typeof Chart !== 'undefined') return true;
+        var c = document.getElementById(canvasId);
+        if (c && c.parentElement && !c.parentElement.querySelector('.pt-chart-missing')) {
+            var note = document.createElement('div');
+            note.className = 'pt-chart-missing text-muted small text-center py-3';
+            note.textContent = 'Nie udało się wczytać wykresu. Odśwież stronę.';
+            c.parentElement.appendChild(note);
+        }
+        return false;
+    }
+
     function primaryColor() {
         return getComputedStyle(document.documentElement)
             .getPropertyValue('--c-primary').trim() || '#0284C7';
@@ -8,6 +22,7 @@ window.PTChart = (function () {
 
     return {
         renderLine: function (canvasId, labels, data, label, unit) {
+            if (!chartAvailable(canvasId)) return;
             if (instances[canvasId]) {
                 instances[canvasId].destroy();
                 delete instances[canvasId];
@@ -69,6 +84,7 @@ window.PTChart = (function () {
         },
 
         renderBar: function (canvasId, labels, datasets) {
+            if (!chartAvailable(canvasId)) return;
             if (instances[canvasId]) {
                 instances[canvasId].destroy();
                 delete instances[canvasId];
@@ -106,6 +122,7 @@ window.PTChart = (function () {
         },
 
         renderDoughnut: function (canvasId, labels, data, colors) {
+            if (!chartAvailable(canvasId)) return;
             if (instances[canvasId]) {
                 instances[canvasId].destroy();
                 delete instances[canvasId];

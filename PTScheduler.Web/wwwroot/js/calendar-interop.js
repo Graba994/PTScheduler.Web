@@ -2,6 +2,11 @@ let calendar = null;
 let summaryEl = null;
 
 export function initCalendar(dotnetRef, el, canEdit) {
+    if (typeof FullCalendar === 'undefined') {
+        // Biblioteka się nie wczytała — komunikat zamiast wyjątku, który zamykał obwód.
+        el.innerHTML = '<div class="alert alert-warning m-3">Nie udało się wczytać kalendarza. Odśwież stronę.</div>';
+        return;
+    }
     const isMobile = window.innerWidth < 768;
 
     const now = new Date();

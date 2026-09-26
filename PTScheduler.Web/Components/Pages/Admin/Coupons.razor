@@ -1,22 +1,28 @@
 @page "/admin/coupons"
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer")]
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @inject ICouponService CouponService
 @inject EntitlementService Entitlements
+@inject IPermissionService Permission
+@inject AuthenticationStateProvider AuthState
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Kupony rabatowe" />
 
 <div class="page-header d-flex justify-content-between align-items-center">
     <h4 class="page-title"><i class="bi bi-tag-fill me-2" style="color:var(--c-primary)"></i>Kupony rabatowe</h4>
-    @if (Entitlements.IsAllowed("Coupons"))
+    @if (Entitlements.IsAllowed("Coupons") && !_denied)
     {
         <button class="btn btn-primary" @onclick="NewCoupon"><i class="bi bi-plus-lg me-1"></i>Nowy kupon</button>
     }
 </div>
 
-@if (!Entitlements.IsAllowed("Coupons"))
+@if (_denied)
+{
+    <div class="alert alert-danger"><i class="bi bi-shield-lock me-2"></i>Brak uprawnień do zarządzania kuponami.</div>
+}
+else if (!Entitlements.IsAllowed("Coupons"))
 {
     <FeatureGate Flag="Coupons" RequiredPlan="Pro"
                  Title="Kupony rabatowe są dostępne w planie Pro">
@@ -75,6 +81,10 @@ else
                     <div class="col-md-3">
                         <label class="form-label small fw-semibold">Max użyć (0 = brak limitu)</label>
                         <input type="number" min="0" class="form-control" @bind="_editing.MaxUses" />
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small fw-semibold">Max użyć na osobę (0 = bez limitu)</label>
+                        <input type="number" min="0" class="form-control" @bind="_editing.MaxUsesPerUser" />
                     </div>
                     <div class="col-md-3 d-flex align-items-end">
                         <div class="form-check">
@@ -162,8 +172,19 @@ else
     private string? _message;
     private bool _msgError;
 
+    private bool _denied;
+
     protected override async Task OnInitializedAsync()
     {
+        // Kupon to rabat na płatności — wymaga uprawnienia do płatności.
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var role = auth.User.IsInRole(PTScheduler.Domain.Constants.Roles.Admin)
+            ? PTScheduler.Domain.Constants.Roles.Admin : PTScheduler.Domain.Constants.Roles.Trainer;
+        if (!await Permission.HasPermissionAsync(role, PTScheduler.Domain.Constants.Permissions.ManagePayments))
+        {
+            _denied = true;
+            return;
+        }
         if (Entitlements.IsAllowed("Coupons")) await Load();
     }
 
@@ -171,7 +192,7 @@ else
 
     private void NewCoupon()
     {
-        _editing = new SaveCouponDto { DiscountType = "percent", DiscountValue = 10, Scope = "all", IsActive = true };
+        _editing = new SaveCouponDto { DiscountType = "percent", DiscountValue = 10, Scope = "all", IsActive = true, MaxUsesPerUser = 1 };
         _editingId = null;
     }
 
@@ -184,7 +205,7 @@ else
             Code = full.Code, Description = full.Description,
             DiscountType = full.DiscountType, DiscountValue = full.DiscountValue,
             ValidFrom = full.ValidFrom, ValidUntil = full.ValidUntil,
-            MaxUses = full.MaxUses, Scope = full.Scope, IsActive = full.IsActive
+            MaxUses = full.MaxUses, MaxUsesPerUser = full.MaxUsesPerUser, Scope = full.Scope, IsActive = full.IsActive
         };
         _editingId = c.Id;
     }

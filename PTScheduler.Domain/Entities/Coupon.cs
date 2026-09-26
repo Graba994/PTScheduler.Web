@@ -17,6 +17,9 @@ public class Coupon
     public int MaxUses { get; set; }
     public int UsedCount { get; set; }
 
+    // Ile razy jedna osoba może użyć kodu (0 = bez limitu).
+    public int MaxUsesPerUser { get; set; }
+
     // Scope: "all" | "packages" | "courses"
     public string Scope { get; set; } = "all";
 

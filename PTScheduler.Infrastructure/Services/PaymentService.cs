@@ -99,7 +99,7 @@ public class PaymentService(
     private async Task ApplyCouponIfAnyAsync(Order order, string? couponCode, string targetType)
     {
         if (string.IsNullOrWhiteSpace(couponCode)) return;
-        var result = await coupons.ValidateAsync(couponCode, order.Amount, targetType);
+        var result = await coupons.ValidateAsync(couponCode, order.Amount, targetType, order.ApplicationUserId);
         if (!result.IsValid) return;
 
         order.OriginalAmount = order.Amount;

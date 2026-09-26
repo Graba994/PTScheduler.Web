@@ -10,6 +10,7 @@ public class CouponDto
     public DateTime? ValidFrom { get; set; }
     public DateTime? ValidUntil { get; set; }
     public int MaxUses { get; set; }
+    public int MaxUsesPerUser { get; set; }
     public int UsedCount { get; set; }
     public string Scope { get; set; } = "all";
     public bool IsActive { get; set; } = true;
@@ -24,6 +25,7 @@ public class SaveCouponDto
     public DateTime? ValidFrom { get; set; }
     public DateTime? ValidUntil { get; set; }
     public int MaxUses { get; set; }
+    public int MaxUsesPerUser { get; set; }
     public string Scope { get; set; } = "all";
     public bool IsActive { get; set; } = true;
 }

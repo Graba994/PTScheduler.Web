@@ -365,7 +365,7 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IW
             BunnyVideoId = string.IsNullOrWhiteSpace(dto.BunnyVideoId) ? null : dto.BunnyVideoId.Trim(),
             BunnyVideoSizeBytes = dto.BunnyVideoSizeBytes,
             BunnyVideoDurationSec = dto.BunnyVideoDurationSec,
-            ContentHtml = string.IsNullOrWhiteSpace(dto.ContentHtml) ? null : dto.ContentHtml,
+            ContentHtml = SafeHtml.SanitizeOrNull(dto.ContentHtml),
             SortOrder = maxOrder + 1
         };
         db.Lessons.Add(lesson);
@@ -383,7 +383,7 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IW
         l.BunnyVideoId = string.IsNullOrWhiteSpace(dto.BunnyVideoId) ? null : dto.BunnyVideoId.Trim();
         l.BunnyVideoSizeBytes = dto.BunnyVideoSizeBytes ?? l.BunnyVideoSizeBytes;
         l.BunnyVideoDurationSec = dto.BunnyVideoDurationSec ?? l.BunnyVideoDurationSec;
-        l.ContentHtml = string.IsNullOrWhiteSpace(dto.ContentHtml) ? null : dto.ContentHtml;
+        l.ContentHtml = SafeHtml.SanitizeOrNull(dto.ContentHtml);
         await db.SaveChangesAsync();
     }
 
@@ -668,7 +668,7 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IW
     {
         c.Title = dto.Title.Trim();
         c.Description = string.IsNullOrWhiteSpace(dto.Description) ? null : dto.Description.Trim();
-        c.DescriptionHtml = string.IsNullOrWhiteSpace(dto.DescriptionHtml) ? null : dto.DescriptionHtml;
+        c.DescriptionHtml = SafeHtml.SanitizeOrNull(dto.DescriptionHtml);
         c.CoverImageUrl = string.IsNullOrWhiteSpace(dto.CoverImageUrl) ? null : dto.CoverImageUrl.Trim();
         c.DurationText = string.IsNullOrWhiteSpace(dto.DurationText) ? null : dto.DurationText.Trim();
         c.Level = string.IsNullOrWhiteSpace(dto.Level) ? null : dto.Level.Trim();

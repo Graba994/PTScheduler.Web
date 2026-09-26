@@ -127,11 +127,15 @@ public class SessionService(
             if (conflict is not null) throw new SlotConflictException(conflict);
         }
 
+        // Pakiet musi być jeszcze ważny w dniu wizyty — wcześniej rezerwacja na
+        // termin po dacie ważności pobierała sesję z pakietu, który do tego czasu wygaśnie.
+        var sessionStartUtc = clock.ToUtc(dto.StartTime);
         var package = await db.SessionPackages
             .Where(p => p.ClientId == dto.ClientId
                      && p.SessionTypeId == dto.SessionTypeId
                      && p.Status == PackageStatus.Active
-                     && p.UsedSessions < p.TotalSessions)
+                     && p.UsedSessions < p.TotalSessions
+                     && (p.ExpiresAt == null || p.ExpiresAt >= sessionStartUtc))
             .OrderBy(p => p.ExpiresAt ?? DateTime.MaxValue)
             .FirstOrDefaultAsync();
 

@@ -34,6 +34,7 @@ public class SiteContentService(IWebRootPathProvider webRoot) : ISiteContentServ
 
     public async Task SaveAsync(SiteContentDto dto)
     {
+        dto.AboutHtml = SafeHtml.SanitizeOrNull(dto.AboutHtml);
         var dir = Path.Combine(webRoot.WebRootPath, "branding");
         Directory.CreateDirectory(dir);
         await using var fs = File.Create(FilePath);

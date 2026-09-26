@@ -53,7 +53,7 @@ public class CouponService(IDbContextFactory<ApplicationDbContext> dbFactory) : 
         await db.SaveChangesAsync();
     }
 
-    public async Task<CouponValidationResult> ValidateAsync(string code, decimal amount, string targetType)
+    public async Task<CouponValidationResult> ValidateAsync(string code, decimal amount, string targetType, string? userId = null)
     {
         if (string.IsNullOrWhiteSpace(code))
             return new() { IsValid = false, Error = "Wpisz kod." };
@@ -68,10 +68,13 @@ public class CouponService(IDbContextFactory<ApplicationDbContext> dbFactory) : 
         var now = DateTime.UtcNow;
         if (c.ValidFrom.HasValue && now < c.ValidFrom.Value)
             return new() { IsValid = false, Error = "Kod jeszcze nie obowiązuje." };
-        if (c.ValidUntil.HasValue && now > c.ValidUntil.Value)
+        if (c.ValidUntil.HasValue && now > EndOfValidity(c.ValidUntil.Value))
             return new() { IsValid = false, Error = "Kod wygasł." };
         if (c.MaxUses > 0 && c.UsedCount >= c.MaxUses)
             return new() { IsValid = false, Error = "Kod wyczerpany." };
+        if (c.MaxUsesPerUser > 0 && !string.IsNullOrEmpty(userId)
+            && await db.CouponRedemptions.CountAsync(r => r.CouponId == c.Id && r.UserId == userId) >= c.MaxUsesPerUser)
+            return new() { IsValid = false, Error = "Ten kod został już przez Ciebie wykorzystany." };
         if (c.Scope != "all" && !string.Equals(c.Scope, targetType, StringComparison.OrdinalIgnoreCase))
             return new() { IsValid = false, Error = $"Kod nie obowiązuje na {targetType}." };
 
@@ -123,6 +126,7 @@ public class CouponService(IDbContextFactory<ApplicationDbContext> dbFactory) : 
         ValidFrom = c.ValidFrom,
         ValidUntil = c.ValidUntil,
         MaxUses = c.MaxUses,
+        MaxUsesPerUser = c.MaxUsesPerUser,
         UsedCount = c.UsedCount,
         Scope = c.Scope,
         IsActive = c.IsActive
@@ -137,7 +141,13 @@ public class CouponService(IDbContextFactory<ApplicationDbContext> dbFactory) : 
         c.ValidFrom = dto.ValidFrom;
         c.ValidUntil = dto.ValidUntil;
         c.MaxUses = Math.Max(0, dto.MaxUses);
+        c.MaxUsesPerUser = Math.Max(0, dto.MaxUsesPerUser);
         c.Scope = dto.Scope;
         c.IsActive = dto.IsActive;
     }
+
+    // „Ważny do 30.09” z pola daty to północ na początku 30.09 — kod ma działać
+    // przez cały ten dzień.
+    private static DateTime EndOfValidity(DateTime until) =>
+        until.TimeOfDay == TimeSpan.Zero ? until.AddDays(1) : until;
 }

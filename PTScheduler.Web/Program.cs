@@ -1,3 +1,4 @@
+using System.Security.Claims;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Components.Authorization;
 using Microsoft.AspNetCore.DataProtection;
@@ -68,7 +69,9 @@ builder.Services.Configure<Microsoft.AspNetCore.SignalR.HubOptions>(options =>
 // instead of a silent "circuit terminated" during diagnosis.
 builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions>(options =>
 {
-    options.DetailedErrors = true;
+    // Szczegóły wyjątków w przeglądarce tylko w trybie deweloperskim — na produkcji
+    // ujawniały nazwy tabel, ścieżki i treść zapytań.
+    options.DetailedErrors = builder.Environment.IsDevelopment();
     // Aplikacja działa głównie jako PWA: telefon usypia kartę/aplikację, a
     // przeglądarka zamraża schowane zakładki. Dłuższe podtrzymanie rozłączonego
     // obwodu pozwala po powrocie wznowić stan bez przeładowania strony
@@ -243,6 +246,9 @@ app.MapGet("/db-error", (StartupHealth h, IHostEnvironment env) =>
 // Manual retry — re-runs migrations + seed. On success flips the flag and redirects to /.
 app.MapGet("/db-error/retry", async (StartupHealth h, IServiceProvider sp, ILogger<Program> log) =>
 {
+    // Ponowna inicjalizacja (migracje + seed) tylko, gdy baza faktycznie jest
+    // niedostępna — wcześniej każdy mógł ją odpalać w kółko.
+    if (h.DatabaseAvailable) return Results.Redirect("/");
     await TryInitializeDatabaseAsync(sp, h, log, isStartup: false);
     return h.DatabaseAvailable ? Results.Redirect("/") : Results.Redirect("/db-error");
 });
@@ -267,6 +273,7 @@ app.MapGet("/reports/client/{clientId:int}/monthly", async (
     int month,
     PTScheduler.Application.Interfaces.IClientReportService reportService,
     PTScheduler.Web.Services.EntitlementService entitlements,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
     HttpContext ctx) =>
 {
     var u = ctx.User;
@@ -280,6 +287,15 @@ app.MapGet("/reports/client/{clientId:int}/monthly", async (
 
     if (year < 2000 || year > 2100 || month < 1 || month > 12)
         return Results.BadRequest("Nieprawidłowy rok lub miesiąc.");
+
+    // Trener widzi raporty tylko swoich klientów (admin — wszystkich).
+    if (!u.IsInRole(PTScheduler.Domain.Constants.Roles.Admin))
+    {
+        var userId = u.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var owns = await db.Clients.AnyAsync(c => c.Id == clientId && c.TrainerUserId == userId);
+        if (!owns) return Results.NotFound();
+    }
 
     try
     {
@@ -697,6 +713,24 @@ static string RenderDbErrorPage(StartupHealth h, bool isDev)
         : "";
     var failedAt = h.FailedAt == default ? "—" : h.FailedAt.ToString("dd.MM.yyyy HH:mm:ss");
 
+    // Szczegóły techniczne tylko w trybie deweloperskim — na produkcji treść
+    // błędu bazy (host, użytkownik) nie może trafić do anonimowego odwiedzającego.
+    var adminBlock = isDev ? $@"
+        <details class=""admin"">
+            <summary>Informacje dla administratora</summary>
+            <div class=""tech"">
+                <div class=""tech-row"">
+                    <div class=""tech-label"">Komunikat błędu</div>
+                    <div class=""tech-value"">{msg}</div>
+                </div>
+                <div class=""tech-row"">
+                    <div class=""tech-label"">Czas wystąpienia</div>
+                    <div class=""tech-value"">{failedAt}</div>
+                </div>
+                {stackBlock}
+            </div>
+        </details>" : "";
+
     return $@"<!doctype html>
 <html lang=""pl"">
 <head>
@@ -772,20 +806,7 @@ static string RenderDbErrorPage(StartupHealth h, bool isDev)
             <a href=""/"" class=""btn btn-ghost"">Strona główna</a>
         </div>
 
-        <details class=""admin"">
-            <summary>Informacje dla administratora</summary>
-            <div class=""tech"">
-                <div class=""tech-row"">
-                    <div class=""tech-label"">Komunikat błędu</div>
-                    <div class=""tech-value"">{msg}</div>
-                </div>
-                <div class=""tech-row"">
-                    <div class=""tech-label"">Czas wystąpienia</div>
-                    <div class=""tech-value"">{failedAt}</div>
-                </div>
-                {stackBlock}
-            </div>
-        </details>
+        {adminBlock}
     </div>
 </body>
 </html>";

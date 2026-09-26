@@ -90,7 +90,12 @@ public class SessionSeriesService(
             }
 
             // Advance to a package that still has credits
-            while (pkgIdx < packages.Count && packages[pkgIdx].UsedSessions >= packages[pkgIdx].TotalSessions)
+            // Pakiety są posortowane po dacie ważności — ten, który wygaśnie przed
+            // tym terminem, nie obejmie też kolejnych.
+            var startUtc = clock.ToUtc(start);
+            while (pkgIdx < packages.Count
+                   && (packages[pkgIdx].UsedSessions >= packages[pkgIdx].TotalSessions
+                       || (packages[pkgIdx].ExpiresAt is { } exp && exp < startUtc)))
                 pkgIdx++;
 
             int? linkedPackageId = null;
