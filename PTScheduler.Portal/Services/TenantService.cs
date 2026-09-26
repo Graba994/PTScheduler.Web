@@ -295,7 +295,7 @@ public class TenantService(
             using var req = new HttpRequestMessage(HttpMethod.Post,
                 $"http://{ForwardHost}:{tenant.Port}/internal/entitlements/reload")
             {
-                Content = new StringContent(SerializePlan(plan), System.Text.Encoding.UTF8, "application/json")
+                Content = new StringContent(await EntitlementsJsonAsync(tenant.Id, plan), System.Text.Encoding.UTF8, "application/json")
             };
             req.Headers.Add("X-Internal-Secret", secret);
             using var resp = await PushClient.SendAsync(req);
@@ -409,7 +409,7 @@ public class TenantService(
 
         try
         {
-            var entitlements = SerializePlan(plan);
+            var entitlements = await EntitlementsJsonAsync(tenant.Id, plan);
             if (string.IsNullOrEmpty(tenant.InternalSecret))
             {
                 tenant.InternalSecret = TenantSecrets.New();
@@ -426,6 +426,29 @@ public class TenantService(
             logger.LogError(ex, "Reprovision failed for tenant {Id}", tenantId);
             return (false, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Uprawnienia instancji = plan + aktywne dodatki miesięczne (więcej transferu
+    /// i przestrzeni wideo). Wartości „bez limitu” zostają bez zmian.
+    /// </summary>
+    public static string SerializeEntitlements(Plan plan, int extraStorageGb, int extraBandwidthGb)
+    {
+        var node = System.Text.Json.Nodes.JsonNode.Parse(SerializePlan(plan))!.AsObject();
+        static int Add(int baseValue, int extra) =>
+            extra <= 0 || baseValue <= 0 || baseValue >= int.MaxValue - extra ? baseValue : baseValue + extra;
+        node["maxVideoStorageGB"] = Add(plan.MaxVideoStorageGB, extraStorageGb);
+        node["maxVideoBandwidthGBPerMonth"] = Add(plan.MaxVideoBandwidthGBPerMonth, extraBandwidthGb);
+        node["addonVideoBandwidthGB"] = extraBandwidthGb;
+        node["addonVideoStorageGB"] = extraStorageGb;
+        return node.ToJsonString();
+    }
+
+    public async Task<string> EntitlementsJsonAsync(int tenantId, Plan plan)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var (storage, bandwidth) = await AddonService.ExtraLimitsAsync(db, tenantId);
+        return SerializeEntitlements(plan, storage, bandwidth);
     }
 
     public static string SerializePlan(Plan plan) =>

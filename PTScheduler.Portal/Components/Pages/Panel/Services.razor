@@ -81,6 +81,33 @@
                     <label class="form-label small fw-semibold">Kolejność</label>
                     <input type="number" class="form-control" @bind="_editing.SortOrder" />
                 </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold" for="si-ful">Po opłaceniu</label>
+                    <select id="si-ful" class="form-select" @bind="_editing.FulfillmentType">
+                        <option value="manual">Realizuję ręcznie</option>
+                        <option value="credit_sms">Dodaj SMS-y</option>
+                        <option value="credit_cdn_storage">Dodaj przestrzeń wideo (GB)</option>
+                        <option value="credit_cdn_bandwidth">Dodaj transfer wideo (GB)</option>
+                    </select>
+                </div>
+                @if (_editing.FulfillmentType != "manual")
+                {
+                    <div class="col-md-2">
+                        <label class="form-label small fw-semibold" for="si-amt">Ilość</label>
+                        <input id="si-amt" type="number" min="1" class="form-control" @bind="_editing.CreditAmount" />
+                    </div>
+                }
+                @if (_editing.PriceType == "monthly" && _editing.FulfillmentType is "credit_cdn_storage" or "credit_cdn_bandwidth")
+                {
+                    <div class="col-md-6">
+                        <label class="form-label small fw-semibold" for="si-stripe">Stripe Price ID (cena miesięczna)</label>
+                        <input id="si-stripe" class="form-control font-monospace" @bind="_editing.StripePriceId" placeholder="price_…" />
+                        <div class="form-text small">
+                            Dodatek miesięczny: podnosi limit trenera, dopóki jest aktywny. Z tym ID trener dopisuje go jednym kliknięciem
+                            do abonamentu opłacanego kartą (Stripe dolicza go co miesiąc). Bez ID — zamawia i płaci w sklepie jak za usługę.
+                        </div>
+                    </div>
+                }
             </div>
 
             <div class="d-flex gap-2">
@@ -187,6 +214,7 @@
 
         try
         {
+            _editing.StripePriceId = string.IsNullOrWhiteSpace(_editing.StripePriceId) ? null : _editing.StripePriceId.Trim();
             await using var db = DbFactory.CreateDbContext();
             if (_isNew)
             {

@@ -1,5 +1,5 @@
 @page "/admin/video"
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer")]
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @inject IBunnyService Bunny
@@ -43,57 +43,54 @@ else
         <!-- Centralized CDN mode -->
         <div class="alert alert-success small">
             <i class="bi bi-check-circle-fill me-2"></i>
-            <strong>CDN centralne</strong> — Twoje konto korzysta z centralnego hostingu wideo.
-            Nie musisz konfigurować własnego konta Bunny.net. Kupuj dodatkową przestrzeń i transfer w sklepie usług.
+            <strong>Hosting wideo działa</strong> — filmy trzymamy za Ciebie, niczego nie konfigurujesz.
+            Gdy zabraknie transferu albo miejsca, zwiększysz je jednym kliknięciem.
         </div>
 
         <div class="row g-3 mb-4">
             <div class="col-md-6">
                 <div class="card h-100">
-                    <div class="card-body">
+                    <div class="card-body d-flex flex-column">
                         <div class="d-flex align-items-center gap-3">
-                            <i class="bi bi-cloud-upload fs-1 text-primary"></i>
+                            <i class="bi bi-speedometer2 fs-1 text-primary"></i>
                             <div>
-                                <div class="text-muted small">Dodatkowa przestrzeń (kredyty)</div>
-                                <div class="fs-3 fw-bold">@_cdnStatus.StorageCredits GB</div>
+                                <div class="text-muted small">Transfer miesięczny (odtwarzanie kursów)</div>
+                                <div class="fs-3 fw-bold">@BandwidthLabel</div>
                             </div>
                         </div>
-                        <div class="text-muted small mt-2">
-                            Limit planu: <strong>@Entitlements.Current.MaxVideoStorageGB GB</strong>
-                            @if (_cdnStatus.StorageCredits > 0)
-                            {
-                                <span> + <strong>@_cdnStatus.StorageCredits GB</strong> z kredytów</span>
-                            }
+                        <div class="text-muted small mt-2 mb-3">
+                            Plan: <strong>@(Entitlements.Current.MaxVideoBandwidthGBPerMonth - Entitlements.Current.AddonVideoBandwidthGB) GB</strong>
+                            @if (Entitlements.Current.AddonVideoBandwidthGB > 0) { <span> + dodatki: <strong>@Entitlements.Current.AddonVideoBandwidthGB GB</strong></span> }
+                            @if (_cdnStatus.BandwidthCredits > 0) { <span> + jednorazowo: <strong>@_cdnStatus.BandwidthCredits GB</strong></span> }
                         </div>
+                        <a href="/admin/sklep?dodatek=transfer" class="btn btn-primary mt-auto align-self-start">
+                            <i class="bi bi-arrow-up-circle me-1"></i>Zwiększ transfer
+                        </a>
+                        <div class="form-text">Dodatek doliczamy do abonamentu co miesiąc — rezygnujesz, kiedy chcesz.</div>
                     </div>
                 </div>
             </div>
             <div class="col-md-6">
                 <div class="card h-100">
-                    <div class="card-body">
+                    <div class="card-body d-flex flex-column">
                         <div class="d-flex align-items-center gap-3">
-                            <i class="bi bi-speedometer2 fs-1 text-primary"></i>
+                            <i class="bi bi-cloud-upload fs-1 text-primary"></i>
                             <div>
-                                <div class="text-muted small">Dodatkowy transfer (kredyty)</div>
-                                <div class="fs-3 fw-bold">@_cdnStatus.BandwidthCredits GB</div>
+                                <div class="text-muted small">Przestrzeń na filmy</div>
+                                <div class="fs-3 fw-bold">@(Entitlements.Current.MaxVideoStorageGB + (int)_cdnStatus.StorageCredits) GB</div>
                             </div>
                         </div>
-                        <div class="text-muted small mt-2">
-                            Limit planu: <strong>@Entitlements.Current.MaxVideoBandwidthGBPerMonth GB</strong>/mies.
-                            @if (_cdnStatus.BandwidthCredits > 0)
-                            {
-                                <span> + <strong>@_cdnStatus.BandwidthCredits GB</strong> z kredytów</span>
-                            }
+                        <div class="text-muted small mt-2 mb-3">
+                            Plan: <strong>@(Entitlements.Current.MaxVideoStorageGB - Entitlements.Current.AddonVideoStorageGB) GB</strong>
+                            @if (Entitlements.Current.AddonVideoStorageGB > 0) { <span> + dodatki: <strong>@Entitlements.Current.AddonVideoStorageGB GB</strong></span> }
+                            @if (_cdnStatus.StorageCredits > 0) { <span> + dokupione: <strong>@_cdnStatus.StorageCredits GB</strong></span> }
                         </div>
+                        <a href="/admin/sklep?dodatek=miejsce" class="btn btn-outline-primary mt-auto align-self-start">
+                            <i class="bi bi-cart-plus me-1"></i>Dokup miejsce
+                        </a>
                     </div>
                 </div>
             </div>
-        </div>
-
-        <div class="mb-4">
-            <a href="/admin/store" class="btn btn-outline-primary">
-                <i class="bi bi-cart-plus me-1"></i>Kup dodatkową przestrzeń / transfer
-            </a>
         </div>
     }
 
@@ -131,8 +128,10 @@ else
         @* Instancja zarządzana: wideo konfiguruje platforma — bez własnych kluczy Bunny. *@
         @if (_cdnStatus is not { PlatformCdnEnabled: true })
         {
-            <div class="alert alert-info small">
-                <i class="bi bi-info-circle me-1"></i>Hosting wideo włącza administrator platformy. Jeśli potrzebujesz wideo w kursach, napisz do nas.
+            <div class="alert alert-info small d-flex flex-wrap align-items-center gap-2">
+                <span class="me-auto"><i class="bi bi-hourglass-split me-1"></i>Hosting wideo jest jeszcze uruchamiany na platformie — włączy się tutaj sam, bez Twojej konfiguracji.
+                Transfer i miejsce na filmy możesz już zaplanować w sklepie.</span>
+                <a href="/admin/sklep?dodatek=transfer" class="btn btn-sm btn-outline-primary">Zobacz pakiety wideo</a>
             </div>
         }
     }
@@ -170,7 +169,7 @@ else
             @if (_cdnStatus is { PlatformCdnEnabled: true } && !_hasLocalSettings)
             {
                 <li>Hosting wideo jest już skonfigurowany centralnie — możesz od razu dodawać kursy z wideo!</li>
-                <li>Jeśli potrzebujesz więcej miejsca, kup pakiet w <a href="/admin/store">sklepie usług</a></li>
+                <li>Jeśli potrzebujesz więcej miejsca, zwiększ je w <a href="/admin/sklep?dodatek=transfer">sklepie usług</a></li>
             }
             else
             {
@@ -186,6 +185,16 @@ else
 }
 
 @code {
+    private string BandwidthLabel
+    {
+        get
+        {
+            var gb = Entitlements.Current.MaxVideoBandwidthGBPerMonth;
+            if (gb <= 0 || gb >= int.MaxValue / 2) return "bez limitu";
+            return $"{gb + (int)(_cdnStatus?.BandwidthCredits ?? 0)} GB";
+        }
+    }
+
     private RenderFragment RenderBunnyForm() => __builder =>
     {
         <div class="form-check mb-3">

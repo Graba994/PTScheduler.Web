@@ -13,6 +13,7 @@ public class StorePaymentService(
     SiteSettingsService settings,
     IDbContextFactory<PortalDbContext> dbFactory,
     CreditService creditService,
+    TenantService tenantService,
     ILogger<StorePaymentService> logger)
 {
     public async Task<List<string>> GetAvailableGatewaysAsync()
@@ -103,6 +104,10 @@ public class StorePaymentService(
                 catch (Exception ex) { logger.LogError(ex, "Auto-fulfill failed for order {Id}", order.Id); }
             }
         }
+        // Opłacony dodatek miesięczny podnosi limity — instancja dostaje je od razu.
+        if (creditService.AddonActivated)
+            foreach (var tenantId in paidOrders.Select(o => o.TenantId).Distinct())
+                await tenantService.PushEntitlementsAsync(tenantId);
 
         return true;
     }

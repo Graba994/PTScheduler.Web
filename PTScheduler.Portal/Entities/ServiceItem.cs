@@ -14,5 +14,10 @@ public class ServiceItem
     public string? Icon { get; set; }
     public string FulfillmentType { get; set; } = "manual"; // "manual" | "credit_sms" | "credit_cdn_storage" | "credit_cdn_bandwidth"
     public int CreditAmount { get; set; }
+    /// <summary>
+    /// Cena w Stripe (price_…) dla dodatków miesięcznych — wtedy dodatek dolicza się
+    /// do abonamentu trenera opłacanego kartą i odnawia automatycznie.
+    /// </summary>
+    public string? StripePriceId { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 }

@@ -19,6 +19,7 @@ public static class TenantEventTypes
     public const string Resumed = "resumed";
     public const string Deleted = "deleted";
     public const string PlanChanged = "plan_changed";
+    public const string AddonChanged = "addon_changed";
     public const string PaymentReceived = "payment_received";
     public const string PaymentFailed = "payment_failed";
     public const string TrialStarted = "trial_started";

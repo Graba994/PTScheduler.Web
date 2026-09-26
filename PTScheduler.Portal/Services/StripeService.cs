@@ -227,6 +227,14 @@ public class StripeService(
 
         tenant.BillingStatus = "canceled";
 
+        // Pozycje dodatków znikają razem z subskrypcją.
+        var now = DateTime.UtcNow;
+        foreach (var addon in await db.TenantAddons.Where(a => a.TenantId == tenant.Id && a.Status == TenantAddonStatus.Active && a.StripeSubscriptionItemId != null).ToListAsync())
+        {
+            addon.Status = TenantAddonStatus.Cancelled;
+            addon.CancelledAt = now;
+        }
+
         db.TenantEvents.Add(new TenantEvent
         {
             TenantId = tenant.Id,

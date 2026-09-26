@@ -1,6 +1,6 @@
 @page "/admin/sklep"
 @using PTScheduler.Domain.Constants
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer")]
 @inject IConfiguration Config
 @inject NavigationManager Nav
 @rendermode PTScheduler.Web.RenderModes.Server
@@ -10,6 +10,7 @@
 <div class="page-header">
     <h4 class="page-title"><i class="bi bi-shop me-2" style="color:var(--c-primary)"></i>Sklep usług</h4>
 </div>
+<p class="text-muted small mb-3">Dodatki do abonamentu, pakiety SMS i usługi od zespołu platformy.</p>
 
 @if (_paymentResult == "success")
 {
@@ -54,9 +55,100 @@ else if (_catalog.Count == 0 && _error is null)
 }
 else
 {
-    <p class="text-muted mb-3">Wybierz usługi, które chcesz zamówić, i kliknij „Zamów".</p>
+    @if (_catalog.Any(c => c.MonthlyAddon) || _addons.Count > 0)
+    {
+        <section class="card mb-4 border-primary-subtle" id="dodatki">
+            <div class="card-body">
+                <h5 class="fw-semibold mb-1"><i class="bi bi-plus-square me-2" style="color:var(--c-primary)"></i>Dodatki do abonamentu</h5>
+                <p class="text-muted small mb-3">Więcej transferu i miejsca na kursy wideo. Działają od razu i odnawiają się co miesiąc razem z abonamentem — rezygnujesz jednym kliknięciem.</p>
 
-    @foreach (var group in _catalog.GroupBy(c => c.Category))
+                @if (_addons.Count > 0)
+                {
+                    <div class="mb-3">
+                        <div class="small fw-semibold text-muted text-uppercase mb-2">Masz aktywne</div>
+                        <ul class="list-group">
+                            @foreach (var a in _addons)
+                            {
+                                <li class="list-group-item d-flex flex-wrap align-items-center gap-2">
+                                    <i class="bi bi-check-circle-fill text-success"></i>
+                                    <span class="fw-semibold">@a.Name</span>
+                                    @if (a.Quantity > 1) { <span class="badge bg-light text-dark border">× @a.Quantity</span> }
+                                    <span class="text-muted small">@((a.Price * a.Quantity).ToString("0")) zł / mies. · od @a.StartedAt.ToLocalTime().ToString("d.MM.yyyy")</span>
+                                    @if (_confirmCancel == a.Id)
+                                    {
+                                        <span class="ms-auto d-flex align-items-center gap-2">
+                                            <span class="small">@(a.Quantity > 1 ? "Zmniejszyć o jeden?" : "Zrezygnować? Limit spadnie od razu.")</span>
+                                            <button class="btn btn-sm btn-danger" @onclick="() => CancelAddonAsync(a.Id)" disabled="@_ordering">Tak</button>
+                                            <button class="btn btn-sm btn-link" @onclick="() => _confirmCancel = null">Nie</button>
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-sm btn-outline-secondary ms-auto" @onclick="() => _confirmCancel = a.Id">Zrezygnuj</button>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                    </div>
+                }
+
+                <div class="row g-3">
+                    @foreach (var item in _catalog.Where(c => c.MonthlyAddon))
+                    {
+                        var highlighted = Highlighted(item);
+                        var inCart = _selected.Contains(item.Id);
+                        <div class="col-md-6 col-lg-4">
+                            <div class="card h-100 @(highlighted ? "border-primary shadow-sm" : "")">
+                                <div class="card-body d-flex flex-column">
+                                    <div class="d-flex align-items-center gap-2 mb-2">
+                                        <i class="bi @(item.Icon ?? "bi-box")" style="color:var(--c-primary);font-size:1.3rem"></i>
+                                        <span class="fw-semibold">@item.Name</span>
+                                        @if (highlighted) { <span class="badge bg-primary-subtle text-primary-emphasis ms-auto">polecane</span> }
+                                    </div>
+                                    @if (!string.IsNullOrWhiteSpace(item.Description)) { <p class="text-muted small mb-3 flex-grow-1">@item.Description</p> }
+                                    <div class="mb-2">
+                                        <span class="fs-5 fw-bold" style="color:var(--c-primary)">+@item.Price.ToString("0") zł</span>
+                                        <span class="text-muted small"> / miesiąc</span>
+                                    </div>
+                                    @if (item.AutoBilling)
+                                    {
+                                        @if (_confirmAdd == item.Id)
+                                        {
+                                            <div class="border rounded-3 p-2 small bg-body-tertiary">
+                                                <div class="mb-2">Doliczymy <strong>@item.Price.ToString("0") zł</strong> do najbliższej płatności za abonament (proporcjonalnie za bieżący miesiąc).</div>
+                                                <div class="d-flex gap-2">
+                                                    <button class="btn btn-sm btn-primary" @onclick="() => AddAddonAsync(item.Id)" disabled="@_ordering">
+                                                        @if (_ordering) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                                        Dodaj
+                                                    </button>
+                                                    <button class="btn btn-sm btn-link" @onclick="() => _confirmAdd = null">Anuluj</button>
+                                                </div>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-primary w-100" @onclick="() => _confirmAdd = item.Id"><i class="bi bi-plus-lg me-1"></i>Dodaj do abonamentu</button>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <button class="btn @(inCart ? "btn-success" : "btn-outline-primary") w-100" @onclick="() => Toggle(item.Id)">
+                                            <i class="bi @(inCart ? "bi-check-lg" : "bi-cart-plus") me-1"></i>@(inCart ? "W koszyku" : "Zamów — pierwszy miesiąc")
+                                        </button>
+                                        <div class="form-text">Płacisz za pierwszy miesiąc teraz; kolejne rozliczamy co miesiąc.</div>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </section>
+    }
+
+    <p class="text-muted mb-3">Pozostałe usługi — zaznacz i kliknij „Zamów”.</p>
+
+    @foreach (var group in _catalog.Where(c => !c.MonthlyAddon).GroupBy(c => c.Category))
     {
         <div class="mb-4">
             <h6 class="fw-semibold text-muted text-uppercase small mb-2">
@@ -162,6 +254,21 @@ else
     [SupplyParameterFromQuery(Name = "payment")]
     public string? PaymentQuery { get; set; }
 
+    /// <summary>„transfer” / „miejsce” — z ekranu Wideo; wyróżnia pasujący dodatek.</summary>
+    [SupplyParameterFromQuery(Name = "dodatek")]
+    public string? AddonQuery { get; set; }
+
+    private List<ActiveAddon> _addons = new();
+    private int? _confirmAdd;
+    private int? _confirmCancel;
+
+    private bool Highlighted(StoreItem item) => AddonQuery switch
+    {
+        "transfer" => item.AddonKind == "bandwidth",
+        "miejsce" => item.AddonKind == "storage",
+        _ => false
+    };
+
     private List<StoreItem> _catalog = new();
     private List<string> _gateways = new();
     private HashSet<int> _selected = new();
@@ -228,7 +335,26 @@ else
                         Icon = el.TryGetProperty("icon", out var ic) ? ic.GetString() : null,
                         Price = el.GetProperty("price").GetDecimal(),
                         PriceType = el.GetProperty("priceType").GetString() ?? "one_time",
-                        Unit = el.TryGetProperty("unit", out var u) ? u.GetString() : null
+                        Unit = el.TryGetProperty("unit", out var u) ? u.GetString() : null,
+                        MonthlyAddon = el.TryGetProperty("monthlyAddon", out var ma) && ma.GetBoolean(),
+                        AutoBilling = el.TryGetProperty("autoBilling", out var ab) && ab.GetBoolean(),
+                        AddonKind = el.TryGetProperty("addonKind", out var ak) ? ak.GetString() : null
+                    });
+                }
+            }
+
+            _addons.Clear();
+            if (root.TryGetProperty("addons", out var addonsEl))
+            {
+                foreach (var el in addonsEl.EnumerateArray())
+                {
+                    _addons.Add(new ActiveAddon
+                    {
+                        Id = el.GetProperty("id").GetInt32(),
+                        Name = el.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "",
+                        Quantity = el.GetProperty("quantity").GetInt32(),
+                        Price = el.GetProperty("price").GetDecimal(),
+                        StartedAt = el.GetProperty("startedAt").GetDateTime()
                     });
                 }
             }
@@ -254,6 +380,64 @@ else
         finally
         {
             _loading = false;
+        }
+    }
+
+    private async Task AddAddonAsync(int itemId)
+    {
+        _ordering = true; _error = null; _success = null;
+        var (ok, error) = await PortalCallAsync(HttpMethod.Post, "/addons", new { serviceItemId = itemId });
+        _confirmAdd = null;
+        if (ok)
+        {
+            await LoadCatalog();
+            _success = "Dodatek aktywny — nowy limit działa od razu, a opłata dolicza się do abonamentu.";
+        }
+        else _error = error;
+        _ordering = false;
+    }
+
+    private async Task CancelAddonAsync(int addonId)
+    {
+        _ordering = true; _error = null; _success = null;
+        var (ok, error) = await PortalCallAsync(HttpMethod.Delete, $"/addons/{addonId}", null);
+        _confirmCancel = null;
+        if (ok)
+        {
+            await LoadCatalog();
+            _success = "Zmieniono abonament — limit zaktualizowany.";
+        }
+        else _error = error;
+        _ordering = false;
+    }
+
+    private static async Task<(bool Ok, string? Error)> PortalCallAsync(HttpMethod method, string suffix, object? body)
+    {
+        var portalUrl = Environment.GetEnvironmentVariable("PORTAL_URL");
+        var slug = Environment.GetEnvironmentVariable("TENANT_SLUG");
+        var secret = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+        if (string.IsNullOrEmpty(portalUrl) || string.IsNullOrEmpty(slug)) return (false, "Sklep usług nie jest dostępny w tej instalacji.");
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            using var req = new HttpRequestMessage(method, $"{portalUrl.TrimEnd('/')}/api/store/{slug}{suffix}");
+            if (!string.IsNullOrEmpty(secret)) req.Headers.TryAddWithoutValidation("X-Internal-Secret", secret);
+            if (body is not null)
+                req.Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(body), System.Text.Encoding.UTF8, "application/json");
+            using var resp = await http.SendAsync(req);
+            if (resp.IsSuccessStatusCode) return (true, null);
+            var text = await resp.Content.ReadAsStringAsync();
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(text);
+                if (doc.RootElement.TryGetProperty("error", out var e)) return (false, e.GetString());
+            }
+            catch { /* odpowiedź bez JSON */ }
+            return (false, $"Nie udało się zmienić abonamentu (HTTP {(int)resp.StatusCode}).");
+        }
+        catch (Exception ex)
+        {
+            return (false, $"Brak połączenia z platformą: {ex.Message}");
         }
     }
 
@@ -422,5 +606,17 @@ else
         public decimal Price { get; set; }
         public string PriceType { get; set; } = "one_time";
         public string? Unit { get; set; }
+        public bool MonthlyAddon { get; set; }
+        public bool AutoBilling { get; set; }
+        public string? AddonKind { get; set; }
+    }
+
+    private class ActiveAddon
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public int Quantity { get; set; }
+        public decimal Price { get; set; }
+        public DateTime StartedAt { get; set; }
     }
 }

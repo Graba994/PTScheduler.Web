@@ -9,6 +9,7 @@
 @inject NavigationManager Nav
 @inject IConfiguration Config
 @inject EmailService EmailSvc
+@inject AddonService AddonSvc
 @rendermode InteractiveServer
 
 <style>
@@ -770,6 +771,35 @@ else
         <div class="col-12 @TabCls("billing")">
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
+                    <h6 class="fw-bold mb-1"><i class="bi bi-plus-square me-2 text-primary"></i>Dodatki miesięczne</h6>
+                    <p class="small text-muted">Podnoszą limity trenera, dopóki są aktywne. „Karta” — Stripe dolicza je do abonamentu; „Sklep” — rozliczasz ręcznie co miesiąc.</p>
+                    @if (_addons.Count == 0)
+                    {
+                        <p class="small text-muted mb-0">Brak aktywnych dodatków.</p>
+                    }
+                    else
+                    {
+                        <ul class="list-group list-group-flush small">
+                            @foreach (var a in _addons)
+                            {
+                                <li class="list-group-item d-flex align-items-center gap-2 px-0">
+                                    <span class="fw-semibold">@a.ServiceItem?.Name</span>
+                                    @if (a.Quantity > 1) { <span class="badge bg-light text-dark border">× @a.Quantity</span> }
+                                    <span class="badge @(a.StripeSubscriptionItemId is null ? "bg-warning-subtle text-warning-emphasis" : "bg-success-subtle text-success-emphasis")">@(a.StripeSubscriptionItemId is null ? "Sklep" : "Karta")</span>
+                                    <span class="text-muted">od @a.StartedAt.ToLocalTime().ToString("dd.MM.yyyy")</span>
+                                    <button class="btn btn-sm btn-outline-danger ms-auto" @onclick="() => CancelAddonAsync(a.Id)">Wyłącz</button>
+                                </li>
+                            }
+                        </ul>
+                    }
+                    @if (_addonMessage is not null) { <div class="small mt-2 text-muted">@_addonMessage</div> }
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 @TabCls("billing")">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center mb-3">
                         <h6 class="fw-bold mb-0"><i class="bi bi-shop me-2 text-primary"></i>Cennik usług (indywidualny)</h6>
                         <button class="btn btn-sm btn-outline-secondary" @onclick="LoadServicePricing" disabled="@_loadingPricing">
@@ -1015,7 +1045,19 @@ else
 
             if (_tenant.Status == TenantStatus.Pending)
                 await LoadApprovalPricing();
+            _addons = await AddonSvc.GetActiveAsync(_tenant.Id);
         }
+    }
+
+    private List<TenantAddon> _addons = [];
+    private string? _addonMessage;
+
+    private async Task CancelAddonAsync(int addonId)
+    {
+        if (_tenant is null) return;
+        var (ok, error) = await AddonSvc.CancelAsync(_tenant.Id, addonId);
+        _addonMessage = ok ? "Dodatek wyłączony — limity trenera zaktualizowane." : error;
+        _addons = await AddonSvc.GetActiveAsync(_tenant.Id);
     }
 
     private async Task LoadInvoices()

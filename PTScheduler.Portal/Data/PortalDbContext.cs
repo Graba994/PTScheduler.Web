@@ -28,6 +28,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<AppFeedback> AppFeedbacks => Set<AppFeedback>();
     public DbSet<GoogleCalendarGrant> GoogleCalendarGrants => Set<GoogleCalendarGrant>();
     public DbSet<TenantMailCounter> TenantMailCounters => Set<TenantMailCounter>();
+    public DbSet<TenantAddon> TenantAddons => Set<TenantAddon>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -117,6 +118,16 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.HasIndex(x => x.IsActive);
             e.HasIndex(x => x.FulfillmentType);
             e.Property(x => x.FulfillmentType).HasDefaultValue("manual");
+            e.Property(x => x.StripePriceId).HasMaxLength(100);
+        });
+
+        b.Entity<TenantAddon>(e =>
+        {
+            e.Property(x => x.Status).HasMaxLength(16);
+            e.Property(x => x.StripeSubscriptionItemId).HasMaxLength(100);
+            e.HasIndex(x => new { x.TenantId, x.Status });
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.ServiceItem).WithMany().HasForeignKey(x => x.ServiceItemId).OnDelete(DeleteBehavior.Restrict);
         });
 
         b.Entity<TenantCredit>(e =>
@@ -476,12 +487,12 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             {
                 Id = 120,
                 CreatedAt = new DateTime(2026, 9, 1, 0, 0, 0, DateTimeKind.Utc),
-                Name = "Dodatkowe 100 GB transferu wideo",
-                Description = "Dodatkowy miesięczny transfer dla odtwarzania kursów wideo.",
+                Name = "Transfer wideo +100 GB miesięcznie",
+                Description = "Podnosi miesięczny limit odtwarzania kursów wideo o 100 GB. Doliczane do abonamentu — rezygnujesz, kiedy chcesz.",
                 Category = "addon",
                 DefaultPrice = 25,
-                PriceType = "one_time",
-                Unit = "100 GB",
+                PriceType = "monthly",
+                Unit = "miesiąc",
                 Icon = "bi-speedometer2",
                 FulfillmentType = "credit_cdn_bandwidth",
                 CreditAmount = 100,

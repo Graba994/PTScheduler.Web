@@ -11,6 +11,9 @@ public class CreditService(
     SiteSettingsService settings,
     ILogger<CreditService> logger)
 {
+    /// <summary>Ustawiane przez <see cref="FulfillOrderAsync"/>, gdy zamówienie aktywowało dodatek (trzeba odświeżyć uprawnienia instancji).</summary>
+    public bool AddonActivated { get; private set; }
+
     public async Task<Dictionary<string, decimal>> GetBalancesAsync(int tenantId)
     {
         await using var db = dbFactory.CreateDbContext();
@@ -77,6 +80,23 @@ public class CreditService(
     public async Task FulfillOrderAsync(ServiceOrder order, ServiceItem item)
     {
         if (item.FulfillmentType == "manual" || item.CreditAmount <= 0) return;
+
+        // Dodatek miesięczny (np. +100 GB transferu) opłacony w sklepie — podnosi limit, zamiast dodawać kredyty.
+        if (AddonService.IsMonthlyAddon(item))
+        {
+            await using var adb = dbFactory.CreateDbContext();
+            AddonService.ActivateFromOrder(adb, order.TenantId, item, order.Id);
+            var o = await adb.ServiceOrders.FindAsync(order.Id);
+            if (o is not null)
+            {
+                o.Status = ServiceOrderStatus.Completed;
+                o.CompletedAt = DateTime.UtcNow;
+                o.AdminNotes = "Dodatek miesięczny aktywny — kolejne miesiące rozliczaj ręcznie albo zrezygnuj w karcie trenera.";
+            }
+            await adb.SaveChangesAsync();
+            AddonActivated = true;
+            return;
+        }
 
         var creditType = item.FulfillmentType switch
         {

@@ -12,9 +12,13 @@
         </NavLink>
     }
 
-    <NavLink class="manage-nav-link manage-nav-standalone" href="admin/sklep">
-        <i class="bi bi-shop"></i><span>Sklep usług</span>
-    </NavLink>
+    @* Zakupy i dodatki do abonamentu — decyzja właściciela studia (admin/trener), nie pracownika. *@
+    @if (_isAdmin || _isTrainer)
+    {
+        <NavLink class="manage-nav-link manage-nav-standalone" href="admin/sklep">
+            <i class="bi bi-shop"></i><span>Sklep usług</span>
+        </NavLink>
+    }
 
     @if (Can(Permissions.ManageUsers))
     {
@@ -182,6 +186,7 @@
 
 @code {
     private bool _isAdmin;
+    private bool _isTrainer;
     private bool _isHighestPlan;
     private readonly HashSet<string> _granted = new();
 
@@ -192,6 +197,7 @@
 
         var auth = await AuthState.GetAuthenticationStateAsync();
         if (auth.User.IsInRole(Roles.Admin)) { _isAdmin = true; return; }
+        _isTrainer = auth.User.IsInRole(Roles.Trainer);
 
         var role = auth.User.IsInRole(Roles.Trainer) ? Roles.Trainer
                  : auth.User.IsInRole(Roles.Subordinate) ? Roles.Subordinate

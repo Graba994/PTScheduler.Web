@@ -18,6 +18,9 @@ public class Entitlements
     public int MaxStorageGB { get; set; } = int.MaxValue;
     public int MaxVideoStorageGB { get; set; }
     public int MaxVideoBandwidthGBPerMonth { get; set; }
+    /// <summary>Część limitów wideo pochodząca z dodatków miesięczych (już wliczona w Max…).</summary>
+    public int AddonVideoBandwidthGB { get; set; }
+    public int AddonVideoStorageGB { get; set; }
     public int MaxSmsPerMonth { get; set; }
 
     // ── Modules ─────────────────────────────────

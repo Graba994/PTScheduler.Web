@@ -69,6 +69,7 @@ builder.Services.AddScoped<CreditService>();
 builder.Services.AddScoped<BunnyPlatformService>();
 builder.Services.AddScoped<GoogleOAuthBroker>();
 builder.Services.AddScoped<TenantMailRelay>();
+builder.Services.AddScoped<AddonService>();
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<StorePaymentService>();
 builder.Services.AddScoped<BackupService>();
@@ -169,6 +170,15 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+// API zwraca czyste kody (401/404/409) — strona „nie znaleziono” jest tylko dla przeglądarki.
+// Bez tego odmowa dostępu na POST/DELETE kończyła się mylącym 405 z ponownego wykonania.
+app.Use((ctx, next) =>
+{
+    if (ctx.Request.Path.StartsWithSegments("/api")
+        && ctx.Features.Get<Microsoft.AspNetCore.Diagnostics.IStatusCodePagesFeature>() is { } scp)
+        scp.Enabled = false;
+    return next(ctx);
+});
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
@@ -420,7 +430,8 @@ app.MapGet("/api/internal/tenants/{slug}/entitlements", async (
     if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
     var plan = await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == tenant.PlanId);
     if (plan is null) return Results.NotFound();
-    return Results.Content(TenantService.SerializePlan(plan), "application/json");
+    var (extraStorage, extraBandwidth) = await AddonService.ExtraLimitsAsync(db, tenant.Id);
+    return Results.Content(TenantService.SerializeEntitlements(plan, extraStorage, extraBandwidth), "application/json");
 });
 
 // Ocena aplikacji wysyłana przez trenera z instancji tenanta (Zarządzanie → „Oceń aplikację”).
@@ -458,7 +469,8 @@ app.MapGet("/api/store/{slug}", async (
     HttpContext ctx,
     IDbContextFactory<PortalDbContext> dbFactory,
     IConfiguration config,
-    StorePaymentService storePayment) =>
+    StorePaymentService storePayment,
+    AddonService addons) =>
 {
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
@@ -473,22 +485,59 @@ app.MapGet("/api/store/{slug}", async (
         .Where(p => p.TenantId == tenant.Id)
         .ToDictionaryAsync(p => p.ServiceItemId);
 
-    var catalog = items
-        .Where(s => !overrides.TryGetValue(s.Id, out var ov) || !ov.IsHidden)
+    var visible = items.Where(s => !overrides.TryGetValue(s.Id, out var ov) || !ov.IsHidden).ToList();
+    var autoBill = new Dictionary<int, bool>();
+    foreach (var s in visible) autoBill[s.Id] = await addons.CanAutoBillAsync(tenant, s);
+
+    var catalog = visible
         .Select(s =>
         {
             var price = overrides.TryGetValue(s.Id, out var ov) ? ov.CustomPrice : s.DefaultPrice;
             return new
             {
                 s.Id, s.Name, s.Description, s.Category, s.Icon,
-                Price = price, s.PriceType, s.Unit
+                Price = price, s.PriceType, s.Unit,
+                // Dodatek miesięczny: podnosi limit, dopóki jest aktywny. autoBilling = dopisanie do abonamentu kartą.
+                MonthlyAddon = AddonService.IsMonthlyAddon(s),
+                AutoBilling = autoBill[s.Id],
+                AddonKind = s.FulfillmentType == "credit_cdn_bandwidth" ? "bandwidth" : s.FulfillmentType == "credit_cdn_storage" ? "storage" : null
             };
         })
         .ToList();
 
+    var active = (await addons.GetActiveAsync(tenant.Id)).Select(a => new
+    {
+        a.Id, a.ServiceItemId, Name = a.ServiceItem?.Name, a.Quantity, a.StartedAt,
+        AutoBilling = a.StripeSubscriptionItemId != null,
+        Price = overrides.TryGetValue(a.ServiceItemId, out var ov) ? ov.CustomPrice : a.ServiceItem?.DefaultPrice ?? 0
+    });
+
     var gateways = await storePayment.GetAvailableGatewaysAsync();
 
-    return Results.Json(new { tenantId = tenant.Id, companyName = tenant.CompanyName, catalog, gateways });
+    return Results.Json(new { tenantId = tenant.Id, companyName = tenant.CompanyName, catalog, gateways, addons = active });
+});
+
+// Dodatki miesięczne: dopisanie do abonamentu (Stripe) i rezygnacja.
+app.MapPost("/api/store/{slug}/addons", async (
+    string slug, AddonRequest body, HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config, AddonService addons) =>
+{
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    var (ok, error) = await addons.AddToSubscriptionAsync(tenant.Id, body.ServiceItemId);
+    return ok ? Results.Ok(new { ok = true }) : Results.Json(new { error }, statusCode: StatusCodes.Status409Conflict);
+});
+
+app.MapDelete("/api/store/{slug}/addons/{id:int}", async (
+    string slug, int id, HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config, AddonService addons) =>
+{
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    var (ok, error) = await addons.CancelAsync(tenant.Id, id);
+    return ok ? Results.Ok(new { ok = true }) : Results.Json(new { error }, statusCode: StatusCodes.Status409Conflict);
 });
 
 app.MapPost("/api/store/{slug}/order", async (
@@ -865,6 +914,7 @@ partial class Program
     }
 }
 record GoogleUserRequest(string UserKey);
+record AddonRequest(int ServiceItemId);
 
 static class InternalAuth
 {
