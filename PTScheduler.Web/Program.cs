@@ -133,6 +133,7 @@ builder.Services.AddIdentityCore<ApplicationUser>(options =>
     .AddRoles<IdentityRole>()
     .AddEntityFrameworkStores<ApplicationDbContext>()
     .AddSignInManager()
+    .AddClaimsPrincipalFactory<PTScheduler.Web.Services.AppClaimsPrincipalFactory>()
     .AddErrorDescriber<PolishIdentityErrorDescriber>()
     .AddDefaultTokenProviders()
     .AddTokenProvider<PTScheduler.Web.Components.Account.ClientInviteTokenProvider<ApplicationUser>>(
@@ -240,6 +241,30 @@ app.UseRequestLocalization(new RequestLocalizationOptions
 });
 app.UseRateLimiter();
 app.UseAntiforgery();
+
+// Wymuszona zmiana hasła: dopóki użytkownik nie ustawi własnego hasła (nadanego przez
+// start systemu, Portal albo admina), każda strona prowadzi do formularza zmiany hasła.
+app.Use(async (ctx, next) =>
+{
+    if (ctx.User.Identity?.IsAuthenticated == true
+        && ctx.User.HasClaim(PTScheduler.Web.Services.AppClaimsPrincipalFactory.MustChangePasswordClaim, "1")
+        && HttpMethods.IsGet(ctx.Request.Method))
+    {
+        var path = ctx.Request.Path;
+        var allowed = path.StartsWithSegments("/Account/Manage/ChangePassword")
+            || path.StartsWithSegments("/Account/Logout")
+            || path.StartsWithSegments("/Account/Login")
+            || path.StartsWithSegments("/_blazor") || path.StartsWithSegments("/_framework")
+            || path.StartsWithSegments("/_content") || path.StartsWithSegments("/internal")
+            || path.StartsWithSegments("/health") || Path.HasExtension(path.Value);
+        if (!allowed)
+        {
+            ctx.Response.Redirect("/Account/Manage/ChangePassword?forced=1");
+            return;
+        }
+    }
+    await next();
+});
 
 // DB-error landing page — pure HTML, no Blazor / Identity / DB dependencies, so it
 // works even when half the stack is broken.
@@ -597,6 +622,9 @@ app.MapPost("/internal/admin-reset",
         var passResult = await userManager.ResetPasswordAsync(admin, token, newPassword);
         if (!passResult.Succeeded)
             return Results.Json(new { success = false, error = string.Join(", ", passResult.Errors.Select(x => x.Description)) });
+        // Hasło nadane z Portalu zna operator platformy — trener ustawi własne po zalogowaniu.
+        admin.MustChangePassword = true;
+        await userManager.UpdateAsync(admin);
     }
 
     if (admin.LockoutEnd is not null)

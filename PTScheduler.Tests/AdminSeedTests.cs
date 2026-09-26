@@ -45,6 +45,7 @@ public class AdminSeedTests
         root.Should().NotBeNull();
         (await users.IsInRoleAsync(root!, Roles.Admin)).Should().BeTrue();
         (await users.CheckPasswordAsync(root!, "password")).Should().BeFalse();
+        root!.MustChangePassword.Should().BeTrue("hasło startowe jest losowe — trzeba ustawić własne");
     }
 
     [Fact]

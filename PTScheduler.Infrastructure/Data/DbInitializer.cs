@@ -95,7 +95,8 @@ public static class DbInitializer
             EmailConfirmed = true,
             FirstName = "Admin",
             LastName = "System",
-            SecurityStamp = Guid.NewGuid().ToString()
+            SecurityStamp = Guid.NewGuid().ToString(),
+            MustChangePassword = true
         };
         await userManager.CreateAsync(admin);
         admin.PasswordHash = userManager.PasswordHasher.HashPassword(admin, NewRandomPassword());

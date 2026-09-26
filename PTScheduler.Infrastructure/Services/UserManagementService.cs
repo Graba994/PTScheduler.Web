@@ -112,7 +112,9 @@ public class UserManagementService(
             Email          = dto.Email,
             FirstName      = dto.FirstName,
             LastName       = dto.LastName,
-            EmailConfirmed = true
+            EmailConfirmed = true,
+            // Hasło startowe zna admin — użytkownik ustawi własne przy pierwszym logowaniu.
+            MustChangePassword = true
         };
 
         var result = await userManager.CreateAsync(user, dto.Password);
@@ -153,6 +155,11 @@ public class UserManagementService(
 
         await userManager.RemovePasswordAsync(user);
         var result = await userManager.AddPasswordAsync(user, newPassword);
+        if (result.Succeeded)
+        {
+            user.MustChangePassword = true;
+            await userManager.UpdateAsync(user);
+        }
 
         return result.Succeeded
             ? (true, null)

@@ -55,6 +55,9 @@ public class SetupService(
 
             var token = await userManager.GeneratePasswordResetTokenAsync(defaultAdmin);
             await userManager.ResetPasswordAsync(defaultAdmin, token, adminPassword);
+            // Hasło ustawia sam trener w kreatorze — nie wymuszamy kolejnej zmiany.
+            defaultAdmin.MustChangePassword = false;
+            await userManager.UpdateAsync(defaultAdmin);
         }
     }
 }
