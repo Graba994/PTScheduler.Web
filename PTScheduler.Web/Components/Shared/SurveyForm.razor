@@ -1,0 +1,183 @@
+@using PTScheduler.Application.Surveys
+
+@* Formularz ankiety generowany z szablonu (pytania, typy, sekcje). Zapis robi rodzic przez Submit. *@
+
+<div class="survey-form">
+    @if (!string.IsNullOrWhiteSpace(Template.Intro) && ShowIntro)
+    {
+        <p class="text-muted small">@Template.Intro</p>
+    }
+
+    @{ string? lastSection = null; var number = 0; }
+    @foreach (var q in Template.Questions)
+    {
+        number++;
+        var answer = Answer(q.Key);
+        if (q.Section != lastSection && !string.IsNullOrWhiteSpace(q.Section))
+        {
+            <h6 class="survey-section">@q.Section</h6>
+        }
+        lastSection = q.Section;
+
+        <div class="survey-question @(_invalid.Contains(q.Key) ? "survey-question-invalid" : "")">
+            <label class="form-label fw-semibold mb-1">
+                @if (ShowNumbers) { <span class="text-muted me-1">@number.</span> }
+                @q.Label
+                @if (q.Required || q.MustBeYes) { <span class="text-danger" title="Wymagane">*</span> }
+            </label>
+            @if (!string.IsNullOrWhiteSpace(q.Help))
+            {
+                <div class="form-text mt-0 mb-2">@q.Help</div>
+            }
+
+            @switch (q.Type)
+            {
+                case SurveyQuestionType.Scale:
+                    <div class="survey-scale" role="radiogroup" aria-label="@q.Label">
+                        @for (var v = q.Min; v <= q.Max; v++)
+                        {
+                            var value = v;
+                            <button type="button" class="survey-scale-btn @(answer.Number == value ? "active" : "")"
+                                    aria-pressed="@(answer.Number == value ? "true" : "false")"
+                                    @onclick="() => SetNumber(q.Key, value)">@value</button>
+                        }
+                    </div>
+                    @if (!string.IsNullOrEmpty(q.MinLabel) || !string.IsNullOrEmpty(q.MaxLabel))
+                    {
+                        <div class="d-flex justify-content-between text-muted" style="font-size:.72rem">
+                            <span>@q.MinLabel</span><span>@q.MaxLabel</span>
+                        </div>
+                    }
+                    break;
+
+                case SurveyQuestionType.YesNo:
+                    <div class="btn-group" role="group">
+                        <button type="button" class="btn btn-sm @(answer.Bool == true ? "btn-primary" : "btn-outline-secondary")"
+                                @onclick="() => SetBool(q.Key, true)">Tak</button>
+                        <button type="button" class="btn btn-sm @(answer.Bool == false ? "btn-primary" : "btn-outline-secondary")"
+                                @onclick="() => SetBool(q.Key, false)">Nie</button>
+                    </div>
+                    break;
+
+                case SurveyQuestionType.SingleChoice:
+                case SurveyQuestionType.MultiChoice:
+                    var multi = q.Type == SurveyQuestionType.MultiChoice;
+                    <div class="d-flex flex-wrap gap-2">
+                        @foreach (var option in q.Options)
+                        {
+                            var opt = option;
+                            var on = answer.Choices.Contains(opt);
+                            <button type="button" class="btn btn-sm rounded-pill @(on ? "btn-primary" : "btn-outline-secondary")"
+                                    aria-pressed="@(on ? "true" : "false")"
+                                    @onclick="() => ToggleChoice(q.Key, opt, multi)">
+                                @if (multi && on) { <i class="bi bi-check-lg me-1"></i> }
+                                @opt
+                            </button>
+                        }
+                    </div>
+                    @if (multi) { <div class="form-text">Możesz wybrać kilka.</div> }
+                    break;
+
+                case SurveyQuestionType.Number:
+                    <div class="input-group" style="max-width:220px">
+                        <input type="number" class="form-control" inputmode="decimal" min="@q.Min" max="@q.Max" step="any"
+                               value="@answer.Number?.ToString(System.Globalization.CultureInfo.InvariantCulture)"
+                               @onchange="e => SetNumberText(q.Key, e.Value?.ToString())" />
+                        @if (!string.IsNullOrEmpty(q.Unit)) { <span class="input-group-text">@q.Unit</span> }
+                    </div>
+                    break;
+
+                default:
+                    <textarea class="form-control" rows="2" maxlength="2000" value="@answer.Text"
+                              @onchange="e => answer.Text = e.Value?.ToString()"></textarea>
+                    break;
+            }
+        </div>
+    }
+
+    @if (_errors.Count > 0)
+    {
+        <div class="alert alert-danger small py-2">
+            @foreach (var e in _errors) { <div>@e</div> }
+        </div>
+    }
+
+    <div class="d-flex gap-2 flex-wrap">
+        <button type="button" class="btn btn-primary flex-grow-1" @onclick="SubmitAsync" disabled="@_busy">
+            @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+            <i class="bi bi-check2-circle me-1"></i>@SubmitLabel
+        </button>
+        @if (OnSkip.HasDelegate)
+        {
+            <button type="button" class="btn btn-outline-secondary" @onclick="OnSkip">@SkipLabel</button>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public SurveyTemplateDto Template { get; set; } = default!;
+    [Parameter, EditorRequired] public Func<Dictionary<string, SurveyAnswerInput>, Task<List<string>>> Submit { get; set; } = default!;
+    [Parameter] public Dictionary<string, SurveyAnswerInput>? Initial { get; set; }
+    [Parameter] public string SubmitLabel { get; set; } = "Wyślij";
+    [Parameter] public string SkipLabel { get; set; } = "Pomiń";
+    [Parameter] public EventCallback OnSkip { get; set; }
+    [Parameter] public bool ShowIntro { get; set; } = true;
+    [Parameter] public bool ShowNumbers { get; set; }
+
+    private Dictionary<string, SurveyAnswerInput> _answers = [];
+    private List<string> _errors = [];
+    private HashSet<string> _invalid = [];
+    private bool _busy;
+
+    protected override void OnInitialized()
+    {
+        _answers = Initial is null ? [] : new Dictionary<string, SurveyAnswerInput>(Initial);
+    }
+
+    private SurveyAnswerInput Answer(string key)
+    {
+        if (!_answers.TryGetValue(key, out var a))
+            _answers[key] = a = new SurveyAnswerInput();
+        return a;
+    }
+
+    private void SetNumber(string key, int value) => Answer(key).Number = value;
+
+    private void SetNumberText(string key, string? text)
+    {
+        var normalized = text?.Replace(',', '.');
+        Answer(key).Number = decimal.TryParse(normalized, System.Globalization.NumberStyles.Number,
+            System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : null;
+    }
+
+    private void SetBool(string key, bool value) => Answer(key).Bool = value;
+
+    private void ToggleChoice(string key, string option, bool multi)
+    {
+        var a = Answer(key);
+        if (a.Choices.Contains(option)) a.Choices.Remove(option);
+        else
+        {
+            if (!multi) a.Choices.Clear();
+            a.Choices.Add(option);
+        }
+    }
+
+    private async Task SubmitAsync()
+    {
+        _busy = true;
+        _errors = [];
+        _invalid = [];
+        try
+        {
+            _errors = await Submit(_answers);
+            // Podświetl pytania z błędami (komunikat zawiera treść pytania w cudzysłowie).
+            _invalid = Template.Questions.Where(q => _errors.Any(e => e.Contains($"„{q.Label}”"))).Select(q => q.Key).ToHashSet();
+        }
+        catch
+        {
+            _errors = ["Nie udało się zapisać ankiety. Spróbuj ponownie."];
+        }
+        finally { _busy = false; }
+    }
+}

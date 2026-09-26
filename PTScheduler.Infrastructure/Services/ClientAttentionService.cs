@@ -79,6 +79,16 @@ public class ClientAttentionService(
                 .ToDictionary(g => g.Key, g => g.Select(d => d.WorkoutDate).OrderByDescending(d => d).ToList());
         }
 
+        // Ankiety: nieprzejrzana ankieta zdrowotna oraz niepokojące ankiety po treningu (7 dni).
+        var surveyFrom = clock.UtcNow.AddDays(-7);
+        var surveys = await db.SurveyResponses.AsNoTracking()
+            .Where(r => ids.Contains(r.ClientId) && r.ReviewedAt == null
+                     && (r.Kind == SurveyKind.HealthIntake
+                         || (r.Kind == SurveyKind.PostWorkout && r.FlagCount > 0 && r.SubmittedAt >= surveyFrom)))
+            .Select(r => new { r.ClientId, r.Kind, r.FlagCount, r.WorkoutDate })
+            .ToListAsync();
+        var surveysByClient = surveys.GroupBy(s => s.ClientId).ToDictionary(g => g.Key, g => g.ToList());
+
         var result = new List<ClientAttentionDto>();
         foreach (var c in clients)
         {
@@ -145,6 +155,23 @@ public class ClientAttentionService(
                             $"Plan przypisany {AttentionRules.Days(days)} temu — brak treningów",
                             $"/trainer/activity/{c.Id}"));
                 }
+            }
+
+            if (surveysByClient.TryGetValue(c.Id, out var sv))
+            {
+                var link = $"/clients/{c.Id}?tab=surveys";
+                if (sv.FirstOrDefault(s => s.Kind == SurveyKind.HealthIntake) is { } health)
+                    reasons.Add(health.FlagCount > 0
+                        ? new(AttentionKind.HealthSurvey, AttentionSeverity.Danger,
+                            $"Ankieta zdrowotna: {health.FlagCount} odp. wymagających uwagi — przejrzyj", link)
+                        : new(AttentionKind.HealthSurvey, AttentionSeverity.Info,
+                            "Nowa ankieta zdrowotna — przejrzyj", link));
+                var flagged = sv.Where(s => s.Kind == SurveyKind.PostWorkout).ToList();
+                if (flagged.Count > 0)
+                    reasons.Add(new(AttentionKind.WorkoutSurveyFlag, AttentionSeverity.Warning,
+                        flagged.Count == 1 && flagged[0].WorkoutDate is { } d
+                            ? $"Uwaga w ankiecie po treningu {d:dd.MM} (np. ból)"
+                            : $"{flagged.Count} {(flagged.Count <= 4 ? "ankiety" : "ankiet")} po treningu z uwagami", link));
             }
 
             if (uncommented.TryGetValue(c.Id, out var fresh) && fresh.Count > 0)

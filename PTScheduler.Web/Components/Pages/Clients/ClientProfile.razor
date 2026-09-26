@@ -386,6 +386,11 @@ else if (client is not null)
                     </button>
                 </li>
                 <li class="nav-item">
+                    <button class="nav-link @(_tab == "surveys" ? "active" : "")" @onclick='() => SelectTab("surveys")'>
+                        <i class="bi bi-clipboard2-pulse me-1"></i>Ankiety
+                    </button>
+                </li>
+                <li class="nav-item">
                     <button class="nav-link @(_tab == "packages" ? "active" : "")" @onclick='() => SelectTab("packages")'>
                         <i class="bi bi-box-seam me-1"></i>Pakiety
                         @if (packages?.Count > 0) { <span class="badge bg-secondary ms-1 rounded-pill" style="font-size:.65rem">@packages.Count</span> }
@@ -438,6 +443,11 @@ else if (client is not null)
                         }
                     </div>
                 </div>
+            }
+
+            @if (_tab == "surveys")
+            {
+                <ClientSurveysPanel ClientId="Id" CurrentUserId="@currentUserId" />
             }
 
             @if (_tab == "packages")
@@ -888,6 +898,7 @@ else if (client is not null)
     [Parameter] public int Id { get; set; }
 
     [SupplyParameterFromQuery(Name = "invite")] public string? InviteQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "tab")] public string? TabQuery { get; set; }
 
     private ClientAccountStatus? _account;
     private string? _inviteLink;
@@ -1048,6 +1059,13 @@ else if (client is not null)
             _inviteError = true;
         }
         InviteQuery = null;
+
+        // Link z powiadomienia / „Wymaga uwagi” (np. ?tab=surveys).
+        if (TabQuery is "surveys" or "sessions" or "measurements" or "packages")
+        {
+            SelectTab(TabQuery);
+            TabQuery = null;
+        }
     }
 
     private async Task LoadAccount()

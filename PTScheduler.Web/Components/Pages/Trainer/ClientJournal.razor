@@ -7,6 +7,7 @@
 @attribute [Authorize(Roles = Roles.Admin + "," + Roles.Trainer + "," + Roles.Subordinate)]
 @inject IWorkoutLogService WorkoutLog
 @inject IClientService ClientService
+@inject ISurveyService Surveys
 @inject AuthenticationStateProvider AuthState
 @inject ILoggerFactory LoggerFactory
 @rendermode PTScheduler.Web.RenderModes.Server
@@ -44,7 +45,7 @@ else
     else
     {
         <p class="text-muted small">Rozwiń dzień, żeby zobaczyć serie i dodać komentarz — klient dostanie powiadomienie.</p>
-        <WorkoutJournal ClientId="_client.Id" Days="_journal" AsTrainer="true" CurrentUserId="@_userId" />
+        <WorkoutJournal ClientId="_client.Id" Days="_journal" AsTrainer="true" CurrentUserId="@_userId" Surveys="_surveys" />
     }
 }
 </FeatureGate>
@@ -56,6 +57,7 @@ else
     private ClientDto? _client;
     private List<WorkoutJournalDayDto> _journal = [];
     private string _userId = string.Empty;
+    private Dictionary<DateOnly, PTScheduler.Application.Surveys.SurveyResponseDto> _surveys = [];
 
     protected override async Task OnParametersSetAsync()
     {
@@ -69,6 +71,7 @@ else
             var client = await ClientService.GetClientAsync(ClientId);
             _client = client is not null && (isAdmin || client.TrainerUserId == _userId) ? client : null;
             _journal = _client is null ? [] : await WorkoutLog.GetJournalAsync(_client.Id, 30);
+            _surveys = _client is null ? [] : await Surveys.GetPostWorkoutByDateAsync(_client.Id, 120);
         }
         catch (Exception ex)
         {

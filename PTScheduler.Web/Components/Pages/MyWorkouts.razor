@@ -7,6 +7,7 @@
 @attribute [Authorize(Roles = Roles.Client + "," + Roles.Admin + "," + Roles.Trainer + "," + Roles.Subordinate)]
 @inject IWorkoutLogService WorkoutLog
 @inject IClientService ClientService
+@inject ISurveyService Surveys
 @inject AuthenticationStateProvider AuthState
 @inject IJSRuntime JS
 @inject ILoggerFactory LoggerFactory
@@ -84,7 +85,8 @@ else
     @if (_journal.Count > 0)
     {
         <h6 class="text-muted mt-4 mb-2"><i class="bi bi-journal-text me-1"></i>Dziennik</h6>
-        <WorkoutJournal ClientId="_clientId.Value" Days="_journal" AsTrainer="false" CurrentUserId="@_userId" />
+        <WorkoutJournal ClientId="_clientId.Value" Days="_journal" AsTrainer="false" CurrentUserId="@_userId"
+                        Surveys="_surveys" RateLinks="_surveysEnabled" />
     }
 }
 </ChildContent>
@@ -99,6 +101,8 @@ else
     private List<PersonalRecordDto> _records = [];
     private List<WorkoutJournalDayDto> _journal = [];
     private string _userId = string.Empty;
+    private Dictionary<DateOnly, PTScheduler.Application.Surveys.SurveyResponseDto> _surveys = [];
+    private bool _surveysEnabled;
 
     private static readonly string[] Palette =
     [
@@ -120,6 +124,8 @@ else
             _muscles = await WorkoutLog.GetVolumeByMuscleAsync(_clientId.Value);
             _records = await WorkoutLog.GetPersonalRecordsAsync(_clientId.Value);
             _journal = await WorkoutLog.GetJournalAsync(_clientId.Value);
+            _surveysEnabled = (await Surveys.GetTemplateAsync(PTScheduler.Domain.Enums.SurveyKind.PostWorkout)).IsEnabled;
+            _surveys = await Surveys.GetPostWorkoutByDateAsync(_clientId.Value, 120);
         }
         catch (Exception ex) { LoggerFactory.CreateLogger("MyWorkouts").LogError(ex, "Błąd ładowania postępów."); }
         _loading = false;

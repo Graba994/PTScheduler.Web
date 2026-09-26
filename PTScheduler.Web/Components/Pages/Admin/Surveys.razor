@@ -1,0 +1,325 @@
+@page "/admin/surveys"
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Surveys
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Admin)]
+@inject ISurveyService Surveys
+@inject IJSRuntime JS
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Ankiety" />
+
+<div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <h4 class="page-title mb-0"><i class="bi bi-clipboard2-pulse me-2" style="color:var(--c-primary)"></i>Ankiety</h4>
+</div>
+
+<p class="text-muted small" style="max-width:760px">
+    Domyślne ankiety są przygotowane według praktyki treningu personalnego: zdrowotna opiera się na kwestionariuszu PAR-Q+,
+    a ankieta po treningu na skali wysiłku RPE (obciążenie sesji = RPE × minuty) i krótkim kwestionariuszu samopoczucia.
+    Możesz je wyłączyć, zmienić treść pytań, dodać własne albo przywrócić domyślne.
+</p>
+
+<div class="btn-group mb-3" role="tablist">
+    <button class="btn @(_kind == SurveyKind.HealthIntake ? "btn-primary" : "btn-outline-primary")" @onclick="() => LoadAsync(SurveyKind.HealthIntake)">
+        <i class="bi bi-clipboard2-pulse me-1"></i>Zdrowotna (pierwsze logowanie)
+    </button>
+    <button class="btn @(_kind == SurveyKind.PostWorkout ? "btn-primary" : "btn-outline-primary")" @onclick="() => LoadAsync(SurveyKind.PostWorkout)">
+        <i class="bi bi-emoji-smile me-1"></i>Po treningu
+    </button>
+</div>
+
+@if (_t is null)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <div class="row g-3">
+        <div class="col-12 col-xl-7">
+            <div class="card mb-3">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+                        <div>
+                            <div class="fw-semibold">@(_kind == SurveyKind.HealthIntake ? "Ankieta zdrowotna" : "Ankieta po treningu")</div>
+                            <div class="text-muted small">
+                                @(_kind == SurveyKind.HealthIntake
+                                    ? "Klient widzi ją przy pierwszym logowaniu (i dopóki jej nie wypełni). Trener dostaje powiadomienie, a ankieta trafia do „Wymaga uwagi”."
+                                    : "Pojawia się po „Zakończ trening”. Trener widzi statystyki i wnioski w profilu klienta → Ankiety; przy bólu lub złym samopoczuciu dostaje powiadomienie.")
+                            </div>
+                        </div>
+                        <div class="form-check form-switch fs-5 m-0">
+                            <input class="form-check-input" type="checkbox" role="switch" id="surveyEnabled" @bind="_t.IsEnabled" />
+                        </div>
+                    </div>
+                    <div class="mb-2">
+                        <label class="form-label small fw-semibold">Tytuł</label>
+                        <input class="form-control" @bind="_t.Name" maxlength="80" />
+                    </div>
+                    <div>
+                        <label class="form-label small fw-semibold">Wstęp dla klienta</label>
+                        <textarea class="form-control" rows="3" @bind="_t.Intro" maxlength="800"></textarea>
+                    </div>
+                </div>
+            </div>
+
+            @for (var i = 0; i < _t.Questions.Count; i++)
+            {
+                var idx = i;
+                var q = _t.Questions[i];
+                var open = _openIndex == idx;
+                <div class="card mb-2 @(open ? "border-primary" : "")">
+                    <div class="card-body py-2">
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="text-muted small" style="width:1.6rem">@(idx + 1).</span>
+                            <button class="btn btn-link text-start text-decoration-none p-0 flex-grow-1 text-body" @onclick="() => _openIndex = open ? -1 : idx">
+                                <span class="badge bg-light text-dark border me-1">@TypeLabel(q.Type)</span>
+                                @if (HasFlagRule(q)) { <i class="bi bi-flag-fill text-danger me-1" title="Ma regułę „wymaga uwagi”"></i> }
+                                <span class="small">@q.Label</span>
+                            </button>
+                            <button class="btn btn-sm btn-light" title="W górę" disabled="@(idx == 0)" @onclick="() => Move(idx, -1)"><i class="bi bi-arrow-up"></i></button>
+                            <button class="btn btn-sm btn-light" title="W dół" disabled="@(idx == _t.Questions.Count - 1)" @onclick="() => Move(idx, 1)"><i class="bi bi-arrow-down"></i></button>
+                            <button class="btn btn-sm btn-light text-danger" title="Usuń" @onclick="() => RemoveAsync(idx)"><i class="bi bi-trash"></i></button>
+                        </div>
+
+                        @if (open)
+                        {
+                            <div class="row g-2 mt-2">
+                                <div class="col-12">
+                                    <label class="form-label small">Treść pytania</label>
+                                    <textarea class="form-control form-control-sm" rows="2" @bind="q.Label"></textarea>
+                                </div>
+                                <div class="col-12">
+                                    <label class="form-label small">Podpowiedź (opcjonalnie)</label>
+                                    <input class="form-control form-control-sm" @bind="q.Help" />
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small">Typ odpowiedzi</label>
+                                    <select class="form-select form-select-sm" value="@q.Type" @onchange="e => q.Type = Enum.Parse<SurveyQuestionType>(e.Value!.ToString()!)">
+                                        @foreach (var type in Enum.GetValues<SurveyQuestionType>())
+                                        {
+                                            <option value="@type">@TypeLabel(type)</option>
+                                        }
+                                    </select>
+                                </div>
+                                <div class="col-6">
+                                    <label class="form-label small">Sekcja (opcjonalnie)</label>
+                                    <input class="form-control form-control-sm" @bind="q.Section" />
+                                </div>
+                                <div class="col-12 d-flex flex-wrap gap-3">
+                                    <div class="form-check">
+                                        <input class="form-check-input" type="checkbox" id="req-@idx" @bind="q.Required" />
+                                        <label class="form-check-label small" for="req-@idx">Wymagane</label>
+                                    </div>
+                                    @if (q.Type is SurveyQuestionType.Scale or SurveyQuestionType.Number)
+                                    {
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="stats-@idx" @bind="q.ShowInStats" />
+                                            <label class="form-check-label small" for="stats-@idx">Pokazuj w statystykach trenera</label>
+                                        </div>
+                                    }
+                                    @if (q.Type == SurveyQuestionType.YesNo)
+                                    {
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="flagyes-@idx" @bind="q.FlagOnYes" />
+                                            <label class="form-check-label small" for="flagyes-@idx">„Tak” wymaga uwagi trenera</label>
+                                        </div>
+                                        <div class="form-check">
+                                            <input class="form-check-input" type="checkbox" id="must-@idx" @bind="q.MustBeYes" />
+                                            <label class="form-check-label small" for="must-@idx">Zgoda (wymagane „Tak”)</label>
+                                        </div>
+                                    }
+                                </div>
+
+                                @if (q.Type is SurveyQuestionType.Scale or SurveyQuestionType.Number)
+                                {
+                                    <div class="col-3"><label class="form-label small">Min</label><input type="number" class="form-control form-control-sm" @bind="q.Min" /></div>
+                                    <div class="col-3"><label class="form-label small">Max</label><input type="number" class="form-control form-control-sm" @bind="q.Max" /></div>
+                                    <div class="col-3"><label class="form-label small">Uwaga, gdy ≥</label><input type="number" step="any" class="form-control form-control-sm" @bind="q.FlagAtOrAbove" /></div>
+                                    <div class="col-3"><label class="form-label small">Uwaga, gdy ≤</label><input type="number" step="any" class="form-control form-control-sm" @bind="q.FlagAtOrBelow" /></div>
+                                    @if (q.Type == SurveyQuestionType.Scale)
+                                    {
+                                        <div class="col-6"><label class="form-label small">Opis minimum</label><input class="form-control form-control-sm" @bind="q.MinLabel" /></div>
+                                        <div class="col-6"><label class="form-label small">Opis maksimum</label><input class="form-control form-control-sm" @bind="q.MaxLabel" /></div>
+                                    }
+                                    else
+                                    {
+                                        <div class="col-6"><label class="form-label small">Jednostka</label><input class="form-control form-control-sm" @bind="q.Unit" placeholder="np. min, kg, h" /></div>
+                                    }
+                                }
+
+                                @if (q.Type is SurveyQuestionType.SingleChoice or SurveyQuestionType.MultiChoice)
+                                {
+                                    <div class="col-12">
+                                        <label class="form-label small">Opcje (jedna w wierszu)</label>
+                                        <textarea class="form-control form-control-sm" rows="4" value="@string.Join("\n", q.Options)"
+                                                  @onchange="e => q.Options = (e.Value?.ToString() ?? string.Empty).Split('\n').Select(o => o.Trim()).Where(o => o.Length > 0).ToList()"></textarea>
+                                    </div>
+                                    @if (q.Options.Count > 0)
+                                    {
+                                        <div class="col-12">
+                                            <div class="form-label small">Wymaga uwagi trenera, gdy wybrano:</div>
+                                            <div class="d-flex flex-wrap gap-2">
+                                                @foreach (var option in q.Options)
+                                                {
+                                                    var opt = option;
+                                                    var flagged = q.FlagOptions.Contains(opt);
+                                                    <button type="button" class="btn btn-sm rounded-pill @(flagged ? "btn-danger" : "btn-outline-secondary")"
+                                                            @onclick="() => { if (!q.FlagOptions.Remove(opt)) q.FlagOptions.Add(opt); }">@opt</button>
+                                                }
+                                            </div>
+                                        </div>
+                                    }
+                                }
+
+                                @if (_kind == SurveyKind.PostWorkout && SurveyKeys.UsedInInsights.Contains(q.Key))
+                                {
+                                    <div class="col-12 form-text"><i class="bi bi-graph-up me-1"></i>To pytanie zasila wnioski trenera (klucz „@q.Key”) — możesz zmienić treść, ale nie typ, jeśli chcesz zachować statystyki.</div>
+                                }
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+
+            <button class="btn btn-outline-primary btn-sm mb-3" @onclick="AddQuestion"><i class="bi bi-plus-lg me-1"></i>Dodaj pytanie</button>
+
+            @if (_errors.Count > 0)
+            {
+                <div class="alert alert-danger small py-2">@foreach (var e in _errors) { <div>@e</div> }</div>
+            }
+            @if (!string.IsNullOrEmpty(_saved))
+            {
+                <div class="alert alert-success small py-2"><i class="bi bi-check-circle me-1"></i>@_saved</div>
+            }
+
+            <div class="d-flex gap-2 flex-wrap mb-4">
+                <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_busy">
+                    @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                    <i class="bi bi-save me-1"></i>Zapisz ankietę
+                </button>
+                <button class="btn btn-outline-secondary" @onclick="ResetAsync" disabled="@_busy">
+                    <i class="bi bi-arrow-counterclockwise me-1"></i>Przywróć domyślną
+                </button>
+            </div>
+        </div>
+
+        <div class="col-12 col-xl-5">
+            <div class="card position-sticky" style="top:1rem">
+                <div class="card-header"><i class="bi bi-eye me-1"></i>Podgląd dla klienta</div>
+                <div class="card-body">
+                    <h6 class="fw-bold">@_t.Name</h6>
+                    @* Klucz wymusza odświeżenie podglądu po zmianach w edytorze. *@
+                    <SurveyForm @key="_previewVersion" Template="_t" Submit="PreviewSubmit" SubmitLabel="Wyślij (podgląd)"
+                                ShowNumbers="@(_kind == SurveyKind.HealthIntake)" />
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private SurveyKind _kind = SurveyKind.HealthIntake;
+    private SurveyTemplateDto? _t;
+    private int _openIndex = -1;
+    private List<string> _errors = [];
+    private string? _saved;
+    private bool _busy;
+    private int _previewVersion;
+
+    protected override Task OnInitializedAsync() => LoadAsync(SurveyKind.HealthIntake);
+
+    private async Task LoadAsync(SurveyKind kind)
+    {
+        _kind = kind;
+        _t = null;
+        _openIndex = -1;
+        _errors = [];
+        _saved = null;
+        var loaded = await Surveys.GetTemplateAsync(kind);
+        // Kopia robocza — edytujemy bez wpływu na obiekt z serwisu.
+        _t = SurveyJson.Deserialize(SurveyJson.Serialize(loaded), loaded);
+        _previewVersion++;
+    }
+
+    private void Move(int idx, int delta)
+    {
+        var target = idx + delta;
+        if (_t is null || target < 0 || target >= _t.Questions.Count) return;
+        (_t.Questions[idx], _t.Questions[target]) = (_t.Questions[target], _t.Questions[idx]);
+        _openIndex = _openIndex == idx ? target : _openIndex;
+        _previewVersion++;
+    }
+
+    private async Task RemoveAsync(int idx)
+    {
+        if (_t is null) return;
+        var q = _t.Questions[idx];
+        var warning = _kind == SurveyKind.PostWorkout && SurveyKeys.UsedInInsights.Contains(q.Key)
+            ? "To pytanie zasila statystyki i wnioski trenera. Usunąć mimo to?"
+            : "Usunąć to pytanie?";
+        if (!await JS.InvokeAsync<bool>("confirm", warning)) return;
+        _t.Questions.RemoveAt(idx);
+        _openIndex = -1;
+        _previewVersion++;
+    }
+
+    private void AddQuestion()
+    {
+        if (_t is null) return;
+        _t.Questions.Add(new SurveyQuestion
+        {
+            Key = "q_" + Guid.NewGuid().ToString("N")[..8],
+            Label = "Nowe pytanie",
+            Type = SurveyQuestionType.Scale,
+            Min = 1,
+            Max = 5
+        });
+        _openIndex = _t.Questions.Count - 1;
+        _previewVersion++;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_t is null) return;
+        _busy = true;
+        _saved = null;
+        try
+        {
+            _errors = await Surveys.SaveTemplateAsync(_t);
+            if (_errors.Count == 0)
+            {
+                _saved = _t.IsEnabled ? "Zapisano. Ankieta jest włączona." : "Zapisano. Ankieta jest wyłączona — klienci jej nie zobaczą.";
+                _previewVersion++;
+            }
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task ResetAsync()
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", "Przywrócić domyślne pytania? Twoje zmiany treści zostaną utracone (odpowiedzi klientów zostają).")) return;
+        await Surveys.ResetTemplateAsync(_kind);
+        await LoadAsync(_kind);
+        _saved = "Przywrócono domyślną ankietę.";
+    }
+
+    private Task<List<string>> PreviewSubmit(Dictionary<string, SurveyAnswerInput> answers)
+    {
+        var (errors, _) = SurveyEvaluator.Evaluate(_t!.Questions, answers);
+        return Task.FromResult(errors.Count > 0 ? errors : ["To tylko podgląd — odpowiedzi są poprawne, ale nie zostały zapisane."]);
+    }
+
+    private static bool HasFlagRule(SurveyQuestion q) =>
+        q.FlagOnYes || q.FlagAtOrAbove is not null || q.FlagAtOrBelow is not null || q.FlagOptions.Count > 0;
+
+    private static string TypeLabel(SurveyQuestionType t) => t switch
+    {
+        SurveyQuestionType.Scale => "Skala",
+        SurveyQuestionType.YesNo => "Tak / Nie",
+        SurveyQuestionType.SingleChoice => "Jeden wybór",
+        SurveyQuestionType.MultiChoice => "Wielokrotny wybór",
+        SurveyQuestionType.Number => "Liczba",
+        _ => "Tekst"
+    };
+}

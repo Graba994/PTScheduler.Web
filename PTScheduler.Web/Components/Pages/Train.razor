@@ -4,12 +4,14 @@
 @using Microsoft.Extensions.Logging
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Surveys
 @using PTScheduler.Domain.Constants
 @attribute [Authorize(Roles = Roles.Client + "," + Roles.Admin + "," + Roles.Trainer + "," + Roles.Subordinate)]
 @inject ITrainingPlanService PlanService
 @inject IWorkoutLogService WorkoutLog
 @inject IWorkoutSessionService Session
 @inject IClientService ClientService
+@inject ISurveyService Surveys
 @inject IAppClock Clock
 @inject AuthenticationStateProvider AuthState
 @inject IJSRuntime JS
@@ -122,6 +124,17 @@ else
         <div class="alert alert-success"><i class="bi bi-check2-circle me-2"></i>@_justFinished</div>
     }
 
+    @if (_survey is not null && _surveyDate is { } surveyDate)
+    {
+        <div class="card mb-3 border-primary">
+            <div class="card-body">
+                <h5 class="fw-bold mb-1"><i class="bi bi-emoji-smile me-2" style="color:var(--c-primary)"></i>@_survey.Name</h5>
+                <SurveyForm Template="_survey" Initial="_surveyInitial" SubmitLabel="Wyślij" SkipLabel="Pomiń"
+                            Submit="d => SubmitSurveyAsync(d, surveyDate)" OnSkip="() => _survey = null" />
+            </div>
+        </div>
+    }
+
     @if (_selectedPlan is null)
     {
         @if (_plans.Count == 0)
@@ -198,6 +211,9 @@ else
     private bool _finishing;
     private string? _error;
     private string? _justFinished;
+    private SurveyTemplateDto? _survey;
+    private DateOnly? _surveyDate;
+    private Dictionary<string, SurveyAnswerInput>? _surveyInitial;
 
     protected override async Task OnInitializedAsync()
     {
@@ -364,12 +380,15 @@ else
                 }).ToList()
             };
             var saved = await WorkoutLog.LogWorkoutAsync(_clientId.Value, dto);
+            var minutes = (int)Math.Clamp(Math.Round((Clock.LocalNow - _draft.StartedAt).TotalMinutes), 5, 300);
+            var workoutDate = _draft.Date;
             await ClearDraftStore();
             _draft = null;
             _justFinished = saved > 0
                 ? $"Trening zapisany — {saved} serii. Dobra robota!"
                 : "Trening zamknięty (brak wypełnionych serii do zapisania).";
             _history = await WorkoutLog.GetRecentForClientAsync(_clientId.Value, 10);
+            await OfferSurveyAsync(workoutDate, minutes);
         }
         catch (Exception ex)
         {
@@ -377,6 +396,35 @@ else
             LoggerFactory.CreateLogger("Train").LogError(ex, "Błąd zapisu treningu klienta {ClientId}.", _clientId);
         }
         finally { _finishing = false; }
+    }
+
+    // Krótka ankieta „Jak poszło?” zaraz po treningu (jeśli włączona); czas trwania z zegara treningu.
+    private async Task OfferSurveyAsync(DateOnly date, int minutes)
+    {
+        try
+        {
+            var template = await Surveys.GetTemplateAsync(PTScheduler.Domain.Enums.SurveyKind.PostWorkout);
+            if (!template.IsEnabled) return;
+            _surveyDate = date;
+            _surveyInitial = new() { [SurveyKeys.Duration] = new SurveyAnswerInput { Number = minutes } };
+            _survey = template;
+        }
+        catch (Exception ex)
+        {
+            LoggerFactory.CreateLogger("Train").LogWarning(ex, "Nie udało się wczytać ankiety po treningu.");
+        }
+    }
+
+    private async Task<List<string>> SubmitSurveyAsync(Dictionary<string, SurveyAnswerInput> answers, DateOnly date)
+    {
+        if (_clientId is null) return ["Brak profilu klienta."];
+        var (errors, _) = await Surveys.SubmitAsync(_clientId.Value, PTScheduler.Domain.Enums.SurveyKind.PostWorkout, answers, date);
+        if (errors.Count == 0)
+        {
+            _survey = null;
+            _justFinished += " Dzięki za ocenę — trener ją zobaczy.";
+        }
+        return errors;
     }
 
     // ----- Model roboczy trzymany w localStorage (JSON) -----

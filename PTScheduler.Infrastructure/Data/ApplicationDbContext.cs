@@ -61,6 +61,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<WorkoutSetLog> WorkoutSetLogs => Set<WorkoutSetLog>();
     public DbSet<WorkoutSession> WorkoutSessions => Set<WorkoutSession>();
     public DbSet<WorkoutComment> WorkoutComments => Set<WorkoutComment>();
+    public DbSet<SurveyTemplate> SurveyTemplates => Set<SurveyTemplate>();
+    public DbSet<SurveyResponse> SurveyResponses => Set<SurveyResponse>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -394,6 +396,17 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         });
 
         builder.Entity<TrainerConfig>(e => e.HasIndex(c => c.CalendarFeedToken).IsUnique());
+
+        builder.Entity<SurveyTemplate>(e => e.HasIndex(t => t.Kind).IsUnique());
+
+        builder.Entity<SurveyResponse>(e =>
+        {
+            e.HasOne(r => r.Client)
+             .WithMany()
+             .HasForeignKey(r => r.ClientId)
+             .OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(r => new { r.ClientId, r.Kind, r.WorkoutDate });
+        });
 
         builder.Entity<WorkoutComment>(e =>
         {

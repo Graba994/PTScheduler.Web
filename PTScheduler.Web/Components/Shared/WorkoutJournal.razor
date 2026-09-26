@@ -1,5 +1,6 @@
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Surveys
 @using Microsoft.Extensions.Logging
 @inject IWorkoutCommentService Comments
 @inject IAppClock Clock
@@ -23,6 +24,13 @@
                     <span class="text-muted small">@day.Exercises.Count ćw. · @day.SetCount serii · @day.TotalVolume.ToString("0") kg obj.</span>
                 </span>
                 <span class="d-flex align-items-center gap-2 flex-shrink-0">
+                    @if (Surveys?.GetValueOrDefault(day.Date) is { } sv)
+                    {
+                        <span class="badge rounded-pill @(sv.FlagCount > 0 ? "bg-danger" : "bg-light text-dark border")" title="Ankieta po treningu">
+                            @(sv[SurveyKeys.Rpe]?.Number is { } rpe ? $"RPE {rpe:0.#}" : "ankieta")
+                            @if (sv.FlagCount > 0) { <i class="bi bi-exclamation-triangle-fill ms-1"></i> }
+                        </span>
+                    }
                     @if (dayComments.Count > 0)
                     {
                         <span class="badge rounded-pill @(unread > 0 ? "bg-primary" : "bg-light text-dark border")" title="Komentarze">
@@ -46,6 +54,31 @@
                                 }
                             </div>
                         </div>
+                    }
+
+                    @if (Surveys?.GetValueOrDefault(day.Date) is { } survey)
+                    {
+                        <div class="small mt-2 p-2 rounded" style="background:var(--bs-tertiary-bg,#F8FAFC)">
+                            <i class="bi bi-emoji-smile me-1 text-primary"></i>
+                            @(string.Join(" · ", survey.Answers
+                                .Where(a => !a.IsEmpty && a.Type != SurveyQuestionType.Text && a.Key != SurveyKeys.PainLocation)
+                                .Select(a => $"{ShortLabel(a)}: {a.Display}")))
+                            @if (survey[SurveyKeys.PainLocation]?.Text is { Length: > 0 } where)
+                            {
+                                <div class="survey-flag mt-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>Ból: @where</div>
+                            }
+                            @if (survey[SurveyKeys.Comment]?.Text is { Length: > 0 } note)
+                            {
+                                <div class="mt-1"><i class="bi bi-chat-left-text me-1"></i>@note</div>
+                            }
+                        </div>
+                    }
+                    else if (RateLinks)
+                    {
+                        <a class="btn btn-sm btn-outline-primary mt-2"
+                           href="@($"/my/survey/po-treningu?date={day.Date:yyyy-MM-dd}&returnUrl=%2Fmy%2Fworkouts")">
+                            <i class="bi bi-emoji-smile me-1"></i>Oceń ten trening
+                        </a>
                     }
 
                     <div class="workout-comments mt-3 pt-2 border-top">
@@ -98,6 +131,22 @@
     [Parameter, EditorRequired] public List<WorkoutJournalDayDto> Days { get; set; } = [];
     [Parameter] public bool AsTrainer { get; set; }
     [Parameter, EditorRequired] public string CurrentUserId { get; set; } = string.Empty;
+    /// <summary>Ankiety po treningu wg dnia (opcjonalnie) — skrót przy dniu.</summary>
+    [Parameter] public Dictionary<DateOnly, SurveyResponseDto>? Surveys { get; set; }
+    /// <summary>Klient: link „Oceń ten trening” przy dniach bez ankiety.</summary>
+    [Parameter] public bool RateLinks { get; set; }
+
+    private static string ShortLabel(SurveyAnswer a) => a.Key switch
+    {
+        SurveyKeys.Rpe => "RPE",
+        SurveyKeys.Duration => "Czas",
+        SurveyKeys.Energy => "Energia",
+        SurveyKeys.Sleep => "Sen",
+        SurveyKeys.Soreness => "Zakwasy",
+        SurveyKeys.Pain => "Ból",
+        SurveyKeys.Satisfaction => "Zadowolenie",
+        _ => a.Label.Length > 24 ? a.Label[..22] + "…" : a.Label
+    };
 
     private readonly HashSet<int> _openDays = [0];
     private List<WorkoutCommentDto> _comments = [];

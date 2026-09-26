@@ -7,7 +7,9 @@ public enum AttentionKind
     LowCredits,
     PackageExpiring,
     NotTraining,
-    NewWorkout
+    NewWorkout,
+    HealthSurvey,
+    WorkoutSurveyFlag
 }
 
 public enum AttentionSeverity
