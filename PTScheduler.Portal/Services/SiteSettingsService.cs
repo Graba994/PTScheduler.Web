@@ -67,6 +67,11 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string PlatformBunnyApiKey = "platform_bunny_api_key";
         public const string PlatformBunnyLibraryId = "platform_bunny_library_id";
         public const string PlatformBunnyCdnHostname = "platform_bunny_cdn_hostname";
+        /// <summary>Klucz konta Bunny (Account → API) — Portal zakłada nim osobną bibliotekę dla każdej instancji.</summary>
+        public const string PlatformBunnyAccountKey = "platform_bunny_account_key";
+
+        // Wspólny SMTP platformy dla instancji trenerów (nadawca = nazwa studia, odpowiedzi do trenera)
+        public const string ShareSmtpWithTenants = "share_smtp_with_tenants";
 
         // Guardian (upgrade orchestrator)
         public const string GuardianUrl = "guardian_url";

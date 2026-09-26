@@ -23,6 +23,49 @@
             {
                 <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
             }
+            else if (_platformMode)
+            {
+                <!-- Instancja zarządzana: wysyłka przez serwer platformy, bez konfiguracji SMTP -->
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center gap-2 mb-2">
+                            <i class="bi bi-check-circle-fill text-success fs-5"></i>
+                            <strong>E-maile wysyłają się automatycznie</strong>
+                        </div>
+                        <p class="small text-muted mb-3">
+                            Przypomnienia, potwierdzenia i faktury wychodzą z serwera platformy — nie musisz niczego konfigurować.
+                            Klienci widzą nazwę Twojego studia jako nadawcę, a odpowiedzi trafiają na Twój adres.
+                        </p>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label small fw-semibold">Nazwa nadawcy</label>
+                                <input class="form-control" @bind="_dto.FromName" placeholder="np. Studio Jana Kowalskiego" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small fw-semibold">Odpowiedzi klientów wysyłaj na</label>
+                                <input type="email" class="form-control" @bind="_dto.ReplyTo" placeholder="twoj@email.pl" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small fw-semibold">Wyślij testowy e-mail na</label>
+                                <input type="email" class="form-control" @bind="_testEmail" />
+                            </div>
+                            <div class="col-md-6 d-flex align-items-end gap-2">
+                                <button class="btn btn-primary" @onclick="SavePlatformAsync" disabled="@(_saving || _testing)">
+                                    <i class="bi bi-floppy-fill me-1"></i>Zapisz
+                                </button>
+                                <button class="btn btn-outline-secondary" @onclick="TestEmailAsync" disabled="@(_saving || _testing || string.IsNullOrWhiteSpace(_testEmail))">
+                                    @if (_testing) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                    Wyślij test
+                                </button>
+                            </div>
+                        </div>
+                        @if (!string.IsNullOrEmpty(_message))
+                        {
+                            <div class="alert @(_messageOk ? "alert-success" : "alert-danger") py-2 small mt-3 mb-0">@_message</div>
+                        }
+                    </div>
+                </div>
+            }
             else
             {
                 <!-- Enable toggle -->
@@ -334,9 +377,18 @@
         )
     };
 
+    // Instancja zarządzana przez Portal bez własnego SMTP — wysyłka przez serwer platformy.
+    private bool _platformMode;
+
     protected override async Task OnInitializedAsync()
     {
         _dto = await SettingsService.GetAsync();
+        _platformMode = await EmailService.GetDeliveryModeAsync() == "platform";
+        if (_platformMode && string.IsNullOrWhiteSpace(_dto.ReplyTo))
+        {
+            var user = (await AuthState.GetAuthenticationStateAsync()).User;
+            _dto.ReplyTo = user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? user.Identity?.Name;
+        }
         var auth = await AuthState.GetAuthenticationStateAsync();
         _testEmail = auth.User.Identity?.Name ?? "";
         _loading = false;
@@ -370,6 +422,20 @@
         finally { _saving = false; }
     }
 
+    private async Task SavePlatformAsync()
+    {
+        _saving = true; _message = "";
+        try
+        {
+            // Własny SMTP pozostaje wyłączony — zapisujemy tylko nadawcę i adres odpowiedzi.
+            _dto.IsEnabled = false;
+            await SettingsService.SaveAsync(_dto);
+            _messageOk = true; _message = "Zapisano.";
+        }
+        catch (Exception ex) { _messageOk = false; _message = $"Błąd zapisu: {ex.Message}"; }
+        finally { _saving = false; }
+    }
+
     private async Task TestEmailAsync()
     {
         if (string.IsNullOrWhiteSpace(_testEmail)) return;
@@ -377,6 +443,7 @@
         _message = "";
         try
         {
+            if (_platformMode) _dto.IsEnabled = false;
             await SettingsService.SaveAsync(_dto);
             var (success, error) = await EmailService.TestAsync(_testEmail);
             _messageOk = success;

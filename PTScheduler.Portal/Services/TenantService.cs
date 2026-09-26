@@ -11,6 +11,7 @@ public class TenantService(
     DockerService docker,
     SiteSettingsService settings,
     NpmService npm,
+    BunnyPlatformService bunny,
     IConfiguration config,
     ILogger<TenantService> logger)
 {
@@ -223,6 +224,8 @@ public class TenantService(
             try { await docker.RemoveContainerAsync(webName); } catch (Exception ex) { logger.LogWarning(ex, "Nie udało się usunąć {Container} przy usuwaniu tenanta {Slug}.", webName, tenant.Slug); }
             try { await docker.RemoveContainerAsync(dbName); } catch (Exception ex) { logger.LogWarning(ex, "Nie udało się usunąć {Container} przy usuwaniu tenanta {Slug}.", dbName, tenant.Slug); }
             await docker.RemoveTenantResourcesAsync(tenant.Slug);
+
+            await bunny.DeleteLibraryAsync(tenant);
 
             if (!string.IsNullOrWhiteSpace(tenant.Domain))
                 try { await npm.DeleteProxyHostByDomainAsync(tenant.Domain); } catch (Exception ex) { logger.LogWarning(ex, "Nie udało się usunąć wpisu proxy dla domeny {Domain} tenanta {Slug}.", tenant.Domain, tenant.Slug); }

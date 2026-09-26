@@ -30,6 +30,12 @@ public class Tenant
     public DateTime? LastActivityAt { get; set; }
     /// <summary>Kiedy ostatnio udało się odczytać aktywność — bez świeżego odczytu nie zawieszamy za bezczynność.</summary>
     public DateTime? LastActivityCheckedAt { get; set; }
+
+    // ── Wideo: osobna biblioteka Bunny Stream tej instancji (zakładana przez Portal) ──
+    public string? BunnyLibraryId { get; set; }
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? BunnyLibraryApiKey { get; set; }
+    public string? BunnyCdnHostname { get; set; }
     public DateTime? GraceUntil { get; set; }
 
     // Stripe subscription lifecycle

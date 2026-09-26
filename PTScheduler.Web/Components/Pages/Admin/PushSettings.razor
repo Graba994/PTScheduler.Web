@@ -33,58 +33,9 @@
             }
             else
             {
-                <div class="card mb-4">
-                    <div class="card-header fw-semibold">
-                        <i class="bi bi-key-fill me-2"></i>Klucze VAPID
-                    </div>
-                    <div class="card-body">
-                        <p class="text-muted small mb-3">
-                            Klucze VAPID są wymagane do wysyłania powiadomień push. Wygeneruj je jednorazowo — zmiana kluczy unieważni istniejące subskrypcje.
-                        </p>
-
-                        @if (!_dto.IsConfigured)
-                        {
-                            <div class="alert alert-warning small">
-                                <i class="bi bi-exclamation-triangle me-1"></i>
-                                Klucze VAPID nie zostały jeszcze skonfigurowane. Wygeneruj klucze, aby włączyć powiadomienia push.
-                            </div>
-                        }
-
-                        <div class="mb-3">
-                            <label class="form-label small fw-semibold">Klucz publiczny</label>
-                            <input type="text" class="form-control form-control-sm font-monospace" @bind="_dto.PublicKey" readonly="@_dto.IsConfigured" />
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label small fw-semibold">Klucz prywatny</label>
-                            <div class="input-group input-group-sm">
-                                <input type="@(_showPrivateKey ? "text" : "password")" class="form-control font-monospace" @bind="_dto.PrivateKey" readonly="@_dto.IsConfigured" />
-                                <button class="btn btn-outline-secondary" type="button" @onclick="() => _showPrivateKey = !_showPrivateKey">
-                                    <i class="bi @(_showPrivateKey ? "bi-eye-slash" : "bi-eye")"></i>
-                                </button>
-                            </div>
-                        </div>
-
-                        <div class="mb-3">
-                            <label class="form-label small fw-semibold">Subject (kontakt)</label>
-                            <input type="text" class="form-control form-control-sm" @bind="_dto.Subject"
-                                   placeholder="mailto:admin@example.com" />
-                            <div class="form-text">Adres e-mail kontaktowy w formacie mailto: — wymagany przez standard VAPID.</div>
-                        </div>
-
-                        <div class="d-flex gap-2">
-                            @if (!_dto.IsConfigured)
-                            {
-                                <button class="btn btn-outline-primary btn-sm" @onclick="GenerateKeys" disabled="@_saving">
-                                    <i class="bi bi-shuffle me-1"></i>Generuj klucze
-                                </button>
-                            }
-                            <button class="btn btn-primary btn-sm" @onclick="SaveAsync" disabled="@_saving">
-                                @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                                <i class="bi bi-floppy-fill me-1"></i>Zapisz
-                            </button>
-                        </div>
-                    </div>
+                <div class="alert alert-success small d-flex align-items-center gap-2">
+                    <i class="bi bi-check-circle-fill"></i>
+                    <span>Powiadomienia push są skonfigurowane automatycznie. Klienci włączają je w swoim profilu albo po zainstalowaniu aplikacji.</span>
                 </div>
 
                 <div class="card mb-4">
@@ -105,7 +56,7 @@
                                 <input type="text" class="form-control form-control-sm" @bind="_testBody" />
                             </div>
                         </div>
-                        <button class="btn btn-outline-primary btn-sm" @onclick="SendTestAsync" disabled="@(!_dto.IsConfigured || _sendingTest)">
+                        <button class="btn btn-outline-primary btn-sm" @onclick="SendTestAsync" disabled="@_sendingTest">
                             @if (_sendingTest) { <span class="spinner-border spinner-border-sm me-1"></span> }
                             <i class="bi bi-send me-1"></i>Wyślij test
                         </button>
@@ -125,9 +76,7 @@
 
 @code {
     private bool _loading = true;
-    private bool _saving;
     private bool _sendingTest;
-    private bool _showPrivateKey;
     private WebPushSettingsDto _dto = new();
     private string _testTitle = "Test PTScheduler";
     private string _testBody = "Powiadomienia push działają poprawnie!";
@@ -140,30 +89,7 @@
         _loading = false;
     }
 
-    private void GenerateKeys()
-    {
-        var (pub, priv) = PushService.GenerateVapidKeys();
-        _dto.PublicKey = pub;
-        _dto.PrivateKey = priv;
-    }
 
-    private async Task SaveAsync()
-    {
-        _saving = true;
-        _message = null;
-        try
-        {
-            await PushService.SaveSettingsAsync(_dto);
-            _message = "Ustawienia zapisane.";
-            _messageSuccess = true;
-        }
-        catch (Exception ex)
-        {
-            _message = $"Błąd: {ex.Message}";
-            _messageSuccess = false;
-        }
-        finally { _saving = false; }
-    }
 
     private async Task SendTestAsync()
     {

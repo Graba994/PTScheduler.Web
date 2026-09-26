@@ -68,6 +68,7 @@ public static class DependencyInjection
         services.AddScoped<IDemoDataService, DemoDataService>();
         services.AddScoped<ISessionInvitationService, SessionInvitationService>();
         services.AddScoped<IEmailSettingsService, EmailSettingsService>();
+        services.AddSingleton<PlatformEmailProvider>();
         services.AddScoped<IEmailService, SmtpEmailService>();
         services.AddScoped<IBodyMeasurementService, BodyMeasurementService>();
         services.AddScoped<ITrainerConfigService, TrainerConfigService>();

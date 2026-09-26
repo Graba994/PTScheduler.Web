@@ -11,4 +11,5 @@ public class EmailSettingsDto
     public string Password { get; set; } = "";
     public string FromAddress { get; set; } = "";
     public string FromName { get; set; } = "PTScheduler";
+    public string? ReplyTo { get; set; }
 }

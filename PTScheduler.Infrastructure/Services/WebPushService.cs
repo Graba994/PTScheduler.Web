@@ -19,7 +19,27 @@ public class WebPushService(
     {
         await using var db = dbFactory.CreateDbContext();
         var s = await db.WebPushSettings.FirstOrDefaultAsync();
-        if (s is null) return new WebPushSettingsDto();
+        if (s is null || string.IsNullOrWhiteSpace(s.PublicKey) || string.IsNullOrWhiteSpace(s.PrivateKey))
+        {
+            // Klucze VAPID generujemy sami przy pierwszym użyciu — trener niczego nie konfiguruje.
+            var (pub, priv) = GenerateVapidKeys();
+            if (s is null) { s = new WebPushSettings(); db.WebPushSettings.Add(s); }
+            s.PublicKey = pub;
+            s.PrivateKey = priv;
+            if (string.IsNullOrWhiteSpace(s.Subject))
+            {
+                var domain = Environment.GetEnvironmentVariable("TENANT_DOMAIN");
+                s.Subject = string.IsNullOrWhiteSpace(domain) ? "mailto:powiadomienia@ptscheduler.pl" : $"https://{domain}";
+            }
+            try { await db.SaveChangesAsync(); }
+            catch (DbUpdateException)
+            {
+                // Równoległe pierwsze użycie — bierzemy klucze zapisane przez drugi wątek.
+                await using var db2 = dbFactory.CreateDbContext();
+                s = await db2.WebPushSettings.AsNoTracking().FirstAsync();
+            }
+            logger.LogInformation("Wygenerowano klucze VAPID dla powiadomień push.");
+        }
         return new WebPushSettingsDto
         {
             PublicKey = s.PublicKey,

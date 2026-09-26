@@ -23,7 +23,8 @@ public class EmailSettingsService(IDbContextFactory<ApplicationDbContext> dbFact
             Login        = e.Login,
             Password     = e.Password,
             FromAddress  = e.FromAddress,
-            FromName     = e.FromName
+            FromName     = e.FromName,
+            ReplyTo      = e.ReplyTo
         };
     }
 
@@ -45,6 +46,7 @@ public class EmailSettingsService(IDbContextFactory<ApplicationDbContext> dbFact
         e.Password    = string.IsNullOrWhiteSpace(dto.Password) ? e.Password : dto.Password;
         e.FromAddress = dto.FromAddress;
         e.FromName    = dto.FromName;
+        e.ReplyTo     = string.IsNullOrWhiteSpace(dto.ReplyTo) ? null : dto.ReplyTo.Trim();
         await db.SaveChangesAsync();
     }
 }

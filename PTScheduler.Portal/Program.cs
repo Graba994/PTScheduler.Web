@@ -66,6 +66,8 @@ builder.Services.AddScoped<UpdateService>();
 builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<StripeService>();
 builder.Services.AddScoped<CreditService>();
+builder.Services.AddScoped<BunnyPlatformService>();
+builder.Services.AddHttpClient();
 builder.Services.AddScoped<StorePaymentService>();
 builder.Services.AddScoped<BackupService>();
 builder.Services.AddHostedService<BackupScheduler>();
@@ -605,9 +607,8 @@ app.MapGet("/api/credits/{slug}", async (
     var platformSmsConfigured = !string.IsNullOrWhiteSpace(
         await db.Set<SiteSetting>().Where(s => s.Key == "platform_sms_api_token")
             .Select(s => s.Value).FirstOrDefaultAsync());
-    var platformBunnyConfigured = !string.IsNullOrWhiteSpace(
-        await db.Set<SiteSetting>().Where(s => s.Key == "platform_bunny_api_key")
-            .Select(s => s.Value).FirstOrDefaultAsync());
+    var platformBunnyConfigured = await db.Set<SiteSetting>()
+        .AnyAsync(s => (s.Key == "platform_bunny_api_key" || s.Key == "platform_bunny_account_key") && s.Value != null && s.Value != "");
 
     return Results.Json(new
     {
@@ -714,8 +715,8 @@ app.MapPost("/api/credits/{slug}/sms/test", async (
     }
 });
 
-// ---- Bunny CDN credentials API ----
-app.MapGet("/api/credits/{slug}/bunny", async (
+// Wspólny SMTP platformy dla instancji trenerów (trener nie konfiguruje poczty).
+app.MapGet("/api/internal/tenants/{slug}/smtp", async (
     string slug,
     HttpContext ctx,
     IDbContextFactory<PortalDbContext> dbFactory,
@@ -726,20 +727,55 @@ app.MapGet("/api/credits/{slug}/bunny", async (
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
     if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
 
-    var apiKey = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformBunnyApiKey);
-    var libraryId = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformBunnyLibraryId);
-    var cdnHostname = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformBunnyCdnHostname);
-
-    if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(libraryId))
-        return Results.Json(new { enabled = false });
+    var s = await settingsService.GetAllAsync(
+        SiteSettingsService.Keys.SmtpHost, SiteSettingsService.Keys.SmtpPort, SiteSettingsService.Keys.SmtpUser,
+        SiteSettingsService.Keys.SmtpPass, SiteSettingsService.Keys.SmtpFrom, SiteSettingsService.Keys.SmtpSsl,
+        SiteSettingsService.Keys.ShareSmtpWithTenants);
+    var share = s.GetValueOrDefault(SiteSettingsService.Keys.ShareSmtpWithTenants) != "false";
+    var host = s.GetValueOrDefault(SiteSettingsService.Keys.SmtpHost);
+    if (!share || string.IsNullOrWhiteSpace(host)) return Results.Json(new { enabled = false });
 
     return Results.Json(new
     {
         enabled = true,
-        apiKey,
-        libraryId,
-        cdnHostname
+        host,
+        port = int.TryParse(s.GetValueOrDefault(SiteSettingsService.Keys.SmtpPort), out var port) ? port : 587,
+        ssl = s.GetValueOrDefault(SiteSettingsService.Keys.SmtpSsl) == "true",
+        user = s.GetValueOrDefault(SiteSettingsService.Keys.SmtpUser),
+        password = s.GetValueOrDefault(SiteSettingsService.Keys.SmtpPass),
+        fromAddress = s.GetValueOrDefault(SiteSettingsService.Keys.SmtpFrom)
     });
+});
+
+// ---- Bunny CDN credentials API ----
+// Każda instancja dostaje klucz WYŁĄCZNIE swojej biblioteki (zakładanej przy pierwszym
+// użyciu kluczem konta platformy). Wspólna biblioteka to tryb przejściowy dla instalacji,
+// w których nie podano jeszcze klucza konta.
+app.MapGet("/api/credits/{slug}/bunny", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config,
+    SiteSettingsService settingsService,
+    BunnyPlatformService bunny,
+    ILogger<Program> logger) =>
+{
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+
+    var library = await bunny.EnsureLibraryAsync(tenant.Id, ctx.RequestAborted);
+    if (library is not null)
+        return Results.Json(new { enabled = true, apiKey = library.ApiKey, libraryId = library.LibraryId, cdnHostname = library.CdnHostname });
+
+    var apiKey = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformBunnyApiKey);
+    var libraryId = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformBunnyLibraryId);
+    var cdnHostname = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformBunnyCdnHostname);
+    if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(libraryId))
+        return Results.Json(new { enabled = false });
+
+    logger.LogWarning("Bunny: instancja {Slug} używa wspólnej biblioteki — ustaw klucz konta w Konfiguracji platformy.", slug);
+    return Results.Json(new { enabled = true, apiKey, libraryId, cdnHostname });
 });
 
 app.MapStaticAssets();

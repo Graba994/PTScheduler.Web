@@ -126,7 +126,17 @@ else
         </div>
     </div>
 
-    @if (_cdnStatus is { PlatformCdnEnabled: true } && !_hasLocalSettings)
+    @if (PTScheduler.Infrastructure.Services.PlatformConnection.IsManaged && !_hasLocalSettings)
+    {
+        @* Instancja zarządzana: wideo konfiguruje platforma — bez własnych kluczy Bunny. *@
+        @if (_cdnStatus is not { PlatformCdnEnabled: true })
+        {
+            <div class="alert alert-info small">
+                <i class="bi bi-info-circle me-1"></i>Hosting wideo włącza administrator platformy. Jeśli potrzebujesz wideo w kursach, napisz do nas.
+            </div>
+        }
+    }
+    else if (_cdnStatus is { PlatformCdnEnabled: true } && !_hasLocalSettings)
     {
         <details class="card mb-3">
             <summary class="card-header fw-semibold" style="cursor:pointer;list-style:none">
@@ -151,6 +161,8 @@ else
         </div>
     }
 
+    @if (!(PTScheduler.Infrastructure.Services.PlatformConnection.IsManaged && !_hasLocalSettings))
+    {
     <div class="alert alert-info small">
         <i class="bi bi-info-circle me-1"></i>
         <strong>Jak zacząć:</strong>
@@ -170,6 +182,7 @@ else
             <li>W kursach dodawaj lekcje z uploadem wideo — pliki wylatują prosto do Bunny.net</li>
         </ol>
     </div>
+    }
 }
 
 @code {
