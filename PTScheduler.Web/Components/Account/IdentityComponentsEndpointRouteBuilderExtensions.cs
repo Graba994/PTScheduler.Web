@@ -206,6 +206,13 @@ namespace Microsoft.AspNetCore.Routing
                         Kind = r.Kind.ToString(), r.WorkoutDate, r.SubmittedAt, r.HealthDataConsentAt,
                         Answers = System.Text.Json.JsonDocument.Parse(r.AnswersJson).RootElement.Clone()
                     });
+
+                    export["ChatMessages"] = await db.ChatMessages
+                        .AsNoTracking()
+                        .Where(m => m.ClientId == client.Id)
+                        .OrderBy(m => m.SentAt)
+                        .Select(m => new { m.SentAt, From = m.FromStaff ? "Trener" : "Ja", m.Body, m.ReadAt })
+                        .ToListAsync();
                 }
 
                 var loginLogs = await db.LoginLogs

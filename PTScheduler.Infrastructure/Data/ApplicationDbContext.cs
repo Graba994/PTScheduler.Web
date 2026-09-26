@@ -51,6 +51,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<MembershipPlan> MembershipPlans => Set<MembershipPlan>();
     public DbSet<Membership> Memberships => Set<Membership>();
     public DbSet<MembershipPeriod> MembershipPeriods => Set<MembershipPeriod>();
+    public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<Coupon> Coupons => Set<Coupon>();
     public DbSet<CouponRedemption> CouponRedemptions => Set<CouponRedemption>();
 
@@ -409,6 +410,13 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
              .HasForeignKey(r => r.ClientId)
              .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(r => new { r.ClientId, r.Kind, r.WorkoutDate });
+        });
+
+        builder.Entity<ChatMessage>(e =>
+        {
+            e.Property(m => m.Body).HasMaxLength(4000);
+            e.HasOne(m => m.Client).WithMany().HasForeignKey(m => m.ClientId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(m => new { m.ClientId, m.SentAt });
         });
 
         builder.Entity<MembershipPlan>(e =>

@@ -86,6 +86,8 @@ public static class DependencyInjection
         services.AddScoped<IReceiptService, ReceiptService>();
         services.AddScoped<IInvoiceService, InvoiceService>();
         services.AddScoped<IMembershipService, MembershipService>();
+        services.AddSingleton<IChatNotifier, ChatNotifier>();
+        services.AddScoped<IChatService, ChatService>();
         services.AddHttpClient<PTScheduler.Infrastructure.Services.Ksef.KsefClient>(c => c.Timeout = TimeSpan.FromSeconds(60));
         services.AddScoped<IKsefService, PTScheduler.Infrastructure.Services.Ksef.KsefService>();
         services.AddScoped<ISmsSettingsService, SmsSettingsService>();
