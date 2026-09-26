@@ -37,7 +37,7 @@ public class WorkoutLogService(
         {
             if (!validExIds.Contains(ex.ExerciseId)) continue;
             var sets = ex.Sets
-                .Where(s => s.Reps > 0 || s.WeightKg > 0) // pomiń puste serie
+                .Where(s => s.Reps > 0 || s.WeightKg > 0 || s.DurationSeconds > 0 || s.DistanceMeters > 0) // pomiń puste serie
                 .OrderBy(s => s.SetNumber)
                 .ToList();
             if (sets.Count == 0) continue;
@@ -54,7 +54,9 @@ public class WorkoutLogService(
                 {
                     SetNumber = i + 1,
                     Reps = s.Reps,
-                    WeightKg = s.WeightKg
+                    WeightKg = s.WeightKg,
+                    DurationSeconds = s.DurationSeconds is > 0 ? s.DurationSeconds : null,
+                    DistanceMeters = s.DistanceMeters is > 0 ? s.DistanceMeters : null
                 }).ToList()
             };
             db.WorkoutLogs.Add(log);
@@ -175,7 +177,9 @@ public class WorkoutLogService(
                     {
                         SetNumber = s.SetNumber,
                         Reps = s.Reps,
-                        WeightKg = s.WeightKg
+                        WeightKg = s.WeightKg,
+                        DurationSeconds = s.DurationSeconds,
+                        DistanceMeters = s.DistanceMeters
                     }).ToList()
                 }).ToList()
             })

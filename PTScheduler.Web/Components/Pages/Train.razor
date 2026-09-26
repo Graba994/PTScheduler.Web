@@ -6,6 +6,8 @@
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Application.Surveys
 @using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
+@using PTScheduler.Domain.Rules
 @attribute [Authorize(Roles = Roles.Client + "," + Roles.Admin + "," + Roles.Trainer + "," + Roles.Subordinate)]
 @inject ITrainingPlanService PlanService
 @inject IWorkoutLogService WorkoutLog
@@ -35,86 +37,115 @@
 else if (_draft is not null)
 {
     <!-- ===== Tryb treningu ===== -->
-    <div class="alert alert-success py-2 d-flex align-items-center gap-2 small">
-        <i class="bi bi-shield-check"></i>
-        <span>Trening jest zapisywany na bieżąco — na tym urządzeniu i na serwerze — więc nie zniknie po zamknięciu przeglądarki, uśpieniu telefonu ani zaniku sieci, a w razie potrzeby wznowisz go na innym urządzeniu. Trwa do „Zakończ trening".</span>
-    </div>
-
-    <div class="card mb-3">
-        <div class="card-body py-2 d-flex align-items-center justify-content-between flex-wrap gap-2">
-            <div>
-                <div class="fw-semibold">@_draft.PlanName</div>
-                <div class="text-muted small">@_draft.DayLabel · @_draft.Date.ToString("yyyy-MM-dd") · start @_draft.StartedAt.ToString("HH:mm")</div>
+    var totalSets = _draft.Exercises.Sum(e => e.Sets.Count);
+    var doneSets = _draft.Exercises.Sum(e => e.Sets.Count(s => s.Done));
+    var pct = totalSets == 0 ? 0 : doneSets * 100 / totalSets;
+    <div class="train-bar">
+        <div class="d-flex align-items-center gap-2">
+            <div class="flex-grow-1 min-w-0">
+                <div class="fw-semibold text-truncate">@_draft.PlanName · @_draft.DayLabel</div>
+                <div class="small text-muted">start @_draft.StartedAt.ToString("HH:mm") · @doneSets z @totalSets serii</div>
             </div>
-            <button class="btn btn-sm btn-outline-danger" @onclick="DiscardDraft"><i class="bi bi-x-circle me-1"></i>Odrzuć</button>
+            <button class="btn btn-success fw-semibold" @onclick="Finish" disabled="@_finishing">
+                @if (_finishing) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                Zakończ
+            </button>
+        </div>
+        <div class="train-progress" role="progressbar" aria-valuenow="@pct" aria-valuemin="0" aria-valuemax="100" aria-label="Postęp treningu">
+            <div style="width:@(pct)%"></div>
         </div>
     </div>
 
-    @foreach (var ex in _draft.Exercises)
-    {
-        <div class="card mb-2">
-            <div class="card-body py-2">
-                <div class="d-flex align-items-center gap-2 mb-2">
-                    @if (!string.IsNullOrEmpty(ex.ThumbnailUrl))
-                    {
-                        <img src="@ex.ThumbnailUrl" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:.35rem" />
-                    }
-                    <div class="flex-grow-1">
-                        <div class="fw-semibold">@ex.NamePl</div>
-                        <div class="text-muted small">
-                            Cel: @ex.TargetSets × @(string.IsNullOrWhiteSpace(ex.TargetReps) ? "—" : ex.TargetReps)
-                            @if (ex.TargetWeightKg is { } w) { <span>@@ @w kg</span> }
-                        </div>
-                    </div>
-                </div>
+    <p class="train-hint"><i class="bi bi-cloud-check me-1"></i>Odhaczaj serie po kolei — postęp zapisuje się sam, także bez internetu.</p>
 
-                <table class="table table-sm align-middle mb-2">
-                    <thead>
-                        <tr class="small text-muted">
-                            <th style="width:36px">#</th>
-                            <th>Powt.</th>
-                            <th>Ciężar (kg)</th>
-                            <th style="width:60px">OK</th>
-                            <th style="width:40px"></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @for (var si = 0; si < ex.Sets.Count; si++)
-                        {
-                            var set = ex.Sets[si];
-                            var idx = si;
-                            <tr class="@(set.Done ? "table-success" : "")">
-                                <td class="text-muted">@(idx + 1)</td>
-                                <td><input type="number" inputmode="numeric" min="0" max="999" class="form-control form-control-sm"
-                                           @bind="set.Reps" @bind:after="SaveDraft" /></td>
-                                <td><input type="number" inputmode="decimal" step="0.5" min="0" class="form-control form-control-sm"
-                                           @bind="set.Weight" @bind:after="SaveDraft" /></td>
-                                <td class="text-center">
-                                    <input type="checkbox" class="form-check-input" @bind="set.Done" @bind:after="SaveDraft" />
-                                </td>
-                                <td>
-                                    <button class="btn btn-sm btn-link text-danger p-0" title="Usuń serię"
-                                            @onclick="() => RemoveSet(ex, idx)"><i class="bi bi-x-lg"></i></button>
-                                </td>
-                            </tr>
-                        }
-                    </tbody>
-                </table>
-                <button class="btn btn-sm btn-outline-secondary" @onclick="() => AddSet(ex)"><i class="bi bi-plus-lg me-1"></i>Dodaj serię</button>
-            </div>
-        </div>
-    }
-
-    <div class="d-flex gap-2 my-3">
-        <button class="btn btn-success flex-grow-1 btn-lg" @onclick="Finish" disabled="@_finishing">
-            @if (_finishing) { <span class="spinner-border spinner-border-sm me-1"></span> }
-            <i class="bi bi-check2-circle me-1"></i>Zakończ trening
-        </button>
-    </div>
     @if (!string.IsNullOrEmpty(_error))
     {
         <div class="alert alert-danger py-2">@_error</div>
     }
+
+    @for (var ei = 0; ei < _draft.Exercises.Count; ei++)
+    {
+        var ex = _draft.Exercises[ei];
+        var exIdx = ei;
+        var tr = ex.Tracking;
+        var exDone = ex.Sets.Count > 0 && ex.Sets.All(s => s.Done);
+        var collapsed = exDone && !_expanded.Contains(exIdx);
+        <div class="card train-ex @(exDone ? "is-done" : "")">
+            <button type="button" class="train-ex-head" @onclick="() => ToggleExpanded(exIdx, exDone)" aria-expanded="@(collapsed ? "false" : "true")">
+                @if (!string.IsNullOrEmpty(ex.ThumbnailUrl))
+                {
+                    <img src="@ex.ThumbnailUrl" alt="" class="train-ex-thumb" />
+                }
+                else
+                {
+                    <span class="train-ex-thumb train-ex-thumb-empty"><i class="bi bi-clipboard-pulse"></i></span>
+                }
+                <span class="train-ex-title">
+                    <span class="train-ex-name">@ex.NamePl</span>
+                    <span class="train-ex-target">Cel: @TargetText(ex)@(ex.RestSeconds is int rest && rest > 0 ? $" · przerwa {ExerciseTrackingRules.FormatDuration(rest)}" : "")</span>
+                </span>
+                @if (exDone)
+                {
+                    <span class="train-ex-status done"><i class="bi bi-check-lg"></i></span>
+                }
+                else
+                {
+                    <span class="train-ex-status">@ex.Sets.Count(s => s.Done)/@ex.Sets.Count</span>
+                }
+            </button>
+
+            @if (!collapsed)
+            {
+                <div class="train-ex-body">
+                    @if (!string.IsNullOrWhiteSpace(ex.Notes))
+                    {
+                        <div class="train-ex-note"><i class="bi bi-chat-quote me-1"></i>@ex.Notes</div>
+                    }
+                    <div class="train-cols" style="--cols:@Columns(tr).Count">
+                        <span class="text-center">#</span>
+                        @foreach (var col in Columns(tr))
+                        {
+                            <span>@col.Label</span>
+                        }
+                        <span class="text-center"><i class="bi bi-check-lg"></i></span>
+                    </div>
+                    @for (var si = 0; si < ex.Sets.Count; si++)
+                    {
+                        var set = ex.Sets[si];
+                        var setIdx = si;
+                        <div class="train-set @(set.Done ? "is-done" : "")" style="--cols:@Columns(tr).Count">
+                            <span class="train-set-no">@(setIdx + 1)</span>
+                            @foreach (var col in Columns(tr))
+                            {
+                                var c = col;
+                                <NumberStepper Value="c.Get(set)" ValueChanged="v => SetValue(ex, set, c, v)"
+                                               Step="c.StepFor(set)" Mode="c.Mode" Max="c.Max" Label="@($"Seria {setIdx + 1}: {c.Label}")" />
+                            }
+                            <button type="button" class="train-check" @onclick="() => ToggleDone(ex, setIdx)"
+                                    aria-pressed="@(set.Done ? "true" : "false")" aria-label="@($"Seria {setIdx + 1} {(set.Done ? "zrobiona — cofnij" : "— oznacz jako zrobioną")}")">
+                                <i class="bi bi-check-lg"></i>
+                            </button>
+                        </div>
+                    }
+                    <div class="train-ex-actions">
+                        <button class="btn btn-outline-secondary" @onclick="() => AddSet(ex)"><i class="bi bi-plus-lg me-1"></i>Seria</button>
+                        @if (ex.Sets.Count > 0)
+                        {
+                            <button class="btn btn-outline-danger" @onclick="() => RemoveLastSet(ex)"><i class="bi bi-trash3 me-1"></i>Usuń ostatnią</button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    <div class="d-flex flex-column gap-2 my-3">
+        <button class="btn btn-success btn-lg py-3 fw-semibold" @onclick="Finish" disabled="@_finishing">
+            @if (_finishing) { <span class="spinner-border spinner-border-sm me-1"></span> }
+            <i class="bi bi-check2-circle me-1"></i>Zakończ trening
+        </button>
+        <button class="btn btn-link text-danger" @onclick="DiscardDraft"><i class="bi bi-x-circle me-1"></i>Odrzuć trening</button>
+    </div>
 }
 else
 {
@@ -214,6 +245,8 @@ else
     private SurveyTemplateDto? _survey;
     private DateOnly? _surveyDate;
     private Dictionary<string, SurveyAnswerInput>? _surveyInitial;
+    private readonly HashSet<int> _expanded = [];
+    private bool _scrollTop;
 
     protected override async Task OnInitializedAsync()
     {
@@ -229,6 +262,12 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (_scrollTop)
+        {
+            // Po zakończeniu treningu strona się skraca — pokaż podsumowanie i ankietę od góry.
+            _scrollTop = false;
+            try { await JS.InvokeVoidAsync("window.scrollTo", 0, 0); } catch { /* best-effort */ }
+        }
         if (!firstRender || _clientId is null || _draftLoaded) return;
         _draftLoaded = true;
         try
@@ -290,39 +329,142 @@ else
             DayLabel = string.IsNullOrWhiteSpace(day.Label) ? "Dzień" : day.Label,
             Date = Clock.Today,
             StartedAt = Clock.LocalNow,
-            Exercises = day.Exercises.Select(x => new DraftExercise
+            Exercises = day.Exercises.Select(x =>
             {
-                ExerciseId = x.ExerciseId,
-                PlanExerciseId = x.Id,
-                NamePl = x.ExerciseNamePl,
-                ThumbnailUrl = x.ThumbnailUrl,
-                TargetSets = x.Sets,
-                TargetReps = x.Reps,
-                TargetWeightKg = x.TargetWeightKg,
-                Sets = Enumerable.Range(0, Math.Max(1, x.Sets)).Select(_ => new DraftSet
+                var ex = new DraftExercise
                 {
-                    Reps = 0,
-                    Weight = x.TargetWeightKg ?? 0m,
-                    Done = false
-                }).ToList()
+                    ExerciseId = x.ExerciseId,
+                    PlanExerciseId = x.Id,
+                    NamePl = x.ExerciseNamePl,
+                    ThumbnailUrl = x.ThumbnailUrl,
+                    Tracking = x.Tracking,
+                    TargetSets = x.Sets,
+                    TargetReps = x.Reps,
+                    TargetWeightKg = x.TargetWeightKg,
+                    TargetDurationSeconds = x.TargetDurationSeconds,
+                    TargetDistanceMeters = x.TargetDistanceMeters,
+                    RestSeconds = x.RestSeconds,
+                    Notes = x.Notes
+                };
+                // Wypełnione tym, co zadał trener (np. 3 × 10 po 40 kg) — wystarczy odhaczyć albo poprawić −/+.
+                ex.Sets = Enumerable.Range(0, Math.Max(1, x.Sets)).Select(_ => NewSet(ex)).ToList();
+                return ex;
             }).ToList()
         };
+        _expanded.Clear();
         _selectedPlan = null;
         await SaveDraft();
     }
 
+    /// <summary>Nowa seria z celami trenera; zakres „8-12” wypełnia dolną granicą.</summary>
+    private static DraftSet NewSet(DraftExercise ex) => new()
+    {
+        Reps = ExerciseTrackingRules.UsesReps(ex.Tracking) ? ProgressionRules.ParseReps(ex.TargetReps)?.Min ?? 0 : 0,
+        Weight = ExerciseTrackingRules.UsesWeight(ex.Tracking) ? ex.TargetWeightKg ?? 0m : 0m,
+        DurationSeconds = ExerciseTrackingRules.UsesTime(ex.Tracking) ? ex.TargetDurationSeconds : null,
+        DistanceMeters = ExerciseTrackingRules.UsesDistance(ex.Tracking) ? ex.TargetDistanceMeters : null
+    };
+
     private async Task AddSet(DraftExercise ex)
     {
         var last = ex.Sets.LastOrDefault();
-        ex.Sets.Add(new DraftSet { Reps = last?.Reps ?? 0, Weight = last?.Weight ?? 0m, Done = false });
+        ex.Sets.Add(last is null ? NewSet(ex) : new DraftSet
+        {
+            Reps = last.Reps, Weight = last.Weight, DurationSeconds = last.DurationSeconds, DistanceMeters = last.DistanceMeters
+        });
+        _expanded.Add(_draft!.Exercises.IndexOf(ex));
         await SaveDraft();
     }
 
-    private async Task RemoveSet(DraftExercise ex, int index)
+    private async Task RemoveLastSet(DraftExercise ex)
     {
-        if (index >= 0 && index < ex.Sets.Count) ex.Sets.RemoveAt(index);
+        if (ex.Sets.Count == 0) return;
+        if (!await JS.InvokeAsync<bool>("confirm", $"Usunąć serię {ex.Sets.Count} z ćwiczenia „{ex.NamePl}”?")) return;
+        ex.Sets.RemoveAt(ex.Sets.Count - 1);
         await SaveDraft();
     }
+
+    private async Task SetValue(DraftExercise ex, DraftSet set, Col col, decimal value)
+    {
+        col.Put(set, value);
+        await SaveDraft();
+    }
+
+    private async Task ToggleDone(DraftExercise ex, int index)
+    {
+        var set = ex.Sets[index];
+        set.Done = !set.Done;
+        if (set.Done)
+        {
+            // Zmieniony ciężar/powtórzenia przechodzą na kolejne, jeszcze nieruszane serie.
+            var template = NewSet(ex);
+            foreach (var later in ex.Sets.Skip(index + 1).Where(s => !s.Done))
+                foreach (var col in Columns(ex.Tracking))
+                    if (col.Get(later) == col.Get(template)) col.Put(later, col.Get(set));
+            var exIdx = _draft!.Exercises.IndexOf(ex);
+            if (ex.Sets.All(s => s.Done)) _expanded.Remove(exIdx);
+        }
+        await SaveDraft();
+    }
+
+    private void ToggleExpanded(int exIdx, bool exDone)
+    {
+        if (!exDone) return;
+        if (!_expanded.Remove(exIdx)) _expanded.Add(exIdx);
+    }
+
+    private static string TargetText(DraftExercise ex)
+    {
+        var parts = new List<string>();
+        var reps = string.IsNullOrWhiteSpace(ex.TargetReps) ? null : ex.TargetReps;
+        var time = ex.TargetDurationSeconds is int t && t > 0 ? ExerciseTrackingRules.FormatDuration(t) : null;
+        var dist = ex.TargetDistanceMeters is decimal d && d > 0 ? ExerciseTrackingRules.FormatDistance(d) : null;
+        var kg = ex.TargetWeightKg is decimal w && w > 0 ? $"{w:0.##} kg" : null;
+        var sets = ex.TargetSets > 1 ? $"{ex.TargetSets} × " : "";
+        switch (ex.Tracking)
+        {
+            case ExerciseTracking.Reps: parts.Add(sets + (reps ?? "—")); break;
+            case ExerciseTracking.Time: parts.Add(sets + (time ?? "—")); break;
+            case ExerciseTracking.DistanceTime:
+                parts.Add(sets + (dist ?? "—"));
+                if (time is not null) parts.Add(time);
+                break;
+            case ExerciseTracking.WeightDistance:
+                parts.Add(sets + (dist ?? "—"));
+                if (kg is not null) parts.Add(kg);
+                break;
+            default:
+                parts.Add(sets + (reps ?? "—"));
+                if (kg is not null) parts.Add(kg);
+                break;
+        }
+        return string.Join(" · ", parts);
+    }
+
+    // ----- Kolumny serii zależne od rodzaju ćwiczenia -----
+    public sealed record Col(string Label, NumberStepper.Kind Mode, decimal Max,
+        Func<DraftSet, decimal> Get, Action<DraftSet, decimal> Put, Func<DraftSet, decimal> StepFor);
+
+    private static readonly Col RepsCol = new("Powt.", NumberStepper.Kind.Integer, 999,
+        s => s.Reps, (s, v) => s.Reps = (int)v, _ => 1);
+    private static readonly Col WeightCol = new("Kg", NumberStepper.Kind.Decimal, 1000,
+        s => s.Weight, (s, v) => s.Weight = v, s => s.Weight < 20 ? 1 : 2.5m);
+    private static readonly Col TimeCol = new("Czas", NumberStepper.Kind.Duration, 86400,
+        s => s.DurationSeconds ?? 0, (s, v) => s.DurationSeconds = v > 0 ? (int)v : null, _ => 15);
+    private static readonly Col LongTimeCol = TimeCol with { StepFor = _ => 30 };
+    private static readonly Col KmCol = new("Km", NumberStepper.Kind.Decimal, 1000,
+        s => (s.DistanceMeters ?? 0) / 1000m, (s, v) => s.DistanceMeters = v > 0 ? v * 1000m : null, _ => 0.5m);
+    private static readonly Col MetersCol = new("Metry", NumberStepper.Kind.Integer, 100000,
+        s => s.DistanceMeters ?? 0, (s, v) => s.DistanceMeters = v > 0 ? v : null, _ => 5);
+
+    private static IReadOnlyList<Col> Columns(ExerciseTracking tracking) => tracking switch
+    {
+        ExerciseTracking.Reps => [RepsCol],
+        ExerciseTracking.Time => [TimeCol],
+        ExerciseTracking.DistanceTime => [KmCol, LongTimeCol],
+        ExerciseTracking.WeightDistance => [MetersCol, WeightCol],
+        _ => [RepsCol, WeightCol]
+    };
 
     private async Task SaveDraft()
     {
@@ -364,6 +506,10 @@ else
     {
         if (_draft is null || _clientId is null) return;
         _error = null;
+        // Zapisujemy odhaczone serie; gdy nic nie odhaczono, pytamy, czy zapisać wszystko, co wpisane.
+        var onlyDone = _draft.Exercises.Any(e => e.Sets.Any(s => s.Done));
+        if (!onlyDone && _draft.Exercises.Any(e => e.Sets.Count > 0)
+            && !await JS.InvokeAsync<bool>("confirm", "Żadna seria nie jest odhaczona. Zapisać wszystkie serie tak, jak są wpisane?")) return;
         _finishing = true;
         try
         {
@@ -376,7 +522,14 @@ else
                 {
                     ExerciseId = e.ExerciseId,
                     PlanExerciseId = e.PlanExerciseId,
-                    Sets = e.Sets.Select((s, i) => new LogSetDto { SetNumber = i + 1, Reps = s.Reps, WeightKg = s.Weight }).ToList()
+                    Sets = e.Sets.Where(s => s.Done || !onlyDone).Select((s, i) => new LogSetDto
+                    {
+                        SetNumber = i + 1,
+                        Reps = ExerciseTrackingRules.UsesReps(e.Tracking) ? s.Reps : 0,
+                        WeightKg = ExerciseTrackingRules.UsesWeight(e.Tracking) ? s.Weight : 0m,
+                        DurationSeconds = ExerciseTrackingRules.UsesTime(e.Tracking) ? s.DurationSeconds : null,
+                        DistanceMeters = ExerciseTrackingRules.UsesDistance(e.Tracking) ? s.DistanceMeters : null
+                    }).ToList()
                 }).ToList()
             };
             var saved = await WorkoutLog.LogWorkoutAsync(_clientId.Value, dto);
@@ -389,6 +542,7 @@ else
                 : "Trening zamknięty (brak wypełnionych serii do zapisania).";
             _history = await WorkoutLog.GetRecentForClientAsync(_clientId.Value, 10);
             await OfferSurveyAsync(workoutDate, minutes);
+            _scrollTop = true;
         }
         catch (Exception ex)
         {
@@ -447,9 +601,14 @@ else
         public int? PlanExerciseId { get; set; }
         public string NamePl { get; set; } = "";
         public string? ThumbnailUrl { get; set; }
+        public ExerciseTracking Tracking { get; set; }
         public int TargetSets { get; set; }
         public string? TargetReps { get; set; }
         public decimal? TargetWeightKg { get; set; }
+        public int? TargetDurationSeconds { get; set; }
+        public decimal? TargetDistanceMeters { get; set; }
+        public int? RestSeconds { get; set; }
+        public string? Notes { get; set; }
         public List<DraftSet> Sets { get; set; } = [];
     }
 
@@ -457,6 +616,8 @@ else
     {
         public int Reps { get; set; }
         public decimal Weight { get; set; }
+        public int? DurationSeconds { get; set; }
+        public decimal? DistanceMeters { get; set; }
         public bool Done { get; set; }
     }
 }

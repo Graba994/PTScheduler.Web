@@ -20,6 +20,10 @@ public class PlanExercise
     /// <summary>Powtórzenia — tekst, aby dopuścić zakres (np. „8-12", „do upadku").</summary>
     public string? Reps { get; set; }
     public decimal? TargetWeightKg { get; set; }
+    /// <summary>Cel czasowy serii (deska 45 s, bieg 30 min) — dla ćwiczeń mierzonych czasem.</summary>
+    public int? TargetDurationSeconds { get; set; }
+    /// <summary>Cel dystansu (bieg 5 km, spacer farmera 40 m).</summary>
+    public decimal? TargetDistanceMeters { get; set; }
     public string? Tempo { get; set; }
     public int? RestSeconds { get; set; }
     public string? Notes { get; set; }

@@ -200,6 +200,7 @@ else
                             <div class="d-flex flex-wrap gap-1 mb-2">
                                 <span class="badge bg-secondary">@CategoryPl(_detail.Category)</span>
                                 <span class="badge bg-secondary">@LevelPl(_detail.Level)</span>
+                                <span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-rulers me-1"></i>@ExerciseTrackingRules.Label(_detail.Tracking)</span>
                                 @if (!string.IsNullOrWhiteSpace(_detail.Equipment))
                                 {
                                     <span class="badge bg-secondary">@_detail.Equipment</span>
@@ -322,6 +323,18 @@ else
                         <div class="col-12 col-md-4">
                             <label class="form-label">Sprzęt</label>
                             <input class="form-control" @bind="_form.Equipment" maxlength="60" placeholder="np. sztanga" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Co mierzymy w serii</label>
+                            <div class="d-flex flex-wrap gap-2">
+                                @foreach (var t in Enum.GetValues<ExerciseTracking>())
+                                {
+                                    <button type="button" class="btn btn-sm @(_form.Tracking == t ? "btn-primary" : "btn-outline-secondary")" @onclick="() => _form.Tracking = t">
+                                        @ExerciseTrackingRules.Label(t)
+                                    </button>
+                                }
+                            </div>
+                            <div class="form-text">Od tego zależą pola w planie i podczas treningu klienta (np. bieg: dystans i czas, deska: czas).</div>
                         </div>
 
                         <div class="col-12 col-md-6">
@@ -511,7 +524,8 @@ else
             Equipment = _detail.Equipment,
             ImageUrls = _detail.ImageUrls.ToList(),
             VideoType = _detail.VideoType,
-            VideoRef = _detail.VideoRef
+            VideoRef = _detail.VideoRef,
+            Tracking = _detail.Tracking
         };
         _imagesText = string.Join("\n", _detail.ImageUrls);
         _editError = null;

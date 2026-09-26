@@ -60,7 +60,7 @@ public class ExerciseCatalogService(
             .Select(e => new
             {
                 e.Id, e.NamePl, e.NameEn, e.PrimaryMuscles, e.Category, e.Level,
-                e.Equipment, e.ImageUrls, e.OwnerTrainerUserId, e.VideoType
+                e.Equipment, e.ImageUrls, e.OwnerTrainerUserId, e.VideoType, e.Tracking
             })
             .ToListAsync();
 
@@ -76,7 +76,9 @@ public class ExerciseCatalogService(
             ThumbnailUrl = FirstImage(e.ImageUrls),
             IsMine = e.OwnerTrainerUserId == trainerUserId,
             IsFavorite = favIdSet.Contains(e.Id),
-            HasVideo = e.VideoType != ExerciseVideoType.None
+            HasVideo = e.VideoType != ExerciseVideoType.None,
+            Tracking = e.Tracking ?? ExerciseTrackingRules.Guess(e.Category, e.Equipment, e.NameEn, e.NamePl),
+            LastUsedAt = lastUsed.TryGetValue(e.Id, out var used) ? used : null
         });
 
         items = filter.Scope == ExerciseCatalogScope.Recent
@@ -115,7 +117,8 @@ public class ExerciseCatalogService(
             VideoType = e.VideoType,
             VideoRef = e.VideoRef,
             IsMine = e.OwnerTrainerUserId == trainerUserId,
-            IsFavorite = isFav
+            IsFavorite = isFav,
+            Tracking = e.Tracking ?? ExerciseTrackingRules.Guess(e.Category, e.Equipment, e.NameEn, e.NamePl)
         };
     }
 
@@ -225,6 +228,7 @@ public class ExerciseCatalogService(
             .Select(u => u.Trim()).Where(u => u.Length > 0));
         e.VideoType = dto.VideoType;
         e.VideoRef = string.IsNullOrWhiteSpace(dto.VideoRef) ? null : dto.VideoRef.Trim();
+        e.Tracking = dto.Tracking;
     }
 
     private static string? FirstImage(string csv)

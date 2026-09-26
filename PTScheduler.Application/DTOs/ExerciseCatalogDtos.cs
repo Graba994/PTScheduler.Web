@@ -37,6 +37,8 @@ public sealed class ExerciseListItemDto
     public bool IsMine { get; set; }
     public bool IsFavorite { get; set; }
     public bool HasVideo { get; set; }
+    public ExerciseTracking Tracking { get; set; }
+    public DateTime? LastUsedAt { get; set; }
 }
 
 /// <summary>Pełne dane ćwiczenia do widoku szczegółów.</summary>
@@ -59,6 +61,7 @@ public sealed class ExerciseDetailDto
     public string? VideoRef { get; set; }
     public bool IsMine { get; set; }
     public bool IsFavorite { get; set; }
+    public ExerciseTracking Tracking { get; set; }
 }
 
 /// <summary>Zapis własnego ćwiczenia trenera (dodanie/edycja).</summary>
@@ -77,4 +80,5 @@ public sealed class SaveExerciseDto
     public List<string> ImageUrls { get; set; } = [];
     public ExerciseVideoType VideoType { get; set; } = ExerciseVideoType.None;
     public string? VideoRef { get; set; }
+    public ExerciseTracking Tracking { get; set; } = ExerciseTracking.WeightReps;
 }

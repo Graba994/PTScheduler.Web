@@ -874,7 +874,8 @@ h5 { font-size: 0.95rem; }
     .alert.d-flex { flex-wrap: wrap; gap: .5rem; }
 
     /* Prevent horizontal page overflow */
-    .app-content { overflow-x: hidden; }
+    /* clip zamiast hidden: nie tworzy kontenera przewijania, więc position: sticky dalej działa */
+    .app-content { overflow-x: hidden; overflow-x: clip; }
     .row { margin-left: 0; margin-right: 0; }
 }
 
@@ -2955,3 +2956,176 @@ h4[tabindex="-1"]:focus, h5[tabindex="-1"]:focus, h6[tabindex="-1"]:focus { outl
     .client-tab { padding: .55rem 1rem; }
 }
 .mobile-nav-item .bi .badge { position: absolute; top: -.4rem; right: -.8rem; font-size: .6rem; }
+
+/* ── Edytor planu: karty ćwiczeń z polami zależnymi od rodzaju pomiaru ── */
+.plan-ex-list { display: flex; flex-direction: column; gap: .6rem; margin-bottom: .75rem; }
+.plan-ex {
+    border: 1px solid var(--bs-border-color); border-radius: .75rem; padding: .65rem .75rem;
+    background: var(--bs-body-bg);
+}
+.plan-ex-head { display: flex; align-items: center; gap: .6rem; margin-bottom: .55rem; }
+.plan-ex-head .min-w-0 { min-width: 0; }
+.plan-ex-thumb { width: 44px; height: 44px; border-radius: .5rem; object-fit: cover; flex-shrink: 0; }
+.plan-ex-thumb-empty {
+    display: grid; place-items: center; font-size: 1.2rem;
+    background: color-mix(in srgb, var(--c-primary) 10%, transparent); color: var(--c-primary);
+}
+.plan-ex-fields { display: grid; grid-template-columns: repeat(auto-fill, minmax(110px, 1fr)); gap: .5rem; }
+.plan-ex-fields label { display: flex; flex-direction: column; gap: .2rem; margin: 0; min-width: 0; }
+.plan-ex-fields label > span {
+    font-size: .68rem; font-weight: 600; text-transform: uppercase; letter-spacing: .04em;
+    color: var(--bs-secondary-color);
+}
+.plan-ex-fields .plan-ex-notes { grid-column: 1 / -1; }
+
+/* ── Wybór ćwiczenia: zakres, partie, karty ── */
+.picker-scopes, .picker-muscles { display: flex; gap: .4rem; }
+.picker-scopes { flex-wrap: wrap; }
+.picker-muscles {
+    overflow-x: auto; scrollbar-width: none; -webkit-overflow-scrolling: touch; padding-bottom: .1rem;
+}
+.picker-muscles::-webkit-scrollbar { display: none; }
+.picker-chip {
+    display: inline-flex; align-items: center; gap: .35rem; flex-shrink: 0;
+    padding: .4rem .85rem; border-radius: 999px; font-size: .85rem; font-weight: 600;
+    color: var(--bs-body-color); background: var(--bs-tertiary-bg); border: 1px solid var(--bs-border-color);
+    transition: background .15s, color .15s, border-color .15s;
+}
+.picker-chip:hover { border-color: var(--c-primary); color: var(--c-primary); }
+.picker-chip.active { background: var(--c-primary); border-color: var(--c-primary); color: #fff; }
+.picker-chip:focus-visible { outline: 2px solid var(--c-primary); outline-offset: 2px; }
+.picker-chip-sm { padding: .28rem .7rem; font-size: .78rem; font-weight: 500; }
+
+.picker-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(260px, 1fr)); gap: .6rem; }
+.picker-card {
+    position: relative; border: 1px solid var(--bs-border-color); border-radius: .75rem;
+    background: var(--bs-body-bg); transition: border-color .15s, box-shadow .15s;
+}
+.picker-card:hover { border-color: var(--c-primary); box-shadow: 0 2px 10px rgba(0, 0, 0, .06); }
+.picker-card.added { border-color: var(--bs-success); background: color-mix(in srgb, var(--bs-success) 7%, var(--bs-body-bg)); }
+.picker-card-main {
+    display: flex; align-items: center; gap: .65rem; width: 100%; padding: .55rem 2.6rem .55rem .55rem;
+    border: 0; background: none; text-align: left; color: inherit; border-radius: .75rem;
+}
+.picker-card-main:focus-visible { outline: 2px solid var(--c-primary); outline-offset: -2px; }
+.picker-card-main img, .picker-card-noimg {
+    width: 56px; height: 56px; border-radius: .55rem; object-fit: cover; flex-shrink: 0;
+}
+.picker-card-noimg {
+    display: grid; place-items: center; font-size: 1.35rem;
+    background: color-mix(in srgb, var(--c-primary) 10%, transparent); color: var(--c-primary);
+}
+.picker-card-body { display: flex; flex-direction: column; gap: .15rem; min-width: 0; flex: 1; }
+.picker-card-name { font-weight: 600; line-height: 1.25; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.picker-card-meta { font-size: .78rem; color: var(--bs-secondary-color); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.picker-card-tags { display: flex; flex-wrap: wrap; gap: .25rem; }
+.picker-card-tags .badge { font-weight: 500; font-size: .68rem; }
+.picker-card-add {
+    width: 2rem; height: 2rem; border-radius: 50%; display: grid; place-items: center; flex-shrink: 0;
+    background: color-mix(in srgb, var(--c-primary) 12%, transparent); color: var(--c-primary); font-size: 1.05rem;
+}
+.picker-card.added .picker-card-add { background: var(--bs-success); color: #fff; }
+.picker-star {
+    position: absolute; top: .3rem; right: .3rem; width: 2rem; height: 2rem; border-radius: 50%;
+    border: 0; background: none; color: var(--bs-secondary-color); font-size: 1rem; display: grid; place-items: center;
+}
+.picker-star:hover { color: #f5a623; }
+.picker-star.on { color: #f5a623; }
+.picker-star:focus-visible { outline: 2px solid var(--c-primary); }
+/* przycisk „dodaj” przesunięty w dół, żeby nie kolidował z gwiazdką */
+.picker-card-main .picker-card-add { align-self: flex-end; margin-right: -2.1rem; }
+@media (max-width: 767.98px) {
+    .picker-grid { grid-template-columns: 1fr; }
+}
+
+/* ── Trenuj (/train): obsługa kciukiem na telefonie ── */
+.train-bar {
+    position: sticky; top: 0; z-index: 20; margin: -.25rem 0 .5rem; padding: .6rem .75rem .5rem;
+    background: var(--bs-body-bg); border: 1px solid var(--bs-border-color); border-radius: .85rem;
+    box-shadow: 0 4px 14px rgba(15, 23, 42, .06);
+}
+.train-bar .min-w-0 { min-width: 0; }
+.train-progress { height: 6px; border-radius: 999px; background: var(--bs-tertiary-bg); margin-top: .5rem; overflow: hidden; }
+.train-progress > div { height: 100%; background: var(--bs-success); border-radius: inherit; transition: width .3s ease; }
+.train-hint { font-size: .82rem; color: var(--bs-secondary-color); margin: 0 0 .75rem; }
+
+.train-ex { margin-bottom: .75rem; border-radius: .85rem; overflow: hidden; }
+.train-ex.is-done { border-color: color-mix(in srgb, var(--bs-success) 45%, var(--bs-border-color)); }
+.train-ex-head {
+    display: flex; align-items: center; gap: .7rem; width: 100%; padding: .75rem;
+    border: 0; background: none; text-align: left; color: inherit;
+}
+.train-ex.is-done .train-ex-head { background: color-mix(in srgb, var(--bs-success) 8%, transparent); }
+.train-ex-thumb { width: 52px; height: 52px; border-radius: .6rem; object-fit: cover; flex-shrink: 0; }
+.train-ex-thumb-empty {
+    display: grid; place-items: center; font-size: 1.35rem;
+    background: color-mix(in srgb, var(--c-primary) 10%, transparent); color: var(--c-primary);
+}
+.train-ex-title { display: flex; flex-direction: column; min-width: 0; flex: 1; }
+.train-ex-name { font-weight: 700; font-size: 1.02rem; line-height: 1.25; }
+.train-ex-target { font-size: .82rem; color: var(--bs-secondary-color); }
+.train-ex-status {
+    flex-shrink: 0; min-width: 2.6rem; height: 2.6rem; padding: 0 .5rem; border-radius: 999px;
+    display: grid; place-items: center; font-weight: 700; font-size: .85rem; font-variant-numeric: tabular-nums;
+    background: var(--bs-tertiary-bg); color: var(--bs-secondary-color);
+}
+.train-ex-status.done { background: var(--bs-success); color: #fff; font-size: 1.3rem; }
+.train-ex-body { padding: 0 .6rem .7rem; }
+.train-ex-note {
+    font-size: .85rem; padding: .5rem .65rem; margin-bottom: .6rem; border-radius: .55rem;
+    background: color-mix(in srgb, var(--c-primary) 8%, transparent);
+}
+
+.train-cols, .train-set {
+    display: grid; align-items: center; gap: .35rem;
+    grid-template-columns: 1.25rem repeat(var(--cols, 2), minmax(0, 1fr)) 3.2rem;
+}
+.train-cols {
+    font-size: .68rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em;
+    color: var(--bs-secondary-color); padding: 0 .25rem .25rem; white-space: nowrap;
+}
+.train-cols > span:not(:first-child):not(:last-child) { text-align: center; }
+.train-set {
+    padding: .35rem .25rem; border-radius: .7rem; margin-bottom: .3rem;
+    transition: background .15s;
+}
+.train-set.is-done { background: color-mix(in srgb, var(--bs-success) 12%, transparent); }
+.train-set-no { font-weight: 700; color: var(--bs-secondary-color); text-align: center; font-variant-numeric: tabular-nums; }
+.train-check {
+    width: 3.2rem; height: 3.2rem; border-radius: 50%; display: grid; place-items: center;
+    border: 2px solid var(--bs-border-color); background: var(--bs-body-bg); color: var(--bs-secondary-color);
+    font-size: 1.6rem; transition: background .15s, border-color .15s, color .15s, transform .1s;
+}
+.train-check:active { transform: scale(.94); }
+.train-set.is-done .train-check { background: var(--bs-success); border-color: var(--bs-success); color: #fff; }
+.train-check:focus-visible { outline: 3px solid color-mix(in srgb, var(--bs-success) 50%, transparent); outline-offset: 2px; }
+.train-ex-actions { display: flex; gap: .5rem; margin-top: .4rem; }
+.train-ex-actions .btn { flex: 1; }
+
+.stepper {
+    display: flex; align-items: stretch; height: 3.1rem; min-width: 0;
+    border: 1px solid var(--bs-border-color); border-radius: .7rem; background: var(--bs-body-bg); overflow: hidden;
+}
+.stepper-btn {
+    width: 1.9rem; flex-shrink: 0; border: 0; background: var(--bs-tertiary-bg); color: var(--bs-body-color);
+    font-size: 1.05rem; display: grid; place-items: center;
+}
+.stepper-btn:active { background: color-mix(in srgb, var(--c-primary) 18%, transparent); }
+.stepper-input {
+    flex: 1; min-width: 0; width: 100%; border: 0; background: transparent; color: var(--bs-body-color);
+    text-align: center; font-size: 1.15rem; font-weight: 700; font-variant-numeric: tabular-nums; padding: 0 .1rem;
+}
+.stepper-input:focus { outline: none; background: color-mix(in srgb, var(--c-primary) 8%, transparent); }
+.stepper:focus-within { border-color: var(--c-primary); }
+.stepper-duration .stepper-input { font-size: 1rem; letter-spacing: -.02em; }
+.train-set.is-done .stepper { border-color: color-mix(in srgb, var(--bs-success) 40%, var(--bs-border-color)); }
+@media (max-width: 380px) {
+    .stepper-btn { width: 1.6rem; }
+    .stepper-input { font-size: 1rem; }
+}
+@media (prefers-reduced-motion: reduce) {
+    .train-progress > div, .train-check, .train-set { transition: none; }
+}
+[data-theme$="-dark"] .train-bar, [data-theme$="-dark"] .plan-ex, [data-theme$="-dark"] .picker-card { background: #1E293B; border-color: #334155; }
+[data-theme$="-dark"] .stepper, [data-theme$="-dark"] .train-check { background: #0F172A; border-color: #334155; }
+[data-theme$="-dark"] .stepper-btn { background: #273449; }

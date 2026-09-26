@@ -48,6 +48,22 @@ public sealed class WorkoutJournalSetDto
     public int SetNumber { get; set; }
     public int Reps { get; set; }
     public decimal WeightKg { get; set; }
+    public int? DurationSeconds { get; set; }
+    public decimal? DistanceMeters { get; set; }
+
+    /// <summary>Seria w czytelnej postaci: „10 × 60 kg”, „15 powt.”, „45 s”, „5 km · 28:00”, „40 m · 32 kg”.</summary>
+    public string Display
+    {
+        get
+        {
+            var parts = new List<string>();
+            if (DistanceMeters is decimal d && d > 0) parts.Add(PTScheduler.Domain.Rules.ExerciseTrackingRules.FormatDistance(d));
+            if (DurationSeconds is int t && t > 0) parts.Add(PTScheduler.Domain.Rules.ExerciseTrackingRules.FormatDuration(t));
+            if (Reps > 0) parts.Add(WeightKg > 0 ? $"{Reps} × {WeightKg:0.##} kg" : $"{Reps} powt.");
+            else if (WeightKg > 0) parts.Add($"{WeightKg:0.##} kg");
+            return parts.Count == 0 ? "—" : string.Join(" · ", parts);
+        }
+    }
 }
 
 /// <summary>Wiersz aktywności podopiecznego (widok trenera).</summary>

@@ -74,7 +74,7 @@ public class TrainingPlanService(
         var exIds = plan.Days.SelectMany(d => d.Exercises).Select(e => e.ExerciseId).Distinct().ToList();
         var exInfo = await db.Exercises.AsNoTracking()
             .Where(e => exIds.Contains(e.Id))
-            .Select(e => new { e.Id, e.NamePl, e.ImageUrls })
+            .Select(e => new { e.Id, e.NamePl, e.ImageUrls, e.Tracking, e.Category, e.Equipment, e.NameEn })
             .ToDictionaryAsync(e => e.Id);
 
         return new PlanEditDto
@@ -98,10 +98,14 @@ public class TrainingPlanService(
                         ExerciseId = x.ExerciseId,
                         ExerciseNamePl = info?.NamePl ?? $"#{x.ExerciseId}",
                         ThumbnailUrl = info is null ? null : FirstImage(info.ImageUrls),
+                        Tracking = info is null ? default
+                            : info.Tracking ?? PTScheduler.Domain.Rules.ExerciseTrackingRules.Guess(info.Category, info.Equipment, info.NameEn, info.NamePl),
                         Order = x.Order,
                         Sets = x.Sets,
                         Reps = x.Reps,
                         TargetWeightKg = x.TargetWeightKg,
+                        TargetDurationSeconds = x.TargetDurationSeconds,
+                        TargetDistanceMeters = x.TargetDistanceMeters,
                         Tempo = x.Tempo,
                         RestSeconds = x.RestSeconds,
                         Notes = x.Notes
@@ -184,6 +188,8 @@ public class TrainingPlanService(
                 pe.Sets = xe.Sets;
                 pe.Reps = string.IsNullOrWhiteSpace(xe.Reps) ? null : xe.Reps.Trim();
                 pe.TargetWeightKg = xe.TargetWeightKg;
+                pe.TargetDurationSeconds = xe.TargetDurationSeconds is > 0 ? xe.TargetDurationSeconds : null;
+                pe.TargetDistanceMeters = xe.TargetDistanceMeters is > 0 ? xe.TargetDistanceMeters : null;
                 pe.Tempo = string.IsNullOrWhiteSpace(xe.Tempo) ? null : xe.Tempo.Trim();
                 pe.RestSeconds = xe.RestSeconds;
                 pe.Notes = string.IsNullOrWhiteSpace(xe.Notes) ? null : xe.Notes.Trim();
@@ -233,6 +239,8 @@ public class TrainingPlanService(
                     Sets = x.Sets,
                     Reps = x.Reps,
                     TargetWeightKg = x.TargetWeightKg,
+                    TargetDurationSeconds = x.TargetDurationSeconds,
+                    TargetDistanceMeters = x.TargetDistanceMeters,
                     Tempo = x.Tempo,
                     RestSeconds = x.RestSeconds,
                     Notes = x.Notes

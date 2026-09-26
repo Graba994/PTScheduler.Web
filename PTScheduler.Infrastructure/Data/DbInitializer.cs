@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using PTScheduler.Domain.Constants;
 using PTScheduler.Domain.Entities;
+using PTScheduler.Domain.Rules;
 using PTScheduler.Domain.Enums;
 using PTScheduler.Infrastructure.Data.SeedData;
 
@@ -146,6 +147,19 @@ public static class DbInitializer
     /// (opis EN dostępny zawsze). Bazę obrazów można nadpisać zmienną
     /// EXERCISE_IMAGE_BASE_URL (domyślnie repo Free Exercise DB).
     /// </summary>
+    /// <summary>
+    /// Typ pomiaru (ciężar+powtórzenia, czas, dystans…) dla ćwiczeń, które go jeszcze nie mają —
+    /// cała baza dostaje parametry automatycznie, a trener może je zmienić w edytorze.
+    /// </summary>
+    public static async Task AssignTrackingAsync(ApplicationDbContext db)
+    {
+        var missing = await db.Exercises.Where(e => e.Tracking == null).ToListAsync();
+        if (missing.Count == 0) return;
+        foreach (var e in missing)
+            e.Tracking = ExerciseTrackingRules.Guess(e.Category, e.Equipment, e.NameEn, e.NamePl);
+        await db.SaveChangesAsync();
+    }
+
     public static async Task SeedExerciseCatalogAsync(ApplicationDbContext db)
     {
         var asm = typeof(DbInitializer).Assembly;
@@ -161,6 +175,7 @@ public static class DbInitializer
                       ?? new Dictionary<string, string[]>();
 
         await ApplyPolishTranslationsAsync(db, plTexts, plNames);
+        await AssignTrackingAsync(db);
 
         var have = (await db.Exercises
                 .Where(e => e.SourceKey != null)
@@ -198,6 +213,7 @@ public static class DbInitializer
                 ImageUrls = string.Join(",", r.Images.Select(p => imageBase + p.TrimStart('/'))),
                 VideoType = ExerciseVideoType.None,
                 VideoRef = null,
+                Tracking = ExerciseTrackingRules.Guess(MapCategory(r.Category), r.Equipment, r.Name, namePl),
                 SourceKey = r.Id
             });
         }

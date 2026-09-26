@@ -42,6 +42,9 @@ public class Exercise
     /// <summary>Mechanika (compound/isolation) — słownik FED, opcjonalny.</summary>
     public string? Mechanic { get; set; }
 
+    /// <summary>Co mierzymy w serii (ciężar+powtórzenia, czas, dystans…). Null = jeszcze nieprzypisane — uzupełnia start aplikacji.</summary>
+    public ExerciseTracking? Tracking { get; set; }
+
     /// <summary>CSV adresów obrazów. Bazowe → współdzielony magazyn; custom → Bunny/URL.</summary>
     public string ImageUrls { get; set; } = string.Empty;
 

@@ -39,11 +39,14 @@ public sealed class PlanExerciseEditDto
     // Pola pomocnicze do wyświetlenia w kreatorze (nie zapisywane wprost).
     public string ExerciseNamePl { get; set; } = string.Empty;
     public string? ThumbnailUrl { get; set; }
+    public PTScheduler.Domain.Enums.ExerciseTracking Tracking { get; set; }
 
     public int Order { get; set; }
     public int Sets { get; set; } = 3;
     public string? Reps { get; set; }
     public decimal? TargetWeightKg { get; set; }
+    public int? TargetDurationSeconds { get; set; }
+    public decimal? TargetDistanceMeters { get; set; }
     public string? Tempo { get; set; }
     public int? RestSeconds { get; set; }
     public string? Notes { get; set; }
