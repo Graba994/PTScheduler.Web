@@ -54,6 +54,12 @@ public class CreatePublicBookingDto
     public DateTime SlotStart { get; set; }
     public string TrainerUserId { get; set; } = string.Empty;
     public bool AcceptedTerms { get; set; }
+
+    // Ochrona przed botami: pole-pułapka (ukryte, człowiek go nie wypełnia),
+    // moment pokazania formularza i adres IP do limitu rezerwacji.
+    public string? Website { get; set; }
+    public DateTime? FormShownAtUtc { get; set; }
+    public string? ClientIp { get; set; }
 }
 
 public class BookingResultDto

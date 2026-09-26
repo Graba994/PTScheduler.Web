@@ -8,6 +8,9 @@ using PTScheduler.Portal.Services;
 
 var builder = WebApplication.CreateBuilder(args);
 
+// Lokalne dane połączenia trzymaj w connections.json (w .gitignore), nie w appsettings.
+builder.Configuration.AddJsonFile("connections.json", optional: true, reloadOnChange: true);
+
 builder.Services.AddDbContextFactory<PortalDbContext>(options =>
 {
     var conn = builder.Configuration.GetConnectionString("DefaultConnection")

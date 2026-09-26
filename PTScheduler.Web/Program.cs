@@ -39,6 +39,16 @@ using PTScheduler.Web.Services;
 // Musi być ustawiony PRZED zbudowaniem data source — stąd sam początek pliku.
 AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
 
+// Polska kultura dla całej aplikacji: nazwy miesięcy i dni w UI i mailach
+// („28 wrz”, „czwartek, 1 października”), przecinek dziesiętny w kwotach.
+// Kontener nie ma LANG, więc bez tego wszystko formatowało się po angielsku
+// (np. „28 SEP” u klienta, „Thursday, 01 October” w przypomnieniach).
+// Uwaga: wartości wstawiane do CSS/JS formatuj niezależnie od kultury
+// (FormattableString.Invariant), inaczej „12,5px” zepsuje styl.
+var plCulture = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
+System.Globalization.CultureInfo.DefaultThreadCurrentCulture = plCulture;
+System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = plCulture;
+
 var builder = WebApplication.CreateBuilder(args);
 
 builder.Configuration.AddJsonFile("connections.json", optional: true, reloadOnChange: true);
@@ -67,6 +77,7 @@ builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions
 });
 
 builder.Services.AddCascadingAuthenticationState();
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IdentityRedirectManager>();
 builder.Services.AddScoped<AuthenticationStateProvider, IdentityRevalidatingAuthenticationStateProvider>();
 
@@ -136,6 +147,20 @@ builder.Services.AddHostedService<PTScheduler.Web.Services.PackageReminderServic
 // Tracks whether DB is reachable. Mutated at startup and via /db-error/retry.
 builder.Services.AddSingleton<StartupHealth>();
 
+// Aplikacja stoi za reverse proxy (Nginx Proxy Manager). Bez tego RemoteIpAddress
+// to adres proxy — limit logowań obejmował całe studio naraz — a Scheme to http,
+// co psuło adresy zwrotne (OAuth). Ufamy wyłącznie proxy z sieci prywatnych.
+builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(o =>
+{
+    o.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+                       | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
+                       | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost;
+    o.KnownIPNetworks.Clear();
+    o.KnownProxies.Clear();
+    foreach (var net in new[] { "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "::1/128", "fc00::/7" })
+        o.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(net));
+});
+
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -161,6 +186,8 @@ builder.Services.AddRateLimiter(options =>
 var app = builder.Build();
 
 StudioClock.Use(app.Services.GetRequiredService<IAppClock>());
+
+app.UseForwardedHeaders();
 
 // Run migrations + seed. On failure: log and flag the app as DB-degraded — DO NOT crash.
 var startupHealth = app.Services.GetRequiredService<StartupHealth>();
@@ -199,6 +226,12 @@ app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages:
 if (Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") != "true")
     app.UseHttpsRedirection();
 
+app.UseRequestLocalization(new RequestLocalizationOptions
+{
+    DefaultRequestCulture = new Microsoft.AspNetCore.Localization.RequestCulture(plCulture),
+    SupportedCultures = [plCulture],
+    SupportedUICultures = [plCulture],
+});
 app.UseRateLimiter();
 app.UseAntiforgery();
 

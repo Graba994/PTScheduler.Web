@@ -94,8 +94,41 @@ public class PublicBookingService(
         return result;
     }
 
+    // Limity anty-spam dla anonimowego formularza (w pamięci instancji — wystarczy,
+    // bo tenant to jeden kontener). Bot bez nich mógł zająć wszystkie terminy
+    // i wysyłać setki maili powitalnych przez SMTP trenera.
+    private const int MaxBookingsPerIpPerHour = 3;
+    private const int MaxBookingsPerTrainerPerDay = 20;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, List<DateTime>> RecentBookings = new();
+
+    private static bool TryReserveQuota(string key, int limit, TimeSpan window)
+    {
+        var now = DateTime.UtcNow;
+        var list = RecentBookings.GetOrAdd(key, _ => []);
+        lock (list)
+        {
+            list.RemoveAll(t => now - t > window);
+            if (list.Count >= limit) return false;
+            list.Add(now);
+            return true;
+        }
+    }
+
     public async Task<BookingResultDto> CreateBookingAsync(CreatePublicBookingDto dto, string appBaseUrl)
     {
+        if (!string.IsNullOrWhiteSpace(dto.Website))
+        {
+            logger.LogWarning("Public booking rejected: honeypot filled (IP {Ip}).", dto.ClientIp);
+            return Fail("Nie udało się zarezerwować terminu. Spróbuj ponownie.");
+        }
+        if (dto.FormShownAtUtc is { } shown && DateTime.UtcNow - shown < TimeSpan.FromSeconds(3))
+            return Fail("Formularz został wysłany zbyt szybko. Sprawdź dane i spróbuj ponownie.");
+        if (!string.IsNullOrEmpty(dto.ClientIp)
+            && !TryReserveQuota($"ip:{dto.ClientIp}", MaxBookingsPerIpPerHour, TimeSpan.FromHours(1)))
+            return Fail("Zbyt wiele rezerwacji z tego urządzenia. Spróbuj za godzinę albo skontaktuj się z trenerem.");
+        if (!TryReserveQuota($"trainer:{dto.TrainerUserId}", MaxBookingsPerTrainerPerDay, TimeSpan.FromDays(1)))
+            return Fail("Chwilowo nie przyjmujemy nowych rezerwacji online. Skontaktuj się z trenerem.");
+
         if (!dto.AcceptedTerms)
             return Fail("Aby zarezerwować, musisz zaakceptować warunki.");
         if (string.IsNullOrWhiteSpace(dto.FirstName) || string.IsNullOrWhiteSpace(dto.LastName))
@@ -203,7 +236,7 @@ public class PublicBookingService(
                 : $"<strong>{cfg.Price.ToString("N2", PlCulture)} zł</strong>";
             var clientVars = new Dictionary<string, string>
             {
-                ["ClientName"] = user.FirstName ?? "",
+                ["ClientName"] = System.Net.WebUtility.HtmlEncode(user.FirstName ?? ""),
                 ["TrainerName"] = trainerName,
                 ["SessionDate"] = when,
                 ["Duration"] = cfg.DurationMinutes.ToString(),
@@ -217,20 +250,23 @@ public class PublicBookingService(
 
             if (!string.IsNullOrEmpty(trainer?.Email))
             {
+                // Dane z anonimowego formularza — kodujemy, żeby nie dało się wstrzyknąć
+                // HTML/linków do maila trenera.
+                static string H(string? v) => System.Net.WebUtility.HtmlEncode(v ?? "");
                 var phoneRow = string.IsNullOrEmpty(dto.Phone) ? "" :
-                    $"<p style=\"margin:6px 0\"><strong>📞 Telefon:</strong> {dto.Phone}</p>";
+                    $"<p style=\"margin:6px 0\"><strong>📞 Telefon:</strong> {H(dto.Phone)}</p>";
                 var goalRow = string.IsNullOrEmpty(dto.TrainingGoal) ? "" :
-                    $"<p style=\"margin:10px 0 0;padding-top:8px;border-top:1px solid #e5e7eb\"><strong>🎯 Cel treningowy:</strong><br/>{dto.TrainingGoal}</p>";
+                    $"<p style=\"margin:10px 0 0;padding-top:8px;border-top:1px solid #e5e7eb\"><strong>🎯 Cel treningowy:</strong><br/>{H(dto.TrainingGoal)}</p>";
                 var trainerVars = new Dictionary<string, string>
                 {
                     ["TrainerName"] = trainerName,
-                    ["ClientName"] = $"{client.FirstName} {client.LastName}",
-                    ["ClientEmail"] = dto.Email,
-                    ["ClientPhone"] = dto.Phone ?? "",
+                    ["ClientName"] = H($"{client.FirstName} {client.LastName}"),
+                    ["ClientEmail"] = H(dto.Email),
+                    ["ClientPhone"] = H(dto.Phone),
                     ["PhoneRow"] = phoneRow,
                     ["SessionDate"] = when,
                     ["Duration"] = cfg.DurationMinutes.ToString(),
-                    ["TrainingGoal"] = dto.TrainingGoal ?? "",
+                    ["TrainingGoal"] = H(dto.TrainingGoal),
                     ["GoalRow"] = goalRow
                 };
                 var (trainerSubject, trainerHtml) = await emailTemplateService.RenderAsync("trainer-new-booking", trainerVars);

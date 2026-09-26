@@ -165,6 +165,9 @@ public class DataExportService(IDbContextFactory<ApplicationDbContext> dbFactory
     private static string Esc(string? v)
     {
         if (string.IsNullOrEmpty(v)) return "";
+        // Ochrona przed wstrzyknięciem formuł (np. „=HYPERLINK(...)” w imieniu klienta
+        // wykonałoby się w Excelu u trenera) — apostrof wymusza tekst.
+        if (v[0] is '=' or '+' or '-' or '@' or '\t' or '\r') v = "'" + v;
         if (v.Contains(';') || v.Contains('"') || v.Contains('\n'))
             return $"\"{v.Replace("\"", "\"\"")}\"";
         return v;

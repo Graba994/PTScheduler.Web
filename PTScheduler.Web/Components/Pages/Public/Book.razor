@@ -5,6 +5,7 @@
 @using PTScheduler.Application.Interfaces
 @inject IPublicBookingService BookingService
 @inject NavigationManager Nav
+@inject IHttpContextAccessor HttpContextAccessor
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <PageTitle>Umów sesję wstępną</PageTitle>
@@ -170,6 +171,10 @@
                     <label>Telefon</label>
                     <input type="tel" class="form-control" maxlength="20" @bind="_form.Phone" />
                 </div>
+                @* Pole-pułapka na boty: niewidoczne dla ludzi i czytników ekranu. *@
+                <div style="position:absolute;left:-10000px;top:auto;width:1px;height:1px;overflow:hidden" aria-hidden="true">
+                    <label>Strona WWW <input type="text" tabindex="-1" autocomplete="off" @bind="_form.Website" /></label>
+                </div>
                 <div class="form-field">
                     <label>Cel treningowy <span class="text-muted small">(opcjonalnie)</span></label>
                     <textarea class="form-control" rows="3" maxlength="500" @bind="_form.TrainingGoal"
@@ -302,7 +307,9 @@
 
     private void GoToForm()
     {
-        if (_selectedSlot.HasValue) _step = Step.Form;
+        if (!_selectedSlot.HasValue) return;
+        _step = Step.Form;
+        _form.FormShownAtUtc ??= DateTime.UtcNow;
     }
 
     private async Task Submit()
@@ -319,6 +326,7 @@
         { _formError = "Zaakceptuj zgodę na kontakt, by zarezerwować."; return; }
 
         _form.SlotStart = _selectedSlot.Value;
+        _form.ClientIp = HttpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
         _form.TrainerUserId = _offer.TrainerUserId;
 
         _submitting = true;
