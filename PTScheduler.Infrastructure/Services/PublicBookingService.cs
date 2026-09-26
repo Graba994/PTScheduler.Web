@@ -287,7 +287,8 @@ public class PublicBookingService(
             ClientEmail = emailNorm,
             TrainerName = trainerName,
             DurationMinutes = cfg.DurationMinutes,
-            EmailSent = emailSent
+            EmailSent = emailSent,
+            ClientId = client.Id
         };
     }
 

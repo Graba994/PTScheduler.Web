@@ -20,3 +20,18 @@ window.ptChat = {
         window.ptChat._handler = null;
     }
 };
+
+// Udostępnianie linku (menu systemowe na telefonie, kopiowanie na komputerze).
+window.ptShare = {
+    share: async function (title, text, url) {
+        if (navigator.share) {
+            try { await navigator.share({ title: title, text: text, url: url }); return 'shared'; }
+            catch (e) { if (e && e.name === 'AbortError') return 'aborted'; }
+        }
+        return (await window.ptShare.copy(url)) ? 'copied' : 'failed';
+    },
+    copy: async function (text) {
+        try { await navigator.clipboard.writeText(text); return true; }
+        catch (e) { return false; }
+    }
+};

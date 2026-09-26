@@ -148,6 +148,7 @@ builder.Services.AddHostedService<PTScheduler.Web.Services.EntitlementSyncServic
 builder.Services.AddHostedService<PTScheduler.Web.Services.PackageReminderService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.KsefStatusService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.MembershipBillingService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.ReferralRewardService>();
 
 // Tracks whether DB is reachable. Mutated at startup and via /db-error/retry.
 builder.Services.AddSingleton<StartupHealth>();
@@ -309,6 +310,28 @@ app.MapGet("/reports/client/{clientId:int}/monthly", async (
         return Results.NotFound(ex.Message);
     }
 }).RequireAuthorization();
+
+// Link polecający: zapamiętuje kod w ciasteczku na 30 dni i prowadzi na stronę trenera.
+// Kod trafia do polecenia przy rejestracji albo rezerwacji pierwszej wizyty.
+app.MapGet("/r/{code}", async (
+    string code,
+    PTScheduler.Application.Interfaces.IReferralService referrals,
+    PTScheduler.Web.Services.EntitlementService entitlements,
+    HttpContext ctx) =>
+{
+    if (entitlements.IsAllowed("ReferralProgram") && await referrals.IsValidCodeAsync(code))
+    {
+        ctx.Response.Cookies.Append("pt_ref", code.Trim().ToUpperInvariant(), new CookieOptions
+        {
+            MaxAge = TimeSpan.FromDays(30),
+            SameSite = SameSiteMode.Lax,
+            Secure = ctx.Request.IsHttps,
+            HttpOnly = true,
+            IsEssential = true
+        });
+    }
+    return Results.Redirect("/");
+});
 
 // Zdjęcia sylwetki: pliki leżą w branding/_private (blokowanym dla plików statycznych),
 // więc jedyna droga do nich to ten endpoint — tylko dla klienta, jego trenera i admina.

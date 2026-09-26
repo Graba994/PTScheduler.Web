@@ -16,6 +16,8 @@
 @inject NavigationManager NavigationManager
 @inject IdentityRedirectManager RedirectManager
 @inject PTScheduler.Infrastructure.Data.ApplicationDbContext DbContext
+@inject PTScheduler.Application.Interfaces.IReferralService Referrals
+@inject PTScheduler.Web.Services.EntitlementService Entitlements
 
 <PageTitle>Rejestracja</PageTitle>
 
@@ -91,13 +93,15 @@
             {
                 <div class="mb-4">
                     <label class="form-label">Wybierz trenera <span class="text-danger">*</span></label>
-                    <select class="form-select" @bind="selectedTrainerId">
+                    @* Pole formularza (InputSelect), a nie @bind — strona jest renderowana statycznie,
+                       więc wybór musi trafić do POST-a razem z resztą danych. *@
+                    <InputSelect class="form-select" @bind-Value="Input.TrainerId">
                         <option value="">— wybierz trenera —</option>
                         @foreach (var t in trainers)
                         {
                             <option value="@t.Id">@t.Name</option>
                         }
-                    </select>
+                    </InputSelect>
                 </div>
             }
 
@@ -129,9 +133,10 @@
 </div>
 
 @code {
+    [CascadingParameter] private HttpContext? HttpContext { get; set; }
+
     private IEnumerable<IdentityError>? identityErrors;
     private List<TrainerItem> trainers = [];
-    private string selectedTrainerId = string.Empty;
     private bool _registering;
 
     [SupplyParameterFromForm]
@@ -157,8 +162,6 @@
             .OrderBy(t => t.Name)
             .ToList();
 
-        if (trainers.Count == 1)
-            selectedTrainerId = trainers[0].Id;
     }
 
     public async Task RegisterUser(EditContext editContext)
@@ -169,7 +172,8 @@
 
     private async Task DoRegister()
     {
-        if (trainers.Count > 1 && string.IsNullOrEmpty(selectedTrainerId))
+        // Tylko trener z listy — identyfikator z formularza nie może wskazać dowolnego konta.
+        if (trainers.Count > 1 && !trainers.Any(t => t.Id == Input.TrainerId))
         {
             identityErrors = [new IdentityError { Description = "Wybierz trenera." }];
             return;
@@ -195,8 +199,8 @@
 
         await UserManager.AddToRoleAsync(user, Roles.Client);
 
-        var trainerId = trainers.Count == 1 ? trainers[0].Id : selectedTrainerId;
-        DbContext.Clients.Add(new Client
+        var trainerId = trainers.Count == 1 ? trainers[0].Id : Input.TrainerId;
+        var client = new Client
         {
             ApplicationUserId = user.Id,
             FirstName = Input.FirstName,
@@ -205,8 +209,17 @@
             Status = PTScheduler.Domain.Enums.ClientStatus.Pending,
             CreatedAt = DateTime.UtcNow,
             TermsAcceptedAt = DateTime.UtcNow
-        });
+        };
+        DbContext.Clients.Add(client);
         await DbContext.SaveChangesAsync();
+
+        // Rejestracja z linku polecającego (/r/{kod}) — kod czeka w ciasteczku.
+        if (Entitlements.IsAllowed("ReferralProgram") && HttpContext?.Request.Cookies["pt_ref"] is { Length: > 0 } refCode)
+        {
+            try { await Referrals.RecordAsync(client.Id, refCode); }
+            catch (Exception ex) { Logger.LogWarning(ex, "Referral for new client {ClientId} not recorded.", client.Id); }
+            HttpContext.Response.Cookies.Delete("pt_ref");
+        }
 
         Logger.LogInformation("New client self-registered: {Email}", Input.Email);
         await SignInManager.SignInAsync(user, isPersistent: true);
@@ -251,5 +264,7 @@
 
         [Range(typeof(bool), "true", "true", ErrorMessage = "Musisz zaakceptować regulamin.")]
         public bool AcceptTerms { get; set; }
+
+        public string? TrainerId { get; set; }
     }
 }

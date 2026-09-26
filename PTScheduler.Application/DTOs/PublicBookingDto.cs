@@ -71,4 +71,6 @@ public class BookingResultDto
     public string? TrainerName { get; set; }
     public int DurationMinutes { get; set; }
     public bool EmailSent { get; set; }
+    /// <summary>Nowo utworzony klient (np. do zapisania polecenia).</summary>
+    public int? ClientId { get; set; }
 }

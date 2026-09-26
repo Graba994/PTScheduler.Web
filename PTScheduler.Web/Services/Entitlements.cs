@@ -61,6 +61,10 @@ public class Entitlements
     public string VideoProvider { get; set; } = "youtube";
     public bool IntegrationGoogleMeet { get; set; }
 
+    // ── Marketing ─────────────────────────────────
+    // Program poleceń: domyślnie wyłączony — to płatny dodatek w wybranych planach.
+    public bool ReferralProgram { get; set; }
+
     // Fallback used when TENANT_ENTITLEMENTS isn't set — legacy behavior,
     // no limits, no locked modules.
     public static Entitlements Unlimited() => new()
@@ -90,6 +94,7 @@ public class Entitlements
         IntegrationPayU = true,
         IntegrationPrzelewy24 = true,
         IntegrationGoogleMeet = true,
+        ReferralProgram = true,
         VideoProvider = "bunny"
     };
 }

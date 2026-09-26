@@ -89,6 +89,8 @@ public static class DependencyInjection
         services.AddSingleton<IChatNotifier, ChatNotifier>();
         services.AddScoped<IChatService, ChatService>();
         services.AddScoped<IProgressPhotoService, ProgressPhotoService>();
+        services.AddScoped<IMarketingSettingsService, MarketingSettingsService>();
+        services.AddScoped<IReferralService, ReferralService>();
         services.AddHttpClient<PTScheduler.Infrastructure.Services.Ksef.KsefClient>(c => c.Timeout = TimeSpan.FromSeconds(60));
         services.AddScoped<IKsefService, PTScheduler.Infrastructure.Services.Ksef.KsefService>();
         services.AddScoped<ISmsSettingsService, SmsSettingsService>();

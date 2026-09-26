@@ -2,6 +2,7 @@
 @inject IJSRuntime JS
 @inject PTScheduler.Web.Services.EntitlementService Entitlements
 @inject AuthenticationStateProvider AuthState
+@inject PTScheduler.Application.Interfaces.IMarketingSettingsService MarketingSettings
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Domain.Constants
 @using System.Security.Claims
@@ -154,6 +155,13 @@
                             <i class="bi bi-arrow-repeat"></i>
                             <span>Karnety</span>
                         </a>
+                        @if (_referralsEnabled)
+                        {
+                        <a href="/my/referrals" class="mobile-sheet-tile" @onclick="CloseSheet">
+                            <i class="bi bi-gift"></i>
+                            <span>Poleć</span>
+                        </a>
+                        }
                         <a href="/my/stats" class="mobile-sheet-tile" @onclick="CloseSheet">
                             <i class="bi bi-graph-up"></i>
                             <span>Statystyki</span>
@@ -205,6 +213,7 @@
     private string _initials = "";
     private string _name = "";
     private string _email = "";
+    private bool _referralsEnabled;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -219,6 +228,7 @@
                 ? $"{parts[0][0]}{parts[^1][0]}".ToUpper()
                 : _name.Length > 0 ? _name[0].ToString().ToUpper() : "?";
             try { _dark = await JS.InvokeAsync<bool>("PTTheme.isDark"); } catch { }
+            try { _referralsEnabled = Entitlements.IsAllowed("ReferralProgram") && (await MarketingSettings.GetAsync()).ReferralEnabled; } catch { }
             try
             {
                 var standalone = await JS.InvokeAsync<bool>("eval",

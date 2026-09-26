@@ -53,6 +53,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<MembershipPeriod> MembershipPeriods => Set<MembershipPeriod>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
     public DbSet<ProgressPhoto> ProgressPhotos => Set<ProgressPhoto>();
+    public DbSet<MarketingSettings> MarketingSettings => Set<MarketingSettings>();
+    public DbSet<Referral> Referrals => Set<Referral>();
     public DbSet<Coupon> Coupons => Set<Coupon>();
     public DbSet<CouponRedemption> CouponRedemptions => Set<CouponRedemption>();
 
@@ -427,6 +429,29 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             e.Property(p => p.UploadedByUserId).HasMaxLength(450);
             e.HasOne(p => p.Client).WithMany().HasForeignKey(p => p.ClientId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(p => new { p.ClientId, p.TakenOn });
+        });
+
+        builder.Entity<Client>(e =>
+        {
+            e.Property(c => c.ReferralCode).HasMaxLength(16);
+            e.HasIndex(c => c.ReferralCode).IsUnique();
+        });
+
+        builder.Entity<MarketingSettings>(e =>
+        {
+            e.Property(m => m.ReferrerRewardValue).HasPrecision(10, 2);
+            e.Property(m => m.GoogleReviewUrl).HasMaxLength(500);
+        });
+
+        builder.Entity<Referral>(e =>
+        {
+            e.HasOne(r => r.ReferrerClient).WithMany().HasForeignKey(r => r.ReferrerClientId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(r => r.ReferredClient).WithMany().HasForeignKey(r => r.ReferredClientId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(r => r.ReferredClientId).IsUnique();
+            e.HasIndex(r => new { r.ReferrerClientId, r.Status });
+            e.Property(r => r.RewardDescription).HasMaxLength(200);
+            e.Property(r => r.RewardCouponCode).HasMaxLength(40);
+            e.Property(r => r.FriendCouponCode).HasMaxLength(40);
         });
 
         builder.Entity<MembershipPlan>(e =>

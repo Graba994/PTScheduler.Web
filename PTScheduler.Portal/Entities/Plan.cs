@@ -75,5 +75,8 @@ public class Plan
     // ── Integracje rozmowy ─────────────────────────────────
     public bool IntegrationGoogleMeet { get; set; }
 
+    // ── Marketing ─────────────────────────────────
+    public bool ReferralProgram { get; set; }
+
     public ICollection<Tenant> Tenants { get; set; } = [];
 }

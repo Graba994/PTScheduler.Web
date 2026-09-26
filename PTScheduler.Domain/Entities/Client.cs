@@ -7,6 +7,9 @@ public class Client
     public int Id { get; set; }
     public string ApplicationUserId { get; set; } = string.Empty;
 
+    /// <summary>Kod polecający klienta (link <c>/r/{kod}</c>); tworzony przy pierwszym użyciu.</summary>
+    public string? ReferralCode { get; set; }
+
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
     public string? Phone { get; set; }
