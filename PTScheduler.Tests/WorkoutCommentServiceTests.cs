@@ -25,6 +25,8 @@ public class WorkoutCommentServiceTests
         await using (var db = f.CreateDbContext())
         {
             db.Clients.Add(new Client { Id = 1, ApplicationUserId = "client-user", FirstName = "Anna", LastName = "Nowak", TrainerUserId = "trainer-1" });
+            db.Users.Add(new ApplicationUser { Id = "trainer-1", FirstName = "Tomek", LastName = "Trener" });
+            db.Users.Add(new ApplicationUser { Id = "client-user", FirstName = "Anna", LastName = "Nowak" });
             await db.SaveChangesAsync();
         }
         var users = MockUserManagerHelper.Create();

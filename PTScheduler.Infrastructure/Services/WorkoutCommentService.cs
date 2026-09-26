@@ -116,7 +116,8 @@ public class WorkoutCommentService(
 
     private async Task<string> ResolveNameAsync(string userId)
     {
-        var user = await userManager.FindByIdAsync(userId);
+        await using var db = dbFactory.CreateDbContext();
+        var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == userId);
         if (user is null) return "Użytkownik";
         var name = $"{user.FirstName} {user.LastName}".Trim();
         return string.IsNullOrEmpty(name) ? user.Email ?? "Użytkownik" : name;

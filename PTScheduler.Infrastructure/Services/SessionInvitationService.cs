@@ -102,7 +102,7 @@ public class SessionInvitationService(
 
     private async Task<SessionInvitationDto> BuildDtoAsync(ApplicationDbContext db, SessionInvitation inv, Session session)
     {
-        var trainer = await userManager.FindByIdAsync(session.TrainerUserId);
+        var trainer = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == session.TrainerUserId);
         var trainerName = $"{trainer?.FirstName} {trainer?.LastName}".Trim()
                           is { Length: > 0 } n ? n : trainer?.Email ?? session.TrainerUserId;
 

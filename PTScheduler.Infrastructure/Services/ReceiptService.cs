@@ -29,7 +29,7 @@ public class ReceiptService(
             .FirstOrDefaultAsync(o => o.Id == orderId)
             ?? throw new InvalidOperationException($"Zamówienie {orderId} nie istnieje.");
 
-        var buyer = await userManager.FindByIdAsync(order.ApplicationUserId);
+        var buyer = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == order.ApplicationUserId);
         var branding = await brandingService.GetAsync();
 
         byte[]? logoBytes = null;

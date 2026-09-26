@@ -1,3 +1,4 @@
+@using Microsoft.EntityFrameworkCore
 @page "/my/profile"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Client")]
 @rendermode PTScheduler.Web.RenderModes.Server
@@ -5,7 +6,7 @@
 @inject ISessionPackageService PackageService
 @inject ISessionService SessionService
 @inject AuthenticationStateProvider AuthStateProvider
-@inject UserManager<ApplicationUser> UserManager
+@inject Microsoft.EntityFrameworkCore.IDbContextFactory<ApplicationDbContext> DbFactory
 @inject IJSRuntime JS
 @using Microsoft.AspNetCore.Identity
 @using PTScheduler.Application.Interfaces
@@ -223,7 +224,7 @@ else
 
                 @if (_activePackage.ExpiresAt.HasValue)
                 {
-                    var daysLeft = (int)(_activePackage.ExpiresAt.Value.ToLocalTime() - DateTime.Now).TotalDays;
+                    var daysLeft = (int)(_activePackage.ExpiresAt.Value.ToLocalTime() - StudioClock.Now).TotalDays;
                     <div class="mt-2 small @(daysLeft <= 7 ? "text-danger fw-semibold" : "text-muted")">
                         <i class="bi bi-hourglass-split me-1"></i>
                         Ważny do @_activePackage.ExpiresAt.Value.ToLocalTime().ToString("dd.MM.yyyy")
@@ -271,7 +272,8 @@ else
             // Trainer info
             if (!string.IsNullOrEmpty(_client.TrainerUserId))
             {
-                _trainer = await UserManager.FindByIdAsync(_client.TrainerUserId);
+                await using (var db = await DbFactory.CreateDbContextAsync())
+                    _trainer = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == _client.TrainerUserId);
                 if (_trainer is not null)
                 {
                     var firstName = _trainer.FirstName ?? string.Empty;
@@ -288,7 +290,7 @@ else
 
             if (_client.DateOfBirth.HasValue)
             {
-                var today = DateOnly.FromDateTime(DateTime.Today);
+                var today = DateOnly.FromDateTime(StudioClock.Today);
                 var dob   = _client.DateOfBirth.Value;
                 _age = today.Year - dob.Year;
                 if (today < dob.AddYears(_age)) _age--;

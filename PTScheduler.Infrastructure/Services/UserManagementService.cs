@@ -11,37 +11,49 @@ public class UserManagementService(
     UserManager<ApplicationUser> userManager,
     IDbContextFactory<ApplicationDbContext> dbFactory) : IUserManagementService
 {
+    // Odczyty idą przez własny kontekst z fabryki, a nie przez UserManager: ten
+    // korzysta ze wspólnego DbContext obwodu Blazora i przy równoległych
+    // zapytaniach (strona + menu) rzucał „A second operation was started…”.
     public async Task<List<UserDto>> GetAllUsersAsync()
     {
-        var users = await userManager.Users
+        await using var db = dbFactory.CreateDbContext();
+        var users = await db.Users.AsNoTracking()
             .Include(u => u.Supervisor)
             .OrderBy(u => u.Email)
             .ToListAsync();
-
-        var result = new List<UserDto>();
-        foreach (var user in users)
-        {
-            var roles = await userManager.GetRolesAsync(user);
-            result.Add(MapToDto(user, roles.FirstOrDefault() ?? string.Empty));
-        }
-        return result;
+        var roles = await RoleByUserAsync(db, users.Select(u => u.Id).ToList());
+        return users.Select(u => MapToDto(u, roles.GetValueOrDefault(u.Id, string.Empty))).ToList();
     }
 
     public async Task<UserDto?> GetUserAsync(string id)
     {
-        var user = await userManager.Users
+        await using var db = dbFactory.CreateDbContext();
+        var user = await db.Users.AsNoTracking()
             .Include(u => u.Supervisor)
             .FirstOrDefaultAsync(u => u.Id == id);
-
         if (user is null) return null;
-        var roles = await userManager.GetRolesAsync(user);
-        return MapToDto(user, roles.FirstOrDefault() ?? string.Empty);
+        var roles = await RoleByUserAsync(db, [id]);
+        return MapToDto(user, roles.GetValueOrDefault(id, string.Empty));
     }
 
     public async Task<List<UserDto>> GetTrainersAsync()
     {
-        var trainers = await userManager.GetUsersInRoleAsync(Roles.Trainer);
+        await using var db = dbFactory.CreateDbContext();
+        var trainers = await (from u in db.Users.AsNoTracking()
+                              join ur in db.UserRoles on u.Id equals ur.UserId
+                              join r in db.Roles on ur.RoleId equals r.Id
+                              where r.Name == Roles.Trainer
+                              select u).ToListAsync();
         return trainers.Select(u => MapToDto(u, Roles.Trainer)).ToList();
+    }
+
+    private static async Task<Dictionary<string, string>> RoleByUserAsync(ApplicationDbContext db, List<string> userIds)
+    {
+        var rows = await (from ur in db.UserRoles
+                          join r in db.Roles on ur.RoleId equals r.Id
+                          where userIds.Contains(ur.UserId)
+                          select new { ur.UserId, r.Name }).ToListAsync();
+        return rows.GroupBy(x => x.UserId).ToDictionary(g => g.Key, g => g.Select(x => x.Name ?? "").OrderBy(n => n).First());
     }
 
     public async Task SetRoleAsync(string userId, string role)

@@ -183,7 +183,7 @@ else if (client is not null)
                                 <select class="form-select form-select-sm" style="max-width:130px" @bind="_reportMonth">
                                     @for (var m = 0; m < 12; m++)
                                     {
-                                        var d = DateTime.Now.AddMonths(-m);
+                                        var d = StudioClock.Now.AddMonths(-m);
                                         var v = $"{d:yyyy-MM}";
                                         <option value="@v">@d.ToString("MMMM yyyy", _plCulture)</option>
                                     }
@@ -559,7 +559,7 @@ else if (client is not null)
                                     <label class="form-label form-label-sm">Data <span class="text-danger">*</span></label>
                                     <input type="date" class="form-control form-control-sm"
                                            value="@newMeasurement.MeasurementDate.ToString("yyyy-MM-dd")"
-                                           @onchange="e => newMeasurement.MeasurementDate = string.IsNullOrEmpty(e.Value?.ToString()) ? DateOnly.FromDateTime(DateTime.Today) : DateOnly.Parse(e.Value!.ToString()!)" />
+                                           @onchange="e => newMeasurement.MeasurementDate = string.IsNullOrEmpty(e.Value?.ToString()) ? DateOnly.FromDateTime(StudioClock.Today) : DateOnly.Parse(e.Value!.ToString()!)" />
                                 </div>
                                 <div class="col-6 col-sm-3">
                                     <label class="form-label form-label-sm">Waga (kg)</label>
@@ -969,14 +969,14 @@ else if (client is not null)
     private bool _chartNeedsRender;
 
     private static readonly System.Globalization.CultureInfo _plCulture = new("pl-PL");
-    private string _reportMonth = DateTime.Now.ToString("yyyy-MM");
+    private string _reportMonth = StudioClock.Now.ToString("yyyy-MM");
 
     private string ReportUrl()
     {
         if (!DateTime.TryParseExact($"{_reportMonth}-01", "yyyy-MM-dd",
                 System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.None, out var dt))
-            dt = DateTime.Now;
+            dt = StudioClock.Now;
         return $"/reports/client/{Id}/monthly?year={dt.Year}&month={dt.Month}";
     }
 
@@ -1483,7 +1483,7 @@ else if (client is not null)
             ClientId = Id,
             TrainerUserId = currentUserId
         };
-        var now = DateTime.Now.AddHours(1);
+        var now = StudioClock.Now.AddHours(1);
         bookingDate = now.ToString("yyyy-MM-dd");
         bookingTime = new TimeOnly(now.Hour, 0);
         bookingError = string.Empty;

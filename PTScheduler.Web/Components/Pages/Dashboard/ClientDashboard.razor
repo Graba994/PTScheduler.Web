@@ -284,7 +284,7 @@ else
                             <span><strong>@pkg.RemainingCredits</strong> z @pkg.TotalSessions</span>
                             @if (pkg.ExpiresAt.HasValue)
                             {
-                                var daysLeft = (int)(pkg.ExpiresAt.Value - DateTime.Now).TotalDays;
+                                var daysLeft = (int)(pkg.ExpiresAt.Value - StudioClock.Now).TotalDays;
                                 var cls = daysLeft <= 7 ? "warn" : daysLeft <= 14 ? "soft" : "muted";
                                 <span class="cd-pkg-expires @cls">
                                     <i class="bi bi-calendar-x"></i>
@@ -499,7 +499,7 @@ else
                         : await SessionService.GetClientCancellationAsync(_nextSession.Id, _client.ApplicationUserId);
 
                     var allRecent = await SessionService.GetClientSessionsAsync(_client.Id, 50);
-                    var pastSessions = allRecent.Where(s => s.StartTime < DateTime.Now).ToList();
+                    var pastSessions = allRecent.Where(s => s.StartTime < StudioClock.Now).ToList();
                     _recentPast    = pastSessions.Take(5).ToList();
                     _completedCount = pastSessions.Count(s => s.Status == SessionStatus.Completed);
                     _noShowCount = pastSessions.Count(s => s.Status == SessionStatus.NoShow);
@@ -612,7 +612,7 @@ else
 
     private string CountdownLabel(DateTime when)
     {
-        var diff = when - DateTime.Now;
+        var diff = when - StudioClock.Now;
         if (diff.TotalSeconds < 0) return "Już trwa";
         if (diff.TotalMinutes < 60) return $"Za {(int)diff.TotalMinutes} min";
         if (diff.TotalHours < 24)
@@ -629,7 +629,7 @@ else
     private string HeroToneClass()
     {
         if (_nextSession is null) return "tone-empty";
-        var diff = _nextSession.StartTime - DateTime.Now;
+        var diff = _nextSession.StartTime - StudioClock.Now;
         if (diff.TotalHours < 4) return "tone-urgent";
         if (diff.TotalHours < 24) return "tone-soon";
         return "tone-default";
@@ -680,7 +680,7 @@ else
             await MeasurementService.AddAsync(new CreateBodyMeasurementDto
             {
                 ClientId = _client.Id,
-                MeasurementDate = DateOnly.FromDateTime(DateTime.Today),
+                MeasurementDate = DateOnly.FromDateTime(StudioClock.Today),
                 WeightKg = w
             });
             _quickWeight = null;

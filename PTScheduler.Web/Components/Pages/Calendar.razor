@@ -420,7 +420,7 @@
                         <label class="form-label small fw-semibold mb-1">Termin</label>
                         <div class="slot-day-nav">
                             <button class="slot-nav-btn" @onclick="BookingPrevDay"
-                                    disabled="@(_bookingSlotDate <= DateOnly.FromDateTime(DateTime.Today))">
+                                    disabled="@(_bookingSlotDate <= DateOnly.FromDateTime(StudioClock.Today))">
                                 <i class="bi bi-chevron-left"></i>
                             </button>
                             <div class="slot-nav-center">
@@ -681,7 +681,7 @@
         _bookingSessionTypeId = _sessionTypes.FirstOrDefault()?.Id ?? 0;
         _bookingDateTime = default;
         _bookingOverlap  = false;
-        var dt = DateTime.TryParse(dateStr, out var parsed) ? parsed : DateTime.Now;
+        var dt = DateTime.TryParse(dateStr, out var parsed) ? parsed : StudioClock.Now;
         _bookingSlotDate = DateOnly.FromDateTime(dt);
         _bookingOpen    = true;
         await InvokeAsync(StateHasChanged);
@@ -724,7 +724,7 @@
             var slots = await AvailabilityService.GetAvailableSlotsAsync(
                 _userId, _bookingSlotDate, sessionType.DurationMinutes);
             _bookingAvailableSlots = slots
-                .Where(s => s.IsAvailable && s.Start > DateTime.Now)
+                .Where(s => s.IsAvailable && s.Start > StudioClock.Now)
                 .ToList();
         }
         catch

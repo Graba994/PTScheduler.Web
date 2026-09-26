@@ -52,7 +52,7 @@ public class InvoiceService(
             await db.SaveChangesAsync();
         }
 
-        var buyer = await userManager.FindByIdAsync(order.ApplicationUserId);
+        var buyer = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == order.ApplicationUserId);
         var branding = await brandingService.GetAsync();
 
         byte[]? logoBytes = null;

@@ -23,7 +23,7 @@ public class ClientService(
             .ToListAsync();
 
         var userIds = clients.Select(c => c.ApplicationUserId).ToList();
-        var users = await userManager.Users
+        var users = await db.Users.AsNoTracking()
             .Where(u => userIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id);
 
@@ -76,7 +76,7 @@ public class ClientService(
         var c = await db.Clients.FindAsync(id);
         if (c is null) return null;
 
-        var user = await userManager.FindByIdAsync(c.ApplicationUserId);
+        var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == c.ApplicationUserId);
         var stats = await db.Sessions
             .AsNoTracking()
             .Where(s => s.ClientId == id)
@@ -208,7 +208,7 @@ public class ClientService(
             .ToListAsync();
 
         var trainerIds = notes.Select(n => n.TrainerUserId).Distinct().ToList();
-        var trainers = await userManager.Users
+        var trainers = await db.Users.AsNoTracking()
             .Where(u => trainerIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id,
                 u => $"{u.FirstName} {u.LastName}".Trim() is { Length: > 0 } n ? n : u.Email ?? u.Id);
@@ -266,7 +266,7 @@ public class ClientService(
             .ToListAsync();
 
         var userIds = clients.Select(c => c.ApplicationUserId).ToList();
-        var users = await userManager.Users
+        var users = await db.Users.AsNoTracking()
             .Where(u => userIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id);
 

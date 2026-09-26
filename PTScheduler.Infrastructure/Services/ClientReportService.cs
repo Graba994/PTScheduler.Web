@@ -27,7 +27,7 @@ public class ClientReportService(
         var client = await db.Clients.AsNoTracking().FirstOrDefaultAsync(c => c.Id == clientId)
             ?? throw new InvalidOperationException($"Klient {clientId} nie istnieje.");
 
-        var user = await userManager.FindByIdAsync(client.ApplicationUserId);
+        var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == client.ApplicationUserId);
         var branding = await brandingService.GetAsync();
 
         // Granice miesiąca to zegar ścienny, tak samo jak Session.StartTime,
@@ -46,7 +46,7 @@ public class ClientReportService(
 
         // Resolve trainer names for sessions
         var trainerIds = sessions.Select(s => s.TrainerUserId).Distinct().ToList();
-        var trainers = await userManager.Users
+        var trainers = await db.Users.AsNoTracking()
             .Where(u => trainerIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id, u => ResolveName(u));
 

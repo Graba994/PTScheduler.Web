@@ -1,3 +1,4 @@
+using PTScheduler.Web.Services;
 ﻿using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Components.Authorization;
@@ -130,7 +131,7 @@ namespace Microsoft.AspNetCore.Routing
 
                 var export = new Dictionary<string, object?>
                 {
-                    ["ExportDate"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                    ["ExportDate"] = StudioClock.Now.ToString("yyyy-MM-dd HH:mm:ss"),
                     ["Account"] = new
                     {
                         user.FirstName,

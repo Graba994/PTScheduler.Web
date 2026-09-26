@@ -160,6 +160,8 @@ builder.Services.AddRateLimiter(options =>
 
 var app = builder.Build();
 
+StudioClock.Use(app.Services.GetRequiredService<IAppClock>());
+
 // Run migrations + seed. On failure: log and flag the app as DB-degraded — DO NOT crash.
 var startupHealth = app.Services.GetRequiredService<StartupHealth>();
 var startupLogger = app.Services.GetRequiredService<ILogger<Program>>();
@@ -222,7 +224,7 @@ app.MapGet("/admin/backup/download", async (
 
     var data = await backupService.ExportAsync();
     return Results.File(data, "application/octet-stream",
-        $"ptscheduler_backup_{DateTime.Now:yyyyMMdd_HHmmss}.sql");
+        $"ptscheduler_backup_{StudioClock.Now:yyyyMMdd_HHmmss}.sql");
 }).RequireAuthorization();
 
 // Monthly client report (PDF) — Admin / Trainer / Subordinate

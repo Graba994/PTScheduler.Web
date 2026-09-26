@@ -361,8 +361,8 @@
                         $"{expiring.Count} {Pl(expiring.Count, "pakiet wygasa", "pakietów wygasa")} w ciągu 7 dni",
                         "bi-box-seam-fill", "var(--c-danger)", "/finance"));
 
-                var todaySessions = await SessionService.GetSessionsAsync(DateTime.Today, DateTime.Today.AddDays(1), trainerFilter);
-                var unfinished = todaySessions.Count(s => s.Status == SessionStatus.Scheduled && s.StartTime < DateTime.Now);
+                var todaySessions = await SessionService.GetSessionsAsync(StudioClock.Today, StudioClock.Today.AddDays(1), trainerFilter);
+                var unfinished = todaySessions.Count(s => s.Status == SessionStatus.Scheduled && s.StartTime < StudioClock.Now);
                 if (unfinished > 0)
                     _notifs.Add(new("Nieoznaczone sesje",
                         $"{unfinished} sesji dzisiaj bez statusu",
@@ -371,7 +371,7 @@
             else if (_role == Roles.Client)
             {
                 var upcoming = await SessionService.GetUpcomingAsync(count: 5);
-                var tomorrow = upcoming.FirstOrDefault(s => s.StartTime.Date == DateTime.Today.AddDays(1).Date);
+                var tomorrow = upcoming.FirstOrDefault(s => s.StartTime.Date == StudioClock.Today.AddDays(1).Date);
                 if (tomorrow is not null)
                     _notifs.Add(new("Trening jutro!",
                         $"{tomorrow.StartTime:HH:mm} — {tomorrow.SessionTypeName}",
@@ -383,7 +383,7 @@
                     var pkgs = await PackageService.GetPackagesAsync(client.Id);
                     var nearExpiry = pkgs.FirstOrDefault(p =>
                         p.Status == PackageStatus.Active && p.ExpiresAt.HasValue &&
-                        (p.ExpiresAt.Value - DateTime.Now).TotalDays <= 7);
+                        (p.ExpiresAt.Value - StudioClock.Now).TotalDays <= 7);
                     if (nearExpiry is not null)
                         _notifs.Add(new("Pakiet wygasa wkrótce",
                             $"\"{nearExpiry.Name}\"",

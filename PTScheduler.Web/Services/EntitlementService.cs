@@ -113,7 +113,7 @@ public class EntitlementService
         if (max == int.MaxValue) return (true, 0, int.MaxValue);
 
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var since = new DateTime(DateTime.Now.Year, DateTime.Now.Month, 1);
+        var since = new DateTime(StudioClock.Now.Year, StudioClock.Now.Month, 1);
         var count = await db.Sessions.CountAsync(s => s.StartTime >= since);
         return (count < max, count, max);
     }

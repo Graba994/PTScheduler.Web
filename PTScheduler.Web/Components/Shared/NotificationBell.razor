@@ -99,10 +99,10 @@
                         "bi-box-seam-fill", "var(--c-danger)", "/finance"));
 
                 // Sessions today not yet completed
-                var todayStart = DateTime.Today;
+                var todayStart = StudioClock.Today;
                 var todayEnd = todayStart.AddDays(1);
                 var todaySessions = await SessionService.GetSessionsAsync(todayStart, todayEnd, trainerFilter);
-                var notDone = todaySessions.Count(s => s.Status == SessionStatus.Scheduled && s.StartTime < DateTime.Now);
+                var notDone = todaySessions.Count(s => s.Status == SessionStatus.Scheduled && s.StartTime < StudioClock.Now);
                 if (notDone > 0)
                     _items.Add(new("Nieoznaczone sesje", $"{notDone} sesji dzisiaj bez statusu — oznacz wynik",
                         "bi-calendar-check-fill", "var(--c-info)", "/sessions"));
@@ -112,7 +112,7 @@
                 // Upcoming session tomorrow
                 var upcoming = await SessionService.GetUpcomingAsync(clientId: null, count: 5);
                 var tomorrow = upcoming.FirstOrDefault(s =>
-                    s.StartTime.Date == DateTime.Today.AddDays(1).Date);
+                    s.StartTime.Date == StudioClock.Today.AddDays(1).Date);
                 if (tomorrow is not null)
                     _items.Add(new("Trening jutro!", $"{tomorrow.StartTime:HH:mm} — {tomorrow.SessionTypeName}",
                         "bi-calendar-event-fill", "var(--c-success)", "/my"));
@@ -124,7 +124,7 @@
                     var pkgs = await PackageService.GetPackagesAsync(client.Id);
                     var nearExpiry = pkgs.Where(p => p.Status == PackageStatus.Active
                         && p.ExpiresAt.HasValue
-                        && (p.ExpiresAt.Value - DateTime.Now).TotalDays <= 7).ToList();
+                        && (p.ExpiresAt.Value - StudioClock.Now).TotalDays <= 7).ToList();
                     if (nearExpiry.Count > 0)
                         _items.Add(new("Pakiet wygasa", $"Pakiet \"{nearExpiry[0].Name}\" wygasa wkrótce",
                             "bi-exclamation-triangle-fill", "var(--c-warning)", "/my/packages"));

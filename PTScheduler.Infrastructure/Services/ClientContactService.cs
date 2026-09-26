@@ -114,7 +114,7 @@ public class ClientContactService(
         var result = new List<SessionInvitationDto>();
         foreach (var inv in invitations)
         {
-            var trainer = await userManager.FindByIdAsync(inv.Session.TrainerUserId);
+            var trainer = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == inv.Session.TrainerUserId);
             var trainerName = $"{trainer?.FirstName} {trainer?.LastName}".Trim().NullIfEmptyX() ?? trainer?.Email ?? inv.Session.TrainerUserId;
             result.Add(new SessionInvitationDto
             {
@@ -166,7 +166,8 @@ public class ClientContactService(
 
     private async Task<ClientContactDto> BuildContactDtoAsync(int? contactId, Client client)
     {
-        var user = await userManager.FindByIdAsync(client.ApplicationUserId);
+        await using var db = dbFactory.CreateDbContext();
+        var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == client.ApplicationUserId);
         return new ClientContactDto
         {
             Id = contactId ?? 0,
