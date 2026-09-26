@@ -1,0 +1,261 @@
+@page "/panel/setup/isolation"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject TenantService Tenants
+@inject DockerService Docker
+@inject TenantMailRelay Mail
+@inject SiteSettingsService Settings
+@rendermode InteractiveServer
+
+<PageTitle>Izolacja trenerów — PTScheduler Portal</PageTitle>
+
+<div class="d-flex align-items-center gap-2 mb-4">
+    <a href="/panel/setup" class="btn btn-sm btn-outline-secondary" aria-label="Wróć do konfiguracji"><i class="bi bi-arrow-left"></i></a>
+    <div>
+        <h4 class="fw-bold mb-0">Izolacja trenerów</h4>
+        <div class="small text-muted">Każdy trener to osobna instancja — jego dane, klienci i usługi nie wpływają na innych.</div>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    @if (_message is not null)
+    {
+        <div class="alert @(_ok ? "alert-success" : "alert-warning") alert-dismissible py-2 small" style="white-space:pre-line">
+            @_message
+            <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button>
+        </div>
+    }
+
+    <div class="row g-3 mb-4">
+        <div class="col-lg-6">
+            <section class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-start justify-content-between gap-2">
+                        <h6 class="fw-bold mb-1"><i class="bi bi-key me-2 text-primary"></i>Własny sekret instancji</h6>
+                        <span class="badge @(_missingSecrets.Count == 0 ? "bg-success-subtle text-success-emphasis" : "bg-danger-subtle text-danger-emphasis")">
+                            @(_total - _missingSecrets.Count) z @_total
+                        </span>
+                    </div>
+                    <p class="small text-muted">
+                        Każda instancja rozmawia z Portalem własnym kluczem. Instancja bez niego jest odrzucana (SMS, wideo, poczta, Google),
+                        bo stary wspólny klucz znali wszyscy trenerzy.
+                    </p>
+                    @if (_missingSecrets.Count > 0)
+                    {
+                        <div class="small mb-2">Bez własnego sekretu: <strong>@string.Join(", ", _missingSecrets)</strong></div>
+                        <button class="btn btn-danger btn-sm" @onclick="SyncSecretsAsync" disabled="@_busy">
+                            @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            Nadaj brakujące sekrety
+                        </button>
+                        <div class="form-text">Kontener web każdej z tych instancji uruchomi się ponownie (ok. 30 s przerwy).</div>
+                    }
+                    else
+                    {
+                        <div class="small text-success"><i class="bi bi-check2-circle me-1"></i>Wszystkie instancje mają własny sekret.</div>
+                    }
+                </div>
+            </section>
+        </div>
+
+        <div class="col-lg-6">
+            <section class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-start justify-content-between gap-2">
+                        <h6 class="fw-bold mb-1"><i class="bi bi-speedometer2 me-2 text-primary"></i>Limity pamięci i procesora</h6>
+                        @if (_dockerOk)
+                        {
+                            <span class="badge @(_unlimited.Count == 0 ? "bg-success-subtle text-success-emphasis" : "bg-warning-subtle text-warning-emphasis")">
+                                @(_total - _unlimited.Count) z @_total
+                            </span>
+                        }
+                    </div>
+                    <p class="small text-muted">
+                        Obciążony trener nie zabierze zasobów pozostałym. Aplikacja: <strong>@Mb(_webLimits.MemoryBytes)</strong>, @Cpu(_webLimits.NanoCpus);
+                        baza: <strong>@Mb(_dbLimits.MemoryBytes)</strong>, @Cpu(_dbLimits.NanoCpus).
+                        <span class="d-block mt-1">Zmienisz je w konfiguracji Portalu (<code>Portal:TenantWebMemoryMb</code>, <code>Portal:TenantDbMemoryMb</code>, <code>Portal:TenantWebCpus</code>, <code>Portal:TenantDbCpus</code>).</span>
+                    </p>
+                    @if (!_dockerOk)
+                    {
+                        <div class="small text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Brak dostępu do Dockera — nie da się sprawdzić kontenerów.</div>
+                    }
+                    else
+                    {
+                        @if (_unlimited.Count > 0)
+                        {
+                            <div class="small mb-2">Bez limitów: <strong>@string.Join(", ", _unlimited)</strong></div>
+                        }
+                        <button class="btn btn-outline-primary btn-sm" @onclick="ApplyLimitsAsync" disabled="@_busy">
+                            @(_unlimited.Count > 0 ? "Nałóż limity" : "Nałóż ponownie (po zmianie wartości)")
+                        </button>
+                        <div class="form-text">Bez restartu. Nowe instancje dostają limity automatycznie.</div>
+                    }
+                </div>
+            </section>
+        </div>
+
+        <div class="col-lg-6">
+            <section class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h6 class="fw-bold mb-1"><i class="bi bi-envelope-at me-2 text-primary"></i>Poczta — dzienny limit na trenera</h6>
+                    <p class="small text-muted">
+                        E-maile trenerów wysyła Portal; instancje nie znają hasła do serwera. Limit chroni serwer i jego reputację —
+                        jeden trener nie zablokuje wysyłki pozostałym.
+                    </p>
+                    <div class="input-group input-group-sm mb-2" style="max-width:260px">
+                        <input type="number" min="10" max="100000" class="form-control" @bind="_mailLimit" aria-label="Dzienny limit e-maili" />
+                        <span class="input-group-text">dziennie</span>
+                        <button class="btn btn-primary" @onclick="SaveMailLimitAsync">Zapisz</button>
+                    </div>
+                    @if (_mailTop.Count > 0)
+                    {
+                        <div class="small text-muted">Dziś najwięcej:
+                            @foreach (var (name, count) in _mailTop)
+                            {
+                                <span class="badge bg-light text-dark border ms-1">@name: @count</span>
+                            }
+                        </div>
+                    }
+                </div>
+            </section>
+        </div>
+
+        <div class="col-lg-6">
+            <section class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="d-flex align-items-start justify-content-between gap-2">
+                        <h6 class="fw-bold mb-1"><i class="bi bi-camera-video me-2 text-primary"></i>Wideo — osobne biblioteki</h6>
+                        <span class="badge bg-light text-dark border">@_libraries z @_total</span>
+                    </div>
+                    <p class="small text-muted mb-2">
+                        Każdy trener dostaje własną bibliotekę Bunny (zakładaną przy pierwszym filmie) i jej klucz — nie widzi filmów innych.
+                        Wspólnej biblioteki nie udostępniamy.
+                    </p>
+                    @if (!_bunnyAccount)
+                    {
+                        <div class="small text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Brak klucza konta Bunny — <a href="/panel/setup/services#video">ustaw go</a>, inaczej wideo jest wyłączone.</div>
+                    }
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <section class="card border-0 shadow-sm">
+        <div class="card-body">
+            <h6 class="fw-bold mb-3">Zawsze osobne dla każdego trenera</h6>
+            <div class="row g-2 small">
+                @foreach (var (icon, title, text) in Always)
+                {
+                    <div class="col-md-6 d-flex gap-2">
+                        <i class="bi @icon text-success"></i>
+                        <div><strong>@title</strong> <span class="text-muted">— @text</span></div>
+                    </div>
+                }
+            </div>
+        </div>
+    </section>
+}
+
+@code {
+    private static readonly (string Icon, string Title, string Text)[] Always =
+    [
+        ("bi-database", "Baza danych", "osobny kontener PostgreSQL z losowym hasłem; klienci jednego trenera nie istnieją u innego"),
+        ("bi-diagram-3", "Sieć", "osobna sieć Docker — aplikacja trenera nie widzi baz pozostałych"),
+        ("bi-folder2", "Pliki", "osobny wolumen na logo, zdjęcia i dokumenty"),
+        ("bi-hdd-stack", "Kopie zapasowe", "osobny plik kopii dla każdej bazy"),
+        ("bi-chat-dots", "SMS", "wspólne konto platformy, ale osobna pula kredytów — trener płaci tylko za swoje"),
+        ("bi-google", "Google", "osobna zgoda każdego trenera; wydarzenia oznaczone jego instancją"),
+        ("bi-bell", "Powiadomienia push", "klucze generowane w każdej instancji osobno"),
+        ("bi-credit-card", "Płatności klientów", "bramki PayU/P24 trenera, pieniądze trafiają na jego konto")
+    ];
+
+    private bool _loading = true;
+    private bool _busy;
+    private bool _ok;
+    private string? _message;
+    private int _total;
+    private List<string> _missingSecrets = [];
+    private List<string> _unlimited = [];
+    private bool _dockerOk = true;
+    private DockerService.ResourceLimits _webLimits = new(0, 0, 0), _dbLimits = new(0, 0, 0);
+    private int _mailLimit;
+    private List<(string Name, int Count)> _mailTop = [];
+    private int _libraries;
+    private bool _bunnyAccount;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var tenants = await db.Tenants.AsNoTracking()
+            .Where(t => t.Status != TenantStatus.Destroyed && t.Status != TenantStatus.Pending)
+            .OrderBy(t => t.Slug)
+            .ToListAsync();
+        _total = tenants.Count;
+        _missingSecrets = tenants.Where(t => string.IsNullOrEmpty(t.InternalSecret)).Select(t => t.Slug).ToList();
+        _libraries = tenants.Count(t => !string.IsNullOrEmpty(t.BunnyLibraryId));
+        _bunnyAccount = !string.IsNullOrWhiteSpace(await Settings.GetAsync(SiteSettingsService.Keys.PlatformBunnyAccountKey));
+
+        _webLimits = Docker.LimitsFor(database: false);
+        _dbLimits = Docker.LimitsFor(database: true);
+        _unlimited = [];
+        var reachable = 0;
+        foreach (var t in tenants)
+        {
+            var web = await Docker.GetMemoryLimitAsync(t.WebContainerName ?? $"pt-{t.Slug}-web");
+            var dbc = await Docker.GetMemoryLimitAsync(t.DbContainerName ?? $"pt-{t.Slug}-db");
+            if (web is null && dbc is null) continue; // brak kontenerów (np. instancja na innym hoście)
+            reachable++;
+            if (web is 0 || dbc is 0) _unlimited.Add(t.Slug);
+        }
+        // Żaden kontener nie odpowiada — najpewniej Portal nie ma dostępu do Dockera.
+        _dockerOk = tenants.Count == 0 || reachable > 0;
+
+        _mailLimit = await Mail.GetDailyLimitAsync();
+        var sent = await Mail.SentTodayByTenantAsync();
+        _mailTop = sent.OrderByDescending(kv => kv.Value).Take(5)
+            .Select(kv => (tenants.FirstOrDefault(t => t.Id == kv.Key)?.Slug ?? $"#{kv.Key}", kv.Value))
+            .ToList();
+        _loading = false;
+    }
+
+    private async Task SyncSecretsAsync()
+    {
+        _busy = true;
+        var (done, failed) = await Tenants.SyncMissingSecretsAsync();
+        Show(failed.Count == 0
+            ? $"Nadano sekrety: {done}. Instancje uruchamiają się ponownie."
+            : $"Nadano: {done}. Nie udało się:\n{string.Join("\n", failed)}", failed.Count == 0);
+        await LoadAsync();
+        _busy = false;
+    }
+
+    private async Task ApplyLimitsAsync()
+    {
+        _busy = true;
+        var (done, failed) = await Tenants.ApplyResourceLimitsAllAsync();
+        Show(failed.Count == 0
+            ? $"Limity nałożone na {done} instancji."
+            : $"Nałożono na {done}. Nie udało się:\n{string.Join("\n", failed)}", failed.Count == 0);
+        await LoadAsync();
+        _busy = false;
+    }
+
+    private async Task SaveMailLimitAsync()
+    {
+        if (_mailLimit < 10) { Show("Limit musi wynosić co najmniej 10 e-maili dziennie.", false); return; }
+        await Settings.SetAsync(SiteSettingsService.Keys.TenantMailDailyLimit, _mailLimit.ToString());
+        Show($"Zapisano: {_mailLimit} e-maili dziennie na trenera.", true);
+    }
+
+    private void Show(string message, bool ok) { _message = message; _ok = ok; }
+
+    private static string Mb(long bytes) => bytes <= 0 ? "bez limitu" : $"{bytes / 1024 / 1024} MB";
+    private static string Cpu(long nano) => nano <= 0 ? "bez limitu CPU" : $"{nano / 1_000_000_000d:0.#} CPU";
+}

@@ -18,7 +18,6 @@ public class TenantService(
     private string TenantImage => config.GetValue<string>("Portal:TenantImage") ?? "ptscheduler-web:latest";
     private string ForwardHost => config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220";
     private string PortalUrl => config.GetValue<string>("Portal:PublicUrl") ?? $"http://{ForwardHost}:8081";
-    private string InternalSecret => config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
 
     private static readonly HttpClient PushClient = new() { Timeout = TimeSpan.FromSeconds(5) };
 
@@ -355,6 +354,48 @@ public class TenantService(
         db.TenantEvents.Add(new TenantEvent { TenantId = tenant.Id, EventType = "secret_synced", Detail = rotate ? "rotated" : "synced" });
         await db.SaveChangesAsync();
         return (true, "Sekret zsynchronizowany — kontener uruchamia się ponownie (ok. 30 s).");
+    }
+
+    /// <summary>
+    /// Nadaje własny sekret każdej instancji, która go jeszcze nie ma (odtwarza jej kontener web).
+    /// Dopóki instancja nie ma własnego sekretu, Portal odrzuca jej wywołania.
+    /// </summary>
+    public async Task<(int Done, List<string> Failed)> SyncMissingSecretsAsync()
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var ids = await db.Tenants.AsNoTracking()
+            .Where(t => (t.InternalSecret == null || t.InternalSecret == "") && t.Status != TenantStatus.Destroyed && t.Status != TenantStatus.Pending)
+            .Select(t => new { t.Id, t.Slug })
+            .ToListAsync();
+        var done = 0;
+        var failed = new List<string>();
+        foreach (var t in ids)
+        {
+            var (ok, message) = await SyncInternalSecretAsync(t.Id);
+            if (ok) done++;
+            else failed.Add($"{t.Slug}: {message}");
+        }
+        return (done, failed);
+    }
+
+    /// <summary>Nakłada limity pamięci i CPU na kontenery wszystkich instancji (bez restartu).</summary>
+    public async Task<(int Done, List<string> Failed)> ApplyResourceLimitsAllAsync()
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var tenants = await db.Tenants.AsNoTracking()
+            .Where(t => t.Status != TenantStatus.Destroyed && t.Status != TenantStatus.Pending)
+            .Select(t => new { t.Slug, t.WebContainerName, t.DbContainerName })
+            .ToListAsync();
+        var done = 0;
+        var failed = new List<string>();
+        foreach (var t in tenants)
+        {
+            var (webOk, webErr) = await docker.ApplyResourceLimitsAsync(t.WebContainerName ?? $"pt-{t.Slug}-web", database: false);
+            var (dbOk, dbErr) = await docker.ApplyResourceLimitsAsync(t.DbContainerName ?? $"pt-{t.Slug}-db", database: true);
+            if (webOk && dbOk) done++;
+            else failed.Add($"{t.Slug}: {webErr ?? dbErr}");
+        }
+        return (done, failed);
     }
 
     public async Task<(bool Success, string Message)> ReprovisionWebAsync(int tenantId)

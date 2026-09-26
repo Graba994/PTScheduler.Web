@@ -23,26 +23,24 @@ public class CreditService(
     public async Task AddCreditsAsync(int tenantId, string creditType, decimal amount, string? description = null)
     {
         await using var db = dbFactory.CreateDbContext();
-        var credit = await db.TenantCredits
-            .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.CreditType == creditType);
-
-        if (credit is null)
+        var now = DateTime.UtcNow;
+        // Atomowo, jak odejmowanie — doładowanie nie nadpisze równoległej wysyłki.
+        var updated = await db.TenantCredits
+            .Where(c => c.TenantId == tenantId && c.CreditType == creditType)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(c => c.Balance, c => c.Balance + amount)
+                .SetProperty(c => c.TotalPurchased, c => c.TotalPurchased + amount)
+                .SetProperty(c => c.UpdatedAt, now));
+        if (updated == 0)
         {
-            credit = new TenantCredit
+            db.TenantCredits.Add(new TenantCredit
             {
                 TenantId = tenantId,
                 CreditType = creditType,
                 Balance = amount,
                 TotalPurchased = amount,
-                UpdatedAt = DateTime.UtcNow
-            };
-            db.TenantCredits.Add(credit);
-        }
-        else
-        {
-            credit.Balance += amount;
-            credit.TotalPurchased += amount;
-            credit.UpdatedAt = DateTime.UtcNow;
+                UpdatedAt = now
+            });
         }
 
         db.TenantEvents.Add(new TenantEvent
@@ -59,18 +57,21 @@ public class CreditService(
     public async Task<(bool Success, decimal Remaining)> DeductCreditAsync(int tenantId, string creditType, decimal amount)
     {
         await using var db = dbFactory.CreateDbContext();
-        var credit = await db.TenantCredits
-            .FirstOrDefaultAsync(c => c.TenantId == tenantId && c.CreditType == creditType);
+        // Jedno warunkowe UPDATE w bazie: równoległe wysyłki tej samej instancji nie zejdą
+        // poniżej zera (odczyt-zmiana-zapis gubił odejmowania przy jednoczesnych SMS-ach).
+        var now = DateTime.UtcNow;
+        var updated = await db.TenantCredits
+            .Where(c => c.TenantId == tenantId && c.CreditType == creditType && c.Balance >= amount)
+            .ExecuteUpdateAsync(u => u
+                .SetProperty(c => c.Balance, c => c.Balance - amount)
+                .SetProperty(c => c.TotalUsed, c => c.TotalUsed + amount)
+                .SetProperty(c => c.UpdatedAt, now));
 
-        if (credit is null || credit.Balance < amount)
-            return (false, credit?.Balance ?? 0);
-
-        credit.Balance -= amount;
-        credit.TotalUsed += amount;
-        credit.UpdatedAt = DateTime.UtcNow;
-        await db.SaveChangesAsync();
-
-        return (true, credit.Balance);
+        var balance = await db.TenantCredits.AsNoTracking()
+            .Where(c => c.TenantId == tenantId && c.CreditType == creditType)
+            .Select(c => (decimal?)c.Balance)
+            .FirstOrDefaultAsync() ?? 0;
+        return (updated == 1, balance);
     }
 
     public async Task FulfillOrderAsync(ServiceOrder order, ServiceItem item)

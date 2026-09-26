@@ -3,6 +3,7 @@
 @attribute [Authorize(Roles = "Admin")]
 @inject SiteSettingsService Settings
 @inject IConfiguration Config
+@inject IDbContextFactory<PortalDbContext> DbFactory
 @rendermode InteractiveServer
 
 <PageTitle>Konfiguracja platformy — PTScheduler Portal</PageTitle>
@@ -78,6 +79,7 @@ else
     private bool _loading = true;
     private List<Group> _groups = [];
     private int _done, _total;
+    private bool _isolationOk;
 
     protected override async Task OnInitializedAsync()
     {
@@ -89,6 +91,9 @@ else
             SiteSettingsService.Keys.StripeSecretKey, SiteSettingsService.Keys.PayuPosId, SiteSettingsService.Keys.P24MerchantId,
             SiteSettingsService.Keys.BackupDir, SiteSettingsService.Keys.PlatformGoogleClientId);
         bool Has(string key) => !string.IsNullOrWhiteSpace(s.GetValueOrDefault(key));
+        await using (var db = await DbFactory.CreateDbContextAsync())
+            _isolationOk = !await db.Tenants.AnyAsync(t => (t.InternalSecret == null || t.InternalSecret == "")
+                && t.Status != TenantStatus.Destroyed && t.Status != TenantStatus.Pending);
 
         _groups =
         [
@@ -118,6 +123,7 @@ else
             ]),
             new("Bezpieczeństwo",
             [
+                new("Izolacja trenerów", "Własne sekrety instancji, limity zasobów i poczty — trenerzy nie wpływają na siebie.", "bi-shield-lock", "/panel/setup/isolation", _isolationOk),
                 new("Konto administratora", "Hasło do Portalu i historia logowań.", "bi-person-lock", "/panel/change-password", true),
                 new("Logi logowań", "Kto i skąd logował się do Portalu.", "bi-journal-text", "/panel/login-logs", true, Optional: true)
             ])

@@ -72,6 +72,7 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
 
         // Wspólny SMTP platformy dla instancji trenerów (nadawca = nazwa studia, odpowiedzi do trenera)
         public const string ShareSmtpWithTenants = "share_smtp_with_tenants";
+        public const string TenantMailDailyLimit = "tenant_mail_daily_limit";
 
         // Klient OAuth Google platformy — kalendarz i Meet trenerów bez ich własnej konfiguracji.
         public const string PlatformGoogleClientId = "platform_google_client_id";

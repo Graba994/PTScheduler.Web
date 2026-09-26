@@ -68,6 +68,7 @@ builder.Services.AddScoped<StripeService>();
 builder.Services.AddScoped<CreditService>();
 builder.Services.AddScoped<BunnyPlatformService>();
 builder.Services.AddScoped<GoogleOAuthBroker>();
+builder.Services.AddScoped<TenantMailRelay>();
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<StorePaymentService>();
 builder.Services.AddScoped<BackupService>();
@@ -80,6 +81,25 @@ builder.Services.AddHostedService<TenantCleanupService>();
 
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
+
+// Każda instancja ma własną pulę zapytań do API Portalu (SMS, poczta, wideo, Google, sklep):
+// zapętlona albo przejęta instancja jednego trenera nie spowolni Portalu pozostałym.
+builder.Services.AddRateLimiter(o =>
+{
+    o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
+    o.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
+    {
+        var slug = TenantApiSlug(ctx.Request.Path);
+        return slug is null
+            ? System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("other")
+            : System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter("tenant:" + slug, _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = builder.Configuration.GetValue<int?>("Portal:TenantApiRequestsPerMinute") ?? 240,
+                Window = TimeSpan.FromMinutes(1),
+                QueueLimit = 0
+            });
+    });
+});
 
 var app = builder.Build();
 
@@ -149,6 +169,7 @@ if (!app.Environment.IsDevelopment())
 }
 
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
@@ -176,7 +197,7 @@ app.MapGet("/api/internal/git-config", async (HttpContext ctx, SiteSettingsServi
         guardianSecret = s;
     }
     var provided = ctx.Request.Headers["X-Guardian-Secret"].FirstOrDefault();
-    if (string.IsNullOrEmpty(guardianSecret) || provided != guardianSecret)
+    if (!TenantSecrets.Matches(provided, guardianSecret))
         return Results.Unauthorized();
 
     var settings = await siteSettings.GetAllAsync(
@@ -609,7 +630,7 @@ app.MapGet("/api/credits/{slug}", async (
         await db.Set<SiteSetting>().Where(s => s.Key == "platform_sms_api_token")
             .Select(s => s.Value).FirstOrDefaultAsync());
     var platformBunnyConfigured = await db.Set<SiteSetting>()
-        .AnyAsync(s => (s.Key == "platform_bunny_api_key" || s.Key == "platform_bunny_account_key") && s.Value != null && s.Value != "");
+        .AnyAsync(s => s.Key == "platform_bunny_account_key" && s.Value != null && s.Value != "");
 
     return Results.Json(new
     {
@@ -770,67 +791,54 @@ app.MapGet(GoogleOAuthBroker.CallbackPath, async (string? code, string? state, s
     return Results.Redirect(redirectTo);
 });
 
-// Wspólny SMTP platformy dla instancji trenerów (trener nie konfiguruje poczty).
-app.MapGet("/api/internal/tenants/{slug}/smtp", async (
-    string slug,
-    HttpContext ctx,
-    IDbContextFactory<PortalDbContext> dbFactory,
-    IConfiguration config,
-    SiteSettingsService settingsService) =>
+// Poczta instancji trenerów: Portal wysyła w ich imieniu przez SMTP platformy.
+// Instancje nie znają hasła serwera, a każda ma własny dzienny limit.
+app.MapGet("/api/internal/tenants/{slug}/mail/status", async (
+    string slug, HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config, TenantMailRelay relay) =>
 {
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
     if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
-
-    var s = await settingsService.GetAllAsync(
-        SiteSettingsService.Keys.SmtpHost, SiteSettingsService.Keys.SmtpPort, SiteSettingsService.Keys.SmtpUser,
-        SiteSettingsService.Keys.SmtpPass, SiteSettingsService.Keys.SmtpFrom, SiteSettingsService.Keys.SmtpSsl,
-        SiteSettingsService.Keys.ShareSmtpWithTenants);
-    var share = s.GetValueOrDefault(SiteSettingsService.Keys.ShareSmtpWithTenants) != "false";
-    var host = s.GetValueOrDefault(SiteSettingsService.Keys.SmtpHost);
-    if (!share || string.IsNullOrWhiteSpace(host)) return Results.Json(new { enabled = false });
-
     return Results.Json(new
     {
-        enabled = true,
-        host,
-        port = int.TryParse(s.GetValueOrDefault(SiteSettingsService.Keys.SmtpPort), out var port) ? port : 587,
-        ssl = s.GetValueOrDefault(SiteSettingsService.Keys.SmtpSsl) == "true",
-        user = s.GetValueOrDefault(SiteSettingsService.Keys.SmtpUser),
-        password = s.GetValueOrDefault(SiteSettingsService.Keys.SmtpPass),
-        fromAddress = s.GetValueOrDefault(SiteSettingsService.Keys.SmtpFrom)
+        enabled = await relay.IsEnabledAsync(),
+        dailyLimit = await relay.GetDailyLimitAsync(),
+        sentToday = await relay.SentTodayAsync(tenant.Id)
     });
+});
+
+app.MapPost("/api/internal/tenants/{slug}/mail", async (
+    string slug, MailRelayRequest body, HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config, TenantMailRelay relay) =>
+{
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    var (status, error) = await relay.SendAsync(tenant, body);
+    return status == 200 ? Results.Ok(new { sent = true }) : Results.Json(new { error }, statusCode: status);
 });
 
 // ---- Bunny CDN credentials API ----
 // Każda instancja dostaje klucz WYŁĄCZNIE swojej biblioteki (zakładanej przy pierwszym
-// użyciu kluczem konta platformy). Wspólna biblioteka to tryb przejściowy dla instalacji,
-// w których nie podano jeszcze klucza konta.
+// użyciu kluczem konta platformy).
 app.MapGet("/api/credits/{slug}/bunny", async (
     string slug,
     HttpContext ctx,
     IDbContextFactory<PortalDbContext> dbFactory,
     IConfiguration config,
-    SiteSettingsService settingsService,
-    BunnyPlatformService bunny,
-    ILogger<Program> logger) =>
+    BunnyPlatformService bunny) =>
 {
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
     if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
 
+    // Tylko własna biblioteka instancji. Wspólnej biblioteki nie udostępniamy — jej klucz
+    // pozwalałby każdemu trenerowi oglądać i usuwać filmy pozostałych.
     var library = await bunny.EnsureLibraryAsync(tenant.Id, ctx.RequestAborted);
-    if (library is not null)
-        return Results.Json(new { enabled = true, apiKey = library.ApiKey, libraryId = library.LibraryId, cdnHostname = library.CdnHostname });
-
-    var apiKey = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformBunnyApiKey);
-    var libraryId = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformBunnyLibraryId);
-    var cdnHostname = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformBunnyCdnHostname);
-    if (string.IsNullOrWhiteSpace(apiKey) || string.IsNullOrWhiteSpace(libraryId))
-        return Results.Json(new { enabled = false });
-
-    logger.LogWarning("Bunny: instancja {Slug} używa wspólnej biblioteki — ustaw klucz konta w Konfiguracji platformy.", slug);
-    return Results.Json(new { enabled = true, apiKey, libraryId, cdnHostname });
+    return library is null
+        ? Results.Json(new { enabled = false })
+        : Results.Json(new { enabled = true, apiKey = library.ApiKey, libraryId = library.LibraryId, cdnHostname = library.CdnHostname });
 });
 
 app.MapStaticAssets();
@@ -844,15 +852,29 @@ app.Run();
 record AppFeedbackRequest(int Rating, string? Text, string? ContactEmail, string? AuthorEmail);
 
 record GoogleAuthorizeRequest(string UserKey, string ReturnUrl);
+
+// Slug instancji z adresów API wołanych przez aplikacje trenerów (null = inne ścieżki, bez limitu).
+partial class Program
+{
+    internal static string? TenantApiSlug(PathString path)
+    {
+        var segs = (path.Value ?? "").Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (segs.Length >= 4 && segs[0] == "api" && segs[1] == "internal" && segs[2] == "tenants") return segs[3].ToLowerInvariant();
+        if (segs.Length >= 3 && segs[0] == "api" && (segs[1] == "credits" || segs[1] == "store")) return segs[2].ToLowerInvariant();
+        return null;
+    }
+}
 record GoogleUserRequest(string UserKey);
 
 static class InternalAuth
 {
     /// <summary>
-    /// Wywołanie tenant → Portal: sekret konkretnej instancji, a dla instancji sprzed
-    /// sekretów per tenant — wspólny sekret platformy. Dzięki temu przejęty kontener
-    /// jednego trenera nie podszyje się pod innego (SMS-y, klucze wideo, zamówienia).
+    /// Wywołanie tenant → Portal wyłącznie własnym sekretem instancji. Wspólny sekret
+    /// platformy nie jest tu akceptowany: znały go wszystkie starsze instancje, więc jedna
+    /// mogłaby wydawać SMS-y, pobierać klucze wideo czy tokeny Google innej. Instancja bez
+    /// własnego sekretu dostaje odmowę, dopóki w Portalu nie klikniesz „Nadaj sekrety”.
     /// </summary>
     public static bool IsAuthorizedFor(HttpContext ctx, Tenant tenant, IConfiguration config) =>
-        TenantSecrets.Matches(ctx.Request.Headers["X-Internal-Secret"].ToString(), TenantSecrets.For(tenant, config));
+        !string.IsNullOrEmpty(tenant.InternalSecret)
+        && TenantSecrets.Matches(ctx.Request.Headers["X-Internal-Secret"].ToString(), tenant.InternalSecret);
 }

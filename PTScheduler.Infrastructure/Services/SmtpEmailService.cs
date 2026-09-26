@@ -24,7 +24,7 @@ public class SmtpEmailService(
         var s = await settingsService.GetAsync();
         if (OwnConfigured(s)) return s;
 
-        var platform = await platformEmail.GetAsync();
+        var platform = await platformEmail.GetStatusAsync();
         if (platform is null) return null;
 
         var fromName = s.FromName;
@@ -32,16 +32,11 @@ public class SmtpEmailService(
         {
             try { fromName = (await brandingService.GetAsync()).CompanyName ?? "PTScheduler"; } catch { fromName = "PTScheduler"; }
         }
+        // Wysyłkę robi Portal (bez hasła SMTP w instancji) — tu tylko nazwa nadawcy i adres odpowiedzi.
         return new Application.DTOs.EmailSettingsDto
         {
             IsEnabled = true,
             Provider = "Platform",
-            SmtpHost = platform.Host,
-            SmtpPort = platform.Port,
-            UseTls = platform.Ssl,
-            Login = platform.User ?? "",
-            Password = platform.Password ?? "",
-            FromAddress = platform.FromAddress,
             FromName = fromName,
             ReplyTo = s.ReplyTo
         };
@@ -69,6 +64,12 @@ public class SmtpEmailService(
         var s = await ResolveAsync();
         if (s is null) return;
 
+        if (s.Provider == "Platform")
+        {
+            await platformEmail.SendAsync(toAddress, toName, subject, htmlBody, s.FromName, s.ReplyTo);
+            return;
+        }
+
         var message = NewMessage(s);
         message.To.Add(new MailboxAddress(toName, toAddress));
         message.Subject = subject;
@@ -77,18 +78,31 @@ public class SmtpEmailService(
         await SendMessageAsync(s, message);
     }
 
+    /// <summary>Dzienny limit i wykorzystanie poczty platformy (null przy własnym SMTP).</summary>
+    public async Task<(int Limit, int SentToday)?> GetPlatformQuotaAsync()
+    {
+        var st = await platformEmail.GetStatusAsync(refresh: true);
+        return st is null ? null : (st.DailyLimit, st.SentToday);
+    }
+
     public async Task<(bool Success, string? Error)> TestAsync(string testAddress)
     {
         var s = await ResolveAsync();
         if (s is null) return (false, "Wysyłka e-maili nie jest skonfigurowana.");
         try
         {
+            var branding = await brandingService.GetAsync();
+            var html = TestEmailHtml(s.FromName, ThemeColor(branding.ThemeName));
+            if (s.Provider == "Platform")
+            {
+                await platformEmail.SendAsync(testAddress, testAddress, "Test połączenia — PTScheduler", html, s.FromName, s.ReplyTo);
+                return (true, null);
+            }
+
             var message = NewMessage(s);
             message.To.Add(new MailboxAddress(testAddress, testAddress));
             message.Subject = "Test połączenia — PTScheduler";
-            var branding = await brandingService.GetAsync();
-            var accent = ThemeColor(branding.ThemeName);
-            message.Body = new TextPart("html") { Text = TestEmailHtml(s.FromName, accent) };
+            message.Body = new TextPart("html") { Text = html };
 
             await SendMessageAsync(s, message);
             return (true, null);

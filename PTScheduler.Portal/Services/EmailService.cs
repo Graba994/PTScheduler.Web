@@ -5,7 +5,10 @@ namespace PTScheduler.Portal.Services;
 
 public class EmailService(SiteSettingsService settings, ILogger<EmailService> logger)
 {
-    public async Task<(bool Success, string? Error)> SendAsync(string toEmail, string subject, string htmlBody)
+    /// <param name="fromNameOverride">Nazwa nadawcy (np. studio trenera); adres zostaje adresem platformy.</param>
+    /// <param name="replyTo">Adres odpowiedzi — przy poczcie trenera jego własny e-mail.</param>
+    public async Task<(bool Success, string? Error)> SendAsync(string toEmail, string subject, string htmlBody,
+        string? fromNameOverride = null, string? replyTo = null, string? toName = null)
     {
         try
         {
@@ -26,7 +29,8 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             var user = s[SiteSettingsService.Keys.SmtpUser];
             var pass = s[SiteSettingsService.Keys.SmtpPass];
             var from = string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.SmtpFrom]) ? user : s[SiteSettingsService.Keys.SmtpFrom];
-            var fromName = string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.SmtpFromName]) ? "PTScheduler" : s[SiteSettingsService.Keys.SmtpFromName];
+            var fromName = !string.IsNullOrWhiteSpace(fromNameOverride) ? fromNameOverride
+                : string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.SmtpFromName]) ? "PTScheduler" : s[SiteSettingsService.Keys.SmtpFromName];
             var ssl = s[SiteSettingsService.Keys.SmtpSsl] == "true";
 
             using var smtp = new SmtpClient(host)
@@ -44,7 +48,8 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                 Body = htmlBody,
                 IsBodyHtml = true
             };
-            mail.To.Add(toEmail);
+            mail.To.Add(string.IsNullOrWhiteSpace(toName) ? new MailAddress(toEmail) : new MailAddress(toEmail, toName));
+            if (!string.IsNullOrWhiteSpace(replyTo)) mail.ReplyToList.Add(new MailAddress(replyTo));
 
             await smtp.SendMailAsync(mail);
             logger.LogInformation("Email sent to {To}: {Subject}", toEmail, subject);

@@ -8,4 +8,7 @@ public interface IEmailService
 
     /// <summary>„own” — własny SMTP trenera, „platform” — serwer platformy, „none” — brak wysyłki.</summary>
     Task<string> GetDeliveryModeAsync();
+
+    /// <summary>Dzienny limit i dzisiejsze wykorzystanie poczty platformy; null przy własnym SMTP.</summary>
+    Task<(int Limit, int SentToday)?> GetPlatformQuotaAsync();
 }

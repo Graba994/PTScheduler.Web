@@ -9,8 +9,69 @@ public class DockerService : IDisposable
         new Uri("unix:///var/run/docker.sock")).CreateClient();
 
     private readonly ILogger<DockerService> _logger;
+    private readonly IConfiguration _config;
 
-    public DockerService(ILogger<DockerService> logger) => _logger = logger;
+    public DockerService(ILogger<DockerService> logger, IConfiguration config)
+    {
+        _logger = logger;
+        _config = config;
+    }
+
+    /// <summary>
+    /// Limity zasobów kontenerów trenera — jeden obciążony trener nie zabiera pamięci
+    /// i procesora pozostałym. Wartości z konfiguracji Portalu (Portal:TenantWebMemoryMb itd.).
+    /// </summary>
+    public sealed record ResourceLimits(long MemoryBytes, long NanoCpus, long Pids);
+
+    public ResourceLimits LimitsFor(bool database)
+    {
+        var memMb = database
+            ? _config.GetValue<int?>("Portal:TenantDbMemoryMb") ?? 512
+            : _config.GetValue<int?>("Portal:TenantWebMemoryMb") ?? 1024;
+        var cpus = database
+            ? _config.GetValue<double?>("Portal:TenantDbCpus") ?? 1.0
+            : _config.GetValue<double?>("Portal:TenantWebCpus") ?? 2.0;
+        return new ResourceLimits(memMb * 1024L * 1024L, (long)(cpus * 1_000_000_000), database ? 256 : 512);
+    }
+
+    private HostConfig WithLimits(HostConfig host, bool database)
+    {
+        var l = LimitsFor(database);
+        host.Memory = l.MemoryBytes;
+        host.MemorySwap = l.MemoryBytes; // bez dodatkowego swapu — limit jest limitem
+        host.NanoCPUs = l.NanoCpus;
+        host.PidsLimit = l.Pids;
+        return host;
+    }
+
+    /// <summary>Nakłada limity na działający kontener bez restartu (docker update).</summary>
+    public async Task<(bool Success, string? Error)> ApplyResourceLimitsAsync(string containerName, bool database)
+    {
+        var l = LimitsFor(database);
+        try
+        {
+            await _client.Containers.UpdateContainerAsync(containerName, new ContainerUpdateParameters
+            {
+                Memory = l.MemoryBytes,
+                MemorySwap = l.MemoryBytes,
+                NanoCPUs = l.NanoCpus,
+                PidsLimit = l.Pids
+            });
+            return (true, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Nie nałożono limitów na {Container}.", containerName);
+            return (false, ex.Message);
+        }
+    }
+
+    /// <summary>Limit pamięci kontenera w bajtach (0 = bez limitu), null gdy kontener nie istnieje.</summary>
+    public async Task<long?> GetMemoryLimitAsync(string containerName)
+    {
+        try { return (await _client.Containers.InspectContainerAsync(containerName)).HostConfig?.Memory ?? 0; }
+        catch { return null; }
+    }
 
     public async Task<ContainerInfo?> GetContainerInfoAsync(string containerName)
     {
@@ -184,7 +245,7 @@ public class DockerService : IDisposable
                     "POSTGRES_USER=ptscheduler",
                     $"POSTGRES_PASSWORD={dbPassword}"
                 },
-                HostConfig = new HostConfig
+                HostConfig = WithLimits(new HostConfig
                 {
                     RestartPolicy = new RestartPolicy { Name = RestartPolicyKind.UnlessStopped },
                     NetworkMode = networkName,
@@ -192,7 +253,7 @@ public class DockerService : IDisposable
                     {
                         new() { Type = "volume", Source = pgVolume, Target = "/var/lib/postgresql/data" }
                     }
-                }
+                }, database: true)
             });
             await _client.Containers.StartContainerAsync(dbName, new ContainerStartParameters());
         }
@@ -234,7 +295,7 @@ public class DockerService : IDisposable
                 Image = webImage,
                 Env = env,
                 ExposedPorts = new Dictionary<string, EmptyStruct> { ["8080/tcp"] = default },
-                HostConfig = new HostConfig
+                HostConfig = WithLimits(new HostConfig
                 {
                     RestartPolicy = new RestartPolicy { Name = RestartPolicyKind.UnlessStopped },
                     NetworkMode = networkName,
@@ -249,7 +310,7 @@ public class DockerService : IDisposable
                     {
                         new() { Type = "volume", Source = brandingVolume, Target = "/app/wwwroot/branding" }
                     }
-                }
+                }, database: false)
             });
             await _client.Containers.StartContainerAsync(webName, new ContainerStartParameters());
         }

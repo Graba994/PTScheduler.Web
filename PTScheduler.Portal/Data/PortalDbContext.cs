@@ -27,6 +27,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<TenantCredit> TenantCredits => Set<TenantCredit>();
     public DbSet<AppFeedback> AppFeedbacks => Set<AppFeedback>();
     public DbSet<GoogleCalendarGrant> GoogleCalendarGrants => Set<GoogleCalendarGrant>();
+    public DbSet<TenantMailCounter> TenantMailCounters => Set<TenantMailCounter>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -84,6 +85,12 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.Property(x => x.AuthorEmail).HasMaxLength(256);
             e.Property(x => x.ContactEmail).HasMaxLength(256);
             e.HasIndex(x => x.CreatedAt);
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<TenantMailCounter>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.Day }).IsUnique();
             e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
 

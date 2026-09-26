@@ -35,6 +35,10 @@
                         <p class="small text-muted mb-3">
                             Przypomnienia, potwierdzenia i faktury wychodzą z serwera platformy — nie musisz niczego konfigurować.
                             Klienci widzą nazwę Twojego studia jako nadawcę, a odpowiedzi trafiają na Twój adres.
+                            @if (_quota is { } q)
+                            {
+                                <span class="d-block mt-1">Dziś wysłano <strong>@q.SentToday</strong> z @q.Limit e-maili (limit dzienny).</span>
+                            }
                         </p>
                         <div class="row g-3">
                             <div class="col-md-6">
@@ -379,11 +383,13 @@
 
     // Instancja zarządzana przez Portal bez własnego SMTP — wysyłka przez serwer platformy.
     private bool _platformMode;
+    private (int Limit, int SentToday)? _quota;
 
     protected override async Task OnInitializedAsync()
     {
         _dto = await SettingsService.GetAsync();
         _platformMode = await EmailService.GetDeliveryModeAsync() == "platform";
+        if (_platformMode) _quota = await EmailService.GetPlatformQuotaAsync();
         if (_platformMode && string.IsNullOrWhiteSpace(_dto.ReplyTo))
         {
             var user = (await AuthState.GetAuthenticationStateAsync()).User;
