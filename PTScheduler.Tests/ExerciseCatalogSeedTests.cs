@@ -57,14 +57,16 @@ public class ExerciseCatalogSeedTests
     }
 
     [Fact]
-    public async Task Falls_Back_To_English_Name_When_No_Override()
+    public async Task Uses_Full_Polish_Translation_For_Name_And_Description()
     {
         var (_, db) = TestDb.CreateFresh();
         await DbInitializer.SeedExerciseCatalogAsync(db);
 
-        // Pozycja spoza kuratorowanej listy PL — NamePl == NameEn.
-        var any = await db.Exercises.FirstAsync(e => e.SourceKey == "Cocoons");
-        any.NamePl.Should().Be(any.NameEn);
+        // Pozycja spoza starej listy nazw — nazwa i opis z pełnego tłumaczenia (exercise-pl.json).
+        var cocoons = await db.Exercises.SingleAsync(e => e.SourceKey == "Cocoons");
+        cocoons.NamePl.Should().StartWith("Kokony");
+        cocoons.NameEn.Should().Be("Cocoons");
+        cocoons.DescriptionPl.Should().NotBeNullOrWhiteSpace();
     }
 
     [Fact]
