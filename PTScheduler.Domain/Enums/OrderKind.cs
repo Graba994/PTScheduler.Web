@@ -4,5 +4,6 @@ namespace PTScheduler.Domain.Enums;
 public enum OrderKind
 {
     Course,   // access to a course
-    Package   // a session package (bookable credits)
+    Package,  // a session package (bookable credits)
+    Membership // opłata za okres karnetu cyklicznego
 }

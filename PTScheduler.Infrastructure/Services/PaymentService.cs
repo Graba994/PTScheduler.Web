@@ -21,6 +21,7 @@ public class PaymentService(
     ICouponService coupons,
     IEnumerable<IPaymentProvider> providers,
     IAuditLogService auditLog,
+    IAppClock clock,
     ILogger<PaymentService> logger) : IPaymentService
 {
     private const string SystemUserId = "system";
@@ -95,6 +96,57 @@ public class PaymentService(
         return await StartAsync(db, order, providerKey, offer.Name, appBaseUrl, buyerEmail, customerIp);
     }
 
+    public async Task<PaymentInitResult> StartMembershipPeriodCheckoutAsync(string userId, int periodId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var period = await db.MembershipPeriods
+            .Include(p => p.Membership).ThenInclude(m => m.Client)
+            .Include(p => p.Membership).ThenInclude(m => m.Plan)
+            .FirstOrDefaultAsync(p => p.Id == periodId);
+        if (period is null || period.Membership.Client.ApplicationUserId != userId)
+            return new(false, null, "Nie znaleziono należności.");
+        if (period.Status != MembershipPeriodStatus.Due)
+            return new(false, null, "Ten okres jest już rozliczony.");
+
+        var name = $"{period.Membership.Plan.Name} {period.PeriodStart:MM.yyyy}";
+        var order = new Order
+        {
+            ApplicationUserId = userId,
+            Kind = OrderKind.Membership,
+            MembershipPeriodId = period.Id,
+            Amount = period.Amount,
+            Currency = period.Membership.Plan.Currency,
+            Description = $"Karnet: {name}",
+            CreatedAt = DateTime.UtcNow
+        };
+        return await StartAsync(db, order, providerKey, name, appBaseUrl, buyerEmail, customerIp);
+    }
+
+    public async Task<PaymentInitResult> StartMembershipPlanCheckoutAsync(string userId, int planId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null, InvoiceBuyerDto? invoiceBuyer = null)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var plan = await db.MembershipPlans.FirstOrDefaultAsync(p => p.Id == planId && p.IsActive && p.AvailableInShop);
+        if (plan is null) return new(false, null, "Karnet nie jest dostępny.");
+        var client = await db.Clients.FirstOrDefaultAsync(c => c.ApplicationUserId == userId);
+        if (client is null) return new(false, null, "Twoje konto nie jest powiązane z profilem klienta. Skontaktuj się z trenerem.");
+        if (await db.Memberships.AnyAsync(m => m.ClientId == client.Id && m.PlanId == planId && m.Status != MembershipStatus.Cancelled))
+            return new(false, null, "Masz już ten karnet — opłaty kolejnych okresów znajdziesz w „Moje karnety”.");
+
+        var order = new Order
+        {
+            ApplicationUserId = userId,
+            Kind = OrderKind.Membership,
+            MembershipPlanId = planId,
+            Amount = plan.Price,
+            Currency = plan.Currency,
+            Description = $"Karnet: {plan.Name}",
+            CreatedAt = DateTime.UtcNow
+        };
+        await ApplyCouponIfAnyAsync(order, couponCode, "membership");
+        if (ApplyInvoiceBuyer(order, invoiceBuyer) is { } buyerError) return new(false, null, buyerError);
+        return await StartAsync(db, order, providerKey, plan.Name, appBaseUrl, buyerEmail, customerIp);
+    }
+
     // Dane do faktury na firmę podane przy zakupie; zwraca komunikat błędu albo null.
     private static string? ApplyInvoiceBuyer(Order order, InvoiceBuyerDto? buyer)
     {
@@ -150,8 +202,8 @@ public class PaymentService(
                 {
                     await coupons.RedeemAsync(cid, order.ApplicationUserId, null,
                         order.OriginalAmount.Value, order.DiscountAmount.Value, order.Amount,
-                        order.Kind == OrderKind.Course ? "course" : "package",
-                        order.CourseId ?? order.PackageOfferId);
+                        order.Kind == OrderKind.Course ? "course" : order.Kind == OrderKind.Membership ? "membership" : "package",
+                        order.CourseId ?? order.PackageOfferId ?? order.MembershipPlanId);
                 }
                 catch (Exception ex)
                 {
@@ -254,8 +306,8 @@ public class PaymentService(
                     {
                         await coupons.RedeemAsync(cid, order.ApplicationUserId, null,
                             order.OriginalAmount.Value, order.DiscountAmount.Value, order.Amount,
-                            order.Kind == OrderKind.Course ? "course" : "package",
-                            order.CourseId ?? order.PackageOfferId);
+                            order.Kind == OrderKind.Course ? "course" : order.Kind == OrderKind.Membership ? "membership" : "package",
+                            order.CourseId ?? order.PackageOfferId ?? order.MembershipPlanId);
                     }
                     catch (Exception ex)
                     {
@@ -300,9 +352,11 @@ public class PaymentService(
         catch (Exception auditEx) { logger.LogError(auditEx, "Audit log write failed for coupon bookkeeping failure on order {OrderId}", order.Id); }
     }
 
-    private static async Task FulfilAsync(ApplicationDbContext db, Order order)
+    private async Task FulfilAsync(ApplicationDbContext db, Order order)
     {
-        if (order.Kind == OrderKind.Course && order.CourseId is int courseId)
+        if (order.Kind == OrderKind.Membership)
+            await MembershipLedger.FulfilOrderAsync(db, clock, order);
+        else if (order.Kind == OrderKind.Course && order.CourseId is int courseId)
             await GrantCourseAsync(db, order, courseId);
         else if (order.Kind == OrderKind.Package && order.PackageOfferId is int offerId)
             await GrantPackageAsync(db, order, offerId);
@@ -390,7 +444,9 @@ public class PaymentService(
                 Id = o.Id,
                 ItemTitle = o.Kind == OrderKind.Package
                     ? (o.PackageOffer != null ? o.PackageOffer.Name : "Pakiet")
-                    : (o.Course != null ? o.Course.Title : "Kurs"),
+                    : o.Kind == OrderKind.Membership
+                        ? (o.Description ?? "Karnet")
+                        : (o.Course != null ? o.Course.Title : "Kurs"),
                 Kind = o.Kind.ToString(),
                 Provider = o.Provider,
                 Amount = o.Amount,
@@ -416,7 +472,9 @@ public class PaymentService(
                 Id = o.Id,
                 ItemTitle = o.Kind == OrderKind.Package
                     ? (o.PackageOffer != null ? o.PackageOffer.Name : "Pakiet")
-                    : (o.Course != null ? o.Course.Title : "Kurs"),
+                    : o.Kind == OrderKind.Membership
+                        ? (o.Description ?? "Karnet")
+                        : (o.Course != null ? o.Course.Title : "Kurs"),
                 Kind = o.Kind.ToString(),
                 Provider = o.Provider,
                 Amount = o.Amount,
@@ -442,7 +500,9 @@ public class PaymentService(
                 Id = o.Id,
                 ItemTitle = o.Kind == OrderKind.Package
                     ? (o.PackageOffer != null ? o.PackageOffer.Name : "Pakiet")
-                    : (o.Course != null ? o.Course.Title : "Kurs"),
+                    : o.Kind == OrderKind.Membership
+                        ? (o.Description ?? "Karnet")
+                        : (o.Course != null ? o.Course.Title : "Kurs"),
                 Kind = o.Kind.ToString(),
                 Provider = o.Provider,
                 Amount = o.Amount,

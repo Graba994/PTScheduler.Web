@@ -13,6 +13,12 @@ public interface IPaymentService
     Task<PaymentInitResult> StartCourseCheckoutAsync(string userId, int courseId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null, InvoiceBuyerDto? invoiceBuyer = null);
 
     /// <summary>Creates a session-package order on the chosen gateway and returns a redirect URL.</summary>
+    /// <summary>Opłata bieżącego okresu karnetu cyklicznego.</summary>
+    Task<PaymentInitResult> StartMembershipPeriodCheckoutAsync(string userId, int periodId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp);
+
+    /// <summary>Zakup karnetu cyklicznego w sklepie (pierwszy okres).</summary>
+    Task<PaymentInitResult> StartMembershipPlanCheckoutAsync(string userId, int planId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null, InvoiceBuyerDto? invoiceBuyer = null);
+
     Task<PaymentInitResult> StartPackageCheckoutAsync(string userId, int packageOfferId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null, InvoiceBuyerDto? invoiceBuyer = null);
 
     /// <summary>Handles a gateway webhook for the given provider. Returns true if accepted.</summary>

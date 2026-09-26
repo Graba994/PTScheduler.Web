@@ -48,6 +48,9 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<PaymentSettings> PaymentSettings => Set<PaymentSettings>();
     public DbSet<Order> Orders => Set<Order>();
     public DbSet<PackageOffer> PackageOffers => Set<PackageOffer>();
+    public DbSet<MembershipPlan> MembershipPlans => Set<MembershipPlan>();
+    public DbSet<Membership> Memberships => Set<Membership>();
+    public DbSet<MembershipPeriod> MembershipPeriods => Set<MembershipPeriod>();
     public DbSet<Coupon> Coupons => Set<Coupon>();
     public DbSet<CouponRedemption> CouponRedemptions => Set<CouponRedemption>();
 
@@ -406,6 +409,28 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
              .HasForeignKey(r => r.ClientId)
              .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(r => new { r.ClientId, r.Kind, r.WorkoutDate });
+        });
+
+        builder.Entity<MembershipPlan>(e =>
+        {
+            e.Property(p => p.Price).HasPrecision(10, 2);
+            e.HasOne(p => p.SessionType).WithMany().HasForeignKey(p => p.SessionTypeId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        builder.Entity<Membership>(e =>
+        {
+            e.Property(m => m.PriceOverride).HasPrecision(10, 2);
+            e.HasOne(m => m.Client).WithMany().HasForeignKey(m => m.ClientId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(m => m.Plan).WithMany().HasForeignKey(m => m.PlanId).OnDelete(DeleteBehavior.Restrict);
+            e.HasIndex(m => new { m.Status, m.NextBillingDate });
+        });
+
+        builder.Entity<MembershipPeriod>(e =>
+        {
+            e.Property(p => p.Amount).HasPrecision(10, 2);
+            e.HasOne(p => p.Membership).WithMany(m => m.Periods).HasForeignKey(p => p.MembershipId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(p => p.Package).WithMany().HasForeignKey(p => p.PackageId).OnDelete(DeleteBehavior.SetNull);
+            e.HasIndex(p => new { p.MembershipId, p.PeriodStart }).IsUnique();
         });
 
         builder.Entity<WorkoutComment>(e =>

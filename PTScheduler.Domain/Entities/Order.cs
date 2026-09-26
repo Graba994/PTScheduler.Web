@@ -20,6 +20,12 @@ public class Order
 
     // Package order target (null for course orders).
     public int? PackageOfferId { get; set; }
+
+    /// <summary>Opłacany okres karnetu cyklicznego (Kind = Membership).</summary>
+    public int? MembershipPeriodId { get; set; }
+
+    /// <summary>Karnet kupowany w sklepie (nowa subskrypcja po opłaceniu).</summary>
+    public int? MembershipPlanId { get; set; }
     public PackageOffer? PackageOffer { get; set; }
 
     // Our unique order reference sent to the gateway as extOrderId.

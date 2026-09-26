@@ -36,6 +36,7 @@ public class PaymentServiceAuditTests
             new Mock<ICouponService>().Object,
             [],
             auditLog.Object,
+            Helpers.TestClock.AtWallClock(new DateTime(2026, 10, 1, 12, 0, 0)),
             NullLogger<PaymentService>.Instance);
 
         var ok = await svc.CompleteSimulatorAsync("ext-123", paid: true);
@@ -72,6 +73,7 @@ public class PaymentServiceAuditTests
             new Mock<ICouponService>().Object,
             [],
             auditLog.Object,
+            Helpers.TestClock.AtWallClock(new DateTime(2026, 10, 1, 12, 0, 0)),
             NullLogger<PaymentService>.Instance);
 
         await svc.CompleteSimulatorAsync("ext-456", paid: false);

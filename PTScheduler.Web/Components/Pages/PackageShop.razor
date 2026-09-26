@@ -3,6 +3,7 @@
 @using PTScheduler.Application.Interfaces
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @inject IPackageOfferService OfferService
+@inject IMembershipService MembershipService
 @inject IPaymentService PaymentService
 @inject IPaymentSettingsService PaymentSettings
 @inject ICouponService CouponSvc
@@ -22,7 +23,7 @@
 {
     <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
 }
-else if (_offers.Count == 0)
+else if (_offers.Count == 0 && _plans.Count == 0)
 {
     <div class="text-center text-muted py-5">
         <i class="bi bi-box-seam" style="font-size:2.4rem"></i>
@@ -32,6 +33,32 @@ else if (_offers.Count == 0)
 else
 {
     @if (!string.IsNullOrEmpty(_err)) { <div class="alert alert-danger">@_err</div> }
+
+    @if (_plans.Any())
+    {
+        <h6 class="text-uppercase text-muted small fw-semibold mb-2"><i class="bi bi-arrow-repeat me-1"></i>Karnety — co okres, stała cena</h6>
+        <div class="row g-3 mb-4">
+            @foreach (var p in _plans)
+            {
+                <div class="col-12 col-md-6 col-xl-4">
+                    <div class="card h-100 border-primary-subtle">
+                        <div class="card-body d-flex flex-column">
+                            <div class="fw-semibold">@p.Name</div>
+                            <div class="small text-muted mb-2">@p.SessionsPerPeriod × @p.SessionTypeName co @p.PeriodLabel</div>
+                            @if (!string.IsNullOrEmpty(p.Description)) { <p class="small mb-2">@p.Description</p> }
+                            <div class="mt-auto d-flex align-items-end justify-content-between">
+                                <div><span class="fs-5 fw-bold">@p.Price.ToString("0.00")</span> <span class="small text-muted">@p.Currency / @p.PeriodLabel</span></div>
+                                @if (_paymentsEnabled && !_isStaff)
+                                {
+                                    <button class="btn btn-primary btn-sm" @onclick="() => { _planFor = p; _err = string.Empty; }">Kup karnet</button>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
 
     @if (_featured.Any())
     {
@@ -123,6 +150,39 @@ else
     }
 }
 
+@if (_planFor is not null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.45)">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h6 class="modal-title">Karnet „@_planFor.Name”</h6>
+                    <button type="button" class="btn-close" @onclick="() => _planFor = null"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="small">
+                        Pierwszy okres zaczyna się dziś: <strong>@_planFor.SessionsPerPeriod sesji</strong> do wykorzystania,
+                        <strong>@_planFor.Price.ToString("0.00") @_planFor.Currency</strong> za @_planFor.PeriodLabel.
+                        Przed każdym kolejnym okresem dostaniesz przypomnienie o płatności. Zrezygnujesz w każdej chwili
+                        w „Moje karnety” — karnet skończy się z końcem opłaconego okresu.
+                    </p>
+                    <CompanyInvoiceFields @bind-Wants="_wantsCompanyInvoice" Buyer="_invoiceBuyer" />
+                    @if (!string.IsNullOrEmpty(_err)) { <div class="alert alert-danger py-2 mb-2">@_err</div> }
+                    <div class="d-grid gap-2">
+                        @foreach (var opt in _options)
+                        {
+                            <button class="pay-option" @onclick="() => StartPlanCheckout(_planFor, opt.Key)" disabled="@_busy">
+                                <i class="bi @opt.Icon"></i><span>@opt.Name</span>
+                                <i class="bi bi-chevron-right ms-auto"></i>
+                            </button>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @if (_pickFor is not null)
 {
     <div class="modal-backdrop-custom" @onclick="ClosePicker">
@@ -198,6 +258,18 @@ else
 
     private List<PackageOfferDto> _offers = [];
     private List<PackageOfferDto> _featured = [];
+    private List<PTScheduler.Application.Memberships.MembershipPlanDto> _plans = [];
+    private PTScheduler.Application.Memberships.MembershipPlanDto? _planFor;
+
+    private async Task StartPlanCheckout(PTScheduler.Application.Memberships.MembershipPlanDto p, string providerKey)
+    {
+        _busy = true; _err = string.Empty;
+        var res = await PaymentService.StartMembershipPlanCheckoutAsync(_userId, p.Id, providerKey, Nav.BaseUri, _email, string.Empty,
+            null, _wantsCompanyInvoice ? _invoiceBuyer : null);
+        if (res.Ok && res.RedirectUrl is not null) { Nav.NavigateTo(res.RedirectUrl, forceLoad: true); return; }
+        _err = res.Error ?? "Nie udało się rozpocząć płatności.";
+        _busy = false;
+    }
     private List<PackageOfferDto> _regular = [];
     private List<PaymentOptionDto> _options = [];
     private PackageOfferDto? _pickFor;
@@ -257,6 +329,7 @@ else
 
         _offers = await OfferService.GetActiveOffersAsync();
         _featured = _offers.Where(o => o.IsFeatured).ToList();
+        _plans = await MembershipService.GetPlansAsync(onlyActive: true, onlyShop: true);
         _regular = _offers.Where(o => !o.IsFeatured).ToList();
         _loading = false;
     }
