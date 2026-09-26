@@ -122,3 +122,52 @@ public class ChatServiceTests
         all.Select(c => c.ClientId).Should().Equal(1, 2);
     }
 }
+
+public class ChatSecurityTests
+{
+    private static async Task<IDbContextFactory<ApplicationDbContext>> SeedAsync()
+    {
+        var (f, _) = TestDb.CreateFresh();
+        await using var db = f.CreateDbContext();
+        db.Users.AddRange(
+            new ApplicationUser { Id = "t1", UserName = "t1", FirstName = "Anna", LastName = "Trener" },
+            new ApplicationUser { Id = "t2", UserName = "t2", FirstName = "Piotr", LastName = "Inny" },
+            new ApplicationUser { Id = "c1", UserName = "c1", FirstName = "Jan", LastName = "Klient" },
+            new ApplicationUser { Id = "c2", UserName = "c2", FirstName = "Ola", LastName = "Klient" },
+            new ApplicationUser { Id = "adm", UserName = "adm" });
+        db.Roles.Add(new Microsoft.AspNetCore.Identity.IdentityRole { Id = "r-admin", Name = PTScheduler.Domain.Constants.Roles.Admin, NormalizedName = "ADMIN" });
+        db.UserRoles.Add(new Microsoft.AspNetCore.Identity.IdentityUserRole<string> { UserId = "adm", RoleId = "r-admin" });
+        db.Clients.AddRange(
+            new Client { Id = 1, ApplicationUserId = "c1", FirstName = "Jan", LastName = "Klient", TrainerUserId = "t1" },
+            new Client { Id = 2, ApplicationUserId = "c2", FirstName = "Ola", LastName = "Klient", TrainerUserId = "t2" });
+        await db.SaveChangesAsync();
+        return f;
+    }
+
+    private static ChatService Make(IDbContextFactory<ApplicationDbContext> f) =>
+        new(f, new Mock<IWebPushService>().Object, new ChatNotifier(),
+            TestClock.AtWallClock(new DateTime(2026, 10, 1, 12, 0, 0)), NullLogger<ChatService>.Instance);
+
+    [Fact]
+    public async Task Only_The_Client_Their_Trainer_Or_Admin_Can_Send()
+    {
+        var svc = Make(await SeedAsync());
+        (await svc.SendAsync(1, "c2", false, "cudza rozmowa")).Ok.Should().BeFalse("klient pisze tylko we własnej rozmowie");
+        (await svc.SendAsync(1, "t2", true, "cudzy klient")).Ok.Should().BeFalse("trener pisze tylko do swoich klientów");
+        (await svc.SendAsync(1, "c1", true, "udaję trenera")).Ok.Should().BeFalse("klient nie może wysłać jako studio");
+        (await svc.SendAsync(1, "adm", true, "Wiadomość od studia")).Ok.Should().BeTrue();
+        (await svc.SendAsync(1, "t1", true, "Cześć")).Ok.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task Flooding_Is_Limited_Per_Sender()
+    {
+        var svc = Make(await SeedAsync());
+        for (var i = 0; i < ChatService.MaxPerMinute; i++)
+            (await svc.SendAsync(1, "c1", false, $"wiadomość {i}")).Ok.Should().BeTrue();
+        var (ok, error) = await svc.SendAsync(1, "c1", false, "jeszcze jedna");
+        ok.Should().BeFalse();
+        error.Should().Contain("odczekaj");
+        (await svc.SendAsync(1, "t1", true, "trener nadal może odpisać")).Ok.Should().BeTrue();
+    }
+}

@@ -22,6 +22,8 @@ public class ChatService(
     ILogger<ChatService> logger) : IChatService
 {
     public const int MaxLength = 2000;
+    /// <summary>Limit przeciw zalewaniu rozmowy (i powiadomień push) — wiadomości na minutę od jednej osoby.</summary>
+    public const int MaxPerMinute = 20;
 
     public async Task<bool> CanAccessAsync(int clientId, string userId, bool isAdmin)
     {
@@ -101,6 +103,21 @@ public class ChatService(
         var client = await db.Clients.AsNoTracking().FirstOrDefaultAsync(c => c.Id == clientId);
         if (client is null) return (false, "Nie znaleziono rozmowy.");
 
+        // Autoryzacja także tutaj, nie tylko na stronie: klient pisze wyłącznie we własnej rozmowie,
+        // a po stronie studia — trener tego klienta albo administrator.
+        var allowed = fromStaff
+            ? client.TrainerUserId == senderUserId || await IsAdminAsync(db, senderUserId)
+            : client.ApplicationUserId == senderUserId;
+        if (!allowed)
+        {
+            logger.LogWarning("Chat: odrzucono wiadomość użytkownika {User} do rozmowy {ClientId}.", senderUserId, clientId);
+            return (false, "Nie masz dostępu do tej rozmowy.");
+        }
+
+        var since = clock.UtcNow.AddMinutes(-1);
+        if (await db.ChatMessages.CountAsync(m => m.SenderUserId == senderUserId && m.SentAt >= since) >= MaxPerMinute)
+            return (false, "Za dużo wiadomości naraz — odczekaj chwilę.");
+
         db.ChatMessages.Add(new ChatMessage
         {
             ClientId = clientId, SenderUserId = senderUserId, FromStaff = fromStaff,
@@ -128,6 +145,12 @@ public class ChatService(
         }
         return (true, null);
     }
+
+    private static Task<bool> IsAdminAsync(ApplicationDbContext db, string userId) =>
+        (from ur in db.UserRoles
+         join r in db.Roles on ur.RoleId equals r.Id
+         where ur.UserId == userId && r.Name == PTScheduler.Domain.Constants.Roles.Admin
+         select ur).AnyAsync();
 
     public async Task MarkReadAsync(int clientId, bool readerIsStaff)
     {

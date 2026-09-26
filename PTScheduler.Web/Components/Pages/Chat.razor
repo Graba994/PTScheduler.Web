@@ -74,7 +74,7 @@ else
                             @(_isStaff ? "Napisz pierwszą wiadomość do klienta." : "Masz pytanie do trenera? Napisz tutaj.")
                         </div>
                     }
-                    @{ DateOnly? lastDay = null; }
+                    @{ DateOnly? lastDay = null; string? lastSender = null; }
                     @foreach (var m in _messages)
                     {
                         var wall = Clock.ToWallClock(m.SentAt);
@@ -82,11 +82,19 @@ else
                         if (lastDay != day)
                         {
                             lastDay = day;
+                            lastSender = null;
                             <div class="chat-day">@wall.ToString("dddd, d MMMM")</div>
                         }
-                        var mine = m.FromStaff == _isStaff;
-                        <div class="chat-bubble-row @(mine ? "mine" : "")">
+                        var mine = m.SenderUserId == _userId;
+                        // Podpis tylko na początku serii wiadomości od tej samej osoby.
+                        var showSender = lastSender != m.SenderUserId;
+                        lastSender = m.SenderUserId;
+                        <div class="chat-bubble-row @(mine ? "mine" : "") @(showSender ? "chat-run-start" : "")">
                             <div class="chat-bubble">
+                                @if (showSender)
+                                {
+                                    <div class="chat-sender">@SenderLabel(m, mine)</div>
+                                }
                                 <div class="chat-body">@m.Body</div>
                                 <div class="chat-meta">
                                     @wall.ToString("HH:mm")
@@ -192,6 +200,11 @@ else
             StateHasChanged();
         });
     }
+
+    private static string SenderLabel(ChatMessageDto m, bool mine) =>
+        mine ? "ja"
+        : m.FromStaff ? (string.IsNullOrWhiteSpace(m.SenderName) ? "Trener" : $"Trener {m.SenderName}")
+        : string.IsNullOrWhiteSpace(m.SenderName) ? "Klient" : m.SenderName;
 
     private bool HasUnread() => _messages.Any(m => m.FromStaff != _isStaff && m.ReadAt is null);
 
