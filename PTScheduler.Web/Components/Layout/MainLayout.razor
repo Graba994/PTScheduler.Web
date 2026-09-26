@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @inject NavigationManager Nav
+@inject PTScheduler.Web.Services.ClientNav ClientNav
 @using PTScheduler.Domain.Constants
 
 <div class="app-shell">
@@ -9,6 +10,9 @@
 
     <main class="app-main">
         <div class="app-content">
+            <AuthorizeView Roles="Client">
+                <Authorized><ClientTabs /></Authorized>
+            </AuthorizeView>
             <ErrorBoundary @ref="_errorBoundary">
                 <ChildContent>@Body</ChildContent>
                 <ErrorContent>
@@ -68,30 +72,20 @@
     </Authorized>
 </AuthorizeView>
 
-<!-- Mobile bottom nav — Client -->
+<!-- Mobile bottom nav — Client: te same sekcje co w menu bocznym -->
 <AuthorizeView Roles="Client">
     <Authorized>
         <nav class="mobile-bottom-nav">
-            <a href="/app" class="mobile-nav-item @IsActive("app")">
-                <span class="mobile-nav-indicator"></span>
-                <i class="bi bi-house-fill"></i>
-                <span>Home</span>
-            </a>
-            <a href="/my" class="mobile-nav-item @IsActive("my")">
-                <span class="mobile-nav-indicator"></span>
-                <i class="bi bi-calendar-week-fill"></i>
-                <span>Grafik</span>
-            </a>
-            <a href="/sessions" class="mobile-nav-item @IsActive("sessions")">
-                <span class="mobile-nav-indicator"></span>
-                <i class="bi bi-calendar-check"></i>
-                <span>Wizyty</span>
-            </a>
-            <a href="/my/measurements" class="mobile-nav-item @IsActive("my/measurements")">
-                <span class="mobile-nav-indicator"></span>
-                <i class="bi bi-rulers"></i>
-                <span>Pomiary</span>
-            </a>
+            @foreach (var s in _clientSections.Where(s => s.Key is "start" or "visits" or "training" or "chat").Take(4))
+            {
+                <a href="@s.Href" class="mobile-nav-item @(_clientSection?.Key == s.Key ? "active" : "")">
+                    <span class="mobile-nav-indicator"></span>
+                    <i class="bi @s.Icon position-relative">
+                        @if (s.Key == "chat") { <ChatUnreadBadge @rendermode="PTScheduler.Web.RenderModes.Server" /> }
+                    </i>
+                    <span>@s.Label</span>
+                </a>
+            }
             <MobileMoreMenu />
         </nav>
     </Authorized>
@@ -107,6 +101,15 @@
     private ErrorBoundary? _errorBoundary;
 
     private void RecoverError() => _errorBoundary?.Recover();
+
+    private IReadOnlyList<PTScheduler.Web.Services.ClientNav.Section> _clientSections = [];
+    private PTScheduler.Web.Services.ClientNav.Section? _clientSection;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _clientSections = await ClientNav.GetSectionsAsync();
+        _clientSection = PTScheduler.Web.Services.ClientNav.Match(_clientSections, Nav.ToBaseRelativePath(Nav.Uri)).Section;
+    }
 
     private string IsActive(string path)
     {

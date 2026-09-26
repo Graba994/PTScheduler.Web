@@ -1,8 +1,8 @@
 @inject PTScheduler.Web.Services.EntitlementService Entitlements
 @inject PTScheduler.Application.Interfaces.IBrandingService BrandingService
-@inject PTScheduler.Application.Interfaces.IModuleSettingsService ModuleSettings
-@inject PTScheduler.Application.Interfaces.IMarketingSettingsService MarketingSettings
 @using PTScheduler.Domain.Constants
+@inject PTScheduler.Web.Services.ClientNav ClientNavigation
+@inject NavigationManager Navigation
 
 <!-- Sidebar brand -->
 <a href="/app" class="sidebar-brand">
@@ -48,72 +48,22 @@
     </AuthorizeView>
 
     <AuthorizeView Roles="@Roles.Client">
-        <NavLink class="sidebar-link" href="app" Match="NavLinkMatch.All">
-            <i class="bi bi-house-fill"></i><span>Dashboard</span>
-        </NavLink>
-        <NavLink class="sidebar-link" href="my" Match="NavLinkMatch.All">
-            <i class="bi bi-calendar-week-fill"></i><span>Mój grafik</span>
-        </NavLink>
-        @if (Entitlements.IsAllowed("TrainingPlansEnabled"))
+        @* Kilka sekcji zamiast kilkunastu pozycji — reszta w zakładkach nad stroną. *@
+        @foreach (var sec in _clientSections)
         {
-            <NavLink class="sidebar-link" href="train">
-                <i class="bi bi-lightning-charge-fill"></i><span>Trenuj</span>
-            </NavLink>
+            <a class="sidebar-link @(_clientSection?.Key == sec.Key ? "active" : "")" href="@sec.Href">
+                <i class="bi @sec.Icon"></i><span>@sec.Label</span>
+                @if (sec.Key == "chat") { <ChatUnreadBadge @rendermode="PTScheduler.Web.RenderModes.Server" /> }
+            </a>
         }
-        <NavLink class="sidebar-link" href="sessions">
-            <i class="bi bi-calendar-check"></i><span>Wizyty</span>
-        </NavLink>
-        <NavLink class="sidebar-link" href="chat">
-            <i class="bi bi-chat-dots-fill"></i><span>Wiadomości</span>
-            <ChatUnreadBadge @rendermode="PTScheduler.Web.RenderModes.Server" />
-        </NavLink>
+        <div class="sidebar-divider"></div>
         <NavLink class="sidebar-link" href="my/profile">
             <i class="bi bi-person-circle"></i><span>Mój profil</span>
         </NavLink>
-        <NavLink class="sidebar-link" href="my/measurements">
-            <i class="bi bi-rulers"></i><span>Moje pomiary</span>
-            <PlanBadge Flag="BodyMeasurements" />
-        </NavLink>
-        <NavLink class="sidebar-link" href="packages" Match="NavLinkMatch.All">
-            <i class="bi bi-bag-check"></i><span>Kup pakiet</span>
-        </NavLink>
-        <NavLink class="sidebar-link" href="my/packages">
-            <i class="bi bi-box-seam"></i><span>Moje pakiety</span>
-        </NavLink>
-        <NavLink class="sidebar-link" href="my/memberships">
-            <i class="bi bi-arrow-repeat"></i><span>Moje karnety</span>
-        </NavLink>
-        @if (_coursesEnabled)
-        {
-            <NavLink class="sidebar-link" href="courses" Match="NavLinkMatch.All">
-                <i class="bi bi-collection-play-fill"></i><span>Kursy</span>
-            </NavLink>
-            <NavLink class="sidebar-link" href="my/courses">
-                <i class="bi bi-mortarboard-fill"></i><span>Moje kursy</span>
-            </NavLink>
-        }
-        @if (_vouchersEnabled)
-        {
-            <NavLink class="sidebar-link" href="my/vouchers">
-                <i class="bi bi-ticket-perforated"></i><span>Bony podarunkowe</span>
-            </NavLink>
-        }
-        @if (_referralsEnabled)
+        @if (ClientNavigation.ReferralsEnabled)
         {
             <NavLink class="sidebar-link" href="my/referrals">
                 <i class="bi bi-gift"></i><span>Poleć znajomym</span>
-            </NavLink>
-        }
-        <NavLink class="sidebar-link" href="my/orders">
-            <i class="bi bi-receipt"></i><span>Moje zamówienia</span>
-        </NavLink>
-        <NavLink class="sidebar-link" href="my/stats">
-            <i class="bi bi-graph-up"></i><span>Moje statystyki</span>
-        </NavLink>
-        @if (Entitlements.IsAllowed("TrainingPlansEnabled"))
-        {
-            <NavLink class="sidebar-link" href="my/workouts">
-                <i class="bi bi-graph-up-arrow"></i><span>Moje postępy</span>
             </NavLink>
         }
     </AuthorizeView>
@@ -181,9 +131,15 @@
 @code {
     private string? _logoPath;
     private string _companyName = "PTScheduler";
-    private bool _coursesEnabled = true;
-    private bool _referralsEnabled;
-    private bool _vouchersEnabled;
+
+    private IReadOnlyList<PTScheduler.Web.Services.ClientNav.Section> _clientSections = [];
+    private PTScheduler.Web.Services.ClientNav.Section? _clientSection;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _clientSections = await ClientNavigation.GetSectionsAsync();
+        _clientSection = PTScheduler.Web.Services.ClientNav.Match(_clientSections, Navigation.ToBaseRelativePath(Navigation.Uri)).Section;
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -195,16 +151,6 @@
         }
         catch { } // Best-effort: fall back to defaults if branding unavailable
 
-        try { _coursesEnabled = (await ModuleSettings.GetAsync()).CoursesEnabled; }
-        catch { }
-
-        try
-        {
-            var marketing = await MarketingSettings.GetAsync();
-            _referralsEnabled = Entitlements.IsAllowed("ReferralProgram") && marketing.ReferralEnabled;
-            _vouchersEnabled = marketing.VouchersEnabled;
-        }
-        catch { }
     }
 
 }

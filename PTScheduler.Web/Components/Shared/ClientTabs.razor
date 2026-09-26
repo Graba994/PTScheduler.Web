@@ -1,0 +1,29 @@
+@* Zakładki sekcji klienta nad treścią strony (np. Pakiety: moje / kup / karnety…).
+   Renderowane w układzie, więc działają na każdej stronie sekcji bez zmian w samych stronach. *@
+@using PTScheduler.Web.Services
+@inject ClientNav Nav
+@inject NavigationManager Navigation
+
+@if (_section is { Tabs.Count: > 1 } current)
+{
+    <nav class="client-tabs" aria-label="@current.Label">
+        @foreach (var t in current.Tabs)
+        {
+            var active = t == _tab;
+            <a href="@t.Href" class="client-tab @(active ? "active" : "")" aria-current="@(active ? "page" : null)">
+                <i class="bi @t.Icon"></i><span>@t.Label</span>
+            </a>
+        }
+    </nav>
+}
+
+@code {
+    private ClientNav.Section? _section;
+    private ClientNav.Tab? _tab;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var sections = await Nav.GetSectionsAsync();
+        (_section, _tab) = ClientNav.Match(sections, Navigation.ToBaseRelativePath(Navigation.Uri));
+    }
+}

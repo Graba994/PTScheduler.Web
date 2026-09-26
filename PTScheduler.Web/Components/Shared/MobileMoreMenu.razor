@@ -3,6 +3,7 @@
 @inject PTScheduler.Web.Services.EntitlementService Entitlements
 @inject AuthenticationStateProvider AuthState
 @inject PTScheduler.Application.Interfaces.IMarketingSettingsService MarketingSettings
+@inject PTScheduler.Web.Services.ClientNav ClientNavigation
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Domain.Constants
 @using System.Security.Claims
@@ -125,54 +126,28 @@
 
         <AuthorizeView Roles="Client">
             <Authorized>
+                @* Sekcje, których nie ma na dolnym pasku (Pakiety, Kursy), i sprawy konta. *@
                 <div class="mobile-sheet-section">
-                    <div class="mobile-sheet-label">Moje</div>
+                    <div class="mobile-sheet-label">Więcej</div>
                     <div class="mobile-sheet-grid">
-                        @if (Entitlements.IsAllowed("TrainingPlansEnabled"))
+                        @foreach (var sec in _clientSections.Where(s => s.Key is "shop" or "courses"))
                         {
-                        <a href="/train" class="mobile-sheet-tile" @onclick="CloseSheet"
-                           style="background:var(--c-primary);color:#fff;grid-column:1 / -1">
-                            <i class="bi bi-lightning-charge-fill" style="color:inherit"></i>
-                            <span>Trenuj</span>
-                        </a>
-                        <a href="/my/workouts" class="mobile-sheet-tile" @onclick="CloseSheet">
-                            <i class="bi bi-graph-up-arrow"></i>
-                            <span>Postępy</span>
-                        </a>
+                            <a href="@sec.Href" class="mobile-sheet-tile" @onclick="CloseSheet">
+                                <i class="bi @sec.Icon"></i>
+                                <span>@sec.Label</span>
+                            </a>
                         }
-                        <a href="/chat" class="mobile-sheet-tile position-relative" @onclick="CloseSheet">
-                            <i class="bi bi-chat-dots-fill"></i>
-                            <span>Wiadomości</span>
-                            <ChatUnreadBadge />
-                        </a>
                         <a href="/my/profile" class="mobile-sheet-tile" @onclick="CloseSheet">
                             <i class="bi bi-person-circle"></i>
-                            <span>Profil</span>
-                        </a>
-                        <a href="/my/packages" class="mobile-sheet-tile" @onclick="CloseSheet">
-                            <i class="bi bi-box-seam"></i>
-                            <span>Pakiety</span>
-                        </a>
-                        <a href="/my/memberships" class="mobile-sheet-tile" @onclick="CloseSheet">
-                            <i class="bi bi-arrow-repeat"></i>
-                            <span>Karnety</span>
+                            <span>Mój profil</span>
                         </a>
                         @if (_referralsEnabled)
                         {
-                        <a href="/my/referrals" class="mobile-sheet-tile" @onclick="CloseSheet">
-                            <i class="bi bi-gift"></i>
-                            <span>Poleć</span>
-                        </a>
+                            <a href="/my/referrals" class="mobile-sheet-tile" @onclick="CloseSheet">
+                                <i class="bi bi-gift"></i>
+                                <span>Poleć znajomym</span>
+                            </a>
                         }
-                        <a href="/my/stats" class="mobile-sheet-tile" @onclick="CloseSheet">
-                            <i class="bi bi-graph-up"></i>
-                            <span>Statystyki</span>
-                        </a>
-                        <a href="/my/courses" class="mobile-sheet-tile" @onclick="CloseSheet"
-                           style="background:var(--c-primary-light);color:var(--c-primary)">
-                            <i class="bi bi-mortarboard-fill"></i>
-                            <span>Moje kursy</span>
-                        </a>
                     </div>
                 </div>
             </Authorized>
@@ -225,6 +200,7 @@
     private string _email = "";
     private bool _referralsEnabled;
     private bool _mustChangePassword;
+    private IReadOnlyList<PTScheduler.Web.Services.ClientNav.Section> _clientSections = [];
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -241,6 +217,7 @@
                 : _name.Length > 0 ? _name[0].ToString().ToUpper() : "?";
             try { _dark = await JS.InvokeAsync<bool>("PTTheme.isDark"); } catch { }
             try { _referralsEnabled = Entitlements.IsAllowed("ReferralProgram") && (await MarketingSettings.GetAsync()).ReferralEnabled; } catch { }
+            try { _clientSections = await ClientNavigation.GetSectionsAsync(); } catch { }
             try
             {
                 var standalone = await JS.InvokeAsync<bool>("eval",
