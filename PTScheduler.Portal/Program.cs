@@ -89,11 +89,51 @@ using (var scope = app.Services.CreateScope())
 
     var userManager = scope.ServiceProvider.GetRequiredService<UserManager<IdentityUser>>();
     const string adminEmail = "admin@ptscheduler.pl";
-    if (await userManager.FindByEmailAsync(adminEmail) is null)
+    const string legacyAdminPassword = "Admin123!";
+    var admins = await userManager.GetUsersInRoleAsync("Admin");
+    if (admins.Count == 0)
     {
-        var admin = new IdentityUser { UserName = adminEmail, Email = adminEmail, EmailConfirmed = true };
-        await userManager.CreateAsync(admin, "Admin123!");
+        // Konto startowe dostaje losowe hasło — wypisujemy je raz do logów kontenera.
+        // Dawniej hasło „Admin123!” było w repozytorium, a konto wracało po każdej
+        // zmianie adresu e-mail (szukane po adresie, nie po roli).
+        var password = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(18)) + "aA1!";
+        var admin = await userManager.FindByEmailAsync(adminEmail);
+        if (admin is null)
+        {
+            admin = new IdentityUser { UserName = adminEmail, Email = adminEmail, EmailConfirmed = true };
+            await userManager.CreateAsync(admin, password);
+        }
+        else
+        {
+            var token = await userManager.GeneratePasswordResetTokenAsync(admin);
+            await userManager.ResetPasswordAsync(admin, token, password);
+        }
         await userManager.AddToRoleAsync(admin, "Admin");
+        app.Logger.LogWarning("Utworzono konto administratora Portalu {Email} z hasłem: {Password} — zmień je po zalogowaniu.",
+            adminEmail, password);
+    }
+    else if (admins.Count > 1)
+    {
+        var legacy = admins.FirstOrDefault(a => string.Equals(a.Email, adminEmail, StringComparison.OrdinalIgnoreCase));
+        if (legacy is not null && await userManager.CheckPasswordAsync(legacy, legacyAdminPassword))
+            await userManager.DeleteAsync(legacy);
+    }
+
+    // Sekret komunikacji Portal ↔ tenanci. Bez niego endpointy /api/credits, /api/store
+    // itd. wpuszczały każdego (warunek „pusty sekret = brak kontroli”). Gdy nie ma go
+    // w konfiguracji, generujemy go raz i trzymamy w bazie; tenanci dostają go przy
+    // (re)provisioningu.
+    if (string.IsNullOrWhiteSpace(app.Configuration["Portal:TenantInternalSecret"]))
+    {
+        var settings = scope.ServiceProvider.GetRequiredService<SiteSettingsService>();
+        var stored = await settings.GetAsync(SiteSettingsService.Keys.TenantInternalSecret);
+        if (string.IsNullOrWhiteSpace(stored))
+        {
+            stored = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(32));
+            await settings.SetAsync(SiteSettingsService.Keys.TenantInternalSecret, stored);
+            app.Logger.LogWarning("Wygenerowano nowy sekret tenantów — zreprowizjonuj tenantów, żeby go otrzymali.");
+        }
+        app.Configuration["Portal:TenantInternalSecret"] = stored;
     }
 }
 
@@ -348,10 +388,7 @@ app.MapGet("/api/internal/tenants/{slug}/entitlements", async (
     IDbContextFactory<PortalDbContext> dbFactory,
     IConfiguration config) =>
 {
-    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
-    if (string.IsNullOrEmpty(secret)) return Results.NotFound();
-    if (ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
-        return Results.Unauthorized();
+    if (!InternalAuth.IsAuthorized(ctx, config)) return Results.Unauthorized();
 
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
@@ -371,9 +408,7 @@ app.MapGet("/api/store/{slug}", async (
     IConfiguration config,
     StorePaymentService storePayment) =>
 {
-    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
-    if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
-        return Results.Unauthorized();
+    if (!InternalAuth.IsAuthorized(ctx, config)) return Results.Unauthorized();
 
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
@@ -416,9 +451,7 @@ app.MapPost("/api/store/{slug}/order", async (
     SiteSettingsService siteSettings,
     ILoggerFactory loggerFactory) =>
 {
-    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
-    if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
-        return Results.Unauthorized();
+    if (!InternalAuth.IsAuthorized(ctx, config)) return Results.Unauthorized();
 
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
@@ -539,9 +572,7 @@ app.MapGet("/api/credits/{slug}", async (
     IConfiguration config,
     CreditService creditService) =>
 {
-    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
-    if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
-        return Results.Unauthorized();
+    if (!InternalAuth.IsAuthorized(ctx, config)) return Results.Unauthorized();
 
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
@@ -573,9 +604,7 @@ app.MapPost("/api/credits/{slug}/sms/send", async (
     IConfiguration config,
     CreditService creditService) =>
 {
-    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
-    if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
-        return Results.Unauthorized();
+    if (!InternalAuth.IsAuthorized(ctx, config)) return Results.Unauthorized();
 
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
@@ -608,9 +637,7 @@ app.MapPost("/api/credits/{slug}/sms/test", async (
     IConfiguration config,
     SiteSettingsService settingsService) =>
 {
-    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
-    if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
-        return Results.Unauthorized();
+    if (!InternalAuth.IsAuthorized(ctx, config)) return Results.Unauthorized();
 
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
@@ -677,9 +704,7 @@ app.MapGet("/api/credits/{slug}/bunny", async (
     IConfiguration config,
     SiteSettingsService settingsService) =>
 {
-    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
-    if (!string.IsNullOrEmpty(secret) && ctx.Request.Headers["X-Internal-Secret"].ToString() != secret)
-        return Results.Unauthorized();
+    if (!InternalAuth.IsAuthorized(ctx, config)) return Results.Unauthorized();
 
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
@@ -706,3 +731,17 @@ app.MapRazorComponents<App>()
     .AddInteractiveServerRenderMode();
 
 app.Run();
+
+// Wspólna kontrola nagłówka X-Internal-Secret dla wywołań tenant → Portal.
+// Pusty sekret = odmowa (wcześniej oznaczał brak jakiejkolwiek kontroli).
+static class InternalAuth
+{
+    public static bool IsAuthorized(HttpContext ctx, IConfiguration config)
+    {
+        var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+        if (string.IsNullOrEmpty(secret)) return false;
+        var provided = ctx.Request.Headers["X-Internal-Secret"].ToString();
+        return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+            System.Text.Encoding.UTF8.GetBytes(provided), System.Text.Encoding.UTF8.GetBytes(secret));
+    }
+}

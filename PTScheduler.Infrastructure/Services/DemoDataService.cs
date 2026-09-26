@@ -13,7 +13,6 @@ public class DemoDataService(
     UserManager<ApplicationUser> userManager) : IDemoDataService
 {
     private const string TrainerEmail = "jan.kowalski@demo.pl";
-    private const string AdminResetEmail = "root@admin.local";
 
     // Stable "today" anchor (UTC, midnight) used across the whole seed
     private static DateTime Today =>
@@ -1405,32 +1404,28 @@ public class DemoDataService(
         await db.EmailTemplates.ExecuteDeleteAsync();
         await db.PaymentSettings.ExecuteDeleteAsync();
         await db.FinanceTaxConfigs.ExecuteDeleteAsync();
+        var companyName = await db.AppBrandings.Select(b => b.CompanyName).FirstOrDefaultAsync() ?? "PTScheduler";
         await db.AppBrandings.ExecuteDeleteAsync();
 
-        // Delete all identity users
+        // Konta administratorów zostają (w tym osoba, która robi reset) — reszta
+        // użytkowników znika. Dawniej kasowano wszystkich i zakładano root@admin.local
+        // z hasłem „password”, a wyczyszczone AppBrandings otwierało anonimowy /setup,
+        // czyli możliwość przejęcia instancji przez dowolną osobę.
+        var adminIds = (await userManager.GetUsersInRoleAsync(Roles.Admin)).Select(a => a.Id).ToHashSet();
         var allUsers = await userManager.Users.ToListAsync();
-        foreach (var u in allUsers)
+        foreach (var u in allUsers.Where(u => !adminIds.Contains(u.Id)))
             await userManager.DeleteAsync(u);
 
-        // Create admin
-        var admin = new ApplicationUser
-        {
-            UserName = AdminResetEmail,
-            Email = AdminResetEmail,
-            NormalizedEmail = AdminResetEmail.ToUpperInvariant(),
-            NormalizedUserName = AdminResetEmail.ToUpperInvariant(),
-            EmailConfirmed = true,
-            FirstName = "Admin",
-            LastName = "System",
-            SecurityStamp = Guid.NewGuid().ToString()
-        };
-        var createResult = await userManager.CreateAsync(admin);
-        if (!createResult.Succeeded)
-            throw new InvalidOperationException(string.Join("; ", createResult.Errors.Select(e => e.Description)));
+        if (adminIds.Count == 0)
+            await DbInitializer.SeedAdminAsync(userManager);
 
-        admin.PasswordHash = userManager.PasswordHasher.HashPassword(admin, "password");
-        await userManager.UpdateAsync(admin);
-        await userManager.AddToRoleAsync(admin, Roles.Admin);
+        db.AppBrandings.Add(new AppBranding
+        {
+            CompanyName = companyName,
+            SetupCompleted = true,
+            SetupCompletedAt = DateTime.UtcNow
+        });
+        await db.SaveChangesAsync();
     }
 
     // ─── HELPERS ──────────────────────────────────────────────────────────────

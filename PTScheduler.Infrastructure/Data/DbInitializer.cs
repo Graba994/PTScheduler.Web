@@ -54,10 +54,37 @@ public static class DbInitializer
         }
     }
 
+    public const string DefaultAdminEmail = "root@admin.local";
+
+    // Hasło, którym dawniej zakładano konto startowe — znane z README.
+    private const string LegacyDefaultPassword = "password";
+
+    /// <summary>
+    /// Zakłada konto startowe administratora TYLKO wtedy, gdy w bazie nie ma żadnego
+    /// admina — i z losowym hasłem. Właściciel ustawia własne dane w kreatorze /setup
+    /// (albo operator przez Portal → reset admina).
+    ///
+    /// Dawniej konto szukano po adresie root@admin.local. Kreator zmienia ten adres na
+    /// prawdziwy, więc przy każdym restarcie powstawał DRUGI admin z hasłem „password”
+    /// — tylne drzwi do każdego tenanta. Takie „wskrzeszone” konta są tu usuwane.
+    /// </summary>
     public static async Task SeedAdminAsync(UserManager<ApplicationUser> userManager)
     {
-        const string email = "root@admin.local";
-        if (await userManager.FindByEmailAsync(email) is not null) return;
+        var admins = await userManager.GetUsersInRoleAsync(Roles.Admin);
+        if (admins.Count > 0)
+        {
+            await RemoveResurrectedDefaultAdminAsync(userManager, admins);
+            return;
+        }
+
+        const string email = DefaultAdminEmail;
+        var existing = await userManager.FindByEmailAsync(email);
+        if (existing is not null)
+        {
+            // Konto istnieje, ale straciło rolę — przywracamy rolę, hasło zostaje.
+            await userManager.AddToRoleAsync(existing, Roles.Admin);
+            return;
+        }
 
         var admin = new ApplicationUser
         {
@@ -71,10 +98,27 @@ public static class DbInitializer
             SecurityStamp = Guid.NewGuid().ToString()
         };
         await userManager.CreateAsync(admin);
-        admin.PasswordHash = userManager.PasswordHasher.HashPassword(admin, "password");
+        admin.PasswordHash = userManager.PasswordHasher.HashPassword(admin, NewRandomPassword());
         await userManager.UpdateAsync(admin);
         await userManager.AddToRoleAsync(admin, Roles.Admin);
     }
+
+    private static async Task RemoveResurrectedDefaultAdminAsync(
+        UserManager<ApplicationUser> userManager, IList<ApplicationUser> admins)
+    {
+        if (admins.Count < 2) return;
+        var root = admins.FirstOrDefault(a =>
+            string.Equals(a.Email, DefaultAdminEmail, StringComparison.OrdinalIgnoreCase));
+        if (root?.PasswordHash is null) return;
+
+        var check = userManager.PasswordHasher.VerifyHashedPassword(root, root.PasswordHash, LegacyDefaultPassword);
+        if (check == PasswordVerificationResult.Failed) return;
+
+        await userManager.DeleteAsync(root);
+    }
+
+    public static string NewRandomPassword() =>
+        Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24)) + "a1";
 
     public static async Task SeedSessionTypesAsync(ApplicationDbContext db)
     {

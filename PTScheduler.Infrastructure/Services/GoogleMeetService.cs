@@ -16,8 +16,7 @@ public class GoogleMeetService(IWebRootPathProvider webRoot, IHttpClientFactory 
     private static readonly JsonSerializerOptions JsonOpts =
         new(JsonSerializerDefaults.Web) { WriteIndented = true };
 
-    private string FilePath =>
-        Path.Combine(webRoot.WebRootPath, "branding", "google-meet-settings.json");
+    private string FilePath => PrivateStorage.SettingsFile(webRoot, "google-meet-settings.json");
 
     private GoogleMeetSettingsDto? _cached;
 
@@ -61,23 +60,46 @@ public class GoogleMeetService(IWebRootPathProvider webRoot, IHttpClientFactory 
         _cached = dto;
     }
 
-    public string BuildAuthorizationUrl(string clientId, string redirectUri)
+    public async Task<string> StartAuthorizationAsync(string redirectUri)
     {
+        var settings = await GetSettingsAsync();
+        var state = Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24));
+        settings.PendingOAuthState = state;
+        settings.PendingOAuthStateExpiresUtc = DateTime.UtcNow.AddMinutes(15);
+        settings.PendingRedirectUri = redirectUri;
+        await SaveSettingsAsync(settings);
+
         var scopes = Uri.EscapeDataString("https://www.googleapis.com/auth/calendar.events");
         return $"https://accounts.google.com/o/oauth2/v2/auth"
-             + $"?client_id={Uri.EscapeDataString(clientId)}"
+             + $"?client_id={Uri.EscapeDataString(settings.ClientId ?? "")}"
              + $"&redirect_uri={Uri.EscapeDataString(redirectUri)}"
              + $"&response_type=code"
              + $"&scope={scopes}"
              + $"&access_type=offline"
-             + $"&prompt=consent";
+             + $"&prompt=consent"
+             + $"&state={state}";
     }
 
-    public async Task<(bool Ok, string? Error)> ExchangeCodeAsync(string code, string redirectUri)
+    public async Task<(bool Ok, string? Error)> ExchangeCodeAsync(string code, string state)
     {
         var settings = await GetSettingsAsync();
         if (string.IsNullOrWhiteSpace(settings.ClientId) || string.IsNullOrWhiteSpace(settings.ClientSecret))
             return (false, "Najpierw zapisz Client ID i Client Secret.");
+
+        // State musi pochodzić z autoryzacji rozpoczętej w panelu i jest jednorazowy.
+        var expected = settings.PendingOAuthState;
+        var validState = !string.IsNullOrEmpty(expected)
+            && !string.IsNullOrEmpty(state)
+            && settings.PendingOAuthStateExpiresUtc > DateTime.UtcNow
+            && System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                Encoding.UTF8.GetBytes(state), Encoding.UTF8.GetBytes(expected));
+        var redirectUri = settings.PendingRedirectUri ?? "";
+        settings.PendingOAuthState = null;
+        settings.PendingOAuthStateExpiresUtc = null;
+        settings.PendingRedirectUri = null;
+        await SaveSettingsAsync(settings);
+        if (!validState)
+            return (false, "Link autoryzacji wygasł albo nie pochodzi z tego panelu. Rozpocznij autoryzację ponownie.");
 
         using var client = httpFactory.CreateClient();
         var body = new FormUrlEncodedContent(new Dictionary<string, string>
@@ -93,7 +115,10 @@ public class GoogleMeetService(IWebRootPathProvider webRoot, IHttpClientFactory 
         var json = await resp.Content.ReadAsStringAsync();
 
         if (!resp.IsSuccessStatusCode)
-            return (false, $"Google zwrócił błąd: {resp.StatusCode} — {json}");
+        {
+            logger.LogWarning("Google OAuth token exchange failed: {Status} {Body}", resp.StatusCode, json);
+            return (false, $"Google odrzucił autoryzację ({(int)resp.StatusCode}). Sprawdź Client ID, Client Secret i adres przekierowania.");
+        }
 
         var token = JsonSerializer.Deserialize<TokenResponse>(json, JsonOpts);
         if (string.IsNullOrWhiteSpace(token?.RefreshToken))

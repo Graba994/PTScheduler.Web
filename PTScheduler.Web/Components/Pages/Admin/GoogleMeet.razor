@@ -1,5 +1,5 @@
 @page "/admin/google-meet"
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer")]
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @inject IGoogleMeetService MeetService
@@ -80,18 +80,18 @@ else
                 {
                     @if (string.IsNullOrWhiteSpace(_settings.RefreshToken))
                     {
-                        <a class="btn btn-outline-success" href="@AuthUrl" target="_blank">
+                        <button class="btn btn-outline-success" @onclick="StartAuth" disabled="@_busy">
                             <i class="bi bi-google me-1"></i>Autoryzuj konto Google
-                        </a>
+                        </button>
                     }
                     else
                     {
                         <button class="btn btn-outline-secondary" @onclick="TestConnection" disabled="@_busy">
                             <i class="bi bi-wifi me-1"></i>Testuj połączenie
                         </button>
-                        <a class="btn btn-outline-warning" href="@AuthUrl" target="_blank">
+                        <button class="btn btn-outline-warning" @onclick="StartAuth" disabled="@_busy">
                             <i class="bi bi-arrow-repeat me-1"></i>Reautoryzuj
-                        </a>
+                        </button>
                     }
                 }
             </div>
@@ -126,13 +126,22 @@ else
 
     private string RedirectUri => $"{Nav.BaseUri.TrimEnd('/')}api/google-meet/callback";
 
-    private string AuthUrl => MeetService.BuildAuthorizationUrl(
-        _settings.ClientId ?? "", RedirectUri);
+    [SupplyParameterFromQuery(Name = "meet")] public string? MeetResult { get; set; }
+    [SupplyParameterFromQuery(Name = "msg")] public string? MeetMessage { get; set; }
 
     protected override async Task OnInitializedAsync()
     {
         if (Entitlements.IsAllowed("IntegrationGoogleMeet"))
             _settings = await MeetService.GetSettingsAsync();
+        if (MeetResult == "ok") { _message = "Połączono z kontem Google."; _msgError = false; }
+        else if (MeetResult == "error") { _message = MeetMessage ?? "Autoryzacja Google nie powiodła się."; _msgError = true; }
+    }
+
+    private async Task StartAuth()
+    {
+        _busy = true;
+        var url = await MeetService.StartAuthorizationAsync(RedirectUri);
+        Nav.NavigateTo(url);
     }
 
     private async Task SaveSettings()

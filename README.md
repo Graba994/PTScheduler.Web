@@ -29,11 +29,9 @@ docker compose up -d
 
 Aplikacja dostępna pod `http://localhost:8080`.
 
-Przy pierwszym uruchomieniu wykonaj reset bazy (`/admin/demo`), który utworzy konto administratora:
-
-| Login | Hasło |
-|-------|-------|
-| `root@admin.local` | `password` |
+Przy pierwszym uruchomieniu aplikacja otworzy kreator `/setup` — tam ustawiasz
+nazwę firmy oraz własny login i hasło administratora. Konto startowe
+`root@admin.local` ma losowe hasło i nie da się na nie zalogować przed kreatorem.
 
 ---
 
@@ -248,13 +246,9 @@ Seed tworzy też: dostępność trenera (pon–pt 8:00–18:00, sob 9:00–13:00
 
 ### Reset bazy danych
 
-Usuwa wszystkie dane i tworzy jedno konto administratora:
+Usuwa wszystkie dane poza kontami administratorów (Twoje konto i hasło zostają).
 
-| Login | Hasło |
-|-------|-------|
-| `root@admin.local` | `password` |
-
-> Wymaga podwójnego potwierdzenia. Po resecie bieżące konto zostaje usunięte — aplikacja wyloguje użytkownika.
+> Wymaga podwójnego potwierdzenia.
 
 ---
 

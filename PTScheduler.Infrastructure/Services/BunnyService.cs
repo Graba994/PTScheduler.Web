@@ -17,8 +17,7 @@ public class BunnyService(IWebRootPathProvider webRoot, IHttpClientFactory httpF
     private string? TenantSlug => Environment.GetEnvironmentVariable("TENANT_SLUG");
     private string? InternalSecret => Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
 
-    private string FilePath =>
-        Path.Combine(webRoot.WebRootPath, "branding", "bunny-settings.json");
+    private string FilePath => PrivateStorage.SettingsFile(webRoot, "bunny-settings.json");
 
     public async Task<BunnySettingsDto> GetSettingsAsync()
     {
@@ -46,8 +45,7 @@ public class BunnyService(IWebRootPathProvider webRoot, IHttpClientFactory httpF
 
     public async Task SaveSettingsAsync(BunnySettingsDto dto)
     {
-        var dir = Path.Combine(webRoot.WebRootPath, "branding");
-        Directory.CreateDirectory(dir);
+        Directory.CreateDirectory(PrivateStorage.Root(webRoot));
         await using var fs = File.Create(FilePath);
         await JsonSerializer.SerializeAsync(fs, dto, JsonOptions);
     }

@@ -373,6 +373,21 @@ app.MapGet("/manifest.webmanifest", async (PTScheduler.Application.Interfaces.IB
     return Results.Json(manifest, contentType: "application/manifest+json");
 });
 
+// Pliki ustawień (JSON) i katalog prywatny leżą na wolumenie branding, ale nie mogą
+// być serwowane statycznie — trzymały m.in. klucz Bunny i token Google.
+app.Use(async (ctx, next) =>
+{
+    var path = ctx.Request.Path.Value ?? "";
+    if (path.StartsWith("/branding/", StringComparison.OrdinalIgnoreCase)
+        && (path.Contains("/" + PTScheduler.Infrastructure.Services.PrivateStorage.DirectoryName, StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)))
+    {
+        ctx.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+    await next();
+});
+
 // MapStaticAssets handles build-time assets with fingerprinting/caching;
 // UseStaticFiles is a fallback for runtime-uploaded files (branding logos, icons).
 app.UseStaticFiles();
@@ -395,10 +410,7 @@ app.MapGet("/health", (StartupHealth h) => Results.Json(new
 app.MapPost("/internal/entitlements/reload",
     async (HttpContext ctx, PTScheduler.Web.Services.EntitlementService svc) =>
 {
-    var expected = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
-    if (string.IsNullOrEmpty(expected)) return Results.NotFound();
-    if (ctx.Request.Headers["X-Internal-Secret"].ToString() != expected)
-        return Results.Unauthorized();
+    if (!InternalSecretMatches(ctx)) return Results.NotFound();
 
     using var reader = new StreamReader(ctx.Request.Body);
     var json = await reader.ReadToEndAsync();
@@ -409,10 +421,7 @@ app.MapPost("/internal/entitlements/reload",
 app.MapGet("/internal/metrics",
     async (HttpContext ctx, IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
-    var expected = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
-    if (string.IsNullOrEmpty(expected)) return Results.NotFound();
-    if (ctx.Request.Headers["X-Internal-Secret"].ToString() != expected)
-        return Results.Unauthorized();
+    if (!InternalSecretMatches(ctx)) return Results.NotFound();
 
     await using var db = dbFactory.CreateDbContext();
     var clientsCount = await db.Clients.CountAsync();
@@ -443,10 +452,7 @@ app.MapGet("/internal/metrics",
 app.MapGet("/internal/admin-info",
     async (HttpContext ctx, UserManager<ApplicationUser> userManager) =>
 {
-    var expected = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
-    if (string.IsNullOrEmpty(expected)) return Results.NotFound();
-    if (ctx.Request.Headers["X-Internal-Secret"].ToString() != expected)
-        return Results.Unauthorized();
+    if (!InternalSecretMatches(ctx)) return Results.NotFound();
 
     var admins = await userManager.GetUsersInRoleAsync(PTScheduler.Domain.Constants.Roles.Admin);
     var admin = admins.FirstOrDefault();
@@ -466,10 +472,7 @@ app.MapGet("/internal/admin-info",
 app.MapPost("/internal/admin-reset",
     async (HttpContext ctx, UserManager<ApplicationUser> userManager) =>
 {
-    var expected = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
-    if (string.IsNullOrEmpty(expected)) return Results.NotFound();
-    if (ctx.Request.Headers["X-Internal-Secret"].ToString() != expected)
-        return Results.Unauthorized();
+    if (!InternalSecretMatches(ctx)) return Results.NotFound();
 
     using var reader = new StreamReader(ctx.Request.Body);
     var body = await reader.ReadToEndAsync();
@@ -514,10 +517,7 @@ app.MapPost("/internal/admin-reset",
 app.MapGet("/internal/last-activity",
     async (HttpContext ctx, IDbContextFactory<ApplicationDbContext> dbFactory) =>
 {
-    var expected = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
-    if (string.IsNullOrEmpty(expected)) return Results.NotFound();
-    if (ctx.Request.Headers["X-Internal-Secret"].ToString() != expected)
-        return Results.Unauthorized();
+    if (!InternalSecretMatches(ctx)) return Results.NotFound();
 
     await using var db = dbFactory.CreateDbContext();
     var lastSession = await db.Sessions
@@ -548,22 +548,20 @@ app.MapGet("/internal/last-activity",
 });
 
 // Google Meet OAuth callback — exchanges the authorization code for a refresh token.
+// Wymaga zalogowanego admina/trenera i jednorazowego „state” wygenerowanego w panelu —
+// bez tego każdy mógł podpiąć tu własne konto Google i przejąć linki do spotkań.
 app.MapGet("/api/google-meet/callback", async (HttpContext ctx, PTScheduler.Application.Interfaces.IGoogleMeetService meet) =>
 {
     var code = ctx.Request.Query["code"].ToString();
+    var state = ctx.Request.Query["state"].ToString();
     if (string.IsNullOrEmpty(code))
-        return Results.BadRequest("Brak kodu autoryzacji.");
+        return Results.Redirect("/admin/google-meet?meet=error&msg=" + Uri.EscapeDataString("Google nie przekazał kodu autoryzacji."));
 
-    var scheme = ctx.Request.Scheme;
-    var host = ctx.Request.Host.ToString();
-    var redirectUri = $"{scheme}://{host}/api/google-meet/callback";
-
-    var (ok, error) = await meet.ExchangeCodeAsync(code, redirectUri);
-    var html = ok
-        ? "<html><body><h2>Połączono z Google Meet!</h2><p>Możesz zamknąć tę kartę i wrócić do panelu administracyjnego.</p></body></html>"
-        : $"<html><body><h2>Błąd</h2><p>{error}</p></body></html>";
-    return Results.Content(html, "text/html");
-});
+    var (ok, error) = await meet.ExchangeCodeAsync(code, state);
+    return ok
+        ? Results.Redirect("/admin/google-meet?meet=ok")
+        : Results.Redirect("/admin/google-meet?meet=error&msg=" + Uri.EscapeDataString(error ?? "Nieznany błąd."));
+}).RequireAuthorization(p => p.RequireRole(PTScheduler.Domain.Constants.Roles.Admin, PTScheduler.Domain.Constants.Roles.Trainer));
 
 // Gateway notify (webhook): verifies the payment and fulfils the order.
 // Route carries the provider key, e.g. /payments/payu/notify, /payments/p24/notify.
@@ -580,6 +578,17 @@ app.MapPost("/payments/{provider}/notify",
 app.Run();
 
 // ---- helpers ----
+
+// Wywołania Portal → tenant. Brak sekretu albo zły nagłówek = 404 (nie zdradzamy,
+// że endpoint istnieje). Porównanie w stałym czasie.
+static bool InternalSecretMatches(HttpContext ctx)
+{
+    var expected = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+    if (string.IsNullOrEmpty(expected)) return false;
+    var provided = ctx.Request.Headers["X-Internal-Secret"].ToString();
+    return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+        System.Text.Encoding.UTF8.GetBytes(provided), System.Text.Encoding.UTF8.GetBytes(expected));
+}
 
 // Własna ikona PWA może być JPG/WebP — zły typ w manifeście psuje wybór ikony w Chrome.
 static string IconMimeType(string path) => Path.GetExtension(path).ToLowerInvariant() switch

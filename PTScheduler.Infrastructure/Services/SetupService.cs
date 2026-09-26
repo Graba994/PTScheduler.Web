@@ -34,10 +34,18 @@ public class SetupService(
         branding.SetupCompletedAt = DateTime.UtcNow;
         await db.SaveChangesAsync();
 
-        var defaultAdmin = await userManager.FindByEmailAsync("root@admin.local");
+        // Konto startowe ma losowe hasło (DbInitializer.SeedAdminAsync) — kreator nadaje
+        // właścicielowi własny login i hasło. Gdy operator zmienił już adres przez Portal,
+        // bierzemy jedynego istniejącego admina.
+        var defaultAdmin = await userManager.FindByEmailAsync(DbInitializer.DefaultAdminEmail);
+        if (defaultAdmin is null)
+        {
+            var admins = await userManager.GetUsersInRoleAsync(Domain.Constants.Roles.Admin);
+            if (admins.Count == 1) defaultAdmin = admins[0];
+        }
         if (defaultAdmin is not null)
         {
-            if (adminEmail != "root@admin.local")
+            if (!string.Equals(adminEmail, defaultAdmin.Email, StringComparison.OrdinalIgnoreCase))
             {
                 defaultAdmin.Email = adminEmail;
                 defaultAdmin.NormalizedEmail = adminEmail.ToUpperInvariant();

@@ -17,7 +17,7 @@ set -euo pipefail
 #   6. Optionally registers a proxy host in Nginx Proxy Manager via API
 #
 # After provisioning, the app is available at http://localhost:<port>
-# Default login: root@admin.local / password  (CHANGE IMMEDIATELY)
+# First login: open the app — the /setup wizard sets the admin e-mail and password
 # ──────────────────────────────────────────────────────────────────────────────
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
@@ -171,6 +171,6 @@ echo "║  ✓ Tenant '$SLUG' provisioned successfully!             "
 echo "╠══════════════════════════════════════════════════════════╣"
 echo "║  URL:       http://$DOMAIN (after DNS + NPM setup)      "
 echo "║  Direct:    http://localhost:$PORT                       "
-echo "║  Login:     root@admin.local / password                  "
-echo "║  ⚠ CHANGE THE DEFAULT PASSWORD IMMEDIATELY!             "
+echo "║  Login:     open the app and finish the /setup wizard     "
+echo "║  ⚠ Finish /setup right away — it claims the admin account "
 echo "╚══════════════════════════════════════════════════════════╝"

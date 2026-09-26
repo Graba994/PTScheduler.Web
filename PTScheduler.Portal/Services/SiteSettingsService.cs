@@ -71,6 +71,7 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         // Guardian (upgrade orchestrator)
         public const string GuardianUrl = "guardian_url";
         public const string GuardianSecret = "guardian_secret";
+        public const string TenantInternalSecret = "tenant_internal_secret";
     }
 
     private static readonly Dictionary<string, string> Defaults = new()

@@ -7,8 +7,9 @@ public interface IGoogleMeetService
     Task<GoogleMeetSettingsDto> GetSettingsAsync();
     Task SaveSettingsAsync(GoogleMeetSettingsDto dto);
 
-    string BuildAuthorizationUrl(string clientId, string redirectUri);
-    Task<(bool Ok, string? Error)> ExchangeCodeAsync(string code, string redirectUri);
+    /// <summary>Generuje jednorazowy state, zapisuje go i zwraca adres zgody Google.</summary>
+    Task<string> StartAuthorizationAsync(string redirectUri);
+    Task<(bool Ok, string? Error)> ExchangeCodeAsync(string code, string state);
 
     Task<(bool Ok, string? Error)> TestConnectionAsync();
 
