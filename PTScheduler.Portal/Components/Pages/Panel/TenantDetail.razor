@@ -11,6 +11,12 @@
 @inject EmailService EmailSvc
 @rendermode InteractiveServer
 
+<style>
+    .tenant-tabs { gap: .25rem; flex-wrap: nowrap; overflow-x: auto; }
+    .tenant-tabs .nav-link { white-space: nowrap; color: #4b5563; border-radius: .6rem; font-size: .9rem; }
+    .tenant-tabs .nav-link.active { background: #eef0ff; color: #4338ca; font-weight: 600; }
+</style>
+
 <PageTitle>@(_tenant?.CompanyName ?? "Trener") — PTScheduler Portal</PageTitle>
 
 @if (_tenant is null)
@@ -44,7 +50,7 @@ else
                 <div class="row g-3 mb-3">
                     <div class="col-md-6">
                         <dl class="row mb-0 small">
-                            <dt class="col-5 text-muted">Imie i nazwisko</dt>
+                            <dt class="col-5 text-muted">Imię i nazwisko</dt>
                             <dd class="col-7 fw-semibold">@_tenant.OwnerName</dd>
                             <dt class="col-5 text-muted">Email</dt>
                             <dd class="col-7"><a href="mailto:@_tenant.OwnerEmail">@_tenant.OwnerEmail</a></dd>
@@ -61,7 +67,7 @@ else
                         </dl>
                     </div>
                     <div class="col-md-6">
-                        <h6 class="fw-bold mb-2 small"><i class="bi bi-tags me-1 text-primary"></i>Zmien plan (opcjonalnie)</h6>
+                        <h6 class="fw-bold mb-2 small"><i class="bi bi-tags me-1 text-primary"></i>Zmień plan (opcjonalnie)</h6>
                         <select class="form-select form-select-sm mb-3" @bind="_selectedPlanId">
                             @foreach (var p in _availablePlans)
                             {
@@ -70,21 +76,21 @@ else
                         </select>
 
                         <h6 class="fw-bold mb-2 small"><i class="bi bi-sticky me-1"></i>Notatka admina (opcjonalnie)</h6>
-                        <textarea class="form-control form-control-sm" rows="2" @bind="_approvalNotes" placeholder="Notatka wewnetrzna..."></textarea>
+                        <textarea class="form-control form-control-sm" rows="2" @bind="_approvalNotes" placeholder="Notatka wewnętrzna..."></textarea>
                     </div>
                 </div>
 
                 @if (_approvalServiceItems is not null && _approvalServiceItems.Count > 0)
                 {
                     <hr class="my-3" />
-                    <h6 class="fw-bold mb-2"><i class="bi bi-shop me-2 text-primary"></i>Cennik uslug (indywidualny)</h6>
-                    <p class="text-muted small mb-2">Ustaw indywidualne ceny lub ukryj uslugi dla tego trenera. Puste = cena domyslna.</p>
+                    <h6 class="fw-bold mb-2"><i class="bi bi-shop me-2 text-primary"></i>Cennik usług (indywidualny)</h6>
+                    <p class="text-muted small mb-2">Ustaw indywidualne ceny lub ukryj usługi dla tego trenera. Puste = cena domyślna.</p>
                     <div class="table-responsive">
                         <table class="table table-sm small align-middle mb-0">
                             <thead class="table-light">
                                 <tr>
-                                    <th>Usluga</th>
-                                    <th>Cena domyslna</th>
+                                    <th>Usługa</th>
+                                    <th>Cena domyślna</th>
                                     <th style="width:140px">Cena indywidualna</th>
                                     <th style="width:80px">Ukryj</th>
                                 </tr>
@@ -123,15 +129,26 @@ else
                     </button>
                     <button class="btn btn-outline-danger" @onclick="RejectRegistration" disabled="@_rejecting">
                         @if (_rejecting) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                        <i class="bi bi-x-circle me-1"></i>Odrzuc
+                        <i class="bi bi-x-circle me-1"></i>Odrzuć
                     </button>
                 </div>
             </div>
         </div>
     }
 
+    <ul class="nav nav-pills tenant-tabs mb-3" role="tablist">
+        @foreach (var (key, label, icon) in _tabs)
+        {
+            <li class="nav-item" role="presentation">
+                <button type="button" role="tab" class="nav-link @(_tab == key ? "active" : "")" aria-selected="@(_tab == key ? "true" : "false")"
+                        @onclick="() => SelectTab(key)">
+                    <i class="bi @icon me-1"></i>@label
+                </button>
+            </li>
+        }
+    </ul>
     <div class="row g-3">
-        <div class="col-md-6">
+        <div class="col-md-6 @TabCls("overview")">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-body">
                     <h6 class="fw-bold mb-3"><i class="bi bi-person-badge me-2 text-primary"></i>Dane trenera</h6>
@@ -156,7 +173,7 @@ else
                         <dd class="col-7">@_tenant.CreatedAt.ToString("dd.MM.yyyy HH:mm")</dd>
                         <dt class="col-5 text-muted">Provisioned</dt>
                         <dd class="col-7">@(_tenant.ProvisionedAt?.ToString("dd.MM.yyyy HH:mm") ?? "—")</dd>
-                        <dt class="col-5 text-muted">Ostatnia aktywnosc</dt>
+                        <dt class="col-5 text-muted">Ostatnia aktywność</dt>
                         <dd class="col-7">@(_tenant.LastActivityAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—")</dd>
                         @if (_tenant.GraceUntil.HasValue)
                         {
@@ -214,7 +231,7 @@ else
             </div>
         </div>
 
-        <div class="col-md-6">
+        <div class="col-md-6 @TabCls("overview")">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center mb-3">
@@ -299,7 +316,7 @@ else
             </div>
         </div>
 
-        <div class="col-md-6">
+        <div class="col-md-6 @TabCls("infra")">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center mb-3">
@@ -379,7 +396,7 @@ else
             </div>
         </div>
 
-        <div class="col-md-6">
+        <div class="col-md-6 @TabCls("overview")">
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
                     <h6 class="fw-bold mb-3"><i class="bi bi-gear me-2 text-warning"></i>Akcje</h6>
@@ -413,19 +430,19 @@ else
                         <div class="alert alert-info py-2 small mt-2 mb-0">
                             <i class="bi bi-shield-check me-1"></i>
                             Okres ochrony aktywny do <strong>@_tenant.GraceUntil.Value.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</strong>
-                            — dane nie zostana usuniete do tego czasu.
+                            — dane nie zostaną usunięte do tego czasu.
                         </div>
                     }
 
                     <hr class="my-3" />
-                    <h6 class="fw-bold mb-2 small text-muted"><i class="bi bi-hourglass-split me-1"></i>Przedluz ochrone</h6>
+                    <h6 class="fw-bold mb-2 small text-muted"><i class="bi bi-hourglass-split me-1"></i>Przedłuż ochronę</h6>
                     <div class="d-flex flex-wrap gap-2">
                         <button class="btn btn-sm btn-outline-info" @onclick="() => ExtendGrace(7)" disabled="@_extending">+7 dni</button>
                         <button class="btn btn-sm btn-outline-info" @onclick="() => ExtendGrace(14)" disabled="@_extending">+14 dni</button>
                         <button class="btn btn-sm btn-outline-info" @onclick="() => ExtendGrace(30)" disabled="@_extending">+30 dni</button>
                     </div>
                     <p class="text-muted small mb-0 mt-1">
-                        <i class="bi bi-info-circle me-1"></i>Przedluza okres ochrony — konto nie zostanie automatycznie usuniete w tym czasie.
+                        <i class="bi bi-info-circle me-1"></i>Przedłuża okres ochrony — konto nie zostanie automatycznie usunięte w tym czasie.
                     </p>
 
                     <hr class="my-3" />
@@ -499,7 +516,7 @@ else
             </div>
         </div>
 
-        <div class="col-md-6">
+        <div class="col-md-6 @TabCls("overview")">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center mb-3">
@@ -576,7 +593,7 @@ else
             </div>
         </div>
 
-        <div class="col-md-6">
+        <div class="col-md-6 @TabCls("infra")">
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center mb-3">
@@ -603,7 +620,7 @@ else
 
         @if (!string.IsNullOrEmpty(_tenant.StripeCustomerId))
         {
-            <div class="col-12">
+            <div class="col-12 @TabCls("billing")">
                 <div class="card border-0 shadow-sm">
                     <div class="card-body">
                         <div class="d-flex justify-content-between align-items-center mb-3">
@@ -664,7 +681,7 @@ else
 
         @if (!string.IsNullOrWhiteSpace(_tenant.Notes))
         {
-            <div class="col-12">
+            <div class="col-12 @TabCls("history")">
                 <div class="card border-0 shadow-sm">
                     <div class="card-body">
                         <h6 class="fw-bold mb-2"><i class="bi bi-sticky me-2"></i>Notatki</h6>
@@ -674,7 +691,7 @@ else
             </div>
         }
 
-        <div class="col-md-6">
+        <div class="col-md-6 @TabCls("infra")">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-body">
                     <h6 class="fw-bold mb-3"><i class="bi bi-globe me-2 text-primary"></i>Domena niestandardowa</h6>
@@ -691,7 +708,7 @@ else
                         <div class="col-md-4">
                             <button class="btn btn-sm btn-primary w-100" @onclick="ChangeDomain" disabled="@_changingDomain">
                                 @if (_changingDomain) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                                Zmien
+                                Zmień
                             </button>
                         </div>
                     </div>
@@ -701,26 +718,26 @@ else
                     }
                     <p class="text-muted small mb-0 mt-2">
                         <i class="bi bi-info-circle me-1"></i>Domena zostanie automatycznie zarejestrowana w NPM z certyfikatem SSL.
-                        Upewnij sie, ze rekord DNS (A/CNAME) wskazuje na serwer.
+                        Upewnij się, ze rekord DNS (A/CNAME) wskazuje na serwer.
                     </p>
                 </div>
             </div>
         </div>
 
-        <div class="col-md-6">
+        <div class="col-md-6 @TabCls("billing")">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-body">
-                    <h6 class="fw-bold mb-3"><i class="bi bi-credit-card me-2 text-success"></i>Platnosci SaaS</h6>
+                    <h6 class="fw-bold mb-3"><i class="bi bi-credit-card me-2 text-success"></i>Płatności SaaS</h6>
                     @if (_paymentRecords is null)
                     {
                         <button class="btn btn-sm btn-outline-dark" @onclick="LoadPaymentRecords" disabled="@_loadingPayments">
                             @if (_loadingPayments) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                            Zaladuj platnosci
+                            Załaduj płatności
                         </button>
                     }
                     else if (_paymentRecords.Count == 0)
                     {
-                        <p class="text-muted small mb-0">Brak zarejestrowanych platnosci.</p>
+                        <p class="text-muted small mb-0">Brak zarejestrowanych płatności.</p>
                     }
                     else
                     {
@@ -750,7 +767,7 @@ else
             </div>
         </div>
 
-        <div class="col-12">
+        <div class="col-12 @TabCls("billing")">
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center mb-3">
@@ -823,11 +840,11 @@ else
             </div>
         </div>
 
-        <div class="col-12">
+        <div class="col-12 @TabCls("history")">
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h6 class="fw-bold mb-0"><i class="bi bi-activity me-2 text-info"></i>Historia zdarzen</h6>
+                        <h6 class="fw-bold mb-0"><i class="bi bi-activity me-2 text-info"></i>Historia zdarzeń</h6>
                         <button class="btn btn-sm btn-outline-secondary" @onclick="LoadEvents" disabled="@_loadingEvents">
                             @if (_loadingEvents) { <span class="spinner-border spinner-border-sm"></span> } else { <i class="bi bi-arrow-clockwise"></i> }
                         </button>
@@ -836,12 +853,12 @@ else
                     {
                         <button class="btn btn-sm btn-outline-dark" @onclick="LoadEvents" disabled="@_loadingEvents">
                             @if (_loadingEvents) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                            Zaladuj zdarzenia
+                            Załaduj zdarzenia
                         </button>
                     }
                     else if (_tenantEvents.Count == 0)
                     {
-                        <p class="text-muted small mb-0">Brak zdarzen.</p>
+                        <p class="text-muted small mb-0">Brak zdarzeń.</p>
                     }
                     else
                     {
@@ -871,7 +888,7 @@ else
         </div>
 
         <!-- Delete section -->
-        <div class="col-12">
+        <div class="col-12 @TabCls("infra")">
             <div class="card border-0 shadow-sm border-danger">
                 <div class="card-body">
                     <h6 class="fw-bold mb-3 text-danger"><i class="bi bi-exclamation-triangle me-2"></i>Strefa zagrożenia</h6>
@@ -950,6 +967,39 @@ else
     private bool _resettingAdmin;
     private string? _adminResetMessage;
     private bool _adminResetError;
+
+    private static readonly (string Key, string Label, string Icon)[] _tabs =
+    [
+        ("overview", "Przegląd", "bi-grid"),
+        ("infra", "Infrastruktura", "bi-hdd-network"),
+        ("billing", "Rozliczenia", "bi-credit-card"),
+        ("history", "Historia", "bi-clock-history")
+    ];
+    private string _tab = "overview";
+    private bool _overviewLoaded;
+
+    private string TabCls(string tab) => _tab == tab ? "" : "d-none";
+
+    private async Task SelectTab(string tab)
+    {
+        _tab = tab;
+        if (tab == "overview") await LoadOverviewAsync();
+    }
+
+    // Konto admina i metryki wczytują się same przy wejściu na „Przegląd”.
+    private async Task LoadOverviewAsync()
+    {
+        if (_overviewLoaded || _tenant?.Status != TenantStatus.Active) return;
+        _overviewLoaded = true;
+        await Task.WhenAll(LoadAdminInfo(), LoadMetrics());
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        await LoadOverviewAsync();
+        StateHasChanged();
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -1339,12 +1389,12 @@ else
             await db.SaveChangesAsync();
 
             var body = EmailSvc.GraceExtendedEmailBody(tenant.OwnerName, days);
-            _ = EmailSvc.SendAsync(tenant.OwnerEmail, $"Przedluzono ochrone konta PTScheduler o {days} dni", body);
+            _ = EmailSvc.SendAsync(tenant.OwnerEmail, $"Przedłużono ochronę konta PTScheduler o {days} dni", body);
 
-            ShowMessage($"Przedluzono ochrone o {days} dni (do {tenant.GraceUntil.Value.ToLocalTime():dd.MM.yyyy HH:mm}).");
+            ShowMessage($"Przedłużono ochronę o {days} dni (do {tenant.GraceUntil.Value.ToLocalTime():dd.MM.yyyy HH:mm}).");
             _tenant = await TenantSvc.GetAsync(Id);
         }
-        catch (Exception ex) { ShowMessage($"Blad: {ex.Message}", true); }
+        catch (Exception ex) { ShowMessage($"Błąd: {ex.Message}", true); }
         finally { _extending = false; }
     }
 
@@ -1389,7 +1439,7 @@ else
 
             _domainMessage = npmOk
                 ? $"Domena zmieniona na {_newDomain.Trim()}. NPM: {npmMsg}"
-                : $"Domena zmieniona, ale NPM: {npmMsg} — dodaj recznie.";
+                : $"Domena zmieniona, ale NPM: {npmMsg} — dodaj ręcznie.";
             _domainError = !npmOk;
 
             _tenant = await TenantSvc.GetAsync(Id);
@@ -1418,21 +1468,21 @@ else
         TenantEventTypes.Provisioned => "Provisioned",
         TenantEventTypes.Suspended => "Zawieszony",
         TenantEventTypes.Resumed => "Wznowiony",
-        TenantEventTypes.Deleted => "Usuniety",
+        TenantEventTypes.Deleted => "Usunięty",
         TenantEventTypes.PlanChanged => "Zmiana planu",
-        TenantEventTypes.PaymentReceived => "Platnosc otrzymana",
-        TenantEventTypes.PaymentFailed => "Platnosc nieudana",
+        TenantEventTypes.PaymentReceived => "Płatność otrzymana",
+        TenantEventTypes.PaymentFailed => "Płatność nieudana",
         TenantEventTypes.TrialStarted => "Trial rozpoczety",
-        TenantEventTypes.TrialExpired => "Trial wygasl",
-        TenantEventTypes.TrialWarning => "Ostrzezenie trial",
+        TenantEventTypes.TrialExpired => "Trial wygasł",
+        TenantEventTypes.TrialWarning => "Ostrzeżenie trial",
         TenantEventTypes.DomainChanged => "Zmiana domeny",
         TenantEventTypes.HealthDown => "Awaria",
-        TenantEventTypes.HealthRecovered => "Przywrocony",
-        TenantEventTypes.InactivityWarning => "Ostrzezenie nieaktywnosc",
-        TenantEventTypes.InactivitySuspended => "Zawieszony (nieaktywnosc)",
-        TenantEventTypes.GraceExtended => "Przedluzono ochrone",
-        TenantEventTypes.CleanupWarning => "Ostrzezenie usuniecie",
-        TenantEventTypes.CleanupDeleted => "Usuniety automatycznie",
+        TenantEventTypes.HealthRecovered => "Przywrócony",
+        TenantEventTypes.InactivityWarning => "Ostrzeżenie nieaktywność",
+        TenantEventTypes.InactivitySuspended => "Zawieszony (nieaktywność)",
+        TenantEventTypes.GraceExtended => "Przedłużono ochronę",
+        TenantEventTypes.CleanupWarning => "Ostrzeżenie usunięcie",
+        TenantEventTypes.CleanupDeleted => "Usunięty automatycznie",
         _ => type
     };
 
@@ -1669,12 +1719,12 @@ else
                 var planName = _availablePlans.FirstOrDefault(p => p.Id == _selectedPlanId)?.Name ?? _selectedPlanId;
                 var body = EmailSvc.TenantApprovedEmailBody(
                     _tenant!.OwnerName, _tenant.Domain, _tenant.Port.ToString(), planName);
-                _ = EmailSvc.SendAsync(_tenant.OwnerEmail, "PTScheduler — Twoje konto zostalo zaakceptowane!", body);
-                ShowMessage("Tenant zaakceptowany i uruchomiony. Email wyslany.");
+                _ = EmailSvc.SendAsync(_tenant.OwnerEmail, "PTScheduler — Twoje konto zostało zaakceptowane!", body);
+                ShowMessage("Tenant zaakceptowany i uruchomiony. Email wysłany.");
             }
             else
             {
-                ShowMessage($"Provisioning nie powiodl sie: {output}", true);
+                ShowMessage($"Provisioning nie powiódł się: {output}", true);
             }
 
             _tenant = await TenantSvc.GetAsync(Id);
@@ -1682,7 +1732,7 @@ else
         }
         catch (Exception ex)
         {
-            ShowMessage($"Blad: {ex.Message}", true);
+            ShowMessage($"Błąd: {ex.Message}", true);
         }
         finally { _approving = false; }
     }
@@ -1714,7 +1764,7 @@ else
         }
         catch (Exception ex)
         {
-            ShowMessage($"Blad: {ex.Message}", true);
+            ShowMessage($"Błąd: {ex.Message}", true);
         }
         finally { _rejecting = false; }
     }
