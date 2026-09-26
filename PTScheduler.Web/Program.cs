@@ -243,11 +243,13 @@ app.UseRequestLocalization(new RequestLocalizationOptions
 app.UseRateLimiter();
 app.UseAntiforgery();
 
-// Wymuszona zmiana hasła: dopóki użytkownik nie ustawi własnego hasła (nadanego przez
-// start systemu, Portal albo admina), każda strona prowadzi do formularza zmiany hasła.
+// Wymuszona zmiana hasła tylko dla konta administratora (hasło startowe z instalacji albo
+// Portalu daje pełną kontrolę nad aplikacją). Klienci i trenerzy dostają przypomnienie na
+// pulpicie i w powiadomieniach — bez blokowania, np. ankiety zdrowotnej po pierwszym logowaniu.
 app.Use(async (ctx, next) =>
 {
     if (ctx.User.Identity?.IsAuthenticated == true
+        && ctx.User.IsInRole(PTScheduler.Domain.Constants.Roles.Admin)
         && ctx.User.HasClaim(PTScheduler.Web.Services.AppClaimsPrincipalFactory.MustChangePasswordClaim, "1")
         && HttpMethods.IsGet(ctx.Request.Method))
     {

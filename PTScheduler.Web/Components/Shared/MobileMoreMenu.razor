@@ -11,7 +11,9 @@
 {
     <button class="mobile-nav-item @(_sheetOpen ? "active" : "")" @onclick="ToggleSheet">
         <span class="mobile-nav-indicator"></span>
-        <i class="bi bi-grid-fill"></i>
+        <i class="bi bi-grid-fill position-relative">
+            @if (_mustChangePassword) { <span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger rounded-circle" style="font-size:0"><span class="visually-hidden">Ustaw własne hasło</span></span> }
+        </i>
         <span>Więcej</span>
     </button>
 
@@ -178,6 +180,14 @@
 
         <div class="mobile-sheet-section">
             <div class="mobile-sheet-label">Konto</div>
+            @if (_mustChangePassword)
+            {
+                <a href="/Account/Manage/ChangePassword" class="mobile-sheet-link text-danger fw-semibold" @onclick="CloseSheet">
+                    <i class="bi bi-shield-lock-fill"></i>
+                    <span>Ustaw własne hasło</span>
+                    <i class="bi bi-chevron-right ms-auto" style="font-size:.7rem;opacity:.4"></i>
+                </a>
+            }
             <a href="/Account/Manage" class="mobile-sheet-link" @onclick="CloseSheet">
                 <i class="bi bi-gear-fill"></i>
                 <span>Ustawienia konta</span>
@@ -214,6 +224,7 @@
     private string _name = "";
     private string _email = "";
     private bool _referralsEnabled;
+    private bool _mustChangePassword;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -223,6 +234,7 @@
             var user = auth.User;
             _name = user.Identity?.Name ?? "";
             _email = user.FindFirst(ClaimTypes.Email)?.Value ?? _name;
+            _mustChangePassword = user.HasClaim(PTScheduler.Web.Services.AppClaimsPrincipalFactory.MustChangePasswordClaim, "1");
             var parts = _name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             _initials = parts.Length >= 2
                 ? $"{parts[0][0]}{parts[^1][0]}".ToUpper()

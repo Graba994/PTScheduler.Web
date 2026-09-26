@@ -281,6 +281,7 @@
     private int _badge;
     private string? _userId;
     private string? _role;
+    private bool _mustChangePassword;
     private List<NotifItem> _notifs = [];
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -292,6 +293,7 @@
             _userId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value;
             _name   = user.Identity?.Name ?? string.Empty;
             _email  = user.FindFirst(ClaimTypes.Email)?.Value ?? _name;
+            _mustChangePassword = user.HasClaim(PTScheduler.Web.Services.AppClaimsPrincipalFactory.MustChangePasswordClaim, "1");
 
             var parts = _name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             _initials = parts.Length >= 2
@@ -345,6 +347,10 @@
         _notifs.Clear();
         try
         {
+            if (_mustChangePassword)
+                _notifs.Add(new("Ustaw własne hasło", "Obecne nadała Ci inna osoba — zmień je",
+                    "bi-shield-lock-fill", "var(--c-danger)", "/Account/Manage/ChangePassword"));
+
             var trainerFilter = _role == Roles.Admin ? null : _userId;
 
             if (_role is Roles.Admin or Roles.Trainer)
