@@ -6,6 +6,7 @@
 @using PTScheduler.Domain.Constants
 @attribute [Authorize(Roles = Roles.Admin + "," + Roles.Trainer + "," + Roles.Subordinate)]
 @inject IWorkoutLogService WorkoutLog
+@inject IProgressionService Progression
 @inject AuthenticationStateProvider AuthState
 @inject ILoggerFactory LoggerFactory
 @rendermode PTScheduler.Web.RenderModes.Server
@@ -44,7 +45,14 @@ else
                 @foreach (var r in _rows)
                 {
                     <tr>
-                        <td class="fw-semibold">@r.ClientName</td>
+                        <td class="fw-semibold">
+                            @r.ClientName
+                            @if (_suggestions.TryGetValue(r.ClientId, out var n))
+                            {
+                                <a href="@($"/trainer/activity/{r.ClientId}")" class="badge rounded-pill bg-success-subtle text-success-emphasis text-decoration-none ms-1 fw-normal"
+                                   title="Propozycje zmiany ciężaru na podstawie RPE"><i class="bi bi-graph-up-arrow me-1"></i>@n @(n == 1 ? "propozycja" : n < 5 ? "propozycje" : "propozycji")</a>
+                            }
+                        </td>
                         <td>
                             @if (r.LastWorkout is { } d)
                             {
@@ -77,6 +85,7 @@ else
 @code {
     private bool _loading = true;
     private List<ClientActivityDto> _rows = [];
+    private Dictionary<int, int> _suggestions = [];
     private DateOnly _today;
 
     protected override async Task OnInitializedAsync()
@@ -84,7 +93,11 @@ else
         var auth = await AuthState.GetAuthenticationStateAsync();
         var userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
         _today = DateOnly.FromDateTime(DateTime.UtcNow);
-        try { _rows = await WorkoutLog.GetClientsActivityAsync(userId); }
+        try
+        {
+            _rows = await WorkoutLog.GetClientsActivityAsync(userId);
+            _suggestions = await Progression.GetCountsAsync(userId, auth.User.IsInRole(Roles.Admin));
+        }
         catch (Exception ex) { LoggerFactory.CreateLogger("Activity").LogError(ex, "Błąd ładowania aktywności."); }
         _loading = false;
     }

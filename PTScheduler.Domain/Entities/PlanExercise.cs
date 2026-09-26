@@ -23,4 +23,10 @@ public class PlanExercise
     public string? Tempo { get; set; }
     public int? RestSeconds { get; set; }
     public string? Notes { get; set; }
+
+    /// <summary>
+    /// Data treningu, dla którego trener już rozpatrzył propozycję progresji
+    /// (zastosował albo pominął) — kolejna pojawi się dopiero po nowym treningu.
+    /// </summary>
+    public DateOnly? ProgressionReviewedFor { get; set; }
 }

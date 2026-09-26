@@ -38,6 +38,8 @@ else
         <a href="@($"/clients/{_client.Id}")" class="btn btn-sm btn-outline-primary"><i class="bi bi-person me-1"></i>Profil</a>
     </div>
 
+    <ProgressionSuggestions ClientId="_client.Id" UserId="@_userId" IsAdmin="_isAdmin" />
+
     @if (_journal.Count == 0)
     {
         <div class="alert alert-secondary"><i class="bi bi-inbox me-2"></i>Klient nie zapisał jeszcze żadnego treningu.</div>
@@ -57,6 +59,7 @@ else
     private ClientDto? _client;
     private List<WorkoutJournalDayDto> _journal = [];
     private string _userId = string.Empty;
+    private bool _isAdmin;
     private Dictionary<DateOnly, PTScheduler.Application.Surveys.SurveyResponseDto> _surveys = [];
 
     protected override async Task OnParametersSetAsync()
@@ -66,7 +69,7 @@ else
         {
             var auth = await AuthState.GetAuthenticationStateAsync();
             _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
-            var isAdmin = auth.User.IsInRole(Roles.Admin);
+            var isAdmin = _isAdmin = auth.User.IsInRole(Roles.Admin);
 
             var client = await ClientService.GetClientAsync(ClientId);
             _client = client is not null && (isAdmin || client.TrainerUserId == _userId) ? client : null;
