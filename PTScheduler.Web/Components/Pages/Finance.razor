@@ -12,6 +12,7 @@
 @inject IPaymentService PaymentService
 @inject IReceiptService ReceiptService
 @inject IInvoiceService InvoiceService
+@inject IKsefService KsefService
 @inject IFinanceService FinanceService
 @inject IPermissionService PermissionService
 @inject IJSRuntime JS
@@ -369,6 +370,55 @@ else
                             <label class="form-label small">Miasto</label>
                             <input type="text" class="form-control form-control-sm" @bind="_taxConfig.SellerCity" />
                         </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label small">Pełna nazwa firmy (sprzedawca)</label>
+                            <input type="text" class="form-control form-control-sm" placeholder="np. Jan Kowalski Trening Personalny" @bind="_taxConfig.SellerName" />
+                        </div>
+                        @if (!_taxConfig.VatEnabled)
+                        {
+                            <div class="col-12 col-md-6">
+                                <label class="form-label small">Podstawa zwolnienia z VAT</label>
+                                <input type="text" class="form-control form-control-sm" placeholder="art. 113 ust. 1 ustawy o VAT" @bind="_taxConfig.VatExemptBasis" />
+                            </div>
+                        }
+
+                        <div class="col-12"><h6 class="mb-0 mt-2"><i class="bi bi-cloud-upload me-2"></i>KSeF — Krajowy System e-Faktur</h6></div>
+                        <div class="col-12">
+                            <div class="form-check form-switch">
+                                <input class="form-check-input" type="checkbox" id="ksef-enabled" @bind="_taxConfig.KsefEnabled" />
+                                <label class="form-check-label" for="ksef-enabled">Wysyłaj faktury do KSeF</label>
+                            </div>
+                            <div class="form-text">
+                                Faktury dla firm (z NIP nabywcy) muszą trafiać do KSeF. Token wygenerujesz w aplikacji
+                                Podatnika KSeF (uprawnienie „wystawianie faktur”). Zacznij od środowiska testowego.
+                            </div>
+                        </div>
+                        @if (_taxConfig.KsefEnabled)
+                        {
+                            <div class="col-12 col-md-4">
+                                <label class="form-label small">Środowisko</label>
+                                <select class="form-select form-select-sm" @bind="_taxConfig.KsefEnvironment">
+                                    <option value="test">Testowe (bez skutków prawnych)</option>
+                                    <option value="demo">Przedprodukcyjne (demo)</option>
+                                    <option value="production">Produkcyjne</option>
+                                </select>
+                            </div>
+                            <div class="col-12 col-md-8">
+                                <label class="form-label small">Token KSeF @(_taxConfig.KsefTokenSet ? "(zapisany — wpisz nowy, aby zmienić)" : "")</label>
+                                <input type="password" class="form-control form-control-sm font-monospace" autocomplete="off"
+                                       placeholder="@(_taxConfig.KsefTokenSet ? "••••••••••••" : "wklej token")" @bind="_taxConfig.NewKsefToken" />
+                            </div>
+                            <div class="col-12 d-flex align-items-center gap-2 flex-wrap">
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="TestKsefAsync" disabled="@_ksefTesting">
+                                    @if (_ksefTesting) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                    <i class="bi bi-plug me-1"></i>Testuj połączenie
+                                </button>
+                                @if (_ksefTestMessage is not null)
+                                {
+                                    <span class="small @(_ksefTestOk ? "text-success" : "text-danger")">@_ksefTestMessage</span>
+                                }
+                            </div>
+                        }
                     }
 
                     <div class="col-12 mt-3">
@@ -469,6 +519,56 @@ else
     @if (_onlineOrders.Count > 0)
     {
         <div class="card mb-3">
+            @if (_ksefMessage is not null)
+            {
+                <div class="alert @(_ksefMessageOk ? "alert-success" : "alert-danger") small py-2 m-2 mb-0">@_ksefMessage</div>
+            }
+            @if (_buyerEditOrder is not null)
+            {
+                <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.45)">
+                    <div class="modal-dialog modal-dialog-centered">
+                        <div class="modal-content">
+                            <div class="modal-header">
+                                <h6 class="modal-title">Faktura na firmę — @_buyerEditOrder.ItemTitle</h6>
+                                <button type="button" class="btn-close" @onclick="() => _buyerEditOrder = null"></button>
+                            </div>
+                            <div class="modal-body">
+                                <p class="small text-muted">Pozostaw NIP pusty, aby wystawić fakturę na osobę prywatną.</p>
+                                <div class="row g-2">
+                                    <div class="col-12 col-md-5">
+                                        <label class="form-label small">NIP nabywcy</label>
+                                        <input class="form-control form-control-sm font-monospace" @bind="_buyerForm.Nip" placeholder="1234567890" />
+                                    </div>
+                                    <div class="col-12 col-md-7">
+                                        <label class="form-label small">Nazwa firmy</label>
+                                        <input class="form-control form-control-sm" @bind="_buyerForm.Name" />
+                                    </div>
+                                    <div class="col-12">
+                                        <label class="form-label small">Adres</label>
+                                        <input class="form-control form-control-sm" @bind="_buyerForm.Address" placeholder="ul. Przykładowa 1" />
+                                    </div>
+                                    <div class="col-5">
+                                        <label class="form-label small">Kod pocztowy</label>
+                                        <input class="form-control form-control-sm" @bind="_buyerForm.PostalCode" placeholder="00-000" />
+                                    </div>
+                                    <div class="col-7">
+                                        <label class="form-label small">Miasto</label>
+                                        <input class="form-control form-control-sm" @bind="_buyerForm.City" />
+                                    </div>
+                                </div>
+                                @if (_buyerError is not null)
+                                {
+                                    <div class="alert alert-danger small py-2 mt-2 mb-0">@_buyerError</div>
+                                }
+                            </div>
+                            <div class="modal-footer">
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="() => _buyerEditOrder = null">Anuluj</button>
+                                <button class="btn btn-primary btn-sm" @onclick="SaveBuyerAsync">Zapisz</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
             <div class="card-header py-2 d-flex align-items-center justify-content-between">
                 <span class="fw-semibold" style="font-size:.875rem">
                     <i class="bi bi-cart-check-fill me-2" style="color:#10b981"></i>Zamówienia online
@@ -485,6 +585,10 @@ else
                             <th class="text-end">Kwota</th>
                             <th>Kupon</th>
                             <th>Data płatności</th>
+                            @if (_taxConfig?.KsefEnabled == true)
+                            {
+                                <th>KSeF</th>
+                            }
                             <th></th>
                         </tr>
                     </thead>
@@ -521,6 +625,21 @@ else
                                     }
                                 </td>
                                 <td class="text-nowrap text-muted">@(o.PaidAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm") ?? "—")</td>
+                                @if (_taxConfig?.KsefEnabled == true)
+                                {
+                                    var (kCss, kLabel) = KsefBadge(o.KsefStatus);
+                                    <td class="small">
+                                        <span class="badge @kCss" title="@o.KsefError">@kLabel</span>
+                                        @if (!string.IsNullOrEmpty(o.KsefNumber))
+                                        {
+                                            <div class="font-monospace text-muted" style="font-size:.7rem">@o.KsefNumber</div>
+                                        }
+                                        @if (o.KsefStatus == PTScheduler.Domain.Enums.KsefStatus.Rejected && !string.IsNullOrEmpty(o.KsefError))
+                                        {
+                                            <div class="text-danger" style="font-size:.7rem;max-width:220px">@o.KsefError</div>
+                                        }
+                                    </td>
+                                }
                                 <td class="text-nowrap">
                                     <button class="btn btn-sm btn-outline-secondary" title="Pobierz potwierdzenie"
                                             @onclick="() => DownloadReceipt(o.Id)" disabled="@(_downloadingReceiptId == o.Id)">
@@ -546,6 +665,18 @@ else
                                                 <i class="bi bi-receipt"></i>
                                             }
                                         </button>
+                                        <button class="btn btn-sm btn-outline-secondary ms-1" title="Faktura na firmę (dane nabywcy)"
+                                                @onclick="() => EditBuyer(o)">
+                                            <i class="bi bi-building"></i>
+                                        </button>
+                                        @if (_taxConfig.KsefEnabled && o.KsefStatus is PTScheduler.Domain.Enums.KsefStatus.None or PTScheduler.Domain.Enums.KsefStatus.Rejected)
+                                        {
+                                            <button class="btn btn-sm btn-outline-success ms-1" title="Wyślij do KSeF"
+                                                    @onclick="() => SendToKsefAsync(o.Id)" disabled="@(_ksefBusyId == o.Id)">
+                                                @if (_ksefBusyId == o.Id) { <span class="spinner-border spinner-border-sm"></span> }
+                                                else { <i class="bi bi-cloud-upload"></i> }
+                                            </button>
+                                        }
                                     }
                                 </td>
                             </tr>
@@ -555,7 +686,7 @@ else
                         <tr>
                             <td colspan="3">Razem (@_onlineOrders.Count zamówień)</td>
                             <td class="text-end">@_onlineOrders.Sum(o => o.Amount).ToString("N2") @(_onlineOrders.FirstOrDefault()?.Currency ?? "PLN")</td>
-                            <td colspan="3"></td>
+                            <td colspan="@(_taxConfig?.KsefEnabled == true ? 4 : 3)"></td>
                         </tr>
                     </tfoot>
                 </table>
@@ -751,6 +882,9 @@ else
         _chartNeedsRender = true;
     }
 
+    private async Task ReloadOrdersAsync() =>
+        _onlineOrders = await PaymentService.GetPaidOrdersAsync(DateTime.UtcNow.AddMonths(-_months));
+
     private async Task HidePackageAsync(int packageId)
     {
         await FinanceService.SetPackageHiddenAsync(packageId, true);
@@ -763,9 +897,79 @@ else
         _taxSaving = true;
         StateHasChanged();
         await FinanceService.SaveTaxConfigAsync(_taxConfig);
+        if (_taxConfig.NewKsefToken is not null)
+        {
+            await KsefService.SaveTokenAsync(_taxConfig.NewKsefToken);
+            _taxConfig.KsefTokenSet = !string.IsNullOrWhiteSpace(_taxConfig.NewKsefToken);
+            _taxConfig.NewKsefToken = null;
+        }
         _taxSaving = false;
         _showTaxSettings = false;
     }
+
+    // ── KSeF ────────────────────────────────────────────────────────────
+    private bool _ksefTesting;
+    private bool _ksefTestOk;
+    private string? _ksefTestMessage;
+    private int? _ksefBusyId;
+    private string? _ksefMessage;
+    private bool _ksefMessageOk;
+    private PTScheduler.Application.DTOs.OrderDto? _buyerEditOrder;
+    private InvoiceBuyerDto _buyerForm = new();
+    private string? _buyerError;
+
+    private async Task TestKsefAsync()
+    {
+        if (_taxConfig is null) return;
+        _ksefTesting = true; _ksefTestMessage = null;
+        // Zapis przed testem — test korzysta z zapisanej konfiguracji i tokenu.
+        await FinanceService.SaveTaxConfigAsync(_taxConfig);
+        if (_taxConfig.NewKsefToken is not null)
+        {
+            await KsefService.SaveTokenAsync(_taxConfig.NewKsefToken);
+            _taxConfig.KsefTokenSet = !string.IsNullOrWhiteSpace(_taxConfig.NewKsefToken);
+            _taxConfig.NewKsefToken = null;
+        }
+        (_ksefTestOk, _ksefTestMessage) = await KsefService.TestConnectionAsync();
+        _ksefTesting = false;
+    }
+
+    private void EditBuyer(PTScheduler.Application.DTOs.OrderDto o)
+    {
+        _buyerEditOrder = o;
+        _buyerError = null;
+        _buyerForm = new InvoiceBuyerDto
+        {
+            Nip = o.BuyerNip, Name = o.BuyerName, Address = o.BuyerAddress,
+            PostalCode = o.BuyerPostalCode, City = o.BuyerCity
+        };
+    }
+
+    private async Task SaveBuyerAsync()
+    {
+        if (_buyerEditOrder is null) return;
+        var (ok, error) = await KsefService.SetBuyerAsync(_buyerEditOrder.Id, _buyerForm);
+        if (!ok) { _buyerError = error; return; }
+        _buyerEditOrder = null;
+        await ReloadOrdersAsync();
+    }
+
+    private async Task SendToKsefAsync(int orderId)
+    {
+        _ksefBusyId = orderId; _ksefMessage = null;
+        (_ksefMessageOk, _ksefMessage) = await KsefService.SendOrderInvoiceAsync(orderId);
+        _ksefBusyId = null;
+        _taxConfig = await FinanceService.GetTaxConfigAsync("standard");
+        await ReloadOrdersAsync();
+    }
+
+    private static (string Css, string Label) KsefBadge(PTScheduler.Domain.Enums.KsefStatus s) => s switch
+    {
+        PTScheduler.Domain.Enums.KsefStatus.Sent => ("bg-warning-subtle text-warning-emphasis", "W KSeF — przetwarzanie"),
+        PTScheduler.Domain.Enums.KsefStatus.Accepted => ("bg-success-subtle text-success-emphasis", "Przyjęta"),
+        PTScheduler.Domain.Enums.KsefStatus.Rejected => ("bg-danger-subtle text-danger-emphasis", "Błąd"),
+        _ => ("bg-light text-muted border", "—")
+    };
 
     private async Task DownloadReceipt(int orderId)
     {

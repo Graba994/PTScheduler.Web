@@ -44,7 +44,7 @@ public class PaymentService(
         return options;
     }
 
-    public async Task<PaymentInitResult> StartCourseCheckoutAsync(string userId, int courseId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null)
+    public async Task<PaymentInitResult> StartCourseCheckoutAsync(string userId, int courseId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null, InvoiceBuyerDto? invoiceBuyer = null)
     {
         await using var db = dbFactory.CreateDbContext();
         var course = await db.Courses.FirstOrDefaultAsync(c => c.Id == courseId);
@@ -66,10 +66,11 @@ public class PaymentService(
             CreatedAt = now
         };
         await ApplyCouponIfAnyAsync(order, couponCode, "course");
+        if (ApplyInvoiceBuyer(order, invoiceBuyer) is { } buyerError) return new(false, null, buyerError);
         return await StartAsync(db, order, providerKey, course.Title, appBaseUrl, buyerEmail, customerIp);
     }
 
-    public async Task<PaymentInitResult> StartPackageCheckoutAsync(string userId, int packageOfferId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null)
+    public async Task<PaymentInitResult> StartPackageCheckoutAsync(string userId, int packageOfferId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null, InvoiceBuyerDto? invoiceBuyer = null)
     {
         await using var db = dbFactory.CreateDbContext();
         var offer = await db.PackageOffers.FirstOrDefaultAsync(o => o.Id == packageOfferId);
@@ -90,7 +91,22 @@ public class PaymentService(
             CreatedAt = DateTime.UtcNow
         };
         await ApplyCouponIfAnyAsync(order, couponCode, "package");
+        if (ApplyInvoiceBuyer(order, invoiceBuyer) is { } buyerError) return new(false, null, buyerError);
         return await StartAsync(db, order, providerKey, offer.Name, appBaseUrl, buyerEmail, customerIp);
+    }
+
+    // Dane do faktury na firmę podane przy zakupie; zwraca komunikat błędu albo null.
+    private static string? ApplyInvoiceBuyer(Order order, InvoiceBuyerDto? buyer)
+    {
+        if (buyer is null || string.IsNullOrWhiteSpace(buyer.Nip)) return null;
+        if (!PTScheduler.Application.Ksef.Nip.IsValid(buyer.Nip)) return "Nieprawidłowy NIP do faktury.";
+        if (string.IsNullOrWhiteSpace(buyer.Name)) return "Podaj nazwę firmy do faktury.";
+        order.BuyerNip = PTScheduler.Application.Ksef.Nip.Normalize(buyer.Nip);
+        order.BuyerName = buyer.Name.Trim();
+        order.BuyerAddress = string.IsNullOrWhiteSpace(buyer.Address) ? null : buyer.Address.Trim();
+        order.BuyerPostalCode = string.IsNullOrWhiteSpace(buyer.PostalCode) ? null : buyer.PostalCode.Trim();
+        order.BuyerCity = string.IsNullOrWhiteSpace(buyer.City) ? null : buyer.City.Trim();
+        return null;
     }
 
     // Validates the coupon and mutates the order to store the discount +
@@ -436,7 +452,16 @@ public class PaymentService(
                 PaidAt = o.PaidAt,
                 OriginalAmount = o.OriginalAmount,
                 DiscountAmount = o.DiscountAmount,
-                CouponCode = o.CouponCode
+                CouponCode = o.CouponCode,
+                InvoiceNumber = o.InvoiceNumber,
+                BuyerNip = o.BuyerNip,
+                BuyerName = o.BuyerName,
+                BuyerAddress = o.BuyerAddress,
+                BuyerPostalCode = o.BuyerPostalCode,
+                BuyerCity = o.BuyerCity,
+                KsefStatus = o.KsefStatus,
+                KsefNumber = o.KsefNumber,
+                KsefError = o.KsefError
             })
             .ToListAsync();
     }

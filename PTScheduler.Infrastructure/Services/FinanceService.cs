@@ -84,6 +84,12 @@ public class FinanceService(IDbContextFactory<ApplicationDbContext> dbFactory) :
             InvoicePrefix = cfg.InvoicePrefix,
             InvoiceNextNumber = cfg.InvoiceNextNumber,
             SellerNip = cfg.SellerNip,
+            SellerName = cfg.SellerName,
+            VatExemptBasis = cfg.VatExemptBasis,
+            KsefEnabled = cfg.KsefEnabled,
+            KsefEnvironment = cfg.KsefEnvironment,
+            KsefApiUrl = cfg.KsefApiUrl,
+            KsefTokenSet = !string.IsNullOrEmpty(cfg.KsefTokenProtected),
             SellerAddress = cfg.SellerAddress,
             SellerCity = cfg.SellerCity,
             SellerPostalCode = cfg.SellerPostalCode
@@ -117,6 +123,11 @@ public class FinanceService(IDbContextFactory<ApplicationDbContext> dbFactory) :
         cfg.InvoicePrefix = dto.InvoicePrefix;
         cfg.InvoiceNextNumber = dto.InvoiceNextNumber;
         cfg.SellerNip = dto.SellerNip;
+        cfg.SellerName = dto.SellerName;
+        cfg.VatExemptBasis = dto.VatExemptBasis;
+        cfg.KsefEnabled = dto.KsefEnabled;
+        cfg.KsefEnvironment = dto.KsefEnvironment is "production" or "demo" ? dto.KsefEnvironment : "test";
+        cfg.KsefApiUrl = string.IsNullOrWhiteSpace(dto.KsefApiUrl) ? null : dto.KsefApiUrl.Trim();
         cfg.SellerAddress = dto.SellerAddress;
         cfg.SellerCity = dto.SellerCity;
         cfg.SellerPostalCode = dto.SellerPostalCode;

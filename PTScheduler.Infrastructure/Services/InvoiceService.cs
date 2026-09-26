@@ -70,7 +70,7 @@ public class InvoiceService(
             logger.LogWarning(ex, "Nie udało się wczytać logo ({LogoPath}) na fakturę zamówienia {OrderId} — generuję bez logo.", branding.LogoPath, order.Id);
         }
 
-        var companyName = branding.CompanyName ?? "PTScheduler";
+        var companyName = !string.IsNullOrWhiteSpace(taxCfg.SellerName) ? taxCfg.SellerName : branding.CompanyName ?? "PTScheduler";
         var itemName = order.Course?.Title ?? order.PackageOffer?.Name ?? order.Description ?? "Usługa";
         var issueDate = order.InvoiceIssuedAt ?? order.PaidAt ?? order.CreatedAt;
         var payDate = order.PaidAt ?? order.CreatedAt;
@@ -98,8 +98,10 @@ public class InvoiceService(
 
                         row.RelativeItem().AlignRight().Column(right =>
                         {
-                            right.Item().Text("FAKTURA VAT").FontSize(18).Bold().FontColor(Colors.Grey.Darken4);
+                            right.Item().Text(vatEnabled ? "FAKTURA VAT" : "FAKTURA").FontSize(18).Bold().FontColor(Colors.Grey.Darken4);
                             right.Item().Text($"Nr: {order.InvoiceNumber}").FontSize(10).FontColor(Colors.Grey.Medium);
+                            if (!string.IsNullOrEmpty(order.KsefNumber))
+                                right.Item().Text($"Nr KSeF: {order.KsefNumber}").FontSize(8).FontColor(Colors.Grey.Medium);
                         });
                     });
                     col.Item().PaddingVertical(8).LineHorizontal(1).LineColor(Colors.Grey.Lighten2);
@@ -130,7 +132,18 @@ public class InvoiceService(
                         row.RelativeItem().Column(buyerCol =>
                         {
                             buyerCol.Item().Text("Nabywca").Bold().FontSize(9).FontColor(Colors.Grey.Medium);
-                            if (buyer is not null)
+                            if (!string.IsNullOrEmpty(order.BuyerNip) || !string.IsNullOrEmpty(order.BuyerName))
+                            {
+                                // Faktura na firmę — dane podane przy zamówieniu.
+                                buyerCol.Item().Text(order.BuyerName ?? "—").FontSize(10).Bold();
+                                if (!string.IsNullOrEmpty(order.BuyerNip))
+                                    buyerCol.Item().Text($"NIP: {order.BuyerNip}").FontSize(9);
+                                if (!string.IsNullOrEmpty(order.BuyerAddress))
+                                    buyerCol.Item().Text(order.BuyerAddress).FontSize(9);
+                                if (!string.IsNullOrEmpty(order.BuyerCity))
+                                    buyerCol.Item().Text($"{order.BuyerPostalCode} {order.BuyerCity}".Trim()).FontSize(9);
+                            }
+                            else if (buyer is not null)
                             {
                                 var name = $"{buyer.FirstName} {buyer.LastName}".Trim();
                                 if (!string.IsNullOrEmpty(name))
@@ -282,7 +295,10 @@ public class InvoiceService(
                 page.Footer().AlignCenter().Column(f =>
                 {
                     f.Item().PaddingTop(10).LineHorizontal(0.5f).LineColor(Colors.Grey.Lighten3);
-                    f.Item().PaddingTop(4).Text($"Faktura VAT — {companyName}")
+                    if (!vatEnabled)
+                        f.Item().PaddingTop(4).Text($"Sprzedaż zwolniona z VAT — {(string.IsNullOrWhiteSpace(taxCfg.VatExemptBasis) ? "art. 113 ust. 1 ustawy o VAT" : taxCfg.VatExemptBasis)}.")
+                            .FontSize(7.5f).FontColor(Colors.Grey.Darken1);
+                    f.Item().PaddingTop(4).Text($"{(vatEnabled ? "Faktura VAT" : "Faktura")} — {companyName}")
                         .FontSize(7).FontColor(Colors.Grey.Lighten1);
                     f.Item().Text("Dokument wygenerowany elektronicznie i jest ważny bez podpisu.")
                         .FontSize(7).FontColor(Colors.Grey.Lighten1);

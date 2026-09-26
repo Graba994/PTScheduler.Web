@@ -21,6 +21,17 @@ public class OrderDto
 
     public bool HasDiscount => DiscountAmount.HasValue && DiscountAmount > 0;
 
+    // Faktura i KSeF
+    public string? InvoiceNumber { get; set; }
+    public string? BuyerNip { get; set; }
+    public string? BuyerName { get; set; }
+    public string? BuyerAddress { get; set; }
+    public string? BuyerPostalCode { get; set; }
+    public string? BuyerCity { get; set; }
+    public PTScheduler.Domain.Enums.KsefStatus KsefStatus { get; set; }
+    public string? KsefNumber { get; set; }
+    public string? KsefError { get; set; }
+
     // Back-compat alias (older markup referenced CourseTitle).
     public string CourseTitle => ItemTitle;
 }

@@ -45,4 +45,19 @@ public class Order
 
     public string? InvoiceNumber { get; set; }
     public DateTime? InvoiceIssuedAt { get; set; }
+
+    // Faktura na firmę (B2B) — dane nabywcy. Bez NIP faktura jest wystawiana na osobę prywatną.
+    public string? BuyerNip { get; set; }
+    public string? BuyerName { get; set; }
+    public string? BuyerAddress { get; set; }
+    public string? BuyerPostalCode { get; set; }
+    public string? BuyerCity { get; set; }
+
+    // KSeF
+    public KsefStatus KsefStatus { get; set; } = KsefStatus.None;
+    public string? KsefNumber { get; set; }
+    public string? KsefSessionReference { get; set; }
+    public string? KsefInvoiceReference { get; set; }
+    public string? KsefError { get; set; }
+    public DateTime? KsefSentAt { get; set; }
 }

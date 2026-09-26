@@ -31,4 +31,14 @@ public class FinanceTaxConfigDto
     public string? SellerAddress { get; set; }
     public string? SellerCity { get; set; }
     public string? SellerPostalCode { get; set; }
+    public string? SellerName { get; set; }
+    public string? VatExemptBasis { get; set; }
+
+    public bool KsefEnabled { get; set; }
+    public string KsefEnvironment { get; set; } = "test";
+    public string? KsefApiUrl { get; set; }
+    /// <summary>Czy token jest zapisany (sam token nie wraca do UI).</summary>
+    public bool KsefTokenSet { get; set; }
+    /// <summary>Nowy token do zapisania; null = bez zmian, pusty = usuń.</summary>
+    public string? NewKsefToken { get; set; }
 }

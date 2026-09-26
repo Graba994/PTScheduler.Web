@@ -166,6 +166,8 @@ else
                 }
             </div>
 
+            <CompanyInvoiceFields @bind-Wants="_wantsCompanyInvoice" Buyer="_invoiceBuyer" />
+
             @if (!string.IsNullOrEmpty(_err)) { <div class="alert alert-danger py-2 mb-2">@_err</div> }
             <div class="d-grid gap-2">
                 @foreach (var opt in _options)
@@ -181,6 +183,9 @@ else
 }
 
 @code {
+    private bool _wantsCompanyInvoice;
+    private PTScheduler.Application.Interfaces.InvoiceBuyerDto _invoiceBuyer = new();
+
     private bool _loading = true;
     private bool _paymentsEnabled;
     private bool _isStaff;
@@ -268,7 +273,7 @@ else
     private async Task StartCheckout(PackageOfferDto o, string providerKey)
     {
         _busy = true; _err = string.Empty;
-        var res = await PaymentService.StartPackageCheckoutAsync(_userId, o.Id, providerKey, Nav.BaseUri, _email, string.Empty, _appliedCoupon);
+        var res = await PaymentService.StartPackageCheckoutAsync(_userId, o.Id, providerKey, Nav.BaseUri, _email, string.Empty, _appliedCoupon, _wantsCompanyInvoice ? _invoiceBuyer : null);
         if (res.Ok && res.RedirectUrl is not null) { Nav.NavigateTo(res.RedirectUrl, forceLoad: true); return; }
         _err = res.Error ?? "Nie udało się rozpocząć płatności.";
         _busy = false;

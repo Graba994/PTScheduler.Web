@@ -10,10 +10,10 @@ public record PaymentOptionDto(string Key, string Name, string Icon);
 public interface IPaymentService
 {
     /// <summary>Creates a course order on the chosen gateway and returns a redirect URL.</summary>
-    Task<PaymentInitResult> StartCourseCheckoutAsync(string userId, int courseId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null);
+    Task<PaymentInitResult> StartCourseCheckoutAsync(string userId, int courseId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null, InvoiceBuyerDto? invoiceBuyer = null);
 
     /// <summary>Creates a session-package order on the chosen gateway and returns a redirect URL.</summary>
-    Task<PaymentInitResult> StartPackageCheckoutAsync(string userId, int packageOfferId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null);
+    Task<PaymentInitResult> StartPackageCheckoutAsync(string userId, int packageOfferId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null, InvoiceBuyerDto? invoiceBuyer = null);
 
     /// <summary>Handles a gateway webhook for the given provider. Returns true if accepted.</summary>
     Task<bool> HandleNotifyAsync(string providerKey, string rawBody, IReadOnlyDictionary<string, string> headers);
