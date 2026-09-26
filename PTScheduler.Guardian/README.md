@@ -112,6 +112,15 @@ To zbuduje i uruchomi:
 docker compose -f docker-compose.prod.yml up -d --build guardian
 ```
 
+**Serwer bez `docker compose` (np. Unraid)** — skrypt pobiera kod, buduje obraz i odtwarza kontener
+z ta sama konfiguracja (zmienne, wolumeny, sieci, porty); jesli nowy nie wstanie, przywraca poprzedni:
+
+```bash
+REPO=$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "/opt/ptscheduler/repo"}}{{.Source}}{{end}}{{end}}' ptguardian)
+cd "$REPO" && git pull
+bash deploy/update-guardian.sh
+```
+
 ### Krok 4 — Sprawdz czy Guardian dziala
 
 ```bash
