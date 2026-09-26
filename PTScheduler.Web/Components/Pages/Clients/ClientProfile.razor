@@ -385,6 +385,14 @@ else if (client is not null)
                         @if (measurements?.Count > 0) { <span class="badge bg-secondary ms-1 rounded-pill" style="font-size:.65rem">@measurements.Count</span> }
                     </button>
                 </li>
+                @if (Entitlements.IsAllowed("BodyMeasurements"))
+                {
+                    <li class="nav-item">
+                        <button class="nav-link @(_tab == "photos" ? "active" : "")" @onclick='() => SelectTab("photos")'>
+                            <i class="bi bi-camera me-1"></i>Zdjęcia
+                        </button>
+                    </li>
+                }
                 <li class="nav-item">
                     <button class="nav-link @(_tab == "surveys" ? "active" : "")" @onclick='() => SelectTab("surveys")'>
                         <i class="bi bi-clipboard2-pulse me-1"></i>Ankiety
@@ -448,6 +456,11 @@ else if (client is not null)
             @if (_tab == "surveys")
             {
                 <ClientSurveysPanel ClientId="Id" CurrentUserId="@currentUserId" />
+            }
+
+            @if (_tab == "photos" && Entitlements.IsAllowed("BodyMeasurements"))
+            {
+                <ProgressPhotos ClientId="Id" UserId="@currentUserId" IsStaff="true" />
             }
 
             @if (_tab == "packages")
@@ -1061,7 +1074,7 @@ else if (client is not null)
         InviteQuery = null;
 
         // Link z powiadomienia / „Wymaga uwagi” (np. ?tab=surveys).
-        if (TabQuery is "surveys" or "sessions" or "measurements" or "packages")
+        if (TabQuery is "surveys" or "sessions" or "measurements" or "packages" or "photos")
         {
             SelectTab(TabQuery);
             TabQuery = null;

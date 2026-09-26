@@ -52,6 +52,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<Membership> Memberships => Set<Membership>();
     public DbSet<MembershipPeriod> MembershipPeriods => Set<MembershipPeriod>();
     public DbSet<ChatMessage> ChatMessages => Set<ChatMessage>();
+    public DbSet<ProgressPhoto> ProgressPhotos => Set<ProgressPhoto>();
     public DbSet<Coupon> Coupons => Set<Coupon>();
     public DbSet<CouponRedemption> CouponRedemptions => Set<CouponRedemption>();
 
@@ -417,6 +418,15 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             e.Property(m => m.Body).HasMaxLength(4000);
             e.HasOne(m => m.Client).WithMany().HasForeignKey(m => m.ClientId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(m => new { m.ClientId, m.SentAt });
+        });
+
+        builder.Entity<ProgressPhoto>(e =>
+        {
+            e.Property(p => p.FileName).HasMaxLength(64);
+            e.Property(p => p.Note).HasMaxLength(500);
+            e.Property(p => p.UploadedByUserId).HasMaxLength(450);
+            e.HasOne(p => p.Client).WithMany().HasForeignKey(p => p.ClientId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(p => new { p.ClientId, p.TakenOn });
         });
 
         builder.Entity<MembershipPlan>(e =>

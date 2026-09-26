@@ -8,7 +8,8 @@ namespace PTScheduler.Infrastructure.Services;
 
 public class DatabaseMaintenanceService(
     IDbContextFactory<ApplicationDbContext> dbFactory,
-    UserManager<ApplicationUser> userManager) : IDatabaseMaintenanceService
+    UserManager<ApplicationUser> userManager,
+    IWebRootPathProvider webRoot) : IDatabaseMaintenanceService
 {
     public async Task<ClearDataResult> ClearAllDataAsync()
     {
@@ -26,6 +27,9 @@ public class DatabaseMaintenanceService(
         result.Sessions = await db.Sessions.ExecuteDeleteAsync();
         result.Packages = await db.SessionPackages.ExecuteDeleteAsync();
         result.IntroConfigs = await db.IntroSessionConfigs.ExecuteDeleteAsync();
+        await db.ProgressPhotos.ExecuteDeleteAsync();
+        var photosDir = Path.Combine(PrivateStorage.Root(webRoot), "photos");
+        if (Directory.Exists(photosDir)) Directory.Delete(photosDir, recursive: true);
         result.Clients = await db.Clients.ExecuteDeleteAsync();
 
         // Delete Identity accounts that had the Client role

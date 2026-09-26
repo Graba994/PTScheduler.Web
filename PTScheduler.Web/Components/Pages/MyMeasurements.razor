@@ -44,7 +44,7 @@ else if (_measurements.Count == 0)
     <div class="empty-state py-5">
         <div class="empty-state-icon">📏</div>
         <div class="empty-state-title">Brak pomiarów</div>
-        <div class="empty-state-desc">Twój trener jeszcze nie wprowadził żadnych pomiarów. Pojawią się po pierwszej sesji.</div>
+        <div class="empty-state-desc">Twój trener jeszcze nie wprowadził żadnych pomiarów. Pojawią się po pierwszej sesji. Poniżej możesz już dodawać zdjęcia sylwetki.</div>
     </div>
 }
 else
@@ -148,6 +148,14 @@ else
     </div>
 }
 
+
+@if (!_loading && _clientId is int photoClientId)
+{
+    <div class="mt-4">
+        <ProgressPhotos ClientId="photoClientId" UserId="@_userId" />
+    </div>
+}
+
 @code {
     private static readonly CultureInfo _pl = new("pl-PL");
 
@@ -156,6 +164,8 @@ else
     private List<ChartMetric> _chartMetrics = [];
     private string _activeMetric = string.Empty;
     private bool _loading = true;
+    private int? _clientId;
+    private string _userId = "";
 
     private bool _hasWeight, _hasFat, _hasChest, _hasWaist, _hasHips, _hasThigh, _hasArm, _hasNotes;
 
@@ -164,6 +174,8 @@ else
         var auth   = await AuthState.GetAuthenticationStateAsync();
         var uid    = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
         var client = await ClientService.GetClientByUserIdAsync(uid);
+        _userId = uid;
+        _clientId = client?.Id;
         if (client is not null)
         {
             _measurements = await MeasurementService.GetAsync(client.Id);

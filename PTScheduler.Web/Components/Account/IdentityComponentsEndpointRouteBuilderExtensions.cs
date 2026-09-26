@@ -213,6 +213,14 @@ namespace Microsoft.AspNetCore.Routing
                         .OrderBy(m => m.SentAt)
                         .Select(m => new { m.SentAt, From = m.FromStaff ? "Trener" : "Ja", m.Body, m.ReadAt })
                         .ToListAsync();
+
+                    // Zdjęcia sylwetki: lista (same pliki są do pobrania w aplikacji, w „Moje pomiary”).
+                    export["ProgressPhotos"] = await db.ProgressPhotos
+                        .AsNoTracking()
+                        .Where(p => p.ClientId == client.Id)
+                        .OrderBy(p => p.TakenOn)
+                        .Select(p => new { p.TakenOn, Pose = p.Pose.ToString(), p.Note, p.UploadedAt, Url = "/photos/" + p.Id })
+                        .ToListAsync();
                 }
 
                 var loginLogs = await db.LoginLogs

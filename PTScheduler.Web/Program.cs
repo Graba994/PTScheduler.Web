@@ -310,6 +310,24 @@ app.MapGet("/reports/client/{clientId:int}/monthly", async (
     }
 }).RequireAuthorization();
 
+// Zdjęcia sylwetki: pliki leżą w branding/_private (blokowanym dla plików statycznych),
+// więc jedyna droga do nich to ten endpoint — tylko dla klienta, jego trenera i admina.
+app.MapGet("/photos/{id:int}", async (
+    int id,
+    string? thumb,
+    PTScheduler.Application.Interfaces.IProgressPhotoService photos,
+    HttpContext ctx) =>
+{
+    var file = await photos.GetFileAsync(id, thumbnail: thumb is "1" or "true");
+    if (file is null) return Results.NotFound();
+    var userId = ctx.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier) ?? "";
+    var isAdmin = ctx.User.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+    if (!await photos.CanAccessAsync(file.Value.ClientId, userId, isAdmin)) return Results.NotFound();
+
+    ctx.Response.Headers.CacheControl = "private, max-age=86400";
+    return Results.File(file.Value.Path, "image/webp");
+}).RequireAuthorization();
+
 // Subskrypcja kalendarza trenera (Google/Apple/Outlook): wszystkie wizyty w jednym pliku ICS.
 // Bez logowania — kalendarze nie wysyłają ciasteczek — więc dostęp wyłącznie po sekretnym
 // tokenie z TrainerConfig. Nowy token (Kalendarz → „W telefonie”) unieważnia stary link.

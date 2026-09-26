@@ -1,0 +1,248 @@
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Photos
+@using PTScheduler.Domain.Enums
+@inject IProgressPhotoService PhotoService
+@inject IAppClock Clock
+
+@* Zdjęcia sylwetki klienta — widoczne tylko dla klienta i jego trenera. *@
+<div class="card mb-3">
+    <div class="card-body">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
+            <h6 class="mb-0 fw-semibold"><i class="bi bi-camera me-2"></i>Zdjęcia sylwetki</h6>
+            <div class="d-flex gap-2">
+                @if (_photos.Count >= 2)
+                {
+                    <button class="btn btn-sm @(_compareMode ? "btn-secondary" : "btn-outline-secondary")" @onclick="ToggleCompare">
+                        <i class="bi bi-layout-split me-1"></i>@(_compareMode ? "Anuluj" : "Porównaj")
+                    </button>
+                }
+                <button class="btn btn-sm btn-primary" @onclick="() => _showForm = !_showForm">
+                    <i class="bi bi-plus-lg me-1"></i>Dodaj zdjęcie
+                </button>
+            </div>
+        </div>
+        <p class="small text-muted mb-3">
+            <i class="bi bi-lock-fill me-1"></i>@(IsStaff ? "Zdjęcia widzi tylko klient i jego trener." : "Zdjęcia widzisz tylko Ty i Twój trener.")
+            Pliki są zmniejszane, a dane z aparatu (np. lokalizacja) — usuwane.
+        </p>
+
+        @if (_showForm)
+        {
+            <div class="photo-upload mb-3">
+                <div class="row g-2">
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small mb-1">Data</label>
+                        <input type="date" class="form-control form-control-sm" @bind="_takenOn" max="@Clock.Today.ToString("yyyy-MM-dd")" />
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small mb-1">Ujęcie</label>
+                        <select class="form-select form-select-sm" @bind="_pose">
+                            @foreach (var p in Enum.GetValues<PhotoPose>())
+                            {
+                                <option value="@p">@ProgressPhotoDto.PoseLabel(p)</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-12 col-md-6">
+                        <label class="form-label small mb-1">Notatka (opcjonalnie)</label>
+                        <input class="form-control form-control-sm" maxlength="500" @bind="_note" placeholder="np. rano, na czczo" />
+                    </div>
+                    <div class="col-12">
+                        <InputFile OnChange="OnFileSelected" accept="image/jpeg,image/png,image/webp" class="form-control form-control-sm" />
+                    </div>
+                </div>
+                @if (_error is not null) { <div class="text-danger small mt-2">@_error</div> }
+                <div class="d-flex justify-content-end gap-2 mt-2">
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="CancelForm">Anuluj</button>
+                    <button class="btn btn-sm btn-primary" disabled="@(_file is null || _uploading)" @onclick="UploadAsync">
+                        @if (_uploading) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        Zapisz zdjęcie
+                    </button>
+                </div>
+            </div>
+        }
+
+        @if (_compareMode)
+        {
+            <div class="alert alert-info small py-2">Wybierz dwa zdjęcia do porównania (@_selected.Count/2).</div>
+        }
+
+        @if (_loading)
+        {
+            <div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></div>
+        }
+        else if (_photos.Count == 0)
+        {
+            <div class="text-muted small text-center py-3">
+                Brak zdjęć. Rób je co 2–4 tygodnie w tym samym świetle i pozach — różnicę widać lepiej niż na wadze.
+            </div>
+        }
+        else
+        {
+            @foreach (var day in _photos.GroupBy(p => p.TakenOn))
+            {
+                <div class="photo-day">@day.Key.ToString("d MMMM yyyy")</div>
+                <div class="photo-grid">
+                    @foreach (var p in day)
+                    {
+                        var sel = _selected.Contains(p.Id);
+                        <button class="photo-thumb @(sel ? "selected" : "")" @onclick="() => OnThumbClick(p)" title="@p.Note">
+                            <img src="@p.ThumbUrl" alt="@ProgressPhotoDto.PoseLabel(p.Pose), @p.TakenOn.ToString("dd.MM.yyyy")" loading="lazy" />
+                            <span class="photo-pose">@ProgressPhotoDto.PoseLabel(p.Pose)</span>
+                            @if (sel) { <span class="photo-check"><i class="bi bi-check-lg"></i></span> }
+                        </button>
+                    }
+                </div>
+            }
+        }
+    </div>
+</div>
+
+@if (_open is not null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.8)" @onclick="() => _open = null">
+        <div class="modal-dialog modal-dialog-centered modal-lg" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title">@ProgressPhotoDto.PoseLabel(_open.Pose) · @_open.TakenOn.ToString("d MMMM yyyy")</h6>
+                    <button type="button" class="btn-close" @onclick="() => _open = null"></button>
+                </div>
+                <div class="modal-body p-0 text-center bg-body-tertiary">
+                    <img src="@_open.Url" class="photo-full" alt="Zdjęcie sylwetki" />
+                </div>
+                <div class="modal-footer py-2 justify-content-between">
+                    <span class="small text-muted">@(_open.Note ?? "")</span>
+                    @if (_confirmDelete)
+                    {
+                        <div class="d-flex gap-2 align-items-center">
+                            <span class="small">Usunąć na zawsze?</span>
+                            <button class="btn btn-sm btn-danger" @onclick="DeleteAsync">Usuń</button>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDelete = false">Nie</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <button class="btn btn-sm btn-outline-danger" @onclick="() => _confirmDelete = true"><i class="bi bi-trash me-1"></i>Usuń</button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_compare is { } pair)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.8)" @onclick="CloseCompare">
+        <div class="modal-dialog modal-dialog-centered modal-xl" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header py-2">
+                    <h6 class="modal-title">Porównanie · @((pair.After.TakenOn.DayNumber - pair.Before.TakenOn.DayNumber)) dni różnicy</h6>
+                    <button type="button" class="btn-close" @onclick="CloseCompare"></button>
+                </div>
+                <div class="modal-body photo-compare">
+                    @foreach (var p in new[] { pair.Before, pair.After })
+                    {
+                        <figure class="mb-0">
+                            <img src="@p.Url" alt="Zdjęcie z @p.TakenOn.ToString("dd.MM.yyyy")" />
+                            <figcaption class="small text-muted text-center mt-1">
+                                @p.TakenOn.ToString("d MMMM yyyy") · @ProgressPhotoDto.PoseLabel(p.Pose)
+                            </figcaption>
+                        </figure>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public int ClientId { get; set; }
+    [Parameter, EditorRequired] public string UserId { get; set; } = "";
+    [Parameter] public bool IsStaff { get; set; }
+
+    private const long MaxBytes = 20 * 1024 * 1024;
+
+    private bool _loading = true;
+    private List<ProgressPhotoDto> _photos = [];
+    private bool _showForm;
+    private DateOnly _takenOn;
+    private PhotoPose _pose = PhotoPose.Front;
+    private string? _note;
+    private IBrowserFile? _file;
+    private bool _uploading;
+    private string? _error;
+    private ProgressPhotoDto? _open;
+    private bool _confirmDelete;
+    private bool _compareMode;
+    private readonly List<int> _selected = [];
+    private (ProgressPhotoDto Before, ProgressPhotoDto After)? _compare;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _takenOn = Clock.Today;
+        _photos = await PhotoService.GetAsync(ClientId);
+        _loading = false;
+    }
+
+    private void OnFileSelected(InputFileChangeEventArgs e)
+    {
+        _error = null;
+        _file = e.File;
+        if (_file.Size > MaxBytes) { _error = "Plik jest za duży (maks. 20 MB)."; _file = null; }
+    }
+
+    private void CancelForm()
+    {
+        _showForm = false; _file = null; _error = null; _note = null;
+    }
+
+    private async Task UploadAsync()
+    {
+        if (_file is null) return;
+        _uploading = true; _error = null;
+        try
+        {
+            await using var stream = _file.OpenReadStream(MaxBytes);
+            var (ok, error) = await PhotoService.UploadAsync(ClientId, UserId, stream, _takenOn, _pose, _note);
+            if (!ok) { _error = error; return; }
+            _photos = await PhotoService.GetAsync(ClientId);
+            CancelForm();
+        }
+        catch (IOException)
+        {
+            _error = "Nie udało się przesłać pliku. Spróbuj ponownie.";
+        }
+        finally { _uploading = false; }
+    }
+
+    private void OnThumbClick(ProgressPhotoDto p)
+    {
+        if (!_compareMode) { _open = p; _confirmDelete = false; return; }
+        if (!_selected.Remove(p.Id)) _selected.Add(p.Id);
+        if (_selected.Count == 2)
+        {
+            var two = _photos.Where(x => _selected.Contains(x.Id)).OrderBy(x => x.TakenOn).ThenBy(x => x.Id).ToList();
+            _compare = (two[0], two[1]);
+        }
+    }
+
+    private void ToggleCompare()
+    {
+        _compareMode = !_compareMode;
+        _selected.Clear();
+    }
+
+    private void CloseCompare()
+    {
+        _compare = null;
+        _selected.Clear();
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_open is null) return;
+        await PhotoService.DeleteAsync(_open.Id, ClientId);
+        _open = null;
+        _photos = await PhotoService.GetAsync(ClientId);
+    }
+}
