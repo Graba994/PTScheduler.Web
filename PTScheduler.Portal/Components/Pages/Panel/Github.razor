@@ -7,12 +7,16 @@
 
 <PageTitle>GitHub — PTScheduler Portal</PageTitle>
 
-<a href="/panel/setup" class="setup-back small text-decoration-none d-inline-flex align-items-center gap-1 mb-2"><i class="bi bi-arrow-left"></i>Konfiguracja platformy</a>
+<PanelHeader Title="GitHub" Icon="bi-github" BackHref="/panel/setup" BackLabel="Konfiguracja platformy" Subtitle="Połączenie z repozytorium kodu. Dzięki niemu strona Aktualizacje widzi nowe wersje i je pobiera." />
 
-<div class="mb-4">
-    <h4 class="fw-bold mb-1"><i class="bi bi-github me-2 text-primary"></i>GitHub</h4>
-    <p class="text-muted small mb-0">Połączenie z repozytorium kodu — potrzebne do sprawdzania i pobierania aktualizacji</p>
-</div>
+@if (string.IsNullOrWhiteSpace(_form.Token))
+{
+    <StatusBanner Tone="warn" Icon="bi-github" Title="Brak połączenia z GitHubem">Bez tokenu strona Aktualizacje nie zobaczy nowych wersji. Utwórz token z dostępem do odczytu repozytorium i wklej go poniżej.</StatusBanner>
+}
+else
+{
+    <StatusBanner Tone="ok" Icon="bi-check-circle-fill" Title="GitHub połączony">Portal sprawdza nowe wersje w repozytorium <strong>@_form.Owner/@_form.Repo</strong> (gałąź @(string.IsNullOrWhiteSpace(_form.Branch) ? "main" : _form.Branch)).</StatusBanner>
+}
 
 @if (_saved)
 {
@@ -24,9 +28,7 @@
 
 <EditForm Model="_form" OnValidSubmit="Save" FormName="github-config">
     <div class="card border-0 shadow-sm mb-3">
-        <div class="card-header bg-white fw-semibold">
-            <i class="bi bi-folder2-open me-1"></i>Repozytorium
-        </div>
+        <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-folder2-open"></i></span>Repozytorium</div>
         <div class="card-body">
             <div class="row g-3">
                 <div class="col-md-6">
@@ -47,9 +49,7 @@
     </div>
 
     <div class="card border-0 shadow-sm mb-3">
-        <div class="card-header bg-white fw-semibold">
-            <i class="bi bi-key me-1"></i>Personal Access Token
-        </div>
+        <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-key"></i></span>Personal Access Token</div>
         <div class="card-body">
             <div class="mb-0">
                 <label class="form-label small fw-semibold">GitHub Token</label>

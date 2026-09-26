@@ -7,7 +7,7 @@
 
 <PageTitle>System — PTScheduler Portal</PageTitle>
 
-<h4 class="fw-bold mb-4"><i class="bi bi-cpu me-2 text-primary"></i>System</h4>
+<PanelHeader Title="Serwer" Icon="bi-cpu" Subtitle="Zasoby maszyny, na której działają Portal i instancje trenerów, oraz stan kontenerów Dockera." />
 
 @if (_loading)
 {
@@ -15,31 +15,26 @@
 }
 else
 {
-    <div class="row g-3 mb-4">
-        <div class="col-md-6 col-lg-3">
-            <div class="card border-0 shadow-sm text-center p-3">
-                <div class="fw-bold fs-3">@(_sys?.CpuCount ?? 0)</div>
-                <div class="text-muted small">CPU Cores</div>
-            </div>
-        </div>
-        <div class="col-md-6 col-lg-3">
-            <div class="card border-0 shadow-sm text-center p-3">
-                <div class="fw-bold fs-3">@((_sys?.TotalMemoryMB ?? 0) / 1024) GB</div>
-                <div class="text-muted small">RAM</div>
-            </div>
-        </div>
-        <div class="col-md-6 col-lg-3">
-            <div class="card border-0 shadow-sm text-center p-3">
-                <div class="fw-bold fs-3">@(_sys?.RunningContainers ?? 0)/@(_sys?.TotalContainers ?? 0)</div>
-                <div class="text-muted small">Kontenery</div>
-            </div>
-        </div>
-        <div class="col-md-6 col-lg-3">
-            <div class="card border-0 shadow-sm text-center p-3">
-                <div class="fw-bold fs-3">@_sys?.DockerVersion</div>
-                <div class="text-muted small">Docker</div>
-            </div>
-        </div>
+    var allUp = _statuses.Count > 0 && _statuses.All(x => x.IsHealthy);
+    var downCount = _statuses.Count(x => !x.IsHealthy);
+    @if (_sys is null)
+    {
+        <StatusBanner Tone="danger" Icon="bi-plug" Title="Brak połączenia z Dockerem">Portal nie widzi Dockera, więc nie pokaże kontenerów ani zasobów. Sprawdź, czy gniazdo Dockera jest zamontowane w kontenerze Portalu.</StatusBanner>
+    }
+    else if (downCount > 0)
+    {
+        <StatusBanner Tone="danger" Icon="bi-exclamation-octagon-fill" Title="@($"{downCount} {PanelUi.Plural(downCount, "trener ma", "trenerów ma", "trenerów ma")} zatrzymane kontenery")">Sprawdź tabelę poniżej i uruchom je ponownie z karty trenera.</StatusBanner>
+    }
+    else if (allUp)
+    {
+        <StatusBanner Tone="ok" Icon="bi-check-circle-fill" Title="Wszystkie kontenery działają">Kontenery aplikacji i baz danych wszystkich trenerów są uruchomione.</StatusBanner>
+    }
+
+    <div class="pp-stats">
+        <StatTile Label="Procesor" Value="@(_sys is null ? "—" : $"{_sys.CpuCount} rdzeni")" Icon="bi-cpu" Tone="info" />
+        <StatTile Label="Pamięć" Value="@(_sys is null ? "—" : $"{_sys.TotalMemoryMB / 1024} GB")" Icon="bi-memory" Tone="info" />
+        <StatTile Label="Kontenery" Value="@(_sys is null ? "—" : $"{_sys.RunningContainers} / {_sys.TotalContainers}")" Meta="działające / wszystkie" Icon="bi-boxes" Tone="@(downCount > 0 ? "danger" : "ok")" />
+        <StatTile Label="Docker" Value="@(_sys?.DockerVersion ?? "—")" Icon="bi-box-seam" Tone="muted" />
     </div>
 
     <div class="row g-3">
@@ -47,7 +42,7 @@ else
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
                     <div class="d-flex justify-content-between align-items-center mb-3">
-                        <h6 class="fw-bold mb-0"><i class="bi bi-box me-2"></i>Kontenery trenerów</h6>
+                        <h2 class="pp-card-title pp-card-title-icon"><span class="pp-icon pp-icon-sm pp-tone-muted"><i class="bi bi-box"></i></span>Kontenery trenerów</h2>
                         <button class="btn btn-sm btn-outline-secondary" @onclick="Refresh">
                             <i class="bi bi-arrow-clockwise"></i>
                         </button>
@@ -75,18 +70,14 @@ else
                                         <tr>
                                             <td class="font-monospace fw-semibold">@s.Slug</td>
                                             <td>
-                                                <span class="badge @(s.Web?.Running == true ? "bg-success" : "bg-danger")">
-                                                    @(s.Web?.Running == true ? "Up" : "Down")
-                                                </span>
+                                                <span class="pp-chip pp-tone-@(s.Web?.Running == true ? "ok" : "danger")">@(s.Web?.Running == true ? "działa" : "zatrzymany")</span>
                                                 @if (s.Web is not null)
                                                 {
                                                     <span class="text-muted ms-1">@s.Web.Id</span>
                                                 }
                                             </td>
                                             <td>
-                                                <span class="badge @(s.Db?.Running == true ? "bg-success" : "bg-danger")">
-                                                    @(s.Db?.Running == true ? "Up" : "Down")
-                                                </span>
+                                                <span class="pp-chip pp-tone-@(s.Db?.Running == true ? "ok" : "danger")">@(s.Db?.Running == true ? "działa" : "zatrzymany")</span>
                                                 @if (s.Db is not null)
                                                 {
                                                     <span class="text-muted ms-1">@s.Db.Id</span>
@@ -115,7 +106,7 @@ else
         <div class="col-lg-4">
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
-                    <h6 class="fw-bold mb-3"><i class="bi bi-bar-chart me-2"></i>Capacity</h6>
+                    <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm pp-tone-muted"><i class="bi bi-bar-chart"></i></span>Ilu trenerów zmieścisz</h2>
                     @if (_sys is not null)
                     {
                         var maxTenants = (int)(_sys.TotalMemoryMB / 150);

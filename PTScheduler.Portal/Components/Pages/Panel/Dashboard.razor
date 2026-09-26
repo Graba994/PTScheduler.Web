@@ -3,11 +3,16 @@
 @attribute [Authorize(Roles = "Admin")]
 @inject TenantService TenantSvc
 @inject DockerService DockerSvc
+@inject UpdateNotifier UpdateNotifier
 @rendermode InteractiveServer
 
-<PageTitle>Dashboard — PTScheduler Portal</PageTitle>
+<PageTitle>Pulpit — PTScheduler Portal</PageTitle>
 
-<h4 class="fw-bold mb-4"><i class="bi bi-speedometer2 me-2 text-primary"></i>Dashboard</h4>
+<PanelHeader Title="Pulpit" Icon="bi-speedometer2" Subtitle="Stan platformy w skrócie: trenerzy, przychody i zdrowie instancji.">
+    <Actions>
+        <a href="/panel/provision" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Nowa instancja</a>
+    </Actions>
+</PanelHeader>
 
 @if (_loading)
 {
@@ -15,223 +20,115 @@
 }
 else
 {
-    <div class="row g-3 mb-4">
-        <div class="col-6 col-lg-3">
-            <div class="portal-stat">
-                <div class="portal-stat-icon bg-primary bg-opacity-10 text-primary"><i class="bi bi-building"></i></div>
-                <div class="portal-stat-val">@_stats.TotalTenants</div>
-                <div class="portal-stat-label">Trenerzy</div>
-            </div>
-        </div>
-        <div class="col-6 col-lg-3">
-            <div class="portal-stat">
-                <div class="portal-stat-icon bg-success bg-opacity-10 text-success"><i class="bi bi-check-circle"></i></div>
-                <div class="portal-stat-val">@_stats.ActiveTenants</div>
-                <div class="portal-stat-label">Aktywnych</div>
-            </div>
-        </div>
-        <div class="col-6 col-lg-3">
-            <div class="portal-stat">
-                <div class="portal-stat-icon bg-warning bg-opacity-10 text-warning"><i class="bi bi-hourglass-split"></i></div>
-                <div class="portal-stat-val">@_stats.PendingTenants</div>
-                <div class="portal-stat-label">Oczekujących</div>
-            </div>
-        </div>
-        <div class="col-6 col-lg-3">
-            <div class="portal-stat">
-                <div class="portal-stat-icon bg-info bg-opacity-10 text-info"><i class="bi bi-currency-exchange"></i></div>
-                <div class="portal-stat-val">@_stats.TotalRevenue.ToString("0") zl</div>
-                <div class="portal-stat-label">MRR</div>
-            </div>
-        </div>
-    </div>
-
-    <div class="row g-3 mb-4">
-        <div class="col-6 col-lg-3">
-            <div class="portal-stat">
-                <div class="portal-stat-icon bg-success bg-opacity-10 text-success"><i class="bi bi-cash-stack"></i></div>
-                <div class="portal-stat-val">@_stats.MonthlyPaymentsTotal.ToString("0") zl</div>
-                <div class="portal-stat-label">Płatności (ten mies.)</div>
-            </div>
-        </div>
-        <div class="col-6 col-lg-3">
-            <div class="portal-stat">
-                <div class="portal-stat-icon bg-primary bg-opacity-10 text-primary"><i class="bi bi-person-plus"></i></div>
-                <div class="portal-stat-val">@_stats.NewTenantsThisMonth</div>
-                <div class="portal-stat-label">Nowi (ten mies.)</div>
-            </div>
-        </div>
-        <div class="col-6 col-lg-3">
-            <div class="portal-stat">
-                <div class="portal-stat-icon bg-info bg-opacity-10 text-info"><i class="bi bi-clock-history"></i></div>
-                <div class="portal-stat-val">@_stats.TrialingTenants</div>
-                <div class="portal-stat-label">Na trialu</div>
-            </div>
-        </div>
-        <div class="col-6 col-lg-3">
-            <div class="portal-stat">
-                <div class="portal-stat-icon bg-danger bg-opacity-10 text-danger"><i class="bi bi-person-dash"></i></div>
-                <div class="portal-stat-val">@_stats.ChurnedThisMonth</div>
-                <div class="portal-stat-label">Churn (ten mies.)</div>
-            </div>
-        </div>
-    </div>
-
-    @if (_system is not null)
-    {
-        <div class="row g-3 mb-4">
-            <div class="col-md-6">
-                <div class="card border-0 shadow-sm">
-                    <div class="card-body">
-                        <h6 class="fw-bold mb-3"><i class="bi bi-cpu me-2 text-primary"></i>Serwer</h6>
-                        <div class="d-flex flex-column gap-2">
-                            <div class="d-flex justify-content-between small">
-                                <span class="text-muted">CPU</span>
-                                <span class="fw-semibold">@_system.CpuCount rdzeni</span>
-                            </div>
-                            <div class="d-flex justify-content-between small">
-                                <span class="text-muted">RAM</span>
-                                <span class="fw-semibold">@(_system.TotalMemoryMB / 1024) GB</span>
-                            </div>
-                            <div class="d-flex justify-content-between small">
-                                <span class="text-muted">Docker</span>
-                                <span class="fw-semibold">@_system.DockerVersion</span>
-                            </div>
-                            <div class="d-flex justify-content-between small">
-                                <span class="text-muted">Kontenery</span>
-                                <span class="fw-semibold">@_system.RunningContainers / @_system.TotalContainers</span>
-                            </div>
-
-                            @{
-                                var usedMB = _stats.ActiveTenants * 150;
-                                var pct = _system.TotalMemoryMB > 0 ? (int)(usedMB * 100 / _system.TotalMemoryMB) : 0;
-                            }
-                            <div class="mt-2">
-                                <div class="d-flex justify-content-between small mb-1">
-                                    <span class="text-muted">RAM (est.)</span>
-                                    <span>@usedMB MB / @_system.TotalMemoryMB MB</span>
-                                </div>
-                                <div class="progress" style="height:6px">
-                                    <div class="progress-bar @(pct > 80 ? "bg-danger" : pct > 60 ? "bg-warning" : "bg-success")"
-                                         style="width:@pct%"></div>
-                                </div>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-
-            <div class="col-md-6">
-                <div class="card border-0 shadow-sm">
-                    <div class="card-body">
-                        <h6 class="fw-bold mb-3"><i class="bi bi-graph-up me-2 text-success"></i>Capacity</h6>
-                        <div class="d-flex flex-column gap-2">
-                            @{
-                                var maxTenants = (int)(_system.TotalMemoryMB / 150);
-                                var capacityPct = maxTenants > 0 ? (_stats.ActiveTenants * 100 / maxTenants) : 0;
-                            }
-                            <div class="d-flex justify-content-between small">
-                                <span class="text-muted">Max trenerów (est.)</span>
-                                <span class="fw-semibold">~@maxTenants</span>
-                            </div>
-                            <div class="d-flex justify-content-between small">
-                                <span class="text-muted">Zajęte sloty</span>
-                                <span class="fw-semibold">@_stats.ActiveTenants / @maxTenants</span>
-                            </div>
-                            <div class="progress mt-2" style="height:20px">
-                                <div class="progress-bar @(capacityPct > 80 ? "bg-danger" : capacityPct > 60 ? "bg-warning" : "bg-primary")"
-                                     style="width:@capacityPct%">
-                                    @capacityPct%
-                                </div>
-                            </div>
-
-                            <div class="d-flex justify-content-between small mt-2">
-                                <span class="text-muted">Aktywne subskrypcje</span>
-                                <span class="fw-semibold">@_stats.ActiveSubscriptions</span>
-                            </div>
-
-                            @if (_stats.PrevMonthPaymentsTotal > 0)
-                            {
-                                var growth = _stats.PrevMonthPaymentsTotal > 0
-                                    ? (int)((_stats.MonthlyPaymentsTotal - _stats.PrevMonthPaymentsTotal) * 100 / _stats.PrevMonthPaymentsTotal)
-                                    : 0;
-                                <div class="d-flex justify-content-between small mt-1">
-                                    <span class="text-muted">Wzrost przychodu m/m</span>
-                                    <span class="fw-semibold @(growth >= 0 ? "text-success" : "text-danger")">
-                                        @(growth >= 0 ? "+" : "")@growth%
-                                    </span>
-                                </div>
-                            }
-                        </div>
-                    </div>
-                </div>
-            </div>
-        </div>
-    }
-
     var unhealthy = _tenants.Where(t => t.Status == TenantStatus.Active && t.IsHealthy == false).ToList();
     var healthyCount = _tenants.Count(t => t.Status == TenantStatus.Active && t.IsHealthy == true);
 
     @if (unhealthy.Count > 0)
     {
-        <div class="card border-danger border-2 shadow-sm mb-3">
-            <div class="card-body">
-                <h6 class="fw-bold mb-3 text-danger">
-                    <i class="bi bi-exclamation-triangle-fill me-2"></i>@unhealthy.Count aktywny(ch) trener(ow) nie odpowiada
-                </h6>
-                <div class="row g-2">
-                    @foreach (var t in unhealthy)
-                    {
-                        <div class="col-md-6">
-                            <a href="/panel/tenants/@t.Id" class="text-decoration-none">
-                                <div class="p-2 border rounded d-flex justify-content-between align-items-center">
-                                    <div>
-                                        <div class="fw-semibold">@t.CompanyName</div>
-                                        <div class="text-muted small">@t.LastHealthError</div>
-                                    </div>
-                                    <span class="badge bg-danger">
-                                        Down @(t.UnhealthySinceUtc.HasValue ? $"({(int)(DateTime.UtcNow - t.UnhealthySinceUtc.Value).TotalMinutes} min)" : "")
-                                    </span>
-                                </div>
-                            </a>
-                        </div>
-                    }
-                </div>
+        <StatusBanner Tone="danger" Icon="bi-heart-pulse-fill" Title="@($"{unhealthy.Count} {PanelUi.Plural(unhealthy.Count, "instancja nie odpowiada", "instancje nie odpowiadają", "instancji nie odpowiada")}")">
+            <span>Trenerzy z tych instancji mogą nie mieć dostępu do aplikacji. Otwórz trenera, żeby zobaczyć logi i zrestartować kontener.</span>
+            <div class="d-flex flex-wrap gap-2 mt-2">
+                @foreach (var t in unhealthy)
+                {
+                    <a href="/panel/tenants/@t.Id" class="pp-chip pp-tone-danger text-decoration-none" title="@t.LastHealthError">
+                        <i class="bi bi-x-circle"></i>@t.CompanyName
+                        @if (t.UnhealthySinceUtc is { } since) { <span class="opacity-75">· @((int)(DateTime.UtcNow - since).TotalMinutes) min</span> }
+                    </a>
+                }
             </div>
-        </div>
+        </StatusBanner>
     }
     else if (healthyCount > 0)
     {
-        <div class="alert alert-success py-2 mb-3">
-            <i class="bi bi-check-circle-fill me-1"></i>
-            Wszyscy aktywni trenerzy (@healthyCount) odpowiadaja na health check.
+        <StatusBanner Tone="ok" Icon="bi-check-circle-fill" Title="Wszystko działa">
+            Wszystkie aktywne instancje (@healthyCount) odpowiadają. Portal sprawdza je co kilka minut i da znać, gdy któraś przestanie.
+        </StatusBanner>
+    }
+    else if (_tenants.Count == 0)
+    {
+        <StatusBanner Tone="info" Icon="bi-rocket-takeoff" Title="Czas na pierwszego trenera">
+            <ChildContent>Utwórz instancję ręcznie albo poczekaj na rejestrację ze strony publicznej — nowi trenerzy pojawią się tutaj.</ChildContent>
+            <Actions><a href="/panel/provision" class="btn btn-primary btn-sm">Utwórz instancję</a></Actions>
+        </StatusBanner>
+    }
+
+    @if (UpdateNotifier.UpgradeAvailable)
+    {
+        <div class="pp-callout pp-tone-warn">
+            <i class="bi bi-cloud-arrow-down-fill"></i>
+            <div class="flex-grow-1">Jest nowa wersja (@UpdateNotifier.RemoteCommitShort). <a href="/panel/updates" class="fw-semibold">Przejdź do aktualizacji</a> — wszystko zrobisz jednym kliknięciem.</div>
         </div>
     }
 
+    <div class="pp-section-title">Trenerzy</div>
+    <div class="pp-stats">
+        <StatTile Label="Wszyscy" Value="@_stats.TotalTenants.ToString()" Icon="bi-building" Tone="info" Href="/panel/tenants" Meta="@($"{_stats.NewTenantsThisMonth} nowych w tym miesiącu")" />
+        <StatTile Label="Aktywni" Value="@_stats.ActiveTenants.ToString()" Icon="bi-check-circle" Tone="ok" Meta="@($"{_stats.ActiveSubscriptions} z opłaconą subskrypcją")" />
+        <StatTile Label="Na okresie próbnym" Value="@_stats.TrialingTenants.ToString()" Icon="bi-hourglass-split" Tone="warn" Meta="@($"{_stats.PendingTenants} czeka na uruchomienie")" />
+        <StatTile Label="Odeszli w tym mies." Value="@_stats.ChurnedThisMonth.ToString()" Icon="bi-person-dash" Tone="@(_stats.ChurnedThisMonth > 0 ? "danger" : "muted")" />
+    </div>
+
+    <div class="pp-section-title">Pieniądze</div>
+    <div class="pp-stats">
+        <StatTile Label="Przychód miesięczny (MRR)" Value="@($"{_stats.TotalRevenue:0} zł")" Icon="bi-graph-up-arrow" Tone="info" Href="/panel/finances" />
+        <StatTile Label="Wpłaty w tym miesiącu" Value="@($"{_stats.MonthlyPaymentsTotal:0} zł")" Icon="bi-cash-stack" Tone="ok" Meta="@GrowthText()" />
+    </div>
+
     <div class="row g-3">
-        <div class="col-md-6">
-            <div class="card border-0 shadow-sm">
-                <div class="card-body">
-                    <div class="d-flex align-items-center justify-content-between mb-3">
-                        <h6 class="fw-bold mb-0"><i class="bi bi-building me-2"></i>Ostatni trenerzy</h6>
-                        <a href="/panel/tenants" class="btn btn-sm btn-outline-primary">Wszyscy</a>
+        @if (_system is not null)
+        {
+            var usedMB = _stats.ActiveTenants * 150;
+            var ramPct = _system.TotalMemoryMB > 0 ? (int)(usedMB * 100 / _system.TotalMemoryMB) : 0;
+            var maxTenants = (int)(_system.TotalMemoryMB / 150);
+            var capacityPct = maxTenants > 0 ? _stats.ActiveTenants * 100 / maxTenants : 0;
+            <div class="col-lg-6">
+                <PanelCard Title="Serwer" Subtitle="Zasoby maszyny z kontenerami" Icon="bi-cpu" Class="h-100">
+                    <Actions><a href="/panel/system" class="btn btn-sm btn-outline-secondary">Szczegóły</a></Actions>
+                    <ChildContent>
+                        <dl class="pp-kv">
+                            <div><dt>Procesor</dt><dd>@_system.CpuCount rdzeni</dd></div>
+                            <div><dt>Pamięć</dt><dd>@(_system.TotalMemoryMB / 1024) GB</dd></div>
+                            <div><dt>Docker</dt><dd>@_system.DockerVersion</dd></div>
+                            <div><dt>Kontenery działające</dt><dd>@_system.RunningContainers z @_system.TotalContainers</dd></div>
+                        </dl>
+                        <div class="d-flex justify-content-between small mt-3 mb-1">
+                            <span class="text-muted">Pamięć zajęta przez instancje (szacunek)</span>
+                            <span class="fw-semibold">@usedMB / @_system.TotalMemoryMB MB</span>
+                        </div>
+                        <div class="pp-meter @PanelUi.MeterTone(ramPct)"><div style="width:@(Math.Min(ramPct, 100))%"></div></div>
+                    </ChildContent>
+                </PanelCard>
+            </div>
+            <div class="col-lg-6">
+                <PanelCard Title="Ilu trenerów zmieścisz" Subtitle="Liczone po ok. 150 MB pamięci na instancję" Icon="bi-speedometer" IconClass="pp-icon-cyan" Class="h-100">
+                    <div class="d-flex align-items-baseline gap-2 mb-2">
+                        <span class="pp-stat-value">@_stats.ActiveTenants</span>
+                        <span class="text-muted">z ok. @maxTenants miejsc</span>
+                        <span class="pp-chip @(capacityPct > 80 ? "pp-tone-danger" : capacityPct > 60 ? "pp-tone-warn" : "pp-tone-ok") ms-auto">@capacityPct% zajęte</span>
                     </div>
+                    <div class="pp-meter @PanelUi.MeterTone(capacityPct)"><div style="width:@(Math.Min(capacityPct, 100))%"></div></div>
+                    <p class="small text-muted mt-3 mb-0">
+                        @(capacityPct > 80 ? "Serwer jest prawie pełny — przed kolejnymi trenerami dołóż pamięci albo drugi serwer."
+                          : capacityPct > 60 ? "Zostało jeszcze trochę miejsca. Warto zaplanować rozbudowę."
+                          : "Dużo wolnego miejsca na nowych trenerów.")
+                    </p>
+                </PanelCard>
+            </div>
+        }
+
+        <div class="col-lg-6">
+            <PanelCard Title="Ostatnio dołączyli" Icon="bi-people" Flush="true" Class="h-100">
+                <Actions><a href="/panel/tenants" class="btn btn-sm btn-outline-secondary">Wszyscy</a></Actions>
+                <ChildContent>
                     @if (_tenants.Count == 0)
                     {
-                        <p class="text-muted small">Brak trenerów. <a href="/panel/provision">Dodaj pierwszego</a>.</p>
+                        <div class="pp-empty"><i class="bi bi-people"></i>Jeszcze nikogo. <a href="/panel/provision">Dodaj pierwszego trenera</a>.</div>
                     }
                     else
                     {
                         <div class="table-responsive">
-                            <table class="table table-hover align-middle mb-0 small">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th>Trener</th>
-                                        <th>Plan</th>
-                                        <th>Status</th>
-                                        <th>Data</th>
-                                    </tr>
-                                </thead>
+                            <table class="table table-hover align-middle">
+                                <thead><tr><th>Trener</th><th>Plan</th><th>Stan</th><th>Od</th></tr></thead>
                                 <tbody>
                                     @foreach (var t in _tenants.Take(8))
                                     {
@@ -240,138 +137,90 @@ else
                                                 <a href="/panel/tenants/@t.Id" class="fw-semibold text-decoration-none">@t.CompanyName</a>
                                                 <div class="text-muted small">@t.OwnerEmail</div>
                                             </td>
-                                            <td><span class="badge bg-primary-subtle text-primary-emphasis">@(t.Plan?.Name ?? t.PlanId)</span></td>
-                                            <td><span class="badge @StatusBadge(t.Status)">@StatusLabel(t.Status)</span></td>
-                                            <td class="text-muted text-nowrap">@t.CreatedAt.ToString("dd.MM.yyyy")</td>
+                                            <td><span class="pp-chip pp-tone-info">@(t.Plan?.Name ?? t.PlanId)</span></td>
+                                            <td><span class="pp-chip pp-tone-@PanelUi.TenantStatusTone(t.Status)">@PanelUi.TenantStatusLabel(t.Status)</span></td>
+                                            <td class="text-muted text-nowrap small">@t.CreatedAt.ToString("dd.MM.yyyy")</td>
                                         </tr>
                                     }
                                 </tbody>
                             </table>
                         </div>
                     }
-                </div>
-            </div>
+                </ChildContent>
+            </PanelCard>
         </div>
 
-        <div class="col-md-6">
-            <div class="card border-0 shadow-sm">
-                <div class="card-body">
-                    <h6 class="fw-bold mb-3"><i class="bi bi-activity me-2 text-info"></i>Ostatnie zdarzenia</h6>
-                    @if (_events.Count == 0)
-                    {
-                        <p class="text-muted small mb-0">Brak zdarzeń.</p>
-                    }
-                    else
-                    {
-                        <div class="d-flex flex-column gap-2" style="max-height:400px;overflow-y:auto">
-                            @foreach (var ev in _events)
-                            {
-                                <div class="d-flex align-items-start gap-2 small border-bottom pb-2">
-                                    <span class="badge @EventBadge(ev.EventType) mt-1" style="min-width:24px;text-align:center">
-                                        <i class="bi @EventIcon(ev.EventType)"></i>
-                                    </span>
-                                    <div class="flex-grow-1">
-                                        <div class="d-flex justify-content-between">
-                                            <span class="fw-semibold">
-                                                @if (ev.Tenant is not null)
-                                                {
-                                                    <a href="/panel/tenants/@ev.TenantId" class="text-decoration-none">@ev.Tenant.CompanyName</a>
-                                                }
-                                                else
-                                                {
-                                                    <text>Tenant #@ev.TenantId</text>
-                                                }
-                                            </span>
-                                            <span class="text-muted">@ev.OccurredAt.ToLocalTime().ToString("dd.MM HH:mm")</span>
-                                        </div>
-                                        <div class="text-muted">@EventLabel(ev.EventType)</div>
-                                        @if (!string.IsNullOrWhiteSpace(ev.Detail))
+        <div class="col-lg-6">
+            <PanelCard Title="Co się ostatnio działo" Icon="bi-activity" IconClass="pp-icon-pink" Class="h-100">
+                @if (_events.Count == 0)
+                {
+                    <div class="pp-empty"><i class="bi bi-activity"></i>Na razie cisza.</div>
+                }
+                else
+                {
+                    <ul class="pp-feed" style="max-height:420px;overflow-y:auto">
+                        @foreach (var ev in _events)
+                        {
+                            <li class="pp-feed-item">
+                                <span class="pp-icon pp-icon-sm pp-tone-@PanelUi.EventTone(ev.EventType)"><i class="bi @PanelUi.EventIcon(ev.EventType)"></i></span>
+                                <div class="pp-feed-body">
+                                    <div class="pp-feed-title">
+                                        @PanelUi.EventLabel(ev.EventType)
+                                        <span class="fw-normal text-muted">·</span>
+                                        @if (ev.Tenant is not null)
                                         {
-                                            <div class="text-muted small font-monospace">@ev.Detail</div>
+                                            <a href="/panel/tenants/@ev.TenantId" class="text-decoration-none fw-normal">@ev.Tenant.CompanyName</a>
+                                        }
+                                        else
+                                        {
+                                            <span class="fw-normal">trener #@ev.TenantId</span>
                                         }
                                     </div>
+                                    @if (!string.IsNullOrWhiteSpace(ev.Detail))
+                                    {
+                                        <div class="pp-feed-meta text-truncate" title="@ev.Detail">@ev.Detail</div>
+                                    }
                                 </div>
-                            }
-                        </div>
-                    }
-                </div>
-            </div>
+                                <span class="pp-feed-time">@ev.OccurredAt.ToLocalTime().ToString("dd.MM HH:mm")</span>
+                            </li>
+                        }
+                    </ul>
+                }
+            </PanelCard>
         </div>
 
         @if (_payments.Count > 0)
         {
             <div class="col-12">
-                <div class="card border-0 shadow-sm">
-                    <div class="card-body">
-                        <h6 class="fw-bold mb-3"><i class="bi bi-credit-card me-2 text-success"></i>Ostatnie płatności</h6>
+                <PanelCard Title="Ostatnie płatności" Icon="bi-credit-card" IconClass="pp-tone-ok" Flush="true">
+                    <Actions><a href="/panel/finances" class="btn btn-sm btn-outline-secondary">Finanse</a></Actions>
+                    <ChildContent>
                         <div class="table-responsive">
-                            <table class="table table-sm mb-0 small align-middle">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th>Trener</th>
-                                        <th>Kwota</th>
-                                        <th>Status</th>
-                                        <th>Źródło</th>
-                                        <th>Data</th>
-                                    </tr>
-                                </thead>
+                            <table class="table align-middle">
+                                <thead><tr><th>Trener</th><th>Kwota</th><th>Stan</th><th>Źródło</th><th>Data</th></tr></thead>
                                 <tbody>
                                     @foreach (var p in _payments.Take(10))
                                     {
                                         <tr>
                                             <td>
-                                                @if (p.Tenant is not null)
-                                                {
-                                                    <a href="/panel/tenants/@p.TenantId" class="text-decoration-none">@p.Tenant.CompanyName</a>
-                                                }
-                                                else
-                                                {
-                                                    <text>#@p.TenantId</text>
-                                                }
+                                                @if (p.Tenant is not null) { <a href="/panel/tenants/@p.TenantId" class="text-decoration-none fw-semibold">@p.Tenant.CompanyName</a> }
+                                                else { <text>#@p.TenantId</text> }
                                             </td>
-                                            <td class="fw-semibold">@p.Amount.ToString("0.00") @p.Currency</td>
-                                            <td><span class="badge @PaymentBadge(p.Status)">@p.Status</span></td>
-                                            <td class="text-muted">@p.Source</td>
-                                            <td class="text-muted text-nowrap">@p.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                            <td class="fw-semibold text-nowrap">@p.Amount.ToString("0.00") @p.Currency</td>
+                                            <td><span class="pp-chip pp-tone-@PanelUi.PaymentTone(p.Status)">@PanelUi.PaymentLabel(p.Status)</span></td>
+                                            <td class="text-muted small">@p.Source</td>
+                                            <td class="text-muted text-nowrap small">@p.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
                                         </tr>
                                     }
                                 </tbody>
                             </table>
                         </div>
-                    </div>
-                </div>
+                    </ChildContent>
+                </PanelCard>
             </div>
         }
     </div>
 }
-
-<style>
-    .portal-stat {
-        background: #fff;
-        border-radius: .75rem;
-        padding: 1.25rem;
-        box-shadow: 0 1px 3px rgba(0,0,0,.06);
-    }
-    .portal-stat-icon {
-        width: 40px;
-        height: 40px;
-        border-radius: .5rem;
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 1.1rem;
-        margin-bottom: .6rem;
-    }
-    .portal-stat-val {
-        font-size: 1.5rem;
-        font-weight: 700;
-        line-height: 1.2;
-    }
-    .portal-stat-label {
-        font-size: .8rem;
-        color: #6b7280;
-    }
-</style>
 
 @code {
     private bool _loading = true;
@@ -394,83 +243,11 @@ else
         _loading = false;
     }
 
-    private static string StatusLabel(TenantStatus s) => s switch
+    private string? GrowthText()
     {
-        TenantStatus.Active => "Aktywny",
-        TenantStatus.Pending => "Oczekuje",
-        TenantStatus.Provisioning => "Tworzenie...",
-        TenantStatus.Suspended => "Zawieszony",
-        TenantStatus.Destroyed => "Usunięty",
-        _ => s.ToString()
-    };
+        if (_stats.PrevMonthPaymentsTotal <= 0) return null;
+        var growth = (int)((_stats.MonthlyPaymentsTotal - _stats.PrevMonthPaymentsTotal) * 100 / _stats.PrevMonthPaymentsTotal);
+        return $"{(growth >= 0 ? "+" : "")}{growth}% względem poprzedniego miesiąca";
+    }
 
-    private static string StatusBadge(TenantStatus s) => s switch
-    {
-        TenantStatus.Active => "bg-success",
-        TenantStatus.Pending => "bg-warning text-dark",
-        TenantStatus.Provisioning => "bg-info",
-        TenantStatus.Suspended => "bg-danger",
-        TenantStatus.Destroyed => "bg-secondary",
-        _ => "bg-secondary"
-    };
-
-    private static string EventLabel(string type) => type switch
-    {
-        TenantEventTypes.Created => "Utworzony",
-        TenantEventTypes.Provisioned => "Provisioned",
-        TenantEventTypes.Suspended => "Zawieszony",
-        TenantEventTypes.Resumed => "Wznowiony",
-        TenantEventTypes.Deleted => "Usunięty",
-        TenantEventTypes.PlanChanged => "Zmiana planu",
-        TenantEventTypes.PaymentReceived => "Płatność otrzymana",
-        TenantEventTypes.PaymentFailed => "Płatność nieudana",
-        TenantEventTypes.TrialStarted => "Trial rozpoczety",
-        TenantEventTypes.TrialExpired => "Trial wygasł",
-        TenantEventTypes.TrialWarning => "Ostrzeżenie trial",
-        TenantEventTypes.DomainChanged => "Zmiana domeny",
-        TenantEventTypes.HealthDown => "Awaria",
-        TenantEventTypes.HealthRecovered => "Przywrócony",
-        _ => type
-    };
-
-    private static string EventIcon(string type) => type switch
-    {
-        TenantEventTypes.Created => "bi-plus-circle",
-        TenantEventTypes.Provisioned => "bi-rocket",
-        TenantEventTypes.Suspended => "bi-pause-circle",
-        TenantEventTypes.Resumed => "bi-play-circle",
-        TenantEventTypes.Deleted => "bi-trash",
-        TenantEventTypes.PlanChanged => "bi-arrow-repeat",
-        TenantEventTypes.PaymentReceived => "bi-cash-stack",
-        TenantEventTypes.PaymentFailed => "bi-exclamation-circle",
-        TenantEventTypes.TrialStarted => "bi-clock",
-        TenantEventTypes.TrialExpired => "bi-clock-history",
-        TenantEventTypes.TrialWarning => "bi-exclamation-triangle",
-        TenantEventTypes.DomainChanged => "bi-globe",
-        TenantEventTypes.HealthDown => "bi-heart-pulse",
-        TenantEventTypes.HealthRecovered => "bi-heart",
-        _ => "bi-circle"
-    };
-
-    private static string EventBadge(string type) => type switch
-    {
-        TenantEventTypes.Created or TenantEventTypes.Provisioned or TenantEventTypes.Resumed => "bg-success",
-        TenantEventTypes.PaymentReceived => "bg-success",
-        TenantEventTypes.Suspended or TenantEventTypes.Deleted => "bg-danger",
-        TenantEventTypes.PaymentFailed or TenantEventTypes.TrialExpired or TenantEventTypes.HealthDown => "bg-danger",
-        TenantEventTypes.TrialWarning => "bg-warning text-dark",
-        TenantEventTypes.PlanChanged or TenantEventTypes.DomainChanged => "bg-info",
-        TenantEventTypes.TrialStarted => "bg-info",
-        TenantEventTypes.HealthRecovered => "bg-success",
-        _ => "bg-secondary"
-    };
-
-    private static string PaymentBadge(PaymentRecordStatus s) => s switch
-    {
-        PaymentRecordStatus.Paid => "bg-success",
-        PaymentRecordStatus.Failed => "bg-danger",
-        PaymentRecordStatus.Refunded => "bg-warning text-dark",
-        PaymentRecordStatus.Pending => "bg-secondary",
-        _ => "bg-secondary"
-    };
 }

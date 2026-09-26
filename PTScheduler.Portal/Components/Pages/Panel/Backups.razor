@@ -8,8 +8,8 @@
 
 <PageTitle>Kopie zapasowe — PTScheduler Portal</PageTitle>
 
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h4 class="fw-bold mb-0"><i class="bi bi-hdd-stack me-2 text-primary"></i>Kopie zapasowe</h4>
+<PanelHeader Title="Kopie zapasowe" Icon="bi-hdd-stack" Subtitle="Codzienne kopie baz danych wszystkich trenerów. Stare kopie usuwają się same po okresie przechowywania.">
+    <Actions>
     <div class="d-flex gap-2">
         <button class="btn btn-primary btn-sm" @onclick="BackupAllNow" disabled="@_busy">
             @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> }
@@ -19,7 +19,8 @@
             <i class="bi bi-trash3 me-1"></i>Wyczyść stare
         </button>
     </div>
-</div>
+    </Actions>
+</PanelHeader>
 
 @if (_message is not null)
 {
@@ -29,8 +30,33 @@
     </div>
 }
 
+@{
+    var last = _entries.Where(e => e.Status != BackupStatus.Running).OrderByDescending(e => e.CreatedAt).FirstOrDefault();
+    var running = _entries.Any(e => e.Status == BackupStatus.Running);
+}
+@if (running)
+{
+    <StatusBanner Tone="info" Icon="bi-arrow-repeat" Title="Trwa tworzenie kopii">Kopie baz trenerów zapisują się na dysk. Odśwież historię za chwilę.</StatusBanner>
+}
+else if (_schedule == "off")
+{
+    <StatusBanner Tone="warn" Icon="bi-pause-circle-fill" Title="Automatyczne kopie są wyłączone">Włącz harmonogram poniżej albo rób kopie ręcznie przyciskiem „Backup wszystkich (teraz)”.</StatusBanner>
+}
+else if (last is null)
+{
+    <StatusBanner Tone="muted" Icon="bi-hdd-stack" Title="Nie ma jeszcze żadnej kopii">Pierwsza kopia powstanie dziś o 3:00 UTC. Możesz też zrobić ją od razu przyciskiem u góry.</StatusBanner>
+}
+else if (last.Status == BackupStatus.Completed)
+{
+    <StatusBanner Tone="ok" Icon="bi-shield-check" Title="Kopie robią się codziennie">Ostatnia udana kopia: @last.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm"). Kopie starsze niż @_retentionDays dni usuwają się same.</StatusBanner>
+}
+else
+{
+    <StatusBanner Tone="danger" Icon="bi-exclamation-octagon-fill" Title="Ostatnia kopia się nie udała">@last.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm") · @last.Slug. Kliknij ikonę błędu w historii, żeby zobaczyć szczegóły.</StatusBanner>
+}
+
 <div class="card border-0 shadow-sm mb-3">
-    <div class="card-header bg-white fw-semibold"><i class="bi bi-gear me-1"></i>Ustawienia</div>
+    <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-gear"></i></span>Ustawienia</div>
     <div class="card-body">
         <div class="row g-3">
             <div class="col-md-6">
@@ -56,13 +82,13 @@
 
 <div class="card border-0 shadow-sm">
     <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-list-ul me-1"></i>Historia (@_entries.Count)</span>
+        <span class="pp-card-header-title"><span class="pp-icon pp-icon-sm"><i class="bi bi-list-ul"></i></span>Historia (@_entries.Count)</span>
         <button class="btn btn-sm btn-outline-secondary" @onclick="Load"><i class="bi bi-arrow-clockwise"></i></button>
     </div>
     <div class="card-body p-0">
         @if (_entries.Count == 0)
         {
-            <p class="text-muted small p-3 mb-0">Brak kopii zapasowych.</p>
+            <div class="pp-empty"><i class="bi bi-hdd-stack"></i>Tu pojawi się lista kopii — z datą, rozmiarem i przyciskiem pobierania.</div>
         }
         else
         {
@@ -97,7 +123,7 @@
                                 <td>@Fmt(e.SizeBytes)</td>
                                 <td><small class="text-muted">@e.Kind</small></td>
                                 <td>
-                                    <span class="badge @(e.Status == BackupStatus.Completed ? "bg-success" : e.Status == BackupStatus.Running ? "bg-info" : "bg-danger")">@e.Status</span>
+                                    <span class="pp-chip pp-tone-@(e.Status == BackupStatus.Completed ? "ok" : e.Status == BackupStatus.Running ? "info" : "danger")">@(e.Status == BackupStatus.Completed ? "gotowa" : e.Status == BackupStatus.Running ? "w toku" : "błąd")</span>
                                 </td>
                                 <td class="text-muted small">@(e.Duration?.ToString("mm\\:ss") ?? "—")</td>
                                 <td class="text-end">
@@ -134,12 +160,28 @@
     </div>
 }
 
-<div class="alert alert-info small mt-3">
-    <i class="bi bi-info-circle me-1"></i>
-    <strong>Restore:</strong> plik <code>.sql.gz</code> możesz rozpakować i przywrócić do dowolnego kontenera bazy komendą:
-    <code>gunzip -c backup.sql.gz | docker exec -i pt-slug-db psql -U ptscheduler -d ptscheduler</code>
-    (najpierw drop-and-create schema public).
-</div>
+<PanelCard Title="Pytania i odpowiedzi" Icon="bi-question-circle" IconClass="pp-tone-muted" Class="mt-3">
+    <div class="pp-faq">
+        <details>
+            <summary>Jak przywrócić bazę trenera z kopii?</summary>
+            <div>
+                <ol class="mb-0 ps-3">
+                    <li>Pobierz plik <code>.sql.gz</code> z historii powyżej.</li>
+                    <li>W bazie trenera usuń i utwórz od nowa schemat <code>public</code>.</li>
+                    <li>Wgraj kopię: <code>gunzip -c backup.sql.gz | docker exec -i pt-slug-db psql -U ptscheduler -d ptscheduler</code> (zamień <code>slug</code> na adres trenera).</li>
+                </ol>
+            </div>
+        </details>
+        <details>
+            <summary>Gdzie fizycznie leżą kopie?</summary>
+            <p>W katalogu z ustawień powyżej — musi być zamontowany w kontenerze Portalu jako wolumen, inaczej kopie znikną przy aktualizacji Portalu.</p>
+        </details>
+        <details>
+            <summary>Czy kopia obejmuje zdjęcia i pliki trenerów?</summary>
+            <p>Nie — kopia to baza danych (klienci, wizyty, plany, płatności). Pliki leżą w wolumenach instancji i w bibliotece wideo Bunny.</p>
+        </details>
+    </div>
+</PanelCard>
 
 @code {
     private List<BackupEntry> _entries = new();

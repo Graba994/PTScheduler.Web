@@ -7,12 +7,11 @@
 
 <PageTitle>Finanse — PTScheduler Portal</PageTitle>
 
-<div class="d-flex align-items-center justify-content-between mb-4">
-    <h4 class="fw-bold mb-0"><i class="bi bi-cash-stack me-2 text-success"></i>Finanse</h4>
-    <button class="btn btn-sm btn-outline-secondary" @onclick="Load">
-        <i class="bi bi-arrow-clockwise"></i> Odśwież
-    </button>
-</div>
+<PanelHeader Title="Finanse" Icon="bi-cash-stack" IconClass="pp-tone-ok" Subtitle="Przychody z abonamentów i sklepu usług, płatności i ich stan.">
+    <Actions>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="Load"><i class="bi bi-arrow-clockwise me-1"></i>Odśwież</button>
+    </Actions>
+</PanelHeader>
 
 @if (_loading)
 {
@@ -20,40 +19,17 @@
 }
 else
 {
-    <!-- Stats -->
-    <div class="row g-3 mb-4">
-        <div class="col-6 col-lg-3">
-            <div class="card border-0 shadow-sm">
-                <div class="card-body text-center">
-                    <div class="text-success fs-4 fw-bold">@_mrr.ToString("0") zł</div>
-                    <div class="text-muted small">MRR (przychód mies.)</div>
-                </div>
-            </div>
-        </div>
-        <div class="col-6 col-lg-3">
-            <div class="card border-0 shadow-sm">
-                <div class="card-body text-center">
-                    <div class="text-primary fs-4 fw-bold">@_arr.ToString("0") zł</div>
-                    <div class="text-muted small">ARR (przychód roczny)</div>
-                </div>
-            </div>
-        </div>
-        <div class="col-6 col-lg-3">
-            <div class="card border-0 shadow-sm">
-                <div class="card-body text-center">
-                    <div class="text-info fs-4 fw-bold">@_activeSubs</div>
-                    <div class="text-muted small">Aktywne subskrypcje</div>
-                </div>
-            </div>
-        </div>
-        <div class="col-6 col-lg-3">
-            <div class="card border-0 shadow-sm">
-                <div class="card-body text-center">
-                    <div class="text-warning fs-4 fw-bold">@_overdue</div>
-                    <div class="text-muted small">Zaległe płatności</div>
-                </div>
-            </div>
-        </div>
+    @if (_overdue > 0)
+    {
+        <StatusBanner Tone="warn" Icon="bi-exclamation-triangle-fill" Title="@($"{_overdue} {PanelUi.Plural(_overdue, "zaległa płatność", "zaległe płatności", "zaległych płatności")}")">
+            Ci trenerzy nie opłacili abonamentu na czas. Stripe ponawia próby sam; po okresie karencji instancja zostanie zawieszona.
+        </StatusBanner>
+    }
+    <div class="pp-stats">
+        <StatTile Label="Przychód miesięczny (MRR)" Value="@($"{_mrr:0} zł")" Icon="bi-graph-up-arrow" Tone="ok" />
+        <StatTile Label="Przychód roczny (ARR)" Value="@($"{_arr:0} zł")" Meta="MRR × 12" Icon="bi-calendar3" Tone="info" />
+        <StatTile Label="Aktywne subskrypcje" Value="@_activeSubs.ToString()" Icon="bi-arrow-repeat" Tone="info" />
+        <StatTile Label="Zaległe płatności" Value="@_overdue.ToString()" Icon="bi-exclamation-circle" Tone="@(_overdue > 0 ? "warn" : "muted")" />
     </div>
 
     <!-- Revenue by plan -->
@@ -61,7 +37,7 @@ else
         <div class="col-md-6">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-body">
-                    <h6 class="fw-bold mb-3"><i class="bi bi-pie-chart me-2 text-primary"></i>Przychód wg planu</h6>
+                    <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm"><i class="bi bi-pie-chart"></i></span>Przychód wg planu</h2>
                     @if (_revenueByPlan.Count == 0)
                     {
                         <p class="text-muted small">Brak aktywnych subskrypcji.</p>
@@ -91,7 +67,7 @@ else
         <div class="col-md-6">
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-body">
-                    <h6 class="fw-bold mb-3"><i class="bi bi-people me-2 text-info"></i>Trenerzy wg planu</h6>
+                    <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm pp-icon-cyan"><i class="bi bi-people"></i></span>Trenerzy wg planu</h2>
                     @if (_tenantsByPlan.Count == 0)
                     {
                         <p class="text-muted small">Brak trenerów.</p>
@@ -169,7 +145,7 @@ else
     <div class="card border-0 shadow-sm">
         <div class="card-body">
             <div class="d-flex justify-content-between align-items-center mb-3">
-                <h6 class="fw-bold mb-0"><i class="bi bi-list-check me-2"></i>Wszystkie subskrypcje</h6>
+                <h2 class="pp-card-title pp-card-title-icon"><span class="pp-icon pp-icon-sm pp-tone-muted"><i class="bi bi-list-check"></i></span>Wszystkie subskrypcje</h2>
                 <button class="btn btn-primary btn-sm" @onclick="() => _showNewSub = true">
                     <i class="bi bi-plus-lg me-1"></i>Dodaj subskrypcję
                 </button>

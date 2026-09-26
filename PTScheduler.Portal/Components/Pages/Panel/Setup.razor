@@ -8,12 +8,7 @@
 
 <PageTitle>Konfiguracja platformy — PTScheduler Portal</PageTitle>
 
-<div class="mb-4">
-    <h4 class="fw-bold mb-1"><i class="bi bi-gear me-2 text-primary"></i>Konfiguracja platformy</h4>
-    <p class="text-muted small mb-0">
-        Ustawienia wspólne dla wszystkich trenerów — robisz je raz, przy instalacji. Trenerzy niczego z tej listy nie konfigurują.
-    </p>
-</div>
+<PanelHeader Title="Konfiguracja platformy" Icon="bi-gear" Subtitle="Ustawienia wspólne dla wszystkich trenerów — robisz je raz, przy instalacji. Trenerzy niczego z tej listy nie konfigurują." />
 
 @if (_loading)
 {
@@ -21,56 +16,43 @@
 }
 else
 {
-    <div class="d-flex align-items-center gap-2 mb-4 small">
-        <div class="progress flex-grow-1" style="height:8px;max-width:320px" role="progressbar" aria-label="Postęp konfiguracji"
-             aria-valuenow="@_done" aria-valuemin="0" aria-valuemax="@_total">
-            <div class="progress-bar bg-success" style="width:@(_total == 0 ? 0 : _done * 100 / _total)%"></div>
-        </div>
-        <span class="text-muted">Skonfigurowano @_done z @_total</span>
-    </div>
+    var missing = _groups.SelectMany(g => g.Items).Where(i => !i.Optional && !i.Done).ToList();
+    @if (missing.Count == 0)
+    {
+        <StatusBanner Tone="ok" Icon="bi-check-circle-fill" Title="Platforma jest skonfigurowana">
+            Wszystkie wymagane ustawienia są gotowe (@_done z @_total). Opcjonalne pozycje możesz dodać w dowolnym momencie.
+        </StatusBanner>
+    }
+    else
+    {
+        <StatusBanner Tone="warn" Icon="bi-list-check" Title="@($"Zostało {missing.Count} z {_total} kroków")">
+            <div class="pp-meter pp-tone-ok my-2" style="max-width:360px"><div style="width:@(_total == 0 ? 0 : _done * 100 / _total)%"></div></div>
+            Do zrobienia: @string.Join(", ", missing.Select(m => m.Title)).
+        </StatusBanner>
+    }
 
     @foreach (var group in _groups)
     {
-        <h6 class="setup-group-title">@group.Title</h6>
-        <div class="row g-3 mb-4">
+        <h2 class="pp-section-title">@group.Title</h2>
+        <div class="pp-tiles">
             @foreach (var item in group.Items)
             {
-                <div class="col-md-6 col-xl-4">
-                    <a href="@item.Href" class="setup-card">
-                        <div class="setup-card-icon"><i class="bi @item.Icon"></i></div>
-                        <div class="flex-grow-1 min-w-0">
-                            <div class="d-flex align-items-center gap-2">
-                                <span class="fw-semibold">@item.Title</span>
-                                @if (item.Optional && !item.Done)
-                                {
-                                    <span class="badge bg-light text-muted border ms-auto">opcjonalne</span>
-                                }
-                                else
-                                {
-                                    <span class="badge ms-auto @(item.Done ? "bg-success-subtle text-success-emphasis" : "bg-warning-subtle text-warning-emphasis")">
-                                        @(item.Done ? "Gotowe" : "Do zrobienia")
-                                    </span>
-                                }
-                            </div>
-                            <div class="small text-muted mt-1">@item.Description</div>
-                        </div>
-                    </a>
-                </div>
+                var tone = item.Done ? "ok" : item.Optional ? "muted" : "warn";
+                <a href="@item.Href" class="pp-tile">
+                    <span class="pp-icon"><i class="bi @item.Icon"></i></span>
+                    <span class="flex-grow-1 min-w-0">
+                        <span class="pp-tile-title d-block">@item.Title</span>
+                        <span class="pp-tile-text d-block">@item.Description</span>
+                        <span class="pp-chip pp-tone-@tone mt-2">
+                            <i class="bi @(item.Done ? "bi-check-lg" : item.Optional ? "bi-dash" : "bi-exclamation")"></i>@(item.Done ? "gotowe" : item.Optional ? "opcjonalne" : "do zrobienia")
+                        </span>
+                    </span>
+                </a>
             }
         </div>
     }
 }
 
-<style>
-    .setup-group-title { font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #6b7280; margin-bottom: .6rem; }
-    .setup-card {
-        display: flex; gap: .85rem; height: 100%; padding: 1rem; border-radius: .9rem; background: #fff;
-        border: 1px solid #e6e8ee; color: inherit; text-decoration: none; transition: border-color .15s, box-shadow .15s;
-    }
-    .setup-card:hover { border-color: #c7cbf7; box-shadow: 0 4px 16px rgba(99,102,241,.08); color: inherit; }
-    .setup-card:focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
-    .setup-card-icon { width: 40px; height: 40px; border-radius: .7rem; display: grid; place-items: center; background: #eef0ff; color: #4f46e5; font-size: 1.15rem; flex-shrink: 0; }
-</style>
 
 @code {
     private record Item(string Title, string Description, string Icon, string Href, bool Done, bool Optional = false);

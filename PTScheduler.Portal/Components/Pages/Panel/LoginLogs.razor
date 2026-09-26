@@ -6,15 +6,11 @@
 
 <PageTitle>Logi logowań — PTScheduler Portal</PageTitle>
 
-<a href="/panel/setup" class="setup-back small text-decoration-none d-inline-flex align-items-center gap-1 mb-2"><i class="bi bi-arrow-left"></i>Konfiguracja platformy</a>
-
-<div class="d-flex align-items-center gap-2 mb-4">
-    <a href="/panel" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i></a>
-    <h4 class="fw-bold mb-0"><i class="bi bi-journal-text me-2 text-info"></i>Logi logowań</h4>
-    <button class="btn btn-sm btn-outline-secondary ms-auto" @onclick="Load">
-        <i class="bi bi-arrow-clockwise"></i> Odśwież
-    </button>
-</div>
+<PanelHeader Title="Logi logowań" Icon="bi-journal-text" IconClass="pp-icon-cyan" BackHref="/panel/setup" BackLabel="Konfiguracja platformy" Subtitle="Kto i kiedy logował się do Portalu. Nieudane próby z jednego adresu mogą oznaczać zgadywanie hasła.">
+    <Actions>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="Load"><i class="bi bi-arrow-clockwise me-1"></i>Odśwież</button>
+    </Actions>
+</PanelHeader>
 
 @if (_loading)
 {
@@ -22,31 +18,10 @@
 }
 else
 {
-    <div class="row g-3 mb-4">
-        <div class="col-auto">
-            <div class="card border-0 shadow-sm">
-                <div class="card-body py-2 px-3 d-flex align-items-center gap-2">
-                    <i class="bi bi-check-circle text-success"></i>
-                    <span class="small fw-semibold">Udane: @_successCount</span>
-                </div>
-            </div>
-        </div>
-        <div class="col-auto">
-            <div class="card border-0 shadow-sm">
-                <div class="card-body py-2 px-3 d-flex align-items-center gap-2">
-                    <i class="bi bi-x-circle text-danger"></i>
-                    <span class="small fw-semibold">Nieudane: @_failCount</span>
-                </div>
-            </div>
-        </div>
-        <div class="col-auto">
-            <div class="card border-0 shadow-sm">
-                <div class="card-body py-2 px-3 d-flex align-items-center gap-2">
-                    <i class="bi bi-lock text-warning"></i>
-                    <span class="small fw-semibold">Blokady: @_lockoutCount</span>
-                </div>
-            </div>
-        </div>
+    <div class="pp-stats">
+        <StatTile Label="Udane logowania" Value="@_successCount.ToString()" Icon="bi-check-circle" Tone="ok" />
+        <StatTile Label="Nieudane próby" Value="@_failCount.ToString()" Icon="bi-x-circle" Tone="@(_failCount > 0 ? "danger" : "muted")" />
+        <StatTile Label="Blokady konta" Value="@_lockoutCount.ToString()" Meta="po kilku nieudanych próbach z rzędu" Icon="bi-lock" Tone="@(_lockoutCount > 0 ? "warn" : "muted")" />
     </div>
 
     <div class="card border-0 shadow-sm">

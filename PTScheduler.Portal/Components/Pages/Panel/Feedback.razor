@@ -6,13 +6,11 @@
 
 <PageTitle>Oceny aplikacji — PTScheduler Portal</PageTitle>
 
-<div class="d-flex align-items-center gap-2 mb-4">
-    <a href="/panel" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i></a>
-    <h4 class="fw-bold mb-0"><i class="bi bi-star-half me-2 text-warning"></i>Oceny aplikacji od trenerów</h4>
-    <button class="btn btn-sm btn-outline-secondary ms-auto" @onclick="LoadAsync">
-        <i class="bi bi-arrow-clockwise"></i> Odśwież
-    </button>
-</div>
+<PanelHeader Title="Oceny aplikacji" Icon="bi-star-half" IconClass="pp-tone-warn" Subtitle="Co trenerzy myślą o aplikacji. Prośba o ocenę pojawia się u nich raz na pół roku.">
+    <Actions>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="LoadAsync"><i class="bi bi-arrow-clockwise me-1"></i>Odśwież</button>
+    </Actions>
+</PanelHeader>
 
 @if (_loading)
 {
@@ -20,30 +18,32 @@
 }
 else if (_items.Count == 0)
 {
-    <div class="text-center text-muted py-5">
-        <i class="bi bi-star fs-1 d-block mb-2"></i>
-        Brak ocen. Trenerzy zobaczą prośbę o ocenę na swoim pulpicie (raz na pół roku) i w Zarządzanie → „Oceń aplikację”.
-    </div>
+    <PanelCard>
+        <div class="pp-empty">
+            <i class="bi bi-star"></i>
+            <div class="pp-empty-title">Jeszcze nikt nie ocenił aplikacji</div>
+            <p>Trenerzy zobaczą prośbę o ocenę na swoim pulpicie (raz na pół roku) i w Zarządzanie → „Oceń aplikację”.</p>
+        </div>
+    </PanelCard>
 }
 else
 {
-    <div class="row g-3 mb-4">
-        <div class="col-auto">
-            <div class="card border-0 shadow-sm"><div class="card-body py-2 px-3">
-                <span class="fs-4 fw-bold">@_items.Average(i => i.Rating).ToString("0.0")</span>
-                <span class="text-warning">★</span>
-                <span class="small text-muted ms-1">średnia z @_items.Count</span>
-            </div></div>
+    var avg = _items.Average(i => i.Rating);
+    <div class="pp-stats">
+        <StatTile Label="Średnia ocena" Value="@($"{avg:0.0} ★")" Meta="@($"z {_items.Count} {PanelUi.Plural(_items.Count, "oceny", "ocen", "ocen")}")" Icon="bi-star-fill" Tone="@(avg >= 4 ? "ok" : avg >= 3 ? "warn" : "danger")" />
+        <div class="pp-stat">
+            <div class="pp-stat-top"><span class="pp-stat-label">Rozkład ocen</span></div>
+            @for (var star = 5; star >= 1; star--)
+            {
+                var n = _items.Count(i => i.Rating == star);
+                var pct = _items.Count == 0 ? 0 : n * 100 / _items.Count;
+                <div class="d-flex align-items-center gap-2 small">
+                    <span class="text-nowrap" style="width:2.2rem">@star ★</span>
+                    <div class="pp-meter flex-grow-1 @(star >= 4 ? "pp-tone-ok" : star == 3 ? "pp-tone-warn" : "pp-tone-danger")"><div style="width:@(pct)%"></div></div>
+                    <span class="text-muted text-end" style="width:1.8rem">@n</span>
+                </div>
+            }
         </div>
-        @for (var star = 5; star >= 1; star--)
-        {
-            var n = _items.Count(i => i.Rating == star);
-            <div class="col-auto">
-                <div class="card border-0 shadow-sm"><div class="card-body py-2 px-3 small">
-                    @star★ <strong>@n</strong>
-                </div></div>
-            </div>
-        }
     </div>
 
     <div class="card border-0 shadow-sm">

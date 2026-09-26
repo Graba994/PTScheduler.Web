@@ -8,8 +8,8 @@
 
 <PageTitle>Zamówienia — PTScheduler Portal</PageTitle>
 
-<div class="d-flex align-items-center justify-content-between mb-4">
-    <h4 class="fw-bold mb-0"><i class="bi bi-bag-check me-2 text-primary"></i>Zamówienia usług</h4>
+<PanelHeader Title="Zamówienia" Icon="bi-bag-check" Subtitle="Zamówienia trenerów ze sklepu usług. Opłacone dodatki włączają się same; usługi z realizacją (np. wdrożenie) prowadzisz tutaj.">
+    <Actions>
     <div class="d-flex gap-2">
         <select class="form-select form-select-sm" style="width:auto" @bind="_statusFilter" @bind:after="Load">
             <option value="">Wszystkie</option>
@@ -24,7 +24,8 @@
             <i class="bi bi-arrow-clockwise"></i>
         </button>
     </div>
-</div>
+    </Actions>
+</PanelHeader>
 
 @if (_message is not null)
 {
@@ -32,6 +33,21 @@
         @_message
         <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button>
     </div>
+}
+
+@{
+    var pendingCount = _orders.Count(o => o.Status == ServiceOrderStatus.Pending);
+    var activeCount = _orders.Count(o => o.Status is ServiceOrderStatus.Accepted or ServiceOrderStatus.InProgress);
+}
+@if (pendingCount > 0)
+{
+    <StatusBanner Tone="warn" Icon="bi-bell-fill" Title="@($"{pendingCount} {PanelUi.Plural(pendingCount, "zamówienie czeka", "zamówienia czekają", "zamówień czeka")} na Twoją decyzję")">
+        Zaakceptuj je, żeby trener wiedział, że zajmiesz się usługą — albo anuluj z krótką notatką.
+    </StatusBanner>
+}
+else if (activeCount > 0)
+{
+    <StatusBanner Tone="info" Icon="bi-hourglass-split" Title="@($"W realizacji: {activeCount}")">Po zakończeniu pracy oznacz zamówienie jako zrealizowane — trener dostanie powiadomienie.</StatusBanner>
 }
 
 @if (_orders.Count == 0)

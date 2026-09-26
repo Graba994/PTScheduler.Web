@@ -9,10 +9,7 @@
 
 <PageTitle>Nowa instancja — PTScheduler Portal</PageTitle>
 
-<div class="d-flex align-items-center gap-2 mb-4">
-    <a href="/panel/tenants" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i></a>
-    <h4 class="fw-bold mb-0"><i class="bi bi-plus-circle me-2 text-primary"></i>Nowa instancja</h4>
-</div>
+<PanelHeader Title="Nowa instancja" Icon="bi-plus-circle" BackHref="/panel/tenants" BackLabel="Trenerzy" Subtitle="Tworzy trenerowi własną aplikację: kontenery, bazę danych, adres i konto administratora. Zwykle trwa to 1–2 minuty." />
 
 <div class="row">
     <div class="col-lg-8">
@@ -116,24 +113,21 @@
     </div>
 
     <div class="col-lg-4">
-        <div class="card border-0 shadow-sm bg-light">
-            <div class="card-body">
-                <h6 class="fw-bold"><i class="bi bi-info-circle me-2"></i>Info</h6>
-                <ul class="small text-muted mb-0">
-                    <li>Slug jest unikalny i niezmienialny</li>
-                    <li>Port jest przydzielany automatycznie</li>
-                    <li>Hasło DB jest generowane losowo</li>
-                    <li>Auto-provisioning tworzy kontenery i uruchamia migracje</li>
-                    <li>Domena jest generowana automatycznie jako subdomena</li>
-                </ul>
-            </div>
-        </div>
+        <PanelCard Title="Co się stanie" Icon="bi-list-ol">
+            <ol class="pp-list mb-2">
+                <li>Tworzymy bazę danych z losowym hasłem i kontener aplikacji na wolnym porcie.</li>
+                <li>Aplikacja uruchamia się i przygotowuje bazę (migracje).</li>
+                <li>Trener dostaje adres w subdomenie — np. <strong>@(string.IsNullOrWhiteSpace(AutoDomain) ? "slug.twoja-domena.pl" : AutoDomain)</strong> — i konto administratora.</li>
+                <li>Jeśli skonfigurowano NPM, adres i certyfikat SSL dodadzą się same.</li>
+            </ol>
+            <div class="pp-callout pp-tone-warn mb-0"><i class="bi bi-exclamation-triangle"></i><div>Adresu (slug) nie da się później zmienić — wybierz go starannie.</div></div>
+        </PanelCard>
 
         @if (_selectedPlan is not null)
         {
-            <div class="card border-0 shadow-sm mt-3">
+            <div class="card border-0 shadow-sm">
                 <div class="card-body">
-                    <h6 class="fw-bold mb-3">@_selectedPlan.Name</h6>
+                    <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm pp-tone-ok"><i class="bi bi-tags"></i></span>Plan: @_selectedPlan.Name</h2>
                     <ul class="list-unstyled small mb-0">
                         <li class="mb-1"><i class="bi bi-check text-success me-1"></i>Max @(_selectedPlan.MaxClients == int.MaxValue ? "bez limitu" : _selectedPlan.MaxClients.ToString()) klientów</li>
                         <li class="mb-1"><i class="bi @(_selectedPlan.PaymentsEnabled ? "bi-check text-success" : "bi-x text-muted") me-1"></i>Płatności online</li>
@@ -150,15 +144,15 @@
 
 <style>
     .plan-option {
-        border: 2px solid #e5e7eb;
-        border-radius: .6rem;
+        border: 1px solid #e6e8ee;
+        border-radius: .85rem; background: #fff;
         padding: .75rem 1rem;
         cursor: pointer;
         transition: border-color .2s, background .2s;
         height: 100%;
     }
     .plan-option:hover { border-color: #6366f1; }
-    .plan-option.selected { border-color: #6366f1; background: rgba(99,102,241,.05); }
+    .plan-option.selected { border-color: #6366f1; background: #eef0ff; box-shadow: 0 0 0 1px #6366f1 inset; }
 </style>
 
 @code {

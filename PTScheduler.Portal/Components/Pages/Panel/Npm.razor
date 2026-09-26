@@ -7,12 +7,16 @@
 
 <PageTitle>Nginx Proxy Manager — PTScheduler Portal</PageTitle>
 
-<a href="/panel/setup" class="setup-back small text-decoration-none d-inline-flex align-items-center gap-1 mb-2"><i class="bi bi-arrow-left"></i>Konfiguracja platformy</a>
+<PanelHeader Title="Nginx Proxy Manager" Icon="bi-diagram-3" BackHref="/panel/setup" BackLabel="Konfiguracja platformy" Subtitle="Gdy powstaje nowy trener, Portal sam dodaje jego adres i certyfikat SSL w NPM — bez ręcznej konfiguracji." />
 
-<div class="mb-4">
-    <h4 class="fw-bold mb-1"><i class="bi bi-diagram-3 me-2 text-primary"></i>Nginx Proxy Manager</h4>
-    <p class="text-muted small mb-0">Integracja z NPM — automatyczna rejestracja domen przy provisioningu</p>
-</div>
+@if (string.IsNullOrWhiteSpace(_form.Url))
+{
+    <StatusBanner Tone="warn" Icon="bi-diagram-3" Title="NPM nie jest połączony">Adresy i certyfikaty nowych trenerów trzeba będzie dodawać ręcznie. Podaj adres NPM i dane logowania, a Portal zrobi to sam.</StatusBanner>
+}
+else
+{
+    <StatusBanner Tone="@(_form.AutoRegister ? "ok" : "info")" Icon="@(_form.AutoRegister ? "bi-check-circle-fill" : "bi-pause-circle")" Title="@(_form.AutoRegister ? "Nowi trenerzy dostaną adres i SSL automatycznie" : "NPM połączony, automatyczne dodawanie wyłączone")">Połączenie: @_form.Url</StatusBanner>
+}
 
 @if (_message is not null)
 {
@@ -24,9 +28,7 @@
 
 <EditForm Model="_form" OnValidSubmit="Save" FormName="npm-settings">
     <div class="card border-0 shadow-sm mb-3">
-        <div class="card-header bg-white fw-semibold">
-            <i class="bi bi-plug me-1"></i>Połączenie z NPM
-        </div>
+        <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-plug"></i></span>Połączenie z NPM</div>
         <div class="card-body">
             <div class="mb-3">
                 <label class="form-label small fw-semibold">URL API NPM</label>
@@ -79,7 +81,7 @@
 
 <div class="card border-0 shadow-sm">
     <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">
-        <span><i class="bi bi-list-ul me-1"></i>Proxy hosty w NPM</span>
+        <span class="pp-card-header-title"><span class="pp-icon pp-icon-sm"><i class="bi bi-list-ul"></i></span>Proxy hosty w NPM</span>
         <span class="badge bg-secondary">@_hosts.Count</span>
     </div>
     <div class="card-body p-0">

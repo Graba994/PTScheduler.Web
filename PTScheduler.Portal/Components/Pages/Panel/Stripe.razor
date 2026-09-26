@@ -6,12 +6,20 @@
 
 <PageTitle>Stripe — PTScheduler Portal</PageTitle>
 
-<a href="/panel/setup" class="setup-back small text-decoration-none d-inline-flex align-items-center gap-1 mb-2"><i class="bi bi-arrow-left"></i>Konfiguracja platformy</a>
+<PanelHeader Title="Stripe" Icon="bi-stripe" BackHref="/panel/setup" BackLabel="Konfiguracja platformy" Subtitle="Płatności kartą za abonamenty trenerów: klucze API, adresy po płatności i webhook, który odnawia subskrypcje." />
 
-<div class="mb-4">
-    <h4 class="fw-bold mb-1"><i class="bi bi-credit-card-2-front me-2 text-primary"></i>Stripe (płatności trenerów)</h4>
-    <p class="text-muted small mb-0">Klucze API i URLe używane do checkout + webhooka subskrypcji</p>
-</div>
+@if (string.IsNullOrWhiteSpace(_form.SecretKey))
+{
+    <StatusBanner Tone="warn" Icon="bi-credit-card" Title="Płatności kartą są wyłączone">Trenerzy nie opłacą abonamentu online. Wklej klucze ze Stripe Dashboard → Developers → API keys.</StatusBanner>
+}
+else
+{
+    var live = _form.SecretKey.StartsWith("sk_live");
+    <StatusBanner Tone="@(live ? "ok" : "info")" Icon="@(live ? "bi-check-circle-fill" : "bi-cone-striped")" Title="@(live ? "Stripe działa na prawdziwych płatnościach" : "Stripe w trybie testowym")">
+        @(live ? "Klucze produkcyjne — trenerzy płacą prawdziwymi kartami." : "Klucze testowe (sk_test_…) — płatności nie pobierają pieniędzy. Przed startem podmień je na produkcyjne.")
+        @if (string.IsNullOrWhiteSpace(_form.WebhookSecret)) { <div class="mt-1 fw-semibold">Brakuje sekretu webhooka — bez niego odnowienia subskrypcji nie dotrą do Portalu.</div> }
+    </StatusBanner>
+}
 
 @if (_saved)
 {
@@ -23,9 +31,7 @@
 
 <EditForm Model="_form" OnValidSubmit="Save" FormName="stripe-config">
     <div class="card border-0 shadow-sm mb-3">
-        <div class="card-header bg-white fw-semibold">
-            <i class="bi bi-key me-1"></i>API Keys
-        </div>
+        <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-key"></i></span>API Keys</div>
         <div class="card-body">
             <div class="mb-3">
                 <label class="form-label small fw-semibold">Secret Key</label>
@@ -48,9 +54,7 @@
     </div>
 
     <div class="card border-0 shadow-sm mb-3">
-        <div class="card-header bg-white fw-semibold">
-            <i class="bi bi-link-45deg me-1"></i>URL-e po płatności
-        </div>
+        <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-link-45deg"></i></span>URL-e po płatności</div>
         <div class="card-body">
             <div class="mb-3">
                 <label class="form-label small fw-semibold">Success URL</label>
