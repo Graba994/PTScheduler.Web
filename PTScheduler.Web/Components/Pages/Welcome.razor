@@ -8,6 +8,7 @@
 @inject ISiteContentService SiteContentService
 @inject IModuleSettingsService ModuleSettings
 @inject ISetupService SetupService
+@inject IReviewService ReviewService
 @inject NavigationManager Nav
 
 <PageTitle>@_companyName — trening personalny i mentoring</PageTitle>
@@ -198,13 +199,29 @@
             </section>
         }
 
-        @if (key == "testimonials" && _content.ShowTestimonials && _content.Testimonials.Count > 0)
+        @* Opinie klientów zaakceptowane przez trenera pokazują się zawsze; ręcznie wpisane — gdy sekcja jest włączona. *@
+        @if (key == "testimonials" && ((_content.ShowTestimonials && _content.Testimonials.Count > 0) || _reviews.Count > 0))
         {
             <section class="wp-sec @RevealCls">
                 <div class="wp-wrap">
                     <h2 class="wp-h2">@_content.TestimonialsTitle</h2>
+                    @if (_reviews.Count > 0)
+                    {
+                        <p class="wp-rating" aria-label="Średnia ocena @_reviews.Average.ToString("0.0") na 5">
+                            <span class="wp-stars">★★★★★<span style="width:@((_reviews.Average / 5 * 100).ToString("0", System.Globalization.CultureInfo.InvariantCulture))%">★★★★★</span></span>
+                            <strong>@_reviews.Average.ToString("0.0")</strong> · @_reviews.Count @(_reviews.Count == 1 ? "opinia" : _reviews.Count % 10 is >= 2 and <= 4 && _reviews.Count % 100 is < 12 or > 14 ? "opinie" : "opinii") klientów
+                        </p>
+                    }
                     <div class="wp-grid3">
-                        @foreach (var t in _content.Testimonials)
+                        @foreach (var r in _reviews.Items)
+                        {
+                            <figure class="wp-quote">
+                                <div class="wp-quote-stars" aria-label="Ocena @r.Rating z 5">@(new string('★', r.Rating))<span>@(new string('★', 5 - r.Rating))</span></div>
+                                <blockquote>@r.Text</blockquote>
+                                <figcaption><strong>@r.DisplayName</strong><span> · klient</span></figcaption>
+                            </figure>
+                        }
+                        @foreach (var t in _content.ShowTestimonials ? _content.Testimonials : [])
                         {
                             <figure class="wp-quote">
                                 <div class="wp-quote-mark">"</div>
@@ -374,6 +391,11 @@
     .wp-quote-mark { font-size: 3rem; line-height: .6; color: var(--c-primary-light, rgba(2,132,199,.5)); font-family: Georgia, serif; }
     .wp-quote blockquote { margin: .4rem 0 1rem; line-height: 1.6; }
     .wp-quote figcaption { color: var(--c-muted, #6b7280); font-size: .92rem; }
+    .wp-quote-stars { color: #f5a623; letter-spacing: .12em; font-size: 1.05rem; }
+    .wp-quote-stars span { color: var(--bs-border-color, #e5e7eb); }
+    .wp-rating { display: flex; align-items: center; justify-content: center; gap: .5rem; flex-wrap: wrap; margin: -.5rem 0 1.5rem; color: var(--c-muted, #6b7280); }
+    .wp-stars { position: relative; display: inline-block; color: var(--bs-border-color, #e5e7eb); letter-spacing: .12em; font-size: 1.15rem; }
+    .wp-stars > span { position: absolute; inset: 0 auto 0 0; overflow: hidden; white-space: nowrap; color: #f5a623; }
 
     /* FAQ */
     .wp-faq { max-width: 780px; }
@@ -464,6 +486,8 @@
         }
     }
 
+    private PTScheduler.Application.Marketing.PublicReviewsDto _reviews = new();
+
     private string RevealCls => _content.Animations ? "wp-reveal" : "";
 
     private static string ColorStyle(string? c) => string.IsNullOrWhiteSpace(c) ? "" : $"color:{c}";
@@ -503,6 +527,9 @@
         catch { }
 
         try { _coursesEnabled = (await ModuleSettings.GetAsync()).CoursesEnabled; }
+        catch { }
+
+        try { _reviews = await ReviewService.GetPublicAsync(); }
         catch { }
     }
 }

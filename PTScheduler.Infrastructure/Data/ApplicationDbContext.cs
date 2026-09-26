@@ -55,6 +55,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<ProgressPhoto> ProgressPhotos => Set<ProgressPhoto>();
     public DbSet<MarketingSettings> MarketingSettings => Set<MarketingSettings>();
     public DbSet<Referral> Referrals => Set<Referral>();
+    public DbSet<ClientReview> ClientReviews => Set<ClientReview>();
     public DbSet<Coupon> Coupons => Set<Coupon>();
     public DbSet<CouponRedemption> CouponRedemptions => Set<CouponRedemption>();
 
@@ -435,6 +436,15 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         {
             e.Property(c => c.ReferralCode).HasMaxLength(16);
             e.HasIndex(c => c.ReferralCode).IsUnique();
+        });
+
+        builder.Entity<ClientReview>(e =>
+        {
+            e.Property(r => r.Text).HasMaxLength(1000);
+            e.Property(r => r.DisplayName).HasMaxLength(80);
+            e.HasOne(r => r.Client).WithMany().HasForeignKey(r => r.ClientId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(r => r.ClientId).IsUnique();
+            e.HasIndex(r => r.IsPublished);
         });
 
         builder.Entity<MarketingSettings>(e =>

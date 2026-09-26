@@ -25,4 +25,7 @@ public class MarketingSettings
     public string? GoogleReviewUrl { get; set; }
     /// <summary>Po ilu odbytych wizytach poprosić klienta o opinię.</summary>
     public int ReviewAskAfterSessions { get; set; } = 5;
+
+    // ── Ocena aplikacji przez trenera (trafia do właściciela platformy) ──
+    public DateTime? LastAppFeedbackAt { get; set; }
 }

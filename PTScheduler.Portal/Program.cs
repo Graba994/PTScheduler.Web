@@ -401,6 +401,35 @@ app.MapGet("/api/internal/tenants/{slug}/entitlements", async (
     return Results.Content(TenantService.SerializePlan(plan), "application/json");
 });
 
+// Ocena aplikacji wysyłana przez trenera z instancji tenanta (Zarządzanie → „Oceń aplikację”).
+app.MapPost("/api/internal/tenants/{slug}/feedback", async (
+    string slug,
+    AppFeedbackRequest body,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config) =>
+{
+    if (!InternalAuth.IsAuthorized(ctx, config)) return Results.Unauthorized();
+    if (body.Rating is < 1 or > 5) return Results.BadRequest();
+
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null) return Results.NotFound();
+
+    static string? Clip(string? v, int max) => string.IsNullOrWhiteSpace(v) ? null : v.Trim()[..Math.Min(v.Trim().Length, max)];
+    db.AppFeedbacks.Add(new AppFeedback
+    {
+        TenantId = tenant.Id,
+        Rating = body.Rating,
+        Text = Clip(body.Text, 2000),
+        AuthorEmail = Clip(body.AuthorEmail, 256),
+        ContactEmail = Clip(body.ContactEmail, 256),
+        CreatedAt = DateTime.UtcNow
+    });
+    await db.SaveChangesAsync();
+    return Results.Ok();
+});
+
 // ---- Store API ----
 // Tenant apps call these endpoints to fetch their service catalog and place orders.
 // Secured by the same shared secret used for internal endpoints.
@@ -737,6 +766,8 @@ app.Run();
 
 // Wspólna kontrola nagłówka X-Internal-Secret dla wywołań tenant → Portal.
 // Pusty sekret = odmowa (wcześniej oznaczał brak jakiejkolwiek kontroli).
+record AppFeedbackRequest(int Rating, string? Text, string? ContactEmail, string? AuthorEmail);
+
 static class InternalAuth
 {
     public static bool IsAuthorized(HttpContext ctx, IConfiguration config)

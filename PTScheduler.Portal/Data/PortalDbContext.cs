@@ -25,6 +25,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<TenantServicePrice> TenantServicePrices => Set<TenantServicePrice>();
     public DbSet<ServiceOrder> ServiceOrders => Set<ServiceOrder>();
     public DbSet<TenantCredit> TenantCredits => Set<TenantCredit>();
+    public DbSet<AppFeedback> AppFeedbacks => Set<AppFeedback>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -74,6 +75,15 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.HasIndex(p => p.ExternalPaymentId);
             e.HasOne(p => p.Tenant).WithMany().HasForeignKey(p => p.TenantId);
             e.HasOne(p => p.ServiceOrder).WithMany().HasForeignKey(p => p.ServiceOrderId);
+        });
+
+        b.Entity<AppFeedback>(e =>
+        {
+            e.Property(x => x.Text).HasMaxLength(2000);
+            e.Property(x => x.AuthorEmail).HasMaxLength(256);
+            e.Property(x => x.ContactEmail).HasMaxLength(256);
+            e.HasIndex(x => x.CreatedAt);
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<TenantEvent>(e =>

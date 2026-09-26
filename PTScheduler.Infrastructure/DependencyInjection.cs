@@ -91,6 +91,8 @@ public static class DependencyInjection
         services.AddScoped<IProgressPhotoService, ProgressPhotoService>();
         services.AddScoped<IMarketingSettingsService, MarketingSettingsService>();
         services.AddScoped<IReferralService, ReferralService>();
+        services.AddScoped<IReviewService, ReviewService>();
+        services.AddScoped<IAppFeedbackService, AppFeedbackService>();
         services.AddHttpClient<PTScheduler.Infrastructure.Services.Ksef.KsefClient>(c => c.Timeout = TimeSpan.FromSeconds(60));
         services.AddScoped<IKsefService, PTScheduler.Infrastructure.Services.Ksef.KsefService>();
         services.AddScoped<ISmsSettingsService, SmsSettingsService>();

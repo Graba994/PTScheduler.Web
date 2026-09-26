@@ -1,0 +1,95 @@
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Marketing
+@inject IAppFeedbackService FeedbackService
+@inject AuthenticationStateProvider AuthState
+
+@* Ocena aplikacji przez trenera — trafia do twórcy aplikacji (portal), nie do klientów. *@
+@if (_visible)
+{
+    <div class="card review-card mb-3">
+        <div class="card-body">
+            @if (_sent)
+            {
+                <div class="d-flex align-items-start gap-3">
+                    <div class="review-icon"><i class="bi bi-heart-fill"></i></div>
+                    <div>
+                        <div class="fw-semibold">Dziękujemy!</div>
+                        <div class="small text-muted">Każda ocena trafia bezpośrednio do twórcy aplikacji i pomaga ustalić, co poprawić w pierwszej kolejności.</div>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <div class="fw-semibold mb-1">Jak oceniasz aplikację?</div>
+                <div class="small text-muted mb-2">Ocena trafia do twórcy aplikacji — Twoi klienci jej nie widzą.</div>
+                <div class="review-stars" role="radiogroup" aria-label="Ocena aplikacji">
+                    @for (var i = 1; i <= 5; i++)
+                    {
+                        var n = i;
+                        <button type="button" class="review-star @(n <= _rating ? "on" : "")" role="radio" aria-checked="@(n == _rating ? "true" : "false")"
+                                aria-label="@n z 5" @onclick="() => _rating = n">
+                            <i class="bi @(n <= _rating ? "bi-star-fill" : "bi-star")"></i>
+                        </button>
+                    }
+                </div>
+                @if (_rating > 0 || !Compact)
+                {
+                    <textarea class="form-control form-control-sm mt-2" rows="3" maxlength="2000" @bind="_text"
+                              placeholder="Czego brakuje? Co działa świetnie, a co przeszkadza?"></textarea>
+                    <div class="form-check mt-2">
+                        <input class="form-check-input" type="checkbox" id="fbContact" @bind="_allowContact" />
+                        <label class="form-check-label small" for="fbContact">Możecie się ze mną skontaktować w sprawie tej opinii (@_email)</label>
+                    </div>
+                    @if (_error is not null) { <div class="text-danger small mt-1">@_error</div> }
+                    <div class="d-flex gap-2 mt-2">
+                        <button class="btn btn-sm btn-primary" disabled="@(_busy || _rating == 0)" @onclick="SendAsync">Wyślij ocenę</button>
+                    </div>
+                }
+                @if (Compact)
+                {
+                    <button class="btn btn-sm btn-link text-muted px-0 mt-1" @onclick="SnoozeAsync">Nie teraz</button>
+                }
+            }
+        </div>
+    </div>
+}
+
+@code {
+    /// <summary>Na pulpicie: pokazuj tylko, gdy przyszedł czas zapytać, i pozwól odłożyć.</summary>
+    [Parameter] public bool Compact { get; set; }
+
+    private bool _visible;
+    private int _rating;
+    private string? _text;
+    private bool _allowContact;
+    private string _email = "";
+    private bool _busy;
+    private bool _sent;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        _email = user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? user.Identity?.Name ?? "";
+        _visible = !Compact || await FeedbackService.ShouldAskAsync();
+    }
+
+    private async Task SendAsync()
+    {
+        _busy = true; _error = null;
+        var (ok, error) = await FeedbackService.SendAsync(new AppFeedbackDto
+        {
+            Rating = _rating,
+            Text = _text,
+            ContactEmail = _allowContact ? _email : null
+        }, _email);
+        _busy = false;
+        if (ok) _sent = true; else _error = error;
+    }
+
+    private async Task SnoozeAsync()
+    {
+        await FeedbackService.SnoozeAsync();
+        _visible = false;
+    }
+}

@@ -1,0 +1,108 @@
+@page "/panel/feedback"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@rendermode InteractiveServer
+
+<PageTitle>Oceny aplikacji — PTScheduler Portal</PageTitle>
+
+<div class="d-flex align-items-center gap-2 mb-4">
+    <a href="/panel" class="btn btn-sm btn-outline-secondary"><i class="bi bi-arrow-left"></i></a>
+    <h4 class="fw-bold mb-0"><i class="bi bi-star-half me-2 text-warning"></i>Oceny aplikacji od trenerów</h4>
+    <button class="btn btn-sm btn-outline-secondary ms-auto" @onclick="LoadAsync">
+        <i class="bi bi-arrow-clockwise"></i> Odśwież
+    </button>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_items.Count == 0)
+{
+    <div class="text-center text-muted py-5">
+        <i class="bi bi-star fs-1 d-block mb-2"></i>
+        Brak ocen. Trenerzy zobaczą prośbę o ocenę na swoim pulpicie (raz na pół roku) i w Zarządzanie → „Oceń aplikację”.
+    </div>
+}
+else
+{
+    <div class="row g-3 mb-4">
+        <div class="col-auto">
+            <div class="card border-0 shadow-sm"><div class="card-body py-2 px-3">
+                <span class="fs-4 fw-bold">@_items.Average(i => i.Rating).ToString("0.0")</span>
+                <span class="text-warning">★</span>
+                <span class="small text-muted ms-1">średnia z @_items.Count</span>
+            </div></div>
+        </div>
+        @for (var star = 5; star >= 1; star--)
+        {
+            var n = _items.Count(i => i.Rating == star);
+            <div class="col-auto">
+                <div class="card border-0 shadow-sm"><div class="card-body py-2 px-3 small">
+                    @star★ <strong>@n</strong>
+                </div></div>
+            </div>
+        }
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead class="table-light">
+                    <tr><th>Data</th><th>Tenant</th><th>Ocena</th><th>Treść</th><th>Kontakt</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var f in _items)
+                    {
+                        <tr class="@(f.IsRead ? "" : "fw-semibold")">
+                            <td class="small text-nowrap">@f.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                            <td class="small">
+                                @if (f.Tenant is not null) { <a href="/panel/tenants/@f.Tenant.Id">@f.Tenant.CompanyName</a> }
+                                <div class="text-muted">@f.AuthorEmail</div>
+                            </td>
+                            <td class="text-warning text-nowrap">@(new string('★', f.Rating))<span class="text-muted">@(new string('☆', 5 - f.Rating))</span></td>
+                            <td class="small" style="max-width:420px;white-space:pre-wrap">@f.Text</td>
+                            <td class="small">
+                                @if (!string.IsNullOrEmpty(f.ContactEmail)) { <a href="mailto:@f.ContactEmail">@f.ContactEmail</a> }
+                                else { <span class="text-muted">—</span> }
+                            </td>
+                            <td>
+                                @if (!f.IsRead)
+                                {
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => MarkReadAsync(f.Id)">Przeczytane</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private List<AppFeedback> _items = [];
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _items = await db.AppFeedbacks.AsNoTracking().Include(f => f.Tenant)
+            .OrderByDescending(f => f.CreatedAt).Take(500).ToListAsync();
+        _loading = false;
+    }
+
+    private async Task MarkReadAsync(int id)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var f = await db.AppFeedbacks.FirstOrDefaultAsync(x => x.Id == id);
+        if (f is null) return;
+        f.IsRead = true;
+        await db.SaveChangesAsync();
+        await LoadAsync();
+    }
+}

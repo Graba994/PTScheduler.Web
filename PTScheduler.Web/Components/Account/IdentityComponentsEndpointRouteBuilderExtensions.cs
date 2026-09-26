@@ -221,6 +221,12 @@ namespace Microsoft.AspNetCore.Routing
                         .OrderBy(p => p.TakenOn)
                         .Select(p => new { p.TakenOn, Pose = p.Pose.ToString(), p.Note, p.UploadedAt, Url = "/photos/" + p.Id })
                         .ToListAsync();
+
+                    export["Review"] = await db.ClientReviews
+                        .AsNoTracking()
+                        .Where(r => r.ClientId == client.Id)
+                        .Select(r => new { r.Rating, r.Text, r.PublishConsent, r.IsPublished, r.CreatedAt, r.UpdatedAt })
+                        .FirstOrDefaultAsync();
                 }
 
                 var loginLogs = await db.LoginLogs

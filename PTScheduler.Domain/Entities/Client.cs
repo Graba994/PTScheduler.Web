@@ -10,6 +10,9 @@ public class Client
     /// <summary>Kod polecający klienta (link <c>/r/{kod}</c>); tworzony przy pierwszym użyciu.</summary>
     public string? ReferralCode { get; set; }
 
+    /// <summary>Klient odłożył prośbę o opinię („Nie teraz”) — nie pytamy do tej daty.</summary>
+    public DateTime? ReviewPromptSnoozedUntil { get; set; }
+
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
     public string? Phone { get; set; }
