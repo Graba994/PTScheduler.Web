@@ -63,6 +63,7 @@ public sealed partial class UpgradeOrchestrator : IDisposable
     }
 
     public string? ActiveJobId => _activeJob?.Id;
+    public string TenantImage => _tenantImage;
     public TimeSpan Uptime => DateTime.UtcNow - _bootTime;
 
     public UpgradeJob? GetJob(string id) =>

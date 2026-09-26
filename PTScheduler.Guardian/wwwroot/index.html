@@ -1,233 +1,341 @@
+<!doctype html>
+<html lang="pl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
 <title>PTScheduler Guardian</title>
 <style>
 :root {
-    --bg: #0f1923;
-    --surface: #1a2733;
-    --border: #2a3a4a;
-    --text: #d4dce4;
-    --muted: #6b7d8d;
-    --success: #34d399;
-    --warning: #fbbf24;
-    --danger: #f87171;
-    --info: #60a5fa;
-    --accent: #818cf8;
+    --bg: #f4f5f8; --card: #fff; --line: #e6e8ee; --line-2: #f1f5f9;
+    --ink: #0f172a; --ink-2: #334155; --muted: #64748b;
+    --accent: #4f46e5; --accent-bg: #eef0ff;
+    --ok: #047857; --ok-bg: #ecfdf5; --ok-bd: #a7f3d0;
+    --warn: #b45309; --warn-bg: #fffbeb; --warn-bd: #fde68a;
+    --danger: #b91c1c; --danger-bg: #fef2f2; --danger-bd: #fecaca;
+    --info: #4338ca; --info-bg: #eef2ff; --info-bd: #c7d2fe;
+    --side: #14161b;
 }
-* { margin: 0; padding: 0; box-sizing: border-box; }
-body {
-    background: var(--bg); color: var(--text);
-    font-family: 'JetBrains Mono', 'Cascadia Code', 'Fira Code', monospace;
-    font-size: 13px; line-height: 1.6; padding: 24px; max-width: 900px; margin: 0 auto;
-}
-h1 { font-size: 18px; font-weight: 600; margin-bottom: 20px; color: var(--accent); }
-h2 { font-size: 14px; font-weight: 600; margin-bottom: 10px; color: var(--muted); text-transform: uppercase; letter-spacing: 1px; }
-.card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; margin-bottom: 16px; }
-.row { display: flex; gap: 12px; flex-wrap: wrap; }
-.row > * { flex: 1; min-width: 200px; }
-.badge { display: inline-block; padding: 2px 8px; border-radius: 4px; font-size: 11px; font-weight: 600; }
-.badge-ok { background: #064e3b; color: var(--success); }
-.badge-warn { background: #78350f; color: var(--warning); }
-.badge-err { background: #7f1d1d; color: var(--danger); }
-.badge-run { background: #1e3a5f; color: var(--info); animation: pulse 2s infinite; }
-@@keyframes pulse { 50% { opacity: .6; } }
-label { display: block; color: var(--muted); font-size: 11px; margin-bottom: 2px; }
-input[type=password] {
-    background: var(--bg); color: var(--text); border: 1px solid var(--border);
-    padding: 8px 12px; border-radius: 6px; font-family: inherit; font-size: 13px; width: 260px;
-}
-button {
-    background: var(--accent); color: #fff; border: none; padding: 8px 16px;
-    border-radius: 6px; cursor: pointer; font-family: inherit; font-size: 12px; font-weight: 600;
-    transition: opacity .2s;
-}
-button:hover { opacity: .85; }
-button:disabled { opacity: .4; cursor: not-allowed; }
-button.danger { background: var(--danger); }
-button.warn { background: #b45309; }
-.log-box {
-    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
-    padding: 12px; max-height: 400px; overflow: auto; font-size: 12px; line-height: 1.5;
-    white-space: pre-wrap; word-break: break-all;
-}
-.log-entry { margin-bottom: 2px; }
-.log-entry .ts { color: var(--muted); }
-.log-entry .stg { color: var(--accent); }
-.log-entry.success { color: var(--success); }
-.log-entry.error { color: var(--danger); }
-.log-entry.warn { color: var(--warning); }
-.status-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-#auth { text-align: center; margin-top: 100px; }
-#auth h1 { margin-bottom: 24px; font-size: 22px; }
-#main { display: none; }
-.history-item { cursor: pointer; padding: 8px; border-bottom: 1px solid var(--border); transition: background .15s; }
-.history-item:hover { background: rgba(129,140,248,.08); }
-.history-item:last-child { border-bottom: none; }
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--ink-2); font: 14px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+.bar { background: var(--side); color: #a1a7b3; display: flex; align-items: center; gap: .75rem; padding: .55rem 1.25rem; font-size: .8rem; }
+.bar strong { color: #fff; font-size: .95rem; }
+.bar .grow { flex: 1; }
+@media (max-width: 560px) { #uptime { display: none; } .bar { padding: .55rem .8rem; } }
+.bar button { background: transparent; border: 1px solid rgba(255,255,255,.15); color: #e5e7eb; padding: .25rem .7rem; border-radius: .5rem; cursor: pointer; font: inherit; }
+main { max-width: 980px; margin: 0 auto; padding: 1.5rem 1rem 3rem; }
+h1 { font-size: 1.35rem; color: var(--ink); margin: 0; }
+.sub { color: var(--muted); font-size: .88rem; margin: .2rem 0 1.2rem; max-width: 70ch; }
+.card { background: var(--card); border: 1px solid var(--line); border-radius: 1rem; padding: 1.1rem 1.25rem; margin-bottom: 1rem; }
+.card h2 { font-size: 1rem; color: var(--ink); margin: 0 0 .8rem; display: flex; align-items: center; gap: .5rem; }
+.hero { display: flex; gap: .9rem; align-items: flex-start; padding: 1rem 1.2rem; border-radius: 1rem; border: 1px solid var(--tbd); background: var(--tbg); margin-bottom: 1rem; }
+.hero .ico { width: 42px; height: 42px; border-radius: 12px; background: #fff; display: grid; place-items: center; font-size: 1.2rem; color: var(--t); flex-shrink: 0; }
+.hero .t { font-weight: 700; color: var(--ink); font-size: 1.02rem; }
+.hero .d { font-size: .88rem; color: #475569; }
+.ok { --t: var(--ok); --tbg: var(--ok-bg); --tbd: var(--ok-bd); }
+.warn { --t: var(--warn); --tbg: var(--warn-bg); --tbd: var(--warn-bd); }
+.danger { --t: var(--danger); --tbg: var(--danger-bg); --tbd: var(--danger-bd); }
+.info { --t: var(--info); --tbg: var(--info-bg); --tbd: var(--info-bd); }
+.muted { --t: var(--muted); --tbg: #f1f5f9; --tbd: #e2e8f0; }
+.chip { display: inline-flex; align-items: center; gap: .25rem; padding: .12rem .6rem; border-radius: 999px; font-size: .74rem; font-weight: 600; border: 1px solid var(--tbd); color: var(--t); background: var(--tbg); white-space: nowrap; }
+.grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: .75rem; }
+.actions { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: .75rem; }
+.action { border: 1px solid var(--line); border-radius: .85rem; padding: .9rem 1rem; display: flex; flex-direction: column; gap: .5rem; }
+.action p { margin: 0; font-size: .84rem; color: var(--muted); flex: 1; }
+.action strong { color: var(--ink); }
+button.btn { border: 0; border-radius: .6rem; padding: .55rem .9rem; font: 600 .86rem system-ui, sans-serif; cursor: pointer; background: var(--accent); color: #fff; }
+button.btn.secondary { background: #fff; color: var(--ink-2); border: 1px solid #dfe3ea; }
+button.btn.warn-btn { background: #fff; color: var(--warn); border: 1px solid var(--warn-bd); }
+button.btn:disabled { opacity: .5; cursor: not-allowed; }
+button.btn:focus-visible, .hist:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }
+.steps { display: flex; gap: .4rem; flex-wrap: wrap; margin: .2rem 0 .8rem; }
+.log { background: #0f172a; color: #cbd5e1; border-radius: .7rem; padding: .8rem 1rem; max-height: 380px; overflow: auto; font: .76rem/1.6 ui-monospace, SFMono-Regular, Menlo, monospace; white-space: pre-wrap; word-break: break-word; }
+.log .ts { color: #64748b; margin-right: .5rem; }
+.log .stg { color: #818cf8; margin-right: .5rem; }
+.log .l-success { color: #6ee7b7; } .log .l-warn { color: #fcd34d; } .log .l-error { color: #fca5a5; }
+.tenants { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: .4rem; margin: .2rem 0 .8rem; }
+.tenant { border: 1px solid var(--tbd); background: var(--tbg); border-radius: .6rem; padding: .45rem .6rem; font-size: .8rem; }
+.tenant b { color: var(--ink); }
+.tenant small { display: block; color: var(--t); }
+.hist { width: 100%; display: flex; align-items: center; gap: .6rem; padding: .6rem .3rem; border: 0; background: none; border-top: 1px solid var(--line-2); cursor: pointer; text-align: left; font: inherit; color: inherit; border-radius: .5rem; }
+.hist:first-child { border-top: 0; }
+.hist:hover { background: #f8fafc; }
+.hist .w { flex: 1; min-width: 0; }
+.card h2 { flex-wrap: wrap; }
+.hist .w span { display: block; font-size: .78rem; color: var(--muted); }
+.kv { display: grid; grid-template-columns: auto 1fr; gap: .25rem 1rem; font-size: .86rem; margin: 0; }
+.kv dt { color: var(--muted); } .kv dd { margin: 0; color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+details summary { cursor: pointer; font-weight: 600; color: var(--ink-2); }
+details ul { margin: .6rem 0 0; padding-left: 1.2rem; font-size: .86rem; }
+details li + li { margin-top: .3rem; }
+#auth { max-width: 380px; margin: 12vh auto; text-align: center; }
+#auth input { width: 100%; padding: .65rem .8rem; border: 1px solid #dfe3ea; border-radius: .6rem; font: inherit; margin: 1rem 0 .7rem; }
+#auth input:focus { outline: none; border-color: #a5b4fc; box-shadow: 0 0 0 .2rem rgba(99,102,241,.15); }
+#auth .err { color: var(--danger); min-height: 1.4em; font-size: .88rem; }
+#toast { position: fixed; bottom: 1rem; left: 50%; transform: translateX(-50%); max-width: min(92vw, 560px); display: none; }
+.hidden { display: none !important; }
+@media (prefers-reduced-motion: no-preference) { .spin { display: inline-block; animation: spin 1.4s linear infinite; } }
+@keyframes spin { to { transform: rotate(360deg); } }
 </style>
+</head>
+<body>
 
 <div id="auth">
     <h1>PTScheduler Guardian</h1>
-    <div style="margin-bottom:12px">
-        <input type="password" id="secret" placeholder="Guardian Secret" onkeydown="if(event.key==='Enter')connect()">
-    </div>
-    <button onclick="connect()">Autoryzuj</button>
-    <p id="auth-err" style="color:var(--danger);margin-top:12px"></p>
+    <p class="sub" style="margin:.4rem auto 0">Awaryjny panel aktualizacji. Na co dzień wszystko robisz z Portalu → Aktualizacje.</p>
+    <form id="auth-form">
+        <input type="password" id="secret" placeholder="Sekret Guardiana (GUARDIAN_SECRET)" autocomplete="current-password" aria-label="Sekret Guardiana">
+        <button class="btn" type="submit" style="width:100%">Zaloguj</button>
+    </form>
+    <p class="err" id="auth-err" role="alert"></p>
 </div>
 
-<div id="main">
-    <h1>PTScheduler Guardian</h1>
+<div id="app" class="hidden">
+    <div class="bar">
+        <strong>Guardian</strong>
+        <span id="ver" class="chip muted" style="background:rgba(255,255,255,.06);border-color:rgba(255,255,255,.12);color:#cbd5e1"></span>
+        <span id="uptime"></span>
+        <span class="grow"></span>
+        <button type="button" id="logout">Wyloguj</button>
+    </div>
+    <main>
+        <h1>Panel Guardiana</h1>
+        <p class="sub">Guardian buduje nowe wersje i podmienia kontenery Portalu i trenerów. Wdrożenie u trenerów uruchamiasz z Portalu (zna listę instancji) — tu widzisz jego przebieg i możesz awaryjnie zaktualizować albo cofnąć Portal.</p>
 
-    <div class="row">
-        <div class="card">
-            <h2>Status</h2>
-            <div class="status-row">
-                <label>Guardian:</label>
-                <span class="badge badge-ok" id="g-status">OK</span>
-                <span id="g-uptime" style="color:var(--muted)"></span>
+        <div id="hero"></div>
+
+        <section class="card hidden" id="job-card">
+            <h2 id="job-title"></h2>
+            <div class="steps" id="job-steps"></div>
+            <div class="tenants" id="job-tenants"></div>
+            <div id="job-result"></div>
+            <div class="log" id="job-log" aria-label="Log zadania"></div>
+        </section>
+
+        <section class="card">
+            <h2>Akcje awaryjne</h2>
+            <div class="actions">
+                <div class="action">
+                    <strong>Aktualizuj Portal</strong>
+                    <p>Pobiera kod, buduje nowy obraz, sprawdza go w kontenerze testowym i podmienia Portal. Przy błędzie wraca poprzednia wersja.</p>
+                    <button class="btn" type="button" data-action="portal">Aktualizuj Portal</button>
+                </div>
+                <div class="action">
+                    <strong>Zbuduj obraz aplikacji trenerów</strong>
+                    <p>Tylko obraz, bez wdrażania. Pełną nową wersję dla trenerów (budowa + wdrożenie na instancje) uruchom z Portalu.</p>
+                    <button class="btn secondary" type="button" data-action="tenant">Zbuduj obraz</button>
+                </div>
+                <div class="action">
+                    <strong>Przywróć poprzedni Portal</strong>
+                    <p>Gdy nowa wersja Portalu działa źle — wraca obraz sprzed ostatniej aktualizacji.</p>
+                    <button class="btn warn-btn" type="button" data-action="rollback">Przywróć poprzedni</button>
+                </div>
             </div>
-            <div class="status-row">
-                <label>Portal:</label>
-                <span id="p-status"></span>
-                <span id="p-checked" style="color:var(--muted)"></span>
-            </div>
-        </div>
-        <div class="card" id="active-card" style="display:none">
-            <h2>Aktywna operacja</h2>
-            <div class="status-row">
-                <span id="a-target"></span>
-                <span id="a-stage"></span>
-                <span id="a-status"></span>
-            </div>
-            <div id="a-progress" style="color:var(--muted);font-size:12px"></div>
-        </div>
-    </div>
+        </section>
 
-    <div class="card">
-        <h2>Akcje</h2>
-        <div style="display:flex;gap:10px;flex-wrap:wrap">
-            <button onclick="upgradePortal()" id="btn-portal">Aktualizuj Portal</button>
-            <button onclick="upgradeTenant()" id="btn-tenant">Aktualizuj Obraz Trenera</button>
-            <button onclick="rollback()" id="btn-rollback" class="warn">Rollback Portal</button>
+        <div class="grid">
+            <section class="card">
+                <h2>Ta instancja Guardiana</h2>
+                <dl class="kv" id="info"></dl>
+            </section>
+            <section class="card">
+                <h2>Co nowego</h2>
+                <details open>
+                    <summary>Wdrażanie u trenerów i zabezpieczenia</summary>
+                    <ul>
+                        <li>Nowa wersja dla trenerów w <b>jednym zadaniu</b>: budowa obrazu i od razu wdrożenie — koniec z „Guardian nie odpowiedział przy starcie wdrażania”.</li>
+                        <li>Stary kontener jest odkładany, a nie usuwany — gdy nowa wersja nie wstanie, wraca dokładnie on (z limitami pamięci i CPU), a w logu widać błąd aplikacji.</li>
+                        <li>Instancje sprawdzane pod adresem hosta, a zapasowo po starcie w logach.</li>
+                        <li>Token GitHuba tylko w pamięci, sekrety wycinane z logów, walidacja danych i audyt wywołań.</li>
+                        <li>Zadania przerwane restartem Guardiana są oznaczane jako nieudane.</li>
+                    </ul>
+                </details>
+            </section>
         </div>
-    </div>
 
-    <div class="card" id="job-card" style="display:none">
-        <h2>Log operacji <span id="job-title"></span></h2>
-        <div class="log-box" id="job-log"></div>
-    </div>
-
-    <div class="card">
-        <h2>Historia</h2>
-        <div id="history">(wczytywanie...)</div>
-    </div>
+        <section class="card">
+            <h2>Historia</h2>
+            <div id="history">Wczytywanie…</div>
+        </section>
+    </main>
 </div>
+
+<div id="toast" role="status"></div>
 
 <script>
-let secret = '', pollId = null;
+'use strict';
+// Sekret trzymamy tylko w pamięci karty — po zamknięciu trzeba go podać ponownie.
+let secret = '';
+let pollId = null;
+let shownJobId = null;
+
+const TARGET = { Portal: 'Aktualizacja Portalu', Tenant: 'Obraz aplikacji trenerów', TenantRolling: 'Wdrażanie u trenerów', TenantRelease: 'Nowa wersja dla trenerów' };
+const STATUS = { Running: ['W toku', 'info'], Success: ['Zakończone', 'ok'], Failed: ['Nieudane', 'danger'], RolledBack: ['Wycofane', 'warn'], PartialSuccess: ['Częściowo', 'warn'] };
+const TSTATUS = { Pending: ['czeka', 'muted'], Updating: ['podmiana…', 'info'], HealthCheck: ['sprawdzanie…', 'info'], Success: ['nowa wersja', 'ok'], Failed: ['błąd', 'danger'], RolledBack: ['przywrócona', 'warn'], Skipped: ['pominięta', 'muted'] };
+const STAGES = { Portal: ['Pulling', 'Building', 'Testing', 'Swapping', 'Verifying'], Tenant: ['Pulling', 'Building'], TenantRolling: ['Swapping', 'Done'], TenantRelease: ['Pulling', 'Building', 'Swapping', 'Done'] };
+const STAGE_PL = { Queued: 'Kolejka', Pulling: 'Pobranie kodu', Building: 'Budowanie', Testing: 'Próba', Swapping: 'Podmiana', Verifying: 'Sprawdzenie', Done: 'Koniec' };
+
+// Wszystko, co przychodzi z serwera (w tym logi aplikacji), wstawiamy jako tekst — nigdy jako HTML.
+function el(tag, attrs, ...children) {
+    const e = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs || {})) {
+        if (k === 'class') e.className = v; else if (k.startsWith('on')) e.addEventListener(k.slice(2), v); else e.setAttribute(k, v);
+    }
+    for (const c of children.flat()) if (c != null && c !== false) e.append(c instanceof Node ? c : String(c));
+    return e;
+}
+const chip = (text, tone) => el('span', { class: 'chip ' + tone }, text);
+const short = c => (c || '').slice(0, 7) || '—';
+const time = d => d ? new Date(d).toLocaleString('pl-PL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
 
 async function api(path, method) {
-    const r = await fetch(path, { method: method || 'GET', headers: { 'X-Guardian-Secret': secret } });
-    if (!r.ok) throw new Error('HTTP ' + r.status);
-    return r.json();
+    const r = await fetch(path, { method: method || 'GET', headers: { 'X-Guardian-Secret': secret }, cache: 'no-store' });
+    let body = null;
+    try { body = await r.json(); } catch { /* brak JSON */ }
+    if (r.status === 401) throw Object.assign(new Error('Zły sekret.'), { auth: true });
+    if (!r.ok && !(body && 'started' in body)) throw new Error((body && body.error) || ('HTTP ' + r.status));
+    return body;
 }
 
-async function connect() {
+function toast(text, tone) {
+    const t = document.getElementById('toast');
+    t.replaceChildren(el('div', { class: 'hero ' + (tone || 'info'), style: 'margin:0;box-shadow:0 8px 24px rgba(15,23,42,.15)' }, el('div', { class: 'd' }, text)));
+    t.style.display = 'block';
+    clearTimeout(toast.h); toast.h = setTimeout(() => t.style.display = 'none', 6000);
+}
+
+document.getElementById('auth-form').addEventListener('submit', async e => {
+    e.preventDefault();
     secret = document.getElementById('secret').value;
+    document.getElementById('secret').value = '';
     try {
         await api('/api/status');
-        document.getElementById('auth').style.display = 'none';
-        document.getElementById('main').style.display = 'block';
+        document.getElementById('auth').classList.add('hidden');
+        document.getElementById('app').classList.remove('hidden');
         refresh();
-        pollId = setInterval(refresh, 5000);
-    } catch (e) {
-        document.getElementById('auth-err').textContent = 'Nieprawidlowy secret lub Guardian niedostepny';
+        pollId = setInterval(refresh, 4000);
+    } catch (err) {
+        secret = '';
+        document.getElementById('auth-err').textContent = err.auth ? 'Nieprawidłowy sekret.' : 'Guardian nie odpowiada: ' + err.message;
     }
-}
+});
+
+document.getElementById('logout').addEventListener('click', () => {
+    secret = ''; clearInterval(pollId); shownJobId = null;
+    document.getElementById('app').classList.add('hidden');
+    document.getElementById('auth').classList.remove('hidden');
+});
 
 async function refresh() {
     try {
         const s = await api('/api/status');
-        document.getElementById('g-uptime').textContent = 'uptime: ' + s.uptime;
-        const ps = document.getElementById('p-status');
-        ps.className = 'badge ' + (s.portalHealthy ? 'badge-ok' : 'badge-err');
-        ps.textContent = s.portalHealthy ? 'HEALTHY' : 'DOWN';
-        if (s.portalLastChecked) {
-            document.getElementById('p-checked').textContent = 'checked: ' + new Date(s.portalLastChecked).toLocaleTimeString();
-        }
-        const ac = document.getElementById('active-card');
-        if (s.activeJob) {
-            ac.style.display = 'block';
-            document.getElementById('a-target').textContent = s.activeJob.target;
-            document.getElementById('a-stage').className = 'badge badge-run';
-            document.getElementById('a-stage').textContent = s.activeJob.stage;
-            renderJobLog(s.activeJob);
-        } else {
-            ac.style.display = 'none';
-        }
-        const hist = await api('/api/upgrade/history?limit=10');
-        renderHistory(hist);
-    } catch {}
+        document.getElementById('ver').textContent = 'wersja ' + short(s.version);
+        document.getElementById('uptime').textContent = 'działa od ' + s.uptime;
+        renderInfo(s);
+        renderHero(s);
+        const busy = !!s.activeJob;
+        document.querySelectorAll('[data-action]').forEach(b => b.disabled = busy);
+        if (s.activeJob) { shownJobId = s.activeJob.id; renderJob(s.activeJob); }
+        else if (shownJobId) { const j = await api('/api/upgrade/jobs/' + encodeURIComponent(shownJobId)); if (j) renderJob(j); }
+        renderHistory(await api('/api/upgrade/history?limit=15'));
+    } catch (err) {
+        if (err.auth) document.getElementById('logout').click();
+    }
 }
 
-function renderJobLog(job) {
-    const jc = document.getElementById('job-card');
-    jc.style.display = 'block';
-    document.getElementById('job-title').textContent = '(' + job.target + ' ' + job.id + ')';
-    const box = document.getElementById('job-log');
-    box.innerHTML = job.log.map(e =>
-        '<div class="log-entry ' + e.level + '">' +
-        '<span class="ts">' + new Date(e.timestamp).toLocaleTimeString() + '</span> ' +
-        '<span class="stg">[' + e.stage + ']</span> ' +
-        e.message + '</div>'
-    ).join('');
-    box.scrollTop = box.scrollHeight;
+function renderInfo(s) {
+    const rows = [
+        ['Wersja', short(s.version) + (s.buildTime && s.buildTime !== 'unknown' ? ' · zbudowana ' + time(s.buildTime) : '')],
+        ['Działa od', s.uptime],
+        ['Obraz trenerów', s.tenantImage || '—'],
+        ['Portal', s.portalHealthy ? 'odpowiada' : 'nie odpowiada'],
+        ['Ostatnie sprawdzenie', time(s.portalLastChecked)]
+    ];
+    document.getElementById('info').replaceChildren(...rows.flatMap(([k, v]) => [el('dt', {}, k), el('dd', {}, v)]));
+}
+
+function renderHero(s) {
+    let tone, icon, title, text;
+    if (s.activeJob) {
+        tone = 'info'; icon = '⟳'; title = 'Trwa: ' + (TARGET[s.activeJob.target] || s.activeJob.target).toLowerCase();
+        text = 'Etap: ' + (STAGE_PL[s.activeJob.stage] || s.activeJob.stage) + '. Możesz zamknąć stronę — Guardian dokończy sam.';
+    } else if (!s.portalHealthy) {
+        tone = 'danger'; icon = '!'; title = 'Portal nie odpowiada';
+        text = 'Jeśli to po aktualizacji — użyj „Przywróć poprzedni Portal” poniżej.';
+    } else {
+        tone = 'ok'; icon = '✓'; title = 'Wszystko w porządku';
+        text = 'Portal odpowiada, żadne zadanie nie trwa.';
+    }
+    document.getElementById('hero').replaceChildren(
+        el('section', { class: 'hero ' + tone, 'aria-live': 'polite' },
+            el('div', { class: 'ico' }, el('span', { class: s.activeJob ? 'spin' : '' }, icon)),
+            el('div', {}, el('div', { class: 't' }, title), el('div', { class: 'd' }, text))));
+}
+
+function renderJob(job) {
+    document.getElementById('job-card').classList.remove('hidden');
+    const [label, tone] = STATUS[job.status] || [job.status, 'muted'];
+    document.getElementById('job-title').replaceChildren(
+        TARGET[job.target] || job.target, ' ', chip(label, tone),
+        el('span', { style: 'margin-left:auto;font-size:.78rem;font-weight:400;color:var(--muted)' },
+            time(job.startedAt), job.requestedBy ? ' · z ' + job.requestedBy : ''));
+
+    const order = ['Queued', 'Pulling', 'Building', 'Testing', 'Swapping', 'Verifying', 'Done'];
+    const cur = order.indexOf(job.stage);
+    document.getElementById('job-steps').replaceChildren(...(STAGES[job.target] || []).map(st => {
+        const i = order.indexOf(st);
+        const state = job.status === 'Success' || i < cur ? 'ok' : i > cur ? 'muted'
+            : job.status === 'Running' ? 'info' : (job.status === 'Failed' || job.status === 'RolledBack') ? 'danger' : 'ok';
+        return chip((state === 'ok' ? '✓ ' : state === 'danger' ? '✕ ' : '') + (STAGE_PL[st] || st), state);
+    }));
+
+    document.getElementById('job-tenants').replaceChildren(...(job.tenantResults || []).map(t => {
+        const [tl, tt] = TSTATUS[t.status] || [t.status, 'muted'];
+        return el('div', { class: 'tenant ' + tt }, el('b', {}, t.slug), ' · ', tl, (t.error || t.detail) ? el('small', {}, t.error || t.detail) : null);
+    }));
+
+    const res = document.getElementById('job-result');
+    res.replaceChildren(job.status !== 'Running' && job.error ? el('div', { class: 'hero danger', style: 'padding:.7rem .9rem' }, el('div', { class: 'd' }, job.error)) : '');
+
+    const log = document.getElementById('job-log');
+    const atBottom = log.scrollHeight - log.scrollTop - log.clientHeight < 40;
+    log.replaceChildren(...(job.log || []).map(e => el('div', { class: 'l-' + e.level },
+        el('span', { class: 'ts' }, new Date(e.timestamp).toLocaleTimeString('pl-PL')),
+        el('span', { class: 'stg' }, STAGE_PL[e.stage] || e.stage), e.message)));
+    if (atBottom) log.scrollTop = log.scrollHeight;
 }
 
 function renderHistory(jobs) {
-    const el = document.getElementById('history');
-    if (!jobs.length) { el.textContent = 'Brak historii.'; return; }
-    el.innerHTML = jobs.map(j => {
-        const badge = j.status === 'Success' ? 'badge-ok' : j.status === 'Failed' ? 'badge-err' :
-            j.status === 'RolledBack' ? 'badge-warn' : 'badge-run';
-        const date = new Date(j.startedAt).toLocaleString();
-        return '<div class="history-item" onclick="showJob(\'' + j.id + '\')">' +
-            '<span class="badge ' + badge + '">' + j.status + '</span> ' +
-            '<strong>' + j.target + '</strong> ' +
-            '<span style="color:var(--muted)">' + date + '</span> ' +
-            (j.commitBefore ? '<span style="color:var(--muted)">' + j.commitBefore.substring(0,7) + ' → ' + (j.commitAfter||'?').substring(0,7) + '</span>' : '') +
-            '</div>';
-    }).join('');
+    const box = document.getElementById('history');
+    if (!jobs || !jobs.length) { box.textContent = 'Jeszcze nic się nie działo.'; return; }
+    box.replaceChildren(...jobs.map(j => {
+        const [label, tone] = STATUS[j.status] || [j.status, 'muted'];
+        const commits = j.commitBefore ? short(j.commitBefore) + ' → ' + short(j.commitAfter) : '';
+        const tenants = j.tenantsTotal ? ` · instancje: ${j.tenantsCompleted}/${j.tenantsTotal}` : '';
+        return el('button', { class: 'hist', type: 'button', onclick: async () => {
+                shownJobId = j.id;
+                try { renderJob(await api('/api/upgrade/jobs/' + encodeURIComponent(j.id))); document.getElementById('job-card').scrollIntoView({ behavior: 'smooth' }); } catch (err) { toast(err.message, 'danger'); }
+            } },
+            chip(label, tone),
+            el('span', { class: 'w' }, el('b', {}, TARGET[j.target] || j.target), el('span', {}, time(j.startedAt), commits ? ' · ' + commits : '', tenants, j.requestedBy ? ' · z ' + j.requestedBy : '')));
+    }));
 }
 
-async function showJob(id) {
+const ACTIONS = {
+    portal: ['Zaktualizować Portal? Panel Portalu zniknie na chwilę podczas podmiany.', '/api/upgrade/portal'],
+    tenant: ['Zbudować nowy obraz aplikacji trenerów (bez wdrażania na instancje)?', '/api/upgrade/tenant'],
+    rollback: ['Przywrócić poprzednią wersję Portalu?', '/api/rollback/portal']
+};
+document.querySelectorAll('[data-action]').forEach(b => b.addEventListener('click', async () => {
+    const [question, path] = ACTIONS[b.dataset.action];
+    if (!confirm(question)) return;
+    b.disabled = true;
     try {
-        const job = await api('/api/upgrade/jobs/' + id);
-        renderJobLog(job);
-    } catch {}
-}
-
-async function upgradePortal() {
-    if (!confirm('Rozpoczac aktualizacje portalu? Portal zostanie zrestartowany.')) return;
-    try {
-        const r = await api('/api/upgrade/portal', 'POST');
-        if (r.started) { clearInterval(pollId); pollId = setInterval(refresh, 2000); }
-        else alert(r.error || 'Blad');
-    } catch (e) { alert('Blad: ' + e.message); }
-}
-
-async function upgradeTenant() {
-    if (!confirm('Rozpoczac rebuild obrazu trenera?')) return;
-    try {
-        const r = await api('/api/upgrade/tenant', 'POST');
-        if (r.started) { clearInterval(pollId); pollId = setInterval(refresh, 2000); }
-        else alert(r.error || 'Blad');
-    } catch (e) { alert('Blad: ' + e.message); }
-}
-
-async function rollback() {
-    if (!confirm('Przywrocic portal do poprzedniej wersji?')) return;
-    try {
-        const r = await api('/api/rollback/portal', 'POST');
-        if (r.started) { clearInterval(pollId); pollId = setInterval(refresh, 2000); }
-        else alert(r.error || 'Blad');
-    } catch (e) { alert('Blad: ' + e.message); }
-}
+        const r = await api(path, 'POST');
+        if (r && r.started) { shownJobId = r.jobId; toast('Zadanie uruchomione.', 'ok'); refresh(); }
+        else toast((r && r.error) || 'Guardian nie przyjął zadania.', 'warn');
+    } catch (err) { toast(err.message, 'danger'); }
+    finally { b.disabled = false; }
+}));
 </script>
+</body>
+</html>

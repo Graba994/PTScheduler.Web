@@ -22,6 +22,12 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 COPY --from=build /app/publish .
 
+# Wersja Guardiana widoczna w /health i w panelu (skrypt deploy/update-guardian.sh ją podaje).
+ARG BUILD_COMMIT=unknown
+ARG BUILD_TIME=unknown
+ENV GUARDIAN_BUILD_COMMIT=$BUILD_COMMIT
+ENV GUARDIAN_BUILD_TIME=$BUILD_TIME
+
 ENV ASPNETCORE_URLS=http://+:9090
 ENV ASPNETCORE_ENVIRONMENT=Production
 

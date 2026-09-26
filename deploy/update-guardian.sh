@@ -44,7 +44,10 @@ ok "Kod: $(git -C "$REPO_DIR" log -1 --format='%h %s')"
 
 # ── 2. Obraz ────────────────────────────────────────────────────────────────
 say "Buduję obraz $IMAGE (kilka minut)..."
-docker build -t "$IMAGE" -f "$REPO_DIR/PTScheduler.Guardian/Dockerfile" "$REPO_DIR"
+docker build -t "$IMAGE" \
+    --build-arg BUILD_COMMIT="$(git -C "$REPO_DIR" rev-parse HEAD)" \
+    --build-arg BUILD_TIME="$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    -f "$REPO_DIR/PTScheduler.Guardian/Dockerfile" "$REPO_DIR"
 ok "Obraz zbudowany."
 
 # ── 3. Konfiguracja obecnego kontenera ─────────────────────────────────────

@@ -88,6 +88,9 @@ public class LogEntry
 public class GuardianStatus
 {
     public bool Healthy { get; set; } = true;
+    public string Version { get; set; } = "unknown";
+    public string BuildTime { get; set; } = "unknown";
+    public string TenantImage { get; set; } = "";
     public string Uptime { get; set; } = "";
     public bool PortalHealthy { get; set; }
     public DateTime? PortalLastChecked { get; set; }

@@ -28,12 +28,30 @@ var orchestrator = app.Services.GetRequiredService<UpgradeOrchestrator>();
 await orchestrator.CleanupOrphanedContainersAsync();
 
 var secretBytes = Encoding.UTF8.GetBytes(guardianSecret);
+var buildCommit = Environment.GetEnvironmentVariable("GUARDIAN_BUILD_COMMIT") ?? "unknown";
+var buildTime = Environment.GetEnvironmentVariable("GUARDIAN_BUILD_TIME") ?? "unknown";
+var version = buildCommit.Length > 7 ? buildCommit[..7] : buildCommit;
 var jsonOptions = new JsonSerializerOptions { PropertyNameCaseInsensitive = true };
 static string Caller(HttpContext ctx) => ctx.Connection.RemoteIpAddress?.ToString() ?? "?";
 static IResult StartResult(bool started, string jobId, string? error) =>
     started ? Results.Ok(new { started, jobId })
     : UpgradeOrchestrator.IsBusy(error) ? Results.Conflict(new { started, error })
     : Results.BadRequest(new { started, error });
+
+// Nagłówki bezpieczeństwa dla panelu (także /index.html serwowanego jako plik statyczny).
+app.Use(async (ctx, next) =>
+{
+    ctx.Response.OnStarting(() =>
+    {
+        var h = ctx.Response.Headers;
+        h["X-Content-Type-Options"] = "nosniff";
+        h["Referrer-Policy"] = "no-referrer";
+        if (!h.ContainsKey("Content-Security-Policy"))
+            h["Content-Security-Policy"] = "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+        return Task.CompletedTask;
+    });
+    await next();
+});
 
 app.UseStaticFiles();
 
@@ -67,13 +85,21 @@ app.Use(async (ctx, next) =>
 app.MapGet("/health", (HealthWatcher hw) => Results.Ok(new
 {
     status = "healthy",
+    version,
     portalHealthy = hw.PortalHealthy,
     uptime = orchestrator.Uptime.ToString(@"d\.hh\:mm\:ss")
 }));
 
-app.MapGet("/", () => Results.File(
-    Path.Combine(AppContext.BaseDirectory, "wwwroot", "index.html"),
-    "text/html"));
+app.MapGet("/", (HttpContext ctx) =>
+{
+    // Panel nie ładuje nic z zewnątrz — ścisła polityka CSP utrudnia wstrzyknięcie skryptu.
+    ctx.Response.Headers["Content-Security-Policy"] =
+        "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'";
+    ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    ctx.Response.Headers["Referrer-Policy"] = "no-referrer";
+    ctx.Response.Headers["Cache-Control"] = "no-store";
+    return Results.File(Path.Combine(AppContext.BaseDirectory, "wwwroot", "index.html"), "text/html; charset=utf-8");
+});
 
 // ── API (auth required) ────────────────────────────────────────────
 
@@ -84,6 +110,9 @@ app.MapGet("/api/status", (HealthWatcher hw) =>
     return Results.Ok(new GuardianStatus
     {
         Healthy = true,
+        Version = version,
+        BuildTime = buildTime,
+        TenantImage = orchestrator.TenantImage,
         Uptime = orchestrator.Uptime.ToString(@"d\.hh\:mm\:ss"),
         PortalHealthy = hw.PortalHealthy,
         PortalLastChecked = hw.LastCheckedAt,
