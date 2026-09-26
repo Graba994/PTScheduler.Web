@@ -79,6 +79,9 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string TenantInternalSecret = "tenant_internal_secret";
     }
 
+    /// <summary>Domyślny nagłówek strony głównej (wyświetlany w wersji z wyróżnieniem).</summary>
+    public const string DefaultHeroTitle = "Mniej papierologii. Więcej treningów.";
+
     private static readonly Dictionary<string, string> Defaults = new()
     {
         [Keys.MainDomain] = "ptscheduler.pl",
@@ -86,15 +89,15 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         [Keys.BackupDir] = "/opt/ptscheduler/backups",
         [Keys.BackupSchedule] = "daily",
         [Keys.BackupRetentionDays] = "14",
-        [Keys.HeroBadge] = "Platforma SaaS dla trenerów",
-        [Keys.HeroTitle] = "Twoja instancja PTScheduler gotowa w 5 minut",
-        [Keys.HeroSubtitle] = "Grafik, klienci, płatności online, kursy wideo, pakiety treningowe — wszystko pod Twoją domeną, w pełni konfigurowane. Bez programowania.",
-        [Keys.HeroCta] = "Rozpocznij za darmo",
+        [Keys.HeroBadge] = "Dla trenerów personalnych i małych studiów",
+        [Keys.HeroTitle] = DefaultHeroTitle,
+        [Keys.HeroSubtitle] = "Grafik i rezerwacje online, karnety, płatności, czat z klientem i plany treningowe — w jednej aplikacji pod Twoją marką. Klienci instalują ją na telefonie jak zwykłą apkę.",
+        [Keys.HeroCta] = "Zacznij za darmo",
         [Keys.HeroCtaUrl] = "/register",
-        [Keys.SectionTitle] = "Co dostajesz?",
-        [Keys.CtaTitle] = "Gotowy, żeby zacząć?",
-        [Keys.CtaSubtitle] = "Pierwszych 3 klientów za darmo. Bez karty kredytowej.",
-        [Keys.CtaButton] = "Załóż darmowe konto",
+        [Keys.SectionTitle] = "Wszystko, czego potrzebuje trener — w jednym miejscu",
+        [Keys.CtaTitle] = "Oddaj papierologię aplikacji. Wróć do trenowania.",
+        [Keys.CtaSubtitle] = "Załóż konto w 5 minut i zaproś pierwszych klientów jeszcze dziś. Plan startowy jest za darmo.",
+        [Keys.CtaButton] = "Zacznij za darmo",
         [Keys.SmtpPort] = "587",
         [Keys.SmtpSsl] = "true",
         [Keys.GithubOwner] = "graba994",
