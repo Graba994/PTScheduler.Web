@@ -180,6 +180,32 @@ namespace Microsoft.AspNetCore.Routing
                         .Select(p => new { p.Name, p.TotalSessions, p.UsedSessions, p.PricePerSession, p.PurchasedAt, p.ExpiresAt, p.Status })
                         .ToListAsync();
                     export["Packages"] = packages;
+
+                    var workouts = await db.WorkoutLogs
+                        .AsNoTracking()
+                        .Where(w => w.ClientId == client.Id)
+                        .OrderByDescending(w => w.WorkoutDate)
+                        .Select(w => new
+                        {
+                            w.WorkoutDate,
+                            Exercise = w.Exercise != null ? w.Exercise.NamePl : null,
+                            Sets = w.Sets.Select(x => new { x.Reps, x.WeightKg })
+                        })
+                        .ToListAsync();
+                    export["Workouts"] = workouts;
+
+                    // Ankiety (w tym zdrowotna) — z treścią pytań z chwili wypełnienia.
+                    var surveys = await db.SurveyResponses
+                        .AsNoTracking()
+                        .Where(r => r.ClientId == client.Id)
+                        .OrderByDescending(r => r.SubmittedAt)
+                        .Select(r => new { r.Kind, r.WorkoutDate, r.SubmittedAt, r.HealthDataConsentAt, r.AnswersJson })
+                        .ToListAsync();
+                    export["Surveys"] = surveys.Select(r => new
+                    {
+                        Kind = r.Kind.ToString(), r.WorkoutDate, r.SubmittedAt, r.HealthDataConsentAt,
+                        Answers = System.Text.Json.JsonDocument.Parse(r.AnswersJson).RootElement.Clone()
+                    });
                 }
 
                 var loginLogs = await db.LoginLogs

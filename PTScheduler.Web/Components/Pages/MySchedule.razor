@@ -84,12 +84,14 @@ else
                 <div class="flex-grow-1">
                     <div class="fw-semibold small">@pkg.Name</div>
                     <div class="progress mt-1" style="height:5px">
-                        <div class="progress-bar bg-primary" style="width:@(pkg.TotalSessions > 0 ? pkg.UsedSessions * 100 / pkg.TotalSessions : 0)%"></div>
+                        @* Pasek i liczba pokazują to samo: ile sesji zostało (wcześniej pasek
+                           pokazywał zużyte, a liczba pozostałe — „4 / 4” z pustym paskiem). *@
+                        <div class="progress-bar bg-primary" style="width:@(pkg.TotalSessions > 0 ? pkg.RemainingCredits * 100 / pkg.TotalSessions : 0)%"></div>
                     </div>
                 </div>
                 <div class="text-end flex-shrink-0">
-                    <div class="fw-bold">@pkg.RemainingCredits</div>
-                    <div class="text-muted" style="font-size:.7rem">/ @pkg.TotalSessions sesji</div>
+                    <div class="fw-bold">@pkg.RemainingCredits <span class="text-muted fw-normal" style="font-size:.75rem">z @pkg.TotalSessions</span></div>
+                    <div class="text-muted" style="font-size:.7rem">sesji zostało</div>
                     @if (daysLeft.HasValue)
                     {
                         <div class="@(daysLeft < 14 ? "text-danger" : "text-muted")" style="font-size:.7rem">
@@ -130,7 +132,7 @@ else
                             <div class="fw-bold fs-5 lh-1">@s.StartTime.ToString("dd")</div>
                             <div class="text-muted small text-uppercase">@s.StartTime.ToString("MMM")</div>
                         </div>
-                        <div class="flex-grow-1">
+                        <div class="flex-grow-1 text-break" style="min-width:0">
                             <div class="fw-semibold">@s.SessionTypeName</div>
                             <div class="text-muted small">
                                 <i class="bi bi-clock me-1"></i>@s.StartTime.ToString("HH:mm") — @s.EndTime.ToString("HH:mm")
@@ -178,7 +180,7 @@ else
                     <tr>
                         <th>Data</th>
                         <th>Typ</th>
-                        <th>Trener</th>
+                        <th class="d-none d-md-table-cell">Trener</th>
                         <th>Status</th>
                     </tr>
                 </thead>
@@ -188,7 +190,7 @@ else
                         <tr>
                             <td class="text-nowrap small">@s.StartTime.ToString("dd.MM.yy HH:mm")</td>
                             <td class="small">@s.SessionTypeName</td>
-                            <td class="small text-muted">@s.TrainerName</td>
+                            <td class="small text-muted d-none d-md-table-cell">@s.TrainerName</td>
                             <td><span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span></td>
                         </tr>
                     }

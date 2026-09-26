@@ -74,8 +74,12 @@ public class SurveyService(
     }
 
     public async Task<(List<string> Errors, SurveyResponseDto? Response)> SubmitAsync(
-        int clientId, SurveyKind kind, IReadOnlyDictionary<string, SurveyAnswerInput> answers, DateOnly? workoutDate = null)
+        int clientId, SurveyKind kind, IReadOnlyDictionary<string, SurveyAnswerInput> answers, DateOnly? workoutDate = null,
+        bool healthDataConsent = false)
     {
+        if (kind == SurveyKind.HealthIntake && !healthDataConsent)
+            return (["Zaznacz zgodę na przetwarzanie danych o zdrowiu — bez niej trener nie może przyjąć ankiety."], null);
+
         var template = await GetTemplateAsync(kind);
         var (errors, evaluated) = SurveyEvaluator.Evaluate(template.Questions, answers);
         if (errors.Count > 0) return (errors, null);
@@ -99,11 +103,22 @@ public class SurveyService(
         entity.SubmittedAt = clock.UtcNow;
         entity.ReviewedAt = null;
         entity.ReviewedByUserId = null;
+        if (kind == SurveyKind.HealthIntake) entity.HealthDataConsentAt = clock.UtcNow;
         await db.SaveChangesAsync();
 
         var dto = Map(entity);
         await NotifyTrainerAsync(client, dto);
         return ([], dto);
+    }
+
+    public async Task WithdrawHealthConsentAsync(int clientId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var rows = await db.SurveyResponses
+            .Where(r => r.ClientId == clientId && r.Kind == SurveyKind.HealthIntake)
+            .ToListAsync();
+        db.SurveyResponses.RemoveRange(rows);
+        await db.SaveChangesAsync();
     }
 
     public async Task<List<SurveyResponseDto>> GetResponsesAsync(int clientId, SurveyKind kind, int take = 60)

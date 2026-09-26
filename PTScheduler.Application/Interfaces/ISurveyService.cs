@@ -11,8 +11,13 @@ public interface ISurveyService
     Task ResetTemplateAsync(SurveyKind kind);
 
     /// <summary>Zapisuje odpowiedzi; zwraca błędy walidacji (pusta lista = zapisano). Powiadamia trenera.</summary>
+    /// <param name="healthDataConsent">Wyraźna zgoda na dane o zdrowiu — wymagana dla ankiety zdrowotnej.</param>
     Task<(List<string> Errors, SurveyResponseDto? Response)> SubmitAsync(
-        int clientId, SurveyKind kind, IReadOnlyDictionary<string, SurveyAnswerInput> answers, DateOnly? workoutDate = null);
+        int clientId, SurveyKind kind, IReadOnlyDictionary<string, SurveyAnswerInput> answers, DateOnly? workoutDate = null,
+        bool healthDataConsent = false);
+
+    /// <summary>Wycofanie zgody: usuwa ankiety zdrowotne klienta (art. 7 ust. 3 i art. 17 RODO).</summary>
+    Task WithdrawHealthConsentAsync(int clientId);
 
     Task<List<SurveyResponseDto>> GetResponsesAsync(int clientId, SurveyKind kind, int take = 60);
     Task<SurveyResponseDto?> GetLatestAsync(int clientId, SurveyKind kind);

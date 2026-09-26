@@ -24,4 +24,10 @@ public class SurveyResponse
 
     public DateTime? ReviewedAt { get; set; }
     public string? ReviewedByUserId { get; set; }
+
+    /// <summary>
+    /// Moment wyrażenia wyraźnej zgody na przetwarzanie danych o zdrowiu
+    /// (art. 9 ust. 2 lit. a RODO) — wymagany dla ankiety zdrowotnej.
+    /// </summary>
+    public DateTime? HealthDataConsentAt { get; set; }
 }

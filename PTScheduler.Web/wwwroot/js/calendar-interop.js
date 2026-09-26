@@ -37,7 +37,10 @@ export function initCalendar(dotnetRef, el, canEdit) {
             month: 'Miesiąc',
             week: 'Tydzień',
             day: 'Dzień',
-            list: 'Lista'
+            // Klucze per widok mają pierwszeństwo przed ogólnym „list” —
+            // bez nich oba przyciski listy na telefonie miały podpis „Lista”.
+            listDay: 'Dzień',
+            listWeek: 'Tydzień'
         },
         views: {
             listDay: { buttonText: 'Dzień' },

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -69,6 +70,30 @@ public class SurveyTests
     }
 
     [Fact]
+    public async Task Submit_Health_Without_Consent_Is_Rejected_And_Withdraw_Deletes()
+    {
+        var (f, _) = TestDb.CreateFresh();
+        await using (var seed = f.CreateDbContext())
+        {
+            seed.Clients.Add(new Client { Id = 1, ApplicationUserId = "cu", FirstName = "Anna", LastName = "Nowak", TrainerUserId = "t1" });
+            await seed.SaveChangesAsync();
+        }
+        var svc = new SurveyService(f, new Mock<IWebPushService>().Object,
+            TestClock.AtWallClock(new DateTime(2026, 6, 30, 12, 0, 0)), NullLogger<SurveyService>.Instance);
+
+        var (errors, _) = await svc.SubmitAsync(1, SurveyKind.HealthIntake, ValidHealth(heart: false));
+        errors.Should().ContainSingle().Which.Should().Contain("zgodę");
+
+        var (ok, _) = await svc.SubmitAsync(1, SurveyKind.HealthIntake, ValidHealth(heart: false), healthDataConsent: true);
+        ok.Should().BeEmpty();
+        await using (var db = f.CreateDbContext())
+            (await db.SurveyResponses.SingleAsync()).HealthDataConsentAt.Should().NotBeNull();
+
+        await svc.WithdrawHealthConsentAsync(1);
+        (await svc.GetLatestAsync(1, SurveyKind.HealthIntake)).Should().BeNull();
+    }
+
+    [Fact]
     public async Task Submit_Health_Notifies_Trainer_And_Marks_Pending_Done()
     {
         var (f, _) = TestDb.CreateFresh();
@@ -81,7 +106,7 @@ public class SurveyTests
         var svc = new SurveyService(f, push.Object, TestClock.AtWallClock(new DateTime(2026, 6, 30, 12, 0, 0)), NullLogger<SurveyService>.Instance);
 
         (await svc.IsHealthSurveyPendingAsync(1)).Should().BeTrue();
-        var (errors, response) = await svc.SubmitAsync(1, SurveyKind.HealthIntake, ValidHealth(heart: true));
+        var (errors, response) = await svc.SubmitAsync(1, SurveyKind.HealthIntake, ValidHealth(heart: true), healthDataConsent: true);
 
         errors.Should().BeEmpty();
         response!.FlagCount.Should().Be(1);

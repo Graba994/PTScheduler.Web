@@ -8,6 +8,7 @@
 @inject AuthenticationStateProvider AuthStateProvider
 @inject Microsoft.EntityFrameworkCore.IDbContextFactory<ApplicationDbContext> DbFactory
 @inject IJSRuntime JS
+@inject ISurveyService Surveys
 @using Microsoft.AspNetCore.Identity
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Application.DTOs
@@ -31,10 +32,27 @@ else
 {
     <div class="page-header mb-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
         <h4 class="page-title mb-0"><i class="bi bi-person-circle me-2" style="color:var(--c-primary)"></i>Mój profil</h4>
-        <a href="/my/survey/zdrowie?returnUrl=%2Fmy%2Fprofile" class="btn btn-sm btn-outline-primary">
-            <i class="bi bi-clipboard2-pulse me-1"></i>Ankieta zdrowotna
-        </a>
+        <div class="d-flex gap-2 flex-wrap">
+            <a href="/my/survey/zdrowie?returnUrl=%2Fmy%2Fprofile" class="btn btn-sm btn-outline-primary">
+                <i class="bi bi-clipboard2-pulse me-1"></i>Ankieta zdrowotna
+            </a>
+            @if (!_confirmWithdraw)
+            {
+                <button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmWithdraw = true">
+                    Wycofaj zgodę na dane o zdrowiu
+                </button>
+            }
+            else
+            {
+                <button class="btn btn-sm btn-danger" @onclick="WithdrawConsentAsync">Tak, usuń moją ankietę zdrowotną</button>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmWithdraw = false">Anuluj</button>
+            }
+        </div>
     </div>
+    @if (_withdrawn)
+    {
+        <div class="alert alert-success small py-2">Zgoda wycofana — ankieta zdrowotna została usunięta.</div>
+    }
 
     <!-- Stat bar -->
     <div class="row g-2 mb-4">
@@ -239,6 +257,16 @@ else
 @code {
     private bool _loading = true;
     private ClientDto? _client;
+    private bool _confirmWithdraw;
+    private bool _withdrawn;
+
+    private async Task WithdrawConsentAsync()
+    {
+        if (_client is null) return;
+        await Surveys.WithdrawHealthConsentAsync(_client.Id);
+        _confirmWithdraw = false;
+        _withdrawn = true;
+    }
     private ApplicationUser? _trainer;
     private string _trainerFullName = string.Empty;
     private string _trainerInitials = "?";

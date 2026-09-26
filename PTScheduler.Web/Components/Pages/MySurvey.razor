@@ -59,6 +59,7 @@
                     }
                     <SurveyForm Template="_template" Submit="SubmitAsync" Initial="_initial"
                                 SubmitLabel="Wyślij ankietę" ShowNumbers="@(_kind == SurveyKind.HealthIntake)"
+                                ConsentText="@(_kind == SurveyKind.HealthIntake ? HealthConsentText : null)"
                                 OnSkip="@(_kind == SurveyKind.PostWorkout ? EventCallback.Factory.Create(this, Skip) : default)" />
                 </div>
             </div>
@@ -68,6 +69,11 @@
 
 @code {
     [Parameter] public string Slug { get; set; } = string.Empty;
+
+    private const string HealthConsentText =
+        "Wyrażam zgodę na przetwarzanie podanych przeze mnie danych o stanie zdrowia przez mojego trenera " +
+        "w celu bezpiecznego zaplanowania treningów (art. 9 ust. 2 lit. a RODO). Zgodę mogę w każdej chwili " +
+        "wycofać w swoim profilu — ankieta zostanie wtedy usunięta.";
     [SupplyParameterFromQuery(Name = "date")] public string? DateQuery { get; set; }
     [SupplyParameterFromQuery(Name = "returnUrl")] public string? ReturnUrlQuery { get; set; }
 
@@ -118,7 +124,9 @@
 
     private async Task<List<string>> SubmitAsync(Dictionary<string, SurveyAnswerInput> answers)
     {
-        var (errors, _) = await Surveys.SubmitAsync(_clientId, _kind, answers, _workoutDate);
+        // Formularz nie pozwala wysłać ankiety zdrowotnej bez zaznaczenia zgody.
+        var (errors, _) = await Surveys.SubmitAsync(_clientId, _kind, answers, _workoutDate,
+            healthDataConsent: _kind == SurveyKind.HealthIntake);
         if (errors.Count == 0) _done = true;
         return errors;
     }

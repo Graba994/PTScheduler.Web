@@ -102,8 +102,17 @@
         </div>
     }
 
+    @if (!string.IsNullOrEmpty(ConsentText))
+    {
+        <div class="form-check survey-consent mb-3">
+            <input class="form-check-input" type="checkbox" id="survey-consent" @bind="_consent" />
+            <label class="form-check-label small" for="survey-consent">@ConsentText</label>
+        </div>
+    }
+
     <div class="d-flex gap-2 flex-wrap">
-        <button type="button" class="btn btn-primary flex-grow-1" @onclick="SubmitAsync" disabled="@_busy">
+        <button type="button" class="btn btn-primary flex-grow-1" @onclick="SubmitAsync"
+                disabled="@(_busy || (!string.IsNullOrEmpty(ConsentText) && !_consent))">
             @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> }
             <i class="bi bi-check2-circle me-1"></i>@SubmitLabel
         </button>
@@ -123,6 +132,9 @@
     [Parameter] public EventCallback OnSkip { get; set; }
     [Parameter] public bool ShowIntro { get; set; } = true;
     [Parameter] public bool ShowNumbers { get; set; }
+    /// <summary>Tekst zgody wymaganej przed wysłaniem (np. na dane o zdrowiu). Pusty = brak.</summary>
+    [Parameter] public string? ConsentText { get; set; }
+    private bool _consent;
 
     private Dictionary<string, SurveyAnswerInput> _answers = [];
     private List<string> _errors = [];

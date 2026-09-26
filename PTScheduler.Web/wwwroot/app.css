@@ -1574,7 +1574,9 @@ a.nav-link.active { /* kept for compat */ }
 
 /* --- Body: calendar + slide panel --- */
 .cal-body { display: flex; gap: 1rem; align-items: flex-start; flex: 1; min-height: 0; }
-.cal-main  { flex: 1; min-width: 0; min-height: 0; }
+/* width:100% — na telefonie .cal-body przechodzi w kolumnę z align-items:flex-start
+   i kalendarz dostawał szerokość treści (wychodził poza ekran). */
+.cal-main  { flex: 1; min-width: 0; min-height: 0; width: 100%; }
 
 /* Panel: animates in; removed from DOM on close (no Blazor @if trick needed) */
 .cal-panel {
@@ -1707,6 +1709,17 @@ a.nav-link.active { /* kept for compat */ }
         font-size: .7rem !important;
         padding: .25rem .6rem !important;
     }
+
+    /* Widok listy: tabela o stałym układzie, zawijana godzina i skracane nazwy —
+       inaczej długie imię klienta wypychało kafelek poza ekran. */
+    .fc .fc-list-table { table-layout: fixed; width: 100%; }
+    .fc .fc-list-event-time { width: 64px; white-space: normal !important; font-size: .78rem; line-height: 1.2; }
+    .fc .fc-list-event-graphic { width: 14px; padding-left: .25rem !important; padding-right: .25rem !important; }
+    .fc .fc-list-event-title { width: auto; min-width: 0; overflow: hidden; }
+    .fc .fc-list-event .fc-event-card { min-width: 0; max-width: 100%; }
+    .fc .fc-event-info { min-width: 0; overflow: hidden; }
+    .fc .fc-event-client, .fc .fc-event-type { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+    .fc .fc-list-day-cushion { white-space: normal; }
 
     /* Filter chips — smaller on mobile */
     .cal-filter-chip {
@@ -2839,3 +2852,8 @@ body:has(.cookie-banner) .pwa-banner { display: none; }
 }
 .health-gate-card { width: min(420px, 100%); border-radius: 18px; }
 .exercise-steps li { margin-bottom: .35rem; }
+
+/* FocusOnNavigate przenosi fokus na pierwszy nagłówek (dla czytników ekranu).
+   Nagłówek nie jest interaktywny — bez pomarańczowej ramki po każdej nawigacji. */
+h1[tabindex="-1"]:focus, h2[tabindex="-1"]:focus, h3[tabindex="-1"]:focus,
+h4[tabindex="-1"]:focus, h5[tabindex="-1"]:focus, h6[tabindex="-1"]:focus { outline: none; box-shadow: none; }
