@@ -22,3 +22,25 @@
     });
     document.addEventListener('keydown', function (e) { if (e.key === 'Escape') window.ptNav.close(); });
 })();
+
+// Zegar w pasku statusu panelu — liczony w przeglądarce, więc nie obciąża serwera.
+(function () {
+    var fmtDate = new Intl.DateTimeFormat('pl-PL', { weekday: 'short', day: 'numeric', month: 'short' });
+    var fmtTime = new Intl.DateTimeFormat('pl-PL', { hour: '2-digit', minute: '2-digit' });
+    function tick() {
+        var now = new Date();
+        var text = fmtTime.format(now) + ' · ' + fmtDate.format(now);
+        document.querySelectorAll('[data-pt-clock]').forEach(function (el) {
+            if (el.textContent !== text) el.textContent = text;
+        });
+    }
+    tick();
+    setInterval(tick, 5000);
+    document.addEventListener('DOMContentLoaded', tick);
+    if (window.MutationObserver) {
+        new MutationObserver(function () {
+            var el = document.querySelector('[data-pt-clock]');
+            if (el && !el.textContent) tick();
+        }).observe(document.documentElement, { childList: true, subtree: true });
+    }
+})();

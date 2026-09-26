@@ -75,6 +75,7 @@ builder.Services.AddScoped<StorePaymentService>();
 builder.Services.AddScoped<BackupService>();
 builder.Services.AddHostedService<BackupScheduler>();
 builder.Services.AddSingleton<UpdateNotifier>();
+builder.Services.AddSingleton<PanelStatusService>();
 builder.Services.AddHostedService<UpdatePollerService>();
 builder.Services.AddHostedService<TrialExpirationService>();
 builder.Services.AddHostedService<HealthMonitorService>();
