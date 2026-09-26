@@ -115,6 +115,13 @@ public class TenantService(
             var plan = await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == tenant.PlanId);
             var entitlementsJson = plan is null ? null : SerializePlan(plan);
 
+            // Każda nowa instancja dostaje własny sekret wywołań Portal ↔ tenant.
+            if (string.IsNullOrEmpty(tenant.InternalSecret))
+            {
+                tenant.InternalSecret = TenantSecrets.New();
+                await db.SaveChangesAsync();
+            }
+
             await docker.ProvisionTenantAsync(
                 tenant.Slug,
                 tenant.DbPassword,
@@ -123,7 +130,7 @@ public class TenantService(
                 tenant.Domain,
                 entitlementsJson,
                 PortalUrl,
-                InternalSecret);
+                tenant.InternalSecret);
 
             tenant.Status = TenantStatus.Active;
             tenant.ProvisionedAt = DateTime.UtcNow;
@@ -279,7 +286,8 @@ public class TenantService(
 
     private async Task<bool> PushEntitlementsAsync(Tenant tenant, Plan plan)
     {
-        if (string.IsNullOrEmpty(InternalSecret) || tenant.Port <= 0) return false;
+        var secret = TenantSecrets.For(tenant, config);
+        if (string.IsNullOrEmpty(secret) || tenant.Port <= 0) return false;
         try
         {
             using var req = new HttpRequestMessage(HttpMethod.Post,
@@ -287,7 +295,7 @@ public class TenantService(
             {
                 Content = new StringContent(SerializePlan(plan), System.Text.Encoding.UTF8, "application/json")
             };
-            req.Headers.Add("X-Internal-Secret", InternalSecret);
+            req.Headers.Add("X-Internal-Secret", secret);
             using var resp = await PushClient.SendAsync(req);
             if (resp.IsSuccessStatusCode) return true;
             logger.LogWarning("Entitlements push to tenant {Slug} returned {Status}", tenant.Slug, (int)resp.StatusCode);
@@ -318,6 +326,34 @@ public class TenantService(
             : (false, $"Synchronizacja nie powiodła się: {error}");
     }
 
+    /// <summary>
+    /// Nadaje instancji własny sekret (albo go rotuje) i wgrywa go do kontenera web razem
+    /// z adresem Portalu — kontener jest odtwarzany z tą samą konfiguracją, więc działa
+    /// także dla instancji zaimportowanych. Naprawia „HTTP 404” metryk i konta admina
+    /// u instancji utworzonych przed wprowadzeniem sekretów.
+    /// </summary>
+    public async Task<(bool Success, string Message)> SyncInternalSecretAsync(int tenantId, bool rotate = false)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var tenant = await db.Tenants.FindAsync(tenantId)
+            ?? throw new InvalidOperationException("Tenant not found.");
+
+        var secret = rotate || string.IsNullOrEmpty(tenant.InternalSecret) ? TenantSecrets.New() : tenant.InternalSecret;
+        var container = tenant.WebContainerName ?? $"pt-{tenant.Slug}-web";
+        var (ok, error) = await docker.RecreateWithEnvAsync(container, new Dictionary<string, string>
+        {
+            ["TENANT_INTERNAL_SECRET"] = secret,
+            ["TENANT_SLUG"] = tenant.Slug,
+            ["PORTAL_URL"] = PortalUrl
+        });
+        if (!ok) return (false, $"Nie udało się odtworzyć kontenera {container}: {error}");
+
+        tenant.InternalSecret = secret;
+        db.TenantEvents.Add(new TenantEvent { TenantId = tenant.Id, EventType = "secret_synced", Detail = rotate ? "rotated" : "synced" });
+        await db.SaveChangesAsync();
+        return (true, "Sekret zsynchronizowany — kontener uruchamia się ponownie (ok. 30 s).");
+    }
+
     public async Task<(bool Success, string Message)> ReprovisionWebAsync(int tenantId)
     {
         await using var db = dbFactory.CreateDbContext();
@@ -330,10 +366,15 @@ public class TenantService(
         try
         {
             var entitlements = SerializePlan(plan);
+            if (string.IsNullOrEmpty(tenant.InternalSecret))
+            {
+                tenant.InternalSecret = TenantSecrets.New();
+                await db.SaveChangesAsync();
+            }
             await docker.RecreateWebContainerAsync(
                 tenant.Slug, tenant.DbPassword, tenant.Port,
                 TenantImage, tenant.Domain, entitlements,
-                PortalUrl, InternalSecret);
+                PortalUrl, tenant.InternalSecret);
             return (true, $"Web container '{tenant.WebContainerName}' zrestartowany z nowym planem '{plan.Name}'.");
         }
         catch (Exception ex)

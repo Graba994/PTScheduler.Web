@@ -11,6 +11,10 @@ public class Tenant
     public string OwnerEmail { get; set; } = string.Empty;
     public string? Phone { get; set; }
     public string DbPassword { get; set; } = string.Empty;
+
+    /// <summary>Sekret wywołań Portal ↔ ta instancja (null = wspólny sekret, instancje sprzed tej zmiany).</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? InternalSecret { get; set; }
     public TenantStatus Status { get; set; } = TenantStatus.Pending;
     public string PlanId { get; set; } = "start";
     public string? SetupMode { get; set; }
@@ -24,6 +28,8 @@ public class Tenant
 
     // Lifecycle management
     public DateTime? LastActivityAt { get; set; }
+    /// <summary>Kiedy ostatnio udało się odczytać aktywność — bez świeżego odczytu nie zawieszamy za bezczynność.</summary>
+    public DateTime? LastActivityCheckedAt { get; set; }
     public DateTime? GraceUntil { get; set; }
 
     // Stripe subscription lifecycle

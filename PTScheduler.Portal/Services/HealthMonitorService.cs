@@ -58,10 +58,13 @@ public class HealthMonitorService(
             {
                 try
                 {
-                    var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+                    var secret = TenantSecrets.For(t, config);
                     var activityDate = await FetchLastActivityAsync(forwardHost, t.Port, secret, ct);
                     if (activityDate.HasValue)
+                    {
                         t.LastActivityAt = activityDate.Value;
+                        t.LastActivityCheckedAt = DateTime.UtcNow;
+                    }
                 }
                 catch (Exception ex)
                 {

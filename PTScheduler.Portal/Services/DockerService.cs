@@ -321,6 +321,84 @@ public class DockerService : IDisposable
         return (false, lastError?.Message ?? "Nieznany błąd synchronizacji hasła.");
     }
 
+    /// <summary>
+    /// Odtwarza kontener z tymi samymi ustawieniami (obraz, wolumeny, porty, sieci,
+    /// polityka restartu), zmieniając tylko wskazane zmienne środowiskowe. Działa też dla
+    /// kontenerów zaimportowanych, których Portal nie tworzył. Przy błędzie przywraca
+    /// poprzedni kontener.
+    /// </summary>
+    public async Task<(bool Success, string? Error)> RecreateWithEnvAsync(string containerName, IDictionary<string, string> setEnv)
+    {
+        ContainerInspectResponse src;
+        try { src = await _client.Containers.InspectContainerAsync(containerName); }
+        catch (Exception ex) { return (false, $"Nie znaleziono kontenera {containerName}: {ex.Message}"); }
+
+        var env = (src.Config.Env ?? [])
+            .Where(e => !setEnv.Keys.Any(k => e.StartsWith(k + "=", StringComparison.Ordinal)))
+            .Concat(setEnv.Select(kv => $"{kv.Key}={kv.Value}"))
+            .ToList();
+
+        var hostConfig = new HostConfig
+        {
+            Binds = src.HostConfig.Binds,
+            Mounts = src.HostConfig.Mounts,
+            NetworkMode = src.HostConfig.NetworkMode ?? "bridge",
+            RestartPolicy = src.HostConfig.RestartPolicy ?? new RestartPolicy { Name = RestartPolicyKind.UnlessStopped },
+            PortBindings = src.HostConfig.PortBindings,
+            ExtraHosts = src.HostConfig.ExtraHosts,
+            LogConfig = src.HostConfig.LogConfig
+        };
+        var extraNetworks = (src.NetworkSettings?.Networks ?? new Dictionary<string, EndpointSettings>())
+            .Where(n => n.Key != hostConfig.NetworkMode)
+            .ToList();
+
+        var backupName = $"{containerName}-old-{DateTime.UtcNow:yyyyMMddHHmmss}";
+        var wasRunning = src.State?.Running == true;
+        try { await _client.Containers.StopContainerAsync(src.ID, new ContainerStopParameters { WaitBeforeKillSeconds = 20 }); } catch { /* już zatrzymany */ }
+        await _client.Containers.RenameContainerAsync(src.ID, new ContainerRenameParameters { NewName = backupName }, CancellationToken.None);
+
+        string? newId = null;
+        try
+        {
+            var created = await _client.Containers.CreateContainerAsync(new CreateContainerParameters
+            {
+                Name = containerName,
+                Image = src.Config.Image,
+                Env = env,
+                ExposedPorts = src.Config.ExposedPorts,
+                Labels = src.Config.Labels,
+                HostConfig = hostConfig
+            });
+            newId = created.ID;
+            foreach (var (network, endpoint) in extraNetworks)
+            {
+                await _client.Networks.ConnectNetworkAsync(network, new NetworkConnectParameters
+                {
+                    Container = newId,
+                    EndpointConfig = new EndpointSettings { Aliases = endpoint.Aliases }
+                });
+            }
+            await _client.Containers.StartContainerAsync(newId, new ContainerStartParameters());
+            await _client.Containers.RemoveContainerAsync(src.ID, new ContainerRemoveParameters { Force = true });
+            return (true, null);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Odtworzenie kontenera {Container} nie powiodło się — przywracam poprzedni.", containerName);
+            if (newId is not null)
+            {
+                try { await _client.Containers.RemoveContainerAsync(newId, new ContainerRemoveParameters { Force = true }); } catch { /* sprzątanie */ }
+            }
+            try
+            {
+                await _client.Containers.RenameContainerAsync(src.ID, new ContainerRenameParameters { NewName = containerName }, CancellationToken.None);
+                if (wasRunning) await _client.Containers.StartContainerAsync(src.ID, new ContainerStartParameters());
+            }
+            catch (Exception restoreEx) { _logger.LogError(restoreEx, "Nie udało się przywrócić kontenera {Container}.", containerName); }
+            return (false, ex.Message);
+        }
+    }
+
     public async Task<ContainerInspectResponse?> InspectAsync(string containerName)
     {
         try { return await _client.Containers.InspectContainerAsync(containerName); }

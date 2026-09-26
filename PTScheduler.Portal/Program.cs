@@ -391,11 +391,9 @@ app.MapGet("/api/internal/tenants/{slug}/entitlements", async (
     IDbContextFactory<PortalDbContext> dbFactory,
     IConfiguration config) =>
 {
-    if (!InternalAuth.IsAuthorized(ctx, config)) return Results.Unauthorized();
-
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
-    if (tenant is null) return Results.NotFound();
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
     var plan = await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == tenant.PlanId);
     if (plan is null) return Results.NotFound();
     return Results.Content(TenantService.SerializePlan(plan), "application/json");
@@ -409,12 +407,10 @@ app.MapPost("/api/internal/tenants/{slug}/feedback", async (
     IDbContextFactory<PortalDbContext> dbFactory,
     IConfiguration config) =>
 {
-    if (!InternalAuth.IsAuthorized(ctx, config)) return Results.Unauthorized();
-    if (body.Rating is < 1 or > 5) return Results.BadRequest();
-
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
-    if (tenant is null) return Results.NotFound();
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    if (body.Rating is < 1 or > 5) return Results.BadRequest();
 
     static string? Clip(string? v, int max) => string.IsNullOrWhiteSpace(v) ? null : v.Trim()[..Math.Min(v.Trim().Length, max)];
     db.AppFeedbacks.Add(new AppFeedback
@@ -440,11 +436,9 @@ app.MapGet("/api/store/{slug}", async (
     IConfiguration config,
     StorePaymentService storePayment) =>
 {
-    if (!InternalAuth.IsAuthorized(ctx, config)) return Results.Unauthorized();
-
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
-    if (tenant is null) return Results.NotFound();
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
 
     var items = await db.ServiceItems.AsNoTracking()
         .Where(s => s.IsActive)
@@ -483,11 +477,9 @@ app.MapPost("/api/store/{slug}/order", async (
     SiteSettingsService siteSettings,
     ILoggerFactory loggerFactory) =>
 {
-    if (!InternalAuth.IsAuthorized(ctx, config)) return Results.Unauthorized();
-
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
-    if (tenant is null) return Results.NotFound();
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
 
     using var reader = new StreamReader(ctx.Request.Body);
     var body = await reader.ReadToEndAsync();
@@ -604,11 +596,9 @@ app.MapGet("/api/credits/{slug}", async (
     IConfiguration config,
     CreditService creditService) =>
 {
-    if (!InternalAuth.IsAuthorized(ctx, config)) return Results.Unauthorized();
-
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
-    if (tenant is null) return Results.NotFound();
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
 
     var balances = await creditService.GetBalancesAsync(tenant.Id);
 
@@ -636,11 +626,9 @@ app.MapPost("/api/credits/{slug}/sms/send", async (
     IConfiguration config,
     CreditService creditService) =>
 {
-    if (!InternalAuth.IsAuthorized(ctx, config)) return Results.Unauthorized();
-
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
-    if (tenant is null) return Results.NotFound();
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
 
     using var reader = new StreamReader(ctx.Request.Body);
     var body = await reader.ReadToEndAsync();
@@ -669,11 +657,9 @@ app.MapPost("/api/credits/{slug}/sms/test", async (
     IConfiguration config,
     SiteSettingsService settingsService) =>
 {
-    if (!InternalAuth.IsAuthorized(ctx, config)) return Results.Unauthorized();
-
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
-    if (tenant is null) return Results.NotFound();
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
 
     var token = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformSmsApiToken);
     if (string.IsNullOrWhiteSpace(token))
@@ -736,11 +722,9 @@ app.MapGet("/api/credits/{slug}/bunny", async (
     IConfiguration config,
     SiteSettingsService settingsService) =>
 {
-    if (!InternalAuth.IsAuthorized(ctx, config)) return Results.Unauthorized();
-
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
-    if (tenant is null) return Results.NotFound();
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
 
     var apiKey = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformBunnyApiKey);
     var libraryId = await settingsService.GetAsync(SiteSettingsService.Keys.PlatformBunnyLibraryId);
@@ -770,12 +754,11 @@ record AppFeedbackRequest(int Rating, string? Text, string? ContactEmail, string
 
 static class InternalAuth
 {
-    public static bool IsAuthorized(HttpContext ctx, IConfiguration config)
-    {
-        var secret = config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
-        if (string.IsNullOrEmpty(secret)) return false;
-        var provided = ctx.Request.Headers["X-Internal-Secret"].ToString();
-        return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
-            System.Text.Encoding.UTF8.GetBytes(provided), System.Text.Encoding.UTF8.GetBytes(secret));
-    }
+    /// <summary>
+    /// Wywołanie tenant → Portal: sekret konkretnej instancji, a dla instancji sprzed
+    /// sekretów per tenant — wspólny sekret platformy. Dzięki temu przejęty kontener
+    /// jednego trenera nie podszyje się pod innego (SMS-y, klucze wideo, zamówienia).
+    /// </summary>
+    public static bool IsAuthorizedFor(HttpContext ctx, Tenant tenant, IConfiguration config) =>
+        TenantSecrets.Matches(ctx.Request.Headers["X-Internal-Secret"].ToString(), TenantSecrets.For(tenant, config));
 }

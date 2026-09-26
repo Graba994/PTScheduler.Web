@@ -9,6 +9,7 @@
 @inject IModuleSettingsService ModuleSettings
 @inject ISetupService SetupService
 @inject IReviewService ReviewService
+@inject ICourseService CourseService
 @inject NavigationManager Nav
 
 <PageTitle>@_companyName — trening personalny i mentoring</PageTitle>
@@ -148,7 +149,8 @@
                                 <div class="wp-card-icon"><i class="bi bi-mortarboard"></i></div>
                                 <h3>@_content.CoursesCardTitle</h3>
                                 <p>@_content.CoursesCardText</p>
-                                @if (_content.CoursesComingSoon)
+                                @* „Wkrótce” tylko dopóki nie ma żadnego opublikowanego kursu. *@
+                                @if (_content.CoursesComingSoon && !_hasPublishedCourses)
                                 {
                                     <span class="wp-link wp-soon"><i class="bi bi-hourglass-split"></i> Wkrótce</span>
                                 }
@@ -487,6 +489,7 @@
     }
 
     private PTScheduler.Application.Marketing.PublicReviewsDto _reviews = new();
+    private bool _hasPublishedCourses;
 
     private string RevealCls => _content.Animations ? "wp-reveal" : "";
 
@@ -530,6 +533,9 @@
         catch { }
 
         try { _reviews = await ReviewService.GetPublicAsync(); }
+        catch { }
+
+        try { _hasPublishedCourses = _coursesEnabled && (await CourseService.GetCoursesAsync(includeUnpublished: false)).Count > 0; }
         catch { }
     }
 }

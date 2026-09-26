@@ -191,6 +191,25 @@ else
                     <p class="text-muted small mb-0 mt-1">
                         <i class="bi bi-info-circle me-1"></i>Użyj tego jeśli web zwraca "password authentication failed" po ręcznej ingerencji w kontenery.
                     </p>
+
+                    <hr class="my-3" />
+                    <h6 class="fw-bold mb-2 small text-muted"><i class="bi bi-shield-lock me-1"></i>Sekret połączenia z Portalem</h6>
+                    @if (string.IsNullOrEmpty(_tenant.InternalSecret))
+                    {
+                        <p class="small text-warning mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Wspólny sekret platformy (instancja sprzed zmiany). Nadaj własny — przejęcie innej instancji nie da wtedy dostępu do tej.</p>
+                        <button class="btn btn-sm btn-warning" @onclick="() => SyncSecret(false)" disabled="@_syncingSecret">
+                            @if (_syncingSecret) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            <i class="bi bi-key me-1"></i>Nadaj własny sekret
+                        </button>
+                    }
+                    else
+                    {
+                        <p class="small text-success mb-2"><i class="bi bi-check-circle me-1"></i>Własny sekret instancji.</p>
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => SyncSecret(true)" disabled="@_syncingSecret">
+                            @if (_syncingSecret) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            <i class="bi bi-arrow-repeat me-1"></i>Wygeneruj nowy sekret
+                        </button>
+                    }
                 </div>
             </div>
         </div>
@@ -258,7 +277,16 @@ else
                     else if (_adminError is not null)
                     {
                         <p class="text-danger small mb-1">@_adminError</p>
-                        <button class="btn btn-sm btn-outline-primary" @onclick="LoadAdminInfo">Spróbuj ponownie</button>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <button class="btn btn-sm btn-outline-primary" @onclick="LoadAdminInfo">Spróbuj ponownie</button>
+                            @if (_secretMismatch)
+                            {
+                                <button class="btn btn-sm btn-warning" @onclick="() => SyncSecret(false)" disabled="@_syncingSecret">
+                                    @if (_syncingSecret) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                    <i class="bi bi-key me-1"></i>Zsynchronizuj sekret
+                                </button>
+                            }
+                        </div>
                     }
                     else
                     {
@@ -526,7 +554,16 @@ else
                     else if (_metricsError is not null)
                     {
                         <p class="text-danger small mb-1">@_metricsError</p>
-                        <button class="btn btn-sm btn-outline-primary" @onclick="LoadMetrics">Spróbuj ponownie</button>
+                        <div class="d-flex gap-2 flex-wrap">
+                            <button class="btn btn-sm btn-outline-primary" @onclick="LoadMetrics">Spróbuj ponownie</button>
+                            @if (_secretMismatch)
+                            {
+                                <button class="btn btn-sm btn-warning" @onclick="() => SyncSecret(false)" disabled="@_syncingSecret">
+                                    @if (_syncingSecret) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                    <i class="bi bi-key me-1"></i>Zsynchronizuj sekret
+                                </button>
+                            }
+                        </div>
                     }
                     else
                     {
@@ -999,6 +1036,42 @@ else
     private static string Mask(string s) =>
         string.IsNullOrEmpty(s) ? "—" : new string('•', Math.Min(s.Length, 24));
 
+    private bool _secretMismatch;
+    private bool _syncingSecret;
+
+    // Instancja odpowiada 404/401 na wywołania wewnętrzne, gdy nie zna sekretu Portalu
+    // (kontener sprzed wprowadzenia sekretów albo zaimportowany).
+    private string DescribeInternalError(System.Net.HttpStatusCode code)
+    {
+        if (code is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.Unauthorized or System.Net.HttpStatusCode.Forbidden)
+        {
+            _secretMismatch = true;
+            return "Aplikacja trenera nie zna sekretu Portalu (kontener sprzed aktualizacji albo zaimportowany). Zsynchronizuj sekret — kontener zostanie odtworzony z tą samą konfiguracją.";
+        }
+        return $"HTTP {(int)code}";
+    }
+
+    private async Task SyncSecret(bool rotate)
+    {
+        if (_tenant is null) return;
+        _syncingSecret = true;
+        try
+        {
+            var (ok, msg) = await TenantSvc.SyncInternalSecretAsync(_tenant.Id, rotate);
+            ShowMessage(msg, !ok);
+            if (ok)
+            {
+                _secretMismatch = false;
+                _tenant = await TenantSvc.GetAsync(_tenant.Id) ?? _tenant;
+                await Task.Delay(TimeSpan.FromSeconds(20));
+                await LoadAdminInfo();
+                await LoadMetrics();
+            }
+        }
+        catch (Exception ex) { ShowMessage($"Błąd: {ex.Message}", true); }
+        _syncingSecret = false;
+    }
+
     private async Task SyncPassword()
     {
         if (_tenant is null) return;
@@ -1133,13 +1206,13 @@ else
         try
         {
             var forwardHost = Config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220";
-            var secret = Config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+            var secret = PTScheduler.Portal.Services.TenantSecrets.For(_tenant, Config);
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             using var req = new HttpRequestMessage(HttpMethod.Get, $"http://{forwardHost}:{_tenant.Port}/internal/metrics");
             if (!string.IsNullOrEmpty(secret))
                 req.Headers.Add("X-Internal-Secret", secret);
             var resp = await http.SendAsync(req);
-            if (!resp.IsSuccessStatusCode) { _metricsError = $"HTTP {(int)resp.StatusCode}"; return; }
+            if (!resp.IsSuccessStatusCode) { _metricsError = DescribeInternalError(resp.StatusCode); return; }
             var json = await resp.Content.ReadAsStringAsync();
             _metrics = System.Text.Json.JsonSerializer.Deserialize<TenantMetrics>(json,
                 new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
@@ -1168,13 +1241,13 @@ else
         try
         {
             var forwardHost = Config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220";
-            var secret = Config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+            var secret = PTScheduler.Portal.Services.TenantSecrets.For(_tenant, Config);
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             using var req = new HttpRequestMessage(HttpMethod.Get, $"http://{forwardHost}:{_tenant.Port}/internal/admin-info");
             if (!string.IsNullOrEmpty(secret))
                 req.Headers.Add("X-Internal-Secret", secret);
             var resp = await http.SendAsync(req);
-            if (!resp.IsSuccessStatusCode) { _adminError = $"HTTP {(int)resp.StatusCode}"; return; }
+            if (!resp.IsSuccessStatusCode) { _adminError = DescribeInternalError(resp.StatusCode); return; }
             var json = await resp.Content.ReadAsStringAsync();
             _adminInfo = System.Text.Json.JsonSerializer.Deserialize<AdminInfo>(json,
                 new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
@@ -1193,7 +1266,7 @@ else
         try
         {
             var forwardHost = Config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220";
-            var secret = Config.GetValue<string>("Portal:TenantInternalSecret") ?? "";
+            var secret = PTScheduler.Portal.Services.TenantSecrets.For(_tenant, Config);
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             using var req = new HttpRequestMessage(HttpMethod.Post, $"http://{forwardHost}:{_tenant.Port}/internal/admin-reset");
             if (!string.IsNullOrEmpty(secret))

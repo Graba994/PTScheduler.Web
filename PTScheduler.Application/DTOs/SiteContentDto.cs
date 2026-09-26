@@ -70,7 +70,7 @@ public class SiteContentDto
     public string CoursesCardTitle { get; set; } = "Kursy & mentoring";
     public string CoursesCardText { get; set; } =
         "Kursy online, lekcje wideo i materiały mentoringowe — dostępne dla Twoich klientów prosto z konta, z płatnościami online.";
-    public bool CoursesComingSoon { get; set; } = true;
+    public bool CoursesComingSoon { get; set; }
 
     public bool ShowPackagesCard { get; set; } = true;
     public string PackagesCardTitle { get; set; } = "Pakiety treningowe";

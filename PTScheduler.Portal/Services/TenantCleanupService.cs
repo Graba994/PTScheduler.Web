@@ -54,6 +54,14 @@ public class TenantCleanupService(
 
         foreach (var t in activeTenants)
         {
+            // Bez świeżego odczytu aktywności (np. instancja odrzuca sekret Portalu) nie wiemy,
+            // czy trener pracuje — nie ostrzegamy i nie zawieszamy na podstawie starych danych.
+            if (t.LastActivityCheckedAt is null || now - t.LastActivityCheckedAt.Value > TimeSpan.FromDays(2))
+            {
+                logger.LogWarning("Skipping inactivity check for tenant {Slug}: no fresh activity reading.", t.Slug);
+                continue;
+            }
+
             var inactiveDays = (int)(now - t.LastActivityAt!.Value).TotalDays;
 
             if (inactiveDays >= suspendDays)

@@ -78,5 +78,7 @@ public class Plan
     // ── Marketing ─────────────────────────────────
     public bool ReferralProgram { get; set; }
 
+    // Nigdy nie trafia do JSON-a uprawnień wysyłanego tenantom.
+    [System.Text.Json.Serialization.JsonIgnore]
     public ICollection<Tenant> Tenants { get; set; } = [];
 }
