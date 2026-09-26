@@ -15,6 +15,16 @@ public class MarketingSettingsDto
     public string? GoogleReviewUrl { get; set; }
     public int ReviewAskAfterSessions { get; set; } = 5;
 
+    public bool VouchersEnabled { get; set; }
+    public string VoucherAmounts { get; set; } = "100,200,300,500";
+    public int VoucherValidMonths { get; set; } = 12;
+
+    /// <summary>Kwoty bonów do wyboru (poprawne, dodatnie, bez powtórzeń).</summary>
+    public List<decimal> VoucherAmountList => VoucherAmounts
+        .Split(new[] { ',', ';', ' ' }, StringSplitOptions.RemoveEmptyEntries)
+        .Select(a => decimal.TryParse(a, System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : 0)
+        .Where(v => v > 0 && v <= 10000).Distinct().OrderBy(v => v).ToList();
+
     /// <summary>Opis nagrody dla polecającego, np. „1 darmowa sesja”, „kupon -20%”.</summary>
     public string RewardLabel => ReferrerRewardKind switch
     {

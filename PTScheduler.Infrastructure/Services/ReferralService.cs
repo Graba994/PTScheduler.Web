@@ -26,7 +26,10 @@ public class MarketingSettingsService(IDbContextFactory<ApplicationDbContext> db
             MaxRewardsPerClient = s.MaxRewardsPerClient,
             ReviewsEnabled = s.ReviewsEnabled,
             GoogleReviewUrl = s.GoogleReviewUrl,
-            ReviewAskAfterSessions = s.ReviewAskAfterSessions
+            ReviewAskAfterSessions = s.ReviewAskAfterSessions,
+            VouchersEnabled = s.VouchersEnabled,
+            VoucherAmounts = s.VoucherAmounts,
+            VoucherValidMonths = s.VoucherValidMonths
         };
     }
 
@@ -52,6 +55,12 @@ public class MarketingSettingsService(IDbContextFactory<ApplicationDbContext> db
         var url = dto.GoogleReviewUrl?.Trim();
         s.GoogleReviewUrl = Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Scheme == Uri.UriSchemeHttps ? url : null;
         s.ReviewAskAfterSessions = Math.Clamp(dto.ReviewAskAfterSessions, 1, 100);
+        s.VouchersEnabled = dto.VouchersEnabled;
+        var amounts = dto.VoucherAmountList;
+        s.VoucherAmounts = amounts.Count > 0
+            ? string.Join(",", amounts.Select(a => a.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture)))
+            : "100,200,300,500";
+        s.VoucherValidMonths = Math.Clamp(dto.VoucherValidMonths, 1, 36);
         await db.SaveChangesAsync();
     }
 }

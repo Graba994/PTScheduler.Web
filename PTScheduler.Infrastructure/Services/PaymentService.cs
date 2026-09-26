@@ -96,6 +96,27 @@ public class PaymentService(
         return await StartAsync(db, order, providerKey, offer.Name, appBaseUrl, buyerEmail, customerIp);
     }
 
+    public async Task<PaymentInitResult> StartGiftVoucherCheckoutAsync(string userId, int voucherId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var voucher = await db.GiftVouchers.FirstOrDefaultAsync(v => v.Id == voucherId && v.BuyerUserId == userId);
+        if (voucher is null || voucher.Status != GiftVoucherStatus.Pending) return new(false, null, "Nie znaleziono bonu do opłacenia.");
+        if (voucher.Value <= 0) return new(false, null, "Nieprawidłowa kwota bonu.");
+
+        // Bez kuponów: bonu nie da się opłacić innym bonem ani rabatem.
+        var order = new Order
+        {
+            ApplicationUserId = userId,
+            Kind = OrderKind.GiftVoucher,
+            GiftVoucherId = voucher.Id,
+            Amount = voucher.Value,
+            Currency = voucher.Currency,
+            Description = $"Bon podarunkowy: {voucher.Title}",
+            CreatedAt = DateTime.UtcNow
+        };
+        return await StartAsync(db, order, providerKey, $"Bon podarunkowy — {voucher.Title}", appBaseUrl, buyerEmail, customerIp);
+    }
+
     public async Task<PaymentInitResult> StartMembershipPeriodCheckoutAsync(string userId, int periodId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp)
     {
         await using var db = dbFactory.CreateDbContext();
@@ -333,7 +354,13 @@ public class PaymentService(
     {
         try
         {
-            var itemLabel = order.Kind == OrderKind.Course ? "kurs" : "pakiet";
+            var itemLabel = order.Kind switch
+            {
+                OrderKind.Course => "kurs",
+                OrderKind.Membership => "karnet",
+                OrderKind.GiftVoucher => "bon podarunkowy",
+                _ => "pakiet"
+            };
             var details = $"Kupujący: {order.ApplicationUserId}, kwota: {order.Amount:0.00} {order.Currency}, bramka: {order.Provider}"
                 + (order.CouponCode is not null ? $", kupon: {order.CouponCode}" : "");
             await auditLog.LogAsync(SystemUserId, SystemUserEmail, SystemRole, "OrderPaid", "Order", order.Id.ToString(),
@@ -360,6 +387,8 @@ public class PaymentService(
             await GrantCourseAsync(db, order, courseId);
         else if (order.Kind == OrderKind.Package && order.PackageOfferId is int offerId)
             await GrantPackageAsync(db, order, offerId);
+        else if (order.Kind == OrderKind.GiftVoucher && order.GiftVoucherId is int voucherId)
+            await GiftVoucherLedger.ActivateAsync(db, voucherId, clock.UtcNow);
     }
 
     private static async Task GrantCourseAsync(ApplicationDbContext db, Order order, int courseId)
@@ -444,7 +473,7 @@ public class PaymentService(
                 Id = o.Id,
                 ItemTitle = o.Kind == OrderKind.Package
                     ? (o.PackageOffer != null ? o.PackageOffer.Name : "Pakiet")
-                    : o.Kind == OrderKind.Membership
+                    : o.Kind == OrderKind.Membership || o.Kind == OrderKind.GiftVoucher
                         ? (o.Description ?? "Karnet")
                         : (o.Course != null ? o.Course.Title : "Kurs"),
                 Kind = o.Kind.ToString(),
@@ -472,7 +501,7 @@ public class PaymentService(
                 Id = o.Id,
                 ItemTitle = o.Kind == OrderKind.Package
                     ? (o.PackageOffer != null ? o.PackageOffer.Name : "Pakiet")
-                    : o.Kind == OrderKind.Membership
+                    : o.Kind == OrderKind.Membership || o.Kind == OrderKind.GiftVoucher
                         ? (o.Description ?? "Karnet")
                         : (o.Course != null ? o.Course.Title : "Kurs"),
                 Kind = o.Kind.ToString(),
@@ -500,7 +529,7 @@ public class PaymentService(
                 Id = o.Id,
                 ItemTitle = o.Kind == OrderKind.Package
                     ? (o.PackageOffer != null ? o.PackageOffer.Name : "Pakiet")
-                    : o.Kind == OrderKind.Membership
+                    : o.Kind == OrderKind.Membership || o.Kind == OrderKind.GiftVoucher
                         ? (o.Description ?? "Karnet")
                         : (o.Course != null ? o.Course.Title : "Kurs"),
                 Kind = o.Kind.ToString(),

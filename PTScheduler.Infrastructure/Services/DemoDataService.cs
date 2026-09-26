@@ -1160,7 +1160,8 @@ public class DemoDataService(
                 Enabled = true,
                 Sandbox = true,
                 Currency = "PLN",
-                ProvidersJson = """{"sim":{"enabled":true,"sandbox":true},"payu":{"enabled":true,"sandbox":true,"fields":{"posId":"300746","secondKey":"b6ca15b0d1020e8094f2b5571c1670c","clientId":"300746","clientSecret":"2ee86a66e5d97e3fadc400c9f19b065d"}},"p24":{"enabled":true,"sandbox":true,"fields":{"merchantId":"12345","crc":"demo-crc-key","apiKey":"demo-api-key"}}}"""
+                // Format listy — taki sam, jaki zapisuje ekran „Płatności” (PaymentSettingsService).
+                ProvidersJson = """[{"key":"sim","enabled":true,"sandbox":true,"fields":{}},{"key":"payu","enabled":true,"sandbox":true,"fields":{"posId":"300746","secondKey":"b6ca15b0d1020e8094f2b5571c1670c","clientId":"300746","clientSecret":"2ee86a66e5d97e3fadc400c9f19b065d"}},{"key":"p24","enabled":true,"sandbox":true,"fields":{"merchantId":"12345","crc":"demo-crc-key","apiKey":"demo-api-key"}}]"""
             });
         }
 

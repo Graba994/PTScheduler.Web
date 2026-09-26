@@ -27,7 +27,7 @@ public class PaymentSettingsService(IDbContextFactory<ApplicationDbContext> dbFa
         var stored = new List<PaymentProviderConfigDto>();
         if (!string.IsNullOrWhiteSpace(s.ProvidersJson))
         {
-            try { stored = JsonSerializer.Deserialize<List<PaymentProviderConfigDto>>(s.ProvidersJson, JsonOpts) ?? []; }
+            try { stored = ParseProviders(s.ProvidersJson); }
             catch { stored = []; }
         }
 
@@ -89,4 +89,25 @@ public class PaymentSettingsService(IDbContextFactory<ApplicationDbContext> dbFa
     }
 
     private static string? Trim(string? v) => string.IsNullOrWhiteSpace(v) ? null : v.Trim();
+
+    /// <summary>
+    /// Lista bramek. Starsze dane demo zapisywały słownik <c>{"payu": {...}}</c> —
+    /// odczytujemy oba formaty, żeby płatności nie znikały po cichu.
+    /// </summary>
+    internal static List<PaymentProviderConfigDto> ParseProviders(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            return JsonSerializer.Deserialize<List<PaymentProviderConfigDto>>(json, JsonOpts) ?? [];
+
+        var list = new List<PaymentProviderConfigDto>();
+        if (doc.RootElement.ValueKind != JsonValueKind.Object) return list;
+        foreach (var prop in doc.RootElement.EnumerateObject())
+        {
+            var cfg = prop.Value.Deserialize<PaymentProviderConfigDto>(JsonOpts) ?? new PaymentProviderConfigDto();
+            cfg.Key = prop.Name;
+            list.Add(cfg);
+        }
+        return list;
+    }
 }

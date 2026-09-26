@@ -358,6 +358,30 @@ app.MapGet("/r/{code}", async (
     return Results.Redirect("/");
 });
 
+// Bon podarunkowy w PDF: kupujący albo personel studia.
+app.MapGet("/vouchers/{id:int}/pdf", async (
+    int id,
+    PTScheduler.Application.Interfaces.IGiftVoucherService vouchers,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    HttpContext ctx) =>
+{
+    var u = ctx.User;
+    var isStaff = u.IsInRole(PTScheduler.Domain.Constants.Roles.Admin) || u.IsInRole(PTScheduler.Domain.Constants.Roles.Trainer)
+        || u.IsInRole(PTScheduler.Domain.Constants.Roles.Subordinate);
+    if (!isStaff)
+    {
+        var userId = u.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        await using var db = await dbFactory.CreateDbContextAsync();
+        if (!await db.GiftVouchers.AnyAsync(v => v.Id == id && v.BuyerUserId == userId)) return Results.NotFound();
+    }
+    try
+    {
+        var (bytes, fileName) = await vouchers.GeneratePdfAsync(id);
+        return Results.File(bytes, "application/pdf", fileName);
+    }
+    catch (InvalidOperationException) { return Results.NotFound(); }
+}).RequireAuthorization();
+
 // Zdjęcia sylwetki: pliki leżą w branding/_private (blokowanym dla plików statycznych),
 // więc jedyna droga do nich to ten endpoint — tylko dla klienta, jego trenera i admina.
 app.MapGet("/photos/{id:int}", async (

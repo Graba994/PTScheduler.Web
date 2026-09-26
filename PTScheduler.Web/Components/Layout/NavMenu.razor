@@ -51,7 +51,7 @@
         <NavLink class="sidebar-link" href="app" Match="NavLinkMatch.All">
             <i class="bi bi-house-fill"></i><span>Dashboard</span>
         </NavLink>
-        <NavLink class="sidebar-link" href="my">
+        <NavLink class="sidebar-link" href="my" Match="NavLinkMatch.All">
             <i class="bi bi-calendar-week-fill"></i><span>Mój grafik</span>
         </NavLink>
         @if (Entitlements.IsAllowed("TrainingPlansEnabled"))
@@ -90,6 +90,12 @@
             </NavLink>
             <NavLink class="sidebar-link" href="my/courses">
                 <i class="bi bi-mortarboard-fill"></i><span>Moje kursy</span>
+            </NavLink>
+        }
+        @if (_vouchersEnabled)
+        {
+            <NavLink class="sidebar-link" href="my/vouchers">
+                <i class="bi bi-ticket-perforated"></i><span>Bony podarunkowe</span>
             </NavLink>
         }
         @if (_referralsEnabled)
@@ -177,6 +183,7 @@
     private string _companyName = "PTScheduler";
     private bool _coursesEnabled = true;
     private bool _referralsEnabled;
+    private bool _vouchersEnabled;
 
     protected override async Task OnInitializedAsync()
     {
@@ -191,7 +198,12 @@
         try { _coursesEnabled = (await ModuleSettings.GetAsync()).CoursesEnabled; }
         catch { }
 
-        try { _referralsEnabled = Entitlements.IsAllowed("ReferralProgram") && (await MarketingSettings.GetAsync()).ReferralEnabled; }
+        try
+        {
+            var marketing = await MarketingSettings.GetAsync();
+            _referralsEnabled = Entitlements.IsAllowed("ReferralProgram") && marketing.ReferralEnabled;
+            _vouchersEnabled = marketing.VouchersEnabled;
+        }
         catch { }
     }
 

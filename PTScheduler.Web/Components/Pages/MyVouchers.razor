@@ -1,0 +1,206 @@
+@page "/my/vouchers"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Marketing
+@using PTScheduler.Domain.Entities
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject IGiftVoucherService VoucherService
+@inject IMarketingSettingsService MarketingSettings
+@inject IPackageOfferService OfferService
+@inject IPaymentService PaymentService
+@inject IClientService ClientService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject EntitlementService Entitlements
+@inject IAppClock Clock
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Bony podarunkowe" />
+
+<div class="page-header mb-3">
+    <h4 class="page-title mb-0"><i class="bi bi-gift me-2" style="color:var(--c-primary)"></i>Bony podarunkowe</h4>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <!-- Mam bon -->
+    <div class="card mb-3" id="redeem">
+        <div class="card-body">
+            <h6 class="fw-semibold mb-1"><i class="bi bi-ticket-perforated me-1"></i>Mam bon</h6>
+            <p class="small text-muted mb-2">Wpisz kod z bonu. Bon na pakiet od razu dodaje sesje do Twojego konta; bon na kwotę wpisujesz jako kupon przy zakupie.</p>
+            <div class="input-group" style="max-width:420px">
+                <input class="form-control text-uppercase font-monospace" placeholder="BON-XXXX-XXXX" maxlength="20" @bind="_redeemCode" @bind:event="oninput" aria-label="Kod bonu" />
+                <button class="btn btn-primary" @onclick="RedeemAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_redeemCode) || _clientId is null)">Użyj bonu</button>
+            </div>
+            @if (_clientId is null)
+            {
+                <div class="small text-muted mt-2">Aby zrealizować bon, konto musi być powiązane z profilem klienta.</div>
+            }
+            @if (_redeemMessage is not null)
+            {
+                <div class="alert @(_redeemOk ? "alert-success" : "alert-warning") small py-2 mt-2 mb-0">@_redeemMessage</div>
+            }
+        </div>
+    </div>
+
+    @if (_canBuy)
+    {
+        <div class="card mb-3">
+            <div class="card-body">
+                <h6 class="fw-semibold mb-1"><i class="bi bi-bag-heart me-1"></i>Kup bon dla bliskiej osoby</h6>
+                <p class="small text-muted">Po opłaceniu dostajesz bon w PDF z kodem — do wydrukowania albo wysłania.</p>
+
+                <div class="btn-group mb-3" role="group" aria-label="Rodzaj bonu">
+                    <input type="radio" class="btn-check" id="vkAmount" checked="@(_req.Kind == GiftVoucherKind.Amount)" @onchange="() => _req.Kind = GiftVoucherKind.Amount" />
+                    <label class="btn btn-outline-primary btn-sm" for="vkAmount">Na kwotę</label>
+                    @if (_offers.Count > 0)
+                    {
+                        <input type="radio" class="btn-check" id="vkPkg" checked="@(_req.Kind == GiftVoucherKind.Package)" @onchange="() => _req.Kind = GiftVoucherKind.Package" />
+                        <label class="btn btn-outline-primary btn-sm" for="vkPkg">Na pakiet treningów</label>
+                    }
+                </div>
+
+                @if (_req.Kind == GiftVoucherKind.Amount)
+                {
+                    <div class="d-flex flex-wrap gap-2 mb-3">
+                        @foreach (var a in _settings.VoucherAmountList)
+                        {
+                            <button type="button" class="btn @(_req.Amount == a ? "btn-primary" : "btn-outline-secondary")" @onclick="() => _req.Amount = a">@a.ToString("0.##") zł</button>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <div class="list-group mb-3">
+                        @foreach (var o in _offers)
+                        {
+                            <button type="button" class="list-group-item list-group-item-action d-flex justify-content-between align-items-center @(_req.PackageOfferId == o.Id ? "active" : "")"
+                                    @onclick="() => _req.PackageOfferId = o.Id">
+                                <span>@o.Name <small class="@(_req.PackageOfferId == o.Id ? "" : "text-muted")">· @o.SessionsCount × @o.SessionTypeName</small></span>
+                                <strong>@o.Price.ToString("0.##") zł</strong>
+                            </button>
+                        }
+                    </div>
+                }
+
+                <div class="row g-2 mb-3">
+                    <div class="col-md-6"><input class="form-control" maxlength="80" placeholder="Dla kogo (np. Kasia)" @bind="_req.RecipientName" aria-label="Dla kogo" /></div>
+                    <div class="col-md-6"><input class="form-control" maxlength="80" placeholder="Od kogo" @bind="_req.FromName" aria-label="Od kogo" /></div>
+                    <div class="col-12"><input class="form-control" maxlength="300" placeholder="Życzenia (opcjonalnie)" @bind="_req.Message" aria-label="Życzenia" /></div>
+                </div>
+
+                @if (_buyError is not null) { <div class="alert alert-danger small py-2">@_buyError</div> }
+                <div class="d-flex flex-wrap gap-2">
+                    @foreach (var opt in _options)
+                    {
+                        <button class="btn btn-primary" disabled="@(_busy || !CanPay)" @onclick="() => BuyAsync(opt.Key)">
+                            <i class="bi @opt.Icon me-1"></i>Zapłać @PriceLabel — @opt.Name
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+
+    @if (_bought.Count > 0)
+    {
+        <h6 class="fw-semibold mt-4 mb-2">Kupione bony</h6>
+        <div class="list-group">
+            @foreach (var v in _bought)
+            {
+                <div class="list-group-item d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                    <div class="min-w-0">
+                        <div class="fw-semibold">@v.Title @(string.IsNullOrWhiteSpace(v.RecipientName) ? "" : $"· dla {v.RecipientName}")</div>
+                        <div class="small text-muted">
+                            <code>@v.Code</code>
+                            @if (v.ExpiresAt is DateTime exp) { <span> · ważny do @Clock.ToWallClock(exp).ToString("dd.MM.yyyy")</span> }
+                            · @StatusLabel(v)
+                        </div>
+                    </div>
+                    <a class="btn btn-sm btn-outline-primary" href="/vouchers/@v.Id/pdf" target="_blank"><i class="bi bi-file-earmark-pdf me-1"></i>PDF</a>
+                </div>
+            }
+        </div>
+    }
+}
+
+@code {
+    private bool _loading = true;
+    private bool _busy;
+    private bool _canBuy;
+    private string _userId = "";
+    private string _email = "";
+    private int? _clientId;
+    private MarketingSettingsDto _settings = new();
+    private List<PackageOfferDto> _offers = [];
+    private List<PaymentOptionDto> _options = [];
+    private List<GiftVoucherDto> _bought = [];
+    private readonly GiftVoucherRequest _req = new();
+    private string? _buyError;
+    private string _redeemCode = "";
+    private string? _redeemMessage;
+    private bool _redeemOk;
+
+    private bool CanPay => _req.Kind == GiftVoucherKind.Amount ? _req.Amount > 0 : _req.PackageOfferId is not null;
+    private string PriceLabel => _req.Kind == GiftVoucherKind.Amount
+        ? (_req.Amount > 0 ? $"{_req.Amount:0.##} zł" : "")
+        : _offers.FirstOrDefault(o => o.Id == _req.PackageOfferId) is { } o ? $"{o.Price:0.##} zł" : "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        _userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _email = user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? user.Identity?.Name ?? "";
+        _clientId = (await ClientService.GetClientByUserIdAsync(_userId))?.Id;
+        _settings = await MarketingSettings.GetAsync();
+
+        if (_settings.VouchersEnabled && Entitlements.IsAllowed("PaymentsEnabled"))
+        {
+            _options = (await PaymentService.GetEnabledOptionsAsync())
+                .Where(o => o.Key switch
+                {
+                    "payu" => Entitlements.IsAllowed("IntegrationPayU"),
+                    "p24" => Entitlements.IsAllowed("IntegrationPrzelewy24"),
+                    _ => true
+                }).ToList();
+            _offers = await OfferService.GetActiveOffersAsync();
+            _canBuy = _options.Count > 0;
+            _req.Amount = _settings.VoucherAmountList.Skip(1).FirstOrDefault(_settings.VoucherAmountList.FirstOrDefault());
+        }
+        _bought = await VoucherService.GetBoughtByAsync(_userId);
+        _loading = false;
+    }
+
+    private async Task BuyAsync(string providerKey)
+    {
+        _busy = true; _buyError = null;
+        var (ok, error, voucherId) = await VoucherService.CreatePendingAsync(_userId, _req);
+        if (!ok || voucherId is null) { _buyError = error; _busy = false; return; }
+        var res = await PaymentService.StartGiftVoucherCheckoutAsync(_userId, voucherId.Value, providerKey, Nav.BaseUri, _email, "");
+        if (res.Ok && res.RedirectUrl is not null) { Nav.NavigateTo(res.RedirectUrl, forceLoad: true); return; }
+        _buyError = res.Error ?? "Nie udało się rozpocząć płatności.";
+        _busy = false;
+    }
+
+    private async Task RedeemAsync()
+    {
+        if (_clientId is not int cid) return;
+        _busy = true;
+        (_redeemOk, _redeemMessage) = await VoucherService.RedeemAsync(_redeemCode, cid);
+        if (_redeemOk) _redeemCode = "";
+        _busy = false;
+    }
+
+    private static string StatusLabel(GiftVoucherDto v) => v.Status switch
+    {
+        GiftVoucherStatus.Redeemed => "wykorzystany",
+        GiftVoucherStatus.Cancelled => "anulowany",
+        _ when v.CouponUsed => "wykorzystany w sklepie",
+        _ when v.ExpiresAt is DateTime e && e <= DateTime.UtcNow => "wygasł",
+        _ => "aktywny"
+    };
+}

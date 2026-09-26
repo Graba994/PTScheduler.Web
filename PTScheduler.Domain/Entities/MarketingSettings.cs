@@ -26,6 +26,13 @@ public class MarketingSettings
     /// <summary>Po ilu odbytych wizytach poprosić klienta o opinię.</summary>
     public int ReviewAskAfterSessions { get; set; } = 5;
 
+    // ── Bony podarunkowe ─────────────────────────────────
+    public bool VouchersEnabled { get; set; }
+    /// <summary>Kwoty bonów do wyboru w sklepie, np. „100,200,300,500”.</summary>
+    public string VoucherAmounts { get; set; } = "100,200,300,500";
+    /// <summary>Ważność bonu w miesiącach od zakupu.</summary>
+    public int VoucherValidMonths { get; set; } = 12;
+
     // ── Ocena aplikacji przez trenera (trafia do właściciela platformy) ──
     public DateTime? LastAppFeedbackAt { get; set; }
 }

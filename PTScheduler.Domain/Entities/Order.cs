@@ -26,6 +26,9 @@ public class Order
 
     /// <summary>Karnet kupowany w sklepie (nowa subskrypcja po opłaceniu).</summary>
     public int? MembershipPlanId { get; set; }
+
+    /// <summary>Kupowany bon podarunkowy (Kind = GiftVoucher).</summary>
+    public int? GiftVoucherId { get; set; }
     public PackageOffer? PackageOffer { get; set; }
 
     // Our unique order reference sent to the gateway as extOrderId.

@@ -56,6 +56,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<MarketingSettings> MarketingSettings => Set<MarketingSettings>();
     public DbSet<Referral> Referrals => Set<Referral>();
     public DbSet<ClientReview> ClientReviews => Set<ClientReview>();
+    public DbSet<GiftVoucher> GiftVouchers => Set<GiftVoucher>();
     public DbSet<Coupon> Coupons => Set<Coupon>();
     public DbSet<CouponRedemption> CouponRedemptions => Set<CouponRedemption>();
 
@@ -445,6 +446,18 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             e.HasOne(r => r.Client).WithMany().HasForeignKey(r => r.ClientId).OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(r => r.ClientId).IsUnique();
             e.HasIndex(r => r.IsPublished);
+        });
+
+        builder.Entity<GiftVoucher>(e =>
+        {
+            e.Property(v => v.Code).HasMaxLength(20);
+            e.HasIndex(v => v.Code).IsUnique();
+            e.Property(v => v.Value).HasPrecision(10, 2);
+            e.Property(v => v.Title).HasMaxLength(200);
+            e.Property(v => v.RecipientName).HasMaxLength(80);
+            e.Property(v => v.FromName).HasMaxLength(80);
+            e.Property(v => v.Message).HasMaxLength(300);
+            e.HasIndex(v => v.BuyerUserId);
         });
 
         builder.Entity<MarketingSettings>(e =>
