@@ -18,6 +18,15 @@ public class Session
     public DateTime? CancelledAt { get; set; }
     public string? CancellationReason { get; set; }
 
+    /// <summary>Odwołanie po terminie bezpłatnego odwołania (polityka trenera).</summary>
+    public bool IsLateCancellation { get; set; }
+
+    /// <summary>
+    /// Sesja zwolniła swoje miejsce w pakiecie (odwołanie z oddaniem lub nieobecność
+    /// bez pobrania). Przywrócenie wizyty pobiera je ponownie tylko wtedy.
+    /// </summary>
+    public bool PackageRefunded { get; set; }
+
     public int? PackageId { get; set; }
     public SessionPackage? Package { get; set; }
 

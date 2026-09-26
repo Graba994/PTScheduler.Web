@@ -208,7 +208,7 @@ public class SessionServiceTests
         db.Sessions.Add(new Session
         {
             Id = 1, ClientId = 1, SessionTypeId = 1, TrainerUserId = "t1",
-            StartTime = DateTime.UtcNow.AddDays(1), Status = SessionStatus.Cancelled,
+            StartTime = DateTime.UtcNow.AddDays(1), Status = SessionStatus.Cancelled, PackageRefunded = true,
             PackageId = 1, CancelledAt = DateTime.UtcNow
         });
         await db.SaveChangesAsync();
@@ -257,7 +257,7 @@ public class SessionServiceTests
         db.Sessions.Add(new Session
         {
             Id = 1, ClientId = 1, SessionTypeId = 1, TrainerUserId = "t1",
-            StartTime = DateTime.UtcNow.AddDays(1), Status = SessionStatus.Cancelled,
+            StartTime = DateTime.UtcNow.AddDays(1), Status = SessionStatus.Cancelled, PackageRefunded = true,
             PackageId = 1, CancelledAt = DateTime.UtcNow
         });
         await db.SaveChangesAsync();
@@ -416,6 +416,151 @@ public class SessionServiceTests
 
         var ex = await act.Should().ThrowAsync<PTScheduler.Application.Exceptions.SlotConflictException>();
         ex.Which.Conflict.SessionId.Should().Be(1);
+    }
+
+    // ── Polityka odwołań ────────────────────────────────────────────────────
+
+    private static async Task<(Microsoft.EntityFrameworkCore.IDbContextFactory<Infrastructure.Data.ApplicationDbContext> F, DateTime Now)>
+        SeedCancellable(LateCancellationPolicy policy, double hoursBeforeStart, int windowHours = 24)
+    {
+        var (factory, db) = TestDb.CreateFresh();
+        SeedSessionType(db);
+        var now = new DateTime(2026, 10, 1, 10, 0, 0);
+        db.Clients.Add(new Client { Id = 1, ApplicationUserId = "c1", FirstName = "Jan", LastName = "K" });
+        db.Clients.Add(new Client { Id = 2, ApplicationUserId = "c2", FirstName = "Ola", LastName = "N" });
+        db.TrainerConfigs.Add(new TrainerConfig { TrainerUserId = "t1", CancellationWindowHours = windowHours, LateCancellationPolicy = policy });
+        db.SessionPackages.Add(new SessionPackage
+        {
+            Id = 1, ClientId = 1, SessionTypeId = 1, Name = "Pak",
+            TotalSessions = 10, UsedSessions = 1, Status = PackageStatus.Active
+        });
+        db.Sessions.Add(new Session
+        {
+            Id = 1, ClientId = 1, SessionTypeId = 1, TrainerUserId = "t1", PackageId = 1,
+            StartTime = now.AddHours(hoursBeforeStart), Status = SessionStatus.Scheduled
+        });
+        await db.SaveChangesAsync();
+        return (factory, now);
+    }
+
+    [Fact]
+    public async Task ClientCancel_BeforeWindow_RefundsSession()
+    {
+        var (factory, now) = await SeedCancellable(LateCancellationPolicy.Block, hoursBeforeStart: 48);
+        var svc = MakeService(factory, Helpers.TestClock.AtWallClock(now));
+
+        var decision = await svc.ClientCancelSessionAsync(1, "c1");
+
+        decision.RefundsSession.Should().BeTrue();
+        await using var v = factory.CreateDbContext();
+        (await v.SessionPackages.FindAsync(1))!.UsedSessions.Should().Be(0);
+        var s = await v.Sessions.FindAsync(1);
+        s!.Status.Should().Be(SessionStatus.Cancelled);
+        s.PackageRefunded.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task ClientCancel_InsideWindow_Block_Throws()
+    {
+        var (factory, now) = await SeedCancellable(LateCancellationPolicy.Block, hoursBeforeStart: 2);
+        var svc = MakeService(factory, Helpers.TestClock.AtWallClock(now));
+
+        var act = () => svc.ClientCancelSessionAsync(1, "c1");
+
+        await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*24 h*");
+        await using var v = factory.CreateDbContext();
+        (await v.Sessions.FindAsync(1))!.Status.Should().Be(SessionStatus.Scheduled);
+    }
+
+    [Fact]
+    public async Task ClientCancel_InsideWindow_Charge_KeepsSessionUsed()
+    {
+        var (factory, now) = await SeedCancellable(LateCancellationPolicy.ChargeSession, hoursBeforeStart: 2);
+        var svc = MakeService(factory, Helpers.TestClock.AtWallClock(now));
+
+        var decision = await svc.ClientCancelSessionAsync(1, "c1");
+
+        decision.IsLate.Should().BeTrue();
+        decision.RefundsSession.Should().BeFalse();
+        await using var v = factory.CreateDbContext();
+        (await v.SessionPackages.FindAsync(1))!.UsedSessions.Should().Be(1);
+        var s = await v.Sessions.FindAsync(1);
+        s!.IsLateCancellation.Should().BeTrue();
+        s.PackageRefunded.Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task ClientCancel_SomeoneElsesSession_Throws()
+    {
+        var (factory, now) = await SeedCancellable(LateCancellationPolicy.Refund, hoursBeforeStart: 48);
+        var svc = MakeService(factory, Helpers.TestClock.AtWallClock(now));
+
+        var act = () => svc.ClientCancelSessionAsync(1, "c2");
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task ClientCancel_CompletedSession_Throws()
+    {
+        var (factory, now) = await SeedCancellable(LateCancellationPolicy.Refund, hoursBeforeStart: 48);
+        await using (var db = factory.CreateDbContext())
+        {
+            (await db.Sessions.FindAsync(1))!.Status = SessionStatus.Completed;
+            await db.SaveChangesAsync();
+        }
+        var svc = MakeService(factory, Helpers.TestClock.AtWallClock(now));
+
+        var act = () => svc.ClientCancelSessionAsync(1, "c1");
+
+        await act.Should().ThrowAsync<InvalidOperationException>();
+    }
+
+    [Fact]
+    public async Task Restore_LateChargedCancellation_DoesNotChargeTwice()
+    {
+        var (factory, now) = await SeedCancellable(LateCancellationPolicy.ChargeSession, hoursBeforeStart: 2);
+        var svc = MakeService(factory, Helpers.TestClock.AtWallClock(now));
+        await svc.ClientCancelSessionAsync(1, "c1");
+
+        await svc.RestoreAsync(1);
+
+        await using var v = factory.CreateDbContext();
+        (await v.SessionPackages.FindAsync(1))!.UsedSessions.Should().Be(1);
+        (await v.Sessions.FindAsync(1))!.Status.Should().Be(SessionStatus.Scheduled);
+    }
+
+    [Fact]
+    public async Task TrainerCancel_WithCharge_KeepsSessionUsed_WithoutCharge_Refunds()
+    {
+        var (factory, now) = await SeedCancellable(LateCancellationPolicy.Block, hoursBeforeStart: 2);
+        var svc = MakeService(factory, Helpers.TestClock.AtWallClock(now));
+
+        await svc.UpdateStatusAsync(1, SessionStatus.Cancelled, chargeSession: true);
+        await using (var v = factory.CreateDbContext())
+            (await v.SessionPackages.FindAsync(1))!.UsedSessions.Should().Be(1);
+
+        await svc.RestoreAsync(1);
+        await svc.UpdateStatusAsync(1, SessionStatus.Cancelled);
+        await using (var v = factory.CreateDbContext())
+            (await v.SessionPackages.FindAsync(1))!.UsedSessions.Should().Be(0);
+    }
+
+    [Fact]
+    public async Task NoShow_WhenPolicyDoesNotCharge_RefundsSession()
+    {
+        var (factory, now) = await SeedCancellable(LateCancellationPolicy.Block, hoursBeforeStart: -1);
+        await using (var db = factory.CreateDbContext())
+        {
+            (await db.TrainerConfigs.FirstAsync()).NoShowChargesSession = false;
+            await db.SaveChangesAsync();
+        }
+        var svc = MakeService(factory, Helpers.TestClock.AtWallClock(now));
+
+        await svc.UpdateStatusAsync(1, SessionStatus.NoShow);
+
+        await using var v = factory.CreateDbContext();
+        (await v.SessionPackages.FindAsync(1))!.UsedSessions.Should().Be(0);
     }
 
     private static void SeedSessionType(Infrastructure.Data.ApplicationDbContext db)

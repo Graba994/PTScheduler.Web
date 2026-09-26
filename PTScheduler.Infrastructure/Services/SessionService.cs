@@ -1,3 +1,4 @@
+using PTScheduler.Application.Scheduling;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using PTScheduler.Application.DTOs;
@@ -189,7 +190,8 @@ public class SessionService(
         return (await GetSessionAsync(session.Id))!;
     }
 
-    public async Task UpdateStatusAsync(int id, SessionStatus status, string? cancellationReason = null, string? completionNotes = null)
+    public async Task UpdateStatusAsync(int id, SessionStatus status, string? cancellationReason = null, string? completionNotes = null,
+        bool chargeSession = false)
     {
         await using var db = dbFactory.CreateDbContext();
         var session = await db.Sessions
@@ -202,17 +204,16 @@ public class SessionService(
         {
             session.CancelledAt = DateTime.UtcNow;
             session.CancellationReason = cancellationReason;
-
-            if (session.PackageId.HasValue)
-            {
-                var pkg = await db.SessionPackages.FindAsync(session.PackageId.Value);
-                if (pkg is not null && pkg.Status != PackageStatus.Cancelled)
-                {
-                    if (pkg.UsedSessions > 0) pkg.UsedSessions--;
-                    if (pkg.Status == PackageStatus.Depleted && pkg.UsedSessions < pkg.TotalSessions)
-                        pkg.Status = PackageStatus.Active;
-                }
-            }
+            // chargeSession: trener odwołuje w imieniu klienta po terminie — sesja przepada.
+            session.IsLateCancellation = chargeSession;
+            if (!chargeSession)
+                await RefundPackageSlotAsync(db, session);
+        }
+        else if (status == SessionStatus.NoShow && session.Status != SessionStatus.NoShow)
+        {
+            var cfg = await availability.GetConfigAsync(session.TrainerUserId);
+            if (!cfg.NoShowChargesSession)
+                await RefundPackageSlotAsync(db, session);
         }
 
         if (status == SessionStatus.Completed && completionNotes is not null)
@@ -271,7 +272,8 @@ public class SessionService(
         session.CancelledAt = null;
         session.CancellationReason = null;
 
-        if (wasStatus == SessionStatus.Cancelled && session.PackageId.HasValue)
+        session.IsLateCancellation = false;
+        if (session.PackageRefunded && session.PackageId.HasValue)
         {
             var pkg = await db.SessionPackages.FindAsync(session.PackageId.Value);
             if (pkg is not null && pkg.Status != PackageStatus.Cancelled
@@ -287,6 +289,7 @@ public class SessionService(
                 session.PackageId = null;
                 session.Status = SessionStatus.AwaitingPackage;
             }
+            session.PackageRefunded = false;
         }
         else
         {
@@ -296,7 +299,20 @@ public class SessionService(
         await db.SaveChangesAsync();
     }
 
-    public async Task ClientCancelSessionAsync(int id, string clientUserId, string? reason = null)
+    public async Task<CancellationDecision> GetClientCancellationAsync(int id, string clientUserId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var session = await db.Sessions.AsNoTracking().Include(x => x.Client)
+            .FirstOrDefaultAsync(x => x.Id == id);
+        if (session is null || session.Client.ApplicationUserId != clientUserId)
+            return new CancellationDecision(false, false, false, "Nie znaleziono wizyty.");
+        if (session.Status is not (SessionStatus.Scheduled or SessionStatus.AwaitingPackage))
+            return new CancellationDecision(false, false, false, "Tej wizyty nie można już odwołać.");
+        var cfg = await availability.GetConfigAsync(session.TrainerUserId);
+        return CancellationRules.ForClient(cfg, session.StartTime, clock.LocalNow);
+    }
+
+    public async Task<CancellationDecision> ClientCancelSessionAsync(int id, string clientUserId, string? reason = null)
     {
         await using var db = dbFactory.CreateDbContext();
         var session = await db.Sessions
@@ -305,25 +321,45 @@ public class SessionService(
             .FirstOrDefaultAsync(s => s.Id == id)
             ?? throw new InvalidOperationException("Sesja nie została znaleziona.");
 
+        // Serwer egzekwuje zasady niezależnie od UI: tylko własna wizyta, tylko
+        // zaplanowana, i zgodnie z polityką odwołań trenera. Wcześniej metoda
+        // ignorowała clientUserId i okno odwołania — dashboard klienta pozwalał
+        // odwołać wizytę 5 minut przed startem z pełnym zwrotem sesji.
+        if (session.Client.ApplicationUserId != clientUserId)
+            throw new InvalidOperationException("Sesja nie została znaleziona.");
+        if (session.Status is not (SessionStatus.Scheduled or SessionStatus.AwaitingPackage))
+            throw new InvalidOperationException("Tej wizyty nie można już odwołać.");
+
+        var cfg = await availability.GetConfigAsync(session.TrainerUserId);
+        var decision = CancellationRules.ForClient(cfg, session.StartTime, clock.LocalNow);
+        if (!decision.Allowed)
+            throw new InvalidOperationException(decision.Message);
+
         session.Status = SessionStatus.Cancelled;
         session.CancelledAt = DateTime.UtcNow;
         session.CancellationReason = reason;
+        session.IsLateCancellation = decision.IsLate;
 
-        if (session.PackageId.HasValue)
-        {
-            var pkg = await db.SessionPackages.FindAsync(session.PackageId.Value);
-            if (pkg is not null && pkg.Status != PackageStatus.Cancelled)
-            {
-                if (pkg.UsedSessions > 0) pkg.UsedSessions--;
-                if (pkg.Status == PackageStatus.Depleted && pkg.UsedSessions < pkg.TotalSessions)
-                    pkg.Status = PackageStatus.Active;
-            }
-        }
+        if (decision.RefundsSession)
+            await RefundPackageSlotAsync(db, session);
 
         await db.SaveChangesAsync();
 
         try { await SendClientCancelledToTrainerAsync(session, reason); }
         catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila o anulowaniu przez klienta (SessionId={Id})", session.Id); }
+        return decision;
+    }
+
+    // Zwalnia miejsce sesji w pakiecie (jeśli jeszcze go nie zwolniła).
+    private static async Task RefundPackageSlotAsync(ApplicationDbContext db, Session session)
+    {
+        if (!session.PackageId.HasValue || session.PackageRefunded) return;
+        var pkg = await db.SessionPackages.FindAsync(session.PackageId.Value);
+        if (pkg is null || pkg.Status == PackageStatus.Cancelled) return;
+        if (pkg.UsedSessions > 0) pkg.UsedSessions--;
+        if (pkg.Status == PackageStatus.Depleted && pkg.UsedSessions < pkg.TotalSessions)
+            pkg.Status = PackageStatus.Active;
+        session.PackageRefunded = true;
     }
 
     public async Task<List<SessionTypeDto>> GetSessionTypesAsync()
@@ -573,6 +609,7 @@ public class SessionService(
         Status = s.Status,
         Notes = s.Notes,
         CancellationReason = s.CancellationReason,
+        IsLateCancellation = s.IsLateCancellation,
         MeetingUrl = s.MeetingUrl
     };
 }

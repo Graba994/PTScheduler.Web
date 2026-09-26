@@ -1,9 +1,11 @@
 @page "/my"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Client")]
+@using PTScheduler.Application.Scheduling
 @inject IClientService ClientService
 @inject ISessionService SessionService
 @inject ITrainerAvailabilityService AvailabilityService
 @inject ITrainerConfigService TrainerConfigService
+@inject IAppClock Clock
 @inject IAuditLogService AuditLogService
 @inject NavigationManager Nav
 @using PTScheduler.Application.DTOs
@@ -143,7 +145,7 @@ else
                             <AddToCalendarButton Title="@($"{s.SessionTypeName} — {s.TrainerName}")"
                                                   StartTime="s.StartTime" DurationMinutes="s.DurationMinutes"
                                                   Location="@(s.MeetingUrl ?? "")" Uid="@($"session-{s.Id}")" Compact="true" />
-                            @if (_cancellationWindowHours == 0 || s.StartTime > DateTime.Now.AddHours(_cancellationWindowHours))
+                            @if (CancellationRules.ForClient(_trainerCfg, s.StartTime, Clock.LocalNow).Allowed)
                             {
                                 <button class="btn btn-outline-danger btn-sm" @onclick="() => ConfirmCancel(s)">
                                     <i class="bi bi-x-circle me-1"></i>Odwołaj
@@ -207,6 +209,10 @@ else
                     <i class="bi bi-exclamation-triangle-fill text-warning fs-2 d-block mb-3"></i>
                     <p class="mb-1 fw-semibold">Odwołać trening?</p>
                     <p class="text-muted small mb-3">@cancelTarget.SessionTypeName — @cancelTarget.StartTime.ToString("dd.MM.yyyy HH:mm")</p>
+                    @{ var decision = CancellationRules.ForClient(_trainerCfg, cancelTarget.StartTime, Clock.LocalNow); }
+                    <div class="alert @(decision.RefundsSession ? "alert-light border" : "alert-warning") py-2 small text-start">
+                        <i class="bi @(decision.RefundsSession ? "bi-info-circle" : "bi-exclamation-triangle") me-1"></i>@decision.Message
+                    </div>
                     <div class="mb-2">
                         <input class="form-control form-control-sm" placeholder="Powód (opcjonalnie)" @bind="cancelReason" />
                     </div>
@@ -404,6 +410,9 @@ else
                         <div class="mb-3">
                             <label class="form-label form-label-sm fw-semibold">Notatki (opcjonalnie)</label>
                             <textarea class="form-control form-control-sm" rows="2" placeholder="Dodaj notatkę do wizyty..." @bind="bookingNotes"></textarea>
+                            <div class="small text-muted mt-2">
+                                <i class="bi bi-shield-check me-1"></i>@CancellationRules.Describe(_trainerCfg)
+                            </div>
                         </div>
 
                         <div class="d-flex justify-content-between mt-2">
@@ -448,7 +457,7 @@ else
     private List<SessionDto> past = [];
     private string _userId = string.Empty;
     private string _userEmail = string.Empty;
-    private int _cancellationWindowHours = 24;
+    private TrainerConfigDto _trainerCfg = new();
 
     private SessionDto? cancelTarget;
     private string cancelReason = string.Empty;
@@ -481,8 +490,7 @@ else
                 {
                     try
                     {
-                        var config = await TrainerConfigService.GetAsync(client.TrainerUserId);
-                        _cancellationWindowHours = config.CancellationWindowHours;
+                        _trainerCfg = await TrainerConfigService.GetAsync(client.TrainerUserId);
                     }
                     catch { /* best-effort — use default cancellation window */ }
                 }
@@ -634,9 +642,12 @@ else
             cancelTarget = null;
             await RefreshSessions();
         }
+        catch (InvalidOperationException ex)
+        {
+            cancelError = ex.Message;
+        }
         catch (Exception)
         {
-            cancelTarget = null;
             cancelError = "Nie udało się anulować sesji. Spróbuj ponownie.";
         }
         finally { isBusy = false; }

@@ -20,6 +20,8 @@ public class TrainerConfigService(IDbContextFactory<ApplicationDbContext> dbFact
             SlotGranularityMinutes = cfg.SlotGranularityMinutes,
             AllowClientsDiscoverPeers = cfg.AllowClientsDiscoverPeers,
             CancellationWindowHours = cfg.CancellationWindowHours,
+            LateCancellationPolicy = cfg.LateCancellationPolicy,
+            NoShowChargesSession = cfg.NoShowChargesSession,
         };
     }
 
@@ -35,7 +37,9 @@ public class TrainerConfigService(IDbContextFactory<ApplicationDbContext> dbFact
         cfg.BreakAfterSessionMinutes = dto.BreakAfterSessionMinutes;
         cfg.SlotGranularityMinutes = dto.SlotGranularityMinutes;
         cfg.AllowClientsDiscoverPeers = dto.AllowClientsDiscoverPeers;
-        cfg.CancellationWindowHours = dto.CancellationWindowHours;
+        cfg.CancellationWindowHours = Math.Clamp(dto.CancellationWindowHours, 0, 168);
+        cfg.LateCancellationPolicy = dto.LateCancellationPolicy;
+        cfg.NoShowChargesSession = dto.NoShowChargesSession;
         await db.SaveChangesAsync();
     }
 

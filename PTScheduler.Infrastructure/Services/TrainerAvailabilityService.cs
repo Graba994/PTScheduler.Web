@@ -84,7 +84,9 @@ public class TrainerAvailabilityService(IDbContextFactory<ApplicationDbContext> 
         cfg.BreakAfterSessionMinutes = dto.BreakAfterSessionMinutes;
         cfg.SlotGranularityMinutes = Math.Max(15, dto.SlotGranularityMinutes);
         cfg.AllowClientsDiscoverPeers = dto.AllowClientsDiscoverPeers;
-        cfg.CancellationWindowHours = dto.CancellationWindowHours;
+        cfg.CancellationWindowHours = Math.Clamp(dto.CancellationWindowHours, 0, 168);
+        cfg.LateCancellationPolicy = dto.LateCancellationPolicy;
+        cfg.NoShowChargesSession = dto.NoShowChargesSession;
         await db.SaveChangesAsync();
     }
 
@@ -193,7 +195,9 @@ public class TrainerAvailabilityService(IDbContextFactory<ApplicationDbContext> 
                 BreakAfterSessionMinutes = cfg.BreakAfterSessionMinutes,
                 SlotGranularityMinutes = cfg.SlotGranularityMinutes,
                 AllowClientsDiscoverPeers = cfg.AllowClientsDiscoverPeers,
-                CancellationWindowHours = cfg.CancellationWindowHours
+                CancellationWindowHours = cfg.CancellationWindowHours,
+                LateCancellationPolicy = cfg.LateCancellationPolicy,
+                NoShowChargesSession = cfg.NoShowChargesSession,
             };
     }
 

@@ -2,12 +2,14 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @implements IAsyncDisposable
 @inject IJSRuntime JS
+@using PTScheduler.Application.Scheduling
 @inject ISessionService SessionService
 @inject IClientService ClientService
 @inject IAuditLogService AuditLogService
 @inject ISessionInvitationService InvitationService
 @inject ITrainerAvailabilityService AvailabilityService
 @inject ITrainerConfigService TrainerConfigService
+@inject IAppClock Clock
 @inject AuthenticationStateProvider AuthState
 @inject ILogger<Calendar> Logger
 @using Microsoft.AspNetCore.Components.Authorization
@@ -228,6 +230,12 @@
                                 <div class="p-3 rounded border border-danger-subtle">
                                     <label class="form-label small mb-1">Powód anulowania (opcjonalny)</label>
                                     <input class="form-control form-control-sm mb-2" @bind="_cancelReason" placeholder="..." />
+                                    <div class="form-check small mb-2">
+                                        <input class="form-check-input" type="checkbox" id="chargeLate" @bind="_chargeLate" />
+                                        <label class="form-check-label" for="chargeLate">
+                                            Późne odwołanie przez klienta — sesja przepada (nie wraca do pakietu)
+                                        </label>
+                                    </div>
                                     <div class="d-flex gap-2">
                                         <button class="btn btn-danger btn-sm flex-fill"
                                                 @onclick="ConfirmCancel" disabled="@_busy">
@@ -340,7 +348,7 @@
 
                     <!-- Client: cancel own session -->
                     @if (_isClientRole && _selectedSession.Status == SessionStatus.Scheduled
-                         && (_cancellationWindowHours == 0 || _selectedSession.StartTime > DateTime.Now.AddHours(_cancellationWindowHours)))
+                         && CancellationRules.ForClient(_trainerCfg, _selectedSession.StartTime, Clock.LocalNow).Allowed)
                     {
                         <div class="mt-3">
                             @if (!_showCancelForm)
@@ -535,7 +543,8 @@
     private string _userRole = string.Empty;
     private int? _clientNumericId;
     private string? _clientTrainerUserId;
-    private int _cancellationWindowHours = 24;
+    private TrainerConfigDto _trainerCfg = new();
+    private bool _chargeLate;
     private bool _isAdminRole;
     private bool _isTrainerRole;
     private bool _isClientRole;
@@ -568,7 +577,7 @@
                 try
                 {
                     var cfg = await TrainerConfigService.GetAsync(_clientTrainerUserId);
-                    _cancellationWindowHours = cfg.CancellationWindowHours;
+                    _trainerCfg = cfg;
                 }
                 catch { /* best-effort — use default cancellation window */ }
             }
@@ -635,6 +644,11 @@
     {
         _bookingOpen        = false;
         _selectedSession    = await SessionService.GetSessionAsync(sessionId);
+        if (_selectedSession is not null && !_isClientRole)
+        {
+            try { _trainerCfg = await TrainerConfigService.GetAsync(_selectedSession.TrainerUserId); }
+            catch { /* domyślna polityka */ }
+        }
         _showCancelForm     = false;
         _showRescheduleForm = false;
         _showRestoreConfirm = false;
@@ -765,7 +779,14 @@
         finally { _busy = false; }
     }
 
-    private void ShowCancelForm()    { _showCancelForm = true; _showRescheduleForm = false; }
+    private void ShowCancelForm()
+    {
+        _showCancelForm = true; _showRescheduleForm = false;
+        // Podpowiedź dla trenera: w oknie późnego odwołania przy polityce „sesja przepada”.
+        _chargeLate = !_isClientRole && _selectedSession is not null
+            && _trainerCfg.LateCancellationPolicy == LateCancellationPolicy.ChargeSession
+            && CancellationRules.ForClient(_trainerCfg, _selectedSession.StartTime, Clock.LocalNow).IsLate;
+    }
     private void ShowRescheduleForm() { _showRescheduleForm = true; _showCancelForm = false; }
 
     private async Task ConfirmCancel()
@@ -784,7 +805,7 @@
             }
             else
             {
-                await SessionService.UpdateStatusAsync(_selectedSession.Id, SessionStatus.Cancelled, _cancelReason);
+                await SessionService.UpdateStatusAsync(_selectedSession.Id, SessionStatus.Cancelled, _cancelReason, chargeSession: _chargeLate);
                 await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionCancelled", "Session",
                     _selectedSession.Id.ToString(), details);
             }

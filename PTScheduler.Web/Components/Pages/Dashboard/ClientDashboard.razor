@@ -163,6 +163,12 @@ else
                 @if (_cancelConfirmId == _nextSession.Id)
                 {
                     <div class="cd-hero-confirm">
+                        @if (_cancelDecision is not null)
+                        {
+                            <div class="cd-hero-err mb-2" style="@(_cancelDecision.RefundsSession ? "opacity:.85" : "")">
+                                <i class="bi @(_cancelDecision.RefundsSession ? "bi-info-circle" : "bi-exclamation-triangle") me-1"></i>@_cancelDecision.Message
+                            </div>
+                        }
                         <input class="form-control form-control-sm mb-2"
                                placeholder="Powód anulowania (opcjonalnie)"
                                @bind="_cancelReason" />
@@ -181,11 +187,15 @@ else
                         }
                     </div>
                 }
-                else
+                else if (_cancelDecision?.Allowed == true)
                 {
                     <button class="cd-hero-cancel" @onclick="StartCancel">
                         <i class="bi bi-x-circle"></i> Anuluj sesję
                     </button>
+                }
+                else if (_cancelDecision is not null && _nextSession.Status == SessionStatus.Scheduled)
+                {
+                    <div class="small opacity-75 mt-2"><i class="bi bi-info-circle me-1"></i>@_cancelDecision.Message</div>
                 }
             }
         </div>
@@ -419,6 +429,7 @@ else
     private bool _loading;
     private ClientDto? _client;
     private SessionDto? _nextSession;
+    private PTScheduler.Application.Scheduling.CancellationDecision? _cancelDecision;
     private List<SessionDto> _recentPast = [];
     private int _upcomingCount;
     private List<SessionInvitationDto> _invitations = [];
@@ -483,6 +494,9 @@ else
                     var upcoming = await SessionService.GetUpcomingAsync(clientId: _client.Id, count: 10);
                     _upcomingCount = upcoming.Count;
                     _nextSession   = upcoming.FirstOrDefault();
+                    _cancelDecision = _nextSession is null || ClientIdOverride.HasValue
+                        ? null
+                        : await SessionService.GetClientCancellationAsync(_nextSession.Id, _client.ApplicationUserId);
 
                     var allRecent = await SessionService.GetClientSessionsAsync(_client.Id, 50);
                     var pastSessions = allRecent.Where(s => s.StartTime < DateTime.Now).ToList();

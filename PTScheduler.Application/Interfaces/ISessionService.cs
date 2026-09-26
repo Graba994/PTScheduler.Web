@@ -1,3 +1,4 @@
+using PTScheduler.Application.Scheduling;
 using PTScheduler.Application.DTOs;
 using PTScheduler.Domain.Enums;
 
@@ -13,7 +14,9 @@ public interface ISessionService
     /// nałożyć terminy, przekazując true.
     /// </param>
     Task<SessionDto> CreateSessionAsync(CreateSessionDto dto, bool allowAwaitingPackage = true, bool allowOverlap = false);
-    Task UpdateStatusAsync(int id, SessionStatus status, string? cancellationReason = null, string? completionNotes = null);
+    /// <param name="chargeSession">Przy odwołaniu: sesja przepada (późne odwołanie klienta).</param>
+    Task UpdateStatusAsync(int id, SessionStatus status, string? cancellationReason = null, string? completionNotes = null,
+        bool chargeSession = false);
     Task<List<SessionTypeDto>> GetSessionTypesAsync();
     Task<List<ClientSummaryDto>> GetClientsAsync(string? trainerUserId = null);
     Task<List<SessionDto>> GetClientSessionsAsync(int clientId, int count = 20);
@@ -22,5 +25,7 @@ public interface ISessionService
     Task<List<SessionDto>> GetAwaitingPackageAsync(string? trainerUserId = null);
     Task RescheduleAsync(int id, DateTime newStartTime, bool allowOverlap = false);
     Task RestoreAsync(int id);
-    Task ClientCancelSessionAsync(int id, string clientUserId, string? reason = null);
+    /// <summary>Czy (i na jakich warunkach) klient może teraz odwołać tę wizytę.</summary>
+    Task<CancellationDecision> GetClientCancellationAsync(int id, string clientUserId);
+    Task<CancellationDecision> ClientCancelSessionAsync(int id, string clientUserId, string? reason = null);
 }
