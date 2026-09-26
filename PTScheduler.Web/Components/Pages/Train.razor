@@ -1,0 +1,462 @@
+@page "/train"
+@using System.Text.Json
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Logging
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Surveys
+@using PTScheduler.Domain.Constants
+@attribute [Authorize(Roles = Roles.Client + "," + Roles.Admin + "," + Roles.Trainer + "," + Roles.Subordinate)]
+@inject ITrainingPlanService PlanService
+@inject IWorkoutLogService WorkoutLog
+@inject IWorkoutSessionService Session
+@inject IClientService ClientService
+@inject ISurveyService Surveys
+@inject IAppClock Clock
+@inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
+@inject ILoggerFactory LoggerFactory
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Trenuj" />
+
+<FeatureGate Flag="TrainingPlansEnabled" Title="Moduł treningowy" ShowUpgrade="false">
+<Description>Moduł treningowy nie jest dostępny w pakiecie Twojego trenera.</Description>
+<ChildContent>
+
+<div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <h4 class="page-title mb-0"><i class="bi bi-lightning-charge-fill me-2" style="color:var(--c-primary)"></i>Trenuj</h4>
+</div>
+
+@if (_clientId is null)
+{
+    <div class="alert alert-warning"><i class="bi bi-info-circle me-2"></i>Twoje konto nie jest jeszcze powiązane z profilem klienta. Skontaktuj się z trenerem.</div>
+}
+else if (_draft is not null)
+{
+    <!-- ===== Tryb treningu ===== -->
+    <div class="alert alert-success py-2 d-flex align-items-center gap-2 small">
+        <i class="bi bi-shield-check"></i>
+        <span>Trening jest zapisywany na bieżąco — na tym urządzeniu i na serwerze — więc nie zniknie po zamknięciu przeglądarki, uśpieniu telefonu ani zaniku sieci, a w razie potrzeby wznowisz go na innym urządzeniu. Trwa do „Zakończ trening".</span>
+    </div>
+
+    <div class="card mb-3">
+        <div class="card-body py-2 d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <div>
+                <div class="fw-semibold">@_draft.PlanName</div>
+                <div class="text-muted small">@_draft.DayLabel · @_draft.Date.ToString("yyyy-MM-dd") · start @_draft.StartedAt.ToString("HH:mm")</div>
+            </div>
+            <button class="btn btn-sm btn-outline-danger" @onclick="DiscardDraft"><i class="bi bi-x-circle me-1"></i>Odrzuć</button>
+        </div>
+    </div>
+
+    @foreach (var ex in _draft.Exercises)
+    {
+        <div class="card mb-2">
+            <div class="card-body py-2">
+                <div class="d-flex align-items-center gap-2 mb-2">
+                    @if (!string.IsNullOrEmpty(ex.ThumbnailUrl))
+                    {
+                        <img src="@ex.ThumbnailUrl" alt="" style="width:44px;height:44px;object-fit:cover;border-radius:.35rem" />
+                    }
+                    <div class="flex-grow-1">
+                        <div class="fw-semibold">@ex.NamePl</div>
+                        <div class="text-muted small">
+                            Cel: @ex.TargetSets × @(string.IsNullOrWhiteSpace(ex.TargetReps) ? "—" : ex.TargetReps)
+                            @if (ex.TargetWeightKg is { } w) { <span>@@ @w kg</span> }
+                        </div>
+                    </div>
+                </div>
+
+                <table class="table table-sm align-middle mb-2">
+                    <thead>
+                        <tr class="small text-muted">
+                            <th style="width:36px">#</th>
+                            <th>Powt.</th>
+                            <th>Ciężar (kg)</th>
+                            <th style="width:60px">OK</th>
+                            <th style="width:40px"></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (var si = 0; si < ex.Sets.Count; si++)
+                        {
+                            var set = ex.Sets[si];
+                            var idx = si;
+                            <tr class="@(set.Done ? "table-success" : "")">
+                                <td class="text-muted">@(idx + 1)</td>
+                                <td><input type="number" inputmode="numeric" min="0" max="999" class="form-control form-control-sm"
+                                           @bind="set.Reps" @bind:after="SaveDraft" /></td>
+                                <td><input type="number" inputmode="decimal" step="0.5" min="0" class="form-control form-control-sm"
+                                           @bind="set.Weight" @bind:after="SaveDraft" /></td>
+                                <td class="text-center">
+                                    <input type="checkbox" class="form-check-input" @bind="set.Done" @bind:after="SaveDraft" />
+                                </td>
+                                <td>
+                                    <button class="btn btn-sm btn-link text-danger p-0" title="Usuń serię"
+                                            @onclick="() => RemoveSet(ex, idx)"><i class="bi bi-x-lg"></i></button>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="() => AddSet(ex)"><i class="bi bi-plus-lg me-1"></i>Dodaj serię</button>
+            </div>
+        </div>
+    }
+
+    <div class="d-flex gap-2 my-3">
+        <button class="btn btn-success flex-grow-1 btn-lg" @onclick="Finish" disabled="@_finishing">
+            @if (_finishing) { <span class="spinner-border spinner-border-sm me-1"></span> }
+            <i class="bi bi-check2-circle me-1"></i>Zakończ trening
+        </button>
+    </div>
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger py-2">@_error</div>
+    }
+}
+else
+{
+    <!-- ===== Wybór planu / dnia ===== -->
+    @if (!string.IsNullOrEmpty(_justFinished))
+    {
+        <div class="alert alert-success"><i class="bi bi-check2-circle me-2"></i>@_justFinished</div>
+    }
+
+    @if (_survey is not null && _surveyDate is { } surveyDate)
+    {
+        <div class="card mb-3 border-primary">
+            <div class="card-body">
+                <h5 class="fw-bold mb-1"><i class="bi bi-emoji-smile me-2" style="color:var(--c-primary)"></i>@_survey.Name</h5>
+                <SurveyForm Template="_survey" Initial="_surveyInitial" SubmitLabel="Wyślij" SkipLabel="Pomiń"
+                            Submit="d => SubmitSurveyAsync(d, surveyDate)" OnSkip="() => _survey = null" />
+            </div>
+        </div>
+    }
+
+    @if (_selectedPlan is null)
+    {
+        @if (_plans.Count == 0)
+        {
+            <div class="alert alert-secondary"><i class="bi bi-inbox me-2"></i>Nie masz jeszcze przypisanego planu treningowego.</div>
+        }
+        else
+        {
+            <div class="text-muted small mb-2">Wybierz plan:</div>
+            <div class="row g-2">
+                @foreach (var p in _plans)
+                {
+                    <div class="col-12 col-md-6">
+                        <button class="card w-100 text-start border-0 shadow-sm" @onclick="() => SelectPlan(p.Id)">
+                            <div class="card-body py-2">
+                                <div class="fw-semibold">@p.Name</div>
+                                <div class="text-muted small"><i class="bi bi-calendar3 me-1"></i>@p.DayCount dni · @p.ExerciseCount ćwiczeń</div>
+                            </div>
+                        </button>
+                    </div>
+                }
+            </div>
+        }
+    }
+    else
+    {
+        <div class="d-flex align-items-center gap-2 mb-2">
+            <button class="btn btn-sm btn-outline-secondary" @onclick="() => _selectedPlan = null"><i class="bi bi-arrow-left"></i></button>
+            <div class="fw-semibold">@_selectedPlan.Name</div>
+        </div>
+        <div class="text-muted small mb-2">Wybierz dzień:</div>
+        <div class="row g-2">
+            @foreach (var d in _selectedPlan.Days)
+            {
+                <div class="col-12 col-md-6">
+                    <button class="card w-100 text-start border-0 shadow-sm" @onclick="() => StartDay(d)">
+                        <div class="card-body py-2">
+                            <div class="fw-semibold">@(string.IsNullOrWhiteSpace(d.Label) ? "Dzień" : d.Label)</div>
+                            <div class="text-muted small"><i class="bi bi-clipboard-pulse me-1"></i>@d.Exercises.Count ćwiczeń</div>
+                        </div>
+                    </button>
+                </div>
+            }
+        </div>
+    }
+
+    @if (_history.Count > 0)
+    {
+        <hr class="my-3" />
+        <div class="text-muted small mb-2"><i class="bi bi-clock-history me-1"></i>Ostatnie treningi</div>
+        <ul class="list-group">
+            @foreach (var h in _history)
+            {
+                <li class="list-group-item d-flex justify-content-between align-items-center py-2 small">
+                    <span>@h.Date.ToString("yyyy-MM-dd")</span>
+                    <span class="text-muted">@h.ExerciseCount ćw. · @h.SetCount serii · @h.TotalVolume.ToString("0") kg obj.</span>
+                </li>
+            }
+        </ul>
+    }
+}
+</ChildContent>
+</FeatureGate>
+
+@code {
+    private int? _clientId;
+    private string _storeKey = "";
+    private List<TrainingPlanListItemDto> _plans = [];
+    private List<WorkoutHistoryItemDto> _history = [];
+    private PlanEditDto? _selectedPlan;
+
+    private WorkoutDraft? _draft;
+    private bool _draftLoaded;
+    private bool _finishing;
+    private string? _error;
+    private string? _justFinished;
+    private SurveyTemplateDto? _survey;
+    private DateOnly? _surveyDate;
+    private Dictionary<string, SurveyAnswerInput>? _surveyInitial;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        var client = await ClientService.GetClientByUserIdAsync(userId);
+        if (client is null) return;
+        _clientId = client.Id;
+        _storeKey = $"pt_workout_v1_{_clientId}";
+        _plans = await PlanService.GetClientPlansAsync(_clientId.Value);
+        _history = await WorkoutLog.GetRecentForClientAsync(_clientId.Value, 10);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender || _clientId is null || _draftLoaded) return;
+        _draftLoaded = true;
+        try
+        {
+            // Lokalny bufor (localStorage) — natychmiastowy, odporny offline.
+            WorkoutDraft? local = null;
+            var json = await JS.InvokeAsync<string?>("PTWorkout.load", _storeKey);
+            if (!string.IsNullOrWhiteSpace(json)) local = Deserialize(json);
+
+            // Backup serwerowy — pozwala wznowić na innym urządzeniu / po utracie telefonu.
+            WorkoutDraft? server = null;
+            try
+            {
+                var s = await Session.GetOpenDraftAsync(_clientId.Value);
+                if (s is not null && !string.IsNullOrWhiteSpace(s.DraftJson)) server = Deserialize(s.DraftJson);
+            }
+            catch (Exception ex) { LoggerFactory.CreateLogger("Train").LogError(ex, "Nie udało się pobrać treningu z serwera."); }
+
+            // Wygrywa nowsza wersja (po SavedAt).
+            _draft = (local, server) switch
+            {
+                (null, null) => null,
+                (not null, null) => local,
+                (null, not null) => server,
+                _ => server!.SavedAt > local!.SavedAt ? server : local
+            };
+
+            if (_draft is not null)
+            {
+                // Ujednolić oba magazyny na wybranej wersji.
+                await PersistDraftAsync();
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex) { LoggerFactory.CreateLogger("Train").LogError(ex, "Nie udało się wczytać trwającego treningu."); }
+    }
+
+    private static WorkoutDraft? Deserialize(string json)
+    {
+        try { return JsonSerializer.Deserialize<WorkoutDraft>(json); }
+        catch { return null; }
+    }
+
+    private async Task SelectPlan(int planId)
+    {
+        if (_clientId is null) return;
+        _selectedPlan = await PlanService.GetForWorkoutAsync(_clientId.Value, planId);
+    }
+
+    private async Task StartDay(PlanDayEditDto day)
+    {
+        if (_selectedPlan is null) return;
+        _draft = new WorkoutDraft
+        {
+            ClientId = _clientId!.Value,
+            PlanId = _selectedPlan.Id,
+            PlanDayId = day.Id,
+            PlanName = _selectedPlan.Name,
+            DayLabel = string.IsNullOrWhiteSpace(day.Label) ? "Dzień" : day.Label,
+            Date = Clock.Today,
+            StartedAt = Clock.LocalNow,
+            Exercises = day.Exercises.Select(x => new DraftExercise
+            {
+                ExerciseId = x.ExerciseId,
+                PlanExerciseId = x.Id,
+                NamePl = x.ExerciseNamePl,
+                ThumbnailUrl = x.ThumbnailUrl,
+                TargetSets = x.Sets,
+                TargetReps = x.Reps,
+                TargetWeightKg = x.TargetWeightKg,
+                Sets = Enumerable.Range(0, Math.Max(1, x.Sets)).Select(_ => new DraftSet
+                {
+                    Reps = 0,
+                    Weight = x.TargetWeightKg ?? 0m,
+                    Done = false
+                }).ToList()
+            }).ToList()
+        };
+        _selectedPlan = null;
+        await SaveDraft();
+    }
+
+    private async Task AddSet(DraftExercise ex)
+    {
+        var last = ex.Sets.LastOrDefault();
+        ex.Sets.Add(new DraftSet { Reps = last?.Reps ?? 0, Weight = last?.Weight ?? 0m, Done = false });
+        await SaveDraft();
+    }
+
+    private async Task RemoveSet(DraftExercise ex, int index)
+    {
+        if (index >= 0 && index < ex.Sets.Count) ex.Sets.RemoveAt(index);
+        await SaveDraft();
+    }
+
+    private async Task SaveDraft()
+    {
+        if (_draft is null) return;
+        _draft.SavedAt = Clock.LocalNow;
+        await PersistDraftAsync();
+    }
+
+    private async Task PersistDraftAsync()
+    {
+        if (_draft is null || _clientId is null) return;
+        var json = JsonSerializer.Serialize(_draft);
+        // 1) localStorage — natychmiast, działa też bez sieci.
+        try { await JS.InvokeVoidAsync("PTWorkout.save", _storeKey, json); }
+        catch (Exception ex) { LoggerFactory.CreateLogger("Train").LogError(ex, "Nie udało się zapisać treningu w pamięci urządzenia."); }
+        // 2) serwer — backup i sync między urządzeniami (best-effort, gdy online).
+        try { await Session.SaveDraftAsync(_clientId.Value, json); }
+        catch (Exception ex) { LoggerFactory.CreateLogger("Train").LogError(ex, "Nie udało się zsynchronizować treningu z serwerem."); }
+    }
+
+    private async Task DiscardDraft()
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", "Odrzucić trwający trening? Wpisane serie zostaną utracone.")) return;
+        await ClearDraftStore();
+        _draft = null;
+    }
+
+    private async Task ClearDraftStore()
+    {
+        try { await JS.InvokeVoidAsync("PTWorkout.clear", _storeKey); } catch { /* best-effort */ }
+        if (_clientId is not null)
+        {
+            try { await Session.DiscardAsync(_clientId.Value); }
+            catch (Exception ex) { LoggerFactory.CreateLogger("Train").LogError(ex, "Nie udało się usunąć draftu treningu z serwera."); }
+        }
+    }
+
+    private async Task Finish()
+    {
+        if (_draft is null || _clientId is null) return;
+        _error = null;
+        _finishing = true;
+        try
+        {
+            var dto = new LogWorkoutDto
+            {
+                PlanId = _draft.PlanId,
+                PlanDayId = _draft.PlanDayId,
+                Date = _draft.Date,
+                Exercises = _draft.Exercises.Select(e => new LogExerciseDto
+                {
+                    ExerciseId = e.ExerciseId,
+                    PlanExerciseId = e.PlanExerciseId,
+                    Sets = e.Sets.Select((s, i) => new LogSetDto { SetNumber = i + 1, Reps = s.Reps, WeightKg = s.Weight }).ToList()
+                }).ToList()
+            };
+            var saved = await WorkoutLog.LogWorkoutAsync(_clientId.Value, dto);
+            var minutes = (int)Math.Clamp(Math.Round((Clock.LocalNow - _draft.StartedAt).TotalMinutes), 5, 300);
+            var workoutDate = _draft.Date;
+            await ClearDraftStore();
+            _draft = null;
+            _justFinished = saved > 0
+                ? $"Trening zapisany — {saved} serii. Dobra robota!"
+                : "Trening zamknięty (brak wypełnionych serii do zapisania).";
+            _history = await WorkoutLog.GetRecentForClientAsync(_clientId.Value, 10);
+            await OfferSurveyAsync(workoutDate, minutes);
+        }
+        catch (Exception ex)
+        {
+            _error = "Nie udało się zapisać treningu. Postęp jest bezpieczny na urządzeniu — spróbuj ponownie.";
+            LoggerFactory.CreateLogger("Train").LogError(ex, "Błąd zapisu treningu klienta {ClientId}.", _clientId);
+        }
+        finally { _finishing = false; }
+    }
+
+    // Krótka ankieta „Jak poszło?” zaraz po treningu (jeśli włączona); czas trwania z zegara treningu.
+    private async Task OfferSurveyAsync(DateOnly date, int minutes)
+    {
+        try
+        {
+            var template = await Surveys.GetTemplateAsync(PTScheduler.Domain.Enums.SurveyKind.PostWorkout);
+            if (!template.IsEnabled) return;
+            _surveyDate = date;
+            _surveyInitial = new() { [SurveyKeys.Duration] = new SurveyAnswerInput { Number = minutes } };
+            _survey = template;
+        }
+        catch (Exception ex)
+        {
+            LoggerFactory.CreateLogger("Train").LogWarning(ex, "Nie udało się wczytać ankiety po treningu.");
+        }
+    }
+
+    private async Task<List<string>> SubmitSurveyAsync(Dictionary<string, SurveyAnswerInput> answers, DateOnly date)
+    {
+        if (_clientId is null) return ["Brak profilu klienta."];
+        var (errors, _) = await Surveys.SubmitAsync(_clientId.Value, PTScheduler.Domain.Enums.SurveyKind.PostWorkout, answers, date);
+        if (errors.Count == 0)
+        {
+            _survey = null;
+            _justFinished += " Dzięki za ocenę — trener ją zobaczy.";
+        }
+        return errors;
+    }
+
+    // ----- Model roboczy trzymany w localStorage (JSON) -----
+    public sealed class WorkoutDraft
+    {
+        public int ClientId { get; set; }
+        public int? PlanId { get; set; }
+        public int? PlanDayId { get; set; }
+        public string PlanName { get; set; } = "";
+        public string DayLabel { get; set; } = "";
+        public DateOnly Date { get; set; }
+        public DateTime StartedAt { get; set; }
+        public DateTime SavedAt { get; set; }
+        public List<DraftExercise> Exercises { get; set; } = [];
+    }
+
+    public sealed class DraftExercise
+    {
+        public int ExerciseId { get; set; }
+        public int? PlanExerciseId { get; set; }
+        public string NamePl { get; set; } = "";
+        public string? ThumbnailUrl { get; set; }
+        public int TargetSets { get; set; }
+        public string? TargetReps { get; set; }
+        public decimal? TargetWeightKg { get; set; }
+        public List<DraftSet> Sets { get; set; } = [];
+    }
+
+    public sealed class DraftSet
+    {
+        public int Reps { get; set; }
+        public decimal Weight { get; set; }
+        public bool Done { get; set; }
+    }
+}

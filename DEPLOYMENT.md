@@ -133,8 +133,8 @@ Utwórz nowy Proxy Host:
 ## Pierwsze uruchomienie
 
 1. Uruchom oba kontenery.
-2. Przejdź do `http://serwer:8080/admin/demo`.
-3. Kliknij **Reset bazy danych** i potwierdź — tworzy konto `root@admin.local` / `password`.
+2. Przejdź do `http://serwer:8080` — otworzy się kreator `/setup`.
+3. Ustaw nazwę firmy oraz własny e-mail i hasło administratora.
 4. Zaloguj się i skonfiguruj branding, e-mail i utwórz pierwszych użytkowników.
 
 ---

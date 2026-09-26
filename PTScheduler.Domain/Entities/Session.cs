@@ -18,17 +18,49 @@ public class Session
     public DateTime? CancelledAt { get; set; }
     public string? CancellationReason { get; set; }
 
+    /// <summary>Odwołanie po terminie bezpłatnego odwołania (polityka trenera).</summary>
+    public bool IsLateCancellation { get; set; }
+
+    /// <summary>
+    /// Sesja zwolniła swoje miejsce w pakiecie (odwołanie z oddaniem lub nieobecność
+    /// bez pobrania). Przywrócenie wizyty pobiera je ponownie tylko wtedy.
+    /// </summary>
+    public bool PackageRefunded { get; set; }
+
     public int? PackageId { get; set; }
     public SessionPackage? Package { get; set; }
 
     public int? SeriesId { get; set; }
     public SessionSeries? Series { get; set; }
 
+    public string? MeetingUrl { get; set; }
+    public string? CalendarEventId { get; set; }
+    /// <summary>Skrót stanu wysłanego do Google Calendar — zmiana = trzeba zaktualizować wydarzenie.</summary>
+    public string? CalendarSyncFingerprint { get; set; }
+
     /// <summary>
-    /// Set when the 24h reminder email was successfully delivered.
-    /// Used as persistent dedup so a service restart doesn't double-send.
+    /// Ustawiane, gdy przypomnienie 24h zostało w pełni obsłużone (oba kanały
+    /// wysłane, pominięte lub porzucone). Dopóki null, sesja jest kandydatem
+    /// w kolejnym cyklu. Trwały dedup przeżywa restart usługi.
     /// </summary>
     public DateTime? ReminderSentAt { get; set; }
+
+    /// <summary>
+    /// Znacznik per-kanał: ustawiany, gdy przypomnienie e-mail zostało wysłane
+    /// (lub kanał nie dotyczy tej sesji). Dzięki niemu częściowa awaria drugiego
+    /// kanału nie powoduje ponownej wysyłki e-maila w kolejnym cyklu.
+    /// </summary>
+    public DateTime? ReminderEmailSentAt { get; set; }
+
+    /// <summary>Znacznik per-kanał dla SMS — analogicznie do e-maila.</summary>
+    public DateTime? ReminderSmsSentAt { get; set; }
+
+    /// <summary>
+    /// Liczba cykli, w których wysyłka któregoś kanału zawiodła. Po przekroczeniu
+    /// limitu przypomnienie jest porzucane (oznaczane jako obsłużone), żeby nie
+    /// ponawiać w nieskończoność.
+    /// </summary>
+    public int ReminderAttempts { get; set; }
 
     public ICollection<SessionInvitation> Invitations { get; set; } = [];
 }

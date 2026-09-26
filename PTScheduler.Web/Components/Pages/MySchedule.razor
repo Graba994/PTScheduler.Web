@@ -1,9 +1,11 @@
 @page "/my"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Client")]
+@using PTScheduler.Application.Scheduling
 @inject IClientService ClientService
 @inject ISessionService SessionService
 @inject ITrainerAvailabilityService AvailabilityService
 @inject ITrainerConfigService TrainerConfigService
+@inject IAppClock Clock
 @inject IAuditLogService AuditLogService
 @inject NavigationManager Nav
 @using PTScheduler.Application.DTOs
@@ -11,7 +13,7 @@
 @using PTScheduler.Domain.Enums
 @using Microsoft.AspNetCore.Components.Authorization
 @inject AuthenticationStateProvider AuthStateProvider
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Mój grafik" />
 
@@ -82,12 +84,14 @@ else
                 <div class="flex-grow-1">
                     <div class="fw-semibold small">@pkg.Name</div>
                     <div class="progress mt-1" style="height:5px">
-                        <div class="progress-bar bg-primary" style="width:@(pkg.TotalSessions > 0 ? pkg.UsedSessions * 100 / pkg.TotalSessions : 0)%"></div>
+                        @* Pasek i liczba pokazują to samo: ile sesji zostało (wcześniej pasek
+                           pokazywał zużyte, a liczba pozostałe — „4 / 4” z pustym paskiem). *@
+                        <div class="progress-bar bg-primary" style="width:@(pkg.TotalSessions > 0 ? pkg.RemainingCredits * 100 / pkg.TotalSessions : 0)%"></div>
                     </div>
                 </div>
                 <div class="text-end flex-shrink-0">
-                    <div class="fw-bold">@pkg.RemainingCredits</div>
-                    <div class="text-muted" style="font-size:.7rem">/ @pkg.TotalSessions sesji</div>
+                    <div class="fw-bold">@pkg.RemainingCredits <span class="text-muted fw-normal" style="font-size:.75rem">z @pkg.TotalSessions</span></div>
+                    <div class="text-muted" style="font-size:.7rem">sesji zostało</div>
                     @if (daysLeft.HasValue)
                     {
                         <div class="@(daysLeft < 14 ? "text-danger" : "text-muted")" style="font-size:.7rem">
@@ -128,7 +132,7 @@ else
                             <div class="fw-bold fs-5 lh-1">@s.StartTime.ToString("dd")</div>
                             <div class="text-muted small text-uppercase">@s.StartTime.ToString("MMM")</div>
                         </div>
-                        <div class="flex-grow-1">
+                        <div class="flex-grow-1 text-break" style="min-width:0">
                             <div class="fw-semibold">@s.SessionTypeName</div>
                             <div class="text-muted small">
                                 <i class="bi bi-clock me-1"></i>@s.StartTime.ToString("HH:mm") — @s.EndTime.ToString("HH:mm")
@@ -139,8 +143,11 @@ else
                                 <div class="text-muted small mt-1 text-truncate"><i class="bi bi-chat-left-text me-1"></i>@s.Notes</div>
                             }
                         </div>
-                        <div class="flex-shrink-0 text-end">
-                            @if (_cancellationWindowHours == 0 || s.StartTime > DateTime.Now.AddHours(_cancellationWindowHours))
+                        <div class="flex-shrink-0 text-end d-flex flex-column align-items-end gap-2">
+                            <AddToCalendarButton Title="@($"{s.SessionTypeName} — {s.TrainerName}")"
+                                                  StartTime="s.StartTime" DurationMinutes="s.DurationMinutes"
+                                                  Location="@(s.MeetingUrl ?? "")" Uid="@($"session-{s.Id}")" Compact="true" />
+                            @if (CancellationRules.ForClient(_trainerCfg, s.StartTime, Clock.LocalNow).Allowed)
                             {
                                 <button class="btn btn-outline-danger btn-sm" @onclick="() => ConfirmCancel(s)">
                                     <i class="bi bi-x-circle me-1"></i>Odwołaj
@@ -173,7 +180,7 @@ else
                     <tr>
                         <th>Data</th>
                         <th>Typ</th>
-                        <th>Trener</th>
+                        <th class="d-none d-md-table-cell">Trener</th>
                         <th>Status</th>
                     </tr>
                 </thead>
@@ -183,7 +190,7 @@ else
                         <tr>
                             <td class="text-nowrap small">@s.StartTime.ToString("dd.MM.yy HH:mm")</td>
                             <td class="small">@s.SessionTypeName</td>
-                            <td class="small text-muted">@s.TrainerName</td>
+                            <td class="small text-muted d-none d-md-table-cell">@s.TrainerName</td>
                             <td><span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span></td>
                         </tr>
                     }
@@ -204,6 +211,10 @@ else
                     <i class="bi bi-exclamation-triangle-fill text-warning fs-2 d-block mb-3"></i>
                     <p class="mb-1 fw-semibold">Odwołać trening?</p>
                     <p class="text-muted small mb-3">@cancelTarget.SessionTypeName — @cancelTarget.StartTime.ToString("dd.MM.yyyy HH:mm")</p>
+                    @{ var decision = CancellationRules.ForClient(_trainerCfg, cancelTarget.StartTime, Clock.LocalNow); }
+                    <div class="alert @(decision.RefundsSession ? "alert-light border" : "alert-warning") py-2 small text-start">
+                        <i class="bi @(decision.RefundsSession ? "bi-info-circle" : "bi-exclamation-triangle") me-1"></i>@decision.Message
+                    </div>
                     <div class="mb-2">
                         <input class="form-control form-control-sm" placeholder="Powód (opcjonalnie)" @bind="cancelReason" />
                     </div>
@@ -317,43 +328,45 @@ else
                     @if (bookingStep == 2)
                     {
                         <p class="text-muted small mb-3">
-                            Wybierz datę i dostępny termin dla wizyty <strong>@selectedType!.Name</strong> (@selectedType.DurationMinutes min).
+                            Wybierz termin dla wizyty <strong>@selectedType!.Name</strong> (@selectedType.DurationMinutes min).
                         </p>
 
-                        <div class="row g-3">
-                            <div class="col-12 col-sm-5">
-                                <label class="form-label form-label-sm fw-semibold">Data</label>
-                                <input type="date" class="form-control"
-                                       value="@selectedDate.ToString("yyyy-MM-dd")"
-                                       min="@DateTime.Today.ToString("yyyy-MM-dd")"
-                                       max="@DateTime.Today.AddDays(60).ToString("yyyy-MM-dd")"
-                                       @onchange="OnDateChanged" />
+                        <div class="slot-day-nav">
+                            <button class="slot-nav-btn" @onclick="SlotPrevDay"
+                                    disabled="@(selectedDate <= DateOnly.FromDateTime(StudioClock.Today))">
+                                <i class="bi bi-chevron-left"></i>
+                            </button>
+                            <div class="slot-nav-center">
+                                <div class="slot-nav-weekday">@selectedDate.ToString("dddd", new System.Globalization.CultureInfo("pl-PL"))</div>
+                                <div class="slot-nav-full">@selectedDate.ToString("d MMMM yyyy", new System.Globalization.CultureInfo("pl-PL"))</div>
                             </div>
+                            <button class="slot-nav-btn" @onclick="SlotNextDay">
+                                <i class="bi bi-chevron-right"></i>
+                            </button>
                         </div>
 
                         <div class="mt-3">
                             @if (loadingSlots)
                             {
-                                <div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></div>
+                                <div class="text-center py-3"><span class="spinner-border spinner-border-sm text-primary"></span></div>
                             }
                             else if (!availableSlots.Any())
                             {
-                                <div class="alert alert-warning py-2 small mt-2">
-                                    <i class="bi bi-calendar-x me-1"></i>
-                                    Brak wolnych terminów w wybranym dniu. Wybierz inną datę.
+                                <div class="slot-empty">
+                                    <i class="bi bi-calendar-x"></i>
+                                    Brak wolnych terminów w tym dniu
                                 </div>
                             }
                             else
                             {
-                                <label class="form-label form-label-sm fw-semibold mt-2">Dostępne terminy</label>
-                                <div class="d-flex flex-wrap gap-2">
+                                <div class="slot-tile-grid">
                                     @foreach (var slot in availableSlots)
                                     {
                                         var isSelected = selectedSlot?.Start == slot.Start;
-                                        <button class="btn btn-sm @(isSelected ? "btn-primary" : "btn-outline-primary")"
-                                                style="min-width:80px"
+                                        <button type="button" class="slot-tile @(isSelected ? "slot-tile-active" : "")"
                                                 @onclick="() => { selectedSlot = slot; bookingError = string.Empty; }">
-                                            @slot.Start.ToString("HH:mm")
+                                            <div class="slot-tile-time">@slot.Start.ToString("HH:mm")</div>
+                                            <div class="slot-tile-end">— @slot.End.ToString("HH:mm")</div>
                                         </button>
                                     }
                                 </div>
@@ -399,6 +412,9 @@ else
                         <div class="mb-3">
                             <label class="form-label form-label-sm fw-semibold">Notatki (opcjonalnie)</label>
                             <textarea class="form-control form-control-sm" rows="2" placeholder="Dodaj notatkę do wizyty..." @bind="bookingNotes"></textarea>
+                            <div class="small text-muted mt-2">
+                                <i class="bi bi-shield-check me-1"></i>@CancellationRules.Describe(_trainerCfg)
+                            </div>
                         </div>
 
                         <div class="d-flex justify-content-between mt-2">
@@ -443,7 +459,7 @@ else
     private List<SessionDto> past = [];
     private string _userId = string.Empty;
     private string _userEmail = string.Empty;
-    private int _cancellationWindowHours = 24;
+    private TrainerConfigDto _trainerCfg = new();
 
     private SessionDto? cancelTarget;
     private string cancelReason = string.Empty;
@@ -456,7 +472,7 @@ else
     private string bookingNotes = string.Empty;
     private List<SessionTypeDto> sessionTypes = [];
     private SessionTypeDto? selectedType;
-    private DateOnly selectedDate = DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+    private DateOnly selectedDate = DateOnly.FromDateTime(StudioClock.Today.AddDays(1));
     private List<AvailableSlotDto> availableSlots = [];
     private AvailableSlotDto? selectedSlot;
     private bool loadingSlots;
@@ -476,8 +492,7 @@ else
                 {
                     try
                     {
-                        var config = await TrainerConfigService.GetAsync(client.TrainerUserId);
-                        _cancellationWindowHours = config.CancellationWindowHours;
+                        _trainerCfg = await TrainerConfigService.GetAsync(client.TrainerUserId);
                     }
                     catch { /* best-effort — use default cancellation window */ }
                 }
@@ -489,7 +504,7 @@ else
     private async Task RefreshSessions()
     {
         var all = await SessionService.GetClientSessionsAsync(client!.Id, 500);
-        var now = DateTime.Now;
+        var now = StudioClock.Now;
         upcoming = all.Where(s => s.Status == SessionStatus.Scheduled && s.StartTime >= now)
                       .OrderBy(s => s.StartTime).ToList();
         past = all.Where(s => s.StartTime < now || s.Status != SessionStatus.Scheduled)
@@ -504,7 +519,7 @@ else
         bookingNotes = string.Empty;
         bookingError = string.Empty;
         availableSlots = [];
-        selectedDate = DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+        selectedDate = DateOnly.FromDateTime(StudioClock.Today.AddDays(1));
 
         if (!sessionTypes.Any())
             sessionTypes = await SessionService.GetSessionTypesAsync();
@@ -540,14 +555,18 @@ else
         bookingStep = 3;
     }
 
-    private async Task OnDateChanged(ChangeEventArgs e)
+    private async Task SlotPrevDay()
     {
-        if (DateOnly.TryParse(e.Value?.ToString(), out var d))
-        {
-            selectedDate = d;
-            selectedSlot = null;
-            await LoadSlots();
-        }
+        selectedDate = selectedDate.AddDays(-1);
+        selectedSlot = null;
+        await LoadSlots();
+    }
+
+    private async Task SlotNextDay()
+    {
+        selectedDate = selectedDate.AddDays(1);
+        selectedSlot = null;
+        await LoadSlots();
     }
 
     private async Task LoadSlots()
@@ -558,7 +577,7 @@ else
         {
             var all = await AvailabilityService.GetAvailableSlotsAsync(
                 client.TrainerUserId, selectedDate, selectedType.DurationMinutes);
-            availableSlots = all.Where(s => s.IsAvailable && s.Start > DateTime.Now).ToList();
+            availableSlots = all.Where(s => s.IsAvailable && s.Start > StudioClock.Now).ToList();
         }
         finally { loadingSlots = false; }
     }
@@ -625,9 +644,12 @@ else
             cancelTarget = null;
             await RefreshSessions();
         }
+        catch (InvalidOperationException ex)
+        {
+            cancelError = ex.Message;
+        }
         catch (Exception)
         {
-            cancelTarget = null;
             cancelError = "Nie udało się anulować sesji. Spróbuj ponownie.";
         }
         finally { isBusy = false; }

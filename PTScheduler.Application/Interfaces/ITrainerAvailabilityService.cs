@@ -21,5 +21,16 @@ public interface ITrainerAvailabilityService
     /// <summary>
     /// Returns true if the trainer has no conflicting session in [start, start+durationMin].
     /// </summary>
-    Task<bool> IsSlotFreeAsync(string trainerUserId, DateTime start, int durationMinutes);
+    /// <param name="excludeSessionId">
+    /// Sesja pomijana w kontroli — używane przy przenoszeniu, żeby sesja nie
+    /// kolidowała sama ze sobą (jej stary rekord wciąż jest w bazie).
+    /// </param>
+    Task<bool> IsSlotFreeAsync(string trainerUserId, DateTime start, int durationMinutes, int? excludeSessionId = null);
+
+    /// <summary>
+    /// Zwraca pierwszą sesję kolidującą z proponowanym terminem, albo null gdy
+    /// termin jest wolny. Jak <see cref="IsSlotFreeAsync"/>, ale z detalami do
+    /// komunikatu dla trenera.
+    /// </summary>
+    Task<SlotConflictDto?> FindConflictAsync(string trainerUserId, DateTime start, int durationMinutes, int? excludeSessionId = null);
 }

@@ -1,6 +1,8 @@
-@rendermode InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 @inject IJSRuntime JS
+@inject PTScheduler.Web.Services.EntitlementService Entitlements
 @inject AuthenticationStateProvider AuthState
+@inject PTScheduler.Application.Interfaces.IMarketingSettingsService MarketingSettings
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Domain.Constants
 @using System.Security.Claims
@@ -9,7 +11,9 @@
 {
     <button class="mobile-nav-item @(_sheetOpen ? "active" : "")" @onclick="ToggleSheet">
         <span class="mobile-nav-indicator"></span>
-        <i class="bi bi-grid-fill"></i>
+        <i class="bi bi-grid-fill position-relative">
+            @if (_mustChangePassword) { <span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger rounded-circle" style="font-size:0"><span class="visually-hidden">Ustaw własne hasło</span></span> }
+        </i>
         <span>Więcej</span>
     </button>
 
@@ -26,6 +30,12 @@
                 <div class="fw-semibold text-truncate">@_name</div>
                 <div class="text-muted text-truncate" style="font-size:.75rem">@_email</div>
             </div>
+            @if (_canInstallPwa)
+            {
+                <button class="mobile-sheet-theme-btn" @onclick="InstallPwaAsync" title="Zainstaluj aplikację">
+                    <i class="bi bi-download"></i>
+                </button>
+            }
             <button class="mobile-sheet-theme-btn" @onclick="ToggleDarkAsync" title="@(_dark ? "Tryb jasny" : "Tryb ciemny")">
                 <i class="bi @(_dark ? "bi-sun-fill" : "bi-moon-stars-fill")"></i>
             </button>
@@ -36,6 +46,11 @@
                 <div class="mobile-sheet-section">
                     <div class="mobile-sheet-label">Nawigacja</div>
                     <div class="mobile-sheet-grid">
+                        <a href="/chat" class="mobile-sheet-tile position-relative" @onclick="CloseSheet">
+                            <i class="bi bi-chat-dots-fill"></i>
+                            <span>Wiadomości</span>
+                            <ChatUnreadBadge />
+                        </a>
                         <a href="/stats" class="mobile-sheet-tile" @onclick="CloseSheet">
                             <i class="bi bi-bar-chart-line-fill"></i>
                             <span>Statystyki</span>
@@ -71,6 +86,26 @@
                         </a>
                     </div>
                 </div>
+                @if (Entitlements.IsAllowed("TrainingPlansEnabled"))
+                {
+                <div class="mobile-sheet-section">
+                    <div class="mobile-sheet-label">Trening</div>
+                    <div class="mobile-sheet-grid">
+                        <a href="/exercises" class="mobile-sheet-tile" @onclick="CloseSheet">
+                            <i class="bi bi-clipboard-pulse"></i>
+                            <span>Ćwiczenia</span>
+                        </a>
+                        <a href="/plans" class="mobile-sheet-tile" @onclick="CloseSheet">
+                            <i class="bi bi-list-check"></i>
+                            <span>Plany</span>
+                        </a>
+                        <a href="/trainer/activity" class="mobile-sheet-tile" @onclick="CloseSheet">
+                            <i class="bi bi-people"></i>
+                            <span>Aktywność</span>
+                        </a>
+                    </div>
+                </div>
+                }
             </Authorized>
         </AuthorizeView>
 
@@ -93,6 +128,23 @@
                 <div class="mobile-sheet-section">
                     <div class="mobile-sheet-label">Moje</div>
                     <div class="mobile-sheet-grid">
+                        @if (Entitlements.IsAllowed("TrainingPlansEnabled"))
+                        {
+                        <a href="/train" class="mobile-sheet-tile" @onclick="CloseSheet"
+                           style="background:var(--c-primary);color:#fff;grid-column:1 / -1">
+                            <i class="bi bi-lightning-charge-fill" style="color:inherit"></i>
+                            <span>Trenuj</span>
+                        </a>
+                        <a href="/my/workouts" class="mobile-sheet-tile" @onclick="CloseSheet">
+                            <i class="bi bi-graph-up-arrow"></i>
+                            <span>Postępy</span>
+                        </a>
+                        }
+                        <a href="/chat" class="mobile-sheet-tile position-relative" @onclick="CloseSheet">
+                            <i class="bi bi-chat-dots-fill"></i>
+                            <span>Wiadomości</span>
+                            <ChatUnreadBadge />
+                        </a>
                         <a href="/my/profile" class="mobile-sheet-tile" @onclick="CloseSheet">
                             <i class="bi bi-person-circle"></i>
                             <span>Profil</span>
@@ -101,9 +153,25 @@
                             <i class="bi bi-box-seam"></i>
                             <span>Pakiety</span>
                         </a>
+                        <a href="/my/memberships" class="mobile-sheet-tile" @onclick="CloseSheet">
+                            <i class="bi bi-arrow-repeat"></i>
+                            <span>Karnety</span>
+                        </a>
+                        @if (_referralsEnabled)
+                        {
+                        <a href="/my/referrals" class="mobile-sheet-tile" @onclick="CloseSheet">
+                            <i class="bi bi-gift"></i>
+                            <span>Poleć</span>
+                        </a>
+                        }
                         <a href="/my/stats" class="mobile-sheet-tile" @onclick="CloseSheet">
                             <i class="bi bi-graph-up"></i>
                             <span>Statystyki</span>
+                        </a>
+                        <a href="/my/courses" class="mobile-sheet-tile" @onclick="CloseSheet"
+                           style="background:var(--c-primary-light);color:var(--c-primary)">
+                            <i class="bi bi-mortarboard-fill"></i>
+                            <span>Moje kursy</span>
                         </a>
                     </div>
                 </div>
@@ -112,6 +180,14 @@
 
         <div class="mobile-sheet-section">
             <div class="mobile-sheet-label">Konto</div>
+            @if (_mustChangePassword)
+            {
+                <a href="/Account/Manage/ChangePassword" class="mobile-sheet-link text-danger fw-semibold" @onclick="CloseSheet">
+                    <i class="bi bi-shield-lock-fill"></i>
+                    <span>Ustaw własne hasło</span>
+                    <i class="bi bi-chevron-right ms-auto" style="font-size:.7rem;opacity:.4"></i>
+                </a>
+            }
             <a href="/Account/Manage" class="mobile-sheet-link" @onclick="CloseSheet">
                 <i class="bi bi-gear-fill"></i>
                 <span>Ustawienia konta</span>
@@ -143,9 +219,12 @@
     private bool _ready;
     private bool _sheetOpen;
     private bool _dark;
+    private bool _canInstallPwa;
     private string _initials = "";
     private string _name = "";
     private string _email = "";
+    private bool _referralsEnabled;
+    private bool _mustChangePassword;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -155,11 +234,28 @@
             var user = auth.User;
             _name = user.Identity?.Name ?? "";
             _email = user.FindFirst(ClaimTypes.Email)?.Value ?? _name;
+            _mustChangePassword = user.HasClaim(PTScheduler.Web.Services.AppClaimsPrincipalFactory.MustChangePasswordClaim, "1");
             var parts = _name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             _initials = parts.Length >= 2
                 ? $"{parts[0][0]}{parts[^1][0]}".ToUpper()
                 : _name.Length > 0 ? _name[0].ToString().ToUpper() : "?";
-            try { _dark = await JS.InvokeAsync<bool>("PTTheme.isDark"); } catch { } // JS interop may fail during prerender
+            try { _dark = await JS.InvokeAsync<bool>("PTTheme.isDark"); } catch { }
+            try { _referralsEnabled = Entitlements.IsAllowed("ReferralProgram") && (await MarketingSettings.GetAsync()).ReferralEnabled; } catch { }
+            try
+            {
+                var standalone = await JS.InvokeAsync<bool>("eval",
+                    "window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true");
+                if (!standalone)
+                {
+                    _canInstallPwa = await JS.InvokeAsync<bool>("eval", "!!window._installPrompt");
+                    if (!_canInstallPwa)
+                    {
+                        _canInstallPwa = await JS.InvokeAsync<bool>("eval",
+                            "/iphone|ipad|ipod/i.test(navigator.userAgent.toLowerCase())");
+                    }
+                }
+            }
+            catch { }
             _ready = true;
             StateHasChanged();
         }
@@ -170,6 +266,25 @@
 
     private async Task ToggleDarkAsync()
     {
-        try { _dark = await JS.InvokeAsync<bool>("PTTheme.toggle"); } catch { } // JS interop may fail during prerender
+        try { _dark = await JS.InvokeAsync<bool>("PTTheme.toggle"); } catch { }
+    }
+
+    private async Task InstallPwaAsync()
+    {
+        try
+        {
+            var hasPrompt = await JS.InvokeAsync<bool>("eval", "!!window._installPrompt");
+            if (hasPrompt)
+            {
+                var accepted = await JS.InvokeAsync<bool>("triggerPwaInstall");
+                if (accepted) _canInstallPwa = false;
+            }
+            else
+            {
+                await JS.InvokeVoidAsync("eval",
+                    "alert('Nacisnij przycisk Udostepnij w Safari, a nastepnie wybierz \\\"Dodaj do ekranu glownego\\\".')");
+            }
+        }
+        catch { }
     }
 }

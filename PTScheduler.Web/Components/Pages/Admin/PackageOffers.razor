@@ -1,0 +1,277 @@
+@page "/admin/package-offers"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@inject IPackageOfferService OfferService
+@inject ISessionTypeService TypeService
+@inject IPaymentSettingsService PaymentSettings
+@inject IPermissionService Permission
+@inject AuthenticationStateProvider AuthState
+@inject PTScheduler.Web.Services.ToastService Toast
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Pakiety na sprzedaż" />
+
+<div class="page-header">
+    <h4 class="page-title"><i class="bi bi-box-seam-fill me-2" style="color:var(--c-primary)"></i>Pakiety na sprzedaż</h4>
+    @if (!_denied)
+    {
+        <button class="btn btn-primary btn-sm" @onclick="OpenAdd">
+            <i class="bi bi-plus-lg me-1"></i>Nowy pakiet
+        </button>
+    }
+</div>
+
+@if (_denied)
+{
+    <div class="alert alert-danger"><i class="bi bi-shield-lock me-2"></i>Brak uprawnień do zarządzania pakietami.</div>
+}
+else if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    @if (!_paymentsEnabled)
+    {
+        <div class="alert alert-warning">
+            <i class="bi bi-exclamation-triangle me-2"></i>Płatności online są wyłączone.
+            Klienci będą mogli przeglądać pakiety, ale nie będą mogli ich kupić online.
+            <a href="/admin/payments" class="alert-link">Włącz płatności</a>
+        </div>
+    }
+
+    @if (!_offers.Any())
+    {
+        <div class="text-center text-muted py-5">
+            <i class="bi bi-box-seam d-block fs-1 mb-2"></i>
+            <p>Nie masz jeszcze żadnych pakietów na sprzedaż.</p>
+            <button class="btn btn-primary" @onclick="OpenAdd"><i class="bi bi-plus-lg me-1"></i>Utwórz pierwszy pakiet</button>
+        </div>
+    }
+    else
+    {
+        <div class="row g-3">
+            @foreach (var o in _offers)
+            {
+                <div class="col-12 col-md-6 col-xl-4">
+                    <div class="card h-100 @(!o.IsActive ? "opacity-50" : "") @(o.IsFeatured ? "border-primary" : "")">
+                        <div class="card-body d-flex flex-column">
+                            <div class="d-flex justify-content-between align-items-start mb-2">
+                                <div>
+                                    <h5 class="card-title mb-1">@o.Name</h5>
+                                    <div class="text-muted small"><i class="bi bi-clock me-1"></i>@o.SessionTypeName · @o.DurationMinutes min</div>
+                                </div>
+                                <div class="d-flex gap-1">
+                                    @if (o.IsFeatured) { <span class="badge bg-warning text-dark">Wyróżniony</span> }
+                                    @if (o.IsActive) { <span class="badge bg-success">Aktywny</span> }
+                                    else { <span class="badge bg-secondary">Nieaktywny</span> }
+                                </div>
+                            </div>
+
+                            @if (!string.IsNullOrEmpty(o.Description))
+                            {
+                                <p class="text-muted small flex-grow-1">@o.Description</p>
+                            }
+                            else { <div class="flex-grow-1"></div> }
+
+                            <div class="d-flex align-items-end justify-content-between mt-2">
+                                <div>
+                                    <div class="fw-bold fs-5" style="color:var(--c-primary)">@o.Price.ToString("0.00") @o.Currency</div>
+                                    <div class="text-muted small">@o.SessionsCount sesji@(o.ValidDays.HasValue ? $" · ważny {o.ValidDays} dni" : "")</div>
+                                </div>
+                                <div class="d-flex gap-1">
+                                    <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenEdit(o)"><i class="bi bi-pencil"></i></button>
+                                    @if (o.IsActive)
+                                    {
+                                        <button class="btn btn-sm btn-outline-secondary" title="Dezaktywuj" @onclick="() => ToggleActive(o, false)"><i class="bi bi-eye-slash"></i></button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-sm btn-outline-success" title="Aktywuj" @onclick="() => ToggleActive(o, true)"><i class="bi bi-eye"></i></button>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+
+@if (_modalOpen)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.45)">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        <i class="bi bi-box-seam me-2 text-primary"></i>
+                        @(_editId is null ? "Nowy pakiet" : "Edytuj pakiet")
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="CloseModal"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(_error)) { <div class="alert alert-danger py-2 small">@_error</div> }
+
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label">Nazwa <span class="text-danger">*</span></label>
+                            <input class="form-control" @bind="_form.Name" placeholder="np. Pakiet 10 treningów" maxlength="100" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Opis</label>
+                            <textarea class="form-control" rows="3" @bind="_form.Description" placeholder="Opis widoczny dla klientów..."></textarea>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label">Typ sesji <span class="text-danger">*</span></label>
+                            <select class="form-select" @bind="_form.SessionTypeId">
+                                <option value="0">— Wybierz —</option>
+                                @foreach (var t in _sessionTypes)
+                                {
+                                    <option value="@t.Id">@t.Name (@t.DurationMinutes min)</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label">Liczba sesji <span class="text-danger">*</span></label>
+                            <input type="number" class="form-control" min="1" max="999" @bind="_form.SessionsCount" />
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label">Cena <span class="text-danger">*</span></label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" min="0" step="0.01" @bind="_form.Price" />
+                                <span class="input-group-text">@_form.Currency</span>
+                            </div>
+                        </div>
+                        <div class="col-6 col-md-4">
+                            <label class="form-label">Ważność (dni)</label>
+                            <input type="number" class="form-control" min="1" placeholder="Bez limitu"
+                                   value="@(_form.ValidDays?.ToString() ?? "")"
+                                   @onchange="e => _form.ValidDays = string.IsNullOrEmpty(e.Value?.ToString()) ? null : int.Parse(e.Value!.ToString()!)" />
+                        </div>
+                        <div class="col-6 col-md-4">
+                            <label class="form-label">Kolejność</label>
+                            <input type="number" class="form-control" @bind="_form.SortOrder" />
+                        </div>
+                        <div class="col-12 col-md-4 d-flex flex-column gap-2 pt-md-4">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="offerActive" @bind="_form.IsActive" />
+                                <label class="form-check-label" for="offerActive">Aktywny</label>
+                            </div>
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="offerFeatured" @bind="_form.IsFeatured" />
+                                <label class="form-check-label" for="offerFeatured">Wyróżniony</label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="CloseModal">Anuluj</button>
+                    <button class="btn btn-primary" @onclick="Save" disabled="@_busy">
+                        @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        Zapisz
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private List<PackageOfferDto> _offers = [];
+    private List<SessionTypeDto> _sessionTypes = [];
+    private bool _loading = true;
+    private bool _denied;
+    private bool _paymentsEnabled;
+    private bool _modalOpen;
+    private bool _busy;
+    private string _error = string.Empty;
+    private string _userId = string.Empty;
+    private int? _editId;
+    private SavePackageOfferDto _form = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        var role = auth.User.IsInRole(Roles.Admin) ? Roles.Admin
+                 : auth.User.IsInRole(Roles.Trainer) ? Roles.Trainer
+                 : auth.User.IsInRole(Roles.Subordinate) ? Roles.Subordinate : string.Empty;
+        if (!await Permission.HasPermissionAsync(role, PTScheduler.Domain.Constants.Permissions.ManagePackages))
+        {
+            _denied = true; _loading = false; return;
+        }
+
+        var ps = await PaymentSettings.GetAsync();
+        _paymentsEnabled = ps.Enabled;
+
+        _sessionTypes = await TypeService.GetAllAsync(includeInactive: false);
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try { _offers = await OfferService.GetAllAsync(includeInactive: true); }
+        finally { _loading = false; }
+    }
+
+    private void OpenAdd()
+    {
+        _editId = null;
+        _form = new SavePackageOfferDto { IsActive = true, SessionsCount = 10, Currency = "PLN" };
+        _error = string.Empty;
+        _modalOpen = true;
+    }
+
+    private void OpenEdit(PackageOfferDto o)
+    {
+        _editId = o.Id;
+        _form = new SavePackageOfferDto
+        {
+            Name = o.Name,
+            Description = o.Description,
+            ImageUrl = o.ImageUrl,
+            SessionTypeId = o.SessionTypeId,
+            SessionsCount = o.SessionsCount,
+            Price = o.Price,
+            Currency = o.Currency,
+            ValidDays = o.ValidDays,
+            IsActive = o.IsActive,
+            IsFeatured = o.IsFeatured,
+            SortOrder = o.SortOrder
+        };
+        _error = string.Empty;
+        _modalOpen = true;
+    }
+
+    private void CloseModal() => _modalOpen = false;
+
+    private async Task Save()
+    {
+        if (string.IsNullOrWhiteSpace(_form.Name)) { _error = "Nazwa jest wymagana."; return; }
+        if (_form.SessionTypeId <= 0) { _error = "Wybierz typ sesji."; return; }
+        if (_form.SessionsCount < 1) { _error = "Liczba sesji musi wynosić co najmniej 1."; return; }
+        if (_form.Price < 0) { _error = "Cena nie może być ujemna."; return; }
+
+        _busy = true; _error = string.Empty;
+        try
+        {
+            if (_editId is null) await OfferService.CreateAsync(_form, _userId);
+            else await OfferService.UpdateAsync(_editId.Value, _form);
+            _modalOpen = false;
+            await LoadAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ToggleActive(PackageOfferDto o, bool active)
+    {
+        try { await OfferService.SetActiveAsync(o.Id, active); await LoadAsync(); }
+        catch { Toast.Error("Nie udało się zmienić statusu pakietu."); }
+    }
+}

@@ -1,0 +1,211 @@
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Surveys
+@using Microsoft.Extensions.Logging
+@inject IWorkoutCommentService Comments
+@inject IAppClock Clock
+@inject ILoggerFactory LoggerFactory
+
+@* Dziennik treningów (dzień po dniu) z wątkiem komentarzy trener ↔ klient pod każdym dniem.
+   Używany u klienta (Moje postępy) i u trenera (Dziennik klienta). *@
+
+<div class="d-flex flex-column gap-2">
+    @for (var i = 0; i < Days.Count; i++)
+    {
+        var day = Days[i];
+        var idx = i;
+        var open = _openDays.Contains(idx);
+        var dayComments = _comments.Where(c => c.WorkoutDate == day.Date).ToList();
+        var unread = dayComments.Count(c => !c.IsRead && c.ByTrainer != AsTrainer);
+        <div class="card">
+            <button class="btn text-start d-flex justify-content-between align-items-center p-3 gap-2" @onclick="() => ToggleDay(idx)">
+                <span class="overflow-hidden">
+                    <span class="fw-semibold me-2">@day.Date.ToString("yyyy-MM-dd")</span>
+                    <span class="text-muted small">@day.Exercises.Count ćw. · @day.SetCount serii · @day.TotalVolume.ToString("0") kg obj.</span>
+                </span>
+                <span class="d-flex align-items-center gap-2 flex-shrink-0">
+                    @if (Surveys?.GetValueOrDefault(day.Date) is { } sv)
+                    {
+                        <span class="badge rounded-pill @(sv.FlagCount > 0 ? "bg-danger" : "bg-light text-dark border")" title="Ankieta po treningu">
+                            @(sv[SurveyKeys.Rpe]?.Number is { } rpe ? $"RPE {rpe:0.#}" : "ankieta")
+                            @if (sv.FlagCount > 0) { <i class="bi bi-exclamation-triangle-fill ms-1"></i> }
+                        </span>
+                    }
+                    @if (dayComments.Count > 0)
+                    {
+                        <span class="badge rounded-pill @(unread > 0 ? "bg-primary" : "bg-light text-dark border")" title="Komentarze">
+                            <i class="bi bi-chat-dots me-1"></i>@dayComments.Count
+                        </span>
+                    }
+                    <i class="bi @(open ? "bi-chevron-up" : "bi-chevron-down") text-muted"></i>
+                </span>
+            </button>
+            @if (open)
+            {
+                <div class="card-body pt-0">
+                    @foreach (var ex in day.Exercises)
+                    {
+                        <div class="mb-2">
+                            <div class="fw-semibold small">@ex.ExerciseName <span class="text-muted fw-normal">· @ex.Volume.ToString("0") kg</span></div>
+                            <div class="d-flex flex-wrap gap-1 mt-1">
+                                @foreach (var s in ex.Sets)
+                                {
+                                    <span class="badge bg-light text-dark border">@s.Reps × @s.WeightKg.ToString("0.##") kg</span>
+                                }
+                            </div>
+                        </div>
+                    }
+
+                    @if (Surveys?.GetValueOrDefault(day.Date) is { } survey)
+                    {
+                        <div class="small mt-2 p-2 rounded" style="background:var(--bs-tertiary-bg,#F8FAFC)">
+                            <i class="bi bi-emoji-smile me-1 text-primary"></i>
+                            @(string.Join(" · ", survey.Answers
+                                .Where(a => !a.IsEmpty && a.Type != SurveyQuestionType.Text && a.Key != SurveyKeys.PainLocation)
+                                .Select(a => $"{ShortLabel(a)}: {a.Display}")))
+                            @if (survey[SurveyKeys.PainLocation]?.Text is { Length: > 0 } where)
+                            {
+                                <div class="survey-flag mt-1"><i class="bi bi-exclamation-triangle-fill me-1"></i>Ból: @where</div>
+                            }
+                            @if (survey[SurveyKeys.Comment]?.Text is { Length: > 0 } note)
+                            {
+                                <div class="mt-1"><i class="bi bi-chat-left-text me-1"></i>@note</div>
+                            }
+                        </div>
+                    }
+                    else if (RateLinks)
+                    {
+                        <a class="btn btn-sm btn-outline-primary mt-2"
+                           href="@($"/my/survey/po-treningu?date={day.Date:yyyy-MM-dd}&returnUrl=%2Fmy%2Fworkouts")">
+                            <i class="bi bi-emoji-smile me-1"></i>Oceń ten trening
+                        </a>
+                    }
+
+                    <div class="workout-comments mt-3 pt-2 border-top">
+                        @foreach (var c in dayComments)
+                        {
+                            var mine = c.AuthorUserId == CurrentUserId;
+                            <div class="workout-comment @(c.ByTrainer ? "workout-comment-trainer" : "workout-comment-client")">
+                                <div class="d-flex justify-content-between align-items-baseline gap-2">
+                                    <span class="fw-semibold small">
+                                        @if (c.ByTrainer) { <i class="bi bi-person-badge me-1"></i> }
+                                        @c.AuthorName
+                                    </span>
+                                    <span class="text-muted" style="font-size:.7rem">
+                                        @Clock.ToWallClock(c.CreatedAtUtc).ToString("dd.MM HH:mm")
+                                        @if (mine)
+                                        {
+                                            <button class="btn btn-link btn-sm p-0 ms-1 text-muted" title="Usuń" @onclick="() => DeleteAsync(c.Id)">
+                                                <i class="bi bi-x-lg"></i>
+                                            </button>
+                                        }
+                                    </span>
+                                </div>
+                                <div class="small" style="white-space:pre-wrap">@c.Text</div>
+                            </div>
+                        }
+
+                        <div class="d-flex gap-2 mt-2">
+                            <textarea class="form-control form-control-sm" rows="1" maxlength="1000"
+                                      placeholder="@(AsTrainer ? "Komentarz dla klienta, np. „Świetnie! Następnym razem +2,5 kg”" : "Odpowiedz trenerowi…")"
+                                      value="@_drafts.GetValueOrDefault(day.Date)"
+                                      @oninput="e => _drafts[day.Date] = e.Value?.ToString() ?? string.Empty"></textarea>
+                            <button class="btn btn-primary btn-sm flex-shrink-0" disabled="@(_sending || string.IsNullOrWhiteSpace(_drafts.GetValueOrDefault(day.Date)))"
+                                    @onclick="() => SendAsync(day.Date)" title="Wyślij">
+                                <i class="bi bi-send"></i>
+                            </button>
+                        </div>
+                        @if (!string.IsNullOrEmpty(_error))
+                        {
+                            <div class="text-danger small mt-1">@_error</div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public int ClientId { get; set; }
+    [Parameter, EditorRequired] public List<WorkoutJournalDayDto> Days { get; set; } = [];
+    [Parameter] public bool AsTrainer { get; set; }
+    [Parameter, EditorRequired] public string CurrentUserId { get; set; } = string.Empty;
+    /// <summary>Ankiety po treningu wg dnia (opcjonalnie) — skrót przy dniu.</summary>
+    [Parameter] public Dictionary<DateOnly, SurveyResponseDto>? Surveys { get; set; }
+    /// <summary>Klient: link „Oceń ten trening” przy dniach bez ankiety.</summary>
+    [Parameter] public bool RateLinks { get; set; }
+
+    private static string ShortLabel(SurveyAnswer a) => a.Key switch
+    {
+        SurveyKeys.Rpe => "RPE",
+        SurveyKeys.Duration => "Czas",
+        SurveyKeys.Energy => "Energia",
+        SurveyKeys.Sleep => "Sen",
+        SurveyKeys.Soreness => "Zakwasy",
+        SurveyKeys.Pain => "Ból",
+        SurveyKeys.Satisfaction => "Zadowolenie",
+        _ => a.Label.Length > 24 ? a.Label[..22] + "…" : a.Label
+    };
+
+    private readonly HashSet<int> _openDays = [0];
+    private List<WorkoutCommentDto> _comments = [];
+    private readonly Dictionary<DateOnly, string> _drafts = [];
+    private bool _sending;
+    private string? _error;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            _comments = await Comments.GetForClientAsync(ClientId);
+            // Otwórz dni z nieprzeczytanymi komentarzami drugiej strony.
+            for (var i = 0; i < Days.Count; i++)
+                if (_comments.Any(c => c.WorkoutDate == Days[i].Date && !c.IsRead && c.ByTrainer != AsTrainer))
+                    _openDays.Add(i);
+            await Comments.MarkReadAsync(ClientId, readerIsTrainer: AsTrainer);
+        }
+        catch (Exception ex)
+        {
+            LoggerFactory.CreateLogger("WorkoutJournal").LogError(ex, "Błąd ładowania komentarzy.");
+        }
+    }
+
+    private void ToggleDay(int i)
+    {
+        if (!_openDays.Add(i)) _openDays.Remove(i);
+    }
+
+    private async Task SendAsync(DateOnly date)
+    {
+        var text = _drafts.GetValueOrDefault(date);
+        if (string.IsNullOrWhiteSpace(text)) return;
+        _sending = true;
+        _error = null;
+        try
+        {
+            var added = await Comments.AddAsync(ClientId, date, CurrentUserId, AsTrainer, text);
+            _comments.Add(added);
+            _drafts[date] = string.Empty;
+        }
+        catch (Exception ex)
+        {
+            _error = "Nie udało się wysłać komentarza. Spróbuj ponownie.";
+            LoggerFactory.CreateLogger("WorkoutJournal").LogError(ex, "Błąd zapisu komentarza.");
+        }
+        finally { _sending = false; }
+    }
+
+    private async Task DeleteAsync(int id)
+    {
+        try
+        {
+            if (await Comments.DeleteAsync(id, CurrentUserId))
+                _comments.RemoveAll(c => c.Id == id);
+        }
+        catch (Exception ex)
+        {
+            LoggerFactory.CreateLogger("WorkoutJournal").LogError(ex, "Błąd usuwania komentarza.");
+        }
+    }
+}

@@ -1,0 +1,110 @@
+@page "/trainer/activity"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Logging
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@attribute [Authorize(Roles = Roles.Admin + "," + Roles.Trainer + "," + Roles.Subordinate)]
+@inject IWorkoutLogService WorkoutLog
+@inject IProgressionService Progression
+@inject AuthenticationStateProvider AuthState
+@inject ILoggerFactory LoggerFactory
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Aktywność podopiecznych" />
+
+<FeatureGate Flag="TrainingPlansEnabled" RequiredPlan="Pro" Title="Moduł treningowy">
+
+<div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <h4 class="page-title mb-0"><i class="bi bi-people me-2" style="color:var(--c-primary)"></i>Aktywność podopiecznych</h4>
+    <span class="text-muted small">okno: 30 dni</span>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center text-muted py-5"><div class="spinner-border"></div></div>
+}
+else if (_rows.Count == 0)
+{
+    <div class="alert alert-secondary"><i class="bi bi-inbox me-2"></i>Brak podopiecznych.</div>
+}
+else
+{
+    <div class="table-responsive">
+        <table class="table table-hover align-middle">
+            <thead>
+                <tr class="small text-muted">
+                    <th>Klient</th>
+                    <th>Ostatni trening</th>
+                    <th class="text-end">Treningi (30 dni)</th>
+                    <th class="text-end">Objętość (30 dni)</th>
+                    <th style="width:190px"></th>
+                </tr>
+            </thead>
+            <tbody>
+                @foreach (var r in _rows)
+                {
+                    <tr>
+                        <td class="fw-semibold">
+                            @r.ClientName
+                            @if (_suggestions.TryGetValue(r.ClientId, out var n))
+                            {
+                                <a href="@($"/trainer/activity/{r.ClientId}")" class="badge rounded-pill bg-success-subtle text-success-emphasis text-decoration-none ms-1 fw-normal"
+                                   title="Propozycje zmiany ciężaru na podstawie RPE"><i class="bi bi-graph-up-arrow me-1"></i>@n @(n == 1 ? "propozycja" : n < 5 ? "propozycje" : "propozycji")</a>
+                            }
+                        </td>
+                        <td>
+                            @if (r.LastWorkout is { } d)
+                            {
+                                <span>@d.ToString("yyyy-MM-dd")</span>
+                                <span class="text-muted small ms-1">(@DaysAgo(d))</span>
+                            }
+                            else
+                            {
+                                <span class="badge bg-light text-dark border">brak</span>
+                            }
+                        </td>
+                        <td class="text-end">
+                            <span class="badge @(r.WorkoutsInWindow > 0 ? "bg-success-subtle text-success-emphasis border" : "bg-light text-dark border")">
+                                @r.WorkoutsInWindow
+                            </span>
+                        </td>
+                        <td class="text-end">@r.VolumeInWindow.ToString("0") kg</td>
+                        <td class="text-nowrap">
+                            <a href="@($"/trainer/activity/{r.ClientId}")" class="btn btn-sm btn-primary"><i class="bi bi-journal-text me-1"></i>Dziennik</a>
+                            <a href="@($"/clients/{r.ClientId}")" class="btn btn-sm btn-outline-primary">Profil</a>
+                        </td>
+                    </tr>
+                }
+            </tbody>
+        </table>
+    </div>
+}
+</FeatureGate>
+
+@code {
+    private bool _loading = true;
+    private List<ClientActivityDto> _rows = [];
+    private Dictionary<int, int> _suggestions = [];
+    private DateOnly _today;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _today = DateOnly.FromDateTime(DateTime.UtcNow);
+        try
+        {
+            _rows = await WorkoutLog.GetClientsActivityAsync(userId);
+            _suggestions = await Progression.GetCountsAsync(userId, auth.User.IsInRole(Roles.Admin));
+        }
+        catch (Exception ex) { LoggerFactory.CreateLogger("Activity").LogError(ex, "Błąd ładowania aktywności."); }
+        _loading = false;
+    }
+
+    private string DaysAgo(DateOnly d)
+    {
+        var diff = _today.DayNumber - d.DayNumber;
+        return diff <= 0 ? "dziś" : diff == 1 ? "wczoraj" : $"{diff} dni temu";
+    }
+}

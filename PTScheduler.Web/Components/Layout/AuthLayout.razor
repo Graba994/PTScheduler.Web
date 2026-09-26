@@ -1,39 +1,41 @@
 @inherits LayoutComponentBase
 @inject PTScheduler.Application.Interfaces.IBrandingService BrandingService
 
-<div class="auth-shell">
+<div class="auth-shell @(_hasPhoto ? "auth-shell-photo" : "")"
+     style="@(_hasPhoto ? $"--auth-bg:url('{_branding.LoginBackgroundPath}')" : null)">
     <div class="auth-brand">
-        @if (!string.IsNullOrEmpty(_logoPath))
+        @if (!string.IsNullOrEmpty(_branding.LogoPath))
         {
-            <img src="@_logoPath" alt="@_companyName" class="auth-logo" />
+            <img src="@_branding.LogoPath" alt="@_branding.CompanyName" class="auth-logo" />
         }
         else
         {
             <div class="auth-icon"><i class="bi bi-calendar-heart"></i></div>
         }
-        <span class="auth-company">@_companyName</span>
+        <span class="auth-company">@_branding.CompanyName</span>
     </div>
 
     <div class="auth-card-wrap">
-        @Body
+        <CascadingValue Value="_branding" IsFixed="true">
+            @Body
+        </CascadingValue>
     </div>
 
-    <div class="auth-footer">© @DateTime.Now.Year @_companyName</div>
+    <div class="auth-footer">© @StudioClock.Now.Year @_branding.CompanyName</div>
 </div>
 
 <CookieConsent />
 
 @code {
-    private string _companyName = "PTScheduler";
-    private string? _logoPath;
+    private PTScheduler.Application.DTOs.AppBrandingDto _branding = new();
+    private bool _hasPhoto => !string.IsNullOrEmpty(_branding.LoginBackgroundPath);
 
     protected override async Task OnInitializedAsync()
     {
         try
         {
-            var b = await BrandingService.GetAsync();
-            _companyName = b.CompanyName ?? "PTScheduler";
-            _logoPath    = b.LogoPath;
+            _branding = await BrandingService.GetAsync();
+            if (string.IsNullOrWhiteSpace(_branding.CompanyName)) _branding.CompanyName = "PTScheduler";
         }
         catch { } // Best-effort: fall back to defaults if branding unavailable
     }

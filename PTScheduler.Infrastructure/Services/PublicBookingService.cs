@@ -9,6 +9,7 @@ using PTScheduler.Application.Interfaces;
 using PTScheduler.Domain.Constants;
 using PTScheduler.Domain.Entities;
 using PTScheduler.Domain.Enums;
+using PTScheduler.Domain.Rules;
 using PTScheduler.Infrastructure.Data;
 
 namespace PTScheduler.Infrastructure.Services;
@@ -19,6 +20,7 @@ public class PublicBookingService(
     ITrainerAvailabilityService availabilityService,
     IEmailService emailService,
     IEmailTemplateService emailTemplateService,
+    IAppClock clock,
     ILogger<PublicBookingService> logger) : IPublicBookingService
 {
     private const string IntroSessionTypeName = "Sesja wstępna";
@@ -27,25 +29,31 @@ public class PublicBookingService(
     public async Task<PublicIntroOfferDto> GetActiveOfferAsync()
     {
         await using var db = dbFactory.CreateDbContext();
-        var cfg = await db.IntroSessionConfigs
+        var configs = await db.IntroSessionConfigs
             .AsNoTracking()
             .Where(c => c.IsActive)
             .OrderBy(c => c.Id)
-            .FirstOrDefaultAsync();
+            .ToListAsync();
 
-        if (cfg is null)
+        // Only accounts that are actually trainers may be surfaced publicly —
+        // an administrator account must never appear as a trainer.
+        ApplicationUser? trainer = null;
+        IntroSessionConfig? cfg = null;
+        foreach (var candidate in configs)
+        {
+            var user = await userManager.FindByIdAsync(candidate.TrainerUserId);
+            if (user is null) continue;
+            if (!await userManager.IsInRoleAsync(user, Roles.Trainer)) continue;
+            trainer = user;
+            cfg = candidate;
+            break;
+        }
+
+        if (cfg is null || trainer is null)
             return new PublicIntroOfferDto
             {
                 IsAvailable = false,
                 UnavailableReason = "Brak skonfigurowanej oferty wstępnej. Trener musi włączyć ofertę w ustawieniach."
-            };
-
-        var trainer = await userManager.FindByIdAsync(cfg.TrainerUserId);
-        if (trainer is null)
-            return new PublicIntroOfferDto
-            {
-                IsAvailable = false,
-                UnavailableReason = "Trener przypisany do oferty nie istnieje."
             };
 
         return new PublicIntroOfferDto
@@ -58,6 +66,7 @@ public class PublicBookingService(
             Price = cfg.Price,
             PromoPrice = cfg.PromoPrice,
             PromoValidUntil = cfg.PromoValidUntil,
+            HasActivePromo = PromoRules.IsActive(cfg.PromoPrice, cfg.PromoValidUntil, clock.Today),
             Description = cfg.Description
         };
     }
@@ -65,7 +74,7 @@ public class PublicBookingService(
     public async Task<List<BookingDayDto>> GetUpcomingSlotsAsync(string trainerUserId, int durationMinutes, int daysAhead = 14)
     {
         var result = new List<BookingDayDto>();
-        var today = DateOnly.FromDateTime(DateTime.Today);
+        var today = clock.Today;
 
         for (var i = 1; i <= daysAhead; i++)
         {
@@ -85,8 +94,41 @@ public class PublicBookingService(
         return result;
     }
 
+    // Limity anty-spam dla anonimowego formularza (w pamięci instancji — wystarczy,
+    // bo tenant to jeden kontener). Bot bez nich mógł zająć wszystkie terminy
+    // i wysyłać setki maili powitalnych przez SMTP trenera.
+    private const int MaxBookingsPerIpPerHour = 3;
+    private const int MaxBookingsPerTrainerPerDay = 20;
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, List<DateTime>> RecentBookings = new();
+
+    private static bool TryReserveQuota(string key, int limit, TimeSpan window)
+    {
+        var now = DateTime.UtcNow;
+        var list = RecentBookings.GetOrAdd(key, _ => []);
+        lock (list)
+        {
+            list.RemoveAll(t => now - t > window);
+            if (list.Count >= limit) return false;
+            list.Add(now);
+            return true;
+        }
+    }
+
     public async Task<BookingResultDto> CreateBookingAsync(CreatePublicBookingDto dto, string appBaseUrl)
     {
+        if (!string.IsNullOrWhiteSpace(dto.Website))
+        {
+            logger.LogWarning("Public booking rejected: honeypot filled (IP {Ip}).", dto.ClientIp);
+            return Fail("Nie udało się zarezerwować terminu. Spróbuj ponownie.");
+        }
+        if (dto.FormShownAtUtc is { } shown && DateTime.UtcNow - shown < TimeSpan.FromSeconds(3))
+            return Fail("Formularz został wysłany zbyt szybko. Sprawdź dane i spróbuj ponownie.");
+        if (!string.IsNullOrEmpty(dto.ClientIp)
+            && !TryReserveQuota($"ip:{dto.ClientIp}", MaxBookingsPerIpPerHour, TimeSpan.FromHours(1)))
+            return Fail("Zbyt wiele rezerwacji z tego urządzenia. Spróbuj za godzinę albo skontaktuj się z trenerem.");
+        if (!TryReserveQuota($"trainer:{dto.TrainerUserId}", MaxBookingsPerTrainerPerDay, TimeSpan.FromDays(1)))
+            return Fail("Chwilowo nie przyjmujemy nowych rezerwacji online. Skontaktuj się z trenerem.");
+
         if (!dto.AcceptedTerms)
             return Fail("Aby zarezerwować, musisz zaakceptować warunki.");
         if (string.IsNullOrWhiteSpace(dto.FirstName) || string.IsNullOrWhiteSpace(dto.LastName))
@@ -95,7 +137,10 @@ public class PublicBookingService(
             return Fail("Podaj prawidłowy adres email.");
         if (string.IsNullOrWhiteSpace(dto.TrainerUserId))
             return Fail("Brak trenera dla rezerwacji.");
-        if (dto.SlotStart < DateTime.Now.AddMinutes(15))
+        // SlotStart to zegar ścienny, więc porównanie musi iść przez zegar
+        // aplikacji. DateTime.Now dałoby czas maszyny — w kontenerze UTC,
+        // co przesuwało próg o offset strefy.
+        if (dto.SlotStart < clock.LocalNow.AddMinutes(15))
             return Fail("Wybrany termin minął lub jest zbyt blisko teraźniejszości.");
 
         await using var db = dbFactory.CreateDbContext();
@@ -103,6 +148,10 @@ public class PublicBookingService(
             .AsNoTracking()
             .FirstOrDefaultAsync(c => c.TrainerUserId == dto.TrainerUserId && c.IsActive);
         if (cfg is null)
+            return Fail("Oferta sesji wstępnej jest nieaktywna.");
+
+        var trainerAccount = await userManager.FindByIdAsync(dto.TrainerUserId);
+        if (trainerAccount is null || !await userManager.IsInRoleAsync(trainerAccount, Roles.Trainer))
             return Fail("Oferta sesji wstępnej jest nieaktywna.");
 
         if (!await availabilityService.IsSlotFreeAsync(dto.TrainerUserId, dto.SlotStart, cfg.DurationMinutes))
@@ -187,7 +236,7 @@ public class PublicBookingService(
                 : $"<strong>{cfg.Price.ToString("N2", PlCulture)} zł</strong>";
             var clientVars = new Dictionary<string, string>
             {
-                ["ClientName"] = user.FirstName ?? "",
+                ["ClientName"] = System.Net.WebUtility.HtmlEncode(user.FirstName ?? ""),
                 ["TrainerName"] = trainerName,
                 ["SessionDate"] = when,
                 ["Duration"] = cfg.DurationMinutes.ToString(),
@@ -201,20 +250,23 @@ public class PublicBookingService(
 
             if (!string.IsNullOrEmpty(trainer?.Email))
             {
+                // Dane z anonimowego formularza — kodujemy, żeby nie dało się wstrzyknąć
+                // HTML/linków do maila trenera.
+                static string H(string? v) => System.Net.WebUtility.HtmlEncode(v ?? "");
                 var phoneRow = string.IsNullOrEmpty(dto.Phone) ? "" :
-                    $"<p style=\"margin:6px 0\"><strong>📞 Telefon:</strong> {dto.Phone}</p>";
+                    $"<p style=\"margin:6px 0\"><strong>📞 Telefon:</strong> {H(dto.Phone)}</p>";
                 var goalRow = string.IsNullOrEmpty(dto.TrainingGoal) ? "" :
-                    $"<p style=\"margin:10px 0 0;padding-top:8px;border-top:1px solid #e5e7eb\"><strong>🎯 Cel treningowy:</strong><br/>{dto.TrainingGoal}</p>";
+                    $"<p style=\"margin:10px 0 0;padding-top:8px;border-top:1px solid #e5e7eb\"><strong>🎯 Cel treningowy:</strong><br/>{H(dto.TrainingGoal)}</p>";
                 var trainerVars = new Dictionary<string, string>
                 {
                     ["TrainerName"] = trainerName,
-                    ["ClientName"] = $"{client.FirstName} {client.LastName}",
-                    ["ClientEmail"] = dto.Email,
-                    ["ClientPhone"] = dto.Phone ?? "",
+                    ["ClientName"] = H($"{client.FirstName} {client.LastName}"),
+                    ["ClientEmail"] = H(dto.Email),
+                    ["ClientPhone"] = H(dto.Phone),
                     ["PhoneRow"] = phoneRow,
                     ["SessionDate"] = when,
                     ["Duration"] = cfg.DurationMinutes.ToString(),
-                    ["TrainingGoal"] = dto.TrainingGoal ?? "",
+                    ["TrainingGoal"] = H(dto.TrainingGoal),
                     ["GoalRow"] = goalRow
                 };
                 var (trainerSubject, trainerHtml) = await emailTemplateService.RenderAsync("trainer-new-booking", trainerVars);
@@ -235,22 +287,17 @@ public class PublicBookingService(
             ClientEmail = emailNorm,
             TrainerName = trainerName,
             DurationMinutes = cfg.DurationMinutes,
-            EmailSent = emailSent
+            EmailSent = emailSent,
+            ClientId = client.Id
         };
     }
 
     // ---- helpers ----
 
-    private async Task<string> BuildSetPasswordLinkAsync(ApplicationUser user, string appBaseUrl)
-    {
-        var token = await userManager.GeneratePasswordResetTokenAsync(user);
-        var encoded = Base64UrlEncode(Encoding.UTF8.GetBytes(token));
-        return $"{appBaseUrl.TrimEnd('/')}/Account/ResetPassword?code={encoded}";
-    }
-
-    /// <summary>RFC 4648 §5 base64url (no padding) — matches Microsoft.AspNetCore.WebUtilities.WebEncoders.</summary>
-    private static string Base64UrlEncode(byte[] data) =>
-        Convert.ToBase64String(data).TrimEnd('=').Replace('+', '-').Replace('/', '_');
+    // Ten sam link co zaproszenie od trenera: strona „ustaw hasło” bez wpisywania e-maila,
+    // ważny 7 dni zamiast 1 dnia jak reset hasła.
+    private Task<string> BuildSetPasswordLinkAsync(ApplicationUser user, string appBaseUrl) =>
+        ClientInvitationService.BuildLinkAsync(userManager, user, appBaseUrl);
 
     private static string ResolveTrainerName(ApplicationUser trainer)
     {

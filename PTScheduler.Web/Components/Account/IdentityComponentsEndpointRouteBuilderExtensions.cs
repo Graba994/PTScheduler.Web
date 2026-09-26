@@ -1,3 +1,4 @@
+using PTScheduler.Web.Services;
 ﻿using Microsoft.AspNetCore.Antiforgery;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Components.Authorization;
@@ -130,7 +131,7 @@ namespace Microsoft.AspNetCore.Routing
 
                 var export = new Dictionary<string, object?>
                 {
-                    ["ExportDate"] = DateTime.Now.ToString("yyyy-MM-dd HH:mm:ss"),
+                    ["ExportDate"] = StudioClock.Now.ToString("yyyy-MM-dd HH:mm:ss"),
                     ["Account"] = new
                     {
                         user.FirstName,
@@ -179,6 +180,53 @@ namespace Microsoft.AspNetCore.Routing
                         .Select(p => new { p.Name, p.TotalSessions, p.UsedSessions, p.PricePerSession, p.PurchasedAt, p.ExpiresAt, p.Status })
                         .ToListAsync();
                     export["Packages"] = packages;
+
+                    var workouts = await db.WorkoutLogs
+                        .AsNoTracking()
+                        .Where(w => w.ClientId == client.Id)
+                        .OrderByDescending(w => w.WorkoutDate)
+                        .Select(w => new
+                        {
+                            w.WorkoutDate,
+                            Exercise = w.Exercise != null ? w.Exercise.NamePl : null,
+                            Sets = w.Sets.Select(x => new { x.Reps, x.WeightKg })
+                        })
+                        .ToListAsync();
+                    export["Workouts"] = workouts;
+
+                    // Ankiety (w tym zdrowotna) — z treścią pytań z chwili wypełnienia.
+                    var surveys = await db.SurveyResponses
+                        .AsNoTracking()
+                        .Where(r => r.ClientId == client.Id)
+                        .OrderByDescending(r => r.SubmittedAt)
+                        .Select(r => new { r.Kind, r.WorkoutDate, r.SubmittedAt, r.HealthDataConsentAt, r.AnswersJson })
+                        .ToListAsync();
+                    export["Surveys"] = surveys.Select(r => new
+                    {
+                        Kind = r.Kind.ToString(), r.WorkoutDate, r.SubmittedAt, r.HealthDataConsentAt,
+                        Answers = System.Text.Json.JsonDocument.Parse(r.AnswersJson).RootElement.Clone()
+                    });
+
+                    export["ChatMessages"] = await db.ChatMessages
+                        .AsNoTracking()
+                        .Where(m => m.ClientId == client.Id)
+                        .OrderBy(m => m.SentAt)
+                        .Select(m => new { m.SentAt, From = m.FromStaff ? "Trener" : "Ja", m.Body, m.ReadAt })
+                        .ToListAsync();
+
+                    // Zdjęcia sylwetki: lista (same pliki są do pobrania w aplikacji, w „Moje pomiary”).
+                    export["ProgressPhotos"] = await db.ProgressPhotos
+                        .AsNoTracking()
+                        .Where(p => p.ClientId == client.Id)
+                        .OrderBy(p => p.TakenOn)
+                        .Select(p => new { p.TakenOn, Pose = p.Pose.ToString(), p.Note, p.UploadedAt, Url = "/photos/" + p.Id })
+                        .ToListAsync();
+
+                    export["Review"] = await db.ClientReviews
+                        .AsNoTracking()
+                        .Where(r => r.ClientId == client.Id)
+                        .Select(r => new { r.Rating, r.Text, r.PublishConsent, r.IsPublished, r.CreatedAt, r.UpdatedAt })
+                        .FirstOrDefaultAsync();
                 }
 
                 var loginLogs = await db.LoginLogs

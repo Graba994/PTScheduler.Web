@@ -9,13 +9,17 @@
 @inject IAuditLogService AuditLogService
 @inject NavigationManager Nav
 @using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Exceptions
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
 @using PTScheduler.Domain.Enums
 @using Microsoft.AspNetCore.Components.Authorization
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IJSRuntime JS
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@inject EntitlementService Entitlements
+@inject IClientInvitationService Invitations
+@inject IAppClock Clock
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <PageTitle>@(client?.FullName ?? "Profil klienta")</PageTitle>
 
@@ -173,21 +177,31 @@ else if (client is not null)
                                 <i class="bi bi-pencil me-1"></i>Edytuj
                             </button>
                         </div>
-                        <div class="d-flex gap-1 mt-2 align-items-center">
-                            <select class="form-select form-select-sm" style="max-width:130px" @bind="_reportMonth">
-                                @for (var m = 0; m < 12; m++)
-                                {
-                                    var d = DateTime.Now.AddMonths(-m);
-                                    var v = $"{d:yyyy-MM}";
-                                    <option value="@v">@d.ToString("LLLL yyyy", _plCulture)</option>
-                                }
-                            </select>
-                            <a class="btn btn-outline-primary btn-sm flex-grow-1"
-                               href="@ReportUrl()" target="_blank" rel="noopener"
-                               title="Pobierz raport PDF za wybrany miesiąc">
+                        @if (Entitlements.IsAllowed("ClientReports"))
+                        {
+                            <div class="d-flex gap-1 mt-2 align-items-center">
+                                <select class="form-select form-select-sm" style="min-width:150px;max-width:190px" @bind="_reportMonth">
+                                    @for (var m = 0; m < 12; m++)
+                                    {
+                                        var d = StudioClock.Now.AddMonths(-m);
+                                        var v = $"{d:yyyy-MM}";
+                                        <option value="@v">@d.ToString("MMMM yyyy", _plCulture)</option>
+                                    }
+                                </select>
+                                <a class="btn btn-outline-primary btn-sm flex-grow-1"
+                                   href="@ReportUrl()" target="_blank" rel="noopener"
+                                   title="Pobierz raport PDF za wybrany miesiąc">
+                                    <i class="bi bi-file-earmark-pdf me-1"></i>Raport PDF
+                                </a>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="mt-2 small text-muted">
                                 <i class="bi bi-file-earmark-pdf me-1"></i>Raport PDF
-                            </a>
-                        </div>
+                                <PlanBadge Flag="ClientReports" RequiredPlan="Business" />
+                            </div>
+                        }
                         <div class="d-flex align-items-center justify-content-between mt-3 pt-2 border-top">
                             <span class="small text-muted">Samodzielna rezerwacja</span>
                             <div class="form-check form-switch mb-0">
@@ -280,26 +294,75 @@ else if (client is not null)
                 </div>
             </div>
 
-            <!-- Password reset card -->
+            <!-- Client account: invitation + manual password -->
             <div class="card shadow-sm mt-4">
                 <div class="card-body p-4">
                     <h6 class="card-title mb-3">
-                        <i class="bi bi-lock me-2 text-warning"></i>Zmień hasło klienta
+                        <i class="bi bi-person-badge me-2 text-primary"></i>Konto klienta
                     </h6>
 
-                    @if (!string.IsNullOrEmpty(pwMsg))
+                    @if (_account is not null)
                     {
-                        <div class="alert @(pwError ? "alert-danger" : "alert-success") py-2 small mb-2">@pwMsg</div>
+                        <div class="small mb-3 d-flex flex-column gap-1">
+                            @if (_account.LastLoginUtc is { } lastLogin)
+                            {
+                                <span><i class="bi bi-check-circle-fill text-success me-1"></i>Ostatnie logowanie: @Clock.ToWallClock(lastLogin).ToString("dd.MM.yyyy HH:mm")</span>
+                            }
+                            else
+                            {
+                                <span><i class="bi bi-hourglass-split text-warning me-1"></i>Klient nie korzystał jeszcze z aplikacji</span>
+                            }
+                            @if (_account.PasskeyCount > 0)
+                            {
+                                <span><i class="bi bi-fingerprint text-success me-1"></i>Logowanie odciskiem palca / Face ID włączone</span>
+                            }
+                        </div>
                     }
 
-                    <div class="mb-2">
-                        <input class="form-control form-control-sm" type="password"
-                               @bind="newPw" placeholder="Nowe hasło (min. 6 znaków)" autocomplete="new-password" />
-                    </div>
-                    <button class="btn btn-warning btn-sm w-100" @onclick="ResetClientPassword" disabled="@isBusy">
-                        @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                        <i class="bi bi-arrow-clockwise me-1"></i>Ustaw nowe hasło
+                    @if (!string.IsNullOrEmpty(_inviteMsg))
+                    {
+                        <div class="alert @(_inviteError ? "alert-warning" : "alert-success") py-2 small mb-2">@_inviteMsg</div>
+                    }
+
+                    <button class="btn btn-primary btn-sm w-100" @onclick="() => SendInvite(true)" disabled="@_inviteBusy">
+                        @if (_inviteBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        <i class="bi bi-envelope-paper me-1"></i>@(_account?.LastLoginUtc is null ? "Wyślij zaproszenie e-mailem" : "Wyślij link do ustawienia hasła")
                     </button>
+                    <button class="btn btn-outline-secondary btn-sm w-100 mt-2" @onclick="() => SendInvite(false)" disabled="@_inviteBusy">
+                        <i class="bi bi-link-45deg me-1"></i>Przygotuj link (SMS, WhatsApp…)
+                    </button>
+
+                    @if (!string.IsNullOrEmpty(_inviteLink))
+                    {
+                        <div class="input-group input-group-sm mt-2">
+                            <input class="form-control" value="@_inviteLink" readonly aria-label="Link zaproszenia" />
+                            <button class="btn btn-outline-secondary" @onclick="CopyInviteLink" title="Kopiuj">
+                                <i class="bi @(_inviteCopied ? "bi-clipboard-check" : "bi-clipboard")"></i>
+                            </button>
+                            <button class="btn btn-outline-secondary" @onclick="ShareInviteLink" title="Udostępnij">
+                                <i class="bi bi-share"></i>
+                            </button>
+                        </div>
+                        <div class="form-text">Link działa jednorazowo przez @ClientInvite.ValidDays dni.</div>
+                    }
+
+                    <details class="mt-3">
+                        <summary class="small text-muted">Ustaw hasło ręcznie</summary>
+                        <div class="mt-2">
+                            @if (!string.IsNullOrEmpty(pwMsg))
+                            {
+                                <div class="alert @(pwError ? "alert-danger" : "alert-success") py-2 small mb-2">@pwMsg</div>
+                            }
+                            <div class="mb-2">
+                                <input class="form-control form-control-sm" type="password"
+                                       @bind="newPw" placeholder="Nowe hasło (min. 8 znaków, w tym cyfra)" autocomplete="new-password" />
+                            </div>
+                            <button class="btn btn-warning btn-sm w-100" @onclick="ResetClientPassword" disabled="@isBusy">
+                                @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                <i class="bi bi-arrow-clockwise me-1"></i>Ustaw nowe hasło
+                            </button>
+                        </div>
+                    </details>
                 </div>
             </div>
 
@@ -322,6 +385,19 @@ else if (client is not null)
                         @if (measurements?.Count > 0) { <span class="badge bg-secondary ms-1 rounded-pill" style="font-size:.65rem">@measurements.Count</span> }
                     </button>
                 </li>
+                @if (Entitlements.IsAllowed("BodyMeasurements"))
+                {
+                    <li class="nav-item">
+                        <button class="nav-link @(_tab == "photos" ? "active" : "")" @onclick='() => SelectTab("photos")'>
+                            <i class="bi bi-camera me-1"></i>Zdjęcia
+                        </button>
+                    </li>
+                }
+                <li class="nav-item">
+                    <button class="nav-link @(_tab == "surveys" ? "active" : "")" @onclick='() => SelectTab("surveys")'>
+                        <i class="bi bi-clipboard2-pulse me-1"></i>Ankiety
+                    </button>
+                </li>
                 <li class="nav-item">
                     <button class="nav-link @(_tab == "packages" ? "active" : "")" @onclick='() => SelectTab("packages")'>
                         <i class="bi bi-box-seam me-1"></i>Pakiety
@@ -332,9 +408,13 @@ else if (client is not null)
 
             @if (_tab == "sessions")
             {
+                @if (Entitlements.IsAllowed("TrainingPlansEnabled"))
+                {
+                    <ProgressionSuggestions ClientId="Id" UserId="@currentUserId" IsAdmin="_isAdmin" />
+                }
                 <div class="card shadow-sm">
                     <div class="card-body p-4">
-                        <h6 class="card-title mb-3"><i class="bi bi-clock-history me-2 text-primary"></i>Historia treningów</h6>
+                        <h6 class="card-title mb-3"><i class="bi bi-clock-history me-2 text-primary"></i>Wizyty <span class="text-muted small fw-normal">(zaplanowane i minione)</span></h6>
 
                         @if (sessions is null)
                         {
@@ -352,9 +432,9 @@ else if (client is not null)
                                         <tr>
                                             <th>Data</th>
                                             <th>Typ</th>
-                                            <th>Trener</th>
+                                            <th class="d-none d-md-table-cell">Trener</th>
                                             <th>Status</th>
-                                            <th>Notatki</th>
+                                            <th class="d-none d-md-table-cell">Notatki</th>
                                         </tr>
                                     </thead>
                                     <tbody>
@@ -363,9 +443,9 @@ else if (client is not null)
                                             <tr>
                                                 <td class="text-nowrap">@s.StartTime.ToString("dd.MM.yy HH:mm")</td>
                                                 <td>@s.SessionTypeName <span class="text-muted small">(@s.DurationMinutes min)</span></td>
-                                                <td class="text-muted small">@s.TrainerName</td>
+                                                <td class="text-muted small d-none d-md-table-cell">@s.TrainerName</td>
                                                 <td><span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span></td>
-                                                <td class="text-muted small text-truncate" style="max-width:180px" title="@s.Notes">@s.Notes</td>
+                                                <td class="text-muted small text-truncate d-none d-md-table-cell" style="max-width:180px" title="@s.Notes">@s.Notes</td>
                                             </tr>
                                         }
                                     </tbody>
@@ -375,6 +455,16 @@ else if (client is not null)
                         }
                     </div>
                 </div>
+            }
+
+            @if (_tab == "surveys")
+            {
+                <ClientSurveysPanel ClientId="Id" CurrentUserId="@currentUserId" />
+            }
+
+            @if (_tab == "photos" && Entitlements.IsAllowed("BodyMeasurements"))
+            {
+                <ProgressPhotos ClientId="Id" UserId="@currentUserId" IsStaff="true" />
             }
 
             @if (_tab == "packages")
@@ -486,7 +576,7 @@ else if (client is not null)
                                     <label class="form-label form-label-sm">Data <span class="text-danger">*</span></label>
                                     <input type="date" class="form-control form-control-sm"
                                            value="@newMeasurement.MeasurementDate.ToString("yyyy-MM-dd")"
-                                           @onchange="e => newMeasurement.MeasurementDate = string.IsNullOrEmpty(e.Value?.ToString()) ? DateOnly.FromDateTime(DateTime.Today) : DateOnly.Parse(e.Value!.ToString()!)" />
+                                           @onchange="e => newMeasurement.MeasurementDate = string.IsNullOrEmpty(e.Value?.ToString()) ? DateOnly.FromDateTime(StudioClock.Today) : DateOnly.Parse(e.Value!.ToString()!)" />
                                 </div>
                                 <div class="col-6 col-sm-3">
                                     <label class="form-label form-label-sm">Waga (kg)</label>
@@ -673,6 +763,15 @@ else if (client is not null)
                             <label class="form-label">Notatki</label>
                             <textarea class="form-control" rows="2" @bind="newPkg.Notes"></textarea>
                         </div>
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="newPkgHidden" @bind="newPkg.IsHidden" />
+                                <label class="form-check-label" for="newPkgHidden">
+                                    <i class="bi bi-eye-slash me-1"></i>Ukryj w finansach
+                                </label>
+                                <div class="form-text">Kwota trafi do ukrytych finansów zamiast do głównych.</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -725,6 +824,15 @@ else if (client is not null)
                             <label class="form-label">Notatki</label>
                             <textarea class="form-control" rows="2" @bind="editPkg.Notes"></textarea>
                         </div>
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="editPkgHidden" @bind="editPkg.IsHidden" />
+                                <label class="form-check-label" for="editPkgHidden">
+                                    <i class="bi bi-eye-slash me-1"></i>Ukryj w finansach
+                                </label>
+                                <div class="form-text">Kwota trafi do ukrytych finansów zamiast do głównych.</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -769,13 +877,11 @@ else if (client is not null)
                             <label class="form-label">Data <span class="text-danger">*</span></label>
                             <input type="date" class="form-control"
                                    value="@bookingDate"
-                                   @onchange="e => bookingDate = e.Value?.ToString() ?? bookingDate" />
+                                   @onchange="e => { bookingDate = e.Value?.ToString() ?? bookingDate; bookingOverlap = false; }" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Godzina <span class="text-danger">*</span></label>
-                            <input type="time" class="form-control"
-                                   value="@bookingTime"
-                                   @onchange="e => bookingTime = e.Value?.ToString() ?? bookingTime" />
+                            <TimePicker @bind-Value="bookingTime" />
                         </div>
                         <div class="col-12">
                             <label class="form-label">Notatki</label>
@@ -785,10 +891,20 @@ else if (client is not null)
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-outline-secondary" @onclick="CloseBooking">Anuluj</button>
-                    <button class="btn btn-primary" @onclick="SubmitBooking" disabled="@isBusy">
-                        @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                        Zarezerwuj
-                    </button>
+                    @if (bookingOverlap)
+                    {
+                        <button class="btn btn-warning" @onclick="() => SubmitBooking(true)" disabled="@isBusy">
+                            @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            <i class="bi bi-exclamation-triangle me-1"></i>Nałóż mimo to
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-primary" @onclick="() => SubmitBooking(false)" disabled="@isBusy">
+                            @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            Zarezerwuj
+                        </button>
+                    }
                 </div>
             </div>
         </div>
@@ -797,6 +913,16 @@ else if (client is not null)
 
 @code {
     [Parameter] public int Id { get; set; }
+
+    [SupplyParameterFromQuery(Name = "invite")] public string? InviteQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "tab")] public string? TabQuery { get; set; }
+
+    private ClientAccountStatus? _account;
+    private string? _inviteLink;
+    private string _inviteMsg = string.Empty;
+    private bool _inviteError;
+    private bool _inviteBusy;
+    private bool _inviteCopied;
 
     private ClientDto? client;
     private List<TrainerNoteDto>? notes;
@@ -820,8 +946,9 @@ else if (client is not null)
     private bool bookingOpen;
     private CreateSessionDto bookingDto = new();
     private string bookingDate = string.Empty;
-    private string bookingTime = string.Empty;
+    private TimeOnly bookingTime;
     private string bookingError = string.Empty;
+    private bool bookingOverlap;   // kolizja terminu wykryta — czeka na potwierdzenie nałożenia
     private List<SessionTypeDto> sessionTypes = [];
 
     private List<SessionPackageDto>? packages;
@@ -859,14 +986,14 @@ else if (client is not null)
     private bool _chartNeedsRender;
 
     private static readonly System.Globalization.CultureInfo _plCulture = new("pl-PL");
-    private string _reportMonth = DateTime.Now.ToString("yyyy-MM");
+    private string _reportMonth = StudioClock.Now.ToString("yyyy-MM");
 
     private string ReportUrl()
     {
         if (!DateTime.TryParseExact($"{_reportMonth}-01", "yyyy-MM-dd",
                 System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.None, out var dt))
-            dt = DateTime.Now;
+            dt = StudioClock.Now;
         return $"/reports/client/{Id}/monthly?year={dt.Year}&month={dt.Month}";
     }
 
@@ -916,6 +1043,10 @@ else if (client is not null)
         addMeasurementOpen = false;
         pwMsg = string.Empty;
         editError = string.Empty;
+        _account = null;
+        _inviteLink = null;
+        _inviteMsg = string.Empty;
+        _inviteCopied = false;
 
         UpdateNavIds();
         _lastLoadedId = Id;
@@ -930,7 +1061,103 @@ else if (client is not null)
         if (sessionTypes.Count == 0) await LoadSessionTypes();
         await LoadPackages();
         await LoadMeasurements();
+        await LoadAccount();
         ComputeStats();
+
+        // Wynik zaproszenia wysłanego przy zakładaniu klienta (ClientNew → ?invite=…), tylko raz.
+        if (InviteQuery is "sent")
+        {
+            _inviteMsg = $"Klient dodany. Zaproszenie wysłane na {client.Email}.";
+            _inviteError = false;
+        }
+        else if (InviteQuery is "failed")
+        {
+            _inviteMsg = "Klient dodany, ale e-mail z zaproszeniem nie wyszedł. Użyj „Przygotuj link” i wyślij go klientowi.";
+            _inviteError = true;
+        }
+        InviteQuery = null;
+
+        // Link z powiadomienia / „Wymaga uwagi” (np. ?tab=surveys).
+        if (TabQuery is "surveys" or "sessions" or "measurements" or "packages" or "photos")
+        {
+            SelectTab(TabQuery);
+            TabQuery = null;
+        }
+    }
+
+    private async Task LoadAccount()
+    {
+        try { _account = await Invitations.GetAccountStatusAsync(Id); }
+        catch { _account = null; } // Status konta jest pomocniczy — nie blokuje profilu.
+    }
+
+    private async Task SendInvite(bool email)
+    {
+        if (client is null) return;
+        _inviteBusy = true;
+        _inviteMsg = string.Empty;
+        _inviteCopied = false;
+        try
+        {
+            var r = await Invitations.SendInviteAsync(Id, Nav.BaseUri, sendEmail: email);
+            _inviteLink = r.Link;
+            if (!r.Success)
+            {
+                _inviteMsg = r.Error ?? "Nie udało się przygotować zaproszenia.";
+                _inviteError = true;
+            }
+            else if (email && r.EmailSent)
+            {
+                _inviteMsg = $"Zaproszenie wysłane na {client.Email}.";
+                _inviteError = false;
+                await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "ClientInviteSent", "Client",
+                    Id.ToString(), $"Klient: {client.FullName}");
+            }
+            else if (email)
+            {
+                _inviteMsg = r.Error ?? "Nie udało się wysłać e-maila — skopiuj link i wyślij go klientowi.";
+                _inviteError = true;
+            }
+            else
+            {
+                _inviteMsg = "Link gotowy — wyślij go klientowi SMS-em lub w komunikatorze.";
+                _inviteError = false;
+                await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "ClientInviteLink", "Client",
+                    Id.ToString(), $"Klient: {client.FullName}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _inviteMsg = ex.Message;
+            _inviteError = true;
+        }
+        finally { _inviteBusy = false; }
+    }
+
+    private async Task CopyInviteLink()
+    {
+        if (string.IsNullOrEmpty(_inviteLink)) return;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", _inviteLink);
+            _inviteCopied = true;
+        }
+        catch { _inviteMsg = "Nie udało się skopiować — zaznacz link i skopiuj ręcznie."; _inviteError = true; }
+    }
+
+    private async Task ShareInviteLink()
+    {
+        if (string.IsNullOrEmpty(_inviteLink) || client is null) return;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.share", new
+            {
+                title = "Zaproszenie do aplikacji",
+                text = $"Cześć {client.FirstName}! Tu ustawisz hasło do aplikacji treningowej:",
+                url = _inviteLink
+            });
+        }
+        catch { await CopyInviteLink(); } // Brak Web Share (np. desktop) — kopiujemy.
     }
 
     private void UpdateNavIds()
@@ -1214,7 +1441,8 @@ else if (client is not null)
             TotalSessions = pkg.TotalSessions,
             PricePerSession = pkg.PricePerSession,
             ExpiresAt = pkg.ExpiresAt,
-            Notes = pkg.Notes
+            Notes = pkg.Notes,
+            IsHidden = pkg.IsHidden
         };
         editPkgError = string.Empty;
         editPackageOpen = true;
@@ -1272,19 +1500,20 @@ else if (client is not null)
             ClientId = Id,
             TrainerUserId = currentUserId
         };
-        var now = DateTime.Now.AddHours(1);
+        var now = StudioClock.Now.AddHours(1);
         bookingDate = now.ToString("yyyy-MM-dd");
-        bookingTime = now.ToString("HH:00");
+        bookingTime = new TimeOnly(now.Hour, 0);
         bookingError = string.Empty;
+        bookingOverlap = false;
         bookingOpen = true;
     }
 
     private void CloseBooking() => bookingOpen = false;
 
-    private async Task SubmitBooking()
+    private async Task SubmitBooking(bool allowOverlap = false)
     {
         if (bookingDto.SessionTypeId == 0) { bookingError = "Wybierz typ sesji."; return; }
-        if (!DateTime.TryParse($"{bookingDate} {bookingTime}", out var startTime))
+        if (!DateTime.TryParse($"{bookingDate} {bookingTime:HH:mm}", out var startTime))
         { bookingError = "Nieprawidłowa data lub godzina."; return; }
 
         bookingDto.StartTime = startTime;
@@ -1292,15 +1521,22 @@ else if (client is not null)
         bookingError = string.Empty;
         try
         {
-            var created = await SessionService.CreateSessionAsync(bookingDto);
+            var created = await SessionService.CreateSessionAsync(bookingDto, allowOverlap: allowOverlap);
             await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "SessionBooked", "Session",
-                created.Id.ToString(), $"Klient: {client?.FullName}, termin: {bookingDto.StartTime:dd.MM.yyyy HH:mm}");
+                created.Id.ToString(), $"Klient: {client?.FullName}, termin: {bookingDto.StartTime:dd.MM.yyyy HH:mm}{(allowOverlap ? " (nałożono)" : "")}");
+            bookingOverlap = false;
             bookingOpen = false;
             sessions = await SessionService.GetClientSessionsAsync(Id, 200);
             client = await ClientService.GetClientAsync(Id);
         }
+        catch (SlotConflictException ex)
+        {
+            bookingOverlap = true;
+            bookingError = ex.Message;
+        }
         catch (Exception ex)
         {
+            bookingOverlap = false;
             bookingError = ex.Message;
         }
         finally { isBusy = false; }

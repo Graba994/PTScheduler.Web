@@ -1,4 +1,4 @@
-const CACHE = 'ptscheduler-v4';
+const CACHE = 'ptscheduler-v6';
 const PRECACHE = [
     '/',
     '/offline.html',
@@ -69,20 +69,25 @@ self.addEventListener('fetch', e => {
         return;
     }
 
-    // Static assets with known extensions — cache-first
+    // Static assets with known extensions — stale-while-revalidate: szybko z cache, a w tle
+    // pobieramy nową wersję. Pliki bez odcisku w nazwie (/js/*.js, /branding/logo.png,
+    // manifest) przy cache-first zostawały na telefonach w starej wersji na zawsze.
     const isStatic = /\.(css|js|png|jpg|jpeg|gif|svg|ico|woff2?|ttf|webmanifest)(\?.*)?$/.test(url.pathname);
     if (isStatic) {
         e.respondWith(
-            caches.match(request).then(cached => {
-                if (cached) return cached;
-                return fetch(request).then(res => {
-                    if (res.ok) {
-                        const clone = res.clone();
-                        caches.open(CACHE).then(c => c.put(request, clone));
+            caches.open(CACHE).then(cache =>
+                cache.match(request).then(cached => {
+                    const network = fetch(request).then(res => {
+                        if (res.ok) cache.put(request, res.clone());
+                        return res;
+                    });
+                    if (cached) {
+                        e.waitUntil(network.catch(() => {}));
+                        return cached;
                     }
-                    return res;
-                });
-            })
+                    return network;
+                })
+            )
         );
         return;
     }
@@ -110,25 +115,26 @@ self.addEventListener('push', e => {
             body: data.body || '',
             icon: data.icon || '/icons/icon-192.png',
             badge: '/icons/icon-96.png',
-            data: { url: data.url || '/' }
+            data: { url: data.url || '/app' }
         })
     );
 });
 
 self.addEventListener('notificationclick', e => {
     e.notification.close();
-    const url = e.notification.data?.url || '/';
-    e.waitUntil(
-        clients.matchAll({ type: 'window', includeUncontrolled: true }).then(list => {
-            for (const client of list) {
-                if (client.url.includes(self.location.origin) && 'focus' in client) {
-                    client.navigate(url);
-                    return client.focus();
-                }
-            }
-            return clients.openWindow(url);
-        })
-    );
+    const url = new URL(e.notification.data?.url || '/app', self.location.origin).href;
+    e.waitUntil((async () => {
+        const list = await clients.matchAll({ type: 'window', includeUncontrolled: true });
+        for (const client of list) {
+            if (!client.url.startsWith(self.location.origin)) continue;
+            try {
+                await client.focus();
+                // navigate() działa tylko dla okien kontrolowanych przez SW — w razie błędu otwieramy nowe.
+                if ('navigate' in client) { await client.navigate(url); return; }
+            } catch (_) { }
+        }
+        await clients.openWindow(url);
+    })());
 });
 
 // Allow app shell to trigger SW update (e.g. after push.ps1 deploy)

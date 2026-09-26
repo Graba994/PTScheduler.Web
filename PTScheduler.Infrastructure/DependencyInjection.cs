@@ -31,7 +31,31 @@ public static class DependencyInjection
         services.AddScoped<IDatabaseSettingsService>(sp =>
             new DatabaseSettingsService(sp.GetRequiredService<IConfiguration>(), settingsFilePath));
 
+        // Jedyne źródło czasu. Singleton — strefa jest rozwiązywana raz i nie
+        // zmienia się w trakcie życia instancji. Zob. IAppClock po opis
+        // konwencji instant / zegar ścienny.
+        services.AddSingleton<IAppClock, AppClock>();
+
         services.AddScoped<IBrandingService, BrandingService>();
+        services.AddScoped<ISiteContentService, SiteContentService>();
+        services.AddScoped<IModuleSettingsService, ModuleSettingsService>();
+        services.AddScoped<IPaymentSettingsService, PaymentSettingsService>();
+        services.AddHttpClient();
+        services.AddScoped<IBunnyService, BunnyService>();
+        services.AddScoped<IGoogleMeetService, GoogleMeetService>();
+        services.AddSingleton<PTScheduler.Infrastructure.Services.Google.IGoogleTokenBroker, PTScheduler.Infrastructure.Services.Google.GoogleTokenBroker>();
+        services.AddSingleton<PTScheduler.Infrastructure.Services.Google.IGoogleCalendarApi, PTScheduler.Infrastructure.Services.Google.GoogleCalendarApi>();
+        services.AddScoped<IGoogleCalendarService, PTScheduler.Infrastructure.Services.Google.GoogleCalendarService>();
+        services.AddScoped<ICouponService, CouponService>();
+        // Payment gateways (resolved as a set by the orchestrator).
+        services.AddScoped<Services.Payments.IPaymentProvider, Services.Payments.SimulatorProvider>();
+        services.AddScoped<Services.Payments.IPaymentProvider, Services.Payments.PayUProvider>();
+        services.AddScoped<Services.Payments.IPaymentProvider, Services.Payments.Przelewy24Provider>();
+        services.AddScoped<Services.Payments.IPaymentProvider, Services.Payments.KlarnaProvider>();
+        services.AddScoped<Services.Payments.IPaymentProvider, Services.Payments.AutoPayProvider>();
+        services.AddScoped<IPaymentService, PaymentService>();
+        services.AddScoped<IPackageOfferService, PackageOfferService>();
+        services.AddScoped<ICourseService, CourseService>();
         services.AddScoped<IBackupService, BackupService>();
         services.AddScoped<IDatabaseMaintenanceService, DatabaseMaintenanceService>();
         services.AddScoped<IUserManagementService, UserManagementService>();
@@ -47,16 +71,43 @@ public static class DependencyInjection
         services.AddScoped<IDemoDataService, DemoDataService>();
         services.AddScoped<ISessionInvitationService, SessionInvitationService>();
         services.AddScoped<IEmailSettingsService, EmailSettingsService>();
+        services.AddSingleton<PlatformEmailProvider>();
         services.AddScoped<IEmailService, SmtpEmailService>();
         services.AddScoped<IBodyMeasurementService, BodyMeasurementService>();
         services.AddScoped<ITrainerConfigService, TrainerConfigService>();
         services.AddScoped<INotificationPreferencesService, NotificationPreferencesService>();
         services.AddScoped<IPublicBookingService, PublicBookingService>();
+        services.AddScoped<IClientInvitationService, ClientInvitationService>();
+        services.AddScoped<IClientAttentionService, ClientAttentionService>();
+        services.AddScoped<IWorkoutCommentService, WorkoutCommentService>();
+        services.AddScoped<ISurveyService, SurveyService>();
         services.AddScoped<IClientReportService, ClientReportService>();
         services.AddScoped<IPermissionService, PermissionService>();
         services.AddScoped<IEmailTemplateService, EmailTemplateService>();
         services.AddScoped<IWebPushService, WebPushService>();
         services.AddScoped<IFinanceService, FinanceService>();
+        services.AddScoped<IDataExportService, DataExportService>();
+        services.AddScoped<IReceiptService, ReceiptService>();
+        services.AddScoped<IInvoiceService, InvoiceService>();
+        services.AddScoped<IMembershipService, MembershipService>();
+        services.AddSingleton<IChatNotifier, ChatNotifier>();
+        services.AddScoped<IChatService, ChatService>();
+        services.AddScoped<IProgressPhotoService, ProgressPhotoService>();
+        services.AddScoped<IMarketingSettingsService, MarketingSettingsService>();
+        services.AddScoped<IReferralService, ReferralService>();
+        services.AddScoped<IReviewService, ReviewService>();
+        services.AddScoped<IGiftVoucherService, GiftVoucherService>();
+        services.AddScoped<IAppFeedbackService, AppFeedbackService>();
+        services.AddHttpClient<PTScheduler.Infrastructure.Services.Ksef.KsefClient>(c => c.Timeout = TimeSpan.FromSeconds(60));
+        services.AddScoped<IKsefService, PTScheduler.Infrastructure.Services.Ksef.KsefService>();
+        services.AddScoped<ISmsSettingsService, SmsSettingsService>();
+        services.AddScoped<ISmsService, SmsApiService>();
+        services.AddScoped<ISetupService, SetupService>();
+        services.AddScoped<IExerciseCatalogService, ExerciseCatalogService>();
+        services.AddScoped<ITrainingPlanService, TrainingPlanService>();
+        services.AddScoped<IWorkoutLogService, WorkoutLogService>();
+        services.AddScoped<IProgressionService, ProgressionService>();
+        services.AddScoped<IWorkoutSessionService, WorkoutSessionService>();
 
         // QuestPDF community license — free for orgs <$1M annual revenue.
         // Set globally; safe to call multiple times in tests.

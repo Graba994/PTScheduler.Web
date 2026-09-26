@@ -12,7 +12,7 @@ async function fetchWithErrorHandling(url, options = {}) {
     if (!response.ok) {
         const text = await response.text();
         console.error(text);
-        throw new Error(`The server responded with status ${response.status}.`);
+        throw new Error(`Serwer odpowiedział błędem (${response.status}). Spróbuj ponownie.`);
     }
     return response;
 }
@@ -68,7 +68,7 @@ customElements.define('passkey-submit', class extends HTMLElement {
 
     async obtainCredential(useConditionalMediation, signal) {
         if (!browserSupportsPasskeys) {
-            throw new Error('Some passkey features are missing. Please update your browser.');
+            throw new Error('Ta przeglądarka nie obsługuje kluczy dostępu. Zaktualizuj ją albo zaloguj się hasłem.');
         }
 
         const headers = {
@@ -107,7 +107,7 @@ customElements.define('passkey-submit', class extends HTMLElement {
                 return;
             }
             const errorMessage = error.name === 'NotAllowedError'
-                ? 'No passkey was provided by the authenticator.'
+                ? 'Nie użyto klucza dostępu (anulowano albo na tym urządzeniu nie ma klucza dla tego konta).'
                 : error.message;
             formData.append(`${this.attrs.name}.Error`, errorMessage);
         }

@@ -1,0 +1,852 @@
+@page "/panel/updates"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject UpdateService UpdateSvc
+@implements IDisposable
+@rendermode InteractiveServer
+
+<PageTitle>Aktualizacje — PTScheduler Portal</PageTitle>
+
+<div class="upd-head">
+    <div>
+        <h4 class="fw-bold mb-1">Aktualizacje</h4>
+        <p class="text-muted small mb-0">Nowa wersja trafia z GitHuba na serwer, a stąd do Portalu i do aplikacji trenerów. Wszystko robisz z tej strony.</p>
+    </div>
+    <button class="btn btn-sm btn-outline-secondary" @onclick="Refresh" disabled="@_checking">
+        @if (_checking) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-arrow-clockwise me-1"></i> }
+        Sprawdź teraz
+    </button>
+</div>
+
+@* ── Stan ogólny ─────────────────────────────────────────── *@
+<section class="upd-hero upd-tone-@HeroTone" aria-live="polite">
+    <div class="upd-hero-icon"><i class="bi @HeroIcon"></i></div>
+    <div class="flex-grow-1 min-w-0">
+        <div class="upd-hero-title">@HeroTitle</div>
+        <div class="upd-hero-text">@HeroText</div>
+        @if (HeroTone == "pending")
+        {
+            <ol class="upd-hero-steps">
+                @if (PortalPending) { <li><strong>Portal</strong> — ma starszą wersję (@_portal.CommitShort → @TargetShort)</li> }
+                @if (TenantPending) { <li><strong>Aplikacja trenerów</strong> — @(Known(_tenant) ? $"ma starszą wersję ({_tenant.CommitShort} → {TargetShort})" : "nie była jeszcze budowana z tego Portalu")</li> }
+            </ol>
+            @if (PortalPending && TenantPending)
+            {
+                <div class="upd-hero-hint"><i class="bi bi-lightbulb me-1"></i>Najpierw zaktualizuj Portal, potem aplikację trenerów — nowa wersja aplikacji może potrzebować nowego Portalu.</div>
+            }
+        }
+    </div>
+</section>
+
+@* ── Skąd dokąd płynie wersja ───────────────────────────── *@
+<section class="upd-flow" aria-label="Wersje">
+    <div class="upd-node">
+        <div class="upd-node-label"><i class="bi bi-github"></i>GitHub</div>
+        @if (_remote is null)
+        {
+            <div class="upd-node-commit text-muted">—</div>
+            <span class="upd-chip upd-chip-muted">brak połączenia</span>
+            <div class="upd-node-meta"><a href="/panel/github">Ustaw token GitHub</a>, żeby widzieć nowe wersje.</div>
+        }
+        else
+        {
+            <div class="upd-node-commit">@_remote.CommitShort</div>
+            <span class="upd-chip upd-chip-info">najnowsza wersja</span>
+            <div class="upd-node-meta" title="@_remote.Message">@Truncate(_remote.Message, 70)</div>
+        }
+    </div>
+    <div class="upd-node">
+        <div class="upd-node-label"><i class="bi bi-hdd"></i>Serwer (repo)</div>
+        @if (_repoHead is null)
+        {
+            <div class="upd-node-commit text-muted">—</div>
+            <span class="upd-chip upd-chip-danger">niedostępne</span>
+            <div class="upd-node-meta">Portal nie widzi katalogu z kodem.</div>
+        }
+        else
+        {
+            <div class="upd-node-commit">@_repoHead.CommitShort</div>
+            @if (_repoBehindRemote) { <span class="upd-chip upd-chip-warn">pobierze się przy aktualizacji</span> }
+            else { <span class="upd-chip upd-chip-ok">aktualne</span> }
+            <div class="upd-node-meta">gałąź @_repoHead.Branch</div>
+        }
+    </div>
+    <div class="upd-node">
+        <div class="upd-node-label"><i class="bi bi-boxes"></i>Portal</div>
+        <div class="upd-node-commit">@(Known(_portal) ? _portal.CommitShort : "—")</div>
+        @if (!Known(_portal)) { <span class="upd-chip upd-chip-muted">wersja nieznana</span> }
+        else if (PortalPending) { <span class="upd-chip upd-chip-warn">do aktualizacji</span> }
+        else { <span class="upd-chip upd-chip-ok">aktualny</span> }
+        <div class="upd-node-meta">@(Known(_portal) ? $"zbudowany {When(_portal.BuildTime)}" : "brak informacji o wersji (uruchomienie ręczne)")</div>
+    </div>
+    <div class="upd-node">
+        <div class="upd-node-label"><i class="bi bi-people"></i>Aplikacja trenerów</div>
+        <div class="upd-node-commit">@(Known(_tenant) ? _tenant.CommitShort : "—")</div>
+        @if (TenantPending) { <span class="upd-chip upd-chip-warn">do aktualizacji</span> }
+        else { <span class="upd-chip upd-chip-ok">aktualna</span> }
+        <div class="upd-node-meta">@(Known(_tenant) ? $"zbudowana {When(_tenant.BuildTime)}" : "jeszcze nie budowana z tego Portalu")</div>
+    </div>
+</section>
+
+@* ── Trwające zadanie ────────────────────────────────────── *@
+@if (_activeGuardianJob is { } job)
+{
+    var running = job.Status == "Running";
+    <section class="upd-card upd-job upd-job-@StatusTone(job.Status)">
+        <div class="upd-job-head">
+            @if (running) { <span class="spinner-border spinner-border-sm text-primary"></span> }
+            else { <i class="bi @StatusIcon(job.Status)"></i> }
+            <div class="flex-grow-1 min-w-0">
+                <div class="fw-bold">@TargetLabel(job.Target)</div>
+                <div class="small text-muted">@StatusLabel(job.Status) · @Elapsed(job)</div>
+            </div>
+            <span class="upd-chip upd-chip-@StatusTone(job.Status)">@StatusLabel(job.Status)</span>
+        </div>
+
+        <ol class="upd-steps">
+            @foreach (var (stage, label) in StagesFor(job.Target))
+            {
+                var state = StepState(job, stage);
+                <li class="upd-step upd-step-@state">
+                    <span class="upd-step-dot">
+                        @if (state == "done") { <i class="bi bi-check-lg"></i> }
+                        else if (state == "fail") { <i class="bi bi-x-lg"></i> }
+                    </span>
+                    <span class="upd-step-label">@label</span>
+                </li>
+            }
+        </ol>
+
+        @if (!running)
+        {
+            <div class="upd-result upd-result-@StatusTone(job.Status)">
+                @ResultText(job)
+                @if (!string.IsNullOrWhiteSpace(job.Error)) { <div class="small mt-1 opacity-75">@job.Error</div> }
+            </div>
+        }
+        else if (job.Target == "Portal")
+        {
+            <div class="small text-muted mt-2"><i class="bi bi-info-circle me-1"></i>Przy podmianie panel może zniknąć na kilkanaście sekund — strona sama się połączy ponownie.</div>
+        }
+
+        @if (job.TenantResults is { Count: > 0 })
+        {
+            var pct = job.TenantsTotal > 0 ? (int)(100.0 * job.TenantsCompleted / job.TenantsTotal) : 0;
+            <div class="upd-tenants">
+                <div class="d-flex justify-content-between small mb-1">
+                    <span class="fw-semibold">Instancje trenerów</span>
+                    <span class="text-muted">@job.TenantsCompleted z @job.TenantsTotal</span>
+                </div>
+                <div class="progress mb-2" style="height:8px" role="progressbar" aria-label="Postęp wdrażania" aria-valuenow="@pct" aria-valuemin="0" aria-valuemax="100">
+                    <div class="progress-bar @(job.Status == "Running" ? "progress-bar-striped progress-bar-animated" : "")" style="width:@(pct)%"></div>
+                </div>
+                <div class="upd-tenant-grid">
+                    @foreach (var tr in job.TenantResults)
+                    {
+                        <div class="upd-tenant upd-tenant-@TenantTone(tr.Status)" title="@(tr.Error ?? TenantStatusLabel(tr.Status))">
+                            <i class="bi @TenantIcon(tr.Status)"></i>
+                            <span class="text-truncate">@tr.Slug</span>
+                            <small>@TenantStatusLabel(tr.Status)</small>
+                        </div>
+                    }
+                </div>
+            </div>
+        }
+
+        <details class="upd-log" open="@running">
+            <summary>Szczegóły techniczne</summary>
+            <div class="upd-log-body">
+                @foreach (var e in job.Log)
+                {
+                    <div class="upd-log-line upd-log-@e.Level"><span class="upd-log-time">@e.Timestamp.ToLocalTime().ToString("HH:mm:ss")</span><span class="upd-log-stage">@e.Stage</span>@e.Message</div>
+                }
+            </div>
+        </details>
+    </section>
+}
+
+@* ── Wynik trybu bez Guardiana ───────────────────────────── *@
+@if (_result is not null)
+{
+    <section class="upd-card">
+        <div class="upd-result upd-result-@(_result.Success ? "ok" : "danger") mt-0">
+            <i class="bi @(_result.Success ? "bi-check-circle-fill" : "bi-x-octagon-fill") me-1"></i>@_result.Summary
+        </div>
+        @if (_result.Log.Count > 0)
+        {
+            <details class="upd-log" open="@(!_result.Success)">
+                <summary>Szczegóły techniczne</summary>
+                <div class="upd-log-body">@string.Join("\n", _result.Log)</div>
+            </details>
+        }
+    </section>
+}
+
+@* ── Akcje ───────────────────────────────────────────────── *@
+<div class="row g-3 mb-3">
+    <div class="col-lg-6">
+        <section class="upd-card upd-action h-100">
+            <div class="upd-action-head">
+                <div class="upd-action-icon"><i class="bi bi-boxes"></i></div>
+                <div>
+                    <h6 class="fw-bold mb-0">Portal</h6>
+                    <div class="small text-muted">Ten panel · @(!Known(_portal) ? "wersja nieznana" : PortalPending ? "jest nowsza wersja" : "aktualny")</div>
+                </div>
+                <span class="upd-chip upd-chip-muted ms-auto">kilka minut</span>
+            </div>
+            <div class="upd-what">Co się stanie</div>
+            <ol class="upd-list">
+                <li>Pobieramy zmiany z GitHuba i budujemy nową wersję.</li>
+                @if (_guardianAvailable)
+                {
+                    <li>Guardian uruchamia ją na próbę i sprawdza, czy działa.</li>
+                    <li>Podmienia Portal — panel znika na ok. 15 s.</li>
+                    <li>Jeśli coś pójdzie nie tak, sam wraca do poprzedniej wersji.</li>
+                }
+                else
+                {
+                    <li>Podmieniamy Portal — panel znika na ok. 15 s, potem odśwież stronę.</li>
+                }
+            </ol>
+            <div class="small text-muted mb-3"><i class="bi bi-person-check me-1"></i>Trenerzy i ich klienci nic nie zauważą.</div>
+
+            @if (_confirm == "portal")
+            {
+                <div class="upd-confirm">
+                    <div class="fw-semibold mb-2">Zaktualizować Portal teraz?</div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary btn-sm" @onclick="ConfirmPortal"><i class="bi bi-arrow-repeat me-1"></i>Tak, aktualizuj</button>
+                        <button class="btn btn-link btn-sm" @onclick="() => _confirm = null">Anuluj</button>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <button class="btn @(PortalPending ? "btn-primary" : "btn-outline-primary") w-100" @onclick='() => _confirm = "portal"' disabled="@Busy">
+                    @if (_upgradingPortal) { <span class="spinner-border spinner-border-sm me-1"></span><span>Trwa aktualizacja…</span> }
+                    else { <i class="bi bi-arrow-repeat me-1"></i><span>@(PortalPending ? "Aktualizuj Portal" : "Zbuduj Portal ponownie")</span> }
+                </button>
+            }
+
+            @if (_guardianAvailable)
+            {
+                <details class="upd-adv">
+                    <summary>Coś nie działa po aktualizacji?</summary>
+                    <p class="small text-muted mb-2">Przywróć wersję Portalu sprzed ostatniej aktualizacji. Dane nie są zmieniane.</p>
+                    @if (_confirm == "rollback")
+                    {
+                        <div class="d-flex gap-2">
+                            <button class="btn btn-danger btn-sm" @onclick="ConfirmRollback">Tak, przywróć</button>
+                            <button class="btn btn-link btn-sm" @onclick="() => _confirm = null">Anuluj</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <button class="btn btn-outline-danger btn-sm" @onclick='() => _confirm = "rollback"' disabled="@Busy">
+                            <i class="bi bi-arrow-counterclockwise me-1"></i>Przywróć poprzednią wersję
+                        </button>
+                    }
+                </details>
+            }
+        </section>
+    </div>
+
+    <div class="col-lg-6">
+        <section class="upd-card upd-action h-100">
+            <div class="upd-action-head">
+                <div class="upd-action-icon upd-action-icon-alt"><i class="bi bi-people"></i></div>
+                <div>
+                    <h6 class="fw-bold mb-0">Aplikacja trenerów</h6>
+                    <div class="small text-muted">Wszystkie instancje · @(TenantPending ? "jest nowsza wersja" : "aktualna")</div>
+                </div>
+                <span class="upd-chip upd-chip-muted ms-auto">10–20 min</span>
+            </div>
+            <div class="upd-what">Co się stanie</div>
+            <ol class="upd-list">
+                @if (_rebuildImage) { <li>Pobieramy zmiany i budujemy nową wersję aplikacji (10–15 min) — w tym czasie trenerzy pracują normalnie.</li> }
+                @if (_reprovision)
+                {
+                    @if (_guardianAvailable && _rollingUpdate)
+                    {
+                        <li>Wdrażamy ją po kolei — po @_concurrency @(_concurrency == 1 ? "instancji" : "instancje") naraz. Każdy trener ma ok. 30 s przerwy.</li>
+                        <li>Po każdej instancji sprawdzamy, czy działa; jeśli nie — ta instancja wraca do poprzedniej wersji.</li>
+                    }
+                    else
+                    {
+                        <li>Restartujemy kontenery wszystkich aktywnych trenerów z nową wersją (krótka przerwa u każdego).</li>
+                    }
+                }
+                @if (!_rebuildImage && !_reprovision) { <li class="text-danger">Nic — zaznacz co najmniej jedną opcję w „Opcjach zaawansowanych”.</li> }
+            </ol>
+            <div class="small text-muted mb-3"><i class="bi bi-clock me-1"></i>Najlepiej wieczorem, gdy trenerzy mają mniej wizyt.</div>
+
+            @if (_confirm == "tenant")
+            {
+                <div class="upd-confirm">
+                    <div class="fw-semibold mb-2">Zaktualizować aplikację wszystkich trenerów?</div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-primary btn-sm" @onclick="ConfirmTenant"><i class="bi bi-rocket-takeoff me-1"></i>Tak, aktualizuj</button>
+                        <button class="btn btn-link btn-sm" @onclick="() => _confirm = null">Anuluj</button>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <button class="btn @(TenantPending ? "btn-primary" : "btn-outline-primary") w-100" @onclick='() => _confirm = "tenant"' disabled="@(Busy || (!_rebuildImage && !_reprovision))">
+                    @if (_upgrading) { <span class="spinner-border spinner-border-sm me-1"></span><span>Trwa aktualizacja…</span> }
+                    else { <i class="bi bi-rocket-takeoff me-1"></i><span>@(TenantPending ? "Aktualizuj aplikację trenerów" : "Wdróż ponownie")</span> }
+                </button>
+            }
+
+            <details class="upd-adv">
+                <summary>Opcje zaawansowane</summary>
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" @bind="_rebuildImage" id="rb" />
+                    <label class="form-check-label small" for="rb">Zbuduj nową wersję aplikacji <span class="text-muted">(odznacz, żeby tylko wdrożyć już zbudowaną)</span></label>
+                </div>
+                <div class="form-check mb-2">
+                    <input class="form-check-input" type="checkbox" @bind="_reprovision" id="rp" />
+                    <label class="form-check-label small" for="rp">Wdróż na instancje trenerów <span class="text-muted">(odznacz, żeby tylko zbudować)</span></label>
+                </div>
+                @if (_reprovision && _guardianAvailable)
+                {
+                    <div class="ms-4">
+                        <div class="form-check mb-2">
+                            <input class="form-check-input" type="checkbox" @bind="_rollingUpdate" id="rolling" />
+                            <label class="form-check-label small" for="rolling">Po kolei, ze sprawdzeniem i wycofaniem przy błędzie <span class="text-muted">(zalecane)</span></label>
+                        </div>
+                        @if (_rollingUpdate)
+                        {
+                            <div class="d-flex align-items-center gap-2 mb-2">
+                                <label class="small" for="conc">Instancji naraz</label>
+                                <input type="number" class="form-control form-control-sm" style="width:70px" min="1" max="10" @bind="_concurrency" id="conc" />
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" @bind="_stopOnFailure" id="sof" />
+                                <label class="form-check-label small" for="sof">Zatrzymaj przy pierwszym błędzie <span class="text-muted">(reszta zostaje na starej wersji)</span></label>
+                            </div>
+                        }
+                    </div>
+                }
+            </details>
+        </section>
+    </div>
+</div>
+
+@* ── Historia ────────────────────────────────────────────── *@
+@if (_guardianAvailable && _jobHistory is { Count: > 0 })
+{
+    <section class="upd-card">
+        <h6 class="fw-bold mb-3">Historia</h6>
+        <ul class="upd-history">
+            @foreach (var h in _jobHistory)
+            {
+                var open = _selectedHistoryJob?.Id == h.Id;
+                <li class="upd-history-item @(open ? "open" : "")">
+                    <button type="button" class="upd-history-row" @onclick="() => SelectHistoryJob(h)" aria-expanded="@(open ? "true" : "false")">
+                        <span class="upd-history-icon upd-tone-bg-@StatusTone(h.Status)"><i class="bi @StatusIcon(h.Status)"></i></span>
+                        <span class="flex-grow-1 min-w-0 text-start">
+                            <span class="fw-semibold d-block">@TargetLabel(h.Target)</span>
+                            <span class="small text-muted">
+                                @h.StartedAt.ToLocalTime().ToString("d MMM, HH:mm", Pl)
+                                @if (h.CompletedAt is DateTime done) { <span> · @Duration(done - h.StartedAt)</span> }
+                                @if (!string.IsNullOrEmpty(h.CommitAfter)) { <span class="font-monospace"> · @Truncate(h.CommitBefore, 7) → @Truncate(h.CommitAfter, 7)</span> }
+                            </span>
+                        </span>
+                        <span class="upd-chip upd-chip-@StatusTone(h.Status)">@StatusLabel(h.Status)</span>
+                        <i class="bi @(open ? "bi-chevron-up" : "bi-chevron-down") text-muted"></i>
+                    </button>
+                    @if (open)
+                    {
+                        <div class="upd-history-detail">
+                            @if (!string.IsNullOrWhiteSpace(h.Error)) { <div class="upd-result upd-result-danger mt-0 mb-2">@h.Error</div> }
+                            @if (h.TenantResults is { Count: > 0 })
+                            {
+                                <div class="upd-tenant-grid mb-2">
+                                    @foreach (var tr in h.TenantResults)
+                                    {
+                                        <div class="upd-tenant upd-tenant-@TenantTone(tr.Status)" title="@(tr.Error ?? "")">
+                                            <i class="bi @TenantIcon(tr.Status)"></i><span class="text-truncate">@tr.Slug</span><small>@TenantStatusLabel(tr.Status)</small>
+                                        </div>
+                                    }
+                                </div>
+                            }
+                            <div class="upd-log-body">
+                                @foreach (var e in h.Log)
+                                {
+                                    <div class="upd-log-line upd-log-@e.Level"><span class="upd-log-time">@e.Timestamp.ToLocalTime().ToString("HH:mm:ss")</span><span class="upd-log-stage">@e.Stage</span>@e.Message</div>
+                                }
+                            </div>
+                        </div>
+                    }
+                </li>
+            }
+        </ul>
+    </section>
+}
+
+@* ── Jak to działa ───────────────────────────────────────── *@
+<section class="upd-card upd-faq">
+    <div class="d-flex align-items-center gap-2 mb-2">
+        <h6 class="fw-bold mb-0">Jak to działa</h6>
+        @if (_guardianAvailable)
+        {
+            <span class="upd-chip upd-chip-ok ms-auto"><i class="bi bi-shield-check me-1"></i>Guardian połączony · działa @(_guardianStatus?.Uptime ?? "?")</span>
+        }
+        else
+        {
+            <span class="upd-chip upd-chip-warn ms-auto"><i class="bi bi-shield-exclamation me-1"></i>Guardian niedostępny — tryb bezpośredni</span>
+        }
+    </div>
+    <details>
+        <summary>Co to jest Guardian?</summary>
+        <p>Osobny, mały program na serwerze, który przeprowadza aktualizacje. Najpierw uruchamia nową wersję na próbę, a dopiero gdy działa — podmienia starą. Jeśli po podmianie coś jest nie tak, sam wraca do poprzedniej wersji. Ma własny panel pod portem 9090.</p>
+    </details>
+    <details>
+        <summary>Czy trenerzy zauważą aktualizację?</summary>
+        <p>Aktualizacja Portalu — nie. Aktualizacja aplikacji trenerów — każda instancja ma ok. 30 sekund przerwy przy podmianie; klienci w tym czasie mogą zobaczyć komunikat o ponownym łączeniu. Dane nie są tracone.</p>
+    </details>
+    <details>
+        <summary>Co, jeśli aktualizacja się nie uda?</summary>
+        <p>Przy Guardianie: Portal i każda instancja trenera wracają do poprzedniej wersji automatycznie, a w historii zobaczysz, co poszło nie tak (rozwiń wpis). Jeśli Portal działa źle mimo udanej aktualizacji, użyj „Przywróć poprzednią wersję”.</p>
+    </details>
+    <details>
+        <summary>W jakiej kolejności aktualizować?</summary>
+        <p>Najpierw Portal, potem aplikację trenerów. Nowe funkcje aplikacji czasem potrzebują nowego Portalu (np. poczty czy kalendarza Google), odwrotnie — nigdy.</p>
+    </details>
+    @if (!_guardianAvailable)
+    {
+        <details open>
+            <summary>Wymagania trybu bezpośredniego</summary>
+            <p>Kontener Portalu potrzebuje wolumenów <code>/var/run/docker.sock:/var/run/docker.sock</code> i <code>/mnt/user/appdata/ptscheduler-repo:/opt/ptscheduler/repo</code>. Bez nich aktualizacja zwróci błąd. Zalecamy uruchomienie Guardiana — daje próbne uruchomienie i automatyczne wycofanie.</p>
+        </details>
+    }
+</section>
+
+@code {
+    private VersionInfo _portal = new();
+    private VersionInfo _tenant = new();
+    private VersionInfo? _repoHead;
+    private RemoteInfo? _remote;
+    private bool _checking;
+    private bool _tenantBehindRepo;
+    private bool _repoBehindRemote;
+    private bool _portalBehind;
+    private bool _upgrading;
+    private bool _upgradingPortal;
+    private bool _rebuildImage = true;
+    private bool _reprovision = true;
+    private bool _rollingUpdate = true;
+    private int _concurrency = 3;
+    private bool _stopOnFailure;
+    private UpgradeResult? _result;
+
+    private bool _guardianAvailable;
+    private GuardianStatusDto? _guardianStatus;
+    private GuardianJobDto? _activeGuardianJob;
+    private List<GuardianJobDto>? _jobHistory;
+    private GuardianJobDto? _selectedHistoryJob;
+    private string? _currentJobId;
+    private Timer? _pollTimer;
+    private bool _pendingRollingAfterBuild;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _portal = await UpdateSvc.GetCurrentAsync();
+        _tenant = await UpdateSvc.GetTenantBuildAsync();
+        _guardianStatus = await UpdateSvc.GetGuardianStatusAsync();
+        _guardianAvailable = _guardianStatus is not null;
+        if (_guardianAvailable)
+            _jobHistory = await UpdateSvc.GetGuardianHistoryAsync();
+        await Refresh();
+    }
+
+    private async Task Refresh()
+    {
+        _checking = true;
+        _repoHead = await UpdateSvc.GetLocalRepoHeadAsync();
+        _remote = await UpdateSvc.CheckRemoteAsync();
+        _tenantBehindRepo = UpdateSvc.IsTenantBehindRepo(_tenant, _repoHead);
+        _repoBehindRemote = UpdateSvc.IsRepoBehindRemote(_repoHead, _remote);
+        _portalBehind = _repoHead is not null
+            && _portal.Commit != "unknown"
+            && !_repoHead.Commit.StartsWith(_portal.Commit)
+            && !_portal.Commit.StartsWith(_repoHead.Commit);
+        _checking = false;
+    }
+
+    // ── Portal upgrade ──────────────────────────────────────
+
+    private async Task UpgradePortal()
+    {
+        _upgradingPortal = true;
+        _result = null;
+        _activeGuardianJob = null;
+
+        if (_guardianAvailable)
+        {
+            var resp = await UpdateSvc.StartPortalUpgradeViaGuardianAsync();
+            if (resp is { Started: true, JobId: { } jobId })
+            {
+                _currentJobId = jobId;
+                StartPolling();
+            }
+            else if (!await TryResumeActiveJobAsync())
+            {
+                _result = new UpgradeResult(false, resp?.Error ?? "Guardian nie odpowiedział (brak aktywnego zadania)", []);
+                _upgradingPortal = false;
+                return;
+            }
+        }
+        else
+        {
+            _result = await UpdateSvc.UpgradePortalAsync();
+            _upgradingPortal = false;
+        }
+    }
+
+    // ── Tenant upgrade ──────────────────────────────────────
+
+    private async Task RunUpgrade()
+    {
+        _upgrading = true;
+        _result = null;
+        _activeGuardianJob = null;
+
+        if (_guardianAvailable && _rebuildImage)
+        {
+            _pendingRollingAfterBuild = _reprovision && _rollingUpdate;
+            var resp = await UpdateSvc.StartTenantUpgradeViaGuardianAsync(_rebuildImage);
+            if (resp is { Started: true, JobId: { } jobId })
+            {
+                _currentJobId = jobId;
+                StartPolling();
+            }
+            else if (!await TryResumeActiveJobAsync())
+            {
+                _pendingRollingAfterBuild = false;
+                _result = new UpgradeResult(false, resp?.Error ?? "Guardian nie odpowiedział (brak aktywnego zadania)", []);
+                _upgrading = false;
+                return;
+            }
+        }
+        else if (_guardianAvailable && !_rebuildImage && _reprovision && _rollingUpdate)
+        {
+            var resp = await UpdateSvc.StartTenantRollingUpdateViaGuardianAsync(_concurrency, _stopOnFailure);
+            if (resp is { Started: true, JobId: { } jobId })
+            {
+                _currentJobId = jobId;
+                StartPolling();
+            }
+            else if (!await TryResumeActiveJobAsync())
+            {
+                _result = resp?.Error?.StartsWith("Brak aktywnych", StringComparison.OrdinalIgnoreCase) == true
+                    ? new UpgradeResult(true, "Nie ma aktywnych trenerów — nie było czego wdrażać.", [])
+                    : new UpgradeResult(false, resp?.Error ?? "Guardian nie odpowiedział (brak aktywnego zadania)", []);
+                _upgrading = false;
+                return;
+            }
+        }
+        else
+        {
+            _result = await UpdateSvc.RunUpgradeAsync(_rebuildImage, _reprovision);
+            _upgrading = false;
+            _portal = await UpdateSvc.GetCurrentAsync();
+            _tenant = await UpdateSvc.GetTenantBuildAsync();
+            await Refresh();
+        }
+    }
+
+    // ── Rollback ────────────────────────────────────────────
+
+    private async Task RollbackPortal()
+    {
+        _upgradingPortal = true;
+        _result = null;
+        _activeGuardianJob = null;
+
+        var resp = await UpdateSvc.RollbackPortalViaGuardianAsync();
+        if (resp is { Started: true, JobId: { } jobId })
+        {
+            _currentJobId = jobId;
+            StartPolling();
+        }
+        else if (!await TryResumeActiveJobAsync())
+        {
+            _result = new UpgradeResult(false, resp?.Error ?? "Guardian nie odpowiedział (brak aktywnego zadania)", []);
+            _upgradingPortal = false;
+            return;
+        }
+    }
+
+    // ── Polling ─────────────────────────────────────────────
+
+    private void StartPolling()
+    {
+        _pollTimer?.Dispose();
+        _pollTimer = new Timer(async _ =>
+        {
+            await InvokeAsync(async () =>
+            {
+                if (_currentJobId is null) return;
+                var job = await UpdateSvc.GetGuardianJobAsync(_currentJobId);
+                if (job is null) return;
+
+                _activeGuardianJob = job;
+
+                if (job.Status != "Running")
+                {
+                    StopPolling();
+
+                    if (job.Target == "Tenant" && job.Status == "Success")
+                    {
+                        await UpdateSvc.SaveTenantBuildInfoAsync(job.CommitAfter);
+
+                        if (_pendingRollingAfterBuild)
+                        {
+                            _pendingRollingAfterBuild = false;
+                            _activeGuardianJob = null;
+                            var resp = await UpdateSvc.StartTenantRollingUpdateViaGuardianAsync(_concurrency, _stopOnFailure);
+                            if (resp is { Started: true, JobId: { } rollingJobId })
+                            {
+                                _currentJobId = rollingJobId;
+                                StartPolling();
+                                StateHasChanged();
+                                return;
+                            }
+                            // Start rollingu mógł ruszyć mimo zgubionej odpowiedzi — nie zrywaj
+                            // łańcucha, jeśli Guardian faktycznie już go wykonuje.
+                            if (await TryResumeActiveJobAsync())
+                            {
+                                StateHasChanged();
+                                return;
+                            }
+                            _result = resp?.Error?.StartsWith("Brak aktywnych", StringComparison.OrdinalIgnoreCase) == true
+                                ? new UpgradeResult(true, "Nowa wersja aplikacji jest gotowa. Nie ma jeszcze aktywnych trenerów, więc nie było czego wdrażać — nowe instancje dostaną ją od razu.", [])
+                                : new UpgradeResult(false, resp?.Error ?? "Guardian nie odpowiedział przy starcie wdrażania (brak aktywnego zadania)", []);
+                        }
+                        else if (_reprovision && !_rollingUpdate)
+                        {
+                            _activeGuardianJob = null;
+                            _result = await UpdateSvc.RunUpgradeAsync(false, true);
+                        }
+                    }
+
+                    _upgrading = false;
+                    _upgradingPortal = false;
+                    _portal = await UpdateSvc.GetCurrentAsync();
+                    _tenant = await UpdateSvc.GetTenantBuildAsync();
+                    _jobHistory = await UpdateSvc.GetGuardianHistoryAsync();
+                    await Refresh();
+                }
+
+                StateHasChanged();
+            });
+        }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(3));
+    }
+
+    private void StopPolling()
+    {
+        _pollTimer?.Dispose();
+        _pollTimer = null;
+        _currentJobId = null;
+    }
+
+    // Odpowiedź startu joba potrafi zaginąć (timeout HTTP / Guardian zajęty buildem),
+    // choć Guardian faktycznie go uruchomił. Zanim ogłosimy „nie odpowiedział" —
+    // sprawdź, czy działa aktywne zadanie i je adoptuj (pollujemy jego status).
+    // Eliminuje fałszywy błąd i pęknięty łańcuch build→rolling.
+    private async Task<bool> TryResumeActiveJobAsync()
+    {
+        try
+        {
+            var active = await UpdateSvc.GetGuardianActiveJobAsync();
+            if (active is { Active: true, Job.Id: { Length: > 0 } id })
+            {
+                _currentJobId = id;
+                StartPolling();
+                return true;
+            }
+        }
+        catch { /* brak kontaktu z Guardianem — potraktuj jak brak aktywnego zadania */ }
+        return false;
+    }
+
+    // ── Helpers ──────────────────────────────────────────────
+
+    private void SelectHistoryJob(GuardianJobDto job)
+    {
+        _selectedHistoryJob = _selectedHistoryJob?.Id == job.Id ? null : job;
+    }
+
+    private static string Truncate(string s, int max) =>
+        s.Length <= max ? s : s[..max] + "…";
+
+    // ── Stan i opisy ────────────────────────────────────────
+
+    private string? _confirm;
+    private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
+    private bool Busy => _upgrading || _upgradingPortal || _activeGuardianJob?.Status == "Running";
+
+    private string? TargetCommit => _remote?.Commit is { Length: > 0 } r ? r : _repoHead?.Commit;
+    private string TargetShort => TargetCommit is { Length: > 7 } t ? t[..7] : TargetCommit ?? "?";
+
+    private static bool Same(string? a, string? b) =>
+        !string.IsNullOrEmpty(a) && !string.IsNullOrEmpty(b) && a != "unknown" && b != "unknown"
+        && (a.StartsWith(b, StringComparison.OrdinalIgnoreCase) || b.StartsWith(a, StringComparison.OrdinalIgnoreCase));
+
+    private static bool Known(VersionInfo v) => !string.IsNullOrWhiteSpace(v.Commit) && v.Commit != "unknown";
+    private bool PortalPending => TargetCommit is not null && Known(_portal) && !Same(_portal.Commit, TargetCommit);
+    private bool TenantPending => TargetCommit is not null && (!Known(_tenant) || !Same(_tenant.Commit, TargetCommit));
+
+    private string HeroTone =>
+        Busy ? "running"
+        : PortalPending || TenantPending ? "pending"
+        : _repoHead is null && _remote is null ? "muted"
+        : "ok";
+
+    private string HeroIcon => HeroTone switch
+    {
+        "running" => "bi-arrow-repeat upd-spin",
+        "pending" => "bi-stars",
+        "muted" => "bi-question-circle",
+        _ => "bi-check-circle-fill"
+    };
+
+    private string HeroTitle => HeroTone switch
+    {
+        "running" => _activeGuardianJob is { } j ? $"Trwa: {TargetLabel(j.Target).ToLowerInvariant()}" : "Trwa aktualizacja",
+        "pending" => "Jest nowa wersja",
+        "muted" => "Nie da się sprawdzić wersji",
+        _ => "Wszystko aktualne"
+    };
+
+    private string HeroText => HeroTone switch
+    {
+        "running" => _guardianAvailable
+            ? "Możesz zamknąć tę stronę — Guardian dokończy sam, a wynik zobaczysz w historii."
+            : "Nie zamykaj tej strony do końca aktualizacji.",
+        "pending" => _remote is { } r ? $"Najnowsza zmiana na GitHubie: „{Truncate(r.Message, 80)}”." : "Na serwerze jest nowsza wersja kodu.",
+        "muted" => "Portal nie widzi ani GitHuba, ani repozytorium na serwerze. Sprawdź ustawienia GitHub i wolumen z kodem.",
+        _ => "Portal i aplikacje trenerów działają na najnowszej wersji."
+    };
+
+    private static (string Stage, string Label)[] StagesFor(string target) => target switch
+    {
+        "Portal" => [("Pulling", "Pobranie zmian"), ("Building", "Budowanie"), ("Testing", "Próbne uruchomienie"), ("Swapping", "Podmiana"), ("Verifying", "Sprawdzenie")],
+        "Tenant" => [("Pulling", "Pobranie zmian"), ("Building", "Budowanie aplikacji")],
+        _ => [("Swapping", "Wdrażanie na instancje"), ("Done", "Zakończenie")]
+    };
+
+    private static readonly string[] StageOrder = ["Queued", "Pulling", "Building", "Testing", "Swapping", "Verifying", "Done"];
+
+    private static string StepState(GuardianJobDto job, string stage)
+    {
+        if (job.Status == "Success") return "done";
+        var current = Array.IndexOf(StageOrder, job.Stage);
+        var step = Array.IndexOf(StageOrder, stage);
+        if (step < current) return "done";
+        if (step > current) return "todo";
+        return job.Status == "Running" ? "current" : job.Status is "Failed" or "RolledBack" ? "fail" : "done";
+    }
+
+    private static string TargetLabel(string target) => target switch
+    {
+        "Portal" => "Aktualizacja Portalu",
+        "Tenant" => "Budowa aplikacji trenerów",
+        "TenantRolling" => "Wdrażanie u trenerów",
+        _ => target
+    };
+
+    private static string StatusLabel(string status) => status switch
+    {
+        "Running" => "W toku",
+        "Success" => "Zakończona",
+        "Failed" => "Nieudana",
+        "RolledBack" => "Wycofana",
+        "PartialSuccess" => "Częściowo",
+        _ => status
+    };
+
+    private static string StatusTone(string status) => status switch
+    {
+        "Running" => "info",
+        "Success" => "ok",
+        "Failed" => "danger",
+        "RolledBack" or "PartialSuccess" => "warn",
+        _ => "muted"
+    };
+
+    private static string StatusIcon(string status) => status switch
+    {
+        "Success" => "bi-check-circle-fill",
+        "Failed" => "bi-x-octagon-fill",
+        "RolledBack" => "bi-arrow-counterclockwise",
+        "PartialSuccess" => "bi-exclamation-triangle-fill",
+        _ => "bi-hourglass-split"
+    };
+
+    private static string ResultText(GuardianJobDto job) => (job.Status, job.Target) switch
+    {
+        ("Success", "Portal") => "Gotowe — Portal działa na nowej wersji.",
+        ("Success", "Tenant") => "Nowa wersja aplikacji zbudowana.",
+        ("Success", _) => "Gotowe — wszystkie instancje trenerów mają nową wersję.",
+        ("RolledBack", _) => "Nowa wersja nie przeszła sprawdzenia, więc wróciliśmy do poprzedniej. Nic nie zostało zepsute.",
+        ("PartialSuccess", _) => "Część instancji ma nową wersję, część została na poprzedniej — szczegóły poniżej.",
+        _ => "Aktualizacja się nie udała — poprzednia wersja działa dalej. Szczegóły techniczne poniżej."
+    };
+
+    private static string Elapsed(GuardianJobDto job) =>
+        Duration((job.CompletedAt ?? DateTime.UtcNow).ToUniversalTime() - job.StartedAt.ToUniversalTime());
+
+    private static string When(string raw) =>
+        DateTime.TryParse(raw, System.Globalization.CultureInfo.InvariantCulture, System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var t)
+            ? t.ToLocalTime().ToString("d MMM yyyy, HH:mm", Pl)
+            : raw;
+
+    private static string Duration(TimeSpan t) =>
+        t.TotalMinutes < 1 ? $"{Math.Max(0, (int)t.TotalSeconds)} s"
+        : t.TotalHours < 1 ? $"{(int)t.TotalMinutes} min"
+        : $"{(int)t.TotalHours} h {t.Minutes} min";
+
+    private static string TenantTone(string status) => status switch
+    {
+        "Success" => "ok",
+        "Failed" => "danger",
+        "RolledBack" => "warn",
+        "Updating" or "HealthCheck" => "info",
+        _ => "muted"
+    };
+
+    private static string TenantIcon(string status) => status switch
+    {
+        "Success" => "bi-check-circle-fill",
+        "Failed" => "bi-x-circle-fill",
+        "RolledBack" => "bi-arrow-counterclockwise",
+        "Updating" => "bi-arrow-repeat",
+        "HealthCheck" => "bi-heart-pulse",
+        "Skipped" => "bi-dash-circle",
+        _ => "bi-circle"
+    };
+
+    private static string TenantStatusLabel(string status) => status switch
+    {
+        "Success" => "gotowe",
+        "Failed" => "błąd",
+        "RolledBack" => "wycofano",
+        "Updating" => "aktualizacja…",
+        "HealthCheck" => "sprawdzanie…",
+        "Pending" => "czeka",
+        "Skipped" => "pominięto",
+        _ => status
+    };
+
+    private async Task ConfirmPortal() { _confirm = null; await UpgradePortal(); }
+    private async Task ConfirmTenant() { _confirm = null; await RunUpgrade(); }
+    private async Task ConfirmRollback() { _confirm = null; await RollbackPortal(); }
+
+    public void Dispose()
+    {
+        _pollTimer?.Dispose();
+    }
+}

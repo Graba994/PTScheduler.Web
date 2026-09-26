@@ -1,0 +1,223 @@
+@page "/admin/referrals"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Marketing
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@inject IReferralService ReferralService
+@inject IMarketingSettingsService MarketingSettings
+@inject ISessionTypeService TypeService
+@inject IPermissionService Permission
+@inject AuthenticationStateProvider AuthState
+@inject EntitlementService Entitlements
+@inject IAppClock Clock
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Program poleceń" />
+
+<div class="page-header mb-3">
+    <h4 class="page-title mb-0"><i class="bi bi-gift me-2" style="color:var(--c-primary)"></i>Program poleceń</h4>
+</div>
+
+@if (!Entitlements.IsAllowed("ReferralProgram"))
+{
+    <FeatureGate Flag="ReferralProgram" RequiredPlan="Pro" Title="Program poleceń jest dostępny w wyższym planie">
+        <Description>
+            Klienci polecają Cię znajomym swoim linkiem, a za każdego nowego klienta po pierwszym treningu dostają nagrodę —
+            darmową sesję albo kupon. Znajomy może dostać rabat na start.
+        </Description>
+    </FeatureGate>
+    return;
+}
+
+@if (_denied)
+{
+    <div class="alert alert-danger"><i class="bi bi-shield-lock me-2"></i>Brak uprawnień do zarządzania programem poleceń.</div>
+}
+else if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <div class="row g-3">
+        <div class="col-lg-5">
+            <div class="card">
+                <div class="card-body">
+                    <div class="form-check form-switch mb-3">
+                        <input class="form-check-input" type="checkbox" id="refOn" @bind="_s.ReferralEnabled" />
+                        <label class="form-check-label fw-semibold" for="refOn">Program poleceń włączony</label>
+                    </div>
+
+                    <label class="form-label small fw-semibold">Nagroda dla polecającego</label>
+                    <div class="row g-2 mb-2">
+                        <div class="col-7">
+                            <select class="form-select form-select-sm" @bind="_s.ReferrerRewardKind">
+                                <option value="@ReferralRewardKind.FreeSessions">Darmowe sesje</option>
+                                <option value="@ReferralRewardKind.DiscountPercent">Kupon procentowy</option>
+                                <option value="@ReferralRewardKind.DiscountAmount">Kupon kwotowy</option>
+                            </select>
+                        </div>
+                        <div class="col-5">
+                            <div class="input-group input-group-sm">
+                                <input type="number" class="form-control" min="1" step="1" @bind="RewardValue" />
+                                <span class="input-group-text">@(_s.ReferrerRewardKind switch { ReferralRewardKind.FreeSessions => "szt.", ReferralRewardKind.DiscountPercent => "%", _ => "zł" })</span>
+                            </div>
+                        </div>
+                    </div>
+                    @if (_s.ReferrerRewardKind == ReferralRewardKind.FreeSessions)
+                    {
+                        <label class="form-label small">Typ sesji w nagrodzie</label>
+                        <select class="form-select form-select-sm mb-2" @bind="_s.ReferrerRewardSessionTypeId">
+                            <option value="">Pierwszy aktywny typ</option>
+                            @foreach (var t in _types)
+                            {
+                                <option value="@t.Id">@t.Name (@t.DurationMinutes min)</option>
+                            }
+                        </select>
+                    }
+
+                    <div class="row g-2 mb-2">
+                        <div class="col-6">
+                            <label class="form-label small">Rabat dla znajomego</label>
+                            <div class="input-group input-group-sm">
+                                <input type="number" class="form-control" min="0" max="100" @bind="_s.FriendDiscountPercent" />
+                                <span class="input-group-text">%</span>
+                            </div>
+                            <div class="form-text">0 = bez rabatu</div>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">Limit nagród na klienta</label>
+                            <input type="number" class="form-control form-control-sm" min="0" @bind="_s.MaxRewardsPerClient" />
+                            <div class="form-text">0 = bez limitu</div>
+                        </div>
+                    </div>
+
+                    <div class="alert alert-light border small mb-3">
+                        Nagroda jest przyznawana automatycznie, gdy polecony znajomy <strong>odbędzie pierwszą wizytę</strong>
+                        (status „Odbyta”). Kupony są jednorazowe; darmowe sesje trafiają do klienta jako opłacony pakiet.
+                    </div>
+
+                    @if (_saved) { <div class="text-success small mb-2"><i class="bi bi-check2 me-1"></i>Zapisano.</div> }
+                    <button class="btn btn-primary btn-sm" @onclick="SaveAsync">Zapisz</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-7">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="fw-semibold mb-0">Polecenia</h6>
+                        <span class="small text-muted">
+                            @_list.Count(r => r.Status == ReferralStatus.Rewarded) nagrodzonych · @_list.Count(r => r.Status == ReferralStatus.Pending) oczekujących
+                        </span>
+                    </div>
+                    @if (_list.Count == 0)
+                    {
+                        <p class="text-muted small mb-0">Brak poleceń. Klienci znajdą swój link w menu „Poleć znajomym”.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead class="table-light">
+                                    <tr><th>Polecający</th><th>Nowy klient</th><th>Status</th><th></th></tr>
+                                </thead>
+                                <tbody>
+                                    @foreach (var r in _list)
+                                    {
+                                        <tr>
+                                            <td><a href="/clients/@r.ReferrerClientId" class="text-decoration-none">@r.ReferrerName</a></td>
+                                            <td>
+                                                <a href="/clients/@r.ReferredClientId" class="text-decoration-none">@r.ReferredName</a>
+                                                <div class="small text-muted">@Clock.ToWallClock(r.CreatedAt).ToString("dd.MM.yyyy")</div>
+                                            </td>
+                                            <td class="small">
+                                                @switch (r.Status)
+                                                {
+                                                    case ReferralStatus.Rewarded:
+                                                        <span class="badge bg-success-subtle text-success-emphasis">Nagrodzone</span>
+                                                        <div class="text-muted">@r.RewardDescription</div>
+                                                        break;
+                                                    case ReferralStatus.Pending:
+                                                        <span class="badge bg-warning-subtle text-warning-emphasis">Czeka na 1. wizytę</span>
+                                                        break;
+                                                    default:
+                                                        <span class="badge bg-light text-muted border">Anulowane</span>
+                                                        <div class="text-muted">@r.RewardDescription</div>
+                                                        break;
+                                                }
+                                            </td>
+                                            <td class="text-end">
+                                                @if (r.Status == ReferralStatus.Pending)
+                                                {
+                                                    <button class="btn btn-sm btn-link text-danger p-0" @onclick="() => CancelAsync(r.Id)" title="Anuluj polecenie">Anuluj</button>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private bool _denied;
+    private bool _saved;
+    private string? _trainerFilter;
+    private MarketingSettingsDto _s = new();
+    private List<SessionTypeDto> _types = [];
+    private List<ReferralDto> _list = [];
+
+    // Liczba sesji / procent / pełne złote — bez części dziesiętnej w polu.
+    private int RewardValue
+    {
+        get => (int)_s.ReferrerRewardValue;
+        set => _s.ReferrerRewardValue = value;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!Entitlements.IsAllowed("ReferralProgram")) return;
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var isAdmin = auth.User.IsInRole(Roles.Admin);
+        var role = isAdmin ? Roles.Admin
+                 : auth.User.IsInRole(Roles.Trainer) ? Roles.Trainer
+                 : auth.User.IsInRole(Roles.Subordinate) ? Roles.Subordinate : string.Empty;
+        if (!await Permission.HasPermissionAsync(role, PTScheduler.Domain.Constants.Permissions.ManagePayments))
+        {
+            _denied = true; _loading = false; return;
+        }
+        _trainerFilter = isAdmin ? null : auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        _s = await MarketingSettings.GetAsync();
+        _types = await TypeService.GetAllAsync();
+        _list = await ReferralService.GetAllAsync(_trainerFilter);
+        _loading = false;
+    }
+
+    private async Task SaveAsync()
+    {
+        // Zapis nie może nadpisać ustawień opinii — bierzemy je z bazy.
+        var current = await MarketingSettings.GetAsync();
+        _s.ReviewsEnabled = current.ReviewsEnabled;
+        _s.GoogleReviewUrl = current.GoogleReviewUrl;
+        _s.ReviewAskAfterSessions = current.ReviewAskAfterSessions;
+        await MarketingSettings.SaveAsync(_s);
+        _s = await MarketingSettings.GetAsync();
+        _saved = true;
+    }
+
+    private async Task CancelAsync(int id)
+    {
+        await ReferralService.CancelAsync(id);
+        _list = await ReferralService.GetAllAsync(_trainerFilter);
+    }
+}

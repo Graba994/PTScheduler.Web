@@ -1,12 +1,14 @@
+@using Microsoft.EntityFrameworkCore
 @page "/my/profile"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Client")]
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 @inject IClientService ClientService
 @inject ISessionPackageService PackageService
 @inject ISessionService SessionService
 @inject AuthenticationStateProvider AuthStateProvider
-@inject UserManager<ApplicationUser> UserManager
+@inject Microsoft.EntityFrameworkCore.IDbContextFactory<ApplicationDbContext> DbFactory
 @inject IJSRuntime JS
+@inject ISurveyService Surveys
 @using Microsoft.AspNetCore.Identity
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Application.DTOs
@@ -28,9 +30,29 @@ else if (_client is null)
 }
 else
 {
-    <div class="page-header mb-3">
-        <h4 class="page-title"><i class="bi bi-person-circle me-2" style="color:var(--c-primary)"></i>Mój profil</h4>
+    <div class="page-header mb-3 d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <h4 class="page-title mb-0"><i class="bi bi-person-circle me-2" style="color:var(--c-primary)"></i>Mój profil</h4>
+        <div class="d-flex gap-2 flex-wrap">
+            <a href="/my/survey/zdrowie?returnUrl=%2Fmy%2Fprofile" class="btn btn-sm btn-outline-primary">
+                <i class="bi bi-clipboard2-pulse me-1"></i>Ankieta zdrowotna
+            </a>
+            @if (!_confirmWithdraw)
+            {
+                <button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmWithdraw = true">
+                    Wycofaj zgodę na dane o zdrowiu
+                </button>
+            }
+            else
+            {
+                <button class="btn btn-sm btn-danger" @onclick="WithdrawConsentAsync">Tak, usuń moją ankietę zdrowotną</button>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmWithdraw = false">Anuluj</button>
+            }
+        </div>
     </div>
+    @if (_withdrawn)
+    {
+        <div class="alert alert-success small py-2">Zgoda wycofana — ankieta zdrowotna została usunięta.</div>
+    }
 
     <!-- Stat bar -->
     <div class="row g-2 mb-4">
@@ -59,6 +81,8 @@ else
             </div>
         </div>
     </div>
+
+    <ReviewPrompt ClientId="_client.Id" EditMode="true" />
 
     <!-- Main content: two columns -->
     <div class="row g-4 mb-4">
@@ -220,7 +244,7 @@ else
 
                 @if (_activePackage.ExpiresAt.HasValue)
                 {
-                    var daysLeft = (int)(_activePackage.ExpiresAt.Value.ToLocalTime() - DateTime.Now).TotalDays;
+                    var daysLeft = (int)(_activePackage.ExpiresAt.Value.ToLocalTime() - StudioClock.Now).TotalDays;
                     <div class="mt-2 small @(daysLeft <= 7 ? "text-danger fw-semibold" : "text-muted")">
                         <i class="bi bi-hourglass-split me-1"></i>
                         Ważny do @_activePackage.ExpiresAt.Value.ToLocalTime().ToString("dd.MM.yyyy")
@@ -235,6 +259,16 @@ else
 @code {
     private bool _loading = true;
     private ClientDto? _client;
+    private bool _confirmWithdraw;
+    private bool _withdrawn;
+
+    private async Task WithdrawConsentAsync()
+    {
+        if (_client is null) return;
+        await Surveys.WithdrawHealthConsentAsync(_client.Id);
+        _confirmWithdraw = false;
+        _withdrawn = true;
+    }
     private ApplicationUser? _trainer;
     private string _trainerFullName = string.Empty;
     private string _trainerInitials = "?";
@@ -268,7 +302,8 @@ else
             // Trainer info
             if (!string.IsNullOrEmpty(_client.TrainerUserId))
             {
-                _trainer = await UserManager.FindByIdAsync(_client.TrainerUserId);
+                await using (var db = await DbFactory.CreateDbContextAsync())
+                    _trainer = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == _client.TrainerUserId);
                 if (_trainer is not null)
                 {
                     var firstName = _trainer.FirstName ?? string.Empty;
@@ -285,7 +320,7 @@ else
 
             if (_client.DateOfBirth.HasValue)
             {
-                var today = DateOnly.FromDateTime(DateTime.Today);
+                var today = DateOnly.FromDateTime(StudioClock.Today);
                 var dob   = _client.DateOfBirth.Value;
                 _age = today.Year - dob.Year;
                 if (today < dob.AddYears(_age)) _age--;

@@ -1,0 +1,244 @@
+@page "/chat"
+@implements IAsyncDisposable
+@using PTScheduler.Application.Chat
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject IChatService ChatService
+@inject IChatNotifier Notifier
+@inject IClientService ClientService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject IAppClock Clock
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Wiadomości" />
+
+<div class="page-header mb-3">
+    <h4 class="page-title mb-0"><i class="bi bi-chat-dots-fill me-2" style="color:var(--c-primary)"></i>Wiadomości</h4>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (!_isStaff && _clientId is null)
+{
+    <div class="alert alert-warning">Twoje konto nie jest powiązane z profilem klienta.</div>
+}
+else
+{
+    <div class="chat-shell @(_isStaff && _clientId is not null ? "chat-has-thread" : "")">
+        @if (_isStaff)
+        {
+            <aside class="chat-list">
+                @if (_conversations.Count == 0)
+                {
+                    <p class="text-muted small p-3 mb-0">Brak klientów.</p>
+                }
+                @foreach (var c in _conversations)
+                {
+                    <button class="chat-list-item @(c.ClientId == _clientId ? "active" : "")" @onclick="() => OpenAsync(c.ClientId)">
+                        <div class="d-flex justify-content-between gap-2">
+                            <span class="fw-semibold text-truncate">@c.ClientName</span>
+                            @if (c.Unread > 0) { <span class="badge rounded-pill bg-danger">@c.Unread</span> }
+                        </div>
+                        <div class="small text-muted text-truncate">
+                            @if (c.LastMessage is null) { <span>Brak wiadomości</span> }
+                            else { @(c.LastFromStaff ? "Ty: " : "")@c.LastMessage }
+                        </div>
+                    </button>
+                }
+            </aside>
+        }
+
+        <section class="chat-thread">
+            @if (_clientId is null)
+            {
+                <div class="text-muted small text-center my-auto">Wybierz klienta, aby zobaczyć rozmowę.</div>
+            }
+            else
+            {
+                @if (_isStaff)
+                {
+                    <div class="chat-thread-header">
+                        <button class="btn btn-sm btn-link chat-back" @onclick="Back"><i class="bi bi-arrow-left"></i></button>
+                        <a href="/clients/@_clientId" class="fw-semibold text-decoration-none">@_title</a>
+                    </div>
+                }
+                <div class="chat-messages" @ref="_scrollEl">
+                    @if (_messages.Count == 0)
+                    {
+                        <div class="text-muted small text-center my-4">
+                            @(_isStaff ? "Napisz pierwszą wiadomość do klienta." : "Masz pytanie do trenera? Napisz tutaj.")
+                        </div>
+                    }
+                    @{ DateOnly? lastDay = null; string? lastSender = null; }
+                    @foreach (var m in _messages)
+                    {
+                        var wall = Clock.ToWallClock(m.SentAt);
+                        var day = DateOnly.FromDateTime(wall);
+                        if (lastDay != day)
+                        {
+                            lastDay = day;
+                            lastSender = null;
+                            <div class="chat-day">@wall.ToString("dddd, d MMMM")</div>
+                        }
+                        var mine = m.SenderUserId == _userId;
+                        // Podpis tylko na początku serii wiadomości od tej samej osoby.
+                        var showSender = lastSender != m.SenderUserId;
+                        lastSender = m.SenderUserId;
+                        <div class="chat-bubble-row @(mine ? "mine" : "") @(showSender ? "chat-run-start" : "")">
+                            <div class="chat-bubble">
+                                @if (showSender)
+                                {
+                                    <div class="chat-sender">@SenderLabel(m, mine)</div>
+                                }
+                                <div class="chat-body">@m.Body</div>
+                                <div class="chat-meta">
+                                    @wall.ToString("HH:mm")
+                                    @if (mine && m.ReadAt is not null) { <i class="bi bi-check2-all ms-1" title="Przeczytana"></i> }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </div>
+                <div class="chat-input">
+                    <textarea class="form-control" rows="1" maxlength="2000" placeholder="Napisz wiadomość…"
+                              @bind="_draft" @bind:event="oninput" @onkeydown="OnKeyDown"></textarea>
+                    <button class="btn btn-primary" @onclick="SendAsync" disabled="@(_sending || string.IsNullOrWhiteSpace(_draft))" title="Wyślij">
+                        <i class="bi bi-send-fill"></i>
+                    </button>
+                </div>
+                @if (_error is not null) { <div class="text-danger small px-2 pb-2">@_error</div> }
+            }
+        </section>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "client")] public int? ClientQuery { get; set; }
+
+    private bool _loading = true;
+    private bool _isStaff;
+    private bool _isAdmin;
+    private string _userId = "";
+    private int? _clientId;
+    private string _title = "";
+    private List<ChatConversationDto> _conversations = [];
+    private List<ChatMessageDto> _messages = [];
+    private string _draft = "";
+    private bool _sending;
+    private string? _error;
+    private ElementReference _scrollEl;
+    private bool _scrollPending;
+    private DotNetObjectReference<Chat>? _selfRef;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _isAdmin = auth.User.IsInRole(Roles.Admin);
+        _isStaff = _isAdmin || auth.User.IsInRole(Roles.Trainer) || auth.User.IsInRole(Roles.Subordinate);
+
+        if (_isStaff)
+        {
+            _conversations = await ChatService.GetConversationsAsync(_isAdmin ? null : _userId);
+            if (ClientQuery is int cq && await ChatService.CanAccessAsync(cq, _userId, _isAdmin))
+                await OpenAsync(cq);
+        }
+        else
+        {
+            var client = await ClientService.GetClientByUserIdAsync(_userId);
+            if (client is not null) await OpenAsync(client.Id);
+        }
+        Notifier.ConversationChanged += OnConversationChanged;
+        _loading = false;
+    }
+
+    private async Task OpenAsync(int clientId)
+    {
+        _clientId = clientId;
+        _error = null;
+        _title = _conversations.FirstOrDefault(c => c.ClientId == clientId)?.ClientName ?? "";
+        _messages = await ChatService.GetMessagesAsync(clientId);
+        await ChatService.MarkReadAsync(clientId, readerIsStaff: _isStaff);
+        _scrollPending = true;
+    }
+
+    private void Back() => _clientId = null;
+
+    private async Task SendAsync()
+    {
+        if (_clientId is not int id || string.IsNullOrWhiteSpace(_draft)) return;
+        _sending = true; _error = null;
+        var (ok, error) = await ChatService.SendAsync(id, _userId, _isStaff, _draft);
+        if (ok) _draft = ""; else _error = error;
+        _sending = false;
+    }
+
+    private async Task OnKeyDown(KeyboardEventArgs e)
+    {
+        // Enter wysyła, Shift+Enter — nowa linia.
+        if (e.Key == "Enter" && !e.ShiftKey) await SendAsync();
+    }
+
+    private void OnConversationChanged(int clientId)
+    {
+        _ = InvokeAsync(async () =>
+        {
+            if (clientId == _clientId)
+            {
+                _messages = await ChatService.GetMessagesAsync(clientId);
+                if (HasUnread() && await IsWatchingAsync())
+                    await ChatService.MarkReadAsync(clientId, readerIsStaff: _isStaff);
+                _scrollPending = true;
+            }
+            if (_isStaff)
+                _conversations = await ChatService.GetConversationsAsync(_isAdmin ? null : _userId);
+            StateHasChanged();
+        });
+    }
+
+    private static string SenderLabel(ChatMessageDto m, bool mine) =>
+        mine ? "ja"
+        : m.FromStaff ? (string.IsNullOrWhiteSpace(m.SenderName) ? "Trener" : $"Trener {m.SenderName}")
+        : string.IsNullOrWhiteSpace(m.SenderName) ? "Klient" : m.SenderName;
+
+    private bool HasUnread() => _messages.Any(m => m.FromStaff != _isStaff && m.ReadAt is null);
+
+    // Zamknięta karta zostawia obwód na kilka minut — bez tego sprawdzenia
+    // oznaczałby nowe wiadomości jako przeczytane, choć nikt ich nie widział.
+    private async Task<bool> IsWatchingAsync()
+    {
+        try { return await JS.InvokeAsync<bool>("ptChat.isVisible", TimeSpan.FromSeconds(3)); }
+        catch { return false; }
+    }
+
+    [JSInvokable]
+    public async Task OnPageVisible()
+    {
+        if (_clientId is not int id || !HasUnread()) return;
+        await ChatService.MarkReadAsync(id, readerIsStaff: _isStaff);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender)
+        {
+            _selfRef = DotNetObjectReference.Create(this);
+            try { await JS.InvokeVoidAsync("ptChat.watchVisibility", _selfRef); } catch { /* obwód zamknięty */ }
+        }
+        if (!_scrollPending) return;
+        _scrollPending = false;
+        try { await JS.InvokeVoidAsync("ptChat.scrollBottom", _scrollEl); } catch { /* obwód zamknięty */ }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        Notifier.ConversationChanged -= OnConversationChanged;
+        try { await JS.InvokeVoidAsync("ptChat.unwatch"); } catch { /* obwód zamknięty */ }
+        _selfRef?.Dispose();
+    }
+}

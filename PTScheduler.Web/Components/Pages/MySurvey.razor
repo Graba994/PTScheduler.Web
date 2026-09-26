@@ -1,0 +1,145 @@
+@page "/my/survey/{Slug}"
+@using Microsoft.AspNetCore.Authorization
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Surveys
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
+@attribute [Authorize(Roles = Roles.Client)]
+@inject ISurveyService Surveys
+@inject IClientService ClientService
+@inject IAppClock Clock
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="@(_template?.Name ?? "Ankieta")" />
+
+<div class="row justify-content-center">
+    <div class="col-12 col-md-9 col-lg-7">
+        @if (_loading)
+        {
+            <div class="text-center text-muted py-5"><div class="spinner-border"></div></div>
+        }
+        else if (_error is not null)
+        {
+            <div class="alert alert-warning"><i class="bi bi-info-circle me-2"></i>@_error</div>
+            <a href="@_returnUrl" class="btn btn-outline-primary">Wróć</a>
+        }
+        else if (_done)
+        {
+            <div class="card">
+                <div class="card-body p-4 text-center">
+                    <div class="mb-2" style="font-size:2.4rem;color:var(--c-success,#16A34A)"><i class="bi bi-check-circle-fill"></i></div>
+                    <h5 class="fw-bold">Dziękujemy!</h5>
+                    <p class="text-muted small mb-4">
+                        @(_kind == SurveyKind.HealthIntake
+                            ? "Trener zobaczy Twoje odpowiedzi przed treningiem. Jeśli coś się zmieni w Twoim zdrowiu, zaktualizujesz ankietę w profilu."
+                            : "Twoja ocena pomoże trenerowi dopasować kolejne treningi.")
+                    </p>
+                    <a href="@_returnUrl" class="btn btn-primary">Dalej</a>
+                </div>
+            </div>
+        }
+        else if (_template is not null)
+        {
+            <div class="card">
+                <div class="card-body p-4">
+                    <h4 class="fw-bold mb-1">
+                        <i class="bi @(_kind == SurveyKind.HealthIntake ? "bi-clipboard2-pulse" : "bi-emoji-smile") me-2" style="color:var(--c-primary)"></i>@_template.Name
+                    </h4>
+                    @if (_workoutDate is { } d)
+                    {
+                        <div class="text-muted small mb-2">Trening z dnia @d.ToString("dd.MM.yyyy")</div>
+                    }
+                    @if (_previousAt is { } prev)
+                    {
+                        <div class="alert alert-info small py-2">
+                            <i class="bi bi-clock-history me-1"></i>Ostatnio wypełniona @Clock.ToWallClock(prev).ToString("dd.MM.yyyy") — możesz ją zaktualizować.
+                        </div>
+                    }
+                    <SurveyForm Template="_template" Submit="SubmitAsync" Initial="_initial"
+                                SubmitLabel="Wyślij ankietę" ShowNumbers="@(_kind == SurveyKind.HealthIntake)"
+                                ConsentText="@(_kind == SurveyKind.HealthIntake ? HealthConsentText : null)"
+                                OnSkip="@(_kind == SurveyKind.PostWorkout ? EventCallback.Factory.Create(this, Skip) : default)" />
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Slug { get; set; } = string.Empty;
+
+    private const string HealthConsentText =
+        "Wyrażam zgodę na przetwarzanie podanych przeze mnie danych o stanie zdrowia przez mojego trenera " +
+        "w celu bezpiecznego zaplanowania treningów (art. 9 ust. 2 lit. a RODO). Zgodę mogę w każdej chwili " +
+        "wycofać w swoim profilu — ankieta zostanie wtedy usunięta.";
+    [SupplyParameterFromQuery(Name = "date")] public string? DateQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "returnUrl")] public string? ReturnUrlQuery { get; set; }
+
+    private bool _loading = true;
+    private bool _done;
+    private string? _error;
+    private SurveyKind _kind;
+    private SurveyTemplateDto? _template;
+    private int _clientId;
+    private DateOnly? _workoutDate;
+    private DateTime? _previousAt;
+    private Dictionary<string, SurveyAnswerInput>? _initial;
+    private string _returnUrl = "/app";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _returnUrl = ReturnUrlQuery is { Length: > 1 } r && r.StartsWith('/') && !r.StartsWith("//") ? r : "/app";
+        _kind = Slug switch { "zdrowie" => SurveyKind.HealthIntake, "po-treningu" => SurveyKind.PostWorkout, _ => (SurveyKind)(-1) };
+        if (!Enum.IsDefined(_kind)) { _error = "Nie ma takiej ankiety."; _loading = false; return; }
+
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        var client = await ClientService.GetClientByUserIdAsync(userId);
+        if (client is null) { _error = "Twoje konto nie jest jeszcze powiązane z profilem klienta."; _loading = false; return; }
+        _clientId = client.Id;
+
+        _template = await Surveys.GetTemplateAsync(_kind);
+        if (!_template.IsEnabled) { _error = "Ta ankieta jest obecnie wyłączona."; _loading = false; return; }
+
+        if (_kind == SurveyKind.PostWorkout)
+        {
+            _workoutDate = DateOnly.TryParse(DateQuery, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : Clock.Today;
+            var existing = (await Surveys.GetPostWorkoutByDateAsync(_clientId, 400)).GetValueOrDefault(_workoutDate.Value);
+            if (existing is not null) _initial = ToInputs(existing);
+        }
+        else
+        {
+            var last = await Surveys.GetLatestAsync(_clientId, SurveyKind.HealthIntake);
+            if (last is not null)
+            {
+                _previousAt = last.SubmittedAtUtc;
+                _initial = ToInputs(last);
+            }
+        }
+        _loading = false;
+    }
+
+    private async Task<List<string>> SubmitAsync(Dictionary<string, SurveyAnswerInput> answers)
+    {
+        // Formularz nie pozwala wysłać ankiety zdrowotnej bez zaznaczenia zgody.
+        var (errors, _) = await Surveys.SubmitAsync(_clientId, _kind, answers, _workoutDate,
+            healthDataConsent: _kind == SurveyKind.HealthIntake);
+        if (errors.Count == 0) _done = true;
+        return errors;
+    }
+
+    private void Skip() => Nav.NavigateTo(_returnUrl);
+
+    // Poprzednie odpowiedzi jako punkt wyjścia do aktualizacji.
+    private static Dictionary<string, SurveyAnswerInput> ToInputs(SurveyResponseDto r) =>
+        r.Answers.ToDictionary(a => a.Key, a => new SurveyAnswerInput
+        {
+            Number = a.Number,
+            Bool = a.Type == SurveyQuestionType.YesNo && a.Key == "consent" ? null : a.Bool,
+            Text = a.Text,
+            Choices = [.. a.Choices]
+        });
+}

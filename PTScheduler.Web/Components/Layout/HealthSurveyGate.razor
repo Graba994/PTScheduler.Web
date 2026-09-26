@@ -1,0 +1,68 @@
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject PTScheduler.Application.Interfaces.ISurveyService Surveys
+@inject PTScheduler.Application.Interfaces.IClientService ClientService
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Przy pierwszym logowaniu klienta (i dopóki nie wypełni): ankieta zdrowotna. „Później” — do końca sesji. *@
+@if (_show)
+{
+    <div class="health-gate-backdrop">
+        <div class="card health-gate-card shadow-lg" role="dialog" aria-modal="true" aria-labelledby="healthGateTitle">
+            <div class="card-body p-4 text-center">
+                <div class="mx-auto mb-3 d-flex align-items-center justify-content-center"
+                     style="width:64px;height:64px;border-radius:18px;background:var(--c-primary-light);color:var(--c-primary);font-size:2rem">
+                    <i class="bi bi-clipboard2-pulse"></i>
+                </div>
+                <h5 class="fw-bold mb-2" id="healthGateTitle">Zanim zaczniemy — ankieta zdrowotna</h5>
+                <p class="text-muted small mb-4">
+                    Kilka pytań o zdrowie i cele (ok. 3 minuty). Dzięki nim trener przygotuje bezpieczny plan dopasowany do Ciebie.
+                </p>
+                <div class="d-flex flex-column gap-2">
+                    <button class="btn btn-primary" @onclick="Open">Wypełnij teraz</button>
+                    <button class="btn btn-link btn-sm text-muted" @onclick="Later">Przypomnij mi później</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _show;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var path = "/" + Nav.ToBaseRelativePath(Nav.Uri);
+            if (path.StartsWith("/my/survey", StringComparison.OrdinalIgnoreCase)) return;
+
+            var user = (await AuthState.GetAuthenticationStateAsync()).User;
+            if (!user.IsInRole(PTScheduler.Domain.Constants.Roles.Client)) return;
+            var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+            var client = await ClientService.GetClientByUserIdAsync(userId);
+            if (client is null || !await Surveys.IsHealthSurveyPendingAsync(client.Id)) return;
+
+            var later = await JS.InvokeAsync<string?>("sessionStorage.getItem", "pts.health.later");
+            if (later == "1") return;
+
+            _show = true;
+            StateHasChanged();
+        }
+        catch { } // Nie blokujemy aplikacji, gdy sprawdzenie się nie uda.
+    }
+
+    private void Open()
+    {
+        var here = "/" + Nav.ToBaseRelativePath(Nav.Uri);
+        Nav.NavigateTo($"/my/survey/zdrowie?returnUrl={Uri.EscapeDataString(here)}");
+    }
+
+    private async Task Later()
+    {
+        _show = false;
+        try { await JS.InvokeVoidAsync("sessionStorage.setItem", "pts.health.later", "1"); } catch { }
+    }
+}

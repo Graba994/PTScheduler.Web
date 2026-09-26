@@ -1,80 +1,166 @@
 @page "/admin/payments"
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@inject IPaymentSettingsService PaymentSettings
+@inject IPermissionService Permission
+@inject EntitlementService Entitlements
+@inject AuthenticationStateProvider AuthState
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Płatności online" />
 
-<div class="manage-card">
-    <h5 class="fw-bold mb-1">
-        <i class="bi bi-credit-card-fill me-2"></i>Płatności online
-        <span class="badge bg-warning text-dark ms-2" style="font-size:.65rem;vertical-align:middle">W przygotowaniu</span>
-    </h5>
-    <p class="text-muted small mb-4">Włącz lub wyłącz moduł płatności online oraz zarządzaj dostępnymi operatorami.</p>
+<div class="page-header">
+    <h4 class="page-title"><i class="bi bi-credit-card-fill me-2" style="color:var(--c-primary)"></i>Płatności online</h4>
+</div>
 
-    <div class="d-flex align-items-center justify-content-between mb-3 p-3 border rounded flex-wrap gap-2">
-        <div>
-            <div class="fw-semibold">Płatności online</div>
-            <div class="text-muted small">Master switch — włącza moduł płatności dla klientów</div>
-        </div>
-        <div class="form-check form-switch mb-0">
-            <input class="form-check-input" type="checkbox" role="switch"
-                   checked="@_enabled"
-                   @onchange="e => _enabled = (bool)(e.Value ?? false)" />
-        </div>
-    </div>
+@if (!Entitlements.IsAllowed("PaymentsEnabled"))
+{
+    <FeatureGate Flag="PaymentsEnabled" RequiredPlan="Starter"
+                 Title="Płatności online są dostępne w planie Starter">
+        <Description>
+            Umożliw klientom płacenie za sesje, pakiety i kursy przez PayU, Przelewy24, Stripe. Odblokuj w planie <strong>Pro</strong> lub wyższym.
+        </Description>
+    </FeatureGate>
+}
+else if (_denied)
+{
+    <div class="alert alert-danger"><i class="bi bi-shield-lock me-2"></i>Brak uprawnień do konfiguracji płatności.</div>
+}
+else if (_settings is null)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    @if (!string.IsNullOrEmpty(_msg)) { <div class="alert alert-success"><i class="bi bi-check-circle me-2"></i>@_msg</div> }
 
-    <label class="form-label fw-semibold small text-uppercase text-muted mb-2">Dostępne operatory</label>
-    <div class="d-flex flex-column gap-0 border rounded overflow-hidden mb-4">
-        @foreach (var provider in _providers)
-        {
-            <div class="d-flex align-items-center justify-content-between px-3 py-2 border-bottom">
-                <div class="d-flex align-items-center gap-2">
-                    <i class="bi bi-bank text-primary"></i>
-                    <span class="small fw-semibold">@provider.Name</span>
+    <div class="row g-4" style="max-width:900px">
+        <div class="col-12">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex align-items-start justify-content-between gap-3 mb-3">
+                        <div>
+                            <div class="fw-semibold">Płatności online</div>
+                            <div class="text-muted small">Główny przełącznik — udostępnia zakupy klientom. Musi być włączony, aby jakakolwiek bramka działała.</div>
+                        </div>
+                        <div class="form-check form-switch fs-5 m-0">
+                            <input class="form-check-input" type="checkbox" role="switch" @bind="_settings.Enabled" />
+                        </div>
+                    </div>
+                    <div class="row g-3 align-items-end">
+                        <div class="col-6 col-md-3">
+                            <label class="form-label fw-semibold">Waluta</label>
+                            <input class="form-control" @bind="_settings.Currency" maxlength="3" />
+                        </div>
+                    </div>
                 </div>
-                <div class="form-check form-switch mb-0">
-                    <input class="form-check-input" type="checkbox" role="switch"
-                           checked="@provider.IsEnabled"
-                           disabled="@(!_enabled)"
-                           @onchange="e => provider.IsEnabled = (bool)(e.Value ?? false)" />
+            </div>
+        </div>
+
+        @foreach (var meta in PaymentProviderCatalog.All)
+        {
+            var cfg = _settings.Provider(meta.Key);
+            if (cfg is null) { continue; }
+            <div class="col-12">
+                <div class="card @(cfg.Enabled ? "border-primary" : "")">
+                    <div class="card-header d-flex align-items-center justify-content-between gap-2">
+                        <span class="fw-semibold">
+                            <i class="bi @meta.Icon me-2" style="color:var(--c-primary)"></i>@meta.Name
+                            @if (meta.AlwaysConfigured) { <span class="badge bg-info-subtle text-info-emphasis ms-1">test</span> }
+                            @if (cfg.Enabled) { <span class="badge bg-success ms-1">włączona</span> }
+                        </span>
+                        <div class="form-check form-switch fs-5 m-0">
+                            <input class="form-check-input" type="checkbox" role="switch" @bind="cfg.Enabled" />
+                        </div>
+                    </div>
+                    @if (cfg.Enabled)
+                    {
+                        <div class="card-body">
+                            <p class="text-muted small">@meta.Description</p>
+
+                            @if (!meta.AlwaysConfigured)
+                            {
+                                <div class="d-flex align-items-center justify-content-between gap-3 mb-3">
+                                    <div>
+                                        <div class="fw-semibold">Tryb sandbox (testowy)</div>
+                                        <div class="text-muted small">Włączony = środowisko testowe. Wyłącz dla płatności produkcyjnych.</div>
+                                    </div>
+                                    <div class="form-check form-switch fs-5 m-0">
+                                        <input class="form-check-input" type="checkbox" role="switch" @bind="cfg.Sandbox" />
+                                    </div>
+                                </div>
+
+                                <div class="row g-3">
+                                    @foreach (var field in meta.Fields)
+                                    {
+                                        <div class="col-12 col-md-6">
+                                            <label class="form-label fw-semibold">@field.Label</label>
+                                            <input class="form-control" type="@(field.Secret ? "password" : "text")"
+                                                   autocomplete="off" placeholder="@field.Placeholder"
+                                                   value="@GetField(cfg, field.Key)"
+                                                   @onchange="e => SetField(cfg, field.Key, e.Value?.ToString())" />
+                                        </div>
+                                    }
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="alert alert-info py-2 mb-0">
+                                    <i class="bi bi-info-circle me-1"></i>Bramka testowa nie wymaga konfiguracji. Klient przechodzi pełny proces zakupu, ale bez prawdziwej płatności.
+                                </div>
+                            }
+                        </div>
+                    }
                 </div>
             </div>
         }
+
+        <div class="col-12">
+            <button class="btn btn-primary" @onclick="Save" disabled="@_saving">
+                @if (_saving) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                <i class="bi bi-save me-1"></i>Zapisz konfigurację
+            </button>
+        </div>
     </div>
-
-    @if (!string.IsNullOrEmpty(_saveMsg))
-    {
-        <div class="alert alert-info py-2 small mb-3">@_saveMsg</div>
-    }
-
-    <button class="btn btn-primary btn-sm" @onclick="Save">
-        <i class="bi bi-floppy-fill me-1"></i>Zapisz ustawienia
-    </button>
-    <p class="text-muted small mt-3 mb-0">
-        <i class="bi bi-info-circle me-1"></i>Integracja z API operatorów płatności zostanie uruchomiona w kolejnej wersji.
-    </p>
-</div>
+}
 
 @code {
-    private bool _enabled;
-    private string _saveMsg = string.Empty;
-    private List<ProviderItem> _providers =
-    [
-        new("Przelewy24"),
-        new("PayU"),
-        new("PayPo"),
-        new("Klarna")
-    ];
+    private PaymentSettingsDto? _settings;
+    private bool _denied;
+    private bool _saving;
+    private string _msg = string.Empty;
 
-    private void Save()
+    protected override async Task OnInitializedAsync()
     {
-        _saveMsg = "Ustawienia płatności zapisane (infrastruktura gotowa — integracja API w przygotowaniu).";
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var role = auth.User.IsInRole(Roles.Admin) ? Roles.Admin
+                 : auth.User.IsInRole(Roles.Trainer) ? Roles.Trainer
+                 : auth.User.IsInRole(Roles.Subordinate) ? Roles.Subordinate : string.Empty;
+        if (!await Permission.HasPermissionAsync(role, PTScheduler.Domain.Constants.Permissions.ManagePayments))
+        {
+            _denied = true;
+            return;
+        }
+        _settings = await PaymentSettings.GetAsync();
     }
 
-    private sealed class ProviderItem(string name)
+    private static string GetField(PaymentProviderConfigDto cfg, string key)
+        => cfg.Fields.TryGetValue(key, out var v) ? v ?? string.Empty : string.Empty;
+
+    private static void SetField(PaymentProviderConfigDto cfg, string key, string? value)
+        => cfg.Fields[key] = value ?? string.Empty;
+
+    private async Task Save()
     {
-        public string Name { get; } = name;
-        public bool IsEnabled { get; set; }
+        if (_settings is null) return;
+        _saving = true; _msg = string.Empty;
+        try
+        {
+            await PaymentSettings.SaveAsync(_settings);
+            _msg = "Zapisano konfigurację płatności.";
+        }
+        finally { _saving = false; }
     }
 }

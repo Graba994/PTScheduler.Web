@@ -1,0 +1,607 @@
+@page "/exercises"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Logging
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
+@using PTScheduler.Domain.Rules
+@attribute [Authorize(Roles = Roles.Admin + "," + Roles.Trainer + "," + Roles.Subordinate)]
+@inject IExerciseCatalogService Catalog
+@inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
+@inject ILoggerFactory LoggerFactory
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Katalog ćwiczeń" />
+
+<FeatureGate Flag="TrainingPlansEnabled" RequiredPlan="Pro" Title="Moduł treningowy">
+
+<div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <h4 class="page-title mb-0"><i class="bi bi-clipboard-pulse me-2" style="color:var(--c-primary)"></i>Katalog ćwiczeń</h4>
+    <button class="btn btn-sm btn-primary" @onclick="OpenCreate"><i class="bi bi-plus-lg me-1"></i>Dodaj ćwiczenie</button>
+</div>
+
+<!-- Zakładki zakresu -->
+<ul class="nav nav-pills gap-1 mb-3 flex-wrap">
+    @foreach (var (scope, label, icon) in _scopes)
+    {
+        <li class="nav-item">
+            <button class="nav-link py-1 px-3 @(_filter.Scope == scope ? "active" : "")"
+                    @onclick="() => SetScope(scope)">
+                <i class="bi @icon me-1"></i>@label
+            </button>
+        </li>
+    }
+</ul>
+
+<!-- Filtry -->
+<div class="row g-2 mb-3">
+    <div class="col-12 col-md-4">
+        <div class="input-group input-group-sm">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input class="form-control" placeholder="Szukaj (PL/EN)…" value="@_filter.Search"
+                   @oninput="OnSearchInput" />
+        </div>
+    </div>
+    <div class="col-6 col-md-2">
+        <select class="form-select form-select-sm" @onchange="OnMuscleChange">
+            <option value="">— partia —</option>
+            @foreach (var m in Enum.GetValues<MuscleGroup>())
+            {
+                <option value="@m" selected="@(_filter.Muscle == m)">@Muscles.Label(m)</option>
+            }
+        </select>
+    </div>
+    <div class="col-6 col-md-2">
+        <select class="form-select form-select-sm" @onchange="OnCategoryChange">
+            <option value="">— kategoria —</option>
+            @foreach (var c in Enum.GetValues<ExerciseCategory>())
+            {
+                <option value="@c" selected="@(_filter.Category == c)">@CategoryPl(c)</option>
+            }
+        </select>
+    </div>
+    <div class="col-6 col-md-2">
+        <select class="form-select form-select-sm" @onchange="OnLevelChange">
+            <option value="">— poziom —</option>
+            @foreach (var l in Enum.GetValues<ExerciseLevel>())
+            {
+                <option value="@l" selected="@(_filter.Level == l)">@LevelPl(l)</option>
+            }
+        </select>
+    </div>
+    <div class="col-6 col-md-2">
+        <select class="form-select form-select-sm" @onchange="OnEquipmentChange">
+            <option value="">— sprzęt —</option>
+            @foreach (var eq in _equipment)
+            {
+                <option value="@eq" selected="@(_filter.Equipment == eq)">@eq</option>
+            }
+        </select>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center text-muted py-5"><div class="spinner-border" role="status"></div></div>
+}
+else if (_items.Count == 0)
+{
+    <div class="alert alert-secondary"><i class="bi bi-inbox me-2"></i>Brak ćwiczeń dla wybranych filtrów.</div>
+}
+else
+{
+    <div class="text-muted small mb-2">@_items.Count ćwiczeń</div>
+    <div class="row g-3">
+        @foreach (var e in _items)
+        {
+            <div class="col-6 col-md-4 col-xl-3">
+                <div class="card h-100 exercise-card" @onclick="() => OpenDetail(e.Id)" style="cursor:pointer">
+                    <div class="exercise-thumb">
+                        @if (!string.IsNullOrEmpty(e.ThumbnailUrl))
+                        {
+                            <img src="@e.ThumbnailUrl" alt="@e.NamePl" loading="lazy" />
+                        }
+                        else
+                        {
+                            <div class="exercise-thumb-empty"><i class="bi bi-clipboard-pulse"></i></div>
+                        }
+                        <button class="btn-fav @(e.IsFavorite ? "on" : "")" title="Interesujące mnie"
+                                @onclick="() => ToggleFav(e)" @onclick:stopPropagation="true">
+                            <i class="bi @(e.IsFavorite ? "bi-star-fill" : "bi-star")"></i>
+                        </button>
+                        @if (e.HasVideo)
+                        {
+                            <span class="badge-video"><i class="bi bi-play-circle-fill"></i></span>
+                        }
+                        @if (e.IsMine)
+                        {
+                            <span class="badge bg-primary badge-mine">moje</span>
+                        }
+                    </div>
+                    <div class="card-body p-2">
+                        <div class="fw-semibold small text-truncate" title="@e.NamePl">@e.NamePl</div>
+                        @if (!string.IsNullOrWhiteSpace(e.NameEn) && e.NameEn != e.NamePl)
+                        {
+                            <div class="text-muted text-truncate" style="font-size:.7rem" title="@e.NameEn">@e.NameEn</div>
+                        }
+                        <div class="d-flex flex-wrap gap-1 mt-1">
+                            @foreach (var m in Muscles.Parse(e.PrimaryMuscles).Take(3))
+                            {
+                                <span class="badge bg-light text-dark border">@Muscles.Label(m)</span>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@* ---------- Szczegóły ---------- *@
+@if (_showDetail && _detail is not null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.5)" @onclick="CloseDetail">
+        <div class="modal-dialog modal-dialog-centered modal-lg" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">
+                        @_detail.NamePl
+                        @if (!string.IsNullOrWhiteSpace(_detail.NameEn) && _detail.NameEn != _detail.NamePl)
+                        {
+                            <small class="d-block text-muted fw-normal" style="font-size:.8rem">🇬🇧 @_detail.NameEn</small>
+                        }
+                    </h5>
+                    <div class="d-flex align-items-center gap-2">
+                        <button class="btn btn-sm @(_detail.IsFavorite ? "btn-warning" : "btn-outline-warning")"
+                                @onclick="() => ToggleFavDetail()">
+                            <i class="bi @(_detail.IsFavorite ? "bi-star-fill" : "bi-star")"></i>
+                        </button>
+                        <button type="button" class="btn-close" @onclick="CloseDetail"></button>
+                    </div>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-12 col-md-6">
+                            @if (_detail.ImageUrls.Count > 0)
+                            {
+                                <img src="@_detail.ImageUrls[0]" class="img-fluid rounded border mb-2" alt="@_detail.NamePl" />
+                                @if (_detail.ImageUrls.Count > 1)
+                                {
+                                    <img src="@_detail.ImageUrls[1]" class="img-fluid rounded border" alt="@_detail.NamePl" />
+                                }
+                            }
+                            else
+                            {
+                                <div class="exercise-thumb-empty rounded border" style="height:180px"><i class="bi bi-clipboard-pulse"></i></div>
+                            }
+
+                            @{ var yt = _detail.VideoType == ExerciseVideoType.YouTube ? YtEmbed(_detail.VideoRef) : null; }
+                            @if (yt is not null)
+                            {
+                                <div class="ratio ratio-16x9 mt-2">
+                                    <iframe src="@yt" title="Wideo" allowfullscreen loading="lazy"></iframe>
+                                </div>
+                            }
+                            else if (_detail.VideoType == ExerciseVideoType.Bunny && !string.IsNullOrWhiteSpace(_detail.VideoRef))
+                            {
+                                <div class="alert alert-light border small mt-2 mb-0"><i class="bi bi-play-circle me-1"></i>Wideo Bunny: <code>@_detail.VideoRef</code></div>
+                            }
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <div class="d-flex flex-wrap gap-1 mb-2">
+                                <span class="badge bg-secondary">@CategoryPl(_detail.Category)</span>
+                                <span class="badge bg-secondary">@LevelPl(_detail.Level)</span>
+                                @if (!string.IsNullOrWhiteSpace(_detail.Equipment))
+                                {
+                                    <span class="badge bg-secondary">@_detail.Equipment</span>
+                                }
+                            </div>
+
+                            <div class="small text-muted mb-1">Partie główne</div>
+                            <div class="d-flex flex-wrap gap-1 mb-2">
+                                @foreach (var m in Muscles.Parse(_detail.PrimaryMuscles))
+                                {
+                                    <span class="badge bg-primary">@Muscles.Label(m)</span>
+                                }
+                                @if (Muscles.Parse(_detail.PrimaryMuscles).Count == 0)
+                                {
+                                    <span class="text-muted small">—</span>
+                                }
+                            </div>
+
+                            @if (Muscles.Parse(_detail.SecondaryMuscles).Count > 0)
+                            {
+                                <div class="small text-muted mb-1">Partie wspomagające</div>
+                                <div class="d-flex flex-wrap gap-1 mb-2">
+                                    @foreach (var m in Muscles.Parse(_detail.SecondaryMuscles))
+                                    {
+                                        <span class="badge bg-light text-dark border">@Muscles.Label(m)</span>
+                                    }
+                                </div>
+                            }
+                        </div>
+
+                        <div class="col-12">
+                            @{
+                                var descPl = string.IsNullOrWhiteSpace(_detail.DescriptionPl) ? null : _detail.DescriptionPl;
+                                var descEn = string.IsNullOrWhiteSpace(_detail.DescriptionEn) ? null : _detail.DescriptionEn;
+                            }
+                            @if (descPl is not null)
+                            {
+                                var steps = descPl.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                                @if (steps.Length > 1)
+                                {
+                                    <ol class="small ps-3 mb-0 exercise-steps">
+                                        @foreach (var step in steps) { <li>@step</li> }
+                                    </ol>
+                                }
+                                else
+                                {
+                                    <div class="small" style="white-space:pre-line">@descPl</div>
+                                }
+                            }
+                            @if (descEn is not null)
+                            {
+                                <button class="btn btn-sm btn-link px-0 mt-1" @onclick="() => _showEn = !_showEn">
+                                    <span style="font-size:1rem">🇬🇧</span> @(_showEn ? "Ukryj opis EN" : "Pokaż opis EN")
+                                </button>
+                                @if (_showEn)
+                                {
+                                    <div class="small text-muted" style="white-space:pre-line">@descEn</div>
+                                }
+                            }
+                            @if (descPl is null && descEn is null)
+                            {
+                                <div class="text-muted small">Brak opisu.</div>
+                            }
+                        </div>
+                    </div>
+                </div>
+                @if (_detail.IsMine)
+                {
+                    <div class="modal-footer">
+                        <button class="btn btn-sm btn-outline-danger me-auto" @onclick="() => DeleteDetail()"><i class="bi bi-trash me-1"></i>Usuń</button>
+                        <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenEditFromDetail()"><i class="bi bi-pencil me-1"></i>Edytuj</button>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@* ---------- Dodaj / edytuj własne ---------- *@
+@if (_showEdit)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.5)">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@(_form.Id is null ? "Nowe ćwiczenie" : "Edytuj ćwiczenie")</h5>
+                    <button type="button" class="btn-close" @onclick="() => _showEdit = false"></button>
+                </div>
+                <div class="modal-body">
+                    @if (!string.IsNullOrEmpty(_editError))
+                    {
+                        <div class="alert alert-danger py-2 small">@_editError</div>
+                    }
+                    <div class="row g-3">
+                        <div class="col-12 col-md-6">
+                            <label class="form-label">Nazwa (PL) <span class="text-danger">*</span></label>
+                            <input class="form-control" @bind="_form.NamePl" maxlength="120" />
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label">Nazwa (EN)</label>
+                            <input class="form-control" @bind="_form.NameEn" maxlength="120" placeholder="opcjonalnie" />
+                        </div>
+                        <div class="col-6 col-md-4">
+                            <label class="form-label">Kategoria</label>
+                            <select class="form-select" @bind="_form.Category">
+                                @foreach (var c in Enum.GetValues<ExerciseCategory>())
+                                {
+                                    <option value="@c">@CategoryPl(c)</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-6 col-md-4">
+                            <label class="form-label">Poziom</label>
+                            <select class="form-select" @bind="_form.Level">
+                                @foreach (var l in Enum.GetValues<ExerciseLevel>())
+                                {
+                                    <option value="@l">@LevelPl(l)</option>
+                                }
+                            </select>
+                        </div>
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Sprzęt</label>
+                            <input class="form-control" @bind="_form.Equipment" maxlength="60" placeholder="np. sztanga" />
+                        </div>
+
+                        <div class="col-12 col-md-6">
+                            <label class="form-label">Partie główne</label>
+                            <div class="muscle-grid">
+                                @foreach (var m in Enum.GetValues<MuscleGroup>())
+                                {
+                                    <label class="muscle-chk">
+                                        <input type="checkbox" checked="@_form.PrimaryMuscles.Contains(m)"
+                                               @onchange="e => TogglePrimary(m, (bool)e.Value!)" />
+                                        <span>@Muscles.Label(m)</span>
+                                    </label>
+                                }
+                            </div>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label">Partie wspomagające</label>
+                            <div class="muscle-grid">
+                                @foreach (var m in Enum.GetValues<MuscleGroup>())
+                                {
+                                    <label class="muscle-chk">
+                                        <input type="checkbox" checked="@_form.SecondaryMuscles.Contains(m)"
+                                               @onchange="e => ToggleSecondary(m, (bool)e.Value!)" />
+                                        <span>@Muscles.Label(m)</span>
+                                    </label>
+                                }
+                            </div>
+                        </div>
+
+                        <div class="col-12">
+                            <label class="form-label">Opis (PL)</label>
+                            <textarea class="form-control" rows="3" @bind="_form.DescriptionPl"></textarea>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label">Opis (EN)</label>
+                            <textarea class="form-control" rows="2" @bind="_form.DescriptionEn"></textarea>
+                        </div>
+
+                        <div class="col-12">
+                            <label class="form-label">Zdjęcia (adresy URL, po jednym w wierszu)</label>
+                            <textarea class="form-control" rows="2" @bind="_imagesText" placeholder="https://…/1.jpg"></textarea>
+                        </div>
+                        <div class="col-6 col-md-4">
+                            <label class="form-label">Wideo</label>
+                            <select class="form-select" @bind="_form.VideoType">
+                                <option value="@ExerciseVideoType.None">brak</option>
+                                <option value="@ExerciseVideoType.YouTube">YouTube</option>
+                                <option value="@ExerciseVideoType.Bunny">Bunny</option>
+                            </select>
+                        </div>
+                        <div class="col-6 col-md-8">
+                            <label class="form-label">Link/ID wideo</label>
+                            <input class="form-control" @bind="_form.VideoRef" placeholder="link YouTube lub ID Bunny" />
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary" @onclick="() => _showEdit = false">Anuluj</button>
+                    <button class="btn btn-primary" @onclick="Save" disabled="@_saving">
+                        @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        Zapisz
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+<style>
+    .exercise-card { transition: box-shadow .15s, transform .15s; }
+    .exercise-card:hover { box-shadow: 0 .5rem 1rem rgba(0,0,0,.12); transform: translateY(-2px); }
+    .exercise-thumb { position: relative; aspect-ratio: 4/3; background: var(--bs-tertiary-bg, #f1f3f5); overflow: hidden; border-top-left-radius: var(--bs-card-inner-border-radius); border-top-right-radius: var(--bs-card-inner-border-radius); }
+    .exercise-thumb img { width: 100%; height: 100%; object-fit: cover; }
+    .exercise-thumb-empty { display:flex; align-items:center; justify-content:center; width:100%; height:100%; color:var(--bs-secondary-color); font-size:2rem; }
+    .btn-fav { position:absolute; top:.35rem; right:.35rem; border:none; background:rgba(255,255,255,.85); border-radius:50%; width:2rem; height:2rem; color:#6c757d; }
+    .btn-fav.on { color:#f5b301; }
+    .badge-video { position:absolute; bottom:.35rem; right:.4rem; color:#fff; font-size:1.25rem; text-shadow:0 0 4px rgba(0,0,0,.6); }
+    .badge-mine { position:absolute; top:.35rem; left:.35rem; font-size:.6rem; }
+    .muscle-grid { display:grid; grid-template-columns:1fr 1fr; gap:.15rem .5rem; max-height:180px; overflow:auto; border:1px solid var(--bs-border-color); border-radius:.375rem; padding:.4rem .5rem; }
+    .muscle-chk { display:flex; align-items:center; gap:.35rem; font-size:.8rem; margin:0; }
+    .muscle-chk input { margin:0; }
+</style>
+</FeatureGate>
+
+@code {
+    private string _userId = string.Empty;
+    private readonly ExerciseFilterDto _filter = new();
+    private List<ExerciseListItemDto> _items = [];
+    private List<string> _equipment = [];
+    private bool _loading = true;
+
+    private ExerciseDetailDto? _detail;
+    private bool _showDetail;
+    private bool _showEn;
+
+    private bool _showEdit;
+    private SaveExerciseDto _form = new();
+    private string _imagesText = string.Empty;
+    private string? _editError;
+    private bool _saving;
+
+    private readonly (ExerciseCatalogScope, string, string)[] _scopes =
+    [
+        (ExerciseCatalogScope.All, "Wszystkie", "bi-grid"),
+        (ExerciseCatalogScope.Public, "Baza", "bi-globe"),
+        (ExerciseCatalogScope.Mine, "Moje", "bi-person"),
+        (ExerciseCatalogScope.Favorites, "Ulubione", "bi-star"),
+        (ExerciseCatalogScope.Recent, "Ostatnie", "bi-clock-history")
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        _equipment = await Catalog.GetEquipmentOptionsAsync(_userId);
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try { _items = await Catalog.SearchAsync(_userId, _filter); }
+        catch (Exception ex)
+        {
+            LoggerFactory.CreateLogger("Exercises").LogError(ex, "Błąd ładowania katalogu ćwiczeń.");
+            _items = [];
+        }
+        _loading = false;
+    }
+
+    private async Task SetScope(ExerciseCatalogScope s) { _filter.Scope = s; await LoadAsync(); }
+    private async Task OnSearchInput(ChangeEventArgs e) { _filter.Search = e.Value?.ToString(); await LoadAsync(); }
+    private async Task OnMuscleChange(ChangeEventArgs e) { _filter.Muscle = Enum.TryParse<MuscleGroup>(e.Value?.ToString(), out var m) ? m : null; await LoadAsync(); }
+    private async Task OnCategoryChange(ChangeEventArgs e) { _filter.Category = Enum.TryParse<ExerciseCategory>(e.Value?.ToString(), out var c) ? c : null; await LoadAsync(); }
+    private async Task OnLevelChange(ChangeEventArgs e) { _filter.Level = Enum.TryParse<ExerciseLevel>(e.Value?.ToString(), out var l) ? l : null; await LoadAsync(); }
+    private async Task OnEquipmentChange(ChangeEventArgs e) { var v = e.Value?.ToString(); _filter.Equipment = string.IsNullOrEmpty(v) ? null : v; await LoadAsync(); }
+
+    private async Task OpenDetail(int id)
+    {
+        _showEn = false;
+        _detail = await Catalog.GetAsync(_userId, id);
+        _showDetail = _detail is not null;
+    }
+    private void CloseDetail() { _showDetail = false; _detail = null; }
+
+    private async Task ToggleFav(ExerciseListItemDto item)
+    {
+        try
+        {
+            item.IsFavorite = await Catalog.ToggleFavoriteAsync(_userId, item.Id);
+            if (_filter.Scope == ExerciseCatalogScope.Favorites && !item.IsFavorite)
+                await LoadAsync();
+        }
+        catch (Exception ex) { LoggerFactory.CreateLogger("Exercises").LogError(ex, "Błąd przełączania ulubionego."); }
+    }
+
+    private async Task ToggleFavDetail()
+    {
+        if (_detail is null) return;
+        _detail.IsFavorite = await Catalog.ToggleFavoriteAsync(_userId, _detail.Id);
+        var card = _items.FirstOrDefault(i => i.Id == _detail.Id);
+        if (card is not null) card.IsFavorite = _detail.IsFavorite;
+    }
+
+    private void OpenCreate()
+    {
+        _form = new SaveExerciseDto();
+        _imagesText = string.Empty;
+        _editError = null;
+        _showEdit = true;
+    }
+
+    private void OpenEditFromDetail()
+    {
+        if (_detail is null) return;
+        _form = new SaveExerciseDto
+        {
+            Id = _detail.Id,
+            NamePl = _detail.NamePl,
+            NameEn = _detail.NameEn,
+            DescriptionPl = _detail.DescriptionPl,
+            DescriptionEn = _detail.DescriptionEn,
+            PrimaryMuscles = Muscles.Parse(_detail.PrimaryMuscles).ToList(),
+            SecondaryMuscles = Muscles.Parse(_detail.SecondaryMuscles).ToList(),
+            Category = _detail.Category,
+            Level = _detail.Level,
+            Equipment = _detail.Equipment,
+            ImageUrls = _detail.ImageUrls.ToList(),
+            VideoType = _detail.VideoType,
+            VideoRef = _detail.VideoRef
+        };
+        _imagesText = string.Join("\n", _detail.ImageUrls);
+        _editError = null;
+        _showDetail = false;
+        _showEdit = true;
+    }
+
+    private void TogglePrimary(MuscleGroup m, bool on)
+    {
+        if (on) { if (!_form.PrimaryMuscles.Contains(m)) _form.PrimaryMuscles.Add(m); }
+        else _form.PrimaryMuscles.Remove(m);
+    }
+    private void ToggleSecondary(MuscleGroup m, bool on)
+    {
+        if (on) { if (!_form.SecondaryMuscles.Contains(m)) _form.SecondaryMuscles.Add(m); }
+        else _form.SecondaryMuscles.Remove(m);
+    }
+
+    private async Task Save()
+    {
+        _editError = null;
+        if (string.IsNullOrWhiteSpace(_form.NamePl)) { _editError = "Podaj nazwę (PL)."; return; }
+        _form.ImageUrls = _imagesText
+            .Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .ToList();
+        _saving = true;
+        try
+        {
+            if (_form.Id is null) await Catalog.CreateAsync(_userId, _form);
+            else await Catalog.UpdateAsync(_userId, _form);
+            _showEdit = false;
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            _editError = ex.Message;
+            LoggerFactory.CreateLogger("Exercises").LogError(ex, "Błąd zapisu ćwiczenia.");
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task DeleteDetail()
+    {
+        if (_detail is null) return;
+        if (!await JS.InvokeAsync<bool>("confirm", $"Usunąć ćwiczenie „{_detail.NamePl}\"?")) return;
+        try
+        {
+            await Catalog.DeleteAsync(_userId, _detail.Id);
+            CloseDetail();
+            await LoadAsync();
+        }
+        catch (Exception ex)
+        {
+            await JS.InvokeVoidAsync("alert", ex.Message);
+        }
+    }
+
+    private static string CategoryPl(ExerciseCategory c) => c switch
+    {
+        ExerciseCategory.Strength => "Siła",
+        ExerciseCategory.Stretching => "Rozciąganie",
+        ExerciseCategory.Plyometrics => "Pliometria",
+        ExerciseCategory.Strongman => "Strongman",
+        ExerciseCategory.Powerlifting => "Trójbój siłowy",
+        ExerciseCategory.Cardio => "Cardio",
+        ExerciseCategory.OlympicWeightlifting => "Podnoszenie olimpijskie",
+        _ => "Inne"
+    };
+
+    private static string LevelPl(ExerciseLevel l) => l switch
+    {
+        ExerciseLevel.Beginner => "Początkujący",
+        ExerciseLevel.Intermediate => "Średniozaawansowany",
+        ExerciseLevel.Expert => "Zaawansowany",
+        _ => l.ToString()
+    };
+
+    private static string? YtEmbed(string? r)
+    {
+        if (string.IsNullOrWhiteSpace(r)) return null;
+        r = r.Trim();
+        string? id = null;
+        if (r.Contains("youtube.com", StringComparison.OrdinalIgnoreCase))
+        {
+            var i = r.IndexOf("v=", StringComparison.OrdinalIgnoreCase);
+            if (i >= 0) { id = r[(i + 2)..]; var amp = id.IndexOf('&'); if (amp >= 0) id = id[..amp]; }
+        }
+        else if (r.Contains("youtu.be/", StringComparison.OrdinalIgnoreCase))
+        {
+            id = r[(r.IndexOf("youtu.be/", StringComparison.OrdinalIgnoreCase) + 9)..];
+            var q = id.IndexOf('?'); if (q >= 0) id = id[..q];
+        }
+        else if (!r.Contains('/') && !r.Contains(' '))
+        {
+            id = r; // samo ID
+        }
+        return string.IsNullOrWhiteSpace(id) ? null : $"https://www.youtube.com/embed/{id}";
+    }
+}

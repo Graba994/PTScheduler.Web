@@ -1,0 +1,36 @@
+@using PTScheduler.Application.Interfaces
+@* Opcjonalne dane do faktury na firmę przy zakupie online (NIP trafia na fakturę i do KSeF). *@
+
+<div class="mb-3">
+    <div class="form-check">
+        <input class="form-check-input" type="checkbox" id="company-invoice" checked="@Wants"
+               @onchange="e => WantsChanged.InvokeAsync((bool)(e.Value ?? false))" />
+        <label class="form-check-label small" for="company-invoice">Chcę fakturę na firmę (NIP)</label>
+    </div>
+    @if (Wants)
+    {
+        <div class="row g-2 mt-1">
+            <div class="col-12 col-sm-5">
+                <input class="form-control form-control-sm font-monospace" placeholder="NIP" @bind="Buyer.Nip" />
+            </div>
+            <div class="col-12 col-sm-7">
+                <input class="form-control form-control-sm" placeholder="Nazwa firmy" @bind="Buyer.Name" />
+            </div>
+            <div class="col-12">
+                <input class="form-control form-control-sm" placeholder="Adres (ulica i numer)" @bind="Buyer.Address" />
+            </div>
+            <div class="col-5">
+                <input class="form-control form-control-sm" placeholder="Kod pocztowy" @bind="Buyer.PostalCode" />
+            </div>
+            <div class="col-7">
+                <input class="form-control form-control-sm" placeholder="Miasto" @bind="Buyer.City" />
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [Parameter] public bool Wants { get; set; }
+    [Parameter] public EventCallback<bool> WantsChanged { get; set; }
+    [Parameter, EditorRequired] public InvoiceBuyerDto Buyer { get; set; } = new();
+}

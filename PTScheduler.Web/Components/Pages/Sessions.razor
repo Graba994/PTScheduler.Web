@@ -1,11 +1,14 @@
 ﻿@page "/sessions"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using PTScheduler.Application.Scheduling
 @inject ISessionService SessionService
 @inject IClientService ClientService
 @inject IAuditLogService AuditLogService
 @inject ITrainerAvailabilityService AvailabilityService
 @inject ISessionSeriesService SeriesService
 @inject ITrainerConfigService TrainerConfigService
+@inject IAppClock Clock
+@inject EntitlementService Entitlements
 @inject AuthenticationStateProvider AuthState
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
@@ -13,7 +16,7 @@
 @using PTScheduler.Domain.Constants
 @using PTScheduler.Domain.Enums
 @using System.Globalization
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Wizyty" />
 
@@ -272,40 +275,47 @@ else
 
                         @if (_bookingMode == "single")
                         {
-                            <!-- Date picker + slot list -->
                             <div class="mb-3">
-                                <label class="form-label small fw-semibold mb-1">Data</label>
-                                <input type="date" class="form-control form-control-sm"
-                                       @bind="_bookingDate" @bind:after="LoadSlotsAsync"
-                                       min="@DateTime.Today.ToString("yyyy-MM-dd")" />
+                                <label class="form-label small fw-semibold mb-1">Termin</label>
+                                <div class="slot-day-nav">
+                                    <button class="slot-nav-btn" @onclick="BookingSlotPrevDay"
+                                            disabled="@(_bookingDate <= DateOnly.FromDateTime(StudioClock.Today))">
+                                        <i class="bi bi-chevron-left"></i>
+                                    </button>
+                                    <div class="slot-nav-center">
+                                        <div class="slot-nav-weekday">@_bookingDate.ToString("dddd", new System.Globalization.CultureInfo("pl-PL"))</div>
+                                        <div class="slot-nav-full">@_bookingDate.ToString("d MMMM yyyy", new System.Globalization.CultureInfo("pl-PL"))</div>
+                                    </div>
+                                    <button class="slot-nav-btn" @onclick="BookingSlotNextDay">
+                                        <i class="bi bi-chevron-right"></i>
+                                    </button>
+                                </div>
                             </div>
 
                             @if (_loadingSlots)
                             {
                                 <div class="text-center py-2"><span class="spinner-border spinner-border-sm text-primary"></span></div>
                             }
-                            else if (_availableSlots.Count > 0)
+                            else if (_availableSlots.Any(s => s.IsAvailable))
                             {
-                                <div class="mb-3">
-                                    <label class="form-label small fw-semibold mb-1">Dostępne terminy</label>
-                                    <div class="d-flex flex-wrap gap-2">
-                                        @foreach (var slot in _availableSlots.Where(s => s.IsAvailable))
-                                        {
-                                            <button class="btn btn-sm @(IsSelectedSlot(slot) ? "btn-primary" : "btn-outline-primary")"
-                                                    @onclick="() => SelectSlot(slot)">
-                                                @slot.Start.ToString("HH:mm")
-                                            </button>
-                                        }
-                                    </div>
-                                    @if (!_availableSlots.Any(s => s.IsAvailable))
+                                <div class="slot-tile-grid mb-3">
+                                    @foreach (var slot in _availableSlots.Where(s => s.IsAvailable))
                                     {
-                                        <div class="text-muted small mt-1">Brak wolnych terminów w tym dniu.</div>
+                                        var sel = IsSelectedSlot(slot);
+                                        <button type="button" class="slot-tile @(sel ? "slot-tile-active" : "")"
+                                                @onclick="() => SelectSlot(slot)">
+                                            <div class="slot-tile-time">@slot.Start.ToString("HH:mm")</div>
+                                            <div class="slot-tile-end">— @slot.End.ToString("HH:mm")</div>
+                                        </button>
                                     }
                                 </div>
                             }
                             else if (_bookingDate != default && !_loadingSlots)
                             {
-                                <div class="text-muted small mb-3">Trener nie ma dostępności w tym dniu.</div>
+                                <div class="slot-empty">
+                                    <i class="bi bi-calendar-x"></i>
+                                    Brak wolnych terminów w tym dniu
+                                </div>
                             }
 
                             <div class="mb-4">
@@ -343,12 +353,12 @@ else
                             <div class="row g-2 mb-3">
                                 <div class="col-6">
                                     <label class="form-label small fw-semibold mb-1">Godzina</label>
-                                    <input type="time" class="form-control form-control-sm" @bind="_seriesTime" />
+                                    <TimePicker @bind-Value="_seriesTime" Small="true" />
                                 </div>
                                 <div class="col-6">
                                     <label class="form-label small fw-semibold mb-1">Data startu</label>
                                     <input type="date" class="form-control form-control-sm" @bind="_seriesStartDate"
-                                           min="@DateTime.Today.ToString("yyyy-MM-dd")" />
+                                           min="@StudioClock.Today.ToString("yyyy-MM-dd")" />
                                 </div>
                                 <div class="col-6">
                                     <label class="form-label small fw-semibold mb-1">Data końca (opcjonalna)</label>
@@ -429,6 +439,16 @@ else
                             <i class="bi bi-person"></i>
                             <span>@_selectedSession.TrainerName</span>
                         </div>
+                        @if (!string.IsNullOrWhiteSpace(_selectedSession.MeetingUrl))
+                        {
+                            <div class="session-detail-row">
+                                <i class="bi bi-camera-video"></i>
+                                <a href="@_selectedSession.MeetingUrl" target="_blank" rel="noopener"
+                                   class="btn btn-sm btn-outline-success">
+                                    <i class="bi bi-google me-1"></i>Dołącz do Google Meet
+                                </a>
+                            </div>
+                        }
                         <div class="session-detail-row">
                             <i class="bi bi-circle-fill" style="font-size:.45rem;margin-top:5px"></i>
                             <span class="badge @StatusBadge(_selectedSession.Status)">@StatusLabel(_selectedSession.Status)</span>
@@ -505,7 +525,7 @@ else
                                     <div class="small fw-semibold mb-2">Oznaczyć jako nieobecność?</div>
                                     <div class="d-flex gap-2 justify-content-center">
                                         <button class="btn btn-warning btn-sm"
-                                                @onclick='() => { _confirmNoShow = false; ChangeStatus(SessionStatus.NoShow); }' disabled="@_busy">
+                                                @onclick='async () => { _confirmNoShow = false; await ChangeStatus(SessionStatus.NoShow); }' disabled="@_busy">
                                             Tak
                                         </button>
                                         <button class="btn btn-outline-secondary btn-sm"
@@ -550,6 +570,12 @@ else
                                     <label class="form-label small mb-1">Powód anulowania (opcjonalny)</label>
                                     <input class="form-control form-control-sm mb-2"
                                            @bind="_cancelReason" placeholder="..." />
+                                    <div class="form-check small mb-2">
+                                        <input class="form-check-input" type="checkbox" id="chargeLate" @bind="_chargeLate" />
+                                        <label class="form-check-label" for="chargeLate">
+                                            Późne odwołanie przez klienta — sesja przepada (nie wraca do pakietu)
+                                        </label>
+                                    </div>
                                     <div class="d-flex gap-2">
                                         <button class="btn btn-danger btn-sm flex-fill"
                                                 @onclick="ConfirmCancel" disabled="@_busy">
@@ -566,7 +592,7 @@ else
 
                     <!-- Client: cancel own session within trainer-configured window -->
                     @if (_isClientRole && _selectedSession.Status == SessionStatus.Scheduled
-                         && (_cancellationWindowHours == 0 || _selectedSession.StartTime > DateTime.Now.AddHours(_cancellationWindowHours)))
+                         && CancellationRules.ForClient(_trainerCfg, _selectedSession.StartTime, Clock.LocalNow).Allowed)
                     {
                         <div class="mt-3">
                             @if (!_showCancelForm)
@@ -640,9 +666,9 @@ else
 @code {
     private static readonly CultureInfo _pl = new("pl-PL");
 
-    private void HandleTileKeyDown(KeyboardEventArgs e, int sessionId)
+    private async Task HandleTileKeyDown(KeyboardEventArgs e, int sessionId)
     {
-        if (e.Key is "Enter" or " ") OpenPanel(sessionId);
+        if (e.Key is "Enter" or " ") await OpenPanel(sessionId);
     }
 
     private List<SessionDto> _upcoming = [];
@@ -662,14 +688,15 @@ else
     // Detail panel state
     private bool _panelOpen;
     private bool _busy;
-    private int _cancellationWindowHours = 24;
+    private TrainerConfigDto _trainerCfg = new();
+    private bool _chargeLate;
     private string _panelError = string.Empty;
     private SessionDto? _selectedSession;
     private bool _showCancelForm;
     private bool _confirmNoShow;
     private string _cancelReason = string.Empty;
     private bool _showRescheduleForm;
-    private DateTime _rescheduleDateTime = DateTime.Now;
+    private DateTime _rescheduleDateTime = StudioClock.Now;
     private bool _showRestoreConfirm;
     private bool _showCompleteForm;
     private string _completionNote = string.Empty;
@@ -687,14 +714,14 @@ else
 
     // Slot picker
     private string _bookingMode = "single";
-    private DateOnly _bookingDate = DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+    private DateOnly _bookingDate = DateOnly.FromDateTime(StudioClock.Today.AddDays(1));
     private List<AvailableSlotDto> _availableSlots = [];
     private bool _loadingSlots;
 
     // Series booking
     private HashSet<DayOfWeek> _seriesDays = [];
     private TimeOnly _seriesTime = new(8, 0);
-    private DateOnly _seriesStartDate = DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+    private DateOnly _seriesStartDate = DateOnly.FromDateTime(StudioClock.Today.AddDays(1));
     private DateOnly? _seriesEndDate;
     private SeriesPreviewDto? _seriesPreview;
 
@@ -768,11 +795,8 @@ else
         if (_selectedSession is not null)
         {
             _rescheduleDateTime = _selectedSession.StartTime;
-            if (_isClientRole)
-            {
-                var cfg = await TrainerConfigService.GetAsync(_selectedSession.TrainerUserId);
-                _cancellationWindowHours = cfg.CancellationWindowHours;
-            }
+            var cfg = await TrainerConfigService.GetAsync(_selectedSession.TrainerUserId);
+            _trainerCfg = cfg;
         }
         _panelOpen = true;
     }
@@ -817,7 +841,7 @@ else
             : (_sessionTypes.FirstOrDefault()?.Id ?? 0);
 
         _bookingMode     = "single";
-        _bookingDate     = DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+        _bookingDate     = DateOnly.FromDateTime(StudioClock.Today.AddDays(1));
         _bookingDateTime = default;
         _bookingNotes    = string.Empty;
         _bookingError    = string.Empty;
@@ -845,6 +869,20 @@ else
 
     private async Task OnSessionTypeChangedAsync()
     {
+        _bookingDateTime = default;
+        await LoadSlotsAsync();
+    }
+
+    private async Task BookingSlotPrevDay()
+    {
+        _bookingDate = _bookingDate.AddDays(-1);
+        _bookingDateTime = default;
+        await LoadSlotsAsync();
+    }
+
+    private async Task BookingSlotNextDay()
+    {
+        _bookingDate = _bookingDate.AddDays(1);
         _bookingDateTime = default;
         await LoadSlotsAsync();
     }
@@ -891,6 +929,14 @@ else
             _bookingError = "Wybierz termin.";
             return;
         }
+        // Plan limit — reject before hitting the DB if the tenant is at the monthly session cap
+        var (sessionsOk, sessionsCur, sessionsMax) = await Entitlements.CheckMonthlySessionsAsync();
+        if (!sessionsOk)
+        {
+            _bookingError = $"Osiągnięto limit sesji w tym miesiącu ({sessionsCur}/{sessionsMax}) w planie {Entitlements.Current.Name}. Zwiększ plan aby dodać więcej.";
+            return;
+        }
+
         _bookingBusy = true; _bookingError = string.Empty;
         try
         {
@@ -957,7 +1003,14 @@ else
         EndDate        = _seriesEndDate,
     };
 
-    private void ShowCancelForm()    { _showCancelForm = true; _showRescheduleForm = false; }
+    private void ShowCancelForm()
+    {
+        _showCancelForm = true; _showRescheduleForm = false;
+        // Podpowiedź dla trenera: w oknie późnego odwołania przy polityce „sesja przepada”.
+        _chargeLate = !_isClientRole && _selectedSession is not null
+            && _trainerCfg.LateCancellationPolicy == LateCancellationPolicy.ChargeSession
+            && CancellationRules.ForClient(_trainerCfg, _selectedSession.StartTime, Clock.LocalNow).IsLate;
+    }
     private void ShowRescheduleForm() { _showRescheduleForm = true; _showCancelForm = false; }
     private void ShowRestoreConfirm() => _showRestoreConfirm = true;
 
@@ -1013,7 +1066,7 @@ else
             }
             else
             {
-                await SessionService.UpdateStatusAsync(_selectedSession.Id, SessionStatus.Cancelled, _cancelReason);
+                await SessionService.UpdateStatusAsync(_selectedSession.Id, SessionStatus.Cancelled, _cancelReason, chargeSession: _chargeLate);
                 await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionCancelled", "Session",
                     _selectedSession.Id.ToString(), baseDetails + suffix);
             }

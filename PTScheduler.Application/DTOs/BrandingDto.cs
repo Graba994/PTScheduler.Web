@@ -14,6 +14,14 @@ public class AppBrandingDto
     public string? PwaBannerBody { get; set; }
     public string? PwaBannerButton { get; set; }
     public string? PwaIconPath { get; set; }
+
+    public string? LoginTitle { get; set; }
+    public string? LoginSubtitle { get; set; }
+    public string? LoginBackgroundPath { get; set; }
+
+    public bool SetupCompleted { get; set; }
+    public string? SetupMode { get; set; }
+    public DateTime? SetupCompletedAt { get; set; }
 }
 
 public class SaveBrandingDto
@@ -27,4 +35,7 @@ public class SaveBrandingDto
     public string? PwaBannerTitle { get; set; }
     public string? PwaBannerBody { get; set; }
     public string? PwaBannerButton { get; set; }
+
+    public string? LoginTitle { get; set; }
+    public string? LoginSubtitle { get; set; }
 }

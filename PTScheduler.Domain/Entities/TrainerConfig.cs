@@ -1,3 +1,5 @@
+using PTScheduler.Domain.Enums;
+
 namespace PTScheduler.Domain.Entities;
 
 /// <summary>
@@ -18,4 +20,16 @@ public class TrainerConfig
     // If true: every client of this trainer can see every other client in contacts
     public bool AllowClientsDiscoverPeers { get; set; } = false;
     public int CancellationWindowHours { get; set; } = 24;
+
+    /// <summary>Zasada dla odwołań klienta później niż CancellationWindowHours.</summary>
+    public LateCancellationPolicy LateCancellationPolicy { get; set; } = LateCancellationPolicy.Block;
+
+    /// <summary>Nieobecność bez odwołania (No-show) pobiera sesję z pakietu.</summary>
+    public bool NoShowChargesSession { get; set; } = true;
+
+    /// <summary>
+    /// Sekretny token adresu subskrypcji kalendarza (ICS) z wizytami trenera.
+    /// Null = subskrypcja jeszcze niewłączona. Zmiana tokenu unieważnia stary link.
+    /// </summary>
+    public string? CalendarFeedToken { get; set; }
 }

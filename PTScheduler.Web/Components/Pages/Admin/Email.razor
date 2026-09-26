@@ -5,7 +5,7 @@
 @inject AuthenticationStateProvider AuthState
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Konfiguracja emaili" />
 
@@ -22,6 +22,53 @@
             @if (_loading)
             {
                 <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+            }
+            else if (_platformMode)
+            {
+                <!-- Instancja zarządzana: wysyłka przez serwer platformy, bez konfiguracji SMTP -->
+                <div class="card mb-3">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center gap-2 mb-2">
+                            <i class="bi bi-check-circle-fill text-success fs-5"></i>
+                            <strong>E-maile wysyłają się automatycznie</strong>
+                        </div>
+                        <p class="small text-muted mb-3">
+                            Przypomnienia, potwierdzenia i faktury wychodzą z serwera platformy — nie musisz niczego konfigurować.
+                            Klienci widzą nazwę Twojego studia jako nadawcę, a odpowiedzi trafiają na Twój adres.
+                            @if (_quota is { } q)
+                            {
+                                <span class="d-block mt-1">Dziś wysłano <strong>@q.SentToday</strong> z @q.Limit e-maili (limit dzienny).</span>
+                            }
+                        </p>
+                        <div class="row g-3">
+                            <div class="col-md-6">
+                                <label class="form-label small fw-semibold">Nazwa nadawcy</label>
+                                <input class="form-control" @bind="_dto.FromName" placeholder="np. Studio Jana Kowalskiego" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small fw-semibold">Odpowiedzi klientów wysyłaj na</label>
+                                <input type="email" class="form-control" @bind="_dto.ReplyTo" placeholder="twoj@email.pl" />
+                            </div>
+                            <div class="col-md-6">
+                                <label class="form-label small fw-semibold">Wyślij testowy e-mail na</label>
+                                <input type="email" class="form-control" @bind="_testEmail" />
+                            </div>
+                            <div class="col-md-6 d-flex align-items-end gap-2">
+                                <button class="btn btn-primary" @onclick="SavePlatformAsync" disabled="@(_saving || _testing)">
+                                    <i class="bi bi-floppy-fill me-1"></i>Zapisz
+                                </button>
+                                <button class="btn btn-outline-secondary" @onclick="TestEmailAsync" disabled="@(_saving || _testing || string.IsNullOrWhiteSpace(_testEmail))">
+                                    @if (_testing) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                    Wyślij test
+                                </button>
+                            </div>
+                        </div>
+                        @if (!string.IsNullOrEmpty(_message))
+                        {
+                            <div class="alert @(_messageOk ? "alert-success" : "alert-danger") py-2 small mt-3 mb-0">@_message</div>
+                        }
+                    </div>
+                </div>
             }
             else
             {
@@ -47,6 +94,36 @@
                         </span>
                     </div>
                 </div>
+
+                <!-- Google Workspace help -->
+                <details class="card mb-4">
+                    <summary class="card-header fw-semibold" style="cursor:pointer;list-style:none">
+                        <i class="bi bi-google me-2"></i>Instrukcja: Gmail / Google Workspace (SMTP)
+                    </summary>
+                    <div class="card-body small">
+                        <p class="text-muted">Aby aplikacja mogła wysyłać e-maile, skonfiguruj alias nadawcy i wygeneruj hasło do aplikacji.</p>
+                        <p class="fw-semibold mb-1">Krok 1 — alias nadawcy (uprawnienia administratora)</p>
+                        <ol class="mb-3">
+                            <li>Zaloguj się na <strong>admin.google.com</strong>.</li>
+                            <li>Przejdź do <strong>Katalog → Użytkownicy</strong> i wybierz swoje konto.</li>
+                            <li>Dodaj alias e-mail <strong>noreply</strong> (np. <code>noreply@twojadomena.pl</code>) i zapisz.</li>
+                        </ol>
+                        <p class="fw-semibold mb-1">Krok 2 — hasło do aplikacji</p>
+                        <ol class="mb-3">
+                            <li>Zaloguj się na <strong>myaccount.google.com</strong>.</li>
+                            <li>W <strong>Bezpieczeństwo</strong> włącz <strong>Weryfikację dwuetapową</strong>.</li>
+                            <li>Wyszukaj <strong>„Hasła do aplikacji"</strong> i wygeneruj nowe hasło (16 znaków).</li>
+                        </ol>
+                        <p class="fw-semibold mb-1">Krok 3 — ustawienia w tej aplikacji</p>
+                        <ul class="mb-0">
+                            <li>Serwer SMTP: <code>smtp.gmail.com</code></li>
+                            <li>Port: <code>587</code>, szyfrowanie: <code>TLS/STARTTLS</code></li>
+                            <li>Login: Twój pełny adres Google (np. <code>ty@twojadomena.pl</code>)</li>
+                            <li>Hasło: <strong>wygenerowane hasło do aplikacji</strong> (nie zwykłe hasło do konta)</li>
+                            <li>Adres nadawcy: <code>noreply@twojadomena.pl</code></li>
+                        </ul>
+                    </div>
+                </details>
 
                 <!-- Provider selection -->
                 <div class="card mb-4">
@@ -304,9 +381,20 @@
         )
     };
 
+    // Instancja zarządzana przez Portal bez własnego SMTP — wysyłka przez serwer platformy.
+    private bool _platformMode;
+    private (int Limit, int SentToday)? _quota;
+
     protected override async Task OnInitializedAsync()
     {
         _dto = await SettingsService.GetAsync();
+        _platformMode = await EmailService.GetDeliveryModeAsync() == "platform";
+        if (_platformMode) _quota = await EmailService.GetPlatformQuotaAsync();
+        if (_platformMode && string.IsNullOrWhiteSpace(_dto.ReplyTo))
+        {
+            var user = (await AuthState.GetAuthenticationStateAsync()).User;
+            _dto.ReplyTo = user.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? user.Identity?.Name;
+        }
         var auth = await AuthState.GetAuthenticationStateAsync();
         _testEmail = auth.User.Identity?.Name ?? "";
         _loading = false;
@@ -340,6 +428,20 @@
         finally { _saving = false; }
     }
 
+    private async Task SavePlatformAsync()
+    {
+        _saving = true; _message = "";
+        try
+        {
+            // Własny SMTP pozostaje wyłączony — zapisujemy tylko nadawcę i adres odpowiedzi.
+            _dto.IsEnabled = false;
+            await SettingsService.SaveAsync(_dto);
+            _messageOk = true; _message = "Zapisano.";
+        }
+        catch (Exception ex) { _messageOk = false; _message = $"Błąd zapisu: {ex.Message}"; }
+        finally { _saving = false; }
+    }
+
     private async Task TestEmailAsync()
     {
         if (string.IsNullOrWhiteSpace(_testEmail)) return;
@@ -347,6 +449,7 @@
         _message = "";
         try
         {
+            if (_platformMode) _dto.IsEnabled = false;
             await SettingsService.SaveAsync(_dto);
             var (success, error) = await EmailService.TestAsync(_testEmail);
             _messageOk = success;

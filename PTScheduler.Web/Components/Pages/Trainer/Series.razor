@@ -6,14 +6,26 @@
 @inject IAuditLogService AuditLogService
 @inject AuthenticationStateProvider AuthState
 @inject ILogger<Series> Logger
+@inject EntitlementService Entitlements
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
 @using PTScheduler.Domain.Enums
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Serie wizyt" />
+
+@if (!Entitlements.IsAllowed("RecurringSessions"))
+{
+    <FeatureGate Flag="RecurringSessions" RequiredPlan="Pro"
+                 Title="Serie wizyt cyklicznych są niedostępne w Twoim planie">
+        <Description>
+            Automatycznie twórz cykliczne serie wizyt dla klientów — cotygodniowe treningi, powtarzające się sesje i wiele więcej.
+        </Description>
+    </FeatureGate>
+    return;
+}
 
 <div class="cal-shell">
     <div class="cal-topbar">
@@ -336,7 +348,7 @@
                         <div class="row g-2 mb-3">
                             <div class="col-6">
                                 <label class="form-label small fw-semibold mb-1">Godzina startu</label>
-                                <input type="time" class="form-control form-control-sm" @bind="_newTime" />
+                                <TimePicker @bind-Value="_newTime" Small="true" />
                                 <div class="form-text" style="font-size:.7rem">Godzina każdej sesji w serii</div>
                             </div>
                         </div>
@@ -345,7 +357,7 @@
                             <div class="col-6">
                                 <label class="form-label small fw-semibold mb-1">Data pierwszej sesji</label>
                                 <input type="date" class="form-control form-control-sm" @bind="_newStartDate"
-                                       min="@DateTime.Today.ToString("yyyy-MM-dd")" />
+                                       min="@StudioClock.Today.ToString("yyyy-MM-dd")" />
                             </div>
                             <div class="col-6">
                                 <label class="form-label small fw-semibold mb-1">
@@ -508,7 +520,7 @@
     private int _newSessionTypeId;
     private HashSet<DayOfWeek> _newDays = [];
     private TimeOnly _newTime = new(8, 0);
-    private DateOnly _newStartDate = DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+    private DateOnly _newStartDate = DateOnly.FromDateTime(StudioClock.Today.AddDays(1));
     private DateOnly? _newEndDate;
     private string? _newNotes;
     private SeriesPreviewDto? _seriesPreview;
@@ -570,7 +582,7 @@
         _newSessionTypeId = _sessionTypes.FirstOrDefault()?.Id ?? 0;
         _newDays = [];
         _newTime = new(8, 0);
-        _newStartDate = DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+        _newStartDate = DateOnly.FromDateTime(StudioClock.Today.AddDays(1));
         _newEndDate = null;
         _newNotes = null;
         _seriesPreview = null;

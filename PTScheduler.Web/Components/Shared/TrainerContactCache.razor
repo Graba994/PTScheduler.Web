@@ -1,7 +1,9 @@
+@using Microsoft.EntityFrameworkCore
 @* Renders nothing — caches role + contact info in localStorage for the offline page *@
-@rendermode InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 @inject IClientService ClientService
 @inject UserManager<ApplicationUser> UserManager
+@inject Microsoft.EntityFrameworkCore.IDbContextFactory<ApplicationDbContext> DbFactory
 @inject IJSRuntime JS
 @inject AuthenticationStateProvider AuthState
 @using Microsoft.AspNetCore.Identity
@@ -33,7 +35,8 @@
                 var client = await ClientService.GetClientByUserIdAsync(userId);
                 if (client?.TrainerUserId is not null)
                 {
-                    var trainer = await UserManager.FindByIdAsync(client.TrainerUserId);
+                    await using var db = await DbFactory.CreateDbContextAsync();
+                    var trainer = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == client.TrainerUserId);
                     if (trainer is not null)
                     {
                         var name = $"{trainer.FirstName} {trainer.LastName}".Trim();

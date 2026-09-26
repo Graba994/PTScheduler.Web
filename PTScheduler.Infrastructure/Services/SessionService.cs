@@ -1,6 +1,8 @@
+using PTScheduler.Application.Scheduling;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using PTScheduler.Application.DTOs;
+using PTScheduler.Application.Exceptions;
 using PTScheduler.Application.Interfaces;
 using PTScheduler.Domain.Constants;
 using PTScheduler.Domain.Entities;
@@ -14,12 +16,18 @@ public class SessionService(
     IEmailService emailService,
     IEmailTemplateService emailTemplateService,
     INotificationPreferencesService notificationPrefs,
+    IGoogleMeetService googleMeetService,
+    ITrainerAvailabilityService availability,
+    IAppClock clock,
     ILogger<SessionService> logger) : ISessionService
 {
     public async Task<List<SessionDto>> GetSessionsAsync(DateTime from, DateTime to, string? trainerUserId = null, int? clientId = null)
     {
-        from = DateTime.SpecifyKind(from, DateTimeKind.Utc);
-        to   = DateTime.SpecifyKind(to,   DateTimeKind.Utc);
+        // StartTime jest zegarem ściennym (kolumna timestamp without time zone),
+        // więc granice zakresu też muszą nim być. Normalizacja Kind, nie konwersja —
+        // wartość godziny pozostaje nietknięta.
+        from = DateTime.SpecifyKind(from, DateTimeKind.Unspecified);
+        to   = DateTime.SpecifyKind(to,   DateTimeKind.Unspecified);
         await using var db = dbFactory.CreateDbContext();
         var query = db.Sessions
             .AsNoTracking()
@@ -53,7 +61,9 @@ public class SessionService(
     public async Task<List<SessionDto>> GetPastSessionsAsync(string? trainerUserId = null, int? clientId = null, int count = 50)
     {
         await using var db = dbFactory.CreateDbContext();
-        var now = DateTime.UtcNow;
+        // Zegar ścienny — StartTime nim jest. UtcNow dawałoby granicę przesuniętą
+        // o offset strefy, więc sesja sprzed godziny mogła jeszcze uchodzić za przyszłą.
+        var now = clock.LocalNow;
         var query = db.Sessions
             .AsNoTracking()
             .Include(s => s.Client)
@@ -98,18 +108,34 @@ public class SessionService(
         return MapToDto(session, new Dictionary<string, string> { [session.TrainerUserId] = trainerName });
     }
 
-    public async Task<SessionDto> CreateSessionAsync(CreateSessionDto dto, bool allowAwaitingPackage = true)
+    public async Task<SessionDto> CreateSessionAsync(CreateSessionDto dto, bool allowAwaitingPackage = true, bool allowOverlap = false)
     {
-        dto.StartTime = DateTime.SpecifyKind(dto.StartTime, DateTimeKind.Utc);
+        // Godzina przychodzi z <input type="datetime-local"> jako zegar ścienny.
+        // Zapisujemy ją bez konwersji — 14:00 wpisane przez trenera to 14:00
+        // w studiu, niezależnie od strefy kontenera.
+        dto.StartTime = DateTime.SpecifyKind(dto.StartTime, DateTimeKind.Unspecified);
         await using var db = dbFactory.CreateDbContext();
         var sessionType = await db.SessionTypes.FindAsync(dto.SessionTypeId)
             ?? throw new InvalidOperationException("Typ sesji nie istnieje.");
 
+        // Kontrola kolizji terminów. Bez tego trener mógł po cichu umówić dwóch
+        // klientów na tę samą godzinę. allowOverlap pozwala na świadome nałożenie.
+        if (!allowOverlap)
+        {
+            var conflict = await availability.FindConflictAsync(
+                dto.TrainerUserId, dto.StartTime, sessionType.DurationMinutes);
+            if (conflict is not null) throw new SlotConflictException(conflict);
+        }
+
+        // Pakiet musi być jeszcze ważny w dniu wizyty — wcześniej rezerwacja na
+        // termin po dacie ważności pobierała sesję z pakietu, który do tego czasu wygaśnie.
+        var sessionStartUtc = clock.ToUtc(dto.StartTime);
         var package = await db.SessionPackages
             .Where(p => p.ClientId == dto.ClientId
                      && p.SessionTypeId == dto.SessionTypeId
                      && p.Status == PackageStatus.Active
-                     && p.UsedSessions < p.TotalSessions)
+                     && p.UsedSessions < p.TotalSessions
+                     && (p.ExpiresAt == null || p.ExpiresAt >= sessionStartUtc))
             .OrderBy(p => p.ExpiresAt ?? DateTime.MaxValue)
             .FirstOrDefaultAsync();
 
@@ -138,12 +164,40 @@ public class SessionService(
         }
 
         await db.SaveChangesAsync();
+
+        try
+        {
+            if (await googleMeetService.CanCreateMeetingsAsync(session.TrainerUserId))
+            {
+                var client = await db.Clients.FindAsync(session.ClientId);
+                var clientUser = client is not null
+                    ? await db.Users.FirstOrDefaultAsync(u => u.Id == client.ApplicationUserId)
+                    : null;
+                var result = await googleMeetService.CreateMeetingAsync(
+                    $"{sessionType.Name} — {client?.FirstName} {client?.LastName}".Trim(),
+                    $"Sesja treningowa: {sessionType.Name}, {sessionType.DurationMinutes} min",
+                    clock.ToUtc(session.StartTime), // StartTime to zegar ścienny, a Google dostaje UTC
+                    sessionType.DurationMinutes,
+                    clientUser?.Email,
+                    session.TrainerUserId,
+                    session.Id);
+                if (result is not null)
+                {
+                    session.MeetingUrl = result.MeetingUrl;
+                    session.CalendarEventId = result.CalendarEventId;
+                    await db.SaveChangesAsync();
+                }
+            }
+        }
+        catch (Exception ex) { logger.LogWarning(ex, "Błąd tworzenia Google Meet (SessionId={Id})", session.Id); }
+
         try { await SendBookingConfirmationAsync(session, sessionType); }
         catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila potwierdzającego rezerwację (SessionId={Id})", session.Id); }
         return (await GetSessionAsync(session.Id))!;
     }
 
-    public async Task UpdateStatusAsync(int id, SessionStatus status, string? cancellationReason = null, string? completionNotes = null)
+    public async Task UpdateStatusAsync(int id, SessionStatus status, string? cancellationReason = null, string? completionNotes = null,
+        bool chargeSession = false)
     {
         await using var db = dbFactory.CreateDbContext();
         var session = await db.Sessions
@@ -156,17 +210,16 @@ public class SessionService(
         {
             session.CancelledAt = DateTime.UtcNow;
             session.CancellationReason = cancellationReason;
-
-            if (session.PackageId.HasValue)
-            {
-                var pkg = await db.SessionPackages.FindAsync(session.PackageId.Value);
-                if (pkg is not null && pkg.Status != PackageStatus.Cancelled)
-                {
-                    if (pkg.UsedSessions > 0) pkg.UsedSessions--;
-                    if (pkg.Status == PackageStatus.Depleted && pkg.UsedSessions < pkg.TotalSessions)
-                        pkg.Status = PackageStatus.Active;
-                }
-            }
+            // chargeSession: trener odwołuje w imieniu klienta po terminie — sesja przepada.
+            session.IsLateCancellation = chargeSession;
+            if (!chargeSession)
+                await RefundPackageSlotAsync(db, session);
+        }
+        else if (status == SessionStatus.NoShow && session.Status != SessionStatus.NoShow)
+        {
+            var cfg = await availability.GetConfigAsync(session.TrainerUserId);
+            if (!cfg.NoShowChargesSession)
+                await RefundPackageSlotAsync(db, session);
         }
 
         if (status == SessionStatus.Completed && completionNotes is not null)
@@ -177,20 +230,34 @@ public class SessionService(
 
         if (status == SessionStatus.Cancelled)
         {
+            try { if (session.CalendarEventId is not null) await googleMeetService.DeleteMeetingAsync(session.CalendarEventId, session.TrainerUserId); }
+            catch (Exception ex) { logger.LogWarning(ex, "Błąd usuwania Google Meet (SessionId={Id})", session.Id); }
+
             try { await SendCancellationEmailAsync(session, cancellationReason); }
             catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila o anulowaniu (SessionId={Id})", session.Id); }
         }
     }
 
-    public async Task RescheduleAsync(int id, DateTime newStartTime)
+    public async Task RescheduleAsync(int id, DateTime newStartTime, bool allowOverlap = false)
     {
-        newStartTime = DateTime.SpecifyKind(newStartTime, DateTimeKind.Utc);
+        newStartTime = DateTime.SpecifyKind(newStartTime, DateTimeKind.Unspecified);
         await using var db = dbFactory.CreateDbContext();
         var session = await db.Sessions
             .Include(s => s.Client)
             .Include(s => s.SessionType)
             .FirstOrDefaultAsync(s => s.Id == id)
             ?? throw new InvalidOperationException("Sesja nie została znaleziona.");
+
+        // Kontrola kolizji, wykluczając samą przenoszoną sesję — inaczej jej
+        // stary rekord (wciąż w bazie) kolidowałby z nowym terminem.
+        if (!allowOverlap)
+        {
+            var conflict = await availability.FindConflictAsync(
+                session.TrainerUserId, newStartTime, session.SessionType.DurationMinutes,
+                excludeSessionId: session.Id);
+            if (conflict is not null) throw new SlotConflictException(conflict);
+        }
+
         var oldTime = session.StartTime;
         session.StartTime = newStartTime;
         await db.SaveChangesAsync();
@@ -211,7 +278,8 @@ public class SessionService(
         session.CancelledAt = null;
         session.CancellationReason = null;
 
-        if (wasStatus == SessionStatus.Cancelled && session.PackageId.HasValue)
+        session.IsLateCancellation = false;
+        if (session.PackageRefunded && session.PackageId.HasValue)
         {
             var pkg = await db.SessionPackages.FindAsync(session.PackageId.Value);
             if (pkg is not null && pkg.Status != PackageStatus.Cancelled
@@ -227,6 +295,7 @@ public class SessionService(
                 session.PackageId = null;
                 session.Status = SessionStatus.AwaitingPackage;
             }
+            session.PackageRefunded = false;
         }
         else
         {
@@ -236,7 +305,20 @@ public class SessionService(
         await db.SaveChangesAsync();
     }
 
-    public async Task ClientCancelSessionAsync(int id, string clientUserId, string? reason = null)
+    public async Task<CancellationDecision> GetClientCancellationAsync(int id, string clientUserId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var session = await db.Sessions.AsNoTracking().Include(x => x.Client)
+            .FirstOrDefaultAsync(x => x.Id == id);
+        if (session is null || session.Client.ApplicationUserId != clientUserId)
+            return new CancellationDecision(false, false, false, "Nie znaleziono wizyty.");
+        if (session.Status is not (SessionStatus.Scheduled or SessionStatus.AwaitingPackage))
+            return new CancellationDecision(false, false, false, "Tej wizyty nie można już odwołać.");
+        var cfg = await availability.GetConfigAsync(session.TrainerUserId);
+        return CancellationRules.ForClient(cfg, session.StartTime, clock.LocalNow);
+    }
+
+    public async Task<CancellationDecision> ClientCancelSessionAsync(int id, string clientUserId, string? reason = null)
     {
         await using var db = dbFactory.CreateDbContext();
         var session = await db.Sessions
@@ -245,25 +327,45 @@ public class SessionService(
             .FirstOrDefaultAsync(s => s.Id == id)
             ?? throw new InvalidOperationException("Sesja nie została znaleziona.");
 
+        // Serwer egzekwuje zasady niezależnie od UI: tylko własna wizyta, tylko
+        // zaplanowana, i zgodnie z polityką odwołań trenera. Wcześniej metoda
+        // ignorowała clientUserId i okno odwołania — dashboard klienta pozwalał
+        // odwołać wizytę 5 minut przed startem z pełnym zwrotem sesji.
+        if (session.Client.ApplicationUserId != clientUserId)
+            throw new InvalidOperationException("Sesja nie została znaleziona.");
+        if (session.Status is not (SessionStatus.Scheduled or SessionStatus.AwaitingPackage))
+            throw new InvalidOperationException("Tej wizyty nie można już odwołać.");
+
+        var cfg = await availability.GetConfigAsync(session.TrainerUserId);
+        var decision = CancellationRules.ForClient(cfg, session.StartTime, clock.LocalNow);
+        if (!decision.Allowed)
+            throw new InvalidOperationException(decision.Message);
+
         session.Status = SessionStatus.Cancelled;
         session.CancelledAt = DateTime.UtcNow;
         session.CancellationReason = reason;
+        session.IsLateCancellation = decision.IsLate;
 
-        if (session.PackageId.HasValue)
-        {
-            var pkg = await db.SessionPackages.FindAsync(session.PackageId.Value);
-            if (pkg is not null && pkg.Status != PackageStatus.Cancelled)
-            {
-                if (pkg.UsedSessions > 0) pkg.UsedSessions--;
-                if (pkg.Status == PackageStatus.Depleted && pkg.UsedSessions < pkg.TotalSessions)
-                    pkg.Status = PackageStatus.Active;
-            }
-        }
+        if (decision.RefundsSession)
+            await RefundPackageSlotAsync(db, session);
 
         await db.SaveChangesAsync();
 
         try { await SendClientCancelledToTrainerAsync(session, reason); }
         catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila o anulowaniu przez klienta (SessionId={Id})", session.Id); }
+        return decision;
+    }
+
+    // Zwalnia miejsce sesji w pakiecie (jeśli jeszcze go nie zwolniła).
+    private static async Task RefundPackageSlotAsync(ApplicationDbContext db, Session session)
+    {
+        if (!session.PackageId.HasValue || session.PackageRefunded) return;
+        var pkg = await db.SessionPackages.FindAsync(session.PackageId.Value);
+        if (pkg is null || pkg.Status == PackageStatus.Cancelled) return;
+        if (pkg.UsedSessions > 0) pkg.UsedSessions--;
+        if (pkg.Status == PackageStatus.Depleted && pkg.UsedSessions < pkg.TotalSessions)
+            pkg.Status = PackageStatus.Active;
+        session.PackageRefunded = true;
     }
 
     public async Task<List<SessionTypeDto>> GetSessionTypesAsync()
@@ -336,7 +438,7 @@ public class SessionService(
     public async Task<List<SessionDto>> GetUpcomingAsync(string? trainerUserId = null, int? clientId = null, int count = 10)
     {
         await using var db = dbFactory.CreateDbContext();
-        var now = DateTime.UtcNow;
+        var now = clock.LocalNow;   // zegar ścienny — porównywany ze StartTime
         var query = db.Sessions
             .AsNoTracking()
             .Include(s => s.Client)
@@ -364,7 +466,7 @@ public class SessionService(
     public async Task<List<SessionDto>> GetAwaitingPackageAsync(string? trainerUserId = null)
     {
         await using var db = dbFactory.CreateDbContext();
-        var now = DateTime.UtcNow;
+        var now = clock.LocalNow;   // zegar ścienny — porównywany ze StartTime
         var query = db.Sessions
             .AsNoTracking()
             .Include(s => s.Client)
@@ -396,6 +498,9 @@ public class SessionService(
         var trainer = await db.Users.FirstOrDefaultAsync(u => u.Id == session.TrainerUserId);
         var trainerName = $"{trainer?.FirstName} {trainer?.LastName}".Trim().NullIfEmpty() ?? trainer?.Email ?? "Trener";
         var clientName = $"{client.FirstName} {client.LastName}".Trim().NullIfEmpty() ?? clientUser.Email;
+        var meetRow = !string.IsNullOrWhiteSpace(session.MeetingUrl)
+            ? $"<tr><td style=\"padding:8px 0;color:#6b7280;font-size:14px\">Google Meet</td><td style=\"padding:8px 0;font-size:14px\"><a href=\"{session.MeetingUrl}\">{session.MeetingUrl}</a></td></tr>"
+            : "";
         var vars = new Dictionary<string, string>
         {
             ["ClientName"] = clientName,
@@ -403,7 +508,9 @@ public class SessionService(
             ["SessionType"] = sessionType.Name,
             ["SessionDate"] = session.StartTime.ToString("dddd, dd MMMM yyyy"),
             ["SessionTime"] = session.StartTime.ToString("HH:mm"),
-            ["Duration"] = sessionType.DurationMinutes.ToString()
+            ["Duration"] = sessionType.DurationMinutes.ToString(),
+            ["MeetingUrl"] = session.MeetingUrl ?? "",
+            ["MeetingRow"] = meetRow
         };
         var (subject, html) = await emailTemplateService.RenderAsync("session-booked", vars);
         await emailService.SendAsync(clientUser.Email, clientName, subject, html);
@@ -507,7 +614,9 @@ public class SessionService(
         StartTime = s.StartTime,
         Status = s.Status,
         Notes = s.Notes,
-        CancellationReason = s.CancellationReason
+        CancellationReason = s.CancellationReason,
+        IsLateCancellation = s.IsLateCancellation,
+        MeetingUrl = s.MeetingUrl
     };
 }
 

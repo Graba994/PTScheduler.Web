@@ -1,0 +1,557 @@
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Logging;
+using PTScheduler.Application.DTOs;
+using PTScheduler.Application.Interfaces;
+using PTScheduler.Domain.Constants;
+using PTScheduler.Domain.Entities;
+using PTScheduler.Domain.Enums;
+using PTScheduler.Infrastructure.Data;
+using PTScheduler.Infrastructure.Services.Payments;
+
+namespace PTScheduler.Infrastructure.Services;
+
+/// <summary>
+/// Orchestrates payments across multiple gateways: creates orders, dispatches to the
+/// selected <see cref="IPaymentProvider"/>, applies webhook outcomes and fulfils
+/// paid orders (course access or session-package credits).
+/// </summary>
+public class PaymentService(
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    IPaymentSettingsService settingsService,
+    ICouponService coupons,
+    IEnumerable<IPaymentProvider> providers,
+    IAuditLogService auditLog,
+    IAppClock clock,
+    ILogger<PaymentService> logger) : IPaymentService
+{
+    private const string SystemUserId = "system";
+    private const string SystemUserEmail = "system";
+    private const string SystemRole = "System";
+
+    private IPaymentProvider? Provider(string key) => providers.FirstOrDefault(p => p.Key == key);
+
+    public async Task<List<PaymentOptionDto>> GetEnabledOptionsAsync()
+    {
+        var settings = await settingsService.GetAsync();
+        if (!settings.Enabled) return [];
+
+        var options = new List<PaymentOptionDto>();
+        foreach (var cfg in settings.Providers.Where(p => p.Enabled))
+        {
+            var meta = PaymentProviderCatalog.Find(cfg.Key);
+            if (meta is null) continue;
+            options.Add(new PaymentOptionDto(cfg.Key, meta.Name, meta.Icon));
+        }
+        return options;
+    }
+
+    public async Task<PaymentInitResult> StartCourseCheckoutAsync(string userId, int courseId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null, InvoiceBuyerDto? invoiceBuyer = null)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var course = await db.Courses.FirstOrDefaultAsync(c => c.Id == courseId);
+        if (course is null) return new(false, null, "Kurs nie istnieje.");
+        if (course.Price <= 0) return new(false, null, "Kurs nie jest płatny.");
+
+        var now = DateTime.UtcNow;
+        var hasAccess = await db.CourseEnrollments.AnyAsync(e => e.ApplicationUserId == userId && e.CourseId == courseId
+            && !e.IsRevoked && (e.ExpiresAt == null || e.ExpiresAt > now) && (e.StartsAt == null || e.StartsAt <= now));
+        if (hasAccess) return new(false, null, "Masz już dostęp do tego kursu.");
+
+        var order = new Order
+        {
+            ApplicationUserId = userId,
+            Kind = OrderKind.Course,
+            CourseId = courseId,
+            Amount = course.Price,
+            Description = $"Kurs: {course.Title}",
+            CreatedAt = now
+        };
+        await ApplyCouponIfAnyAsync(order, couponCode, "course");
+        if (ApplyInvoiceBuyer(order, invoiceBuyer) is { } buyerError) return new(false, null, buyerError);
+        return await StartAsync(db, order, providerKey, course.Title, appBaseUrl, buyerEmail, customerIp);
+    }
+
+    public async Task<PaymentInitResult> StartPackageCheckoutAsync(string userId, int packageOfferId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null, InvoiceBuyerDto? invoiceBuyer = null)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var offer = await db.PackageOffers.FirstOrDefaultAsync(o => o.Id == packageOfferId);
+        if (offer is null) return new(false, null, "Pakiet nie istnieje.");
+        if (!offer.IsActive) return new(false, null, "Pakiet nie jest dostępny.");
+        if (offer.Price <= 0) return new(false, null, "Pakiet nie jest płatny.");
+
+        var client = await db.Clients.FirstOrDefaultAsync(c => c.ApplicationUserId == userId);
+        if (client is null) return new(false, null, "Twoje konto nie jest powiązane z profilem klienta. Skontaktuj się z trenerem.");
+
+        var order = new Order
+        {
+            ApplicationUserId = userId,
+            Kind = OrderKind.Package,
+            PackageOfferId = packageOfferId,
+            Amount = offer.Price,
+            Description = $"Pakiet: {offer.Name}",
+            CreatedAt = DateTime.UtcNow
+        };
+        await ApplyCouponIfAnyAsync(order, couponCode, "package");
+        if (ApplyInvoiceBuyer(order, invoiceBuyer) is { } buyerError) return new(false, null, buyerError);
+        return await StartAsync(db, order, providerKey, offer.Name, appBaseUrl, buyerEmail, customerIp);
+    }
+
+    public async Task<PaymentInitResult> StartGiftVoucherCheckoutAsync(string userId, int voucherId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var voucher = await db.GiftVouchers.FirstOrDefaultAsync(v => v.Id == voucherId && v.BuyerUserId == userId);
+        if (voucher is null || voucher.Status != GiftVoucherStatus.Pending) return new(false, null, "Nie znaleziono bonu do opłacenia.");
+        if (voucher.Value <= 0) return new(false, null, "Nieprawidłowa kwota bonu.");
+
+        // Bez kuponów: bonu nie da się opłacić innym bonem ani rabatem.
+        var order = new Order
+        {
+            ApplicationUserId = userId,
+            Kind = OrderKind.GiftVoucher,
+            GiftVoucherId = voucher.Id,
+            Amount = voucher.Value,
+            Currency = voucher.Currency,
+            Description = $"Bon podarunkowy: {voucher.Title}",
+            CreatedAt = DateTime.UtcNow
+        };
+        return await StartAsync(db, order, providerKey, $"Bon podarunkowy — {voucher.Title}", appBaseUrl, buyerEmail, customerIp);
+    }
+
+    public async Task<PaymentInitResult> StartMembershipPeriodCheckoutAsync(string userId, int periodId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var period = await db.MembershipPeriods
+            .Include(p => p.Membership).ThenInclude(m => m.Client)
+            .Include(p => p.Membership).ThenInclude(m => m.Plan)
+            .FirstOrDefaultAsync(p => p.Id == periodId);
+        if (period is null || period.Membership.Client.ApplicationUserId != userId)
+            return new(false, null, "Nie znaleziono należności.");
+        if (period.Status != MembershipPeriodStatus.Due)
+            return new(false, null, "Ten okres jest już rozliczony.");
+
+        var name = $"{period.Membership.Plan.Name} {period.PeriodStart:MM.yyyy}";
+        var order = new Order
+        {
+            ApplicationUserId = userId,
+            Kind = OrderKind.Membership,
+            MembershipPeriodId = period.Id,
+            Amount = period.Amount,
+            Currency = period.Membership.Plan.Currency,
+            Description = $"Karnet: {name}",
+            CreatedAt = DateTime.UtcNow
+        };
+        return await StartAsync(db, order, providerKey, name, appBaseUrl, buyerEmail, customerIp);
+    }
+
+    public async Task<PaymentInitResult> StartMembershipPlanCheckoutAsync(string userId, int planId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null, InvoiceBuyerDto? invoiceBuyer = null)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var plan = await db.MembershipPlans.FirstOrDefaultAsync(p => p.Id == planId && p.IsActive && p.AvailableInShop);
+        if (plan is null) return new(false, null, "Karnet nie jest dostępny.");
+        var client = await db.Clients.FirstOrDefaultAsync(c => c.ApplicationUserId == userId);
+        if (client is null) return new(false, null, "Twoje konto nie jest powiązane z profilem klienta. Skontaktuj się z trenerem.");
+        if (await db.Memberships.AnyAsync(m => m.ClientId == client.Id && m.PlanId == planId && m.Status != MembershipStatus.Cancelled))
+            return new(false, null, "Masz już ten karnet — opłaty kolejnych okresów znajdziesz w „Moje karnety”.");
+
+        var order = new Order
+        {
+            ApplicationUserId = userId,
+            Kind = OrderKind.Membership,
+            MembershipPlanId = planId,
+            Amount = plan.Price,
+            Currency = plan.Currency,
+            Description = $"Karnet: {plan.Name}",
+            CreatedAt = DateTime.UtcNow
+        };
+        await ApplyCouponIfAnyAsync(order, couponCode, "membership");
+        if (ApplyInvoiceBuyer(order, invoiceBuyer) is { } buyerError) return new(false, null, buyerError);
+        return await StartAsync(db, order, providerKey, plan.Name, appBaseUrl, buyerEmail, customerIp);
+    }
+
+    // Dane do faktury na firmę podane przy zakupie; zwraca komunikat błędu albo null.
+    private static string? ApplyInvoiceBuyer(Order order, InvoiceBuyerDto? buyer)
+    {
+        if (buyer is null || string.IsNullOrWhiteSpace(buyer.Nip)) return null;
+        if (!PTScheduler.Application.Ksef.Nip.IsValid(buyer.Nip)) return "Nieprawidłowy NIP do faktury.";
+        if (string.IsNullOrWhiteSpace(buyer.Name)) return "Podaj nazwę firmy do faktury.";
+        order.BuyerNip = PTScheduler.Application.Ksef.Nip.Normalize(buyer.Nip);
+        order.BuyerName = buyer.Name.Trim();
+        order.BuyerAddress = string.IsNullOrWhiteSpace(buyer.Address) ? null : buyer.Address.Trim();
+        order.BuyerPostalCode = string.IsNullOrWhiteSpace(buyer.PostalCode) ? null : buyer.PostalCode.Trim();
+        order.BuyerCity = string.IsNullOrWhiteSpace(buyer.City) ? null : buyer.City.Trim();
+        return null;
+    }
+
+    // Validates the coupon and mutates the order to store the discount +
+    // final Amount. The caller decides whether to bubble errors up; we
+    // silently ignore bad codes so a stale code doesn't block checkout.
+    private async Task ApplyCouponIfAnyAsync(Order order, string? couponCode, string targetType)
+    {
+        if (string.IsNullOrWhiteSpace(couponCode)) return;
+        var result = await coupons.ValidateAsync(couponCode, order.Amount, targetType, order.ApplicationUserId);
+        if (!result.IsValid) return;
+
+        order.OriginalAmount = order.Amount;
+        order.DiscountAmount = result.DiscountAmount;
+        order.Amount = result.FinalAmount;
+        order.CouponId = result.CouponId;
+        order.CouponCode = result.Code;
+    }
+
+    private async Task<PaymentInitResult> StartAsync(ApplicationDbContext db, Order order, string providerKey,
+        string itemName, string appBaseUrl, string buyerEmail, string customerIp)
+    {
+        var settings = await settingsService.GetAsync();
+        if (!settings.Enabled) return new(false, null, "Płatności online są wyłączone.");
+
+        order.Provider = providerKey;
+        order.Currency = string.IsNullOrWhiteSpace(settings.Currency) ? "PLN" : settings.Currency;
+        order.ExtOrderId = Guid.NewGuid().ToString("N");
+
+        // 100% discount — skip gateway entirely, auto-fulfil.
+        if (order.Amount <= 0)
+        {
+            order.Status = OrderStatus.Paid;
+            order.PaidAt = DateTime.UtcNow;
+            db.Orders.Add(order);
+            await FulfilAsync(db, order);
+            await db.SaveChangesAsync();
+
+            if (order.CouponId is int cid && order.OriginalAmount.HasValue && order.DiscountAmount.HasValue)
+            {
+                try
+                {
+                    await coupons.RedeemAsync(cid, order.ApplicationUserId, null,
+                        order.OriginalAmount.Value, order.DiscountAmount.Value, order.Amount,
+                        order.Kind == OrderKind.Course ? "course" : order.Kind == OrderKind.Membership ? "membership" : "package",
+                        order.CourseId ?? order.PackageOfferId ?? order.MembershipPlanId);
+                }
+                catch (Exception ex)
+                {
+                    logger.LogError(ex, "Coupon redemption bookkeeping failed for free order {OrderId}", order.Id);
+                    await LogCouponBookkeepingFailedAsync(order, ex);
+                }
+            }
+
+            await LogOrderPaidAsync(order);
+
+            var returnUrl = $"{appBaseUrl.TrimEnd('/')}/payment/success?order={order.ExtOrderId}";
+            return new(true, returnUrl, null);
+        }
+
+        var providerCfg = settings.Provider(providerKey);
+        if (providerCfg is null || !providerCfg.Enabled)
+            return new(false, null, "Wybrana bramka płatności jest niedostępna.");
+
+        var provider = Provider(providerKey);
+        if (provider is null) return new(false, null, "Nieznana bramka płatności.");
+
+        var runtime = new ProviderRuntimeConfig
+        {
+            Sandbox = providerCfg.Sandbox,
+            Currency = settings.Currency,
+            Fields = providerCfg.Fields
+        };
+        if (!provider.IsConfigured(runtime))
+            return new(false, null, "Wybrana bramka nie jest w pełni skonfigurowana.");
+
+        order.Status = OrderStatus.Pending;
+        db.Orders.Add(order);
+        await db.SaveChangesAsync();
+
+        var ctx = new ProviderCheckoutContext(order, itemName, buyerEmail, customerIp, appBaseUrl);
+        var result = await provider.CreateCheckoutAsync(ctx, runtime);
+        if (!result.Ok || string.IsNullOrEmpty(result.RedirectUrl))
+            return new(false, null, result.Error ?? "Nie udało się rozpocząć płatności.");
+
+        if (!string.IsNullOrEmpty(result.ProviderOrderId))
+        {
+            order.PayUOrderId = result.ProviderOrderId;
+            await db.SaveChangesAsync();
+        }
+        return new(true, result.RedirectUrl, null);
+    }
+
+    public async Task<bool> HandleNotifyAsync(string providerKey, string rawBody, IReadOnlyDictionary<string, string> headers)
+    {
+        var provider = Provider(providerKey);
+        if (provider is null) { logger.LogWarning("Notify for unknown provider {Provider}", providerKey); return false; }
+
+        var settings = await settingsService.GetAsync();
+        var providerCfg = settings.Provider(providerKey);
+        if (providerCfg is null) return false;
+
+        var runtime = new ProviderRuntimeConfig
+        {
+            Sandbox = providerCfg.Sandbox,
+            Currency = settings.Currency,
+            Fields = providerCfg.Fields
+        };
+
+        var res = await provider.HandleNotifyAsync(rawBody, headers, runtime);
+        if (!res.Valid || string.IsNullOrEmpty(res.ExtOrderId)) return false;
+
+        await ApplyOutcomeAsync(res.ExtOrderId, res.Outcome);
+        return true;
+    }
+
+    public async Task<bool> CompleteSimulatorAsync(string extOrderId, bool paid)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var order = await db.Orders.FirstOrDefaultAsync(o => o.ExtOrderId == extOrderId && o.Provider == PaymentProviders.Simulator);
+        if (order is null) return false;
+        await ApplyOutcomeAsync(extOrderId, paid ? PaymentOutcome.Paid : PaymentOutcome.Canceled);
+        return true;
+    }
+
+    private async Task ApplyOutcomeAsync(string extOrderId, PaymentOutcome outcome)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var order = await db.Orders.FirstOrDefaultAsync(o => o.ExtOrderId == extOrderId);
+        if (order is null) return;
+
+        if (outcome == PaymentOutcome.Paid)
+        {
+            if (order.Status != OrderStatus.Paid)
+            {
+                order.Status = OrderStatus.Paid;
+                order.PaidAt = DateTime.UtcNow;
+                await FulfilAsync(db, order);
+                await db.SaveChangesAsync();
+
+                // Record coupon redemption after the order is committed so a rollback
+                // wouldn't leave the counter incremented without a paid order behind it.
+                if (order.CouponId is int cid && order.OriginalAmount.HasValue && order.DiscountAmount.HasValue)
+                {
+                    try
+                    {
+                        await coupons.RedeemAsync(cid, order.ApplicationUserId, null,
+                            order.OriginalAmount.Value, order.DiscountAmount.Value, order.Amount,
+                            order.Kind == OrderKind.Course ? "course" : order.Kind == OrderKind.Membership ? "membership" : "package",
+                            order.CourseId ?? order.PackageOfferId ?? order.MembershipPlanId);
+                    }
+                    catch (Exception ex)
+                    {
+                        logger.LogError(ex, "Coupon redemption bookkeeping failed for order {OrderId}", order.Id);
+                        await LogCouponBookkeepingFailedAsync(order, ex);
+                    }
+                }
+
+                await LogOrderPaidAsync(order);
+            }
+        }
+        else if (outcome == PaymentOutcome.Canceled)
+        {
+            if (order.Status == OrderStatus.Pending) { order.Status = OrderStatus.Canceled; await db.SaveChangesAsync(); }
+        }
+        else if (outcome == PaymentOutcome.Failed)
+        {
+            if (order.Status == OrderStatus.Pending) { order.Status = OrderStatus.Failed; await db.SaveChangesAsync(); }
+        }
+    }
+
+    private async Task LogOrderPaidAsync(Order order)
+    {
+        try
+        {
+            var itemLabel = order.Kind switch
+            {
+                OrderKind.Course => "kurs",
+                OrderKind.Membership => "karnet",
+                OrderKind.GiftVoucher => "bon podarunkowy",
+                _ => "pakiet"
+            };
+            var details = $"Kupujący: {order.ApplicationUserId}, kwota: {order.Amount:0.00} {order.Currency}, bramka: {order.Provider}"
+                + (order.CouponCode is not null ? $", kupon: {order.CouponCode}" : "");
+            await auditLog.LogAsync(SystemUserId, SystemUserEmail, SystemRole, "OrderPaid", "Order", order.Id.ToString(),
+                $"Opłacono {itemLabel} — {details}");
+        }
+        catch (Exception ex) { logger.LogError(ex, "Audit log write failed for paid order {OrderId}", order.Id); }
+    }
+
+    private async Task LogCouponBookkeepingFailedAsync(Order order, Exception ex)
+    {
+        try
+        {
+            await auditLog.LogAsync(SystemUserId, SystemUserEmail, SystemRole, "CouponRedemptionFailed", "Order",
+                order.Id.ToString(), $"Kupon: {order.CouponCode}, błąd: {ex.Message}", Domain.Enums.AuditSeverity.Error);
+        }
+        catch (Exception auditEx) { logger.LogError(auditEx, "Audit log write failed for coupon bookkeeping failure on order {OrderId}", order.Id); }
+    }
+
+    private async Task FulfilAsync(ApplicationDbContext db, Order order)
+    {
+        if (order.Kind == OrderKind.Membership)
+            await MembershipLedger.FulfilOrderAsync(db, clock, order);
+        else if (order.Kind == OrderKind.Course && order.CourseId is int courseId)
+            await GrantCourseAsync(db, order, courseId);
+        else if (order.Kind == OrderKind.Package && order.PackageOfferId is int offerId)
+            await GrantPackageAsync(db, order, offerId);
+        else if (order.Kind == OrderKind.GiftVoucher && order.GiftVoucherId is int voucherId)
+            await GiftVoucherLedger.ActivateAsync(db, voucherId, clock.UtcNow);
+    }
+
+    private static async Task GrantCourseAsync(ApplicationDbContext db, Order order, int courseId)
+    {
+        var now = DateTime.UtcNow;
+        var has = await db.CourseEnrollments.AnyAsync(e => e.ApplicationUserId == order.ApplicationUserId && e.CourseId == courseId
+            && !e.IsRevoked && (e.ExpiresAt == null || e.ExpiresAt > now));
+        if (has) return;
+
+        var course = await db.Courses.FirstOrDefaultAsync(c => c.Id == courseId);
+        var accessType = course?.DefaultAccessType ?? CourseAccessType.Lifetime;
+        DateTime? expires = accessType == CourseAccessType.Lifetime
+            ? null
+            : (course?.DefaultAccessDays is int d ? now.AddDays(d) : null);
+
+        db.CourseEnrollments.Add(new CourseEnrollment
+        {
+            CourseId = courseId,
+            ApplicationUserId = order.ApplicationUserId,
+            AccessType = accessType,
+            Source = EnrollmentSource.Purchase,
+            GrantedAt = now,
+            ExpiresAt = expires,
+            Notes = $"Zakup (zamówienie {order.ExtOrderId})"
+        });
+    }
+
+    private static async Task GrantPackageAsync(ApplicationDbContext db, Order order, int offerId)
+    {
+        var offer = await db.PackageOffers.FirstOrDefaultAsync(o => o.Id == offerId);
+        if (offer is null) return;
+
+        var client = await db.Clients.FirstOrDefaultAsync(c => c.ApplicationUserId == order.ApplicationUserId);
+        if (client is null) return;
+
+        // Avoid double-granting if a package already references this order.
+        var already = await db.SessionPackages.AnyAsync(p => p.PaymentReference == order.ExtOrderId);
+        if (already) return;
+
+        var now = DateTime.UtcNow;
+        var package = new SessionPackage
+        {
+            ClientId = client.Id,
+            CreatedByUserId = offer.CreatedByUserId,
+            Name = offer.Name,
+            SessionTypeId = offer.SessionTypeId,
+            TotalSessions = offer.SessionsCount,
+            PricePerSession = offer.SessionsCount > 0 ? Math.Round(offer.Price / offer.SessionsCount, 2) : offer.Price,
+            IsPaid = true,
+            PaidAt = now,
+            PaymentReference = order.ExtOrderId,
+            PurchasedAt = now,
+            ExpiresAt = offer.ValidDays is int days ? now.AddDays(days) : null,
+            Status = PackageStatus.Active,
+            Notes = $"Zakup online (zamówienie {order.ExtOrderId})"
+        };
+        db.SessionPackages.Add(package);
+        await db.SaveChangesAsync();
+
+        // Fill any sessions the client already booked awaiting a package.
+        var awaiting = await db.Sessions
+            .Where(s => s.ClientId == client.Id && s.SessionTypeId == offer.SessionTypeId && s.Status == SessionStatus.AwaitingPackage)
+            .OrderBy(s => s.StartTime)
+            .ToListAsync();
+        foreach (var s in awaiting)
+        {
+            if (package.UsedSessions >= package.TotalSessions) break;
+            s.PackageId = package.Id;
+            s.Status = SessionStatus.Scheduled;
+            package.UsedSessions++;
+        }
+        if (package.UsedSessions >= package.TotalSessions) package.Status = PackageStatus.Depleted;
+    }
+
+    public async Task<OrderDto?> GetOrderByExtAsync(string extOrderId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        return await db.Orders.AsNoTracking()
+            .Where(o => o.ExtOrderId == extOrderId)
+            .Select(o => new OrderDto
+            {
+                Id = o.Id,
+                ItemTitle = o.Kind == OrderKind.Package
+                    ? (o.PackageOffer != null ? o.PackageOffer.Name : "Pakiet")
+                    : o.Kind == OrderKind.Membership || o.Kind == OrderKind.GiftVoucher
+                        ? (o.Description ?? "Karnet")
+                        : (o.Course != null ? o.Course.Title : "Kurs"),
+                Kind = o.Kind.ToString(),
+                Provider = o.Provider,
+                Amount = o.Amount,
+                Currency = o.Currency,
+                Status = o.Status.ToString(),
+                CreatedAt = o.CreatedAt,
+                PaidAt = o.PaidAt,
+                OriginalAmount = o.OriginalAmount,
+                DiscountAmount = o.DiscountAmount,
+                CouponCode = o.CouponCode
+            })
+            .FirstOrDefaultAsync();
+    }
+
+    public async Task<List<OrderDto>> GetMyOrdersAsync(string userId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        return await db.Orders.AsNoTracking()
+            .Where(o => o.ApplicationUserId == userId)
+            .OrderByDescending(o => o.CreatedAt)
+            .Select(o => new OrderDto
+            {
+                Id = o.Id,
+                ItemTitle = o.Kind == OrderKind.Package
+                    ? (o.PackageOffer != null ? o.PackageOffer.Name : "Pakiet")
+                    : o.Kind == OrderKind.Membership || o.Kind == OrderKind.GiftVoucher
+                        ? (o.Description ?? "Karnet")
+                        : (o.Course != null ? o.Course.Title : "Kurs"),
+                Kind = o.Kind.ToString(),
+                Provider = o.Provider,
+                Amount = o.Amount,
+                Currency = o.Currency,
+                Status = o.Status.ToString(),
+                CreatedAt = o.CreatedAt,
+                PaidAt = o.PaidAt,
+                OriginalAmount = o.OriginalAmount,
+                DiscountAmount = o.DiscountAmount,
+                CouponCode = o.CouponCode
+            })
+            .ToListAsync();
+    }
+
+    public async Task<List<OrderDto>> GetPaidOrdersAsync(DateTime from)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        return await db.Orders.AsNoTracking()
+            .Where(o => o.Status == OrderStatus.Paid && o.PaidAt != null && o.PaidAt >= from)
+            .OrderByDescending(o => o.PaidAt)
+            .Select(o => new OrderDto
+            {
+                Id = o.Id,
+                ItemTitle = o.Kind == OrderKind.Package
+                    ? (o.PackageOffer != null ? o.PackageOffer.Name : "Pakiet")
+                    : o.Kind == OrderKind.Membership || o.Kind == OrderKind.GiftVoucher
+                        ? (o.Description ?? "Karnet")
+                        : (o.Course != null ? o.Course.Title : "Kurs"),
+                Kind = o.Kind.ToString(),
+                Provider = o.Provider,
+                Amount = o.Amount,
+                Currency = o.Currency,
+                Status = o.Status.ToString(),
+                CreatedAt = o.CreatedAt,
+                PaidAt = o.PaidAt,
+                OriginalAmount = o.OriginalAmount,
+                DiscountAmount = o.DiscountAmount,
+                CouponCode = o.CouponCode,
+                InvoiceNumber = o.InvoiceNumber,
+                BuyerNip = o.BuyerNip,
+                BuyerName = o.BuyerName,
+                BuyerAddress = o.BuyerAddress,
+                BuyerPostalCode = o.BuyerPostalCode,
+                BuyerCity = o.BuyerCity,
+                KsefStatus = o.KsefStatus,
+                KsefNumber = o.KsefNumber,
+                KsefError = o.KsefError
+            })
+            .ToListAsync();
+    }
+}

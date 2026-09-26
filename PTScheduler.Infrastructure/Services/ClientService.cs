@@ -23,7 +23,7 @@ public class ClientService(
             .ToListAsync();
 
         var userIds = clients.Select(c => c.ApplicationUserId).ToList();
-        var users = await userManager.Users
+        var users = await db.Users.AsNoTracking()
             .Where(u => userIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id);
 
@@ -76,7 +76,7 @@ public class ClientService(
         var c = await db.Clients.FindAsync(id);
         if (c is null) return null;
 
-        var user = await userManager.FindByIdAsync(c.ApplicationUserId);
+        var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == c.ApplicationUserId);
         var stats = await db.Sessions
             .AsNoTracking()
             .Where(s => s.ClientId == id)
@@ -208,7 +208,7 @@ public class ClientService(
             .ToListAsync();
 
         var trainerIds = notes.Select(n => n.TrainerUserId).Distinct().ToList();
-        var trainers = await userManager.Users
+        var trainers = await db.Users.AsNoTracking()
             .Where(u => trainerIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id,
                 u => $"{u.FirstName} {u.LastName}".Trim() is { Length: > 0 } n ? n : u.Email ?? u.Id);
@@ -266,7 +266,7 @@ public class ClientService(
             .ToListAsync();
 
         var userIds = clients.Select(c => c.ApplicationUserId).ToList();
-        var users = await userManager.Users
+        var users = await db.Users.AsNoTracking()
             .Where(u => userIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id);
 
@@ -294,5 +294,96 @@ public class ClientService(
             ?? throw new InvalidOperationException("Klient nie istnieje.");
         client.AllowSelfBooking = allow;
         await db.SaveChangesAsync();
+    }
+
+    public async Task<CsvImportResult> ImportClientsFromCsvAsync(Stream csvStream)
+    {
+        var result = new CsvImportResult();
+        using var reader = new StreamReader(csvStream, System.Text.Encoding.UTF8);
+        var header = await reader.ReadLineAsync();
+        if (header is null) { result.Errors.Add("Plik jest pusty."); return result; }
+
+        var cols = header.Split(';').Select(c => c.Trim().Trim('"')).ToArray();
+        int Col(params string[] names) => Array.FindIndex(cols, c => names.Any(n => c.Equals(n, StringComparison.OrdinalIgnoreCase)));
+
+        var iFirst = Col("Imię", "Imie", "FirstName");
+        var iLast  = Col("Nazwisko", "LastName");
+        var iEmail = Col("Email", "E-mail");
+        var iPhone = Col("Telefon", "Phone");
+        var iGoal  = Col("Cel treningowy", "TrainingGoal", "Cel");
+        var iDob   = Col("Data urodzenia", "DateOfBirth", "Urodziny");
+
+        if (iFirst < 0 || iLast < 0 || iEmail < 0)
+        {
+            result.Errors.Add("Brak wymaganych kolumn: Imię, Nazwisko, Email (rozdzielane średnikiem).");
+            return result;
+        }
+
+        var row = 1;
+        while (await reader.ReadLineAsync() is { } line)
+        {
+            row++;
+            if (string.IsNullOrWhiteSpace(line)) continue;
+            var parts = ParseCsvLine(line, ';');
+            string Val(int idx) => idx >= 0 && idx < parts.Length ? parts[idx].Trim().Trim('"') : string.Empty;
+
+            var email = Val(iEmail);
+            var first = Val(iFirst);
+            var last  = Val(iLast);
+
+            if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(first))
+            {
+                result.Errors.Add($"Wiersz {row}: brak email lub imienia — pominięto.");
+                result.Skipped++;
+                continue;
+            }
+
+            if (await userManager.FindByEmailAsync(email) is not null)
+            {
+                result.Errors.Add($"Wiersz {row}: {email} — email już istnieje — pominięto.");
+                result.Skipped++;
+                continue;
+            }
+
+            DateOnly? dob = null;
+            var dobStr = Val(iDob);
+            if (!string.IsNullOrEmpty(dobStr) && DateOnly.TryParse(dobStr, out var parsed))
+                dob = parsed;
+
+            try
+            {
+                await CreateClientAsync(new CreateClientDto
+                {
+                    Email = email,
+                    FirstName = first,
+                    LastName = string.IsNullOrWhiteSpace(last) ? first : last,
+                    Phone = string.IsNullOrWhiteSpace(Val(iPhone)) ? null : Val(iPhone),
+                    TrainingGoal = string.IsNullOrWhiteSpace(Val(iGoal)) ? null : Val(iGoal),
+                    DateOfBirth = dob
+                });
+                result.Imported++;
+            }
+            catch (Exception ex)
+            {
+                result.Errors.Add($"Wiersz {row}: {email} — {ex.Message}");
+                result.Skipped++;
+            }
+        }
+        return result;
+    }
+
+    private static string[] ParseCsvLine(string line, char sep)
+    {
+        var fields = new List<string>();
+        var inQuote = false;
+        var sb = new System.Text.StringBuilder();
+        foreach (var ch in line)
+        {
+            if (ch == '"') { inQuote = !inQuote; continue; }
+            if (ch == sep && !inQuote) { fields.Add(sb.ToString()); sb.Clear(); continue; }
+            sb.Append(ch);
+        }
+        fields.Add(sb.ToString());
+        return fields.ToArray();
     }
 }

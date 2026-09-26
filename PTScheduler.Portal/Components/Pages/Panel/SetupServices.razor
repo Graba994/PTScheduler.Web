@@ -1,0 +1,269 @@
+@page "/panel/setup/services"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject SiteSettingsService Settings
+@inject BunnyPlatformService Bunny
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject GoogleOAuthBroker Google
+@inject NavigationManager Nav
+@rendermode InteractiveServer
+
+<PageTitle>Usługi dla trenerów — PTScheduler Portal</PageTitle>
+
+<div class="d-flex align-items-center gap-2 mb-4">
+    <a href="/panel/setup" class="btn btn-sm btn-outline-secondary" aria-label="Wróć do konfiguracji"><i class="bi bi-arrow-left"></i></a>
+    <div>
+        <h4 class="fw-bold mb-0">Usługi dla trenerów</h4>
+        <div class="small text-muted">SMS, wideo, poczta i Google — konfigurujesz raz, trenerzy tylko dokupują pakiety.</div>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    @if (_message is not null)
+    {
+        <div class="alert @(_ok ? "alert-success" : "alert-danger") alert-dismissible py-2 small">
+            @_message
+            <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button>
+        </div>
+    }
+
+    <!-- SMS -->
+    <section id="sms" class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <h6 class="fw-bold mb-1"><i class="bi bi-chat-dots me-2 text-primary"></i>SMS (SMSAPI.pl)</h6>
+            <p class="small text-muted">Jedno konto platformy. Trenerzy kupują pakiety SMS w sklepie usług, a przypomnienia schodzą z ich puli.</p>
+            <div class="row g-3">
+                <div class="col-md-7">
+                    <label class="form-label small fw-semibold" for="smsToken">Token API (OAuth)</label>
+                    <input id="smsToken" type="password" class="form-control font-monospace" @bind="_smsToken" placeholder="@(_smsTokenSet ? "••••••••  (zapisany — wpisz nowy, aby zmienić)" : "")" autocomplete="off" />
+                    <div class="form-text">SMSAPI → Ustawienia API → Tokeny API (uprawnienie „SMS”).</div>
+                </div>
+                <div class="col-md-5">
+                    <label class="form-label small fw-semibold" for="smsSender">Nazwa nadawcy</label>
+                    <input id="smsSender" class="form-control" maxlength="11" @bind="_smsSender" placeholder="np. PTScheduler" />
+                    <div class="form-text">Zarejestrowana w SMSAPI (do 11 znaków). Puste = numer systemowy.</div>
+                </div>
+            </div>
+            <button class="btn btn-primary btn-sm mt-3" @onclick="SaveSmsAsync">Zapisz SMS</button>
+        </div>
+    </section>
+
+    <!-- Wideo -->
+    <section id="video" class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <h6 class="fw-bold mb-1"><i class="bi bi-camera-video me-2 text-primary"></i>Wideo (Bunny Stream)</h6>
+            <p class="small text-muted">
+                Podaj klucz <strong>konta</strong> Bunny. Portal sam zakłada każdemu trenerowi osobną bibliotekę wideo przy pierwszym użyciu —
+                trener dostaje tylko klucz swojej biblioteki i nie widzi filmów innych.
+            </p>
+            <div class="row g-3 align-items-end">
+                <div class="col-md-8">
+                    <label class="form-label small fw-semibold" for="bunnyKey">Klucz konta (Account → API key)</label>
+                    <input id="bunnyKey" type="password" class="form-control font-monospace" @bind="_bunnyKey" placeholder="@(_bunnyKeySet ? "••••••••  (zapisany — wpisz nowy, aby zmienić)" : "")" autocomplete="off" />
+                </div>
+                <div class="col-md-4 d-flex gap-2">
+                    <button class="btn btn-primary btn-sm" @onclick="SaveBunnyAsync">Zapisz</button>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="TestBunnyAsync" disabled="@(!_bunnyKeySet && string.IsNullOrWhiteSpace(_bunnyKey))">Testuj</button>
+                </div>
+            </div>
+            <div class="small text-muted mt-3">
+                Biblioteki trenerów: <strong>@_librariesCount</strong> z @_tenantsCount.
+                @if (_legacyShared)
+                {
+                    <div class="alert alert-warning py-2 mt-2 mb-0">
+                        <i class="bi bi-exclamation-triangle me-1"></i>
+                        Jest ustawiona stara <em>wspólna</em> biblioteka — nie jest już udostępniana trenerom (każdy widziałby filmy pozostałych).
+                        Podaj klucz konta, żeby wideo działało.
+                    </div>
+                }
+            </div>
+        </div>
+    </section>
+
+    <!-- Google -->
+    <section id="google" class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <h6 class="fw-bold mb-1"><i class="bi bi-google me-2 text-primary"></i>Google Calendar i Meet</h6>
+            <p class="small text-muted">
+                Jeden klient OAuth platformy. Trener w swojej aplikacji klika tylko <strong>„Połącz z Google”</strong> — wizyty trafiają do jego kalendarza,
+                zajęte terminy z kalendarza blokują grafik, a wizyty online dostają link Meet. Tokeny trenerów zostają w Portalu (zaszyfrowane).
+            </p>
+            <details class="small mb-3">
+                <summary class="fw-semibold">Jak utworzyć klienta w Google Cloud (jednorazowo)</summary>
+                <ol class="mt-2 mb-0 ps-3">
+                    <li>Google Cloud Console → nowy projekt → <em>APIs &amp; Services → Library</em> → włącz <strong>Google Calendar API</strong>.</li>
+                    <li><em>OAuth consent screen</em>: typ „External”, nazwa aplikacji, e-mail kontaktowy, domena Portalu; zakresy: <code>openid</code>, <code>email</code>, <code>.../auth/calendar.events</code>.</li>
+                    <li><em>Credentials → Create credentials → OAuth client ID</em> → „Web application”; w <em>Authorized redirect URIs</em> wklej adres poniżej.</li>
+                    <li>Skopiuj Client ID i Client Secret tutaj.</li>
+                    <li>Zakres kalendarza jest „wrażliwy”: do czasu weryfikacji aplikacji przez Google trener zobaczy ostrzeżenie „aplikacja niezweryfikowana”, a limit to 100 kont. Weryfikację zgłaszasz w tym samym ekranie zgody (potrzebna polityka prywatności na domenie Portalu).</li>
+                </ol>
+            </details>
+            <div class="mb-3">
+                <label class="form-label small fw-semibold" for="gRedirect">Adres przekierowania (Authorized redirect URI)</label>
+                <div class="input-group input-group-sm">
+                    <input id="gRedirect" class="form-control font-monospace" @bind="_googleRedirect" />
+                    <button class="btn btn-outline-secondary" type="button" @onclick="() => _googleRedirect = SuggestedRedirect" title="Użyj adresu tego Portalu">Ten Portal</button>
+                </div>
+                <div class="form-text">Musi być publiczny (HTTPS) i identyczny jak w Google Cloud.</div>
+            </div>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold" for="gId">Client ID</label>
+                    <input id="gId" class="form-control font-monospace" @bind="_googleId" placeholder="….apps.googleusercontent.com" autocomplete="off" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold" for="gSecret">Client Secret</label>
+                    <input id="gSecret" type="password" class="form-control font-monospace" @bind="_googleSecret" placeholder="@(_googleSecretSet ? "••••••••  (zapisany — wpisz nowy, aby zmienić)" : "")" autocomplete="off" />
+                </div>
+            </div>
+            <div class="d-flex flex-wrap align-items-center gap-2 mt-3">
+                <button class="btn btn-primary btn-sm" @onclick="SaveGoogleAsync">Zapisz i sprawdź</button>
+                <span class="small text-muted">Połączone konta trenerów: <strong>@_googleGrants</strong></span>
+            </div>
+        </div>
+    </section>
+
+    <!-- Poczta -->
+    <section id="email" class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <h6 class="fw-bold mb-1"><i class="bi bi-envelope-at me-2 text-primary"></i>Poczta dla trenerów</h6>
+            <p class="small text-muted mb-2">
+                Aplikacje trenerów wysyłają e-maile przez <a href="/panel/email">serwer SMTP Portalu</a>. Nadawcą jest nazwa studia,
+                a odpowiedzi klientów trafiają do trenera. Trener nie wpisuje żadnych danych serwera.
+            </p>
+            <div class="form-check form-switch">
+                <input class="form-check-input" type="checkbox" id="shareSmtp" checked="@_shareSmtp" @onchange="ToggleShareSmtpAsync" />
+                <label class="form-check-label" for="shareSmtp">Udostępniaj SMTP Portalu aplikacjom trenerów</label>
+            </div>
+            @if (!_smtpConfigured)
+            {
+                <div class="small text-warning mt-2"><i class="bi bi-exclamation-triangle me-1"></i>SMTP Portalu nie jest jeszcze ustawiony — <a href="/panel/email">skonfiguruj go</a>.</div>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    private bool _loading = true;
+    private string? _message;
+    private bool _ok;
+
+    private string _smsToken = "";
+    private bool _smsTokenSet;
+    private string _smsSender = "";
+
+    private string _bunnyKey = "";
+    private bool _bunnyKeySet;
+    private bool _legacyShared;
+    private int _librariesCount, _tenantsCount;
+
+    private bool _shareSmtp;
+    private bool _smtpConfigured;
+
+    private string _googleId = "";
+    private string _googleSecret = "";
+    private bool _googleSecretSet;
+    private string _googleRedirect = "";
+    private int _googleGrants;
+    private string SuggestedRedirect => Nav.BaseUri.TrimEnd('/') + GoogleOAuthBroker.CallbackPath;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var s = await Settings.GetAllAsync(
+            SiteSettingsService.Keys.PlatformSmsApiToken, SiteSettingsService.Keys.PlatformSmsSenderName,
+            SiteSettingsService.Keys.PlatformBunnyAccountKey, SiteSettingsService.Keys.PlatformBunnyApiKey,
+            SiteSettingsService.Keys.ShareSmtpWithTenants, SiteSettingsService.Keys.SmtpHost,
+            SiteSettingsService.Keys.PlatformGoogleClientId, SiteSettingsService.Keys.PlatformGoogleClientSecret,
+            SiteSettingsService.Keys.PlatformGoogleRedirectUri);
+        _smsTokenSet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformSmsApiToken]);
+        _smsSender = s[SiteSettingsService.Keys.PlatformSmsSenderName];
+        _bunnyKeySet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformBunnyAccountKey]);
+        _legacyShared = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformBunnyApiKey]) && !_bunnyKeySet;
+        _shareSmtp = s[SiteSettingsService.Keys.ShareSmtpWithTenants] != "false";
+        _smtpConfigured = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.SmtpHost]);
+        _googleId = s[SiteSettingsService.Keys.PlatformGoogleClientId];
+        _googleSecretSet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformGoogleClientSecret]);
+        _googleRedirect = string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformGoogleRedirectUri])
+            ? SuggestedRedirect : s[SiteSettingsService.Keys.PlatformGoogleRedirectUri];
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _tenantsCount = await db.Tenants.CountAsync(t => t.Status != TenantStatus.Destroyed);
+        _librariesCount = await db.Tenants.CountAsync(t => t.BunnyLibraryId != null);
+        _googleGrants = await db.GoogleCalendarGrants.CountAsync();
+        _loading = false;
+    }
+
+    private async Task SaveSmsAsync()
+    {
+        var values = new Dictionary<string, string> { [SiteSettingsService.Keys.PlatformSmsSenderName] = _smsSender.Trim() };
+        if (!string.IsNullOrWhiteSpace(_smsToken)) values[SiteSettingsService.Keys.PlatformSmsApiToken] = _smsToken.Trim();
+        await Settings.SetManyAsync(values);
+        _smsToken = "";
+        Show("Zapisano ustawienia SMS.", true);
+        await LoadAsync();
+    }
+
+    private async Task SaveBunnyAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_bunnyKey)) { Show("Wpisz klucz konta Bunny.", false); return; }
+        var (ok, msg) = await Bunny.TestAccountKeyAsync(_bunnyKey.Trim());
+        if (!ok) { Show(msg, false); return; }
+        await Settings.SetAsync(SiteSettingsService.Keys.PlatformBunnyAccountKey, _bunnyKey.Trim());
+        _bunnyKey = "";
+        Show("Zapisano klucz konta Bunny — biblioteki trenerów będą zakładane automatycznie.", true);
+        await LoadAsync();
+    }
+
+    private async Task TestBunnyAsync()
+    {
+        var key = string.IsNullOrWhiteSpace(_bunnyKey)
+            ? await Settings.GetAsync(SiteSettingsService.Keys.PlatformBunnyAccountKey)
+            : _bunnyKey.Trim();
+        var (ok, msg) = await Bunny.TestAccountKeyAsync(key);
+        Show(msg, ok);
+    }
+
+    private async Task SaveGoogleAsync()
+    {
+        var id = _googleId.Trim();
+        var secret = string.IsNullOrWhiteSpace(_googleSecret)
+            ? await Settings.GetAsync(SiteSettingsService.Keys.PlatformGoogleClientSecret)
+            : _googleSecret.Trim();
+        var redirect = _googleRedirect.Trim();
+        if (string.IsNullOrWhiteSpace(id) || string.IsNullOrWhiteSpace(secret)) { Show("Wpisz Client ID i Client Secret.", false); return; }
+        if (!Uri.TryCreate(redirect, UriKind.Absolute, out var uri) || !redirect.EndsWith(GoogleOAuthBroker.CallbackPath, StringComparison.Ordinal))
+        {
+            Show($"Adres przekierowania musi być pełnym adresem kończącym się na {GoogleOAuthBroker.CallbackPath}.", false);
+            return;
+        }
+        var (ok, msg) = await Google.TestClientAsync(id, secret);
+        if (!ok) { Show(msg, false); return; }
+        await Settings.SetManyAsync(new Dictionary<string, string>
+        {
+            [SiteSettingsService.Keys.PlatformGoogleClientId] = id,
+            [SiteSettingsService.Keys.PlatformGoogleClientSecret] = secret,
+            [SiteSettingsService.Keys.PlatformGoogleRedirectUri] = redirect
+        });
+        _googleSecret = "";
+        Show(uri.Scheme == Uri.UriSchemeHttps
+            ? "Zapisano. Trenerzy mogą już łączyć swoje kalendarze Google."
+            : "Zapisano, ale adres przekierowania nie jest HTTPS — Google przyjmie go tylko dla localhost.", uri.Scheme == Uri.UriSchemeHttps);
+        await LoadAsync();
+    }
+
+    private async Task ToggleShareSmtpAsync(ChangeEventArgs e)
+    {
+        _shareSmtp = e.Value is true;
+        await Settings.SetAsync(SiteSettingsService.Keys.ShareSmtpWithTenants, _shareSmtp ? "true" : "false");
+        Show(_shareSmtp ? "Aplikacje trenerów wysyłają e-maile przez SMTP Portalu." : "Udostępnianie SMTP wyłączone.", true);
+    }
+
+    private void Show(string message, bool ok) { _message = message; _ok = ok; }
+}

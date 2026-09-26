@@ -1,0 +1,136 @@
+@page "/panel/setup"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject SiteSettingsService Settings
+@inject IConfiguration Config
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@rendermode InteractiveServer
+
+<PageTitle>Konfiguracja platformy — PTScheduler Portal</PageTitle>
+
+<div class="mb-4">
+    <h4 class="fw-bold mb-1"><i class="bi bi-gear me-2 text-primary"></i>Konfiguracja platformy</h4>
+    <p class="text-muted small mb-0">
+        Ustawienia wspólne dla wszystkich trenerów — robisz je raz, przy instalacji. Trenerzy niczego z tej listy nie konfigurują.
+    </p>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <div class="d-flex align-items-center gap-2 mb-4 small">
+        <div class="progress flex-grow-1" style="height:8px;max-width:320px" role="progressbar" aria-label="Postęp konfiguracji"
+             aria-valuenow="@_done" aria-valuemin="0" aria-valuemax="@_total">
+            <div class="progress-bar bg-success" style="width:@(_total == 0 ? 0 : _done * 100 / _total)%"></div>
+        </div>
+        <span class="text-muted">Skonfigurowano @_done z @_total</span>
+    </div>
+
+    @foreach (var group in _groups)
+    {
+        <h6 class="setup-group-title">@group.Title</h6>
+        <div class="row g-3 mb-4">
+            @foreach (var item in group.Items)
+            {
+                <div class="col-md-6 col-xl-4">
+                    <a href="@item.Href" class="setup-card">
+                        <div class="setup-card-icon"><i class="bi @item.Icon"></i></div>
+                        <div class="flex-grow-1 min-w-0">
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="fw-semibold">@item.Title</span>
+                                @if (item.Optional && !item.Done)
+                                {
+                                    <span class="badge bg-light text-muted border ms-auto">opcjonalne</span>
+                                }
+                                else
+                                {
+                                    <span class="badge ms-auto @(item.Done ? "bg-success-subtle text-success-emphasis" : "bg-warning-subtle text-warning-emphasis")">
+                                        @(item.Done ? "Gotowe" : "Do zrobienia")
+                                    </span>
+                                }
+                            </div>
+                            <div class="small text-muted mt-1">@item.Description</div>
+                        </div>
+                    </a>
+                </div>
+            }
+        </div>
+    }
+}
+
+<style>
+    .setup-group-title { font-size: .72rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: #6b7280; margin-bottom: .6rem; }
+    .setup-card {
+        display: flex; gap: .85rem; height: 100%; padding: 1rem; border-radius: .9rem; background: #fff;
+        border: 1px solid #e6e8ee; color: inherit; text-decoration: none; transition: border-color .15s, box-shadow .15s;
+    }
+    .setup-card:hover { border-color: #c7cbf7; box-shadow: 0 4px 16px rgba(99,102,241,.08); color: inherit; }
+    .setup-card:focus-visible { outline: 2px solid #6366f1; outline-offset: 2px; }
+    .setup-card-icon { width: 40px; height: 40px; border-radius: .7rem; display: grid; place-items: center; background: #eef0ff; color: #4f46e5; font-size: 1.15rem; flex-shrink: 0; }
+</style>
+
+@code {
+    private record Item(string Title, string Description, string Icon, string Href, bool Done, bool Optional = false);
+    private record Group(string Title, List<Item> Items);
+
+    private bool _loading = true;
+    private List<Group> _groups = [];
+    private int _done, _total;
+    private bool _isolationOk;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var s = await Settings.GetAllAsync(
+            SiteSettingsService.Keys.MainDomain, SiteSettingsService.Keys.NpmUrl, SiteSettingsService.Keys.NpmToken,
+            SiteSettingsService.Keys.NpmEmail, SiteSettingsService.Keys.GithubToken, SiteSettingsService.Keys.GuardianUrl,
+            SiteSettingsService.Keys.SmtpHost, SiteSettingsService.Keys.PlatformSmsApiToken,
+            SiteSettingsService.Keys.PlatformBunnyAccountKey, SiteSettingsService.Keys.PlatformBunnyApiKey,
+            SiteSettingsService.Keys.StripeSecretKey, SiteSettingsService.Keys.PayuPosId, SiteSettingsService.Keys.P24MerchantId,
+            SiteSettingsService.Keys.BackupDir, SiteSettingsService.Keys.PlatformGoogleClientId);
+        bool Has(string key) => !string.IsNullOrWhiteSpace(s.GetValueOrDefault(key));
+        await using (var db = await DbFactory.CreateDbContextAsync())
+            _isolationOk = !await db.Tenants.AnyAsync(t => (t.InternalSecret == null || t.InternalSecret == "")
+                && t.Status != TenantStatus.Destroyed && t.Status != TenantStatus.Pending);
+
+        _groups =
+        [
+            new("Serwer i domeny",
+            [
+                new("Domena główna", "Adres platformy i subdomeny trenerów.", "bi-globe", "/panel/domain", Has(SiteSettingsService.Keys.MainDomain)),
+                new("Reverse proxy (NPM)", "Automatyczne wpisy i certyfikaty SSL dla nowych trenerów.", "bi-diagram-3", "/panel/npm",
+                    Has(SiteSettingsService.Keys.NpmUrl) && (Has(SiteSettingsService.Keys.NpmToken) || Has(SiteSettingsService.Keys.NpmEmail))),
+                new("GitHub", "Źródło aktualizacji aplikacji i Portalu.", "bi-github", "/panel/github", Has(SiteSettingsService.Keys.GithubToken)),
+                new("Guardian (aktualizacje bez przestoju)", "Adres i sekret usługi aktualizacji.", "bi-shield-check", "/panel/updates", Has(SiteSettingsService.Keys.GuardianUrl)),
+                new("Kopie zapasowe", "Katalog i harmonogram kopii baz trenerów.", "bi-hdd-stack", "/panel/backups", Has(SiteSettingsService.Keys.BackupDir), Optional: true)
+            ]),
+            new("Usługi dla trenerów",
+            [
+                new("E-mail (SMTP)", "Poczta Portalu i wysyłka z aplikacji trenerów (nadawca = nazwa studia).", "bi-envelope-at", "/panel/email", Has(SiteSettingsService.Keys.SmtpHost)),
+                new("SMS", "Konto SMSAPI platformy — trenerzy kupują pakiety SMS.", "bi-chat-dots", "/panel/setup/services#sms", Has(SiteSettingsService.Keys.PlatformSmsApiToken)),
+                new("Wideo (Bunny)", "Klucz konta — każdy trener dostaje osobną bibliotekę.", "bi-camera-video", "/panel/setup/services#video",
+                    Has(SiteSettingsService.Keys.PlatformBunnyAccountKey)),
+                new("Google Calendar i Meet", "Klient OAuth platformy — trener tylko klika „Połącz z Google”.", "bi-google", "/panel/setup/services#google",
+                    Has(SiteSettingsService.Keys.PlatformGoogleClientId), Optional: true)
+            ]),
+            new("Płatności",
+            [
+                new("Abonamenty trenerów (Stripe)", "Płatności za plany cenowe.", "bi-credit-card-2-front", "/panel/stripe", Has(SiteSettingsService.Keys.StripeSecretKey)),
+                new("Sklep usług (PayU / Przelewy24)", "Płatności trenerów za SMS-y, wideo i usługi.", "bi-wallet2", "/panel/payment-gateways",
+                    Has(SiteSettingsService.Keys.PayuPosId) || Has(SiteSettingsService.Keys.P24MerchantId))
+            ]),
+            new("Bezpieczeństwo",
+            [
+                new("Izolacja trenerów", "Własne sekrety instancji, limity zasobów i poczty — trenerzy nie wpływają na siebie.", "bi-shield-lock", "/panel/setup/isolation", _isolationOk),
+                new("Konto administratora", "Hasło do Portalu i historia logowań.", "bi-person-lock", "/panel/change-password", true),
+                new("Logi logowań", "Kto i skąd logował się do Portalu.", "bi-journal-text", "/panel/login-logs", true, Optional: true)
+            ])
+        ];
+        var required = _groups.SelectMany(g => g.Items).Where(i => !i.Optional).ToList();
+        _total = required.Count;
+        _done = required.Count(i => i.Done);
+        _loading = false;
+    }
+}

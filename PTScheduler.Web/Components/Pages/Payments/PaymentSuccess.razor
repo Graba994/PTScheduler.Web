@@ -1,0 +1,120 @@
+@page "/payment/success"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject IPaymentService PaymentService
+@inject IReceiptService ReceiptService
+@inject IJSRuntime JS
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Płatność zakończona" />
+
+<div class="d-flex justify-content-center py-5">
+    @if (_loading)
+    {
+        <div class="spinner-border text-primary"></div>
+    }
+    else if (_order is null)
+    {
+        <div class="text-center">
+            <i class="bi bi-exclamation-triangle text-warning" style="font-size:3rem"></i>
+            <h4 class="mt-3">Zamówienie nie znalezione</h4>
+            <p class="text-muted">Nie udało się odnaleźć zamówienia. Sprawdź <a href="/my/orders">moje zamówienia</a>.</p>
+        </div>
+    }
+    else
+    {
+        <div class="card" style="max-width:480px;width:100%">
+            <div class="card-body text-center">
+                @if (_order.Status == "Paid")
+                {
+                    <div class="text-success mb-3"><i class="bi bi-check-circle-fill" style="font-size:3.5rem"></i></div>
+                    <h4 class="fw-bold">Płatność zakończona!</h4>
+                    <p class="text-muted">Twoje zamówienie zostało opłacone.</p>
+                }
+                else if (_order.Status == "Pending")
+                {
+                    <div class="text-warning mb-3"><i class="bi bi-hourglass-split" style="font-size:3.5rem"></i></div>
+                    <h4 class="fw-bold">Oczekiwanie na płatność</h4>
+                    <p class="text-muted">Płatność jest w trakcie przetwarzania.</p>
+                }
+                else
+                {
+                    <div class="text-secondary mb-3"><i class="bi bi-receipt" style="font-size:3.5rem"></i></div>
+                    <h4 class="fw-bold">Zamówienie</h4>
+                }
+
+                <div class="border rounded p-3 mt-3 text-start">
+                    <div class="d-flex justify-content-between mb-2">
+                        <span class="text-muted">Produkt</span>
+                        <span class="fw-semibold">@_order.ItemTitle</span>
+                    </div>
+                    @if (_order.HasDiscount)
+                    {
+                        <div class="d-flex justify-content-between mb-1">
+                            <span class="text-muted">Cena</span>
+                            <span class="text-decoration-line-through text-muted">@_order.OriginalAmount!.Value.ToString("0.00") @_order.Currency</span>
+                        </div>
+                        <div class="d-flex justify-content-between mb-1">
+                            <span class="text-muted">Rabat <span class="badge bg-success-subtle text-success-emphasis">@_order.CouponCode</span></span>
+                            <span class="text-success">−@_order.DiscountAmount!.Value.ToString("0.00") @_order.Currency</span>
+                        </div>
+                        <hr class="my-2" />
+                    }
+                    <div class="d-flex justify-content-between">
+                        <span class="text-muted">Do zapłaty</span>
+                        <span class="fw-bold fs-5">@_order.Amount.ToString("0.00") @_order.Currency</span>
+                    </div>
+                </div>
+
+                <div class="d-flex gap-2 justify-content-center mt-4 flex-wrap">
+                    @if (_order.Kind == "Course")
+                    {
+                        <a href="/my/courses" class="btn btn-primary"><i class="bi bi-play-fill me-1"></i>Moje kursy</a>
+                    }
+                    else
+                    {
+                        <a href="/my/packages" class="btn btn-primary"><i class="bi bi-box-seam me-1"></i>Moje pakiety</a>
+                    }
+                    @if (_order.Status == "Paid")
+                    {
+                        <button class="btn btn-outline-primary" @onclick="DownloadReceipt" disabled="@_downloading">
+                            @if (_downloading) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            <i class="bi bi-file-earmark-pdf me-1"></i>Pobierz potwierdzenie
+                        </button>
+                    }
+                    <a href="/my/orders" class="btn btn-outline-secondary"><i class="bi bi-receipt me-1"></i>Zamówienia</a>
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "order")]
+    public string? ExtOrderId { get; set; }
+
+    private bool _loading = true;
+    private bool _downloading;
+    private OrderDto? _order;
+
+    protected override async Task OnInitializedAsync()
+    {
+        if (!string.IsNullOrEmpty(ExtOrderId))
+            _order = await PaymentService.GetOrderByExtAsync(ExtOrderId);
+        _loading = false;
+    }
+
+    private async Task DownloadReceipt()
+    {
+        if (_order is null) return;
+        _downloading = true;
+        try
+        {
+            var (bytes, fileName) = await ReceiptService.GenerateReceiptAsync(_order.Id);
+            await JS.InvokeVoidAsync("PTExport.downloadCsv", fileName, bytes);
+        }
+        catch { }
+        finally { _downloading = false; }
+    }
+}

@@ -8,8 +8,9 @@
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
 @using System.Globalization
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Dostępność trenera" />
 
@@ -52,7 +53,30 @@
                                 <label class="form-label">Okno anulowania przez klienta (godz.) <HintButton Title="Okno anulowania" Text="Klient może samodzielnie anulować wizytę tylko jeśli pozostało więcej niż X godzin do jej rozpoczęcia. Wpisz 0, aby zezwolić na anulowanie w dowolnym momencie bez ograniczeń." /></label>
                                 <input type="number" class="form-control" min="0" max="168"
                                        @bind="_cfg.CancellationWindowHours" />
-                                <div class="form-text">0 = brak ograniczeń. Klient może anulować do X godz. przed treningiem.</div>
+                                <div class="form-text">0 = brak ograniczeń. Bezpłatne odwołanie do X godz. przed treningiem.</div>
+                            </div>
+                            <div class="col-md-4">
+                                <label class="form-label">Późne odwołanie przez klienta <HintButton Title="Późne odwołanie" Text="Co się dzieje, gdy klient odwołuje wizytę później niż okno bezpłatnego odwołania. Standardem w treningu personalnym jest pobranie sesji z pakietu." /></label>
+                                <select class="form-select" @bind="_cfg.LateCancellationPolicy" disabled="@(_cfg.CancellationWindowHours == 0)">
+                                    <option value="@LateCancellationPolicy.Block">Blokuj — tylko przez kontakt z trenerem</option>
+                                    <option value="@LateCancellationPolicy.ChargeSession">Pozwól, ale sesja przepada</option>
+                                    <option value="@LateCancellationPolicy.Refund">Pozwól bez konsekwencji</option>
+                                </select>
+                            </div>
+                            <div class="col-md-4 d-flex align-items-end">
+                                <div class="form-check form-switch mb-2">
+                                    <input class="form-check-input" type="checkbox" id="noShowCharges"
+                                           @bind="_cfg.NoShowChargesSession" />
+                                    <label class="form-check-label" for="noShowCharges">
+                                        Nieobecność (No-show) pobiera sesję
+                                    </label>
+                                </div>
+                            </div>
+                            <div class="col-12">
+                                <div class="alert alert-light border small mb-0">
+                                    <i class="bi bi-info-circle me-1"></i><strong>Tak zobaczą to klienci:</strong>
+                                    @PTScheduler.Application.Scheduling.CancellationRules.Describe(_cfg)
+                                </div>
                             </div>
                             <div class="col-md-4 d-flex align-items-end">
                                 <div class="form-check form-switch mb-2">
@@ -81,7 +105,8 @@
                         <div class="row g-3 align-items-end">
                             <div class="col-md-3">
                                 <label class="form-label">Typ okna <HintButton Title="Cykliczny vs jednorazowy" Text="Cykliczny powtarza się co tydzień w wybranym dniu — idealny dla stałego grafiku. Jednorazowy obowiązuje tylko konkretnego dnia, np. wyjątkowy termin w wakacje lub zastępstwo za inny dzień." /></label>
-                                <select class="form-select" @bind="_newIsRecurring">
+                                <select class="form-select" value="@(_newIsRecurring ? "true" : "false")"
+                                        @onchange="@(e => _newIsRecurring = e.Value?.ToString() == "true")">
                                     <option value="true">Cykliczny (dzień tygodnia)</option>
                                     <option value="false">Jednorazowy (data)</option>
                                 </select>
@@ -117,11 +142,11 @@
 
                             <div class="col-md-2">
                                 <label class="form-label">Od</label>
-                                <input type="time" class="form-control" @bind="_newStartTime" />
+                                <TimePicker @bind-Value="_newStartTime" />
                             </div>
                             <div class="col-md-2">
                                 <label class="form-label">Do</label>
-                                <input type="time" class="form-control" @bind="_newEndTime" />
+                                <TimePicker @bind-Value="_newEndTime" />
                             </div>
                             <div class="col-md-3">
                                 <label class="form-label">Etykieta (opcjonalna)</label>

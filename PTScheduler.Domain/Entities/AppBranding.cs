@@ -16,4 +16,13 @@ public class AppBranding
     public string? PwaBannerBody { get; set; }
     public string? PwaBannerButton { get; set; }
     public string? PwaIconPath { get; set; }
+
+    // Strona logowania
+    public string? LoginTitle { get; set; }
+    public string? LoginSubtitle { get; set; }
+    public string? LoginBackgroundPath { get; set; }
+
+    public bool SetupCompleted { get; set; }
+    public string? SetupMode { get; set; }
+    public DateTime? SetupCompletedAt { get; set; }
 }

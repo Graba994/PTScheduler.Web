@@ -1,0 +1,271 @@
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Surveys
+@using PTScheduler.Domain.Enums
+@using Microsoft.Extensions.Logging
+@inject ISurveyService Surveys
+@inject IAppClock Clock
+@inject IJSRuntime JS
+@inject ILoggerFactory LoggerFactory
+
+@* Trener: ankieta zdrowotna klienta i statystyki / wnioski z ankiet po treningu. *@
+
+@if (_loading)
+{
+    <div class="text-center text-muted py-4"><div class="spinner-border"></div></div>
+}
+else
+{
+    <!-- Ankieta zdrowotna -->
+    <div class="card shadow-sm mb-3">
+        <div class="card-body p-4">
+            <div class="d-flex justify-content-between align-items-start flex-wrap gap-2 mb-2">
+                <h6 class="card-title mb-0"><i class="bi bi-clipboard2-pulse me-2 text-primary"></i>Ankieta zdrowotna</h6>
+                @if (_health is not null)
+                {
+                    <div class="d-flex align-items-center gap-2">
+                        <span class="text-muted small">wypełniona @Clock.ToWallClock(_health.SubmittedAtUtc).ToString("dd.MM.yyyy")</span>
+                        @if (_health.ReviewedAtUtc is null)
+                        {
+                            <button class="btn btn-sm btn-outline-success" @onclick="() => ReviewAsync(_health)">
+                                <i class="bi bi-check2 me-1"></i>Oznacz jako przejrzaną
+                            </button>
+                        }
+                        else
+                        {
+                            <span class="badge bg-success-subtle text-success-emphasis border"><i class="bi bi-check2 me-1"></i>Przejrzana</span>
+                        }
+                    </div>
+                }
+            </div>
+
+            @if (_health is null)
+            {
+                <p class="text-muted small mb-0">
+                    Klient nie wypełnił jeszcze ankiety. Zobaczy ją po zalogowaniu@(_healthEnabled ? "" : " (obecnie wyłączona w Admin → Ankiety)").
+                </p>
+            }
+            else
+            {
+                var parqYes = _health.Answers.Count(a => a.Key.StartsWith("parq_") && a.Bool == true);
+                @if (parqYes > 0)
+                {
+                    <div class="alert alert-danger small py-2">
+                        <i class="bi bi-exclamation-octagon me-1"></i>
+                        PAR-Q+: @parqYes @(parqYes == 1 ? "odpowiedź" : "odpowiedzi") „Tak”. Zgodnie z PAR-Q+ przed zwiększaniem intensywności
+                        klient powinien skonsultować się z lekarzem — dopasuj plan i poproś o zaświadczenie, jeśli to potrzebne.
+                    </div>
+                }
+                else if (_health.FlagCount > 0)
+                {
+                    <div class="alert alert-warning small py-2"><i class="bi bi-exclamation-triangle me-1"></i>Odpowiedzi wymagające uwagi: @_health.FlagCount (zaznaczone poniżej).</div>
+                }
+                else
+                {
+                    <div class="alert alert-success small py-2"><i class="bi bi-check-circle me-1"></i>Brak zgłoszonych przeciwwskazań.</div>
+                }
+
+                string? section = null;
+                <dl class="mb-0">
+                    @foreach (var a in _health.Answers.Where(a => !a.IsEmpty && a.Key != "consent"))
+                    {
+                        if (a.Section != section && !string.IsNullOrEmpty(a.Section))
+                        {
+                            <div class="survey-section">@a.Section</div>
+                        }
+                        section = a.Section;
+                        <div class="row g-1 py-1 @(a.Flagged ? "survey-answer-flagged" : "")">
+                            <dt class="col-12 col-md-7 fw-normal small text-muted">@a.Label</dt>
+                            <dd class="col-12 col-md-5 mb-0 small @(a.Flagged ? "survey-flag" : "fw-semibold")" style="white-space:pre-wrap">
+                                @if (a.Flagged) { <i class="bi bi-exclamation-triangle-fill me-1"></i> }
+                                @a.Display
+                            </dd>
+                        </div>
+                    }
+                </dl>
+            }
+        </div>
+    </div>
+
+    <!-- Ankiety po treningu -->
+    <div class="card shadow-sm">
+        <div class="card-body p-4">
+            <h6 class="card-title mb-3"><i class="bi bi-activity me-2 text-primary"></i>Po treningu — statystyki i uwagi</h6>
+
+            @if (_stats is null || _stats.Responses == 0)
+            {
+                <p class="text-muted small mb-0">
+                    Brak ankiet po treningu. Klient wypełnia je po „Zakończ trening” w zakładce Trenuj@(_postEnabled ? "." : " (obecnie wyłączone w Admin → Ankiety).")
+                </p>
+            }
+            else
+            {
+                @if (_stats.Insights.Count > 0)
+                {
+                    <div class="d-flex flex-column gap-2 mb-3">
+                        @foreach (var i in _stats.Insights)
+                        {
+                            <div class="alert @InsightClass(i.Level) small py-2 mb-0">
+                                <i class="bi @InsightIcon(i.Level) me-1"></i>@i.Text
+                            </div>
+                        }
+                    </div>
+                }
+
+                <div class="row g-2 mb-3">
+                    @foreach (var t in _stats.Tiles)
+                    {
+                        <div class="col-6 col-md-4 col-xl-3">
+                            <div class="border rounded p-2 h-100">
+                                <div class="text-muted" style="font-size:.72rem">@t.Label</div>
+                                <div class="fs-5 fw-bold">
+                                    @(t.Average?.ToString("0.#") ?? "—")<span class="text-muted fs-6 fw-normal">@(t.Unit is null ? $"/{t.Max}" : $" {t.Unit}")</span>
+                                </div>
+                                <div style="font-size:.7rem" class="text-muted">
+                                    30 dni · @t.Count odp.
+                                    @if (t.Average is { } now && t.Previous is { } before && now != before)
+                                    {
+                                        <span class="ms-1">@(now > before ? "▲" : "▼") @Math.Abs(now - before).ToString("0.#")</span>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+                    }
+                    @if (_stats.Acwr is { } acwr)
+                    {
+                        <div class="col-6 col-md-4 col-xl-3">
+                            <div class="border rounded p-2 h-100">
+                                <div class="text-muted" style="font-size:.72rem" title="Obciążenie z 7 dni / średnie tygodniowe z 28 dni">ACWR (obciążenie)</div>
+                                <div class="fs-5 fw-bold @(acwr > 1.5m ? "text-danger" : acwr > 1.3m || acwr < 0.8m ? "text-warning" : "text-success")">@acwr.ToString("0.00")</div>
+                                <div style="font-size:.7rem" class="text-muted">bezpiecznie 0,8–1,3</div>
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                @if (_stats.Series.Count(p => p.Rpe is not null) >= 2)
+                {
+                    <div class="text-muted small mb-1">RPE ostatnich treningów</div>
+                    <div style="position:relative;height:200px" class="mb-3"><canvas id="@_rpeCanvasId"></canvas></div>
+                }
+
+                @if (_stats.Comments.Count > 0)
+                {
+                    <div class="text-muted small mb-1">Uwagi klienta</div>
+                    <ul class="list-unstyled small mb-3">
+                        @foreach (var (date, text) in _stats.Comments)
+                        {
+                            <li class="mb-1"><span class="text-muted me-2">@date.ToString("dd.MM")</span>@text</li>
+                        }
+                    </ul>
+                }
+
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle small mb-0">
+                        <thead class="text-muted">
+                            <tr><th>Dzień</th><th>RPE</th><th>Czas</th><th>Energia</th><th>Sen</th><th>Zakwasy</th><th>Ból</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var r in _recent)
+                            {
+                                <tr class="@(r.FlagCount > 0 ? "table-warning" : "")">
+                                    <td>@r.WorkoutDate?.ToString("dd.MM")</td>
+                                    <td>@Num(r, SurveyKeys.Rpe)</td>
+                                    <td>@Num(r, SurveyKeys.Duration)</td>
+                                    <td>@Num(r, SurveyKeys.Energy)</td>
+                                    <td>@Num(r, SurveyKeys.Sleep)</td>
+                                    <td>@Num(r, SurveyKeys.Soreness)</td>
+                                    <td>
+                                        @if (r[SurveyKeys.Pain]?.Bool == true)
+                                        {
+                                            <span class="survey-flag" title="@r[SurveyKeys.PainLocation]?.Text">Tak</span>
+                                        }
+                                        else { <span class="text-muted">nie</span> }
+                                    </td>
+                                    <td class="text-end">
+                                        @if (r.FlagCount > 0 && r.ReviewedAtUtc is null)
+                                        {
+                                            <button class="btn btn-sm btn-link p-0" @onclick="() => ReviewAsync(r)">przejrzane</button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public int ClientId { get; set; }
+    [Parameter, EditorRequired] public string CurrentUserId { get; set; } = string.Empty;
+
+    private bool _loading = true;
+    private bool _healthEnabled;
+    private bool _postEnabled;
+    private SurveyResponseDto? _health;
+    private PostWorkoutStats? _stats;
+    private List<SurveyResponseDto> _recent = [];
+    private bool _chartPending;
+    private readonly string _rpeCanvasId = $"rpe-{Guid.NewGuid():N}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        try
+        {
+            _healthEnabled = (await Surveys.GetTemplateAsync(SurveyKind.HealthIntake)).IsEnabled;
+            _postEnabled = (await Surveys.GetTemplateAsync(SurveyKind.PostWorkout)).IsEnabled;
+            _health = await Surveys.GetLatestAsync(ClientId, SurveyKind.HealthIntake);
+            _stats = await Surveys.GetPostWorkoutStatsAsync(ClientId);
+            _recent = (await Surveys.GetResponsesAsync(ClientId, SurveyKind.PostWorkout, 12))
+                .OrderByDescending(r => r.WorkoutDate).ToList();
+            _chartPending = true;
+        }
+        catch (Exception ex)
+        {
+            LoggerFactory.CreateLogger("ClientSurveysPanel").LogError(ex, "Błąd ładowania ankiet klienta {ClientId}.", ClientId);
+        }
+        _loading = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_chartPending || _loading || _stats is null) return;
+        _chartPending = false;
+        var points = _stats.Series.Where(p => p.Rpe is not null).ToList();
+        if (points.Count < 2) return;
+        try
+        {
+            await JS.InvokeVoidAsync("PTChart.renderLine", _rpeCanvasId,
+                points.Select(p => p.Date.ToString("dd.MM")).ToArray(),
+                points.Select(p => p.Rpe!.Value).ToArray(), "RPE", "");
+        }
+        catch { }
+    }
+
+    private async Task ReviewAsync(SurveyResponseDto r)
+    {
+        await Surveys.MarkReviewedAsync(r.Id, CurrentUserId);
+        r.ReviewedAtUtc = DateTime.UtcNow;
+    }
+
+    private static string Num(SurveyResponseDto r, string key) => r[key]?.Number?.ToString("0.#") ?? "—";
+
+    private static string InsightClass(InsightLevel l) => l switch
+    {
+        InsightLevel.Danger => "alert-danger",
+        InsightLevel.Warning => "alert-warning",
+        InsightLevel.Positive => "alert-success",
+        _ => "alert-info"
+    };
+
+    private static string InsightIcon(InsightLevel l) => l switch
+    {
+        InsightLevel.Danger => "bi-exclamation-octagon",
+        InsightLevel.Warning => "bi-exclamation-triangle",
+        InsightLevel.Positive => "bi-hand-thumbs-up",
+        _ => "bi-info-circle"
+    };
+}

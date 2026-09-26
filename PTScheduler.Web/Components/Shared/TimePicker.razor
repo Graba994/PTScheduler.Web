@@ -1,0 +1,153 @@
+@inject IJSRuntime JS
+
+<div class="tp @(Small ? "tp-sm" : "")" @onclick:stopPropagation="true">
+    <button type="button"
+            class="tp-trigger form-control @(Small ? "form-control-sm" : "")"
+            @onclick="Toggle">
+        <i class="bi bi-clock tp-icon"></i>
+        <span class="tp-time">@Value.ToString("HH:mm")</span>
+        <svg class="tp-caret" viewBox="0 0 12 12" fill="none">
+            <path d="M3 5l3-2.5L9 5M3 7l3 2.5L9 7" stroke="currentColor" stroke-width="1.5"
+                  stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+    </button>
+
+    @if (_open)
+    {
+        <div class="tp-overlay" @onclick="Close"></div>
+        <div class="tp-drop">
+            <div class="tp-col">
+                <div class="tp-hdr">Godz.</div>
+                <div class="tp-scroll" id="@_hId">
+                    @for (int h = 0; h < 24; h++)
+                    {
+                        var hour = h;
+                        <button type="button"
+                                class="tp-cell @(hour == Value.Hour ? "tp-on" : "")"
+                                @onclick="() => Pick(hour, Value.Minute)">
+                            @hour.ToString("D2")
+                        </button>
+                    }
+                </div>
+            </div>
+            <div class="tp-div"></div>
+            <div class="tp-col">
+                <div class="tp-hdr">Min.</div>
+                <div class="tp-scroll" id="@_mId">
+                    @for (int m = 0; m < 60; m += Step)
+                    {
+                        var minute = m;
+                        <button type="button"
+                                class="tp-cell @(minute == Value.Minute ? "tp-on" : "")"
+                                @onclick="() => Pick(Value.Hour, minute)">
+                            @minute.ToString("D2")
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+</div>
+
+<style>
+    .tp { position: relative; display: inline-block; width: 100%; }
+    .tp-trigger {
+        display: inline-flex !important; align-items: center; gap: 0.4rem;
+        cursor: pointer; text-align: left; font-variant-numeric: tabular-nums;
+    }
+    .tp-trigger:focus { border-color: var(--c-primary); box-shadow: 0 0 0 3px var(--c-focus-ring); }
+    .tp-icon { color: var(--c-primary); font-size: 0.9em; flex-shrink: 0; }
+    .tp-time { flex: 1; font-weight: 600; font-size: 1.05em; letter-spacing: 0.04em; }
+    .tp-caret { width: 12px; height: 12px; opacity: 0.4; flex-shrink: 0; }
+    .tp.tp-sm .tp-time { font-size: 0.92em; }
+    .tp.tp-sm .tp-icon { font-size: 0.82em; }
+
+    .tp-overlay { position: fixed; inset: 0; z-index: 1040; }
+    .tp-drop {
+        position: absolute; top: calc(100% + 6px); left: 0; z-index: 1050;
+        display: flex; background: var(--bs-body-bg, #fff);
+        border: 1px solid var(--bs-border-color, #dee2e6);
+        border-radius: 12px;
+        box-shadow: 0 12px 32px rgba(0,0,0,0.12), 0 2px 6px rgba(0,0,0,0.06);
+        animation: tp-in 0.15s ease-out;
+        overflow: hidden;
+    }
+    @@keyframes tp-in {
+        from { opacity: 0; transform: translateY(-6px) scale(0.98); }
+        to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    .tp-col { display: flex; flex-direction: column; min-width: 72px; }
+    .tp-hdr {
+        padding: 10px 0 6px; text-align: center;
+        font-size: 0.68rem; font-weight: 700; text-transform: uppercase;
+        letter-spacing: 0.1em; color: var(--bs-secondary-color, #6c757d);
+    }
+    .tp-scroll {
+        max-height: 252px; overflow-y: auto; padding: 2px 4px 6px;
+        scrollbar-width: thin;
+        scrollbar-color: color-mix(in srgb, var(--bs-body-color, #333) 15%, transparent) transparent;
+    }
+    .tp-scroll::-webkit-scrollbar { width: 4px; }
+    .tp-scroll::-webkit-scrollbar-track { background: transparent; }
+    .tp-scroll::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--bs-body-color, #333) 15%, transparent); border-radius: 2px; }
+
+    .tp-cell {
+        all: unset; display: block; width: 100%; box-sizing: border-box;
+        padding: 5px 8px; text-align: center; cursor: pointer;
+        border-radius: 8px; font-variant-numeric: tabular-nums;
+        font-size: 0.875rem; font-weight: 500; line-height: 1.4;
+        transition: background 0.1s, color 0.1s;
+    }
+    .tp-cell:hover:not(.tp-on) { background: var(--c-primary-light); color: var(--c-primary); }
+    .tp-cell.tp-on {
+        background: var(--c-primary); color: var(--c-primary-text, #fff); font-weight: 700;
+    }
+
+    .tp-div { width: 1px; background: var(--bs-border-color, #dee2e6); margin: 10px 0 6px; }
+</style>
+
+@code {
+    [Parameter] public TimeOnly Value { get; set; } = new(8, 0);
+    [Parameter] public EventCallback<TimeOnly> ValueChanged { get; set; }
+    [Parameter] public bool Small { get; set; }
+    [Parameter] public int Step { get; set; } = 5;
+
+    private bool _open;
+    private bool _scrollPending;
+    private readonly string _hId = $"tp-h-{Guid.NewGuid():N}";
+    private readonly string _mId = $"tp-m-{Guid.NewGuid():N}";
+
+    private void Toggle()
+    {
+        _open = !_open;
+        if (_open) _scrollPending = true;
+    }
+
+    private void Close() => _open = false;
+
+    private async Task Pick(int hour, int minute)
+    {
+        Value = new TimeOnly(hour, minute);
+        await ValueChanged.InvokeAsync(Value);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_scrollPending) return;
+        _scrollPending = false;
+        try
+        {
+            await JS.InvokeVoidAsync("eval",
+                $"setTimeout(function(){{" +
+                $"var h=document.getElementById('{_hId}');" +
+                $"var a=h&&h.querySelector('.tp-on');" +
+                $"if(a&&h)h.scrollTop=a.offsetTop-h.clientHeight/2+a.clientHeight/2;" +
+                $"var m=document.getElementById('{_mId}');" +
+                $"var b=m&&m.querySelector('.tp-on');" +
+                $"if(b&&m)m.scrollTop=b.offsetTop-m.clientHeight/2+b.clientHeight/2;" +
+                $"}},16)");
+        }
+        catch { }
+    }
+}

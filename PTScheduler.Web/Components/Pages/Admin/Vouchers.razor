@@ -1,0 +1,223 @@
+@page "/admin/vouchers"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Marketing
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Entities
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@inject IGiftVoucherService VoucherService
+@inject IMarketingSettingsService MarketingSettings
+@inject IPackageOfferService OfferService
+@inject IPermissionService Permission
+@inject AuthenticationStateProvider AuthState
+@inject IAppClock Clock
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Bony podarunkowe" />
+
+<div class="page-header mb-3">
+    <h4 class="page-title mb-0"><i class="bi bi-gift me-2" style="color:var(--c-primary)"></i>Bony podarunkowe</h4>
+</div>
+
+@if (_denied)
+{
+    <div class="alert alert-danger"><i class="bi bi-shield-lock me-2"></i>Brak uprawnień do zarządzania bonami.</div>
+}
+else if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    @if (_message is not null)
+    {
+        <div class="alert @(_ok ? "alert-success" : "alert-danger") alert-dismissible py-2 small">
+            @_message
+            <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button>
+        </div>
+    }
+    <div class="row g-3">
+        <div class="col-lg-5">
+            <div class="card mb-3">
+                <div class="card-body">
+                    <h6 class="fw-semibold">Sprzedaż online</h6>
+                    <div class="form-check form-switch mb-2">
+                        <input class="form-check-input" type="checkbox" id="vOn" @bind="_s.VouchersEnabled" />
+                        <label class="form-check-label" for="vOn">Klienci mogą kupować bony w aplikacji</label>
+                    </div>
+                    <label class="form-label small" for="vAmounts">Kwoty bonów (zł, po przecinku)</label>
+                    <input id="vAmounts" class="form-control form-control-sm mb-2" @bind="_s.VoucherAmounts" placeholder="100,200,300,500" />
+                    <label class="form-label small" for="vMonths">Ważność (miesiące)</label>
+                    <input id="vMonths" type="number" min="1" max="36" class="form-control form-control-sm mb-2" style="max-width:120px" @bind="_s.VoucherValidMonths" />
+                    <div class="form-text mb-2">Bony na pakiet to Twoje aktywne pakiety na sprzedaż. Płatność idzie przez skonfigurowane bramki.</div>
+                    <button class="btn btn-primary btn-sm" @onclick="SaveSettingsAsync">Zapisz</button>
+                </div>
+            </div>
+
+            <div class="card">
+                <div class="card-body">
+                    <h6 class="fw-semibold">Wystaw bon ręcznie</h6>
+                    <p class="small text-muted">Np. sprzedany na miejscu albo w prezencie od studia. Bon jest od razu aktywny.</p>
+                    <select class="form-select form-select-sm mb-2" @bind="KindValue" aria-label="Rodzaj bonu">
+                        <option value="Amount">Na kwotę</option>
+                        <option value="Package">Na pakiet</option>
+                    </select>
+                    @if (_req.Kind == GiftVoucherKind.Amount)
+                    {
+                        <div class="input-group input-group-sm mb-2">
+                            <input type="number" min="1" class="form-control" @bind="_req.Amount" aria-label="Kwota" />
+                            <span class="input-group-text">zł</span>
+                        </div>
+                    }
+                    else
+                    {
+                        <select class="form-select form-select-sm mb-2" @bind="_req.PackageOfferId" aria-label="Pakiet">
+                            <option value="">— wybierz pakiet —</option>
+                            @foreach (var o in _offers)
+                            {
+                                <option value="@o.Id">@o.Name (@o.SessionsCount × @o.SessionTypeName, @o.Price.ToString("0.##") zł)</option>
+                            }
+                        </select>
+                    }
+                    <input class="form-control form-control-sm mb-2" maxlength="80" placeholder="Dla kogo" @bind="_req.RecipientName" aria-label="Dla kogo" />
+                    <input class="form-control form-control-sm mb-2" maxlength="80" placeholder="Od kogo" @bind="_req.FromName" aria-label="Od kogo" />
+                    <input class="form-control form-control-sm mb-2" maxlength="300" placeholder="Życzenia (opcjonalnie)" @bind="_req.Message" aria-label="Życzenia" />
+                    <button class="btn btn-outline-primary btn-sm" @onclick="IssueAsync"><i class="bi bi-plus-lg me-1"></i>Wystaw bon</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-lg-7">
+            <div class="card">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-2">
+                        <h6 class="fw-semibold mb-0">Bony</h6>
+                        <span class="small text-muted">sprzedane: @_list.Count(v => !v.IssuedManually) · wystawione: @_list.Count(v => v.IssuedManually)</span>
+                    </div>
+                    @if (_list.Count == 0)
+                    {
+                        <p class="text-muted small mb-0">Brak bonów.</p>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead class="table-light"><tr><th>Bon</th><th>Kod</th><th>Status</th><th></th></tr></thead>
+                                <tbody>
+                                    @foreach (var v in _list)
+                                    {
+                                        <tr>
+                                            <td>
+                                                <div class="fw-semibold small">@v.Title</div>
+                                                <div class="small text-muted">
+                                                    @(v.IssuedManually ? "wystawiony ręcznie" : v.BuyerEmail)
+                                                    @if (!string.IsNullOrWhiteSpace(v.RecipientName)) { <span> · dla @v.RecipientName</span> }
+                                                </div>
+                                            </td>
+                                            <td><code class="small">@v.Code</code></td>
+                                            <td class="small">
+                                                <span class="badge @StatusCss(v)">@StatusLabel(v)</span>
+                                                @if (v.RedeemedByName is not null) { <div class="text-muted">@v.RedeemedByName</div> }
+                                                else if (v.ExpiresAt is DateTime exp && v.IsUsable) { <div class="text-muted">do @Clock.ToWallClock(exp).ToString("dd.MM.yyyy")</div> }
+                                            </td>
+                                            <td class="text-end text-nowrap">
+                                                <a class="btn btn-sm btn-link p-0 me-2" href="/vouchers/@v.Id/pdf" target="_blank" title="PDF"><i class="bi bi-file-earmark-pdf"></i></a>
+                                                @if (v.IsUsable)
+                                                {
+                                                    <button class="btn btn-sm btn-link p-0 me-2" @onclick="() => MarkUsedAsync(v.Id)" title="Oznacz jako wykorzystany"><i class="bi bi-check2-square"></i></button>
+                                                    <button class="btn btn-sm btn-link text-danger p-0" @onclick="() => CancelAsync(v.Id)" title="Anuluj bon"><i class="bi bi-x-circle"></i></button>
+                                                }
+                                            </td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private bool _denied;
+    private string _userId = "";
+    private string? _message;
+    private bool _ok;
+    private MarketingSettingsDto _s = new();
+    private List<PackageOfferDto> _offers = [];
+    private List<GiftVoucherDto> _list = [];
+    private GiftVoucherRequest _req = new() { Amount = 200 };
+
+    private string KindValue
+    {
+        get => _req.Kind.ToString();
+        set => _req.Kind = Enum.TryParse<GiftVoucherKind>(value, out var k) ? k : GiftVoucherKind.Amount;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        var role = auth.User.IsInRole(Roles.Admin) ? Roles.Admin
+                 : auth.User.IsInRole(Roles.Trainer) ? Roles.Trainer
+                 : auth.User.IsInRole(Roles.Subordinate) ? Roles.Subordinate : string.Empty;
+        if (!await Permission.HasPermissionAsync(role, PTScheduler.Domain.Constants.Permissions.ManagePayments))
+        {
+            _denied = true; _loading = false; return;
+        }
+        _s = await MarketingSettings.GetAsync();
+        _offers = await OfferService.GetAllAsync();
+        _list = await VoucherService.GetAllAsync();
+        _loading = false;
+    }
+
+    private async Task SaveSettingsAsync()
+    {
+        var current = await MarketingSettings.GetAsync();
+        current.VouchersEnabled = _s.VouchersEnabled;
+        current.VoucherAmounts = _s.VoucherAmounts;
+        current.VoucherValidMonths = _s.VoucherValidMonths;
+        await MarketingSettings.SaveAsync(current);
+        _s = await MarketingSettings.GetAsync();
+        Show("Zapisano ustawienia bonów.", true);
+    }
+
+    private async Task IssueAsync()
+    {
+        var (ok, error, voucher) = await VoucherService.IssueAsync(_userId, _req);
+        if (!ok) { Show(error ?? "Nie udało się wystawić bonu.", false); return; }
+        Show($"Wystawiono bon {voucher!.Code} — pobierz PDF z listy.", true);
+        _req = new() { Amount = 200, Kind = _req.Kind };
+        _list = await VoucherService.GetAllAsync();
+    }
+
+    private async Task MarkUsedAsync(int id)
+    {
+        await VoucherService.MarkRedeemedAsync(id);
+        _list = await VoucherService.GetAllAsync();
+    }
+
+    private async Task CancelAsync(int id)
+    {
+        await VoucherService.CancelAsync(id);
+        _list = await VoucherService.GetAllAsync();
+    }
+
+    private void Show(string message, bool ok) { _message = message; _ok = ok; }
+
+    private static string StatusLabel(GiftVoucherDto v) => v.Status switch
+    {
+        GiftVoucherStatus.Redeemed => "Wykorzystany",
+        GiftVoucherStatus.Cancelled => "Anulowany",
+        _ when v.CouponUsed => "Wykorzystany w sklepie",
+        _ when !v.IsUsable => "Wygasł",
+        _ => "Aktywny"
+    };
+
+    private static string StatusCss(GiftVoucherDto v) => v.IsUsable
+        ? "bg-success-subtle text-success-emphasis"
+        : "bg-light text-muted border";
+}

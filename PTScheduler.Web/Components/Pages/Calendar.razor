@@ -2,20 +2,25 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize]
 @implements IAsyncDisposable
 @inject IJSRuntime JS
+@using PTScheduler.Application.Scheduling
 @inject ISessionService SessionService
 @inject IClientService ClientService
 @inject IAuditLogService AuditLogService
 @inject ISessionInvitationService InvitationService
+@inject ITrainerAvailabilityService AvailabilityService
+@inject IGoogleCalendarService GoogleCalendar
 @inject ITrainerConfigService TrainerConfigService
+@inject IAppClock Clock
 @inject AuthenticationStateProvider AuthState
 @inject ILogger<Calendar> Logger
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Exceptions
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
 @using PTScheduler.Domain.Enums
 @using System.Globalization
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Kalendarz" />
 
@@ -23,9 +28,12 @@
 
     <!-- Topbar -->
     <div class="cal-topbar">
-        <h4 class="mb-0 fw-bold">
-            <i class="bi bi-calendar3 me-2"></i>Kalendarz
-        </h4>
+        <div class="d-flex align-items-center gap-2">
+            <h4 class="mb-0 fw-bold">
+                <i class="bi bi-calendar3 me-2"></i>Kalendarz
+            </h4>
+            <CalendarFeedButton />
+        </div>
         <div class="cal-filters">
             <button class='cal-filter-chip chip-all @(IsAllActive ? "active" : "")'
                     @onclick='() => ToggleFilter("All")'>Wszystkie</button>
@@ -47,7 +55,7 @@
             </button>
             <button class='cal-filter-chip chip-noshow @(_activeStatuses.Contains("NoShow") ? "active" : "")'
                     @onclick='() => ToggleFilter("NoShow")'>
-                <span class="chip-dot"></span>No-Show
+                <span class="chip-dot"></span>Nieobecność
             </button>
         </div>
     </div>
@@ -94,6 +102,16 @@
                             <i class="bi bi-person"></i>
                             <span>@_selectedSession.TrainerName</span>
                         </div>
+                        @if (!string.IsNullOrWhiteSpace(_selectedSession.MeetingUrl))
+                        {
+                            <div class="session-detail-row">
+                                <i class="bi bi-camera-video"></i>
+                                <a href="@_selectedSession.MeetingUrl" target="_blank" rel="noopener"
+                                   class="btn btn-sm btn-outline-success">
+                                    <i class="bi bi-google me-1"></i>Dołącz do Google Meet
+                                </a>
+                            </div>
+                        }
                         <div class="session-detail-row">
                             <i class="bi bi-circle-fill" style="font-size:.45rem;margin-top:5px"></i>
                             <span class="badge @StatusBadge(_selectedSession.Status)">@StatusLabel(_selectedSession.Status)</span>
@@ -135,7 +153,7 @@
                     {
                         <div class="d-grid gap-2 mt-3">
                             <button class="btn btn-success btn-sm"
-                                    @onclick='() => ChangeStatus(SessionStatus.Completed)' disabled="@_busy">
+                                    @onclick='async () => await ChangeStatus(SessionStatus.Completed)' disabled="@_busy">
                                 <i class="bi bi-check-circle me-1"></i>Oznacz jako ukończona
                             </button>
                             @if (!_confirmNoShow)
@@ -151,7 +169,7 @@
                                     <div class="small fw-semibold mb-2">Oznaczyć jako nieobecność?</div>
                                     <div class="d-flex gap-2 justify-content-center">
                                         <button class="btn btn-warning btn-sm"
-                                                @onclick='() => { _confirmNoShow = false; ChangeStatus(SessionStatus.NoShow); }' disabled="@_busy">
+                                                @onclick='async () => { _confirmNoShow = false; await ChangeStatus(SessionStatus.NoShow); }' disabled="@_busy">
                                             Tak
                                         </button>
                                         <button class="btn btn-outline-secondary btn-sm"
@@ -177,15 +195,33 @@
                                 <div class="p-3 rounded border border-primary-subtle">
                                     <label class="form-label small fw-semibold mb-1">Nowy termin</label>
                                     <input type="datetime-local" class="form-control form-control-sm mb-2"
-                                           @bind="_rescheduleDateTime" @bind:format="yyyy-MM-ddTHH:mm" />
+                                           @bind="_rescheduleDateTime" @bind:format="yyyy-MM-ddTHH:mm"
+                                           @bind:after="() => _rescheduleOverlap = false" />
+                                    @if (_rescheduleOverlap)
+                                    {
+                                        <div class="alert alert-warning py-2 small mb-2">
+                                            Ten termin nachodzi na inną sesję. Możesz nałożyć terminy mimo to.
+                                        </div>
+                                    }
                                     <div class="d-flex gap-2">
-                                        <button class="btn btn-primary btn-sm flex-fill"
-                                                @onclick="ConfirmReschedule" disabled="@_busy">
-                                            @if (_busy) { <span class="spinner-border spinner-border-sm me-1" /> }
-                                            Potwierdź
-                                        </button>
+                                        @if (_rescheduleOverlap)
+                                        {
+                                            <button class="btn btn-warning btn-sm flex-fill"
+                                                    @onclick="() => ConfirmReschedule(true)" disabled="@_busy">
+                                                @if (_busy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                                                Nałóż mimo to
+                                            </button>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-primary btn-sm flex-fill"
+                                                    @onclick="() => ConfirmReschedule(false)" disabled="@_busy">
+                                                @if (_busy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                                                Potwierdź
+                                            </button>
+                                        }
                                         <button class="btn btn-secondary btn-sm"
-                                                @onclick="() => _showRescheduleForm = false">Wróć</button>
+                                                @onclick="() => { _showRescheduleForm = false; _rescheduleOverlap = false; }">Wróć</button>
                                     </div>
                                 </div>
                             }
@@ -195,6 +231,12 @@
                                 <div class="p-3 rounded border border-danger-subtle">
                                     <label class="form-label small mb-1">Powód anulowania (opcjonalny)</label>
                                     <input class="form-control form-control-sm mb-2" @bind="_cancelReason" placeholder="..." />
+                                    <div class="form-check small mb-2">
+                                        <input class="form-check-input" type="checkbox" id="chargeLate" @bind="_chargeLate" />
+                                        <label class="form-check-label" for="chargeLate">
+                                            Późne odwołanie przez klienta — sesja przepada (nie wraca do pakietu)
+                                        </label>
+                                    </div>
                                     <div class="d-flex gap-2">
                                         <button class="btn btn-danger btn-sm flex-fill"
                                                 @onclick="ConfirmCancel" disabled="@_busy">
@@ -307,7 +349,7 @@
 
                     <!-- Client: cancel own session -->
                     @if (_isClientRole && _selectedSession.Status == SessionStatus.Scheduled
-                         && (_cancellationWindowHours == 0 || _selectedSession.StartTime > DateTime.Now.AddHours(_cancellationWindowHours)))
+                         && CancellationRules.ForClient(_trainerCfg, _selectedSession.StartTime, Clock.LocalNow).Allowed)
                     {
                         <div class="mt-3">
                             @if (!_showCancelForm)
@@ -348,11 +390,6 @@
                 </div>
                 <div class="cal-panel-body">
 
-                    <div class="p-2 rounded mb-3" style="background:var(--bs-tertiary-bg)">
-                        <div class="small text-muted">Wybrany termin</div>
-                        <div class="fw-semibold">@_bookingDateTime.ToString("dddd, d MMMM yyyy HH:mm", new CultureInfo("pl-PL"))</div>
-                    </div>
-
                     @if (!string.IsNullOrEmpty(_bookingError))
                     {
                         <div class="alert alert-danger py-2 small">@_bookingError</div>
@@ -371,7 +408,8 @@
 
                     <div class="mb-3">
                         <label class="form-label small fw-semibold mb-1">Rodzaj sesji</label>
-                        <select class="form-select form-select-sm" @bind="_bookingSessionTypeId">
+                        <select class="form-select form-select-sm" @bind="_bookingSessionTypeId"
+                                @bind:after="LoadBookingSlotsAsync">
                             @foreach (var t in _sessionTypes)
                             {
                                 <option value="@t.Id">@t.Name (@t.DurationMinutes min)</option>
@@ -380,9 +418,46 @@
                     </div>
 
                     <div class="mb-3">
-                        <label class="form-label small fw-semibold mb-1">Korekta godziny</label>
-                        <input type="datetime-local" class="form-control form-control-sm"
-                               @bind="_bookingDateTime" @bind:format="yyyy-MM-ddTHH:mm" />
+                        <label class="form-label small fw-semibold mb-1">Termin</label>
+                        <div class="slot-day-nav">
+                            <button class="slot-nav-btn" @onclick="BookingPrevDay"
+                                    disabled="@(_bookingSlotDate <= DateOnly.FromDateTime(StudioClock.Today))">
+                                <i class="bi bi-chevron-left"></i>
+                            </button>
+                            <div class="slot-nav-center">
+                                <div class="slot-nav-weekday">@_bookingSlotDate.ToString("dddd", new CultureInfo("pl-PL"))</div>
+                                <div class="slot-nav-full">@_bookingSlotDate.ToString("d MMMM yyyy", new CultureInfo("pl-PL"))</div>
+                            </div>
+                            <button class="slot-nav-btn" @onclick="BookingNextDay">
+                                <i class="bi bi-chevron-right"></i>
+                            </button>
+                        </div>
+
+                        @if (_loadingBookingSlots)
+                        {
+                            <div class="text-center py-2"><span class="spinner-border spinner-border-sm text-primary"></span></div>
+                        }
+                        else if (_bookingAvailableSlots.Count > 0)
+                        {
+                            <div class="slot-tile-grid">
+                                @foreach (var slot in _bookingAvailableSlots)
+                                {
+                                    var sel = _bookingDateTime != default && slot.Start == _bookingDateTime;
+                                    <button type="button" class="slot-tile @(sel ? "slot-tile-active" : "")"
+                                            @onclick="() => { _bookingDateTime = slot.Start; _bookingOverlap = false; }">
+                                        <div class="slot-tile-time">@slot.Start.ToString("HH:mm")</div>
+                                        <div class="slot-tile-end">— @slot.End.ToString("HH:mm")</div>
+                                    </button>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="slot-empty">
+                                <i class="bi bi-calendar-x"></i>
+                                Brak wolnych terminów w tym dniu
+                            </div>
+                        }
                     </div>
 
                     <div class="mb-4">
@@ -391,12 +466,29 @@
                                   placeholder="Uwagi do sesji..."></textarea>
                     </div>
 
+                    @if (_bookingOverlap)
+                    {
+                        <div class="alert alert-warning py-2 small">
+                            Ten termin nachodzi na inną sesję. Możesz nałożyć terminy mimo to.
+                        </div>
+                    }
                     <div class="d-grid gap-2">
-                        <button class="btn btn-primary btn-sm" @onclick="ConfirmBooking"
-                                disabled="@(_bookingBusy || _bookingClientId == 0)">
-                            @if (_bookingBusy) { <span class="spinner-border spinner-border-sm me-1" /> }
-                            <i class="bi bi-check-circle me-1"></i>Utwórz sesję
-                        </button>
+                        @if (_bookingOverlap)
+                        {
+                            <button class="btn btn-warning btn-sm" @onclick="() => ConfirmBooking(true)"
+                                    disabled="@(_bookingBusy || _bookingClientId == 0 || _bookingDateTime == default)">
+                                @if (_bookingBusy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                                <i class="bi bi-exclamation-triangle me-1"></i>Nałóż mimo to
+                            </button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-primary btn-sm" @onclick="() => ConfirmBooking(false)"
+                                    disabled="@(_bookingBusy || _bookingClientId == 0 || _bookingDateTime == default)">
+                                @if (_bookingBusy) { <span class="spinner-border spinner-border-sm me-1" /> }
+                                <i class="bi bi-check-circle me-1"></i>Utwórz sesję
+                            </button>
+                        }
                         <button class="btn btn-outline-secondary btn-sm" @onclick="CloseBookingPanel">Anuluj</button>
                     </div>
                 </div>
@@ -420,6 +512,7 @@
     private string _cancelReason = string.Empty;
     private bool _showRescheduleForm;
     private DateTime _rescheduleDateTime;
+    private bool _rescheduleOverlap;   // kolizja terminu wykryta — czeka na potwierdzenie nałożenia
     private bool _showRestoreConfirm;
 
     // Invitations
@@ -433,6 +526,7 @@
     private bool _bookingOpen;
     private bool _bookingBusy;
     private string _bookingError = string.Empty;
+    private bool _bookingOverlap;   // kolizja terminu wykryta — czeka na potwierdzenie nałożenia
     private DateTime _bookingDateTime;
     private int _bookingClientId;
     private int _bookingSessionTypeId;
@@ -440,12 +534,18 @@
     private List<ClientSummaryDto> _allClients = [];
     private List<SessionTypeDto> _sessionTypes = [];
 
+    // Slot picker for booking panel
+    private DateOnly _bookingSlotDate;
+    private List<AvailableSlotDto> _bookingAvailableSlots = [];
+    private bool _loadingBookingSlots;
+
     private string _userId = string.Empty;
     private string _userEmail = string.Empty;
     private string _userRole = string.Empty;
     private int? _clientNumericId;
     private string? _clientTrainerUserId;
-    private int _cancellationWindowHours = 24;
+    private TrainerConfigDto _trainerCfg = new();
+    private bool _chargeLate;
     private bool _isAdminRole;
     private bool _isTrainerRole;
     private bool _isClientRole;
@@ -478,7 +578,7 @@
                 try
                 {
                     var cfg = await TrainerConfigService.GetAsync(_clientTrainerUserId);
-                    _cancellationWindowHours = cfg.CancellationWindowHours;
+                    _trainerCfg = cfg;
                 }
                 catch { /* best-effort — use default cancellation window */ }
             }
@@ -516,7 +616,7 @@
             if (_activeStatuses.Count > 0)
                 sessions = sessions.Where(s => _activeStatuses.Contains(s.Status.ToString())).ToList();
 
-            return sessions.Select(s => (object)new
+            var events = sessions.Select(s => (object)new
             {
                 id    = s.Id.ToString(),
                 title = s.ClientName,
@@ -531,7 +631,24 @@
                     initials    = Initials(s.ClientName),
                     duration    = s.DurationMinutes
                 }
-            }).ToArray();
+            }).ToList();
+
+            // Zajęte terminy z Google Calendar jako tło — widać, czemu godzina nie jest do rezerwacji.
+            if (!_isClientRole)
+            {
+                var busy = await GoogleCalendar.GetBusyBlocksAsync(_userId, from, to);
+                events.AddRange(busy.Select((b, i) => (object)new
+                {
+                    id        = $"busy-{i}",
+                    start     = b.IsAllDay ? b.StartTime.ToString("yyyy-MM-dd") : b.StartTime.ToString("o"),
+                    end       = b.IsAllDay ? b.EndTime.ToString("yyyy-MM-dd") : b.EndTime.ToString("o"),
+                    allDay    = b.IsAllDay,
+                    display   = "background",
+                    classNames = new[] { "cal-busy-bg" },
+                    extendedProps = new { busy = true }
+                }));
+            }
+            return events.ToArray();
         }
         catch (Exception ex)
         {
@@ -545,6 +662,11 @@
     {
         _bookingOpen        = false;
         _selectedSession    = await SessionService.GetSessionAsync(sessionId);
+        if (_selectedSession is not null && !_isClientRole)
+        {
+            try { _trainerCfg = await TrainerConfigService.GetAsync(_selectedSession.TrainerUserId); }
+            catch { /* domyślna polityka */ }
+        }
         _showCancelForm     = false;
         _showRescheduleForm = false;
         _showRestoreConfirm = false;
@@ -555,6 +677,7 @@
         _inviteSuccess      = string.Empty;
         _cancelReason       = string.Empty;
         _panelError         = string.Empty;
+        _rescheduleOverlap  = false;
         _panelOpen          = true;
         if (_selectedSession is not null)
         {
@@ -574,9 +697,13 @@
         _bookingNotes   = string.Empty;
         _bookingClientId = 0;
         _bookingSessionTypeId = _sessionTypes.FirstOrDefault()?.Id ?? 0;
-        _bookingDateTime = DateTime.TryParse(dateStr, out var dt) ? dt : DateTime.Now;
+        _bookingDateTime = default;
+        _bookingOverlap  = false;
+        var dt = DateTime.TryParse(dateStr, out var parsed) ? parsed : StudioClock.Now;
+        _bookingSlotDate = DateOnly.FromDateTime(dt);
         _bookingOpen    = true;
         await InvokeAsync(StateHasChanged);
+        await LoadBookingSlotsAsync();
     }
 
     private void ClosePanel()
@@ -597,6 +724,48 @@
     {
         _bookingOpen  = false;
         _bookingError = string.Empty;
+        _bookingAvailableSlots = [];
+        _bookingSlotDate = default;
+        _bookingDateTime = default;
+    }
+
+    private async Task LoadBookingSlotsAsync()
+    {
+        var sessionType = _sessionTypes.FirstOrDefault(t => t.Id == _bookingSessionTypeId);
+        if (sessionType is null || _bookingSlotDate == default) return;
+
+        _loadingBookingSlots = true;
+        _bookingDateTime = default;
+        StateHasChanged();
+        try
+        {
+            var slots = await AvailabilityService.GetAvailableSlotsAsync(
+                _userId, _bookingSlotDate, sessionType.DurationMinutes);
+            _bookingAvailableSlots = slots
+                .Where(s => s.IsAvailable && s.Start > StudioClock.Now)
+                .ToList();
+        }
+        catch
+        {
+            _bookingAvailableSlots = [];
+        }
+        finally
+        {
+            _loadingBookingSlots = false;
+            await InvokeAsync(StateHasChanged);
+        }
+    }
+
+    private async Task BookingPrevDay()
+    {
+        _bookingSlotDate = _bookingSlotDate.AddDays(-1);
+        await LoadBookingSlotsAsync();
+    }
+
+    private async Task BookingNextDay()
+    {
+        _bookingSlotDate = _bookingSlotDate.AddDays(1);
+        await LoadBookingSlotsAsync();
     }
 
     private async Task ToggleFilter(string status)
@@ -628,7 +797,14 @@
         finally { _busy = false; }
     }
 
-    private void ShowCancelForm()    { _showCancelForm = true; _showRescheduleForm = false; }
+    private void ShowCancelForm()
+    {
+        _showCancelForm = true; _showRescheduleForm = false;
+        // Podpowiedź dla trenera: w oknie późnego odwołania przy polityce „sesja przepada”.
+        _chargeLate = !_isClientRole && _selectedSession is not null
+            && _trainerCfg.LateCancellationPolicy == LateCancellationPolicy.ChargeSession
+            && CancellationRules.ForClient(_trainerCfg, _selectedSession.StartTime, Clock.LocalNow).IsLate;
+    }
     private void ShowRescheduleForm() { _showRescheduleForm = true; _showCancelForm = false; }
 
     private async Task ConfirmCancel()
@@ -647,7 +823,7 @@
             }
             else
             {
-                await SessionService.UpdateStatusAsync(_selectedSession.Id, SessionStatus.Cancelled, _cancelReason);
+                await SessionService.UpdateStatusAsync(_selectedSession.Id, SessionStatus.Cancelled, _cancelReason, chargeSession: _chargeLate);
                 await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionCancelled", "Session",
                     _selectedSession.Id.ToString(), details);
             }
@@ -658,21 +834,23 @@
         finally { _busy = false; }
     }
 
-    private async Task ConfirmReschedule()
+    private async Task ConfirmReschedule(bool allowOverlap = false)
     {
         if (_selectedSession is null) return;
         _busy = true; _panelError = string.Empty;
         try
         {
             var oldTime = _selectedSession.StartTime;
-            await SessionService.RescheduleAsync(_selectedSession.Id, _rescheduleDateTime);
+            await SessionService.RescheduleAsync(_selectedSession.Id, _rescheduleDateTime, allowOverlap);
             await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionRescheduled", "Session",
                 _selectedSession.Id.ToString(),
-                $"Klient: {_selectedSession.ClientName}, stary: {oldTime:dd.MM.yyyy HH:mm}, nowy: {_rescheduleDateTime:dd.MM.yyyy HH:mm}");
+                $"Klient: {_selectedSession.ClientName}, stary: {oldTime:dd.MM.yyyy HH:mm}, nowy: {_rescheduleDateTime:dd.MM.yyyy HH:mm}{(allowOverlap ? " (nałożono)" : "")}");
+            _rescheduleOverlap = false;
             ClosePanel();
             if (_module is not null) await _module.InvokeVoidAsync("refetchEvents");
         }
-        catch (Exception ex) { _panelError = ex.Message; }
+        catch (SlotConflictException ex) { _rescheduleOverlap = true; _panelError = ex.Message; }
+        catch (Exception ex) { _rescheduleOverlap = false; _panelError = ex.Message; }
         finally { _busy = false; }
     }
 
@@ -693,7 +871,7 @@
         finally { _busy = false; }
     }
 
-    private async Task ConfirmBooking()
+    private async Task ConfirmBooking(bool allowOverlap = false)
     {
         if (_bookingClientId == 0 || _bookingSessionTypeId == 0) return;
         _bookingBusy = true; _bookingError = string.Empty;
@@ -707,13 +885,15 @@
                 StartTime     = _bookingDateTime,
                 Notes         = string.IsNullOrWhiteSpace(_bookingNotes) ? null : _bookingNotes.Trim()
             };
-            var created = await SessionService.CreateSessionAsync(dto);
+            var created = await SessionService.CreateSessionAsync(dto, allowOverlap: allowOverlap);
             await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionBooked", "Session",
-                created.Id.ToString(), $"Klient: {created.ClientName}, termin: {_bookingDateTime:dd.MM.yyyy HH:mm}");
+                created.Id.ToString(), $"Klient: {created.ClientName}, termin: {_bookingDateTime:dd.MM.yyyy HH:mm}{(allowOverlap ? " (nałożono)" : "")}");
+            _bookingOverlap = false;
             CloseBookingPanel();
             if (_module is not null) await _module.InvokeVoidAsync("refetchEvents");
         }
-        catch (Exception ex) { _bookingError = ex.Message; }
+        catch (SlotConflictException ex) { _bookingOverlap = true; _bookingError = ex.Message; }
+        catch (Exception ex) { _bookingOverlap = false; _bookingError = ex.Message; }
         finally { _bookingBusy = false; }
     }
 

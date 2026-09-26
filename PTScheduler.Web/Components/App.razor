@@ -93,10 +93,8 @@
 
     <ResourcePreloader />
     <link rel="stylesheet" href="@Assets["lib/bootstrap/dist/css/bootstrap.min.css"]" />
-    <!-- Bootstrap Icons -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" />
-    <!-- FullCalendar -->
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.css" />
+    <!-- Bootstrap Icons (lokalnie — działa offline w PWA, bez zależności od CDN) -->
+    <link rel="stylesheet" href="@Assets["lib/bootstrap-icons/bootstrap-icons.min.css"]" />
     <link rel="stylesheet" href="@Assets["app.css"]" />
     <link rel="stylesheet" href="@Assets["PTScheduler.Web.styles.css"]" />
     <ImportMap />
@@ -109,14 +107,19 @@
     <ReconnectModal />
     <script src="@Assets["_framework/blazor.web.js"]"></script>
     <script src="@Assets["Components/Account/Shared/PasskeySubmit.razor.js"]" type="module"></script>
-    <!-- FullCalendar global bundle -->
-    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/index.global.min.js"></script>
-    <script src="https://cdn.jsdelivr.net/npm/fullcalendar@6.1.15/locales/pl.global.min.js"></script>
-    <!-- Chart.js -->
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.9/dist/chart.umd.min.js"></script>
+    <!-- FullCalendar 6.1.15 (CSS wstrzykuje sam bundle) + polska lokalizacja z @fullcalendar/core -->
+    <script src="@Assets["lib/fullcalendar/index.global.min.js"]"></script>
+    <script src="@Assets["lib/fullcalendar/locales/pl.global.min.js"]"></script>
+    <!-- Chart.js 4.4.9 -->
+    <script src="@Assets["lib/chartjs/chart.umd.min.js"]"></script>
     <script src="/js/charts.js"></script>
+    <script src="/js/chat.js"></script>
     <script src="/js/keyboard-nav.js"></script>
     <script src="/js/pull-to-refresh.js"></script>
+    <script src="/js/welcome.js"></script>
+    <script src="/js/export.js"></script>
+    <script src="/js/workout-store.js"></script>
+    <script src="/js/auth-forms.js"></script>
     <!-- UserMenu position helper -->
     <script>
         window.PTMenu = {
@@ -139,9 +142,14 @@
             e.preventDefault();
             window._installPrompt = e;
             // Notify the Blazor banner component if it's already listening
-            if (window._bannerRef) {
+            if (window._bannerRef && !document.querySelector('.pwa-banner')) {
                 window._bannerRef.invokeMethodAsync('OnInstallAvailable');
             }
+        });
+
+        window.addEventListener('appinstalled', () => {
+            window._installPrompt = null;
+            localStorage.setItem('pwa-banner-dismissed', Date.now().toString());
         });
 
         window.triggerPwaInstall = async () => {
@@ -154,10 +162,35 @@
 
         // Called by PwaInstallBanner.razor to register its DotNet ref
         window.PTBanner = {
+            // standalone | dismissed | desktop | ios | mobile
+            environment: () => {
+                if (window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches)
+                    return 'standalone';
+                try {
+                    const ts = parseInt(localStorage.getItem('pwa-banner-dismissed') || '0', 10);
+                    if (ts && Date.now() - ts < 3 * 24 * 60 * 60 * 1000) return 'dismissed';
+                } catch (e) { }
+                const ua = navigator.userAgent;
+                // iPadOS 13+ przedstawia się jako Mac — rozpoznajemy po ekranie dotykowym.
+                const ios = /iphone|ipad|ipod/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+                if (ios) {
+                    try {
+                        if (sessionStorage.getItem('pwa-ios-shown')) return 'dismissed';
+                        sessionStorage.setItem('pwa-ios-shown', '1');
+                    } catch (e) { }
+                    return 'ios';
+                }
+                const mobile = /android|mobile/i.test(ua) || window.matchMedia('(pointer: coarse)').matches;
+                return mobile ? 'mobile' : 'desktop';
+            },
+            dismiss: () => {
+                try { localStorage.setItem('pwa-banner-dismissed', Date.now().toString()); } catch (e) { }
+            },
+            otherBannerVisible: () => !!document.querySelector('.pwa-banner'),
             listen: (dotnetRef) => {
                 window._bannerRef = dotnetRef;
                 // If the install prompt already fired before the banner mounted, notify immediately
-                if (window._installPrompt) {
+                if (window._installPrompt && !document.querySelector('.pwa-banner')) {
                     dotnetRef.invokeMethodAsync('OnInstallAvailable');
                 }
             }
@@ -166,27 +199,92 @@
         // Web Push subscription helpers
         window.PTPush = {
             isSupported: () => 'serviceWorker' in navigator && 'PushManager' in window && 'Notification' in window,
-            getPermission: () => Notification.permission,
-            subscribe: async (vapidPublicKey) => {
-                const reg = await navigator.serviceWorker.ready;
-                const sub = await reg.pushManager.subscribe({
-                    userVisibleOnly: true,
-                    applicationServerKey: PTPush._urlBase64ToUint8Array(vapidPublicKey)
-                });
+            getPermission: () => ('Notification' in window) ? Notification.permission : 'unsupported',
+            // iPhone/iPad: push działa tylko w aplikacji dodanej do ekranu głównego (iOS 16.4+).
+            isIosNotInstalled: () => {
+                const ios = /iphone|ipad|ipod/i.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+                const standalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+                return ios && !standalone;
+            },
+            // navigator.serviceWorker.ready nigdy się nie kończy, gdy SW się nie zarejestrował — limit czasu.
+            _ready: () => Promise.race([
+                navigator.serviceWorker.ready,
+                new Promise((_, reject) => setTimeout(() => reject(new Error('Service worker niedostępny')), 8000))
+            ]),
+            _toDto: (sub) => {
                 const json = sub.toJSON();
                 return { endpoint: json.endpoint, p256dh: json.keys.p256dh, auth: json.keys.auth };
             },
+            _sameKey: (current, expected) => {
+                if (!current) return false;
+                const a = new Uint8Array(current);
+                if (a.length !== expected.length) return false;
+                for (let i = 0; i < a.length; i++) if (a[i] !== expected[i]) return false;
+                return true;
+            },
+            // Przy zgodzie już udzielonej: zwraca aktualną subskrypcję (tworzy/odnawia ją w razie potrzeby,
+            // np. po zmianie kluczy VAPID przez admina). Bez zgody — null.
+            ensureSubscribed: async (vapidPublicKey) => {
+                if (Notification.permission !== 'granted') return null;
+                const reg = await PTPush._ready();
+                const key = PTPush._urlBase64ToUint8Array(vapidPublicKey);
+                let sub = await reg.pushManager.getSubscription();
+                if (sub && !PTPush._sameKey(sub.options && sub.options.applicationServerKey, key)) {
+                    await sub.unsubscribe();
+                    sub = null;
+                }
+                if (!sub) sub = await reg.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: key });
+                return PTPush._toDto(sub);
+            },
+            // Prośba o zgodę MUSI paść bezpośrednio w obsłudze kliknięcia (Safari/iOS, Firefox) — dlatego
+            // natywny listener, a nie zdarzenie onclick Blazora (tam wywołanie JS przychodzi po podróży do serwera).
+            bindEnable: (el, dotnetRef, vapidPublicKey) => {
+                if (!el || el._ptPushBound) return;
+                el._ptPushBound = true;
+                el.addEventListener('click', async () => {
+                    try {
+                        const permission = await Notification.requestPermission();
+                        if (permission !== 'granted') {
+                            await dotnetRef.invokeMethodAsync('OnPushResult', null, permission);
+                            return;
+                        }
+                        const sub = await PTPush.ensureSubscribed(vapidPublicKey);
+                        await dotnetRef.invokeMethodAsync('OnPushResult', sub, 'granted');
+                    } catch (e) {
+                        await dotnetRef.invokeMethodAsync('OnPushResult', null, 'error:' + ((e && e.message) || e));
+                    }
+                });
+            },
+            getSubscription: async () => {
+                const reg = await PTPush._ready();
+                const sub = await reg.pushManager.getSubscription();
+                return sub ? sub.endpoint : null;
+            },
             unsubscribe: async () => {
-                const reg = await navigator.serviceWorker.ready;
+                const reg = await PTPush._ready();
                 const sub = await reg.pushManager.getSubscription();
                 if (sub) { await sub.unsubscribe(); return sub.endpoint; }
                 return null;
             },
-            getSubscription: async () => {
-                const reg = await navigator.serviceWorker.ready;
-                const sub = await reg.pushManager.getSubscription();
-                return sub ? sub.endpoint : null;
+            // Propozycja włączenia po zalogowaniu: raz na sesję, „Nie teraz” wycisza na 30 dni,
+            // nie razem z innym banerem (instalacja PWA, odcisk palca).
+            shouldOffer: () => {
+                if (!PTPush.isSupported() || PTPush.isIosNotInstalled()) return false;
+                // Telefon w zwykłej przeglądarce: najpierw instalacja aplikacji (baner PWA), push — już w aplikacji.
+                const standalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+                const mobile = /android|iphone|ipad|mobile/i.test(navigator.userAgent) || window.matchMedia('(pointer: coarse)').matches;
+                if (mobile && !standalone) return false;
+                if (Notification.permission !== 'default') return false;
+                if (document.querySelector('.pwa-banner')) return false;
+                try {
+                    const d = parseInt(localStorage.getItem('pts.push.dismissed') || '0', 10);
+                    if (d && Date.now() - d < 30 * 864e5) return false;
+                    if (sessionStorage.getItem('pts.push.shown')) return false;
+                    sessionStorage.setItem('pts.push.shown', '1');
+                } catch (e) { }
+                return true;
             },
+            dismiss: () => { try { localStorage.setItem('pts.push.dismissed', Date.now().toString()); } catch (e) { } },
             _urlBase64ToUint8Array: (base64String) => {
                 const padding = '='.repeat((4 - base64String.length % 4) % 4);
                 const base64 = (base64String + padding).replace(/-/g, '+').replace(/_/g, '/');
