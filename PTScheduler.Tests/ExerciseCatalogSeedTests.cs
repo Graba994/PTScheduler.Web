@@ -105,4 +105,18 @@ public class ExerciseCatalogSeedTests
         sitUp.DescriptionPl.Should().Contain("\n").And.Contain("kolana");
         (await db.Exercises.SingleAsync(e => e.SourceKey == "Ab_Roller")).NamePl.Should().Be("Moja nazwa");
     }
+
+    [Fact]
+    public async Task Every_Catalog_Exercise_Has_Polish_Name_And_Description()
+    {
+        var (_, db) = TestDb.CreateFresh();
+        await DbInitializer.SeedExerciseCatalogAsync(db);
+
+        var rows = await db.Exercises.Where(e => e.SourceKey != null).ToListAsync();
+        rows.Should().NotBeEmpty();
+        rows.Should().OnlyContain(e => !string.IsNullOrWhiteSpace(e.NamePl)
+                                       && !string.IsNullOrWhiteSpace(e.DescriptionPl));
+        // Pojedyncze nazwy własne (np. „Superman”) mogą się pokrywać — reszta musi być po polsku.
+        rows.Count(e => e.NamePl == e.NameEn).Should().BeLessThan(10);
+    }
 }
