@@ -90,17 +90,24 @@ public class WebPushService(
         return await db.PushSubscriptions.CountAsync(s => s.UserId == userId);
     }
 
-    public async Task SendAsync(string userId, PushMessageDto message)
+    public async Task SendAsync(string userId, PushMessageDto message) => await SendWithReportAsync(userId, message);
+
+    public async Task<PushSendReport> SendWithReportAsync(string userId, PushMessageDto message)
     {
         var settings = await GetSettingsAsync();
-        if (!settings.IsConfigured) return;
+        if (!settings.IsConfigured) return new PushSendReport(0, 0, "Powiadomienia push nie są skonfigurowane.");
 
         await using var db = dbFactory.CreateDbContext();
         var subs = await db.PushSubscriptions.Where(s => s.UserId == userId).ToListAsync();
+        var sent = 0;
+        string? lastError = null;
         foreach (var sub in subs)
         {
-            await SendToSubscriptionAsync(settings, sub, message);
+            var error = await SendToSubscriptionAsync(settings, sub, message);
+            if (error is null) sent++;
+            else lastError = error;
         }
+        return new PushSendReport(sent, subs.Count - sent, lastError);
     }
 
     public async Task SendToAllAsync(PushMessageDto message)
@@ -116,7 +123,10 @@ public class WebPushService(
         }
     }
 
-    private async Task SendToSubscriptionAsync(WebPushSettingsDto settings, PushSubscription sub, PushMessageDto message)
+    private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(15) };
+
+    /// <returns>null = wysłano; inaczej opis błędu.</returns>
+    private async Task<string?> SendToSubscriptionAsync(WebPushSettingsDto settings, PushSubscription sub, PushMessageDto message)
     {
         try
         {
@@ -134,15 +144,16 @@ public class WebPushService(
             var vapidHeaders = GenerateVapidHeaders(audience, settings.Subject, settings.PublicKey, settings.PrivateKey);
             var encryptedPayload = EncryptPayload(sub.P256dh, sub.Auth, Encoding.UTF8.GetBytes(payload));
 
-            using var client = new HttpClient();
             using var request = new HttpRequestMessage(HttpMethod.Post, sub.Endpoint);
             request.Headers.Add("TTL", "86400");
+            // Bez „high” Android w trybie Doze potrafi opóźnić powiadomienie o wiele minut.
+            request.Headers.Add("Urgency", "high");
             request.Headers.Authorization = new AuthenticationHeaderValue("vapid", $"t={vapidHeaders.Token},k={vapidHeaders.PublicKey}");
             request.Content = new ByteArrayContent(encryptedPayload);
             request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
             request.Content.Headers.ContentEncoding.Add("aes128gcm");
 
-            var response = await client.SendAsync(request);
+            using var response = await Http.SendAsync(request);
 
             if (response.StatusCode is System.Net.HttpStatusCode.Gone or System.Net.HttpStatusCode.NotFound)
             {
@@ -153,15 +164,20 @@ public class WebPushService(
                     dbCleanup.PushSubscriptions.Remove(stale);
                     await dbCleanup.SaveChangesAsync();
                 }
+                return "Subskrypcja wygasła na urządzeniu — usunięta. Włącz powiadomienia ponownie.";
             }
-            else if (!response.IsSuccessStatusCode)
+            if (!response.IsSuccessStatusCode)
             {
-                logger.LogWarning("Push notification failed for {Endpoint}: {Status}", sub.Endpoint, response.StatusCode);
+                var body = await response.Content.ReadAsStringAsync();
+                logger.LogWarning("Push notification failed for {Endpoint}: {Status} {Body}", sub.Endpoint, response.StatusCode, body);
+                return $"Serwer powiadomień odrzucił wiadomość ({(int)response.StatusCode}).";
             }
+            return null;
         }
         catch (Exception ex)
         {
             logger.LogWarning(ex, "Failed to send push notification to {Endpoint}", sub.Endpoint);
+            return "Błąd wysyłki powiadomienia.";
         }
     }
 
@@ -170,8 +186,14 @@ public class WebPushService(
     {
         var header = Base64UrlEncode(Encoding.UTF8.GetBytes("{\"typ\":\"JWT\",\"alg\":\"ES256\"}"));
         var now = DateTimeOffset.UtcNow.ToUnixTimeSeconds();
-        var exp = now + 43200; // 12 hours
-        var claimJson = $"{{\"aud\":\"{audience}\",\"exp\":{exp},\"sub\":\"{subject}\"}}";
+        // Apple odrzuca tokeny ważne zbyt długo; token i tak generujemy przy każdej wysyłce.
+        var exp = now + 3600;
+        // „sub” musi być mailto: albo https: — inaczej Apple/Mozilla zwracają 403 (BadJwtToken).
+        if (string.IsNullOrWhiteSpace(subject)
+            || !(subject.StartsWith("mailto:", StringComparison.OrdinalIgnoreCase)
+                 || subject.StartsWith("https://", StringComparison.OrdinalIgnoreCase)))
+            subject = "mailto:admin@ptscheduler.app";
+        var claimJson = JsonSerializer.Serialize(new { aud = audience, exp, sub = subject });
         var claims = Base64UrlEncode(Encoding.UTF8.GetBytes(claimJson));
         var unsigned = $"{header}.{claims}";
         var dataToSign = Encoding.UTF8.GetBytes(unsigned);
@@ -189,7 +211,9 @@ public class WebPushService(
         return (token, publicKey);
     }
 
-    private static byte[] EncryptPayload(string subscriberPublicKeyBase64, string subscriberAuthBase64, byte[] payload)
+    /// <summary>Szyfrowanie treści powiadomienia (RFC 8291 + aes128gcm, RFC 8188).</summary>
+    /// <param name="salt">Tylko do testów — w produkcji losowa.</param>
+    internal static byte[] EncryptPayload(string subscriberPublicKeyBase64, string subscriberAuthBase64, byte[] payload, byte[]? salt = null)
     {
         var subscriberPublicKey = Base64UrlDecode(subscriberPublicKeyBase64);
         var subscriberAuth = Base64UrlDecode(subscriberAuthBase64);
@@ -214,15 +238,20 @@ public class WebPushService(
         Buffer.BlockCopy(subscriberPublicKey, 0, keyInfoBuffer, infoPrefix.Length, subscriberPublicKey.Length);
         Buffer.BlockCopy(localPublicKeyUncompressed, 0, keyInfoBuffer, infoPrefix.Length + subscriberPublicKey.Length, localPublicKeyUncompressed.Length);
 
-        var ikm = HKDF.DeriveKey(HashAlgorithmName.SHA256, sharedSecret, 32, keyInfoBuffer, subscriberAuth);
+        // RFC 8291 §3.4: salt = auth secret, info = key_info. Argumenty nazwane, bo kolejność
+        // (ikm, length, salt, info) łatwo pomylić — wcześniej były zamienione i przeglądarki nie
+        // potrafiły odszyfrować żadnego powiadomienia (serwer push przyjmował je bez błędu).
+        var ikm = HKDF.DeriveKey(HashAlgorithmName.SHA256, ikm: sharedSecret, outputLength: 32,
+            salt: subscriberAuth, info: keyInfoBuffer);
 
-        var salt = RandomNumberGenerator.GetBytes(16);
+        salt ??= RandomNumberGenerator.GetBytes(16);
 
+        // RFC 8188 §2.2–2.3: salt = losowa sól rekordu, info = etykiety CEK / nonce.
         var cekInfo = Encoding.UTF8.GetBytes("Content-Encoding: aes128gcm\0");
-        var cek = HKDF.DeriveKey(HashAlgorithmName.SHA256, ikm, 16, cekInfo, salt);
+        var cek = HKDF.DeriveKey(HashAlgorithmName.SHA256, ikm: ikm, outputLength: 16, salt: salt, info: cekInfo);
 
         var nonceInfo = Encoding.UTF8.GetBytes("Content-Encoding: nonce\0");
-        var nonce = HKDF.DeriveKey(HashAlgorithmName.SHA256, ikm, 12, nonceInfo, salt);
+        var nonce = HKDF.DeriveKey(HashAlgorithmName.SHA256, ikm: ikm, outputLength: 12, salt: salt, info: nonceInfo);
 
         // Pad payload with delimiter (0x02) — required by RFC 8291
         var paddedPayload = new byte[payload.Length + 1];

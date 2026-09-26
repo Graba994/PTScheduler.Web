@@ -22,3 +22,6 @@ public class PushMessageDto
     public string? Url { get; set; }
     public string? Icon { get; set; }
 }
+
+/// <summary>Wynik wysyłki do wszystkich urządzeń użytkownika.</summary>
+public sealed record PushSendReport(int Sent, int Failed, string? LastError);

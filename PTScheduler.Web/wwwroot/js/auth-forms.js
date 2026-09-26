@@ -81,7 +81,8 @@ window.PTPasskey = (function () {
             var s = get();
             if (s === 'enrolled') return false;
             if (s.indexOf('dismissed:') === 0 && Date.now() - parseInt(s.slice(10), 10) < DISMISS_DAYS * 864e5) return false;
-            if (!(isStandalone() || window.matchMedia('(pointer: coarse)').matches)) return false;
+            // Telefon w przeglądarce: najpierw instalacja aplikacji (baner PWA); odcisk palca — już w aplikacji.
+            if (!isStandalone()) return false;
             if (document.querySelector('.pwa-banner')) return false;
             // Raz na sesję przeglądarki — nie wraca przy każdej zmianie strony.
             try { if (sessionStorage.getItem(KEY + '.shown')) return false; } catch (e) { }

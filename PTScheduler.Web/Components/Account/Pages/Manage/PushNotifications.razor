@@ -2,6 +2,7 @@
 @inject IWebPushService PushService
 @inject AuthenticationStateProvider AuthState
 @inject IJSRuntime JS
+@implements IDisposable
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
@@ -11,17 +12,26 @@
 
 <div class="manage-card">
     <h5 class="fw-bold mb-1">Powiadomienia push</h5>
-    <p class="text-muted small mb-4">Otrzymuj powiadomienia na tym urządzeniu, nawet gdy przeglądarka jest zamknięta.</p>
+    <p class="text-muted small mb-4">Otrzymuj powiadomienia na tym urządzeniu, nawet gdy aplikacja jest zamknięta.</p>
 
     @if (_loading)
     {
         <div class="text-center py-4"><span class="spinner-border text-primary"></span></div>
     }
+    else if (_iosNotInstalled)
+    {
+        <div class="alert alert-info mb-0">
+            <i class="bi bi-phone me-2"></i>
+            Na iPhonie i iPadzie powiadomienia działają w aplikacji dodanej do ekranu głównego:
+            w Safari naciśnij <i class="bi bi-box-arrow-up"></i> <strong>Udostępnij</strong> →
+            <strong>Dodaj do ekranu głównego</strong>, otwórz aplikację z ikony i wróć tutaj.
+        </div>
+    }
     else if (!_supported)
     {
         <div class="alert alert-warning mb-0">
             <i class="bi bi-exclamation-triangle me-2"></i>
-            Ta przeglądarka nie obsługuje powiadomień push.
+            Ta przeglądarka nie obsługuje powiadomień push@(_https ? "." : " — albo aplikacja jest otwarta przez http:// (powiadomienia wymagają https://).")
         </div>
     }
     else if (!_configured)
@@ -33,7 +43,7 @@
     }
     else
     {
-        <div class="d-flex align-items-center justify-content-between p-3 rounded border mb-3">
+        <div class="d-flex align-items-center justify-content-between p-3 rounded border mb-3 gap-2">
             <div>
                 <div class="fw-semibold small">Stan na tym urządzeniu</div>
                 <div class="text-muted" style="font-size:.8rem">
@@ -51,9 +61,12 @@
                     }
                 </div>
             </div>
-            <div>
+            <div class="d-flex gap-2 flex-wrap justify-content-end">
                 @if (_subscribed)
                 {
+                    <button class="btn btn-outline-primary btn-sm" @onclick="SendTestAsync" disabled="@_busy">
+                        <i class="bi bi-send me-1"></i>Wyślij test
+                    </button>
                     <button class="btn btn-outline-danger btn-sm" @onclick="UnsubscribeAsync" disabled="@_busy">
                         @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> }
                         Wyłącz
@@ -61,7 +74,8 @@
                 }
                 else if (_permission != "denied")
                 {
-                    <button class="btn btn-primary btn-sm" @onclick="SubscribeAsync" disabled="@_busy">
+                    @* Kliknięcie obsługuje natywny listener (PTPush.bindEnable) — zgoda musi paść w obsłudze gestu. *@
+                    <button class="btn btn-primary btn-sm" @ref="_enableButton" disabled="@_busy">
                         @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> }
                         Włącz powiadomienia
                     </button>
@@ -73,7 +87,8 @@
         {
             <div class="alert alert-warning small mb-3">
                 <i class="bi bi-gear-fill me-1"></i>
-                Powiadomienia zostały zablokowane w ustawieniach przeglądarki. Aby je włączyć, kliknij ikonę kłódki obok adresu strony i zmień ustawienie powiadomień.
+                Powiadomienia zostały zablokowane. Włącz je w ustawieniach przeglądarki (ikona kłódki obok adresu)
+                albo — w zainstalowanej aplikacji — w ustawieniach telefonu: Powiadomienia → ta aplikacja.
             </div>
         }
 
@@ -98,29 +113,59 @@
     private string _userId = "";
     private bool _loading = true;
     private bool _supported;
+    private bool _iosNotInstalled;
+    private bool _https;
     private bool _configured;
     private bool _subscribed;
     private string _permission = "default";
+    private string _publicKey = "";
     private int _deviceCount;
     private bool _busy;
     private string? _message;
     private bool _messageSuccess;
+    private ElementReference _enableButton;
+    private DotNetObjectReference<PushNotifications>? _ref;
+
+    [Inject] private NavigationManager Nav { get; set; } = default!;
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        if (!_loading && _configured && !_subscribed && _permission != "denied" && _ref is not null)
+        {
+            try { await JS.InvokeVoidAsync("PTPush.bindEnable", _enableButton, _ref, _publicKey); } catch { }
+        }
         if (!firstRender) return;
 
         var auth = await AuthState.GetAuthenticationStateAsync();
         _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _https = Nav.BaseUri.StartsWith("https://", StringComparison.OrdinalIgnoreCase);
+        _ref = DotNetObjectReference.Create(this);
 
-        _supported = await JS.InvokeAsync<bool>("PTPush.isSupported");
-        if (_supported)
+        try
         {
-            var publicKey = await PushService.GetPublicKeyAsync();
-            _configured = !string.IsNullOrEmpty(publicKey);
-            _permission = await JS.InvokeAsync<string>("PTPush.getPermission");
-            var endpoint = await JS.InvokeAsync<string?>("PTPush.getSubscription");
-            _subscribed = endpoint is not null;
+            _iosNotInstalled = await JS.InvokeAsync<bool>("PTPush.isIosNotInstalled");
+            _supported = await JS.InvokeAsync<bool>("PTPush.isSupported");
+            if (_supported && !_iosNotInstalled)
+            {
+                _publicKey = await PushService.GetPublicKeyAsync();
+                _configured = !string.IsNullOrEmpty(_publicKey);
+                _permission = await JS.InvokeAsync<string>("PTPush.getPermission");
+                if (_configured && _permission == "granted")
+                {
+                    // Zgoda jest — upewniamy się, że serwer zna aktualną subskrypcję (samonaprawa).
+                    var sub = await JS.InvokeAsync<PushSubscriptionDto?>("PTPush.ensureSubscribed", _publicKey);
+                    if (sub is not null)
+                    {
+                        await PushService.SubscribeAsync(_userId, sub);
+                        _subscribed = true;
+                    }
+                }
+            }
+        }
+        catch (Exception ex)
+        {
+            _message = $"Nie udało się sprawdzić powiadomień: {ex.Message}";
+            _messageSuccess = false;
         }
 
         if (!string.IsNullOrEmpty(_userId))
@@ -130,28 +175,55 @@
         StateHasChanged();
     }
 
-    private async Task SubscribeAsync()
+    [JSInvokable]
+    public async Task OnPushResult(PushSubscriptionDto? sub, string status)
+    {
+        _message = null;
+        if (sub is not null)
+        {
+            await PushService.SubscribeAsync(_userId, sub);
+            _subscribed = true;
+            _permission = "granted";
+            _deviceCount = await PushService.GetSubscriptionCountAsync(_userId);
+            _message = "Powiadomienia włączone! Kliknij „Wyślij test”, żeby sprawdzić.";
+            _messageSuccess = true;
+        }
+        else if (status == "denied")
+        {
+            _permission = "denied";
+            _message = "Powiadomienia zostały zablokowane w przeglądarce.";
+            _messageSuccess = false;
+        }
+        else if (status.StartsWith("error:"))
+        {
+            _message = $"Nie udało się włączyć powiadomień: {status[6..]}";
+            _messageSuccess = false;
+        }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task SendTestAsync()
     {
         _busy = true;
         _message = null;
         try
         {
-            var publicKey = await PushService.GetPublicKeyAsync();
-            var sub = await JS.InvokeAsync<PushSubscriptionDto>("PTPush.subscribe", publicKey);
-            await PushService.SubscribeAsync(_userId, sub);
-            _subscribed = true;
+            var report = await PushService.SendWithReportAsync(_userId, new PushMessageDto
+            {
+                Title = "Powiadomienia działają 🎉",
+                Body = "Tak będą wyglądać przypomnienia o treningach i komentarze.",
+                Url = "/Account/Manage/Push"
+            });
+            _messageSuccess = report.Sent > 0;
+            _message = report.Sent > 0
+                ? $"Wysłano na {report.Sent} {(report.Sent == 1 ? "urządzenie" : "urządzenia")}. Powinno pojawić się za kilka sekund."
+                : report.LastError ?? "Brak aktywnych urządzeń.";
             _deviceCount = await PushService.GetSubscriptionCountAsync(_userId);
-            _permission = await JS.InvokeAsync<string>("PTPush.getPermission");
-            _message = "Powiadomienia push zostały włączone!";
-            _messageSuccess = true;
         }
         catch (Exception ex)
         {
-            _message = ex.Message.Contains("denied")
-                ? "Powiadomienia zostały zablokowane w przeglądarce."
-                : "Nie udało się włączyć powiadomień.";
+            _message = $"Błąd wysyłki: {ex.Message}";
             _messageSuccess = false;
-            _permission = await JS.InvokeAsync<string>("PTPush.getPermission");
         }
         finally { _busy = false; }
     }
@@ -177,4 +249,6 @@
         }
         finally { _busy = false; }
     }
+
+    public void Dispose() => _ref?.Dispose();
 }

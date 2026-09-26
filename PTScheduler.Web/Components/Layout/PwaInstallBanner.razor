@@ -101,7 +101,8 @@
 
             _fallbackCts = new CancellationTokenSource();
             await Task.Delay(ManualFallbackDelay, _fallbackCts.Token);
-            if (!_show)
+            // Nie nakładamy się na inną kartę (np. propozycję odcisku palca) — wrócimy w kolejnej sesji.
+            if (!_show && !await JS.InvokeAsync<bool>("PTBanner.otherBannerVisible"))
             {
                 _mode = Mode.Manual;
                 _show = true;
