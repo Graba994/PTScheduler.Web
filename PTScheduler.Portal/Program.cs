@@ -60,6 +60,7 @@ builder.Services.AddAuthorization();
 
 builder.Services.AddSingleton<DockerService>();
 builder.Services.AddScoped<TenantService>();
+builder.Services.AddScoped<ContainerLogService>();
 builder.Services.AddScoped<SiteSettingsService>();
 builder.Services.AddScoped<NpmService>();
 builder.Services.AddScoped<UpdateService>();
@@ -416,6 +417,23 @@ app.MapGet("/api/backups/{id:int}/download", async (
         return Results.NotFound();
 
     return Results.File(entry.FilePath, "application/gzip", Path.GetFileName(entry.FilePath));
+}).RequireAuthorization();
+
+// Logi kontenera jako plik .txt — tylko administrator i tylko kontenery, które panel sam pokazuje.
+app.MapGet("/api/panel/logs/download", async (
+    string c, int? tail, int? minutes,
+    HttpContext ctx,
+    ContainerLogService logs) =>
+{
+    if (!ctx.User.IsInRole("Admin")) return Results.Forbid();
+    var source = await logs.FindAsync(c);
+    if (source is null) return Results.NotFound();
+
+    DateTime? since = minutes is > 0 ? DateTime.UtcNow.AddMinutes(-minutes.Value) : null;
+    var lines = await logs.ReadAsync(source.Container, tail ?? 2000, since, ctx.RequestAborted);
+    var text = ContainerLogService.ToText(source.Container, lines);
+    var file = $"{source.Container}-{DateTime.UtcNow:yyyyMMdd-HHmm}.txt";
+    return Results.File(System.Text.Encoding.UTF8.GetBytes(text), "text/plain; charset=utf-8", file);
 }).RequireAuthorization();
 
 // Tenant apps pull their current plan at startup, so a restart (or Guardian rolling

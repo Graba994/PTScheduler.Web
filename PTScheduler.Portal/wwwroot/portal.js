@@ -44,3 +44,9 @@
         }).observe(document.documentElement, { childList: true, subtree: true });
     }
 })();
+
+// Podgląd logów: przewijanie na dół (najnowsze wpisy są na końcu), chyba że ktoś czyta starsze.
+window.ptLogs = {
+    atBottom: function (el) { return !el || el.scrollHeight - el.scrollTop - el.clientHeight < 40; },
+    toBottom: function (el) { if (el) el.scrollTop = el.scrollHeight; }
+};
