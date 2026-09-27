@@ -141,10 +141,10 @@
         window.addEventListener('beforeinstallprompt', e => {
             e.preventDefault();
             window._installPrompt = e;
-            // Notify the Blazor banner component if it's already listening
-            if (window._bannerRef && !document.querySelector('.pwa-banner')) {
-                window._bannerRef.invokeMethodAsync('OnInstallAvailable');
-            }
+            // Baner zamienia wtedy instrukcję „⋮ → Zainstaluj” na przycisk otwierający okno instalacji.
+            // Chrome wysyła to zdarzenie dopiero po chwili (interakcja + ok. 30 s), więc musi działać
+            // także wtedy, gdy baner już wisi.
+            if (window._bannerRef) window._bannerRef.invokeMethodAsync('OnInstallAvailable');
         });
 
         window.addEventListener('appinstalled', () => {
@@ -163,9 +163,16 @@
         // Called by PwaInstallBanner.razor to register its DotNet ref
         window.PTBanner = {
             // standalone | dismissed | desktop | ios | mobile
-            environment: () => {
+            environment: async () => {
                 if (window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches)
                     return 'standalone';
+                // Aplikacja już zainstalowana, a ktoś otworzył stronę w przeglądarce — nie namawiamy drugi raz.
+                try {
+                    if (navigator.getInstalledRelatedApps) {
+                        const apps = await navigator.getInstalledRelatedApps();
+                        if (apps && apps.length) return 'standalone';
+                    }
+                } catch (e) { }
                 try {
                     const ts = parseInt(localStorage.getItem('pwa-banner-dismissed') || '0', 10);
                     if (ts && Date.now() - ts < 3 * 24 * 60 * 60 * 1000) return 'dismissed';
@@ -189,10 +196,8 @@
             otherBannerVisible: () => !!document.querySelector('.pwa-banner'),
             listen: (dotnetRef) => {
                 window._bannerRef = dotnetRef;
-                // If the install prompt already fired before the banner mounted, notify immediately
-                if (window._installPrompt && !document.querySelector('.pwa-banner')) {
-                    dotnetRef.invokeMethodAsync('OnInstallAvailable');
-                }
+                // Zdarzenie mogło przyjść, zanim baner się pojawił — wtedy od razu przycisk „Zainstaluj”.
+                if (window._installPrompt) dotnetRef.invokeMethodAsync('OnInstallAvailable');
             }
         };
 

@@ -55,9 +55,9 @@
     private CancellationTokenSource? _fallbackCts;
 
     // Ile czekamy na beforeinstallprompt, zanim pokażemy instrukcję ręczną. Chrome wysyła je
-    // dopiero po spełnieniu warunków (HTTPS, interakcja + ~30 s na stronie), Firefox/Samsung
-    // czasem wcale — bez tego baner na Androidzie mógł się nigdy nie pojawić.
-    private static readonly TimeSpan ManualFallbackDelay = TimeSpan.FromSeconds(8);
+    // dopiero po spełnieniu warunków (HTTPS, interakcja + ~30 s na stronie), Firefox czasem wcale.
+    // Gdy zdarzenie przyjdzie później, instrukcja i tak zamienia się w przycisk „Zainstaluj”.
+    private static readonly TimeSpan ManualFallbackDelay = TimeSpan.FromSeconds(30);
 
     protected override async Task OnInitializedAsync()
     {
@@ -113,25 +113,33 @@
         catch { }
     }
 
+    /// <summary>
+    /// Przeglądarka pozwala zainstalować jednym dotknięciem: baner pokazuje przycisk, który otwiera
+    /// systemowe okno instalacji. Jeśli wisiała instrukcja „⋮ → Zainstaluj”, zamienia się w przycisk.
+    /// </summary>
     [JSInvokable]
-    public void OnInstallAvailable()
+    public async Task OnInstallAvailable()
     {
         _fallbackCts?.Cancel();
+        if (_show && _mode == Mode.Prompt) return;
+        // Nie nakładamy się na inną kartę (np. propozycję odcisku palca) — przycisk zostaje w ustawieniach.
+        if (!_show)
+        {
+            try { if (await JS.InvokeAsync<bool>("PTBanner.otherBannerVisible")) return; } catch { return; }
+        }
         _mode = Mode.Prompt;
         _show = true;
-        InvokeAsync(StateHasChanged);
+        await InvokeAsync(StateHasChanged);
     }
 
     private async Task InstallAsync()
     {
         try
         {
-            var accepted = await JS.InvokeAsync<bool>("triggerPwaInstall");
-            if (accepted)
-            {
-                _show = false;
-                await JS.InvokeVoidAsync("PTBanner.dismiss");
-            }
+            // Okno instalacji przeglądarka pokazuje raz na zdarzenie — po nim (zgoda czy odmowa) baner znika na kilka dni.
+            await JS.InvokeAsync<bool>("triggerPwaInstall");
+            _show = false;
+            await JS.InvokeVoidAsync("PTBanner.dismiss");
         }
         catch { }
     }

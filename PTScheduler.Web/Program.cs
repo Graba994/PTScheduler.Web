@@ -465,7 +465,7 @@ app.MapGet("/calendar/feed/{token}.ics", async (
 
 // Dynamic PWA manifest — reads branding from DB so name/theme follow admin settings.
 // Served as application/manifest+json; browsers prefer .webmanifest over .json.
-app.MapGet("/manifest.webmanifest", async (PTScheduler.Application.Interfaces.IBrandingService branding) =>
+app.MapGet("/manifest.webmanifest", async (HttpContext ctx, IWebHostEnvironment env, PTScheduler.Application.Interfaces.IBrandingService branding) =>
 {
     AppBrandingDto? b = null;
     try { b = await branding.GetAsync(); } catch { /* DB down — use safe defaults */ }
@@ -488,9 +488,24 @@ app.MapGet("/manifest.webmanifest", async (PTScheduler.Application.Interfaces.IB
         new { src = "/icons/icon-512.png", sizes = "512x512", type = "image/png" },
         new { src = "/icons/icon-512-maskable.png", sizes = "512x512", type = "image/png", purpose = "maskable" },
     };
-    var icons = string.IsNullOrEmpty(customIcon)
-        ? defaultIcons
-        : (object[])[ new { src = customIcon, sizes = "512x512", type = IconMimeType(customIcon), purpose = "any" }, ..defaultIcons ];
+    // Własna ikona: przy wgraniu przeskalowana do prawdziwych 512×512 i 192×192 (pwa-icon.png + pwa-icon-192.png),
+    // więc deklarujemy dokładne rozmiary — inaczej Chrome potrafi uznać aplikację za nieinstalowalną.
+    // SVG deklarujemy jako „any”, a rastrowe ikony zapasowe zostają dla wymogów instalacji.
+    object[] icons;
+    if (string.IsNullOrEmpty(customIcon))
+        icons = defaultIcons;
+    else if (customIcon.EndsWith("/pwa-icon.png", StringComparison.OrdinalIgnoreCase)
+             && File.Exists(Path.Combine(env.WebRootPath, "branding", "pwa-icon-192.png")))
+        icons =
+        [
+            new { src = "/branding/pwa-icon-192.png", sizes = "192x192", type = "image/png", purpose = "any" },
+            new { src = customIcon, sizes = "512x512", type = "image/png", purpose = "any" },
+            new { src = "/icons/icon-512-maskable.png", sizes = "512x512", type = "image/png", purpose = "maskable" }
+        ];
+    else if (customIcon.EndsWith(".svg", StringComparison.OrdinalIgnoreCase))
+        icons = [ new { src = customIcon, sizes = "any", type = "image/svg+xml", purpose = "any" }, ..defaultIcons ];
+    else
+        icons = defaultIcons; // stary plik w nieznanym rozmiarze — wgraj ikonę ponownie, żeby jej użyć
 
     var shortcutIcon = string.IsNullOrEmpty(customIcon) ? "/icons/icon-96.png" : customIcon;
 
@@ -508,6 +523,8 @@ app.MapGet("/manifest.webmanifest", async (PTScheduler.Application.Interfaces.IB
         theme_color = color,
         orientation = "any",
         prefer_related_applications = false,
+        // Pozwala stronie sprawdzić (getInstalledRelatedApps), że aplikacja jest już zainstalowana — wtedy nie namawiamy ponownie.
+        related_applications = new[] { new { platform = "webapp", url = $"{ctx.Request.Scheme}://{ctx.Request.Host}/manifest.webmanifest" } },
         icons,
         shortcuts = new object[]
         {

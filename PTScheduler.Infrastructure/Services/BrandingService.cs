@@ -61,7 +61,31 @@ public class BrandingService(IDbContextFactory<ApplicationDbContext> dbFactory, 
 
     public async Task<string> UploadPwaIconAsync(Stream stream, string fileName)
     {
-        var path = await SaveFileAsync(stream, fileName, "pwa-icon");
+        // Obraz rastrowy przeskalowujemy do prawdziwych 512×512 i 192×192 (wymóg instalacji w Chrome);
+        // SVG i inne formaty zapisujemy bez zmian.
+        using var buffer = new MemoryStream();
+        await stream.CopyToAsync(buffer);
+        var bytes = buffer.ToArray();
+
+        string path;
+        var png512 = Services.Photos.PwaIconRenderer.RenderSquarePng(bytes, 512);
+        var png192 = png512 is null ? null : Services.Photos.PwaIconRenderer.RenderSquarePng(bytes, 192);
+        if (png512 is not null && png192 is not null)
+        {
+            var dir = Path.Combine(webRoot.WebRootPath, "branding");
+            Directory.CreateDirectory(dir);
+            foreach (var old in Directory.GetFiles(dir, "pwa-icon*"))
+                File.Delete(old);
+            await File.WriteAllBytesAsync(Path.Combine(dir, "pwa-icon.png"), png512);
+            await File.WriteAllBytesAsync(Path.Combine(dir, "pwa-icon-192.png"), png192);
+            path = "/branding/pwa-icon.png";
+        }
+        else
+        {
+            var old192 = Path.Combine(webRoot.WebRootPath, "branding", "pwa-icon-192.png");
+            if (File.Exists(old192)) File.Delete(old192);
+            path = await SaveFileAsync(new MemoryStream(bytes), fileName, "pwa-icon");
+        }
         await using var db = dbFactory.CreateDbContext();
         await UpdatePath(db, b => b.PwaIconPath = path);
         return path;
@@ -111,6 +135,7 @@ public class BrandingService(IDbContextFactory<ApplicationDbContext> dbFactory, 
         var b = await db.AppBrandings.FirstOrDefaultAsync();
         if (b is null) return;
         DeleteFile(b.PwaIconPath);
+        DeleteFile("/branding/pwa-icon-192.png");
         b.PwaIconPath = null;
         await db.SaveChangesAsync();
     }
