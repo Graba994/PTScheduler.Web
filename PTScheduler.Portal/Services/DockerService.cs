@@ -449,13 +449,37 @@ public class DockerService : IDisposable
     /// kontenerów zaimportowanych, których Portal nie tworzył. Przy błędzie przywraca
     /// poprzedni kontener.
     /// </summary>
+    private static readonly HashSet<string> ImageOwnedEnv = new(StringComparer.Ordinal)
+    {
+        "PATH", "HOME", "HOSTNAME", "APP_UID", "DOTNET_VERSION", "ASPNET_VERSION", "DOTNET_SDK_VERSION", "DOTNET_RUNNING_IN_CONTAINER",
+        "PTS_BUILD_COMMIT", "PTS_BUILD_TIME", "PTS_BUILD_BRANCH", "BUILD_COMMIT", "BUILD_TIME", "BUILD_BRANCH"
+    };
+
     public async Task<(bool Success, string? Error)> RecreateWithEnvAsync(string containerName, IDictionary<string, string> setEnv)
     {
         ContainerInspectResponse src;
         try { src = await _client.Containers.InspectContainerAsync(containerName); }
         catch (Exception ex) { return (false, $"Nie znaleziono kontenera {containerName}: {ex.Message}"); }
 
+        // Config.Env zawiera też ENV z obrazu (m.in. numer wersji). Tag obrazu mógł już przejść na nowszą wersję,
+        // więc zmienne pochodzące z obrazu zostawiamy obrazowi — inaczej nowa wersja pokazywałaby stary numer.
+        var imageEnv = new HashSet<string>(StringComparer.Ordinal);
+        var colon = (src.Config.Image ?? "").LastIndexOf(':');
+        var previousTag = colon > (src.Config.Image ?? "").LastIndexOf('/') ? src.Config.Image![..colon] + ":previous" : null;
+        foreach (var candidate in new[] { src.Image, previousTag }.Where(c => !string.IsNullOrEmpty(c)))
+        {
+            try
+            {
+                var img = await _client.Images.InspectImageAsync(candidate);
+                if (candidate != src.Image && img.ID != src.Image) continue;
+                foreach (var e in img.Config?.Env ?? []) imageEnv.Add(e);
+                break;
+            }
+            catch { /* obraz bez nazwy albo usunięty — próbujemy dalej, w ostateczności pomijamy tylko zmienne wersji */ }
+        }
+
         var env = (src.Config.Env ?? [])
+            .Where(e => !imageEnv.Contains(e) && !ImageOwnedEnv.Contains(e.Split('=', 2)[0]))
             .Where(e => !setEnv.Keys.Any(k => e.StartsWith(k + "=", StringComparison.Ordinal)))
             .Concat(setEnv.Select(kv => $"{kv.Key}={kv.Value}"))
             .ToList();

@@ -597,7 +597,7 @@ public sealed partial class UpgradeOrchestrator : IDisposable
         {
             Name = name,
             Image = image,
-            Env = src.Config.Env ?? [],
+            Env = await OwnEnvAsync(src),
             ExposedPorts = src.Config.ExposedPorts,
             Labels = src.Config.Labels,
             HostConfig = host,
@@ -622,6 +622,60 @@ public sealed partial class UpgradeOrchestrator : IDisposable
         }
         return created.ID;
     }
+
+    // Zmienne opisujące sam obraz (wersja, środowisko .NET) — zawsze z nowego obrazu, nigdy ze starego kontenera.
+    private static readonly HashSet<string> ImageOwnedEnv = new(StringComparer.Ordinal)
+    {
+        "PATH", "HOME", "HOSTNAME", "APP_UID", "DOTNET_VERSION", "ASPNET_VERSION", "DOTNET_SDK_VERSION", "DOTNET_RUNNING_IN_CONTAINER",
+        "PTS_BUILD_COMMIT", "PTS_BUILD_TIME", "PTS_BUILD_BRANCH", "BUILD_COMMIT", "BUILD_TIME", "BUILD_BRANCH",
+        "GUARDIAN_BUILD_COMMIT", "GUARDIAN_BUILD_TIME"
+    };
+
+    /// <summary>
+    /// Zmienne ustawione dla kontenera (hasła, adresy, limity) bez tych, które pochodzą z obrazu.
+    /// Docker w Config.Env kontenera trzyma też ENV z obrazu — przepisane 1:1 nadpisałyby wartości
+    /// nowego obrazu (np. numer wersji zostawałby stary). Pomijamy więc wszystko, co ma identyczną
+    /// wartość w starym obrazie, oraz zmienne opisujące obraz.
+    /// </summary>
+    private async Task<List<string>> OwnEnvAsync(ContainerInspectResponse src)
+    {
+        var fromImage = new HashSet<string>(StringComparer.Ordinal);
+        // Stary obraz po ID; gdy Docker już go nie pokazuje (magazyn containerd nie udostępnia obrazów bez nazwy),
+        // to samo pod tagiem :previous, który Guardian nadaje przed budową nowej wersji.
+        foreach (var candidate in new[] { src.Image, PreviousTag(src.Config.Image) }.Where(c => !string.IsNullOrEmpty(c)).Distinct())
+        {
+            try
+            {
+                var img = await _docker.Images.InspectImageAsync(candidate);
+                if (candidate != src.Image && img.ID != src.Image) continue;
+                foreach (var e in img.Config?.Env ?? []) fromImage.Add(e);
+                break;
+            }
+            catch (Exception ex) { _logger.LogDebug(ex, "Nie odczytano obrazu {Image}.", candidate); }
+        }
+        if (fromImage.Count == 0)
+            _logger.LogInformation("Nie odczytano starego obrazu {Image} — pomijam tylko zmienne wersji i środowiska .NET.", src.Image);
+
+        return OwnEnv(src.Config.Env ?? [], fromImage);
+    }
+
+    /// <summary>„repo:latest” → „repo:previous” (także z rejestrem z portem, np. host:5000/repo:tag).</summary>
+    internal static string? PreviousTag(string? image)
+    {
+        if (string.IsNullOrEmpty(image) || image.StartsWith("sha256:", StringComparison.Ordinal)) return null;
+        var slash = image.LastIndexOf('/');
+        var colon = image.LastIndexOf(':');
+        var repo = colon > slash ? image[..colon] : image;
+        return $"{repo}:previous";
+    }
+
+    internal static List<string> OwnEnv(IEnumerable<string> containerEnv, ISet<string> imageEnv) =>
+        containerEnv.Where(e =>
+        {
+            var eq = e.IndexOf('=');
+            var key = eq < 0 ? e : e[..eq];
+            return !imageEnv.Contains(e) && !ImageOwnedEnv.Contains(key);
+        }).ToList();
 
     /// <summary>
     /// Czy nowa wersja działa: najpierw HTTP /health pod adresem hosta (jak Portal),

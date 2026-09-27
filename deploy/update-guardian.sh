@@ -60,7 +60,7 @@ HAS_TENANT_HOST=0
 while IFS= read -r line; do
     [[ -z "$line" ]] && continue
     case "$line" in
-        PATH=*|DOTNET_*|ASPNET_VERSION=*|APP_UID=*|HOME=*|HOSTNAME=*) continue ;; # z obrazu
+        PATH=*|DOTNET_*|ASPNET_VERSION=*|APP_UID=*|HOME=*|HOSTNAME=*|GUARDIAN_BUILD_*) continue ;; # z obrazu (w tym numer wersji)
         GUARDIAN_TENANT_HOST=*) HAS_TENANT_HOST=1 ;;
     esac
     ARGS+=(-e "$line")
