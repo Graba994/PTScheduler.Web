@@ -164,26 +164,44 @@ public class WorkoutLogService(
         return logs.GroupBy(w => w.WorkoutDate)
             .OrderByDescending(g => g.Key)
             .Take(takeDays)
-            .Select(g => new WorkoutJournalDayDto
-            {
-                Date = g.Key,
-                SetCount = g.Sum(l => l.Sets.Count),
-                TotalVolume = g.Sum(l => VolumeCalculator.TotalVolume(l.Sets)),
-                Exercises = g.Select(l => new WorkoutJournalExerciseDto
-                {
-                    ExerciseName = l.Exercise!.NamePl,
-                    Volume = VolumeCalculator.TotalVolume(l.Sets),
-                    Sets = l.Sets.OrderBy(s => s.SetNumber).Select(s => new WorkoutJournalSetDto
-                    {
-                        SetNumber = s.SetNumber,
-                        Reps = s.Reps,
-                        WeightKg = s.WeightKg,
-                        DurationSeconds = s.DurationSeconds,
-                        DistanceMeters = s.DistanceMeters
-                    }).ToList()
-                }).ToList()
-            })
+            .Select(g => ToJournalDay(g.Key, g))
             .ToList();
+    }
+
+    public async Task<WorkoutJournalDayDto?> GetDayAsync(int clientId, DateOnly date)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var logs = await db.WorkoutLogs.AsNoTracking()
+            .Where(w => w.ClientId == clientId && w.WorkoutDate == date)
+            .Include(w => w.Sets)
+            .Include(w => w.Exercise)
+            .OrderBy(w => w.Id)
+            .ToListAsync();
+        return logs.Count == 0 ? null : ToJournalDay(date, logs);
+    }
+
+    private static WorkoutJournalDayDto ToJournalDay(DateOnly date, IEnumerable<Domain.Entities.WorkoutLog> logs)
+    {
+        var list = logs.ToList();
+        return new WorkoutJournalDayDto
+        {
+            Date = date,
+            SetCount = list.Sum(l => l.Sets.Count),
+            TotalVolume = list.Sum(l => VolumeCalculator.TotalVolume(l.Sets)),
+            Exercises = list.Select(l => new WorkoutJournalExerciseDto
+            {
+                ExerciseName = l.Exercise!.NamePl,
+                Volume = VolumeCalculator.TotalVolume(l.Sets),
+                Sets = l.Sets.OrderBy(s => s.SetNumber).Select(s => new WorkoutJournalSetDto
+                {
+                    SetNumber = s.SetNumber,
+                    Reps = s.Reps,
+                    WeightKg = s.WeightKg,
+                    DurationSeconds = s.DurationSeconds,
+                    DistanceMeters = s.DistanceMeters
+                }).ToList()
+            }).ToList()
+        };
     }
 
     public async Task<List<ClientActivityDto>> GetClientsActivityAsync(string trainerUserId, int days = 30)

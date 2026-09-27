@@ -1354,7 +1354,46 @@ a.nav-link.active { /* kept for compat */ }
         font-size: .55rem;
         margin: 0 !important;
     }
+
+    /* Podstrona: menu zwinięte do bieżącej opcji + „Wszystkie opcje”; treść zaraz pod spodem. */
+    .manage-sidebar:has(.manage-nav-link.active) .manage-nav-toggle { display: inline-flex; }
+    .manage-sidebar:has(.manage-nav-link.active):not(.open) {
+        display: flex; align-items: center; gap: .5rem;
+        background: var(--bs-body-bg); border: 1px solid var(--bs-border-color); border-radius: .85rem;
+        padding: .35rem .35rem .35rem .5rem;
+    }
+    .manage-sidebar:has(.manage-nav-link.active):not(.open) .manage-nav { flex: 1; min-width: 0; gap: 0; }
+    .manage-sidebar:has(.manage-nav-link.active):not(.open) .manage-nav-section,
+    .manage-sidebar:has(.manage-nav-link.active):not(.open) .manage-nav-link:not(.active),
+    .manage-sidebar:has(.manage-nav-link.active):not(.open) .manage-nav-group:not(:has(.active)) { display: none; }
+    .manage-sidebar:has(.manage-nav-link.active):not(.open) .manage-nav-grid { display: block; }
+    .manage-sidebar:has(.manage-nav-link.active):not(.open) .manage-nav-link.active {
+        flex-direction: row; justify-content: flex-start; text-align: left;
+        background: none; padding: .45rem .25rem; font-size: .95rem; font-weight: 700; gap: .55rem;
+        color: var(--bs-body-color); pointer-events: none; overflow: hidden; white-space: nowrap; text-overflow: ellipsis;
+    }
+    .manage-sidebar:has(.manage-nav-link.active):not(.open) .manage-nav-link.active i { font-size: 1.1rem; }
+    .manage-sidebar:has(.manage-nav-link.active):not(.open) .manage-nav-link.active > .badge { display: none; }
+    .manage-sidebar.open { display: flex; flex-direction: column; gap: .75rem; }
+    .manage-sidebar.open .manage-nav-toggle { order: -1; align-self: flex-end; }
+    .manage-nav-toggle-close { display: none; }
+    .manage-sidebar.open .manage-nav-toggle-open { display: none; }
+    .manage-sidebar.open .manage-nav-toggle-close { display: inline-flex; }
+
+    .manage-header { margin-bottom: .75rem; }
+    .manage-avatar { width: 48px; height: 48px; font-size: 1.1rem; }
+    .manage-body { gap: .75rem; }
 }
+
+.manage-nav-toggle {
+    display: none; align-items: center; flex-shrink: 0;
+    border: 0; border-radius: .6rem; padding: .5rem .75rem;
+    background: var(--c-primary-light); color: var(--c-primary);
+    font-size: .8rem; font-weight: 700; white-space: nowrap;
+}
+.manage-nav-toggle span { align-items: center; gap: .4rem; }
+.manage-nav-toggle-open { display: inline-flex; }
+.manage-nav-toggle:focus-visible { outline: 2px solid var(--c-primary); outline-offset: 2px; }
 
 /* ============================================================
    HINT BUTTON
@@ -3148,3 +3187,58 @@ h4[tabindex="-1"]:focus, h5[tabindex="-1"]:focus, h6[tabindex="-1"]:focus { outl
 .source-status { padding: .65rem .8rem; border-radius: .6rem; background: var(--bs-tertiary-bg); }
 [data-theme$="-dark"] .source-option { background: #1E293B; border-color: #334155; }
 .exercise-attribution { font-size: .72rem; color: var(--bs-secondary-color); line-height: 1.4; }
+
+/* ============================================================
+   PODSUMOWANIE TRENINGU (po zakończeniu i w historii)
+   ============================================================ */
+.wsum {
+    background: var(--bs-body-bg); border: 1px solid var(--bs-border-color); border-radius: 1rem;
+    padding: 1.1rem 1.1rem 1rem; margin-bottom: 1rem;
+    animation: fadeSlideUp .35s cubic-bezier(.25,.46,.45,.94) both;
+}
+.wsum-head { display: flex; align-items: center; gap: .8rem; margin-bottom: .9rem; }
+.wsum-badge {
+    width: 46px; height: 46px; border-radius: 14px; flex-shrink: 0; display: grid; place-items: center;
+    background: var(--c-primary-light); color: var(--c-primary); font-size: 1.35rem;
+}
+.wsum-title { font-weight: 800; margin: 0; font-size: 1.1rem; }
+.wsum-date { color: var(--bs-secondary-color); font-size: .85rem; }
+.wsum-stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(92px, 1fr)); gap: .5rem; margin-bottom: .9rem; }
+.wsum-stat {
+    background: var(--bs-tertiary-bg); border-radius: .8rem; padding: .6rem .7rem;
+    display: flex; flex-direction: column; align-items: flex-start;
+}
+.wsum-stat-value { font-size: 1.35rem; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+.wsum-stat-label { font-size: .75rem; color: var(--bs-secondary-color); }
+.wsum-label { font-size: .72rem; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--bs-secondary-color); margin-bottom: .4rem; }
+.wsum-survey { margin-bottom: .9rem; }
+.wsum-chips { display: flex; flex-wrap: wrap; gap: .35rem; }
+.wsum-chip { font-size: .8rem; padding: .25rem .6rem; border-radius: 999px; background: var(--bs-tertiary-bg); }
+.wsum-chip.flag { background: rgba(220,53,69,.1); color: #b02a37; }
+.wsum-comment { margin: .6rem 0 0; padding: .5rem .75rem; border-left: 3px solid var(--c-primary); background: var(--bs-tertiary-bg); border-radius: 0 .5rem .5rem 0; font-size: .88rem; }
+.wsum-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: .5rem; }
+.wsum-ex { border-top: 1px solid var(--bs-border-color); padding-top: .55rem; }
+.wsum-ex:first-child { border-top: 0; padding-top: 0; }
+.wsum-ex-head { display: flex; justify-content: space-between; gap: .5rem; align-items: baseline; margin-bottom: .3rem; }
+.wsum-ex-name { font-weight: 700; }
+.wsum-ex-vol { font-size: .78rem; color: var(--bs-secondary-color); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.wsum-sets { display: flex; flex-wrap: wrap; gap: .3rem; }
+.wsum-set { display: inline-flex; align-items: center; gap: .35rem; font-size: .8rem; padding: .2rem .55rem .2rem .25rem; border-radius: 999px; background: var(--bs-tertiary-bg); font-variant-numeric: tabular-nums; }
+.wsum-set-no { width: 1.3rem; height: 1.3rem; border-radius: 50%; display: grid; place-items: center; background: var(--bs-body-bg); font-size: .68rem; font-weight: 700; color: var(--bs-secondary-color); }
+.wsum-footer { margin-top: .9rem; display: flex; gap: .5rem; flex-wrap: wrap; }
+.train-history-item { width: 100%; text-align: left; border: 0; background: none; }
+.train-history-item:hover, .train-history-item.active { background: var(--c-primary-light); }
+@media (prefers-reduced-motion: reduce) { .wsum { animation: none; } }
+
+/* ── Zakładki segmentowe (np. Pomiary / Zdjęcia sylwetki) ── */
+.seg-tabs { display: flex; gap: .25rem; padding: .25rem; border-radius: .9rem; background: var(--bs-tertiary-bg); width: fit-content; max-width: 100%; }
+.seg-tab {
+    display: inline-flex; align-items: center; justify-content: center; gap: .45rem; flex: 1 1 auto;
+    border: 0; background: none; border-radius: .7rem; padding: .5rem 1rem;
+    font-weight: 600; font-size: .9rem; color: var(--bs-secondary-color); white-space: nowrap;
+    transition: background .15s, color .15s, box-shadow .15s;
+}
+.seg-tab:hover { color: var(--bs-body-color); }
+.seg-tab.active { background: var(--bs-body-bg); color: var(--c-primary); box-shadow: 0 1px 3px rgba(15, 23, 42, .1); }
+.seg-tab:focus-visible { outline: 2px solid var(--c-primary); outline-offset: 1px; }
+@media (max-width: 575.98px) { .seg-tabs { width: 100%; } .seg-tab { padding: .55rem .5rem; font-size: .85rem; } }

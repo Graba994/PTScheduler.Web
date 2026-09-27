@@ -161,9 +161,14 @@ else
             <div class="card-body">
                 <h5 class="fw-bold mb-1"><i class="bi bi-emoji-smile me-2" style="color:var(--c-primary)"></i>@_survey.Name</h5>
                 <SurveyForm Template="_survey" Initial="_surveyInitial" SubmitLabel="Wyślij" SkipLabel="Pomiń"
-                            Submit="d => SubmitSurveyAsync(d, surveyDate)" OnSkip="() => _survey = null" />
+                            Submit="d => SubmitSurveyAsync(d, surveyDate)" OnSkip="SkipSurvey" />
             </div>
         </div>
+    }
+    else if (_summary is not null)
+    {
+        @* Po ankiecie (albo bez niej) — podsumowanie właśnie zakończonego treningu. *@
+        <WorkoutSummary Day="_summary" Survey="_summarySurvey" Celebrate="true" OnClose="() => _summary = null" />
     }
 
     @if (_selectedPlan is null)
@@ -219,9 +224,20 @@ else
         <ul class="list-group">
             @foreach (var h in _history)
             {
-                <li class="list-group-item d-flex justify-content-between align-items-center py-2 small">
-                    <span>@h.Date.ToString("yyyy-MM-dd")</span>
-                    <span class="text-muted">@h.ExerciseCount ćw. · @h.SetCount serii · @h.TotalVolume.ToString("0") kg obj.</span>
+                var open = _historyDay?.Date == h.Date;
+                <li class="list-group-item p-0">
+                    <button type="button" class="train-history-item d-flex justify-content-between align-items-center gap-2 py-2 px-3 small @(open ? "active" : "")"
+                            aria-expanded="@(open ? "true" : "false")" @onclick="() => ToggleHistoryAsync(h.Date)">
+                        <span class="fw-semibold">@h.Date.ToString("dd.MM.yyyy")</span>
+                        <span class="text-muted ms-auto">@h.ExerciseCount ćw. · @h.SetCount serii@(h.TotalVolume > 0 ? $" · {h.TotalVolume:0} kg" : "")</span>
+                        <i class="bi @(open ? "bi-chevron-up" : "bi-chevron-down") text-muted"></i>
+                    </button>
+                    @if (open && _historyDay is not null)
+                    {
+                        <div class="px-2 pb-2">
+                            <WorkoutSummary Day="_historyDay" Survey="_historySurvey" />
+                        </div>
+                    }
                 </li>
             }
         </ul>
@@ -243,6 +259,11 @@ else
     private string? _error;
     private string? _justFinished;
     private SurveyTemplateDto? _survey;
+    private WorkoutJournalDayDto? _summary;
+    private SurveyResponseDto? _summarySurvey;
+    private WorkoutJournalDayDto? _historyDay;
+    private SurveyResponseDto? _historySurvey;
+    private string _savedText = "";
     private DateOnly? _surveyDate;
     private Dictionary<string, SurveyAnswerInput>? _surveyInitial;
     private readonly HashSet<int> _expanded = [];
@@ -537,10 +558,14 @@ else
             var workoutDate = _draft.Date;
             await ClearDraftStore();
             _draft = null;
-            _justFinished = saved > 0
-                ? $"Trening zapisany — {saved} serii. Dobra robota!"
+            _savedText = saved > 0
+                ? $"Trening zapisany — {saved} serii."
                 : "Trening zamknięty (brak wypełnionych serii do zapisania).";
+            _justFinished = _savedText;
             _history = await WorkoutLog.GetRecentForClientAsync(_clientId.Value, 10);
+            _summary = saved > 0 ? await WorkoutLog.GetDayAsync(_clientId.Value, workoutDate) : null;
+            _summarySurvey = null;
+            _historyDay = null;
             await OfferSurveyAsync(workoutDate, minutes);
             _scrollTop = true;
         }
@@ -569,16 +594,36 @@ else
         }
     }
 
+    // Wywoływane z formularza ankiety (dziecka) — sama zmiana pól nie odświeży tej strony, stąd StateHasChanged.
+    // Drugie kliknięcie „Wyślij” w trakcie zapisu nic nie zrobi (ankieta jest już zamknięta).
     private async Task<List<string>> SubmitSurveyAsync(Dictionary<string, SurveyAnswerInput> answers, DateOnly date)
     {
         if (_clientId is null) return ["Brak profilu klienta."];
-        var (errors, _) = await Surveys.SubmitAsync(_clientId.Value, PTScheduler.Domain.Enums.SurveyKind.PostWorkout, answers, date);
+        if (_survey is null) return [];
+        var (errors, response) = await Surveys.SubmitAsync(_clientId.Value, PTScheduler.Domain.Enums.SurveyKind.PostWorkout, answers, date);
         if (errors.Count == 0)
         {
             _survey = null;
-            _justFinished += " Dzięki za ocenę — trener ją zobaczy.";
+            _summarySurvey = response;
+            _justFinished = $"{_savedText} Dzięki za ocenę — trener ją zobaczy.";
+            _scrollTop = true;
+            await InvokeAsync(StateHasChanged);
         }
         return errors;
+    }
+
+    private void SkipSurvey()
+    {
+        _survey = null;
+        _scrollTop = true;
+    }
+
+    private async Task ToggleHistoryAsync(DateOnly date)
+    {
+        if (_historyDay?.Date == date || _clientId is null) { _historyDay = null; return; }
+        _historyDay = await WorkoutLog.GetDayAsync(_clientId.Value, date);
+        var days = Math.Max(1, Clock.Today.DayNumber - date.DayNumber + 1);
+        _historySurvey = (await Surveys.GetPostWorkoutByDateAsync(_clientId.Value, days)).GetValueOrDefault(date);
     }
 
     // ----- Model roboczy trzymany w localStorage (JSON) -----

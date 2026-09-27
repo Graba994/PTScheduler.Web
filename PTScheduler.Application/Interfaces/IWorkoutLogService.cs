@@ -28,6 +28,9 @@ public interface IWorkoutLogService
     /// <summary>Dziennik treningowy: dni z rozbiciem na ćwiczenia i serie (najnowsze pierwsze).</summary>
     Task<List<WorkoutJournalDayDto>> GetJournalAsync(int clientId, int takeDays = 20);
 
+    /// <summary>Jeden dzień treningowy klienta (podsumowanie po treningu i w historii); null, gdy nic nie zapisano.</summary>
+    Task<WorkoutJournalDayDto?> GetDayAsync(int clientId, DateOnly date);
+
     /// <summary>Aktywność podopiecznych trenera w oknie ostatnich `days` dni.</summary>
     Task<List<ClientActivityDto>> GetClientsActivityAsync(string trainerUserId, int days = 30);
 }

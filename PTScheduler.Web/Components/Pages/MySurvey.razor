@@ -127,7 +127,12 @@
         // Formularz nie pozwala wysłać ankiety zdrowotnej bez zaznaczenia zgody.
         var (errors, _) = await Surveys.SubmitAsync(_clientId, _kind, answers, _workoutDate,
             healthDataConsent: _kind == SurveyKind.HealthIntake);
-        if (errors.Count == 0) _done = true;
+        if (errors.Count == 0)
+        {
+            _done = true;
+            // Wywołanie przychodzi z formularza (dziecka) — bez tego strona nie pokazałaby potwierdzenia.
+            await InvokeAsync(StateHasChanged);
+        }
         return errors;
     }
 

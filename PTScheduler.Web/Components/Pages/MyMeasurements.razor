@@ -24,11 +24,29 @@
     return;
 }
 
-<h4 class="mb-0 fw-bold mb-4">
+<h4 class="mb-0 fw-bold mb-3">
     <i class="bi bi-rulers me-2"></i>Moje pomiary
 </h4>
 
-@if (_loading)
+<div class="seg-tabs mb-4" role="tablist" aria-label="Pomiary i zdjęcia">
+    <button type="button" role="tab" class="seg-tab @(_tab == Tab.Measurements ? "active" : "")" aria-selected="@(_tab == Tab.Measurements ? "true" : "false")"
+            @onclick="() => SelectTab(Tab.Measurements)"><i class="bi bi-graph-up"></i>Pomiary</button>
+    <button type="button" role="tab" class="seg-tab @(_tab == Tab.Photos ? "active" : "")" aria-selected="@(_tab == Tab.Photos ? "true" : "false")"
+            @onclick="() => SelectTab(Tab.Photos)"><i class="bi bi-camera"></i>Zdjęcia sylwetki</button>
+</div>
+
+@if (_tab == Tab.Photos)
+{
+    @if (!_loading && _clientId is int photoClientId)
+    {
+        <ProgressPhotos ClientId="photoClientId" UserId="@_userId" />
+    }
+    else if (!_loading)
+    {
+        <div class="alert alert-secondary">Twoje konto nie jest jeszcze powiązane z profilem klienta.</div>
+    }
+}
+else if (_loading)
 {
     @for (var i = 0; i < 3; i++)
     {
@@ -44,7 +62,8 @@ else if (_measurements.Count == 0)
     <div class="empty-state py-5">
         <div class="empty-state-icon">📏</div>
         <div class="empty-state-title">Brak pomiarów</div>
-        <div class="empty-state-desc">Twój trener jeszcze nie wprowadził żadnych pomiarów. Pojawią się po pierwszej sesji. Poniżej możesz już dodawać zdjęcia sylwetki.</div>
+        <div class="empty-state-desc">Twój trener jeszcze nie wprowadził żadnych pomiarów. Pojawią się po pierwszej sesji. Zdjęcia sylwetki możesz dodawać już teraz — w zakładce obok.</div>
+        <button type="button" class="btn btn-outline-primary btn-sm mt-3" @onclick="() => SelectTab(Tab.Photos)"><i class="bi bi-camera me-1"></i>Zdjęcia sylwetki</button>
     </div>
 }
 else
@@ -149,15 +168,26 @@ else
 }
 
 
-@if (!_loading && _clientId is int photoClientId)
-{
-    <div class="mt-4">
-        <ProgressPhotos ClientId="photoClientId" UserId="@_userId" />
-    </div>
-}
-
 @code {
     private static readonly CultureInfo _pl = new("pl-PL");
+
+    private enum Tab { Measurements, Photos }
+    [SupplyParameterFromQuery(Name = "tab")] public string? TabQuery { get; set; }
+    private Tab _tab = Tab.Measurements;
+    private bool _chartPending;
+
+    protected override void OnParametersSet()
+    {
+        if (string.Equals(TabQuery, "zdjecia", StringComparison.OrdinalIgnoreCase)) _tab = Tab.Photos;
+    }
+
+    private void SelectTab(Tab tab)
+    {
+        if (_tab == tab) return;
+        _tab = tab;
+        // Wykres rysuje JS na płótnie, które znika z zakładką — po powrocie trzeba go narysować od nowa.
+        _chartPending = tab == Tab.Measurements;
+    }
 
     private List<BodyMeasurementDto> _measurements = [];
     private List<StatCard> _cards = [];
@@ -189,8 +219,11 @@ else
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (firstRender && _chartMetrics.Count > 0)
+        if ((firstRender || _chartPending) && _tab == Tab.Measurements && _chartMetrics.Count > 0)
+        {
+            _chartPending = false;
             await RenderChartAsync();
+        }
     }
 
     private void DetectColumns()

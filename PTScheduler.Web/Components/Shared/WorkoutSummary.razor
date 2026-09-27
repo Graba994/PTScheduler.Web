@@ -1,0 +1,98 @@
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Surveys
+@* Podsumowanie jednego dnia treningowego: liczby, odpowiedzi z ankiety i serie ćwiczeń.
+   Pokazywane zaraz po zakończeniu treningu i po wybraniu treningu z historii. *@
+
+<section class="wsum" aria-labelledby="@_titleId">
+    <div class="wsum-head">
+        <div class="wsum-badge"><i class="bi @(Celebrate ? "bi-trophy-fill" : "bi-journal-check")"></i></div>
+        <div class="flex-grow-1 min-w-0">
+            <h5 class="wsum-title" id="@_titleId">@(Celebrate ? "Dobra robota!" : "Podsumowanie treningu")</h5>
+            <div class="wsum-date">@DateLabel(Day.Date)</div>
+        </div>
+        @if (OnClose.HasDelegate)
+        {
+            <button type="button" class="btn-close" aria-label="Zamknij podsumowanie" @onclick="OnClose"></button>
+        }
+    </div>
+
+    <div class="wsum-stats">
+        <div class="wsum-stat"><span class="wsum-stat-value">@Day.Exercises.Count</span><span class="wsum-stat-label">@Plural(Day.Exercises.Count, "ćwiczenie", "ćwiczenia", "ćwiczeń")</span></div>
+        <div class="wsum-stat"><span class="wsum-stat-value">@Day.SetCount</span><span class="wsum-stat-label">@Plural(Day.SetCount, "seria", "serie", "serii")</span></div>
+        @if (Day.TotalVolume > 0)
+        {
+            <div class="wsum-stat"><span class="wsum-stat-value">@Day.TotalVolume.ToString("#,0")</span><span class="wsum-stat-label">kg objętości</span></div>
+        }
+        @if (Survey?[SurveyKeys.Duration]?.Number is { } minutes)
+        {
+            <div class="wsum-stat"><span class="wsum-stat-value">@minutes.ToString("0")</span><span class="wsum-stat-label">min</span></div>
+        }
+    </div>
+
+    @if (Survey is not null)
+    {
+        var answers = Survey.Answers.Where(a => !a.IsEmpty && a.Key != SurveyKeys.Duration && a.Key != SurveyKeys.Comment).ToList();
+        var comment = Survey[SurveyKeys.Comment]?.Text;
+        @if (answers.Count > 0 || !string.IsNullOrWhiteSpace(comment))
+        {
+            <div class="wsum-survey">
+                <div class="wsum-label"><i class="bi bi-emoji-smile me-1"></i>Twoja ocena</div>
+                <div class="wsum-chips">
+                    @foreach (var a in answers)
+                    {
+                        <span class="wsum-chip @(a.Flagged ? "flag" : "")"><span class="text-muted">@a.Label:</span> <strong>@a.Display</strong></span>
+                    }
+                </div>
+                @if (!string.IsNullOrWhiteSpace(comment))
+                {
+                    <blockquote class="wsum-comment">„@comment”</blockquote>
+                }
+            </div>
+        }
+    }
+
+    <ol class="wsum-list">
+        @foreach (var e in Day.Exercises)
+        {
+            <li class="wsum-ex">
+                <div class="wsum-ex-head">
+                    <span class="wsum-ex-name">@e.ExerciseName</span>
+                    @if (e.Volume > 0) { <span class="wsum-ex-vol">@e.Volume.ToString("#,0") kg</span> }
+                </div>
+                <div class="wsum-sets">
+                    @foreach (var s in e.Sets)
+                    {
+                        <span class="wsum-set"><span class="wsum-set-no">@s.SetNumber</span>@s.Display</span>
+                    }
+                </div>
+            </li>
+        }
+    </ol>
+
+    @if (Footer is not null)
+    {
+        <div class="wsum-footer">@Footer</div>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public WorkoutJournalDayDto Day { get; set; } = default!;
+    [Parameter] public SurveyResponseDto? Survey { get; set; }
+    /// <summary>Tuż po zakończeniu treningu — nagłówek „Dobra robota!”.</summary>
+    [Parameter] public bool Celebrate { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+    [Parameter] public RenderFragment? Footer { get; set; }
+
+    private readonly string _titleId = "wsum-" + Guid.NewGuid().ToString("N")[..8];
+
+    private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
+
+    private static string Plural(int n, string one, string few, string many) =>
+        n == 1 ? one : n % 10 is >= 2 and <= 4 && n % 100 is < 12 or > 14 ? few : many;
+
+    private static string DateLabel(DateOnly d)
+    {
+        var text = d.ToString("dddd, d MMMM yyyy", Pl);
+        return char.ToUpper(text[0], Pl) + text[1..];
+    }
+}
