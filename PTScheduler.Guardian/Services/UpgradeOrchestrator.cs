@@ -19,6 +19,7 @@ public sealed partial class UpgradeOrchestrator : IDisposable
 
     private readonly DockerClient _docker;
     private readonly LogStore _logStore;
+    private readonly Janitor _janitor;
     private readonly HealthWatcher _healthWatcher;
     private readonly ILogger<UpgradeOrchestrator> _logger;
     private readonly HttpClient _healthHttp = new() { Timeout = TimeSpan.FromSeconds(10) };
@@ -40,11 +41,12 @@ public sealed partial class UpgradeOrchestrator : IDisposable
     private readonly DateTime _bootTime = DateTime.UtcNow;
 
     public UpgradeOrchestrator(
-        DockerClient docker, LogStore logStore, HealthWatcher healthWatcher,
+        DockerClient docker, LogStore logStore, HealthWatcher healthWatcher, Janitor janitor,
         ILogger<UpgradeOrchestrator> logger, IConfiguration config)
     {
         _docker = docker;
         _logStore = logStore;
+        _janitor = janitor;
         _healthWatcher = healthWatcher;
         _logger = logger;
 
@@ -754,6 +756,24 @@ public sealed partial class UpgradeOrchestrator : IDisposable
         }
     }
 
+    // ── Sprzątanie ──────────────────────────────────────────────────
+
+    /// <summary>
+    /// Po udanej aktualizacji usuwa to, co po niej zostało (stare obrazy, cache budowania, kopie kontenerów).
+    /// Działa jeszcze w ramach zadania, więc nic innego nie wystartuje w tym czasie, a wynik trafia do dziennika.
+    /// </summary>
+    private async Task CleanupAfterAsync(UpgradeJob job)
+    {
+        if (!_janitor.Enabled || job.Status != UpgradeStatus.Success || job.Target == UpgradeTarget.Maintenance) return;
+        try
+        {
+            Log(job, "info", "Done", "Sprzątam po aktualizacji...");
+            var result = await _janitor.CleanAsync(_portalContainer, m => Log(job, "info", "Done", m));
+            Log(job, "success", "Done", result.Anything ? $"Posprzątane — {result.Summary}." : "Sprzątanie: nie było czego usuwać.");
+        }
+        catch (Exception ex) { Log(job, "warn", "Done", $"Sprzątanie nie powiodło się: {ex.Message}"); }
+    }
+
     // ── Startup cleanup ─────────────────────────────────────────────
 
     public async Task CleanupOrphanedContainersAsync()
@@ -807,7 +827,11 @@ public sealed partial class UpgradeOrchestrator : IDisposable
     {
         return Task.Run(async () =>
         {
-            try { await action(job); }
+            try
+            {
+                await action(job);
+                await CleanupAfterAsync(job);
+            }
             catch (Exception ex)
             {
                 Log(job, "error", job.Stage.ToString(), $"Nieoczekiwany wyjątek: {ex.Message}");
@@ -1024,7 +1048,7 @@ public sealed partial class UpgradeOrchestrator : IDisposable
     /// Uruchamia program z listą argumentów (bez powłoki i bez sklejania stringów),
     /// więc wartości z Portalu nie mogą dopisać własnych parametrów.
     /// </summary>
-    private static async Task<(bool Ok, string Output)> Cli(
+    internal static async Task<(bool Ok, string Output)> Cli(
         string file, IEnumerable<string> args, string? workDir = null, int timeoutMin = 5)
     {
         var psi = new ProcessStartInfo

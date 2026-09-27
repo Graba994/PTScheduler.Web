@@ -196,6 +196,8 @@ Logowanie: wpisz Guardian Secret i kliknij "Autoryzuj".
 | `GUARDIAN_TENANT_IMAGE` | Obraz trenera | `ptscheduler-web:latest` |
 | `GUARDIAN_PORTAL_PORT` | Port wewnetrzny portalu | `8081` |
 | `GUARDIAN_TENANT_HOST` | Adres hosta, pod ktorym Guardian sprawdza porty instancji (zapas — Portal podaje swoj `Portal:ForwardHost`) | `host.docker.internal` |
+| `GUARDIAN_AUTO_HEAL` | `false` wylacza samoleczenie Portalu | wlaczone |
+| `GUARDIAN_AUTO_CLEANUP` | `false` wylacza automatyczne sprzatanie po aktualizacjach i w nocy | wlaczone |
 
 ---
 
@@ -378,6 +380,15 @@ Guardian ma wglad w Dockera, wiec co chwile sprawdza platforme i w panelu (sekcj
 Naprawy sa z zamknietej listy i dotycza tylko kontenerow platformy; klient podaje wylacznie identyfikator problemu, a Guardian ustala dzialanie na swiezej diagnozie. Kazda naprawa trafia do historii (z autorem).
 
 **Samoleczenie:** gdy Portal nie odpowiada dluzej niz 3 minuty i nie trwa aktualizacja, Guardian sam stosuje bezpieczne naprawy (oznaczone w panelu), kazda najwyzej raz na 30 minut. Wylaczenie: `GUARDIAN_AUTO_HEAL=false`.
+
+**Automatyczne sprzatanie:** po kazdej udanej aktualizacji (Portal, obraz trenera, wdrozenie u trenerow) i codziennie o 4:00 czasu polskiego Guardian usuwa:
+
+- zatrzymane kontenery probne `ptportal-test-…`,
+- odlozone kopie `…-prev-…` Portalu i aplikacji trenerow — **tylko gdy oryginal istnieje i dziala** (inaczej kopia moze byc jedyna droga powrotu),
+- obrazy bez nazwy (`<none>`), ktorych nie uzywa zaden kontener — tagi `:latest` i `:previous` zostaja, wiec cofniecie wersji dalej dziala,
+- cache budowania starszy niz tydzien (swiezy zostaje, zeby kolejne budowy byly szybkie).
+
+Wszystko starsze niz 30 minut. Wolumenow, sieci, baz danych ani kontenerow spoza platformy nie dotyka. Wynik trafia do dziennika zadania (nocne sprzatanie — tylko gdy cos usunieto). Wylaczenie: `GUARDIAN_AUTO_CLEANUP=false`.
 
 API: `GET /api/doctor`, `POST /api/doctor/fix` z `{"id":"..."}`.
 

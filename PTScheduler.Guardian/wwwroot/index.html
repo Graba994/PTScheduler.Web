@@ -341,14 +341,20 @@ async function loadDoctor() {
     try {
         const r = await api('/api/doctor');
         document.getElementById('doctor-auto').replaceChildren(
-            chip(r.autoHealEnabled ? 'samoleczenie włączone' : 'samoleczenie wyłączone', r.autoHealEnabled ? 'ok' : 'muted'));
+            chip(r.autoHealEnabled ? 'samoleczenie włączone' : 'samoleczenie wyłączone', r.autoHealEnabled ? 'ok' : 'muted'), ' ',
+            chip(r.autoCleanupEnabled ? 'sprzątanie włączone' : 'sprzątanie wyłączone', r.autoCleanupEnabled ? 'ok' : 'muted'));
+        const cleanup = el('div', { class: 'fix', style: 'margin-top:.6rem' },
+            r.autoCleanupEnabled
+                ? 'Sprzątanie: po każdej udanej aktualizacji i codziennie o 4:00. ' + (r.lastCleanupAt ? 'Ostatnio ' + time(r.lastCleanupAt) + ' — ' + r.lastCleanup : 'Od startu Guardiana jeszcze nie sprzątało.')
+                : 'Automatyczne sprzątanie wyłączone (GUARDIAN_AUTO_CLEANUP=false).');
         if (!r.findings.length) {
             box.replaceChildren(el('div', { class: 'finding ok' }, el('div', { class: 'fbody' },
                 el('div', { class: 'ftitle' }, '✓ Nie widzę problemów'),
-                el('div', { class: 'fdetail' }, 'Sprawdzono ' + time(r.checkedAt) + '.'))));
+                el('div', { class: 'fdetail' }, 'Sprawdzono ' + time(r.checkedAt) + '.'))), cleanup);
             return;
         }
-        box.replaceChildren(...r.findings.map(f => el('div', { class: 'finding ' + f.severity },
+        box.replaceChildren(cleanup);
+        box.prepend(...r.findings.map(f => el('div', { class: 'finding ' + f.severity },
             el('div', { class: 'fbody' },
                 el('div', { class: 'ftitle' }, f.title),
                 el('div', { class: 'fdetail' }, f.detail),

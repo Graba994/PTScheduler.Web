@@ -17,12 +17,14 @@ public sealed partial class DoctorService(
     UpgradeOrchestrator orchestrator,
     HealthWatcher health,
     LogStore logStore,
+    Janitor janitor,
     IConfiguration config,
     ILogger<DoctorService> logger) : BackgroundService
 {
     private static readonly string[] SystemNetworks = ["bridge", "host", "none", "default"];
     private readonly SemaphoreSlim _fixLock = new(1, 1);
     private readonly Dictionary<string, DateTime> _lastAutoFix = [];
+    private DateOnly _lastNightlyCleanup;
 
     public bool AutoHealEnabled { get; } =
         !string.Equals(Environment.GetEnvironmentVariable("GUARDIAN_AUTO_HEAL") ?? config["Guardian:AutoHeal"], "false", StringComparison.OrdinalIgnoreCase);
@@ -32,7 +34,14 @@ public sealed partial class DoctorService(
     // ── Diagnoza ─────────────────────────────────────────────────────
 
     public async Task<DoctorReport> DiagnoseAsync(CancellationToken ct = default) =>
-        new() { Findings = (await PlanAsync(ct)).Select(p => p.Finding).ToList(), AutoHealEnabled = AutoHealEnabled };
+        new()
+        {
+            Findings = (await PlanAsync(ct)).Select(p => p.Finding).ToList(),
+            AutoHealEnabled = AutoHealEnabled,
+            AutoCleanupEnabled = janitor.Enabled,
+            LastCleanupAt = janitor.Last?.At,
+            LastCleanup = janitor.Last?.Summary
+        };
 
     private async Task<List<Plan>> PlanAsync(CancellationToken ct)
     {
@@ -52,7 +61,7 @@ public sealed partial class DoctorService(
         await CheckPortalAsync(plans, all, byName, portalName, ct);
         await CheckGuardianNetworkAsync(plans, all, byName, portalName, ct);
         await CheckTenantsAsync(plans, all, byName, ct);
-        CheckLeftovers(plans, all, byName, portalName);
+        await CheckLeftoversAsync(plans, portalName, ct);
         await CheckImagesAsync(plans, ct);
 
         return plans
@@ -338,21 +347,10 @@ public sealed partial class DoctorService(
         }
     }
 
-    private void CheckLeftovers(List<Plan> plans, IList<ContainerListResponse> all,
-        Dictionary<string, ContainerListResponse> byName, string portalName)
+    private async Task CheckLeftoversAsync(List<Plan> plans, string portalName, CancellationToken ct)
     {
-        // Odłożone kopie po aktualizacjach i kontenery próbne — tylko zatrzymane i starsze niż godzina,
-        // a kopie Portalu tylko wtedy, gdy Portal działa (inaczej to jedyna droga powrotu).
-        var portalRunning = byName.TryGetValue(portalName, out var portal) && portal.State == "running";
-        var cutoff = DateTime.UtcNow.AddHours(-1);
-        var leftovers = all.Where(c =>
-        {
-            var n = c.Names.First().TrimStart('/');
-            if (c.State == "running" || c.Created > cutoff) return false;
-            if (n.StartsWith("ptportal-test-", StringComparison.Ordinal)) return true;
-            if (Regex.IsMatch(n, $"^{Regex.Escape(portalName)}-prev-\\d+$")) return portalRunning;
-            return TenantBackup().IsMatch(n);
-        }).ToList();
+        // Te same reguły co automatyczne sprzątanie: próbne kontenery i kopie „-prev-” działających kontenerów.
+        var leftovers = await janitor.FindLeftoversAsync(portalName, ct);
         if (leftovers.Count == 0) return;
 
         var names = leftovers.Select(c => c.Names.First().TrimStart('/')).ToList();
@@ -362,17 +360,16 @@ public sealed partial class DoctorService(
             Severity = "info",
             Title = $"Pozostałości po aktualizacjach: {leftovers.Count}",
             Detail = string.Join(", ", names.Take(8)) + (names.Count > 8 ? "…" : ""),
-            FixLabel = "Usuń pozostałości",
-            FixDescription = "Usunie zatrzymane kopie zapasowe kontenerów i kontenery próbne (starsze niż godzina)."
-        }, async log =>
-        {
-            foreach (var c in leftovers)
-            {
-                await docker.Containers.RemoveContainerAsync(c.ID, new ContainerRemoveParameters { Force = true });
-                log($"Usunięto {c.Names.First().TrimStart('/')}.");
-            }
-        }));
+            FixLabel = "Posprzątaj",
+            FixDescription = "Usunie zatrzymane kopie kontenerów (tylko gdy oryginał działa), kontenery próbne, stare obrazy bez nazwy i cache budowania starszy niż tydzień."
+        }, CleanFix(portalName)));
     }
+
+    private Func<Action<string>, Task> CleanFix(string portalName) => async log =>
+    {
+        var r = await janitor.CleanAsync(portalName, log);
+        if (!r.Anything) log("Nie było czego usuwać.");
+    };
 
     private async Task CheckImagesAsync(List<Plan> plans, CancellationToken ct)
     {
@@ -391,15 +388,8 @@ public sealed partial class DoctorService(
                 Title = $"Stare obrazy zajmują {bytes / 1024 / 1024 / 1024.0:0.0} GB",
                 Detail = $"{dangling.Count} obrazów bez nazwy (po poprzednich budowach).",
                 FixLabel = "Zwolnij miejsce",
-                FixDescription = "Usunie obrazy bez nazwy, których nie używa żaden kontener."
-            }, async log =>
-            {
-                var r = await docker.Images.PruneImagesAsync(new ImagesPruneParameters
-                {
-                    Filters = new Dictionary<string, IDictionary<string, bool>> { ["dangling"] = new Dictionary<string, bool> { ["true"] = true } }
-                });
-                log($"Zwolniono {r.SpaceReclaimed / 1024 / 1024} MB.");
-            }));
+                FixDescription = "Usunie obrazy bez nazwy, których nie używa żaden kontener, i cache budowania starszy niż tydzień."
+            }, CleanFix(orchestrator.PortalContainer)));
         }
         catch (Exception ex) { logger.LogDebug(ex, "Nie sprawdzono obrazów."); }
     }
@@ -480,8 +470,59 @@ public sealed partial class DoctorService(
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { break; }
             catch (Exception ex) { logger.LogWarning(ex, "Doktor: automatyczna diagnoza nie powiodła się."); }
+
+            try { await NightlyCleanupAsync(); }
+            catch (Exception ex) { logger.LogWarning(ex, "Nocne sprzątanie nie powiodło się."); }
             await Task.Delay(TimeSpan.FromMinutes(1), ct);
         }
+    }
+
+    /// <summary>
+    /// Raz na dobę, o 4:00 czasu polskiego (poza godzinami pracy trenerów), sprząta to samo co po aktualizacji —
+    /// na wypadek aktualizacji robionych ręcznie albo przerwanych. Do historii trafia tylko, gdy coś usunięto.
+    /// </summary>
+    private async Task NightlyCleanupAsync()
+    {
+        if (!janitor.Enabled || orchestrator.ActiveJobId is not null) return;
+        var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, Warsaw);
+        var today = DateOnly.FromDateTime(now);
+        if (now.Hour != 4 || _lastNightlyCleanup == today) return;
+        _lastNightlyCleanup = today;
+
+        if (!await _fixLock.WaitAsync(TimeSpan.FromSeconds(5))) return;
+        try
+        {
+            var job = new UpgradeJob
+            {
+                Id = $"{DateTime.UtcNow:yyyyMMddHHmmss}-cleanup",
+                Target = UpgradeTarget.Maintenance,
+                Stage = UpgradeStage.Swapping,
+                Status = UpgradeStatus.Running,
+                StartedAt = DateTime.UtcNow,
+                RequestedBy = "nocne sprzątanie"
+            };
+            void Log(string level, string message)
+            {
+                lock (job.Log) job.Log.Add(new LogEntry { Level = level, Stage = "Swapping", Message = message });
+            }
+            Log("info", "Nocne sprzątanie: pozostałości po aktualizacjach, stare obrazy i cache budowania.");
+            var result = await janitor.CleanAsync(orchestrator.PortalContainer, m => Log("success", m));
+            if (!result.Anything) return;
+            Log("success", $"Posprzątane — {result.Summary}.");
+            job.Status = UpgradeStatus.Success;
+            job.Stage = UpgradeStage.Done;
+            job.CompletedAt = DateTime.UtcNow;
+            logStore.Save(job);
+        }
+        finally { _fixLock.Release(); }
+    }
+
+    private static readonly TimeZoneInfo Warsaw = FindWarsaw();
+
+    private static TimeZoneInfo FindWarsaw()
+    {
+        try { return TimeZoneInfo.FindSystemTimeZoneById("Europe/Warsaw"); }
+        catch { return TimeZoneInfo.Utc; }
     }
 
     // ── Pomocnicze ───────────────────────────────────────────────────
@@ -537,6 +578,4 @@ public sealed partial class DoctorService(
 
     [GeneratedRegex("^pt-([a-z0-9][a-z0-9-]*)-web$")]
     private static partial Regex TenantWeb();
-    [GeneratedRegex(@"^pt-[a-z0-9-]+-web-prev-\d+$")]
-    private static partial Regex TenantBackup();
 }

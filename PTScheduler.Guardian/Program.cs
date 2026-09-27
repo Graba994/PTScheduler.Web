@@ -16,6 +16,7 @@ builder.Services.AddSingleton<DockerClient>(_ =>
 builder.Services.AddSingleton<LogStore>();
 builder.Services.AddSingleton<HealthWatcher>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<HealthWatcher>());
+builder.Services.AddSingleton<Janitor>();
 builder.Services.AddSingleton<UpgradeOrchestrator>();
 builder.Services.AddSingleton<DoctorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DoctorService>());

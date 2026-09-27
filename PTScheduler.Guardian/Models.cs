@@ -121,4 +121,7 @@ public class DoctorReport
     public DateTime CheckedAt { get; set; } = DateTime.UtcNow;
     public List<DoctorFinding> Findings { get; set; } = [];
     public bool AutoHealEnabled { get; set; }
+    public bool AutoCleanupEnabled { get; set; }
+    public DateTime? LastCleanupAt { get; set; }
+    public string? LastCleanup { get; set; }
 }
