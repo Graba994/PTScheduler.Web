@@ -55,6 +55,11 @@ button.btn:focus-visible, .hist:focus-visible { outline: 2px solid var(--accent)
 .tenants { display: grid; grid-template-columns: repeat(auto-fill, minmax(210px, 1fr)); gap: .4rem; margin: .2rem 0 .8rem; }
 .tenant { border: 1px solid var(--tbd); background: var(--tbg); border-radius: .6rem; padding: .45rem .6rem; font-size: .8rem; }
 .tenant b { color: var(--ink); }
+.finding { display: flex; gap: .8rem; align-items: flex-start; padding: .8rem .9rem; border: 1px solid var(--tbd); background: var(--tbg); border-radius: .8rem; margin-bottom: .5rem; }
+.finding .fbody { flex: 1; min-width: 0; }
+.finding .ftitle { font-weight: 700; color: var(--ink); }
+.finding .fdetail { font-size: .84rem; color: #475569; white-space: pre-wrap; overflow-wrap: anywhere; margin-top: .15rem; max-height: 14em; overflow: auto; }
+.finding .fix { font-size: .78rem; color: var(--t); margin-top: .3rem; }
 .tenant small { display: block; color: var(--t); }
 .hist { width: 100%; display: flex; align-items: center; gap: .6rem; padding: .6rem .3rem; border: 0; background: none; border-top: 1px solid var(--line-2); cursor: pointer; text-align: left; font: inherit; color: inherit; border-radius: .5rem; }
 .hist:first-child { border-top: 0; }
@@ -109,6 +114,14 @@ details li + li { margin-top: .3rem; }
             <div class="tenants" id="job-tenants"></div>
             <div id="job-result"></div>
             <div class="log" id="job-log" aria-label="Log zadania"></div>
+        </section>
+
+        <section class="card" id="doctor-card">
+            <h2>Diagnostyka <span id="doctor-auto"></span>
+                <button class="btn secondary" type="button" id="doctor-refresh" style="margin-left:auto;padding:.3rem .7rem;font-size:.8rem">Sprawdź teraz</button>
+            </h2>
+            <p class="sub" style="margin:-.3rem 0 .8rem">Guardian przegląda kontenery platformy: czy Portal widzi bazę, czy coś nie stoi albo nie restartuje się w kółko, czy zostały śmieci po aktualizacjach. Naprawę wykonuje po Twoim potwierdzeniu.</p>
+            <div id="doctor-list">Sprawdzam…</div>
         </section>
 
         <section class="card">
@@ -168,7 +181,7 @@ let secret = '';
 let pollId = null;
 let shownJobId = null;
 
-const TARGET = { Portal: 'Aktualizacja Portalu', Tenant: 'Obraz aplikacji trenerów', TenantRolling: 'Wdrażanie u trenerów', TenantRelease: 'Nowa wersja dla trenerów' };
+const TARGET = { Portal: 'Aktualizacja Portalu', Tenant: 'Obraz aplikacji trenerów', TenantRolling: 'Wdrażanie u trenerów', TenantRelease: 'Nowa wersja dla trenerów', Maintenance: 'Naprawa (diagnostyka)' };
 const STATUS = { Running: ['W toku', 'info'], Success: ['Zakończone', 'ok'], Failed: ['Nieudane', 'danger'], RolledBack: ['Wycofane', 'warn'], PartialSuccess: ['Częściowo', 'warn'] };
 const TSTATUS = { Pending: ['czeka', 'muted'], Updating: ['podmiana…', 'info'], HealthCheck: ['sprawdzanie…', 'info'], Success: ['nowa wersja', 'ok'], Failed: ['błąd', 'danger'], RolledBack: ['przywrócona', 'warn'], Skipped: ['pominięta', 'muted'] };
 const STAGES = { Portal: ['Pulling', 'Building', 'Testing', 'Swapping', 'Verifying'], Tenant: ['Pulling', 'Building'], TenantRolling: ['Swapping', 'Done'], TenantRelease: ['Pulling', 'Building', 'Swapping', 'Done'] };
@@ -187,13 +200,15 @@ const chip = (text, tone) => el('span', { class: 'chip ' + tone }, text);
 const short = c => (c || '').slice(0, 7) || '—';
 const time = d => d ? new Date(d).toLocaleString('pl-PL', { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit' }) : '—';
 
-async function api(path, method) {
-    const r = await fetch(path, { method: method || 'GET', headers: { 'X-Guardian-Secret': secret }, cache: 'no-store' });
-    let body = null;
-    try { body = await r.json(); } catch { /* brak JSON */ }
+async function api(path, method, body) {
+    const headers = { 'X-Guardian-Secret': secret };
+    if (body) headers['Content-Type'] = 'application/json';
+    const r = await fetch(path, { method: method || 'GET', headers, cache: 'no-store', body: body ? JSON.stringify(body) : undefined });
+    let data = null;
+    try { data = await r.json(); } catch { /* brak JSON */ }
     if (r.status === 401) throw Object.assign(new Error('Zły sekret.'), { auth: true });
-    if (!r.ok && !(body && 'started' in body)) throw new Error((body && body.error) || ('HTTP ' + r.status));
-    return body;
+    if (!r.ok && !(data && ('started' in data || 'ok' in data))) throw new Error((data && (data.error || data.message)) || ('HTTP ' + r.status));
+    return data;
 }
 
 function toast(text, tone) {
@@ -237,6 +252,7 @@ async function refresh() {
         if (s.activeJob) { shownJobId = s.activeJob.id; renderJob(s.activeJob); }
         else if (shownJobId) { const j = await api('/api/upgrade/jobs/' + encodeURIComponent(shownJobId)); if (j) renderJob(j); }
         renderHistory(await api('/api/upgrade/history?limit=15'));
+        if (Date.now() - (refresh.lastDoctor || 0) > 30000) { refresh.lastDoctor = Date.now(); loadDoctor(); }
     } catch (err) {
         if (err.auth) document.getElementById('logout').click();
     }
@@ -319,6 +335,37 @@ function renderHistory(jobs) {
             el('span', { class: 'w' }, el('b', {}, TARGET[j.target] || j.target), el('span', {}, time(j.startedAt), commits ? ' · ' + commits : '', tenants, j.requestedBy ? ' · z ' + j.requestedBy : '')));
     }));
 }
+
+async function loadDoctor() {
+    const box = document.getElementById('doctor-list');
+    try {
+        const r = await api('/api/doctor');
+        document.getElementById('doctor-auto').replaceChildren(
+            chip(r.autoHealEnabled ? 'samoleczenie włączone' : 'samoleczenie wyłączone', r.autoHealEnabled ? 'ok' : 'muted'));
+        if (!r.findings.length) {
+            box.replaceChildren(el('div', { class: 'finding ok' }, el('div', { class: 'fbody' },
+                el('div', { class: 'ftitle' }, '✓ Nie widzę problemów'),
+                el('div', { class: 'fdetail' }, 'Sprawdzono ' + time(r.checkedAt) + '.'))));
+            return;
+        }
+        box.replaceChildren(...r.findings.map(f => el('div', { class: 'finding ' + f.severity },
+            el('div', { class: 'fbody' },
+                el('div', { class: 'ftitle' }, f.title),
+                el('div', { class: 'fdetail' }, f.detail),
+                f.fixDescription ? el('div', { class: 'fix' }, 'Naprawa: ' + f.fixDescription + (f.autoFix ? ' (Guardian zrobi to sam, gdy Portal nie odpowiada)' : '')) : null),
+            f.fixLabel ? el('button', { class: 'btn' + (f.severity === 'info' ? ' secondary' : ''), type: 'button', onclick: async (e) => {
+                if (!confirm(f.fixLabel + '?\n\n' + (f.fixDescription || ''))) return;
+                e.target.disabled = true;
+                try {
+                    const res = await api('/api/doctor/fix', 'POST', { id: f.id });
+                    toast(res.message, res.ok ? 'ok' : 'warn');
+                    if (res.jobId) shownJobId = res.jobId;
+                } catch (err) { toast(err.message, 'danger'); }
+                refresh.lastDoctor = 0; refresh();
+            } }, f.fixLabel) : null)));
+    } catch (err) { box.textContent = 'Nie udało się sprawdzić: ' + err.message; }
+}
+document.getElementById('doctor-refresh').addEventListener('click', () => { document.getElementById('doctor-list').textContent = 'Sprawdzam…'; loadDoctor(); });
 
 const ACTIONS = {
     portal: ['Zaktualizować Portal? Panel Portalu zniknie na chwilę podczas podmiany.', '/api/upgrade/portal'],

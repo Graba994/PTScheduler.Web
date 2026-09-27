@@ -360,6 +360,27 @@ Albo w Nginx Proxy Manager: nie twórz proxy hosta dla portu 9090.
 
 ---
 
+## Diagnostyka i samoleczenie („Doktor”)
+
+Guardian ma wglad w Dockera, wiec co chwile sprawdza platforme i w panelu (sekcja **Diagnostyka**) pokazuje problemy z propozycja naprawy:
+
+| Problem | Naprawa |
+|---------|---------|
+| Portal i jego baza nie maja wspolnej sieci | podlaczenie bazy do sieci Portalu pod jej nazwa + restart Portalu |
+| Portal nie rozpoznaje nazwy bazy (DNS Dockera) | ponowne podlaczenie bazy z aliasem + restart Portalu |
+| Baza Portalu zatrzymana | uruchomienie bazy + restart Portalu |
+| Nie ma kontenera Portalu, jest odlozona kopia `-prev-` | przywrocenie kopii |
+| Portal zatrzymany / w petli restartow | uruchomienie / logi do diagnozy |
+| Guardian poza siecia Portalu | dolaczenie Guardiana do sieci |
+| Aplikacja lub baza trenera zatrzymana, brak wspolnej sieci | uruchomienie / polaczenie sieci |
+| Pozostalosci po aktualizacjach, stare obrazy | usuniecie / zwolnienie miejsca |
+
+Naprawy sa z zamknietej listy i dotycza tylko kontenerow platformy; klient podaje wylacznie identyfikator problemu, a Guardian ustala dzialanie na swiezej diagnozie. Kazda naprawa trafia do historii (z autorem).
+
+**Samoleczenie:** gdy Portal nie odpowiada dluzej niz 3 minuty i nie trwa aktualizacja, Guardian sam stosuje bezpieczne naprawy (oznaczone w panelu), kazda najwyzej raz na 30 minut. Wylaczenie: `GUARDIAN_AUTO_HEAL=false`.
+
+API: `GET /api/doctor`, `POST /api/doctor/fix` z `{"id":"..."}`.
+
 ## Jak dziala wdrozenie u trenerow
 
 1. Portal wysyla **jedno** polecenie: `POST /api/upgrade/tenant?rebuild=true` z lista aktywnych instancji i adresem hosta.

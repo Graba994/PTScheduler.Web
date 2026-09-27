@@ -64,6 +64,8 @@ public sealed partial class UpgradeOrchestrator : IDisposable
 
     public string? ActiveJobId => _activeJob?.Id;
     public string TenantImage => _tenantImage;
+    public string PortalContainer => _portalContainer;
+    public int PortalPort => _portalPort;
     public TimeSpan Uptime => DateTime.UtcNow - _bootTime;
 
     public UpgradeJob? GetJob(string id) =>

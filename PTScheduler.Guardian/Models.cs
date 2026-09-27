@@ -11,7 +11,9 @@ public enum UpgradeTarget
     /// <summary>Wdrożenie gotowego obrazu na instancje trenerów.</summary>
     TenantRolling,
     /// <summary>Obraz + wdrożenie w jednym zadaniu — Portal nie musi niczego łączyć.</summary>
-    TenantRelease
+    TenantRelease,
+    /// <summary>Naprawa wykonana przez diagnostykę Guardiana (ręcznie albo automatycznie).</summary>
+    Maintenance
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -96,4 +98,27 @@ public class GuardianStatus
     public DateTime? PortalLastChecked { get; set; }
     public UpgradeJob? ActiveJob { get; set; }
     public int TotalJobs { get; set; }
+}
+
+/// <summary>Problem wykryty przez diagnostykę: co jest nie tak, dlaczego i co Guardian może z tym zrobić.</summary>
+public class DoctorFinding
+{
+    public string Id { get; set; } = "";
+    /// <summary>danger | warn | info</summary>
+    public string Severity { get; set; } = "info";
+    public string Title { get; set; } = "";
+    public string Detail { get; set; } = "";
+    /// <summary>Etykieta przycisku naprawy; null = tylko podpowiedź.</summary>
+    public string? FixLabel { get; set; }
+    /// <summary>Co dokładnie zrobi naprawa (pokazywane przed potwierdzeniem).</summary>
+    public string? FixDescription { get; set; }
+    /// <summary>Bezpieczna naprawa, którą Guardian może wykonać sam, gdy Portal leży.</summary>
+    public bool AutoFix { get; set; }
+}
+
+public class DoctorReport
+{
+    public DateTime CheckedAt { get; set; } = DateTime.UtcNow;
+    public List<DoctorFinding> Findings { get; set; } = [];
+    public bool AutoHealEnabled { get; set; }
 }

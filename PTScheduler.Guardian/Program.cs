@@ -17,6 +17,8 @@ builder.Services.AddSingleton<LogStore>();
 builder.Services.AddSingleton<HealthWatcher>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<HealthWatcher>());
 builder.Services.AddSingleton<UpgradeOrchestrator>();
+builder.Services.AddSingleton<DoctorService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<DoctorService>());
 
 var app = builder.Build();
 
@@ -175,6 +177,21 @@ app.MapGet("/api/upgrade/history", (HttpContext ctx) =>
     return Results.Ok(orchestrator.GetHistory(Math.Clamp(limit, 1, 50)));
 });
 
+// ── Diagnostyka i naprawy ──────────────────────────────────────────
+
+app.MapGet("/api/doctor", async (DoctorService doctor, CancellationToken ct) => Results.Ok(await doctor.DiagnoseAsync(ct)));
+
+app.MapPost("/api/doctor/fix", async (HttpContext ctx, DoctorService doctor) =>
+{
+    string? id = null;
+    try { id = (await ctx.Request.ReadFromJsonAsync<DoctorFixRequest>(jsonOptions))?.Id; }
+    catch { /* niżej: brak id */ }
+    if (string.IsNullOrWhiteSpace(id) || id.Length > 200 || id.Any(char.IsControl))
+        return Results.BadRequest(new { ok = false, message = "Brak albo nieprawidłowy identyfikator problemu." });
+    var (ok, message, jobId) = await doctor.FixAsync(id, Caller(ctx));
+    return ok ? Results.Ok(new { ok, message, jobId }) : Results.Conflict(new { ok, message, jobId });
+});
+
 app.MapPost("/api/rollback/portal", async (HttpContext ctx) =>
 {
     var (started, jobId, error) = await orchestrator.RollbackPortalAsync(Caller(ctx));
@@ -182,3 +199,5 @@ app.MapPost("/api/rollback/portal", async (HttpContext ctx) =>
 });
 
 app.Run();
+
+internal sealed record DoctorFixRequest(string? Id);
