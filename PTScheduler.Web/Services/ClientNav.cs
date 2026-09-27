@@ -13,7 +13,8 @@ public sealed class ClientNav(
     IModuleSettingsService modules,
     IMarketingSettingsService marketing)
 {
-    public sealed record Tab(string Href, string Label, string Icon, bool Exact = false);
+    /// <param name="Short">Krótszy podpis na telefon (zakładki w jednym pasku bez przewijania).</param>
+    public sealed record Tab(string Href, string Label, string Icon, bool Exact = false, string? Short = null);
     public sealed record Section(string Key, string Label, string Icon, string Href, IReadOnlyList<Tab> Tabs);
 
     private List<Section>? _cache;
@@ -59,18 +60,18 @@ public sealed class ClientNav(
 
         var shop = new List<Tab>
         {
-            new("/my/packages", "Moje pakiety", "bi-box-seam"),
-            new("/packages", "Kup pakiet", "bi-bag-plus", Exact: true),
+            new("/my/packages", "Moje pakiety", "bi-box-seam", Short: "Moje"),
+            new("/packages", "Kup pakiet", "bi-bag-plus", Exact: true, Short: "Kup"),
             new("/my/memberships", "Karnety", "bi-arrow-repeat")
         };
         if (vouchersEnabled) shop.Add(new("/my/vouchers", "Bony", "bi-ticket-perforated"));
-        shop.Add(new("/my/orders", "Zamówienia", "bi-receipt"));
+        shop.Add(new("/my/orders", "Zamówienia", "bi-receipt", Short: "Zakupy"));
         sections.Add(new("shop", "Pakiety", "bi-box-seam-fill", "/my/packages", shop));
 
         if (coursesEnabled)
             sections.Add(new("courses", "Kursy", "bi-mortarboard-fill", "/my/courses",
             [
-                new("/my/courses", "Moje kursy", "bi-mortarboard"),
+                new("/my/courses", "Moje kursy", "bi-mortarboard", Short: "Moje"),
                 new("/courses", "Katalog", "bi-collection-play")
             ]));
 

@@ -131,7 +131,40 @@ else
         <div class="card-header fw-semibold bg-transparent border-bottom">
             Historia pomiarów
         </div>
-        <div class="table-responsive">
+        @* Telefon: najważniejsze na wierzchu (data, waga, tkanka tłuszczowa), reszta po rozwinięciu. *@
+        <div class="hist-list d-md-none">
+            @for (var i = 0; i < _measurements.Count; i++)
+            {
+                var m = _measurements[i];
+                var prev = i + 1 < _measurements.Count ? _measurements[i + 1] : null;
+                <details class="hist-item">
+                    <summary>
+                        <div class="hist-date"><b>@m.MeasurementDate.Day</b><span>@m.MeasurementDate.ToString("MMM yy", _pl)</span></div>
+                        <div class="hist-main">
+                            <div class="hist-title">@(m.WeightKg.HasValue ? $"{Fmt(m.WeightKg)} kg" : "Pomiar")</div>
+                            <div class="hist-sub">
+                                @if (m.WeightKg.HasValue && prev?.WeightKg is decimal pw)
+                                {
+                                    var d = m.WeightKg.Value - pw;
+                                    <span class="@(d < 0 ? "text-success" : d > 0 ? "text-danger" : "")">@(d > 0 ? "+" : "")@d.ToString("0.#") kg</span>
+                                }
+                                @if (m.BodyFatPercent.HasValue) { <span> · tł. @Fmt(m.BodyFatPercent)%</span> }
+                            </div>
+                        </div>
+                    </summary>
+                    <div class="hist-body">
+                        @if (_hasChest) { <div><small>Klatka</small>@Fmt(m.ChestCm) cm</div> }
+                        @if (_hasWaist) { <div><small>Talia</small>@Fmt(m.WaistCm) cm</div> }
+                        @if (_hasHips)  { <div><small>Biodra</small>@Fmt(m.HipsCm) cm</div> }
+                        @if (_hasThigh) { <div><small>Udo</small>@Fmt(m.ThighCm) cm</div> }
+                        @if (_hasArm)   { <div><small>Ramię</small>@Fmt(m.ArmCm) cm</div> }
+                        @if (_hasFat)   { <div><small>Tkanka tł.</small>@Fmt(m.BodyFatPercent) %</div> }
+                        @if (!string.IsNullOrWhiteSpace(m.Notes)) { <div class="wide"><small>Notatka</small>@m.Notes</div> }
+                    </div>
+                </details>
+            }
+        </div>
+        <div class="table-responsive d-none d-md-block">
             <table class="table table-sm table-hover align-middle mb-0">
                 <thead class="table-light">
                     <tr>

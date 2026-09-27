@@ -141,7 +141,29 @@ else
             <span><i class="bi bi-clock-history me-2"></i>Historia pakietów</span>
             <span class="badge bg-secondary">@_packages.Count</span>
         </div>
-        <div class="table-responsive">
+        @* Telefon: nazwa, wykorzystanie i status na wierzchu, szczegóły po rozwinięciu. *@
+        <div class="hist-list d-md-none">
+            @foreach (var p in _packages.OrderByDescending(p => p.PurchasedAt))
+            {
+                <details class="hist-item">
+                    <summary>
+                        <div class="hist-main">
+                            <div class="hist-title">@p.Name</div>
+                            <div class="hist-sub">@p.PurchasedAt.ToLocalTime().ToString("dd.MM.yyyy") · <span class="badge @StatusCss(p.Status)">@StatusLabel(p.Status)</span></div>
+                        </div>
+                        <div class="hist-side"><b>@p.UsedSessions/@p.TotalSessions</b><div class="hist-sub">treningów</div></div>
+                    </summary>
+                    <div class="hist-body">
+                        <div><small>Wartość</small>@p.TotalPrice.ToString("N0") zł</div>
+                        <div><small>Za trening</small>@p.PricePerSession.ToString("N0") zł</div>
+                        <div><small>Ważny do</small>@(p.ExpiresAt.HasValue ? p.ExpiresAt.Value.ToLocalTime().ToString("dd.MM.yyyy") : "bez limitu")</div>
+                        <div><small>Płatność</small>@(p.IsPaid ? "Opłacony" : p.Status != PackageStatus.Cancelled ? "Oczekuje" : "—")</div>
+                        <div class="wide"><small>Rodzaj</small>@p.SessionTypeName · @p.DurationMinutes min@(p.IsForPair ? $" · wspólny z: {(p.ClientId == _clientId ? p.PartnerName : p.ClientName)}" : "")</div>
+                    </div>
+                </details>
+            }
+        </div>
+        <div class="table-responsive d-none d-md-block">
             <table class="table table-hover align-middle mb-0" style="font-size:.875rem">
                 <thead class="table-light">
                     <tr>

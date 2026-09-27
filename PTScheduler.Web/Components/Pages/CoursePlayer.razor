@@ -6,6 +6,7 @@
 @inject ICourseService CourseService
 @inject IModuleSettingsService ModuleSettings
 @inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Kurs" />
@@ -29,12 +30,16 @@ else if (_detail is null)
 }
 else
 {
-    <div class="cplayer @(_navOpen ? "is-open" : "is-closed")">
+    <div class="cplayer @(_navOpen switch { true => "is-open", false => "is-closed", _ => "is-default" })">
 
         <!-- Top bar -->
         <div class="cplayer-top">
-            <button class="cp-iconbtn" @onclick="ToggleNav" title="Moduły" aria-label="Przełącz listę modułów">
-                <i class="bi @(_navOpen ? "bi-x-lg" : "bi-list")"></i>
+            @* Domyślnie lista lekcji jest widoczna na komputerze i schowana na telefonie — stąd dwa przyciski. *@
+            <button class="cp-iconbtn d-lg-none" @onclick="() => _navOpen = _navOpen != true" title="Lekcje" aria-label="Pokaż listę lekcji">
+                <i class="bi @(_navOpen == true ? "bi-x-lg" : "bi-list")"></i>
+            </button>
+            <button class="cp-iconbtn d-none d-lg-inline-flex" @onclick="() => _navOpen = _navOpen == false" title="Lekcje" aria-label="Przełącz listę lekcji">
+                <i class="bi @(_navOpen == false ? "bi-list" : "bi-layout-sidebar-inset")"></i>
             </button>
             <a href="/my/courses" class="cp-iconbtn" title="Wróć"><i class="bi bi-arrow-left"></i></a>
             <div class="cplayer-title">@_detail.Title</div>
@@ -176,6 +181,43 @@ else
                                 }
                             </div>
                         }
+
+                        @* Nawigacja między lekcjami — bez otwierania listy modułów: ukończ i od razu dalej. *@
+                        @{
+                            var (prev, next, index, total) = Neighbours();
+                            var needsQuiz = _selected.HasQuiz && !_selected.IsCompleted;
+                        }
+                        <div class="cp-next">
+                            @if (prev is not null)
+                            {
+                                <button class="cp-prev-btn" @onclick="() => Select(prev.Id)" title="@prev.Title"><i class="bi bi-chevron-left"></i><span>Poprzednia</span></button>
+                            }
+                            else
+                            {
+                                <span></span>
+                            }
+                            <span class="cp-next-count">Lekcja @index z @total</span>
+                            @if (needsQuiz)
+                            {
+                                <span class="cp-next-hint">Zalicz quiz, aby przejść dalej</span>
+                            }
+                            else if (!_selected.IsCompleted)
+                            {
+                                <button class="cp-next-btn" @onclick="CompleteAndNext" disabled="@_saving">
+                                    @(next is null ? "Ukończ kurs" : "Ukończ i dalej")<i class="bi bi-arrow-right"></i>
+                                </button>
+                            }
+                            else if (next is not null)
+                            {
+                                <button class="cp-next-btn" @onclick="() => Select(next.Id)">
+                                    <span class="cp-next-label">Dalej: @next.Title</span><i class="bi bi-arrow-right"></i>
+                                </button>
+                            }
+                            else
+                            {
+                                <a class="cp-next-btn done" href="/my/courses"><i class="bi bi-trophy-fill"></i>Kurs ukończony — wróć do kursów</a>
+                            }
+                        </div>
                     </div>
                 }
             </main>
@@ -285,6 +327,29 @@ else
     .cp-complete i { transition: transform .25s cubic-bezier(.22,1,.36,1); }
     .cp-complete.done i { transform: scale(1.15); }
 
+    /* Dół lekcji: poprzednia / licznik / dalej */
+    .cp-next { display: flex; align-items: center; justify-content: space-between; gap: .75rem; margin-top: 1.6rem; padding-top: 1.1rem; border-top: 1px solid var(--bs-border-color); flex-wrap: wrap; }
+    .cp-next-count { font-size: .82rem; color: var(--bs-secondary-color); }
+    .cp-next-hint { font-size: .85rem; color: var(--bs-secondary-color); }
+    .cp-prev-btn { display: inline-flex; align-items: center; gap: .3rem; border: 0; background: none; color: var(--bs-secondary-color); font-weight: 600; padding: .5rem .25rem; }
+    .cp-prev-btn:hover { color: var(--c-primary); }
+    .cp-next-btn {
+        display: inline-flex; align-items: center; justify-content: center; gap: .5rem; max-width: 100%;
+        padding: .7rem 1.2rem; border-radius: 12px; border: 0; font-weight: 700; text-decoration: none;
+        background: var(--c-primary); color: #fff; box-shadow: 0 8px 20px -10px var(--c-primary);
+        transition: transform .12s ease, filter .15s ease;
+    }
+    .cp-next-btn:hover { filter: brightness(1.05); color: #fff; }
+    .cp-next-btn:active { transform: scale(.97); }
+    .cp-next-btn.done { background: #16a34a; box-shadow: none; }
+    .cp-next-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 260px; }
+    @@media (max-width: 575.98px) {
+        .cp-next { display: grid; grid-template-columns: auto 1fr; }
+        .cp-next-count { justify-self: end; }
+        .cp-next-btn, .cp-next-hint { grid-column: 1 / -1; width: 100%; text-align: center; }
+        .cp-next-label { max-width: 220px; }
+    }
+
     /* Fade-in on lesson switch */
     .cp-fade { animation: cpFade .28s ease; }
     @@keyframes cpFade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
@@ -323,7 +388,7 @@ else
             transition: transform .32s cubic-bezier(.22,1,.36,1);
         }
         .cplayer.is-open .cplayer-side { transform: translateX(0); }
-        .cplayer.is-closed .cplayer-side { transform: translateX(-102%); margin-left: 0; opacity: 1; pointer-events: none; }
+        .cplayer:not(.is-open) .cplayer-side { transform: translateX(-102%); margin-left: 0; opacity: 1; pointer-events: none; box-shadow: none; }
         .cplayer.is-open .cplayer-backdrop {
             display: block; position: fixed; inset: 0; z-index: 1040;
             background: rgba(0,0,0,.45); animation: cpFade .2s ease;
@@ -337,7 +402,8 @@ else
     private bool _loading = true;
     private bool _moduleOff;
     private bool _saving;
-    private bool _navOpen = true;
+    // null = domyślnie: na komputerze lista lekcji widoczna, na telefonie schowana (od razu treść lekcji).
+    private bool? _navOpen;
     private string _userId = string.Empty;
     private StudentCourseDetailDto? _detail;
     private int? _selectedId;
@@ -372,13 +438,14 @@ else
         }
     }
 
-    private void ToggleNav() => _navOpen = !_navOpen;
+
 
     private async Task Select(int lessonId)
     {
         _selectedId = lessonId;
-        _navOpen = false; // auto-collapse the modules column after picking a lesson
+        if (_navOpen == true) _navOpen = null; // po wyborze lekcji na telefonie lista się chowa
         await LoadQuizForSelected();
+        try { await JS.InvokeVoidAsync("scrollTo", 0, 0); } catch { /* prerender */ }
     }
 
     private async Task LoadQuizForSelected()
@@ -421,6 +488,30 @@ else
         _result = null;
         if (_quiz is not null)
             foreach (var q in _quiz.Questions) _answers[q.Id] = new HashSet<int>();
+    }
+
+    private (LessonDto? Prev, LessonDto? Next, int Index, int Total) Neighbours()
+    {
+        var all = _detail?.Modules.SelectMany(m => m.Lessons).ToList() ?? [];
+        var i = all.FindIndex(l => l.Id == _selectedId);
+        if (i < 0) return (null, null, 0, all.Count);
+        return (i > 0 ? all[i - 1] : null, i + 1 < all.Count ? all[i + 1] : null, i + 1, all.Count);
+    }
+
+    // Jedno kliknięcie: lekcja ukończona i od razu następna (jak w aplikacjach do nauki).
+    private async Task CompleteAndNext()
+    {
+        if (_selected is null) return;
+        var next = Neighbours().Next;
+        _saving = true;
+        try
+        {
+            if (!_selected.IsCompleted)
+                await CourseService.SetLessonCompletedAsync(_userId, _selected.Id, true);
+            await Load();
+        }
+        finally { _saving = false; }
+        if (next is not null) await Select(next.Id);
     }
 
     private async Task ToggleComplete()
