@@ -22,16 +22,33 @@ public class AddonService(
         && item.FulfillmentType is "credit_cdn_bandwidth" or "credit_cdn_storage"
         && item.CreditAmount > 0;
 
-    /// <summary>Dodatkowe GB z aktywnych dodatków — doliczane do limitów planu.</summary>
-    public static async Task<(int StorageGb, int BandwidthGb)> ExtraLimitsAsync(PortalDbContext db, int tenantId)
+    /// <summary>
+    /// Co trener ma ponad plan: GB z aktywnych dodatków i pozycji oferty, SMS-y miesięcznie z oferty
+    /// oraz czy ma kredyty SMS (wtedy przypomnienia SMS działają nawet w planie bez SMS).
+    /// </summary>
+    public static async Task<ExtraLimits> ExtraLimitsAsync(PortalDbContext db, int tenantId)
     {
         var rows = await db.TenantAddons.AsNoTracking()
             .Where(a => a.TenantId == tenantId && a.Status == TenantAddonStatus.Active)
             .Select(a => new { a.Quantity, a.ServiceItem!.FulfillmentType, a.ServiceItem.CreditAmount })
             .ToListAsync();
-        return (
-            rows.Where(r => r.FulfillmentType == "credit_cdn_storage").Sum(r => r.Quantity * r.CreditAmount),
-            rows.Where(r => r.FulfillmentType == "credit_cdn_bandwidth").Sum(r => r.Quantity * r.CreditAmount));
+        var now = DateTime.UtcNow;
+        var offer = (await db.TenantOfferItems.AsNoTracking()
+                .Where(o => o.TenantId == tenantId && o.CancelledAt == null && o.Effect != OfferEffect.None)
+                .ToListAsync())
+            .Where(o => o.IsActiveAt(now))
+            .ToList();
+        var smsCredits = await db.TenantCredits.AsNoTracking()
+            .Where(c => c.TenantId == tenantId && c.CreditType == "sms")
+            .Select(c => c.Balance).FirstOrDefaultAsync();
+
+        return new ExtraLimits(
+            StorageGb: rows.Where(r => r.FulfillmentType == "credit_cdn_storage").Sum(r => r.Quantity * r.CreditAmount)
+                       + offer.Where(o => o.Effect == OfferEffect.VideoStorageGb).Sum(o => o.TotalEffect),
+            BandwidthGb: rows.Where(r => r.FulfillmentType == "credit_cdn_bandwidth").Sum(r => r.Quantity * r.CreditAmount)
+                         + offer.Where(o => o.Effect == OfferEffect.VideoBandwidthGb).Sum(o => o.TotalEffect),
+            SmsPerMonth: offer.Where(o => o.Effect == OfferEffect.Sms && o.Billing != OfferBilling.OneTime).Sum(o => o.TotalEffect),
+            HasSmsCredits: smsCredits > 0);
     }
 
     public async Task<List<TenantAddon>> GetActiveAsync(int tenantId)
@@ -144,4 +161,10 @@ public class AddonService(
         await tenants.PushEntitlementsAsync(tenantId);
         return (true, null);
     }
+}
+
+/// <summary>Limity ponad plan (dodatki i oferta) doliczane do uprawnień instancji.</summary>
+public sealed record ExtraLimits(int StorageGb, int BandwidthGb, int SmsPerMonth, bool HasSmsCredits)
+{
+    public static readonly ExtraLimits None = new(0, 0, 0, false);
 }

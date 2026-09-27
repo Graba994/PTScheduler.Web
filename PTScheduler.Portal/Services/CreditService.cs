@@ -122,27 +122,86 @@ public class CreditService(
         }
     }
 
-    public async Task<(bool Success, string? Error)> SendSmsCentralizedAsync(
-        int tenantId, string phone, string message)
+    public static int MonthKey(DateTime utc) => utc.Year * 100 + utc.Month;
+
+    /// <summary>
+    /// Stan SMS trenera: miesięczny limit (plan + oferta), ile z niego wysłano w tym miesiącu
+    /// i ile ma kredytów (dokupionych albo w gratisie — nie wygasają).
+    /// </summary>
+    public async Task<SmsStatus> GetSmsStatusAsync(int tenantId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var tenant = await db.Tenants.AsNoTracking().Include(t => t.Plan).FirstOrDefaultAsync(t => t.Id == tenantId);
+        var extra = await AddonService.ExtraLimitsAsync(db, tenantId);
+        var planLimit = tenant?.Plan is { SmsReminders: true } plan ? plan.MaxSmsPerMonth : 0;
+        var limit = planLimit >= int.MaxValue - extra.SmsPerMonth ? int.MaxValue : planLimit + extra.SmsPerMonth;
+        var month = MonthKey(DateTime.UtcNow);
+        var used = await db.TenantSmsCounters.AsNoTracking()
+            .Where(c => c.TenantId == tenantId && c.Month == month).Select(c => c.Count).FirstOrDefaultAsync();
+        var credits = await db.TenantCredits.AsNoTracking()
+            .Where(c => c.TenantId == tenantId && c.CreditType == "sms").Select(c => c.Balance).FirstOrDefaultAsync();
+        var enabled = !string.IsNullOrWhiteSpace(await settings.GetAsync(SiteSettingsService.Keys.PlatformSmsApiToken));
+        return new SmsStatus(enabled, limit, used, credits);
+    }
+
+    /// <summary>
+    /// Wysyłka przez konto SMSAPI platformy. Najpierw z miesięcznego limitu planu (i oferty),
+    /// potem z kredytów. Nieudana wysyłka oddaje SMS-a do limitu albo kredytów.
+    /// </summary>
+    public async Task<SmsSendResult> SendSmsCentralizedAsync(int tenantId, string phone, string message)
     {
         var token = await settings.GetAsync(SiteSettingsService.Keys.PlatformSmsApiToken);
         if (string.IsNullOrWhiteSpace(token))
-            return (false, "Platforma SMS nie skonfigurowana.");
+            return new(false, "SMS nie są jeszcze uruchomione na platformie.", false);
 
-        var (ok, remaining) = await DeductCreditAsync(tenantId, "sms", 1);
-        if (!ok)
-            return (false, $"Brak kredytów SMS (pozostało: {remaining}).");
+        var status = await GetSmsStatusAsync(tenantId);
+        var month = MonthKey(DateTime.UtcNow);
+        var fromAllowance = status.MonthlyLimit > 0 && await TryUseAllowanceAsync(tenantId, month, status.MonthlyLimit);
+        if (!fromAllowance)
+        {
+            var (ok, _) = await DeductCreditAsync(tenantId, "sms", 1);
+            if (!ok)
+                return new(false, status.MonthlyLimit > 0
+                    ? $"Wykorzystano miesięczny limit SMS ({status.MonthlyLimit}) i nie ma dokupionych SMS-ów."
+                    : "Brak SMS-ów do wysłania — dokup pakiet SMS.", true);
+        }
 
         var senderName = await settings.GetAsync(SiteSettingsService.Keys.PlatformSmsSenderName);
         var (sent, error) = await SendSmsApiAsync(token, senderName, phone, message);
-
         if (!sent)
         {
-            await AddCreditsAsync(tenantId, "sms", 1, "Zwrot — błąd wysyłki");
-            return (false, error);
+            await using var db = dbFactory.CreateDbContext();
+            if (fromAllowance)
+                await db.TenantSmsCounters.Where(c => c.TenantId == tenantId && c.Month == month && c.Count > 0)
+                    .ExecuteUpdateAsync(u => u.SetProperty(c => c.Count, c => c.Count - 1));
+            else
+                await db.TenantCredits.Where(c => c.TenantId == tenantId && c.CreditType == "sms")
+                    .ExecuteUpdateAsync(u => u.SetProperty(c => c.Balance, c => c.Balance + 1).SetProperty(c => c.TotalUsed, c => c.TotalUsed - 1));
+            return new(false, error, false);
         }
+        return new(true, null, false);
+    }
 
-        return (true, null);
+    /// <summary>Atomowo zwiększa licznik miesiąca, o ile nie przekroczy limitu.</summary>
+    private async Task<bool> TryUseAllowanceAsync(int tenantId, int month, int limit)
+    {
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            await using var db = dbFactory.CreateDbContext();
+            var updated = await db.TenantSmsCounters
+                .Where(c => c.TenantId == tenantId && c.Month == month && c.Count < limit)
+                .ExecuteUpdateAsync(u => u.SetProperty(c => c.Count, c => c.Count + 1));
+            if (updated == 1) return true;
+            if (await db.TenantSmsCounters.AnyAsync(c => c.TenantId == tenantId && c.Month == month)) return false;
+            try
+            {
+                db.TenantSmsCounters.Add(new TenantSmsCounter { TenantId = tenantId, Month = month, Count = 1 });
+                await db.SaveChangesAsync();
+                return true;
+            }
+            catch (DbUpdateException) { /* równoległy pierwszy SMS miesiąca — ponów przez UPDATE */ }
+        }
+        return false;
     }
 
     private async Task<(bool Success, string? Error)> SendSmsApiAsync(
@@ -196,3 +255,13 @@ public class CreditService(
         };
     }
 }
+
+/// <summary>Stan SMS trenera w Portalu.</summary>
+public sealed record SmsStatus(bool PlatformEnabled, int MonthlyLimit, int MonthlyUsed, decimal Credits)
+{
+    public bool Unlimited => MonthlyLimit == int.MaxValue;
+    public int MonthlyLeft => Unlimited ? int.MaxValue : Math.Max(0, MonthlyLimit - MonthlyUsed);
+    public bool CanSend => PlatformEnabled && (MonthlyLeft > 0 || Credits >= 1);
+}
+
+public sealed record SmsSendResult(bool Success, string? Error, bool QuotaExceeded);

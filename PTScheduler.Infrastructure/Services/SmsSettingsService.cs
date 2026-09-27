@@ -17,7 +17,8 @@ public class SmsSettingsService(IDbContextFactory<ApplicationDbContext> dbFactor
         {
             IsEnabled = s.IsEnabled,
             ApiToken = s.ApiToken,
-            SenderName = s.SenderName
+            SenderName = s.SenderName,
+            RemindersPaused = s.RemindersPaused
         };
     }
 
@@ -33,6 +34,7 @@ public class SmsSettingsService(IDbContextFactory<ApplicationDbContext> dbFactor
         s.IsEnabled = dto.IsEnabled;
         s.ApiToken = string.IsNullOrWhiteSpace(dto.ApiToken) ? s.ApiToken : dto.ApiToken;
         s.SenderName = dto.SenderName;
+        s.RemindersPaused = dto.RemindersPaused;
         await db.SaveChangesAsync();
     }
 }

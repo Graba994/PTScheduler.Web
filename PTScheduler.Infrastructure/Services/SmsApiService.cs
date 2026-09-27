@@ -19,18 +19,26 @@ public class SmsApiService(
     private string? TenantSlug => Environment.GetEnvironmentVariable("TENANT_SLUG");
     private string? InternalSecret => Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
 
+    // Instancja zarządzana przez Portal wysyła wyłącznie przez platformę (limit planu + dokupione SMS-y) —
+    // trener nie wpisuje żadnych tokenów. Własne konto SMSAPI działa tylko w instancji samodzielnej.
+    private static bool Managed => PlatformConnection.IsManaged;
+
     public async Task<bool> IsEnabledAsync()
     {
         await using var db = dbFactory.CreateDbContext();
         var s = await db.SmsSettings.FirstOrDefaultAsync();
+        if (Managed)
+            return s?.RemindersPaused != true && (await GetCentralizedStatusAsync())?.CanSend == true;
+
         if (s is { IsEnabled: true } && !string.IsNullOrWhiteSpace(s.ApiToken))
             return true;
-
         return await IsPlatformSmsEnabledAsync();
     }
 
     public async Task<(bool Success, string? Error)> TestAsync(string phone)
     {
+        if (Managed) return await TestViaPlatformAsync(phone);
+
         await using var db = dbFactory.CreateDbContext();
         var s = await db.SmsSettings.FirstOrDefaultAsync();
 
@@ -45,6 +53,9 @@ public class SmsApiService(
 
     public async Task<SmsResult> SendReminderAsync(string phone, string message, int maxPerMonth)
     {
+        // Limit miesięczny i kredyty liczy Portal — tu tylko przekazujemy wiadomość.
+        if (Managed) return await SendViaPlatformAsync(phone, message);
+
         await using var db = dbFactory.CreateDbContext();
         var s = await db.SmsSettings.FirstOrDefaultAsync();
 
@@ -69,6 +80,12 @@ public class SmsApiService(
 
     public async Task<(int Sent, int Max)> GetQuotaStatusAsync(int maxPerMonth)
     {
+        if (Managed)
+        {
+            var status = await GetCentralizedStatusAsync();
+            return status is null ? (0, 0) : (status.MonthlyUsed, status.MonthlyLimit);
+        }
+
         await using var db = dbFactory.CreateDbContext();
         var s = await db.SmsSettings.FirstOrDefaultAsync();
 
@@ -110,7 +127,9 @@ public class SmsApiService(
 
             return new CentralizedSmsStatus(
                 PlatformSmsEnabled: root.GetProperty("platformSmsEnabled").GetBoolean(),
-                SmsCredits: root.GetProperty("sms").GetDecimal());
+                SmsCredits: root.GetProperty("sms").GetDecimal(),
+                MonthlyLimit: root.TryGetProperty("smsMonthlyLimit", out var limit) ? limit.GetInt32() : 0,
+                MonthlyUsed: root.TryGetProperty("smsMonthlyUsed", out var used) ? used.GetInt32() : 0);
         }
         catch (Exception ex)
         {
@@ -119,11 +138,8 @@ public class SmsApiService(
         }
     }
 
-    private async Task<bool> IsPlatformSmsEnabledAsync()
-    {
-        var status = await GetCentralizedStatusAsync();
-        return status is { PlatformSmsEnabled: true, SmsCredits: > 0 };
-    }
+    private async Task<bool> IsPlatformSmsEnabledAsync() =>
+        (await GetCentralizedStatusAsync())?.CanSend == true;
 
     private async Task<decimal> GetPlatformSmsCreditsAsync()
     {
@@ -154,8 +170,9 @@ public class SmsApiService(
 
             var success = root.GetProperty("success").GetBoolean();
             var error = root.TryGetProperty("error", out var e) ? e.GetString() : null;
+            var quota = root.TryGetProperty("quotaExceeded", out var q) && q.ValueKind == JsonValueKind.True;
 
-            if (!success && error?.Contains("kredyt", StringComparison.OrdinalIgnoreCase) == true)
+            if (!success && (quota || error?.Contains("kredyt", StringComparison.OrdinalIgnoreCase) == true))
                 return new SmsResult(false, true, error);
 
             return new SmsResult(success, false, error);

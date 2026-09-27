@@ -54,6 +54,8 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string P24Sandbox = "p24_sandbox";
         public const string StorePaymentGateway = "store_payment_gateway";
         public const string AdminNotificationEmail = "admin_notification_email";
+        /// <summary>Dane sprzedawcy w nagłówku PDF oferty trenera (nazwa, adres, NIP, konto — wiele linii).</summary>
+        public const string OfferSellerDetails = "offer_seller_details";
 
         // Update tracking
         public const string LastTenantBuildCommit = "last_tenant_build_commit";

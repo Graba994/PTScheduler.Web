@@ -61,6 +61,8 @@ builder.Services.AddAuthorization();
 builder.Services.AddSingleton<DockerService>();
 builder.Services.AddScoped<TenantService>();
 builder.Services.AddScoped<ContainerLogService>();
+builder.Services.AddScoped<OfferService>();
+builder.Services.AddHostedService<OfferSyncService>();
 builder.Services.AddScoped<SiteSettingsService>();
 builder.Services.AddScoped<NpmService>();
 builder.Services.AddScoped<UpdateService>();
@@ -419,6 +421,21 @@ app.MapGet("/api/backups/{id:int}/download", async (
     return Results.File(entry.FilePath, "application/gzip", Path.GetFileName(entry.FilePath));
 }).RequireAuthorization();
 
+// Oferta trenera jako PDF — tylko administrator.
+app.MapGet("/api/panel/tenants/{id:int}/offer.pdf", async (
+    int id,
+    HttpContext ctx,
+    OfferService offers,
+    SiteSettingsService siteSettings) =>
+{
+    if (!ctx.User.IsInRole("Admin")) return Results.Forbid();
+    var offer = await offers.GetAsync(id);
+    if (offer is null) return Results.NotFound();
+    var seller = await siteSettings.GetAsync(SiteSettingsService.Keys.OfferSellerDetails);
+    var pdf = OfferPdf.Render(offer, seller, "PTScheduler");
+    return Results.File(pdf, "application/pdf", $"oferta-{offer.Tenant.Slug}-{DateTime.UtcNow:yyyy-MM-dd}.pdf");
+}).RequireAuthorization();
+
 // Logi kontenera jako plik .txt — tylko administrator i tylko kontenery, które panel sam pokazuje.
 app.MapGet("/api/panel/logs/download", async (
     string c, int? tail, int? minutes,
@@ -449,8 +466,7 @@ app.MapGet("/api/internal/tenants/{slug}/entitlements", async (
     if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
     var plan = await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == tenant.PlanId);
     if (plan is null) return Results.NotFound();
-    var (extraStorage, extraBandwidth) = await AddonService.ExtraLimitsAsync(db, tenant.Id);
-    return Results.Content(TenantService.SerializeEntitlements(plan, extraStorage, extraBandwidth), "application/json");
+    return Results.Content(TenantService.SerializeEntitlements(plan, await AddonService.ExtraLimitsAsync(db, tenant.Id)), "application/json");
 });
 
 // Ocena aplikacji wysyłana przez trenera z instancji tenanta (Zarządzanie → „Oceń aplikację”).
@@ -693,10 +709,7 @@ app.MapGet("/api/credits/{slug}", async (
     if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
 
     var balances = await creditService.GetBalancesAsync(tenant.Id);
-
-    var platformSmsConfigured = !string.IsNullOrWhiteSpace(
-        await db.Set<SiteSetting>().Where(s => s.Key == "platform_sms_api_token")
-            .Select(s => s.Value).FirstOrDefaultAsync());
+    var sms = await creditService.GetSmsStatusAsync(tenant.Id);
     var platformBunnyConfigured = await db.Set<SiteSetting>()
         .AnyAsync(s => s.Key == "platform_bunny_account_key" && s.Value != null && s.Value != "");
 
@@ -705,7 +718,9 @@ app.MapGet("/api/credits/{slug}", async (
         sms = balances.GetValueOrDefault("sms", 0),
         cdnStorageGb = balances.GetValueOrDefault("cdn_storage_gb", 0),
         cdnBandwidthGb = balances.GetValueOrDefault("cdn_bandwidth_gb", 0),
-        platformSmsEnabled = platformSmsConfigured,
+        platformSmsEnabled = sms.PlatformEnabled,
+        smsMonthlyLimit = sms.MonthlyLimit,
+        smsMonthlyUsed = sms.MonthlyUsed,
         platformCdnEnabled = platformBunnyConfigured
     });
 });
@@ -729,14 +744,15 @@ app.MapPost("/api/credits/{slug}/sms/send", async (
     var phone = root.GetProperty("phone").GetString() ?? "";
     var message = root.GetProperty("message").GetString() ?? "";
 
-    var (success, error) = await creditService.SendSmsCentralizedAsync(tenant.Id, phone, message);
+    var result = await creditService.SendSmsCentralizedAsync(tenant.Id, phone, message);
 
     var balances = await creditService.GetBalancesAsync(tenant.Id);
 
     return Results.Json(new
     {
-        success,
-        error,
+        success = result.Success,
+        error = result.Error,
+        quotaExceeded = result.QuotaExceeded,
         remaining = balances.GetValueOrDefault("sms", 0)
     });
 });

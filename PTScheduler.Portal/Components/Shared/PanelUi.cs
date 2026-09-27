@@ -51,6 +51,7 @@ public static class PanelUi
         TenantEventTypes.CleanupDeleted => "Usunięty po czasie",
         TenantEventTypes.CreditAdded => "Doładowanie kredytów",
         TenantEventTypes.CreditDeducted => "Pobranie kredytów",
+        TenantEventTypes.OfferChanged => "Zmiana oferty",
         _ => type
     };
 
@@ -74,6 +75,7 @@ public static class PanelUi
         TenantEventTypes.GraceExtended => "bi-calendar-plus",
         TenantEventTypes.CreditAdded => "bi-plus-square",
         TenantEventTypes.CreditDeducted => "bi-dash-square",
+        TenantEventTypes.OfferChanged => "bi-file-earmark-text",
         _ => "bi-circle"
     };
 

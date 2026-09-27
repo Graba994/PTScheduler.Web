@@ -432,23 +432,27 @@ public class TenantService(
     /// Uprawnienia instancji = plan + aktywne dodatki miesięczne (więcej transferu
     /// i przestrzeni wideo). Wartości „bez limitu” zostają bez zmian.
     /// </summary>
-    public static string SerializeEntitlements(Plan plan, int extraStorageGb, int extraBandwidthGb)
+    public static string SerializeEntitlements(Plan plan, ExtraLimits extra)
     {
         var node = System.Text.Json.Nodes.JsonNode.Parse(SerializePlan(plan))!.AsObject();
         static int Add(int baseValue, int extra) =>
-            extra <= 0 || baseValue <= 0 || baseValue >= int.MaxValue - extra ? baseValue : baseValue + extra;
-        node["maxVideoStorageGB"] = Add(plan.MaxVideoStorageGB, extraStorageGb);
-        node["maxVideoBandwidthGBPerMonth"] = Add(plan.MaxVideoBandwidthGBPerMonth, extraBandwidthGb);
-        node["addonVideoBandwidthGB"] = extraBandwidthGb;
-        node["addonVideoStorageGB"] = extraStorageGb;
+            extra <= 0 || baseValue >= int.MaxValue - extra ? baseValue : baseValue + extra;
+        // Limit 0 znaczy „brak” — dodatek GB do planu bez wideo nic nie daje (wideo i tak wyłączone).
+        static int AddIfEnabled(int baseValue, int extra) => baseValue <= 0 ? baseValue : Add(baseValue, extra);
+        node["maxVideoStorageGB"] = AddIfEnabled(plan.MaxVideoStorageGB, extra.StorageGb);
+        node["maxVideoBandwidthGBPerMonth"] = AddIfEnabled(plan.MaxVideoBandwidthGBPerMonth, extra.BandwidthGb);
+        node["addonVideoBandwidthGB"] = extra.BandwidthGb;
+        node["addonVideoStorageGB"] = extra.StorageGb;
+        // SMS z oferty dokładają się do limitu planu; gratisowe albo dokupione SMS-y włączają przypomnienia SMS.
+        node["maxSmsPerMonth"] = Add(plan.SmsReminders ? plan.MaxSmsPerMonth : 0, extra.SmsPerMonth);
+        node["smsReminders"] = plan.SmsReminders || extra.SmsPerMonth > 0 || extra.HasSmsCredits;
         return node.ToJsonString();
     }
 
     public async Task<string> EntitlementsJsonAsync(int tenantId, Plan plan)
     {
         await using var db = dbFactory.CreateDbContext();
-        var (storage, bandwidth) = await AddonService.ExtraLimitsAsync(db, tenantId);
-        return SerializeEntitlements(plan, storage, bandwidth);
+        return SerializeEntitlements(plan, await AddonService.ExtraLimitsAsync(db, tenantId));
     }
 
     public static string SerializePlan(Plan plan) =>

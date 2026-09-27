@@ -34,114 +34,111 @@ else
                 }
                 else
                 {
-                    @if (_centralizedStatus is { PlatformSmsEnabled: true })
+                    @if (_managed)
                     {
-                        <!-- Centralized (platform) SMS mode -->
-                        <div class="alert alert-success small">
-                            <i class="bi bi-check-circle-fill me-2"></i>
-                            <strong>SMS centralne</strong> — Twoje konto korzysta z centralnej platformy SMS.
-                            Nie musisz konfigurować własnego konta SMSAPI.pl. Kupuj pakiety SMS w sklepie usług.
-                        </div>
-
-                        <div class="card mb-4">
-                            <div class="card-body">
-                                <div class="row align-items-center">
-                                    <div class="col-auto">
-                                        <div class="d-flex align-items-center gap-3">
-                                            <div>
-                                                <i class="bi bi-chat-dots fs-1 text-primary"></i>
-                                            </div>
-                                            <div>
-                                                <div class="text-muted small">Dostępne kredyty SMS</div>
-                                                <div class="fs-3 fw-bold">@_centralizedStatus.SmsCredits</div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                    <div class="col-auto ms-auto">
-                                        <a href="/admin/sklep" class="btn btn-outline-primary">
-                                            <i class="bi bi-cart-plus me-1"></i>Kup pakiet SMS
-                                        </a>
+                        @* Instancja zarządzana: SMS-y dostarcza platforma — bez tokenów i konfiguracji. *@
+                        @if (_centralizedStatus is not { PlatformSmsEnabled: true })
+                        {
+                            <div class="card mb-4">
+                                <div class="card-body d-flex gap-3 align-items-start">
+                                    <i class="bi bi-hourglass-split fs-3 text-primary"></i>
+                                    <div>
+                                        <div class="fw-semibold mb-1">SMS-y uruchamia administrator platformy</div>
+                                        <div class="text-muted small">Nie musisz niczego konfigurować. Gdy SMS-y będą dostępne, przypomnienia zaczną wychodzić same, a tutaj zobaczysz, ile ich zostało.</div>
                                     </div>
                                 </div>
-                                @if (_centralizedStatus.SmsCredits <= 10 && _centralizedStatus.SmsCredits > 0)
-                                {
-                                    <div class="alert alert-warning small py-2 mt-3 mb-0">
-                                        <i class="bi bi-exclamation-triangle-fill me-2"></i>
-                                        Niski stan kredytów SMS. Kup dodatkowy pakiet, aby zapewnić ciągłość przypomnień.
-                                    </div>
-                                }
-                                else if (_centralizedStatus.SmsCredits <= 0)
-                                {
-                                    <div class="alert alert-danger small py-2 mt-3 mb-0">
-                                        <i class="bi bi-x-circle-fill me-2"></i>
-                                        Brak kredytów SMS. Przypomnienia SMS nie będą wysyłane do czasu zakupu pakietu.
-                                    </div>
-                                }
                             </div>
-                        </div>
+                        }
+                        else
+                        {
+                            var s = _centralizedStatus;
+                            <div class="card mb-3">
+                                <div class="card-body d-flex align-items-center gap-3 flex-wrap">
+                                    <div class="form-check form-switch mb-0">
+                                        <input class="form-check-input" type="checkbox" role="switch" id="smsReminders"
+                                               checked="@(!_dto.RemindersPaused)" @onchange="ToggleRemindersAsync" style="width:2.5em;height:1.3em" />
+                                        <label class="form-check-label fw-semibold" for="smsReminders">Wysyłaj przypomnienia SMS dzień przed treningiem</label>
+                                    </div>
+                                    <span class="badge @(_dto.RemindersPaused ? "bg-secondary" : s.CanSend ? "bg-success" : "bg-warning text-dark") ms-auto">
+                                        @(_dto.RemindersPaused ? "Wstrzymane" : s.CanSend ? "Działa" : "Brak SMS-ów")
+                                    </span>
+                                </div>
+                            </div>
 
-                        <!-- Test SMS for centralized mode -->
-                        <div class="card mb-4">
-                            <div class="card-header fw-semibold">
-                                <i class="bi bi-send me-2"></i>Test SMS
-                            </div>
-                            <div class="card-body">
-                                <div class="row g-3 align-items-end">
-                                    <div class="col-md-6">
-                                        <label class="form-label fw-semibold small mb-1">Testowy numer telefonu</label>
-                                        <input type="tel" class="form-control" @bind="_testPhone"
-                                               placeholder="np. 600123456" />
-                                    </div>
-                                    <div class="col-md-3">
-                                        <button class="btn btn-outline-primary w-100" @onclick="TestSmsAsync"
-                                                disabled="@(_testing || string.IsNullOrWhiteSpace(_testPhone))">
-                                            @if (_testing)
+                            <div class="row g-3 mb-3">
+                                <div class="col-md-7">
+                                    <div class="card h-100">
+                                        <div class="card-body">
+                                            <div class="text-muted small mb-1">W tym miesiącu (z planu)</div>
+                                            @if (s.Unlimited)
                                             {
-                                                <span class="spinner-border spinner-border-sm me-1"></span>
+                                                <div class="fs-4 fw-bold">@s.MonthlyUsed <span class="fs-6 fw-normal text-muted">wysłanych · bez limitu</span></div>
+                                            }
+                                            else if (s.MonthlyLimit > 0)
+                                            {
+                                                var pct = (int)Math.Min(100, s.MonthlyUsed * 100L / Math.Max(1, s.MonthlyLimit));
+                                                <div class="fs-4 fw-bold">@s.MonthlyUsed <span class="fs-6 fw-normal text-muted">/ @s.MonthlyLimit</span></div>
+                                                <div class="progress mt-2" style="height:8px" role="progressbar" aria-valuenow="@pct" aria-valuemin="0" aria-valuemax="100" aria-label="Wykorzystanie limitu SMS">
+                                                    <div class="progress-bar @(pct >= 90 ? "bg-danger" : pct >= 70 ? "bg-warning" : "")" style="width:@(pct)%"></div>
+                                                </div>
+                                                <div class="small text-muted mt-2">Zostało @s.MonthlyLeft. Limit odnawia się 1. dnia miesiąca.</div>
                                             }
                                             else
                                             {
-                                                <i class="bi bi-send me-1"></i>
+                                                <div class="small text-muted">Twój plan nie zawiera SMS-ów w cenie — przypomnienia wychodzą z dodatkowych SMS-ów.</div>
                                             }
-                                            Wyślij test
-                                        </button>
+                                        </div>
                                     </div>
                                 </div>
-                                <div class="form-text mt-2">Test SMS nie zużywa kredytów.</div>
-
-                                @if (!string.IsNullOrEmpty(_message))
-                                {
-                                    <div class="alert @(_messageOk ? "alert-success" : "alert-danger") py-2 small mt-3 mb-0">
-                                        <i class="bi @(_messageOk ? "bi-check-circle-fill" : "bi-x-circle-fill") me-2"></i>
-                                        @_message
+                                <div class="col-md-5">
+                                    <div class="card h-100">
+                                        <div class="card-body d-flex flex-column">
+                                            <div class="text-muted small mb-1">Dodatkowe SMS-y</div>
+                                            <div class="fs-4 fw-bold">@s.SmsCredits.ToString("0")</div>
+                                            <div class="small text-muted mb-3">Nie wygasają. Używamy ich, gdy skończy się limit z planu.</div>
+                                            <a href="/admin/sklep" class="btn btn-outline-primary btn-sm mt-auto align-self-start">
+                                                <i class="bi bi-cart-plus me-1"></i>Dokup SMS
+                                            </a>
+                                        </div>
                                     </div>
-                                }
+                                </div>
                             </div>
-                        </div>
 
-                        @* W instancji zarządzanej SMS-y idą tylko z kredytów platformy — bez własnych tokenów. *@
-                        @if (!PTScheduler.Infrastructure.Services.PlatformConnection.IsManaged)
+                            @if (!s.CanSend && !_dto.RemindersPaused)
+                            {
+                                <div class="alert alert-warning small">
+                                    <i class="bi bi-exclamation-triangle-fill me-2"></i>
+                                    Skończyły się SMS-y na ten miesiąc — przypomnienia idą tylko mailem. Dokup pakiet, żeby wróciły SMS-y.
+                                </div>
+                            }
+
+                            <details class="card mb-4">
+                                <summary class="card-header fw-semibold" style="cursor:pointer;list-style:none">
+                                    <i class="bi bi-send me-2"></i>Wyślij SMS testowy
+                                </summary>
+                                <div class="card-body">
+                                    <div class="row g-2 align-items-end">
+                                        <div class="col-sm-7">
+                                            <label class="form-label small fw-semibold mb-1" for="smsTestPhone">Numer telefonu</label>
+                                            <input id="smsTestPhone" type="tel" class="form-control" @bind="_testPhone" placeholder="np. 600123456" />
+                                        </div>
+                                        <div class="col-sm-5">
+                                            <button class="btn btn-outline-primary w-100" @onclick="TestSmsAsync" disabled="@(_testing || string.IsNullOrWhiteSpace(_testPhone))">
+                                                @if (_testing) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-send me-1"></i> }
+                                                Wyślij test
+                                            </button>
+                                        </div>
+                                    </div>
+                                    <div class="form-text mt-2">Test nie zużywa SMS-ów z limitu.</div>
+                                </div>
+                            </details>
+                        }
+
+                        @if (!string.IsNullOrEmpty(_message))
                         {
-                        <details class="card mb-4">
-                            <summary class="card-header fw-semibold" style="cursor:pointer;list-style:none">
-                                <i class="bi bi-question-circle me-2"></i>Wolisz własne konto SMSAPI.pl?
-                            </summary>
-                            <div class="card-body small">
-                                Jeśli chcesz korzystać z własnego konta SMSAPI.pl zamiast centralnych kredytów,
-                                skonfiguruj poniżej token API. Własne konto ma pierwszeństwo — system będzie
-                                korzystał z Twoich środków SMSAPI.pl zamiast centralnych kredytów.
+                            <div class="alert @(_messageOk ? "alert-success" : "alert-danger") py-2 small">
+                                <i class="bi @(_messageOk ? "bi-check-circle-fill" : "bi-x-circle-fill") me-2"></i>@_message
                             </div>
-                        </details>
-
-                        <!-- Collapsed BYOA section when centralized is active -->
-                        <details class="card mb-4">
-                            <summary class="card-header fw-semibold" style="cursor:pointer;list-style:none">
-                                <i class="bi bi-sliders me-2"></i>Konfiguracja własnego konta SMSAPI.pl (opcjonalne)
-                            </summary>
-                            <div class="card-body">
-                                @RenderByoaForm()
-                            </div>
-                        </details>
                         }
                     }
                     else
@@ -322,6 +319,7 @@ else
     private int _quotaSent;
     private int _maxPerMonth;
     private CentralizedSmsStatus? _centralizedStatus;
+    private readonly bool _managed = PTScheduler.Infrastructure.Services.PlatformConnection.IsManaged;
 
     protected override async Task OnInitializedAsync()
     {
@@ -330,7 +328,7 @@ else
 
         _centralizedStatus = await SmsService.GetCentralizedStatusAsync();
 
-        if (_centralizedStatus is not { PlatformSmsEnabled: true })
+        if (!_managed)
             (_quotaSent, _) = await SmsService.GetQuotaStatusAsync(_maxPerMonth);
 
         _loading = false;
@@ -354,6 +352,14 @@ else
         finally { _saving = false; }
     }
 
+    private async Task ToggleRemindersAsync(ChangeEventArgs e)
+    {
+        _dto.RemindersPaused = e.Value is not true;
+        await SettingsService.SaveAsync(_dto);
+        _messageOk = true;
+        _message = _dto.RemindersPaused ? "Przypomnienia SMS wstrzymane." : "Przypomnienia SMS włączone.";
+    }
+
     private async Task TestSmsAsync()
     {
         if (string.IsNullOrWhiteSpace(_testPhone)) return;
@@ -361,11 +367,8 @@ else
         _message = "";
         try
         {
-            if (_centralizedStatus is not { PlatformSmsEnabled: true }
-                || !string.IsNullOrWhiteSpace(_dto.ApiToken))
-            {
+            if (!_managed)
                 await SettingsService.SaveAsync(_dto);
-            }
 
             var (success, error) = await SmsService.TestAsync(_testPhone);
             _messageOk = success;

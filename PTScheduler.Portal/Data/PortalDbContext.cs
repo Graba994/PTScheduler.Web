@@ -29,6 +29,8 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<GoogleCalendarGrant> GoogleCalendarGrants => Set<GoogleCalendarGrant>();
     public DbSet<TenantMailCounter> TenantMailCounters => Set<TenantMailCounter>();
     public DbSet<TenantAddon> TenantAddons => Set<TenantAddon>();
+    public DbSet<TenantOfferItem> TenantOfferItems => Set<TenantOfferItem>();
+    public DbSet<TenantSmsCounter> TenantSmsCounters => Set<TenantSmsCounter>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -128,6 +130,29 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.HasIndex(x => new { x.TenantId, x.Status });
             e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.ServiceItem).WithMany().HasForeignKey(x => x.ServiceItemId).OnDelete(DeleteBehavior.Restrict);
+        });
+
+        b.Entity<TenantOfferItem>(e =>
+        {
+            e.Property(x => x.Kind).HasMaxLength(16);
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Description).HasMaxLength(1000);
+            e.Property(x => x.InternalNote).HasMaxLength(1000);
+            e.Property(x => x.Billing).HasMaxLength(16);
+            e.Property(x => x.Effect).HasMaxLength(32);
+            e.Property(x => x.UnitPrice).HasPrecision(12, 2);
+            e.Property(x => x.CreatedBy).HasMaxLength(256);
+            e.Ignore(x => x.Total);
+            e.Ignore(x => x.TotalEffect);
+            e.HasIndex(x => x.TenantId);
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.ServiceItem).WithMany().HasForeignKey(x => x.ServiceItemId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        b.Entity<TenantSmsCounter>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.Month }).IsUnique();
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<TenantCredit>(e =>

@@ -35,4 +35,5 @@ public static class TenantEventTypes
     public const string CleanupDeleted = "cleanup_deleted";
     public const string CreditAdded = "credit_added";
     public const string CreditDeducted = "credit_deducted";
+    public const string OfferChanged = "offer_changed";
 }

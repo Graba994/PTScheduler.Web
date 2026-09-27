@@ -7,6 +7,12 @@ public class SmsSettings
     public string ApiToken { get; set; } = "";
     public string SenderName { get; set; } = "";
 
+    /// <summary>
+    /// Instancja zarządzana przez Portal: trener wstrzymał przypomnienia SMS. Domyślnie wysyłamy —
+    /// trener niczego nie musi włączać, SMS-y idą z limitu planu i dokupionych pakietów.
+    /// </summary>
+    public bool RemindersPaused { get; set; }
+
     // Monthly quota tracking (yyyyMM as int, e.g. 202607). Reset when the
     // month rolls over so the counter doesn't need a separate cron job.
     public int QuotaMonthKey { get; set; }
