@@ -421,6 +421,15 @@ app.MapGet("/api/backups/{id:int}/download", async (
     return Results.File(entry.FilePath, "application/gzip", Path.GetFileName(entry.FilePath));
 }).RequireAuthorization();
 
+// Zdjęcia sylwetek trenerów ze strony głównej (publiczne; trzymane w ustawieniach Portalu).
+app.MapGet("/media/trainers/{id}.jpg", async (string id, HttpContext ctx, SiteSettingsService siteSettings) =>
+{
+    var jpeg = await FeaturedTrainers.GetPhotoAsync(siteSettings, id);
+    if (jpeg is null) return Results.NotFound();
+    ctx.Response.Headers.CacheControl = "public, max-age=604800";
+    return Results.File(jpeg, "image/jpeg");
+});
+
 // Oferta trenera jako PDF — tylko administrator.
 app.MapGet("/api/panel/tenants/{id:int}/offer.pdf", async (
     int id,

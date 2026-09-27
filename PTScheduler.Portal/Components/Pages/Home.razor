@@ -2,7 +2,6 @@
 @layout PublicLayout
 @inject SiteSettingsService Settings
 @inject IDbContextFactory<PortalDbContext> DbFactory
-@using System.Text.Json
 
 <PageTitle>PTScheduler — aplikacja dla trenerów personalnych</PageTitle>
 <HeadContent>
@@ -224,26 +223,103 @@
             <div class="lp-eyebrow">Twoja marka</div>
             <h2 class="lp-section-title" style="text-align:left">Klienci widzą Ciebie, nie nas</h2>
             <p class="lp-section-sub">Własne logo, kolory i adres — a do tego gotowa strona z ofertą, opiniami i przyciskiem „Umów trening”. Możesz podpiąć własną domenę; certyfikat SSL ustawiamy automatycznie.</p>
-            <div class="lp-brand-swatches" aria-hidden="true">
-                <span style="background:#0F766E"></span><span style="background:#7C3AED"></span><span style="background:#E11D48"></span><span style="background:#EA580C"></span><span style="background:#1E293B"></span>
-            </div>
+            <p class="lp-demo-hint"><i class="bi bi-hand-index-thumb"></i>Kliknij kolor obok i zobacz, jak zmienia się aplikacja.</p>
             <ul class="lp-ticks">
                 <li><i class="bi bi-check-circle-fill"></i>Adres <strong>twoja-nazwa.ptscheduler.pl</strong> albo własna domena</li>
                 <li><i class="bi bi-check-circle-fill"></i>E-maile do klientów z nazwą Twojego studia</li>
                 <li><i class="bi bi-check-circle-fill"></i>Bez konfigurowania serwerów, poczty i SMS-ów — to po naszej stronie</li>
             </ul>
         </div>
-        <div class="lp-site" aria-hidden="true">
-            <div class="lp-site-bar"><b></b><b></b><b></b><span class="lp-site-url">studio-kasi.pl</span></div>
-            <div class="lp-site-hero">
-                <h4>Studio Kasi — trening personalny</h4>
-                <p>Siła, sylwetka i zdrowe plecy. Warszawa Mokotów i online.</p>
-                <a href="#" tabindex="-1">Umów pierwszy trening</a>
+        <div class="lp-demo">
+            <div class="lp-demo-pick">
+                <span class="lp-demo-pick-label">Wybierz kolor:</span>
+                <div class="lp-demo-swatches" role="radiogroup" aria-label="Kolor aplikacji w podglądzie">
+                    @foreach (var (key, name, color) in _themes)
+                    {
+                        <input type="radio" name="lp-theme" id="@($"lp-t-{key}")" value="@key" checked="@(key == "ocean")" />
+                        <label for="@($"lp-t-{key}")" style="--sw:@color" title="@name"><span class="visually-hidden">@name</span></label>
+                    }
+                </div>
+                <span class="lp-demo-names" aria-hidden="true">
+                    @foreach (var (key, name, _) in _themes) { <span data-t="@key">@name</span> }
+                </span>
             </div>
-            <div class="lp-site-body"><div>Oferta i pakiety</div><div>★ 4,9 · 38 opinii</div><div>Kursy online</div></div>
+
+            @* Miniatura prawdziwej aplikacji trenera (bez funkcji) — kolory zmieniają same style, bez JavaScriptu. *@
+            <div class="lp-app" aria-hidden="true">
+                <div class="lp-app-bar"><b></b><b></b><b></b><span>studio-kasi.pl</span></div>
+                <div class="lp-app-body">
+                    <aside class="lp-app-side">
+                        <div class="lp-app-brand"><span class="lp-app-logo">K</span><span class="lp-app-label">Studio Kasi</span></div>
+                        <div class="lp-app-nav active"><i class="bi bi-house-door-fill"></i><span class="lp-app-label">Dashboard</span></div>
+                        <div class="lp-app-nav"><i class="bi bi-calendar3"></i><span class="lp-app-label">Kalendarz</span></div>
+                        <div class="lp-app-nav"><i class="bi bi-calendar-check"></i><span class="lp-app-label">Wizyty</span></div>
+                        <div class="lp-app-nav"><i class="bi bi-people-fill"></i><span class="lp-app-label">Klienci</span></div>
+                        <div class="lp-app-nav"><i class="bi bi-chat-dots-fill"></i><span class="lp-app-label">Wiadomości</span><em>2</em></div>
+                    </aside>
+                    <div class="lp-app-main">
+                        <div class="lp-app-head">
+                            <div><div class="lp-app-hello">Dzień dobry, Kasiu</div><div class="lp-app-date">wtorek, 14 października</div></div>
+                            <span class="lp-app-btn"><i class="bi bi-plus-lg"></i>Nowa wizyta</span>
+                        </div>
+                        <div class="lp-app-stats">
+                            <div class="lp-app-stat"><span class="lp-app-ico"><i class="bi bi-calendar-event"></i></span><b>4</b><small>dziś</small></div>
+                            <div class="lp-app-stat"><span class="lp-app-ico"><i class="bi bi-people"></i></span><b>38</b><small>klientów</small></div>
+                            <div class="lp-app-stat"><span class="lp-app-ico"><i class="bi bi-wallet2"></i></span><b>6 240 zł</b><small>w tym mies.</small></div>
+                        </div>
+                        <div class="lp-app-card">
+                            <div class="lp-app-card-title">Dzisiaj</div>
+                            <div class="lp-app-row"><span class="lp-app-time">07:00</span><span class="lp-app-who">Marta K.<small>Trening personalny</small></span><span class="lp-app-chip">Opłacone</span></div>
+                            <div class="lp-app-row"><span class="lp-app-time">17:00</span><span class="lp-app-who">Tomek W.<small>Siła — góra/dół</small></span><span class="lp-app-chip">Karnet 5/8</span></div>
+                            <div class="lp-app-row"><span class="lp-app-time">18:30</span><span class="lp-app-who">Nowy klient<small>Pierwsza wizyta</small></span><span class="lp-app-chip">Nowy</span></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         </div>
     </div>
 </section>
+
+@if (_reviews.Count > 0)
+{
+    <!-- OPINIE TRENERÓW -->
+    <section class="lp-section lp-section-alt lp-reviews" id="opinie">
+        <div class="lp-container">
+            <div class="lp-section-head">
+                <div class="lp-eyebrow">Opinie trenerów</div>
+                <h2 class="lp-section-title">Co mówią trenerzy, którzy już z nami pracują</h2>
+                <p class="lp-section-sub"><span class="lp-stars">★★★★★</span> średnio @_reviews.Average(r => r.Rating).ToString("0.0", System.Globalization.CultureInfo.GetCultureInfo("pl-PL")) z @_reviews.Count opinii w aplikacji</p>
+            </div>
+        </div>
+        @if (_reviews.Count >= 3)
+        {
+            var rows = _reviews.Count >= 6 ? new[] { _reviews.Where((_, i) => i % 2 == 0).ToList(), _reviews.Where((_, i) => i % 2 == 1).ToList() } : new[] { _reviews };
+            @for (var r = 0; r < rows.Length; r++)
+            {
+                var row = rows[r];
+                <div class="lp-marquee @(r == 1 ? "reverse" : "")" style="--dur:@(Math.Max(30, row.Count * 9))s">
+                    <div class="lp-marquee-track">
+                        @foreach (var copy in new[] { false, true })
+                        {
+                            @foreach (var f in row)
+                            {
+                                @ReviewCard(f, copy)
+                            }
+                        }
+                    </div>
+                </div>
+            }
+        }
+        else
+        {
+            <div class="lp-container">
+                <div class="lp-reviews-grid">
+                    @foreach (var f in _reviews) { @ReviewCard(f, false) }
+                </div>
+            </div>
+        }
+    </section>
+}
 
 <!-- JAK ZACZĄĆ -->
 <section class="lp-section lp-section-alt">
@@ -302,16 +378,36 @@
 
 @if (_trainers.Count > 0)
 {
-    <section class="lp-section lp-section-alt" style="padding:64px 0">
+    <!-- SYLWETKI TRENERÓW -->
+    <section class="lp-section lp-section-alt" id="trenerzy">
         <div class="lp-container">
-            <div class="lp-section-head" style="margin-bottom:28px">
+            <div class="lp-section-head">
                 <div class="lp-eyebrow">Z nami trenują</div>
+                <h2 class="lp-section-title">Poznaj trenerów, którzy już pracują z PTScheduler</h2>
             </div>
-            <div class="lp-trainers">
+            <div class="lp-coaches">
                 @foreach (var t in _trainers)
                 {
-                    <a class="lp-trainer" href="@(string.IsNullOrWhiteSpace(t.Instagram) ? "#" : $"https://instagram.com/{t.Instagram.TrimStart('@')}")" target="_blank" rel="noopener">
-                        <span class="lp-trainer-avatar" style="background:@t.Color">@t.Initials</span>@t.Name
+                    var href = t.Href;
+                    <a class="lp-coach" href="@(href ?? "#trenerzy")" target="@(href is null ? null : "_blank")" rel="noopener">
+                        <div class="lp-coach-photo" style="--c:@t.Color">
+                            @if (t.HasPhoto)
+                            {
+                                <img src="@t.PhotoUrl" alt="@t.Name" loading="lazy" />
+                            }
+                            else
+                            {
+                                <span>@t.Initials</span>
+                            }
+                        </div>
+                        <div class="lp-coach-body">
+                            <div class="lp-coach-name">@t.Name</div>
+                            @if (!string.IsNullOrWhiteSpace(t.Role)) { <div class="lp-coach-role">@t.Role</div> }
+                            <div class="lp-coach-meta">
+                                @if (!string.IsNullOrWhiteSpace(t.City)) { <span><i class="bi bi-geo-alt"></i>@t.City</span> }
+                                @if (href is not null) { <span class="lp-coach-go"><i class="bi @(string.IsNullOrWhiteSpace(t.Link) ? "bi-instagram" : "bi-arrow-up-right")"></i></span> }
+                            </div>
+                        </div>
                     </a>
                 }
             </div>
@@ -354,14 +450,29 @@
     private Dictionary<string, string> _settings = new();
     private List<Plan> _plans = [];
     private List<FeaturedTrainer> _trainers = [];
+    private List<AppFeedback> _reviews = [];
 
-    private class FeaturedTrainer
+    // Te same motywy co w aplikacji trenera (Zarządzanie → Wygląd).
+    private static readonly (string Key, string Name, string Color)[] _themes =
+    [
+        ("ocean", "Ocean", "#0284C7"),
+        ("forest", "Las", "#16A34A"),
+        ("sunset", "Zachód słońca", "#EA580C"),
+        ("lavender", "Lawenda", "#9333EA"),
+        ("rose", "Róża", "#E11D48"),
+        ("slate", "Grafit", "#475569")
+    ];
+
+    private RenderFragment ReviewCard(AppFeedback f, bool duplicate) => __builder =>
     {
-        public string Name { get; set; } = "";
-        public string Initials { get; set; } = "";
-        public string Instagram { get; set; } = "";
-        public string Color { get; set; } = "#7C3AED";
-    }
+        var author = string.IsNullOrWhiteSpace(f.PublicAuthor) ? "Trener PTScheduler" : f.PublicAuthor;
+        var initials = string.Concat(author.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => char.IsLetter(w[0])).Take(2).Select(w => char.ToUpperInvariant(w[0])));
+        <figure class="lp-review" aria-hidden="@(duplicate ? "true" : null)">
+            <div class="lp-stars" aria-label="@($"{f.Rating} na 5")">@(new string('★', f.Rating))<span class="off">@(new string('★', 5 - f.Rating))</span></div>
+            <blockquote>„@f.Text”</blockquote>
+            <figcaption><span class="lp-review-avatar">@initials</span>@author</figcaption>
+        </figure>
+    };
 
     private static readonly (string Day, string[] Slots)[] _weekPreview =
     [
@@ -415,18 +526,13 @@
             SiteSettingsService.Keys.HeroCta, SiteSettingsService.Keys.HeroCtaUrl, SiteSettingsService.Keys.SectionTitle,
             SiteSettingsService.Keys.CtaTitle, SiteSettingsService.Keys.CtaSubtitle, SiteSettingsService.Keys.CtaButton);
 
-        var trainersJson = await Settings.GetAsync(SiteSettingsService.Keys.FeaturedTrainers);
-        if (!string.IsNullOrWhiteSpace(trainersJson) && trainersJson != "[]")
-        {
-            try
-            {
-                _trainers = JsonSerializer.Deserialize<List<FeaturedTrainer>>(trainersJson,
-                    new JsonSerializerOptions { PropertyNameCaseInsensitive = true }) ?? [];
-            }
-            catch { _trainers = []; }
-        }
+        _trainers = await FeaturedTrainers.LoadAsync(Settings);
 
         await using var db = DbFactory.CreateDbContext();
+        _reviews = await db.AppFeedbacks.AsNoTracking()
+            .Where(f => f.ShowOnHomepage && f.Text != null && f.Text != "")
+            .OrderByDescending(f => f.Rating).ThenByDescending(f => f.CreatedAt)
+            .Take(16).ToListAsync();
         _plans = await db.Plans.AsNoTracking().Where(p => p.IsActive).OrderBy(p => p.SortOrder).ToListAsync();
     }
 

@@ -87,6 +87,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.Property(x => x.Text).HasMaxLength(2000);
             e.Property(x => x.AuthorEmail).HasMaxLength(256);
             e.Property(x => x.ContactEmail).HasMaxLength(256);
+            e.Property(x => x.PublicAuthor).HasMaxLength(120);
             e.HasIndex(x => x.CreatedAt);
             e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
