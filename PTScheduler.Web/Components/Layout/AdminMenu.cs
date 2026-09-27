@@ -23,7 +23,8 @@ public sealed record AdminMenuItem(
     /// <summary>Klucz stanu wyliczanego na stronie „Zarządzanie” (np. liczba typów treningów).</summary>
     string? StatusKey = null);
 
-public sealed record AdminMenuGroup(string Title, string Icon, string Tone, IReadOnlyList<AdminMenuItem> Items);
+/// <param name="Advanced">Rzadko używane — na stronie „Zarządzanie” schowane pod „Więcej ustawień”.</param>
+public sealed record AdminMenuGroup(string Title, string Icon, string Tone, IReadOnlyList<AdminMenuItem> Items, bool Advanced = false);
 
 /// <summary>Kto co widzi w ustawieniach (rola i uprawnienia nadane w „Uprawnieniach”).</summary>
 public sealed class AdminAccess
@@ -38,6 +39,9 @@ public sealed class AdminAccess
     public bool Sees(AdminMenuItem item) =>
         Can(item.Permission)
         && (!item.OwnerOnly || IsOwner)
+        // Strony dostępne tylko dla wybranych ról — bez tego kafelek prowadził do „Brak dostępu”.
+        && (IsAdmin || !AdminMenu.AdminOnly.Contains(item.Href))
+        && (IsOwner || !AdminMenu.AdminOrTrainer.Contains(item.Href))
         && (!item.HideWhenManaged || !PTScheduler.Infrastructure.Services.PlatformConnection.IsManaged);
 
     public static async Task<AdminAccess> LoadAsync(AuthenticationStateProvider authState, IPermissionService permissions)
@@ -63,6 +67,20 @@ public sealed class AdminAccess
 /// </summary>
 public static class AdminMenu
 {
+    /// <summary>Strony z atrybutem Authorize(Roles = "Admin").</summary>
+    public static readonly HashSet<string> AdminOnly = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "admin/session-types", "admin/modules", "admin/email", "admin/email-templates", "admin/push", "admin/surveys",
+        "admin/branding", "admin/site", "admin/users", "admin/permissions", "admin/backup", "admin/audit-logs",
+        "admin/settings", "admin/demo"
+    };
+
+    /// <summary>Strony z atrybutem Authorize(Roles = "Admin,Trainer") — bez asystenta.</summary>
+    public static readonly HashSet<string> AdminOrTrainer = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "admin/coupons", "admin/sklep", "admin/sms", "admin/google-meet", "admin/video", "admin/export"
+    };
+
     public static readonly IReadOnlyList<AdminMenuGroup> Groups =
     [
         new("Oferta i grafik", "bi-calendar-week", "blue",
@@ -178,7 +196,7 @@ public static class AdminMenu
                 "Co może asystent, a co trener",
                 "Decydujesz, co widzą i mogą zmieniać asystenci i inni trenerzy — np. grafik tak, finanse nie.",
                 Permissions.ManageUsers, "RoleBasedAccess", "Business")
-        ]),
+        ], Advanced: true),
         new("Dane i bezpieczeństwo", "bi-shield-check", "slate",
         [
             new("admin/backup", "bi-archive-fill", "Kopie zapasowe",
@@ -201,6 +219,18 @@ public static class AdminMenu
                 "Przykładowe dane do wypróbowania",
                 "Wgraj przykładowych klientów i wizyty, żeby zobaczyć aplikację w akcji — albo wyczyść je przed startem.",
                 Permissions.ManageBackup)
-        ])
+        ], Advanced: true)
     ];
+
+    /// <summary>Pozycja i grupa dla bieżącej ścieżki (np. „admin/branding/…”).</summary>
+    public static (AdminMenuGroup Group, AdminMenuItem Item)? Find(string path)
+    {
+        path = path.Trim('/');
+        foreach (var g in Groups)
+            foreach (var i in g.Items)
+                if (path.Equals(i.Href, StringComparison.OrdinalIgnoreCase)
+                    || path.StartsWith(i.Href + "/", StringComparison.OrdinalIgnoreCase))
+                    return (g, i);
+        return null;
+    }
 }

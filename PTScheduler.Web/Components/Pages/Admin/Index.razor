@@ -14,6 +14,7 @@
 @inject AuthenticationStateProvider AuthState
 @inject ILoggerFactory LoggerFactory
 @inject EntitlementService Entitlements
+@inject SetupGuide Guide
 @using PTScheduler.Web.Components.Layout
 @rendermode PTScheduler.Web.RenderModes.Server
 
@@ -33,31 +34,52 @@
 }
 else
 {
-    @if (_access.IsOwner && _steps.Count > 0 && _steps.Any(x => !x.Done))
+    @if (_access.IsOwner && _setup.Steps.Count > 0)
     {
-        var done = _steps.Count(x => x.Done);
-        <section class="set-start" aria-labelledby="set-start-title">
-            <div class="set-start-head">
-                <div>
-                    <h5 id="set-start-title"><i class="bi bi-rocket-takeoff"></i>Pierwsze kroki</h5>
-                    <div class="text-muted small">Zrób to raz, a aplikacja będzie gotowa dla klientów.</div>
+        var steps = _setup.Steps;
+        var done = _setup.DoneCount;
+        if (!_setup.AllDone)
+        {
+            <section class="set-start" aria-labelledby="set-start-title">
+                <div class="set-start-head">
+                    <div>
+                        <h5 id="set-start-title"><i class="bi bi-rocket-takeoff"></i>Pierwsze kroki</h5>
+                        <div class="text-muted small">Zrób to raz, a aplikacja będzie gotowa dla klientów.</div>
+                    </div>
+                    <div class="set-start-count"><b>@done</b> z @steps.Count</div>
                 </div>
-                <div class="set-start-count"><b>@done</b> z @_steps.Count</div>
-            </div>
-            <div class="set-progress" role="progressbar" aria-valuenow="@done" aria-valuemin="0" aria-valuemax="@_steps.Count"><div style="width:@(done * 100 / _steps.Count)%"></div></div>
-            <ol class="set-steps">
-                @foreach (var step in _steps)
+                <div class="set-progress" role="progressbar" aria-valuenow="@done" aria-valuemin="0" aria-valuemax="@steps.Count"><div style="width:@(done * 100 / steps.Count)%"></div></div>
+                <ol class="set-steps">
+                    @foreach (var step in steps.Where(x => !x.Done))
+                    {
+                        <li>
+                            <a href="@step.Href">
+                                <span class="set-step-check"><i class="bi @step.Icon"></i></span>
+                                <span class="set-step-text"><b>@step.Title</b><small>@step.Hint</small></span>
+                                <i class="bi bi-chevron-right ms-auto text-muted"></i>
+                            </a>
+                        </li>
+                    }
+                </ol>
+                @if (done > 0)
                 {
-                    <li class="@(step.Done ? "done" : "")">
-                        <a href="@step.Href">
-                            <span class="set-step-check"><i class="bi @(step.Done ? "bi-check-lg" : step.Icon)"></i></span>
-                            <span class="set-step-text"><b>@step.Title</b><small>@step.Hint</small></span>
-                            @if (!step.Done) { <i class="bi bi-chevron-right ms-auto text-muted"></i> }
-                        </a>
-                    </li>
+                    <div class="set-steps-done">
+                        <span>Zrobione:</span>
+                        @foreach (var step in steps.Where(x => x.Done))
+                        {
+                            <a href="@step.Href"><i class="bi bi-check-circle-fill me-1"></i>@step.Title</a>
+                        }
+                    </div>
                 }
-            </ol>
-        </section>
+            </section>
+        }
+        else
+        {
+            <div class="set-alldone">
+                <i class="bi bi-patch-check-fill"></i>
+                <span><b>Wszystko gotowe.</b> Aplikacja jest skonfigurowana — poniżej zostały tylko opcje, do których możesz wrócić, gdy zechcesz.</span>
+            </div>
+        }
     }
 
     @if (!_isHighestPlan && _access.IsOwner)
@@ -69,36 +91,20 @@ else
         </a>
     }
 
-    @foreach (var group in AdminMenu.Groups)
+    @foreach (var group in AdminMenu.Groups.Where(g => !g.Advanced))
     {
-        var items = group.Items.Where(_access.Sees).ToList();
-        if (items.Count == 0) continue;
-        <section class="set-group set-tone-@group.Tone" aria-label="@group.Title">
-            <h6 class="set-group-title"><i class="bi @group.Icon"></i>@group.Title</h6>
-            <div class="set-grid">
-                @foreach (var item in items)
-                {
-                    var locked = item.PlanFlag is not null && !Entitlements.IsAllowed(item.PlanFlag);
-                    var status = item.StatusKey is not null ? _status.GetValueOrDefault(item.StatusKey) : default;
-                    <div class="set-tile @(locked ? "locked" : "")">
-                        <span class="set-tile-icon"><i class="bi @item.Icon"></i></span>
-                        <div class="set-tile-body">
-                            <a class="set-tile-link" href="/@item.Href">@item.Title</a>
-                            <div class="set-tile-desc">@item.Description</div>
-                            @if (locked)
-                            {
-                                <span class="set-chip set-chip-plan"><i class="bi bi-lock-fill"></i>Plan @(item.PlanName ?? "Pro")</span>
-                            }
-                            else if (status.Text is not null)
-                            {
-                                <span class="set-chip set-chip-@status.Tone">@status.Text</span>
-                            }
-                        </div>
-                        <InfoTip Title="@item.Title" Text="@item.Info" Class="set-tile-info" />
-                    </div>
-                }
-            </div>
-        </section>
+        @RenderGroup(group)
+    }
+
+    @if (AdminMenu.Groups.Any(g => g.Advanced && g.Items.Any(_access.Sees)))
+    {
+        <details class="set-more">
+            <summary><i class="bi bi-sliders"></i>Więcej ustawień: zespół, kopie zapasowe, eksport, historia zmian</summary>
+            @foreach (var group in AdminMenu.Groups.Where(g => g.Advanced))
+            {
+                @RenderGroup(group)
+            }
+        </details>
     }
 
     <div class="set-foot">
@@ -343,12 +349,58 @@ else
 
     private AdminStats _stats = new();
 
+    // Grupa kafelków: skonfigurowane opcje zwinięte do małych „✓”, żeby na wierzchu zostało to, co do zrobienia.
+    private RenderFragment RenderGroup(AdminMenuGroup group) => __builder =>
+    {
+        var items = group.Items.Where(_access.Sees).ToList();
+        if (items.Count == 0) return;
+        var configured = items.Where(i => _setup.StatusOf(i).IsConfigured && !(i.PlanFlag is not null && !Entitlements.IsAllowed(i.PlanFlag))).ToList();
+        var open = items.Except(configured).ToList();
+        <section class="set-group set-tone-@group.Tone" aria-label="@group.Title">
+            <h6 class="set-group-title"><i class="bi @group.Icon"></i>@group.Title</h6>
+            @if (open.Count > 0)
+            {
+                <div class="set-grid">
+                    @foreach (var item in open)
+                    {
+                        var locked = item.PlanFlag is not null && !Entitlements.IsAllowed(item.PlanFlag);
+                        var status = _setup.StatusOf(item);
+                        <div class="set-tile @(locked ? "locked" : "")">
+                            <span class="set-tile-icon"><i class="bi @item.Icon"></i></span>
+                            <div class="set-tile-body">
+                                <a class="set-tile-link" href="/@item.Href">@item.Title</a>
+                                <div class="set-tile-desc">@item.Description</div>
+                                @if (locked)
+                                {
+                                    <span class="set-chip set-chip-plan"><i class="bi bi-lock-fill"></i>Plan @(item.PlanName ?? "Pro")</span>
+                                }
+                                else if (status.Text is not null)
+                                {
+                                    <span class="set-chip set-chip-@status.Tone">@status.Text</span>
+                                }
+                            </div>
+                            <InfoTip Title="@item.Title" Text="@item.Info" Class="set-tile-info" />
+                        </div>
+                    }
+                </div>
+            }
+            @if (configured.Count > 0)
+            {
+                <div class="set-done">
+                    <span class="set-done-label">Gotowe:</span>
+                    @foreach (var item in configured)
+                    {
+                        <a href="/@item.Href" title="@item.Description"><i class="bi bi-check-circle-fill"></i>@item.Title <small>@_setup.StatusOf(item).Text</small></a>
+                    }
+                </div>
+            }
+        </section>
+    };
+
     // Strona „Zarządzanie”: kto co widzi, pierwsze kroki i stan kafelków.
     private AdminAccess _access = new();
     private bool _isHighestPlan;
-    private sealed record SetupStep(string Title, string Hint, string Href, string Icon, bool Done);
-    private List<SetupStep> _steps = [];
-    private Dictionary<string, (string? Text, string Tone)> _status = [];
+    private SetupState _setup = new();
     private List<AuditLogDto> _recentLogs = [];
     private List<RoleCount> _roleCounts = [];
     private List<TableSize> _tableSizes = [];
@@ -389,58 +441,7 @@ else
     }
 
     /// <summary>Stan kafelków („3 rodzaje”, „Do ustawienia”) i lista pierwszych kroków.</summary>
-    private async Task LoadHubAsync(string userId)
-    {
-        try
-        {
-            await using var db = DbFactory.CreateDbContext();
-            var windows = await db.TrainerAvailabilities.AsNoTracking()
-                .Where(a => a.TrainerUserId == userId && a.IsActive && a.DayOfWeek != null)
-                .Select(a => new { a.StartTime, a.EndTime }).ToListAsync();
-            var weeklyHours = windows.Sum(w => (w.EndTime - w.StartTime).TotalHours);
-            var sessionTypes = await db.SessionTypes.CountAsync(t => t.IsActive);
-            var packages = await db.PackageOffers.CountAsync(p => p.IsActive);
-            var memberships = await db.MembershipPlans.CountAsync();
-            var coupons = await db.Coupons.CountAsync(c => c.IsActive);
-            var courses = await db.Courses.CountAsync();
-            var hasLogo = await db.AppBrandings.AnyAsync(b => b.LogoPath != null && b.LogoPath != "");
-
-            static (string?, string) Count(int n, string one, string few, string many, string empty = "Brak") =>
-                n == 0 ? (empty, "warn") : ($"{n} {Pl(n, one, few, many)}", "ok");
-
-            _status = new()
-            {
-                ["availability"] = weeklyHours > 0 ? ($"{weeklyHours:0.#} h w tygodniu", "ok") : ("Do ustawienia", "warn"),
-                ["sessionTypes"] = Count(sessionTypes, "rodzaj", "rodzaje", "rodzajów", "Do ustawienia"),
-                ["packages"] = Count(packages, "pakiet", "pakiety", "pakietów"),
-                ["memberships"] = memberships == 0 ? ("Brak", "muted") : ($"{memberships} {Pl(memberships, "karnet", "karnety", "karnetów")}", "ok"),
-                ["payments"] = _paymentsEnabled ? ("Włączone", "ok") : ("Wyłączone", "muted"),
-                ["coupons"] = coupons == 0 ? ("Brak", "muted") : ($"{coupons} {Pl(coupons, "aktywny", "aktywne", "aktywnych")}", "ok"),
-                ["courses"] = courses == 0 ? ("Brak", "muted") : ($"{courses} {Pl(courses, "kurs", "kursy", "kursów")}", "ok"),
-                ["branding"] = hasLogo ? ("Logo dodane", "ok") : ("Dodaj logo", "warn"),
-                ["users"] = ($"{_stats.Users} {Pl(_stats.Users, "konto", "konta", "kont")}", "muted")
-            };
-
-            // Tylko kroki, które ta osoba może wykonać (asystent bez uprawnień do wyglądu nie dostanie linku do niego).
-            _steps = [];
-            if (_access.Can(PTScheduler.Domain.Constants.Permissions.ManageBranding))
-                _steps.Add(new("Dodaj logo i kolory", "Klienci zobaczą Twoją markę", "/admin/branding", "bi-palette", hasLogo));
-            _steps.Add(new("Ustaw godziny pracy", "Kiedy klienci mogą się zapisać", "/trainer/availability", "bi-clock", weeklyHours > 0));
-            if (_access.Can(PTScheduler.Domain.Constants.Permissions.ManageSessionTypes))
-                _steps.Add(new("Dodaj rodzaj treningu", "Np. trening personalny 60 min", "/admin/session-types", "bi-lightning-charge", sessionTypes > 0));
-            if (_access.Can(PTScheduler.Domain.Constants.Permissions.ManageClients))
-                _steps.Add(new("Zaproś pierwszego klienta", "Wyślij link albo dodaj ręcznie", "/clients", "bi-person-plus", _stats.Clients > 0));
-            if (_access.Can(PTScheduler.Domain.Constants.Permissions.ManagePayments) && Entitlements.IsAllowed("PaymentsEnabled"))
-                _steps.Add(new("Włącz płatności online", "BLIK i karta — pieniądze od razu u Ciebie", "/admin/payments", "bi-credit-card", _paymentsEnabled));
-        }
-        catch (Exception ex)
-        {
-            LoggerFactory.CreateLogger("AdminHub").LogWarning(ex, "Nie udało się policzyć stanu ustawień.");
-        }
-    }
-
-    private static string Pl(int n, string one, string few, string many) =>
-        n == 1 ? one : n % 10 is >= 2 and <= 4 && n % 100 is < 12 or > 14 ? few : many;
+    private async Task LoadHubAsync(string userId) => _setup = await Guide.GetAsync(userId, _access);
 
     private async Task Refresh()
     {

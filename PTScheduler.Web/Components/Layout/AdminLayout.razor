@@ -1,46 +1,77 @@
 @inherits LayoutComponentBase
 @layout PTScheduler.Web.Components.Layout.MainLayout
 @inject AuthenticationStateProvider AuthState
+@inject PTScheduler.Application.Interfaces.IPermissionService Permission
+@inject NavigationManager Nav
+@inject SetupGuide Guide
 
-<div class="manage-shell admin-shell">
-
-    <div class="manage-header admin-panel-header">
-        <div class="manage-avatar" style="background:linear-gradient(135deg,var(--bs-danger),#921925)">
-            <i class="bi bi-shield-fill-check" style="font-size:1.4rem"></i>
-        </div>
-        <div>
-            <div class="manage-user-name">Panel zarządzania</div>
-            <div class="manage-user-email">Konfiguracja i zarządzanie</div>
-            <span class="badge @_roleBadgeClass mt-1" style="font-size:.7rem">@_roleLabel</span>
-        </div>
-    </div>
-
-    <div class="manage-body">
-        @* Na telefonie menu jest zwinięte do bieżącej opcji — treść strony zaczyna się od razu pod nim. *@
-        <div class="manage-sidebar" onclick="if(event.target.closest('.manage-nav-link'))this.classList.remove('open')">
-            <AdminNavMenu />
-            <button type="button" class="manage-nav-toggle" aria-expanded="false"
-                    onclick="var s=this.closest('.manage-sidebar');this.setAttribute('aria-expanded',s.classList.toggle('open'))">
-                <span class="manage-nav-toggle-open"><i class="bi bi-grid-3x3-gap-fill"></i>Wszystkie opcje</span>
-                <span class="manage-nav-toggle-close"><i class="bi bi-chevron-up"></i>Zwiń</span>
+@* Ustawienia: bez długiego menu bocznego. Strona „Zarządzanie” to kafelki, a na podstronach jest tylko
+   powrót, nazwa bieżącej opcji z wyjaśnieniem (i) i „Przejdź do…” do szybkiej zmiany. *@
+<div class="setx">
+    @if (!_isHub)
+    {
+        <div class="setx-bar">
+            <a class="setx-back" href="/admin" title="Wszystkie ustawienia">
+                <i class="bi bi-arrow-left"></i><span>Ustawienia</span>
+            </a>
+            <div class="setx-crumb">
+                @if (_current is { } c)
+                {
+                    <span class="setx-crumb-group">@c.Group.Title</span>
+                    <i class="bi bi-chevron-right setx-crumb-sep"></i>
+                    <span class="setx-crumb-item"><i class="bi @c.Item.Icon"></i>@c.Item.Title</span>
+                    <InfoTip Title="@c.Item.Title" Text="@c.Item.Info" />
+                }
+            </div>
+            <button type="button" class="setx-jump-btn" popovertarget="setx-jump">
+                <i class="bi bi-grid-3x3-gap-fill"></i><span>Przejdź do…</span>
             </button>
+            <div popover id="setx-jump" class="setx-jump" role="dialog" aria-label="Przejdź do ustawienia">
+                <div class="setx-jump-head">
+                    <strong>Przejdź do</strong>
+                    <button type="button" class="btn-close" popovertarget="setx-jump" popovertargetaction="hide" aria-label="Zamknij"></button>
+                </div>
+                <div class="setx-jump-grid">
+                    @foreach (var group in AdminMenu.Groups)
+                    {
+                        var items = group.Items.Where(_access.Sees).ToList();
+                        if (items.Count == 0) continue;
+                        <div class="setx-jump-group set-tone-@group.Tone">
+                            <div class="setx-jump-title"><i class="bi @group.Icon"></i>@group.Title</div>
+                            @foreach (var item in items)
+                            {
+                                var done = _state?.StatusOf(item).IsConfigured == true;
+                                <a href="/@item.Href" class="@(_current?.Item == item ? "active" : "")">
+                                    <i class="bi @item.Icon"></i><span>@item.Title</span>
+                                    @if (done) { <i class="bi bi-check-circle-fill setx-jump-ok" title="Skonfigurowane"></i> }
+                                </a>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
         </div>
-        <div class="manage-content">
-            @Body
-        </div>
+        @if (_state is not null) { <SetupGuideBar State="_state" /> }
+    }
+    <div class="setx-page">
+        @Body
     </div>
-
 </div>
 
 @code {
-    private string _roleLabel = "Administrator";
-    private string _roleBadgeClass = "bg-danger";
+    private bool _isHub;
+    private AdminAccess _access = new();
+    private SetupState? _state;
+    private (AdminMenuGroup Group, AdminMenuItem Item)? _current;
 
     protected override async Task OnInitializedAsync()
     {
+        var path = Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].Trim('/');
+        _isHub = path.Equals("admin", StringComparison.OrdinalIgnoreCase);
+        if (_isHub) return;
+        _current = AdminMenu.Find(path);
+        _access = await AdminAccess.LoadAsync(AuthState, Permission);
         var auth = await AuthState.GetAuthenticationStateAsync();
-        if (auth.User.IsInRole("Admin")) { _roleLabel = "Administrator"; _roleBadgeClass = "bg-danger"; }
-        else if (auth.User.IsInRole("Trainer")) { _roleLabel = "Trener"; _roleBadgeClass = "bg-primary"; }
-        else if (auth.User.IsInRole("Subordinate")) { _roleLabel = "Współtrener"; _roleBadgeClass = "bg-secondary"; }
+        _state = await Guide.GetAsync(auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "", _access);
     }
 }
