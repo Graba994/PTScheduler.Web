@@ -143,7 +143,7 @@ else
                     <div class="px-3 py-2 @(g != awaitingGroups.Last() ? "border-bottom" : "")">
                         <div class="d-flex align-items-center gap-2 mb-1">
                             <div class="avatar-circle flex-shrink-0" style="width:28px;height:28px;font-size:.65rem">@initials</div>
-                            <span class="fw-semibold" style="font-size:.875rem">@first.ClientName</span>
+                            <span class="fw-semibold" style="font-size:.875rem">@first.DisplayName</span>
                             @if (sessions.Count > 1)
                             {
                                 <span class="badge rounded-pill bg-warning text-dark ms-auto" style="font-size:.65rem">@sessions.Count×</span>
@@ -195,7 +195,7 @@ else
                                         <div class="text-muted" style="font-size:.7rem">@s.DurationMinutes min</div>
                                     </div>
                                     <div class="flex-grow-1 overflow-hidden">
-                                        <div class="fw-semibold text-truncate" style="font-size:.875rem">@s.ClientName</div>
+                                        <div class="fw-semibold text-truncate" style="font-size:.875rem">@s.DisplayName</div>
                                         <div class="text-muted" style="font-size:.75rem">@s.SessionTypeName</div>
                                     </div>
                                     @if (!string.IsNullOrEmpty(s.MeetingUrl))
@@ -242,7 +242,7 @@ else
                                         <div class="text-muted" style="font-size:.7rem">@s.StartTime.ToString("HH:mm")</div>
                                     </div>
                                     <div class="flex-grow-1 overflow-hidden">
-                                        <div class="fw-semibold text-truncate" style="font-size:.875rem">@s.ClientName</div>
+                                        <div class="fw-semibold text-truncate" style="font-size:.875rem">@s.DisplayName</div>
                                         <div class="text-muted" style="font-size:.75rem">@s.SessionTypeName · @s.DurationMinutes min</div>
                                     </div>
                                     @if (!string.IsNullOrEmpty(s.MeetingUrl))
@@ -391,9 +391,10 @@ else
             var todayStart = new DateTime(now.Year, now.Month, now.Day);
             var todayEnd   = todayStart.AddDays(1);
 
-            _today    = await SessionService.GetSessionsAsync(todayStart, todayEnd, TrainerUserId);
+            // Trening w parze to dwie wizyty — na pulpicie pokazujemy go raz („Ola + Piotr”).
+            _today    = (await SessionService.GetSessionsAsync(todayStart, todayEnd, TrainerUserId)).Where(s => !s.IsPairFollower).ToList();
             _upcoming = (await SessionService.GetUpcomingAsync(trainerUserId: TrainerUserId, count: 8))
-                            .Where(s => s.StartTime.Date > StudioClock.Now.Date).ToList();
+                            .Where(s => s.StartTime.Date > StudioClock.Now.Date && !s.IsPairFollower).ToList();
             _awaiting = await SessionService.GetAwaitingPackageAsync(TrainerUserId);
             _expiring = await PackageService.GetExpiringAsync(14, TrainerUserId);
             try { _attention = await Attention.GetAsync(TrainerUserId, Entitlements.IsAllowed("TrainingPlansEnabled")); }
@@ -410,7 +411,7 @@ else
 
             var statsSessions = await SessionService.GetSessionsAsync(statsFrom, weekEnd, TrainerUserId);
             _thisWeekCount = statsSessions.Count(s =>
-                s.StartTime >= weekStart &&
+                s.StartTime >= weekStart && !s.IsPairFollower &&
                 s.Status != SessionStatus.Cancelled &&
                 s.Status != SessionStatus.NoShow);
 

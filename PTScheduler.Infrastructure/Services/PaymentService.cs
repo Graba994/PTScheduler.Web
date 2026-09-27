@@ -22,7 +22,8 @@ public class PaymentService(
     IEnumerable<IPaymentProvider> providers,
     IAuditLogService auditLog,
     IAppClock clock,
-    ILogger<PaymentService> logger) : IPaymentService
+    ILogger<PaymentService> logger,
+    IPairService? pairs = null) : IPaymentService
 {
     private const string SystemUserId = "system";
     private const string SystemUserEmail = "system";
@@ -71,7 +72,7 @@ public class PaymentService(
         return await StartAsync(db, order, providerKey, course.Title, appBaseUrl, buyerEmail, customerIp);
     }
 
-    public async Task<PaymentInitResult> StartPackageCheckoutAsync(string userId, int packageOfferId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null, InvoiceBuyerDto? invoiceBuyer = null)
+    public async Task<PaymentInitResult> StartPackageCheckoutAsync(string userId, int packageOfferId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null, InvoiceBuyerDto? invoiceBuyer = null, int? partnerClientId = null)
     {
         await using var db = dbFactory.CreateDbContext();
         var offer = await db.PackageOffers.FirstOrDefaultAsync(o => o.Id == packageOfferId);
@@ -82,11 +83,23 @@ public class PaymentService(
         var client = await db.Clients.FirstOrDefaultAsync(c => c.ApplicationUserId == userId);
         if (client is null) return new(false, null, "Twoje konto nie jest powiązane z profilem klienta. Skontaktuj się z trenerem.");
 
+        // Pakiet dla pary: kupuje jedna osoba, pakiet należy do obojga.
+        if (offer.IsForPair)
+        {
+            if (partnerClientId is null || partnerClientId == client.Id)
+                return new(false, null, "Wybierz osobę, z którą trenujesz.");
+            if (!await db.Clients.AnyAsync(c => c.Id == partnerClientId))
+                return new(false, null, "Nie znaleziono partnera.");
+        }
+        else partnerClientId = null;
+
         var order = new Order
         {
             ApplicationUserId = userId,
             Kind = OrderKind.Package,
             PackageOfferId = packageOfferId,
+            PartnerClientId = partnerClientId,
+            AppBaseUrl = appBaseUrl,
             Amount = offer.Price,
             Description = $"Pakiet: {offer.Name}",
             CreatedAt = DateTime.UtcNow
@@ -216,6 +229,7 @@ public class PaymentService(
             db.Orders.Add(order);
             await FulfilAsync(db, order);
             await db.SaveChangesAsync();
+            await NotifyPartnerAsync(db, order);
 
             if (order.CouponId is int cid && order.OriginalAmount.HasValue && order.DiscountAmount.HasValue)
             {
@@ -318,6 +332,7 @@ public class PaymentService(
                 order.PaidAt = DateTime.UtcNow;
                 await FulfilAsync(db, order);
                 await db.SaveChangesAsync();
+                await NotifyPartnerAsync(db, order);
 
                 // Record coupon redemption after the order is committed so a rollback
                 // wouldn't leave the counter incremented without a paid order behind it.
@@ -432,6 +447,7 @@ public class PaymentService(
         var package = new SessionPackage
         {
             ClientId = client.Id,
+            PartnerClientId = offer.IsForPair ? order.PartnerClientId : null,
             CreatedByUserId = offer.CreatedByUserId,
             Name = offer.Name,
             SessionTypeId = offer.SessionTypeId,
@@ -446,21 +462,21 @@ public class PaymentService(
             Notes = $"Zakup online (zamówienie {order.ExtOrderId})"
         };
         db.SessionPackages.Add(package);
+        if (package.PartnerClientId is int partnerId)
+            await PairService.EnsurePairAsync(db, client.Id, partnerId, client.TrainerUserId);
         await db.SaveChangesAsync();
 
-        // Fill any sessions the client already booked awaiting a package.
-        var awaiting = await db.Sessions
-            .Where(s => s.ClientId == client.Id && s.SessionTypeId == offer.SessionTypeId && s.Status == SessionStatus.AwaitingPackage)
-            .OrderBy(s => s.StartTime)
-            .ToListAsync();
-        foreach (var s in awaiting)
-        {
-            if (package.UsedSessions >= package.TotalSessions) break;
-            s.PackageId = package.Id;
-            s.Status = SessionStatus.Scheduled;
-            package.UsedSessions++;
-        }
-        if (package.UsedSessions >= package.TotalSessions) package.Status = PackageStatus.Depleted;
+        // Wizyty, które czekały na pakiet, od razu z niego korzystają.
+        await PackageAllocation.FillAwaitingAsync(db, package);
+    }
+
+    // Po zapisaniu opłaconego zamówienia: partner z pakietu dla pary dostaje wiadomość.
+    private async Task NotifyPartnerAsync(ApplicationDbContext db, Order order)
+    {
+        if (order.Kind != OrderKind.Package || order.PartnerClientId is null || pairs is null) return;
+        var packageId = await db.SessionPackages.Where(p => p.PaymentReference == order.ExtOrderId && p.PartnerClientId != null)
+            .Select(p => (int?)p.Id).FirstOrDefaultAsync();
+        if (packageId is int id) await pairs.NotifyPackageSharedAsync(id, order.AppBaseUrl);
     }
 
     public async Task<OrderDto?> GetOrderByExtAsync(string extOrderId)

@@ -156,7 +156,8 @@ public class TrainerAvailabilityService(IDbContextFactory<ApplicationDbContext> 
     public async Task<bool> IsSlotFreeAsync(string trainerUserId, DateTime start, int durationMinutes, int? excludeSessionId = null)
         => await FindConflictAsync(trainerUserId, start, durationMinutes, excludeSessionId) is null;
 
-    public async Task<SlotConflictDto?> FindConflictAsync(string trainerUserId, DateTime start, int durationMinutes, int? excludeSessionId = null)
+    public async Task<SlotConflictDto?> FindConflictAsync(string trainerUserId, DateTime start, int durationMinutes, int? excludeSessionId = null,
+        Guid? excludePairGroupId = null)
     {
         // Zegar ścienny — porównujemy z Session.StartTime, które też nim jest.
         start = DateTime.SpecifyKind(start, DateTimeKind.Unspecified);
@@ -173,6 +174,7 @@ public class TrainerAvailabilityService(IDbContextFactory<ApplicationDbContext> 
             .Where(s => s.TrainerUserId == trainerUserId
                         && s.Status != SessionStatus.Cancelled
                         && (excludeSessionId == null || s.Id != excludeSessionId)
+                        && (excludePairGroupId == null || s.PairGroupId == null || s.PairGroupId != excludePairGroupId)
                         && s.StartTime < slotEnd.AddMinutes(cfg.BreakAfterSessionMinutes)
                         && s.StartTime.AddMinutes(s.SessionType.DurationMinutes) > start)
             .OrderBy(s => s.StartTime)

@@ -25,7 +25,8 @@ public class SessionPackageService(
             .AsNoTracking()
             .Include(p => p.SessionType)
             .Include(p => p.Client)
-            .Where(p => p.ClientId == clientId)
+            .Include(p => p.PartnerClient)
+            .Where(p => p.ClientId == clientId || p.PartnerClientId == clientId)
             .OrderByDescending(p => p.PurchasedAt)
             .ToListAsync();
         return list.Select(MapToDto).ToList();
@@ -39,6 +40,7 @@ public class SessionPackageService(
             .AsNoTracking()
             .Include(p => p.SessionType)
             .Include(p => p.Client)
+            .Include(p => p.PartnerClient)
             .Where(p => trainerUserId == null || p.Client.TrainerUserId == trainerUserId)
             .OrderByDescending(p => p.PurchasedAt)
             .ToListAsync();
@@ -52,6 +54,7 @@ public class SessionPackageService(
             .AsNoTracking()
             .Include(p => p.SessionType)
             .Include(p => p.Client)
+            .Include(p => p.PartnerClient)
             .FirstOrDefaultAsync(p => p.Id == id);
         return p is null ? null : MapToDto(p);
     }
@@ -62,12 +65,14 @@ public class SessionPackageService(
         var sessionType = await db.SessionTypes.FindAsync(dto.SessionTypeId)
             ?? throw new InvalidOperationException("Typ sesji nie istnieje.");
 
+        if (dto.PartnerClientId == dto.ClientId) dto.PartnerClientId = null;
         var package = new SessionPackage
         {
             ClientId = dto.ClientId,
+            PartnerClientId = dto.PartnerClientId,
             CreatedByUserId = dto.CreatedByUserId,
             Name = string.IsNullOrWhiteSpace(dto.Name)
-                ? $"Pakiet {dto.TotalSessions}×{sessionType.Name}"
+                ? $"{(dto.PartnerClientId is null ? "Pakiet" : "Duet")} {dto.TotalSessions}×{sessionType.Name}"
                 : dto.Name,
             SessionTypeId = dto.SessionTypeId,
             TotalSessions = dto.TotalSessions,
@@ -75,36 +80,26 @@ public class SessionPackageService(
             ExpiresAt = dto.ExpiresAt,
             Notes = dto.Notes,
             IsHidden = dto.IsHidden,
+            IsPaid = dto.IsPaid,
+            PaidAt = dto.IsPaid ? DateTime.UtcNow : null,
             PurchasedAt = DateTime.UtcNow,
             Status = PackageStatus.Active
         };
 
         db.SessionPackages.Add(package);
+        if (dto.PartnerClientId is int partnerId)
+            await PairService.EnsurePairAsync(db, dto.ClientId, partnerId, dto.CreatedByUserId);
         await db.SaveChangesAsync();
 
-        var awaitingSessions = await db.Sessions
-            .Where(s => s.ClientId == dto.ClientId
-                     && s.SessionTypeId == dto.SessionTypeId
-                     && s.Status == SessionStatus.AwaitingPackage)
-            .OrderBy(s => s.StartTime)
-            .ToListAsync();
+        await PackageAllocation.FillAwaitingAsync(db, package);
+        await db.SaveChangesAsync();
 
-        foreach (var session in awaitingSessions)
+        // Pakiet pary widzą od razu obie osoby — obie dostają wiadomość.
+        foreach (var clientId in new[] { dto.ClientId, dto.PartnerClientId ?? 0 }.Where(id => id > 0))
         {
-            if (package.UsedSessions >= package.TotalSessions) break;
-            session.PackageId = package.Id;
-            session.Status = SessionStatus.Scheduled;
-            package.UsedSessions++;
+            try { await SendPackageAssignedEmailAsync(clientId, package); }
+            catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila o przypisaniu pakietu (PackageId={Id})", package.Id); }
         }
-
-        if (package.UsedSessions >= package.TotalSessions)
-            package.Status = PackageStatus.Depleted;
-
-        if (awaitingSessions.Count > 0)
-            await db.SaveChangesAsync();
-
-        try { await SendPackageAssignedEmailAsync(dto.ClientId, package); }
-        catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila o przypisaniu pakietu (PackageId={Id})", package.Id); }
 
         return (await GetPackageAsync(package.Id))!;
     }
@@ -281,6 +276,10 @@ public class SessionPackageService(
         ClientName = p.Client is not null
             ? $"{p.Client.FirstName} {p.Client.LastName}".Trim() is { Length: > 0 } n ? n : p.Client.ApplicationUserId
             : string.Empty,
+        PartnerClientId = p.PartnerClientId,
+        PartnerName = p.PartnerClient is not null
+            ? $"{p.PartnerClient.FirstName} {p.PartnerClient.LastName}".Trim() is { Length: > 0 } pn ? pn : "Partner"
+            : null,
         CreatedByUserId = p.CreatedByUserId,
         Name = p.Name,
         Notes = p.Notes,

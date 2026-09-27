@@ -6,7 +6,7 @@
 @inject ISessionService SessionService
 @inject IClientService ClientService
 @inject IAuditLogService AuditLogService
-@inject ISessionInvitationService InvitationService
+@inject IPairService PairService
 @inject ITrainerAvailabilityService AvailabilityService
 @inject IGoogleCalendarService GoogleCalendar
 @inject ITrainerConfigService TrainerConfigService
@@ -78,13 +78,44 @@
 
                     <div class="d-flex align-items-center gap-3 mb-4">
                         <div class="avatar-circle" style="width:52px;height:52px;font-size:1.1rem">
-                            @Initials(_selectedSession.ClientName)
+                            @if (_selectedSession.IsPair) { <i class="bi bi-people-fill"></i> } else { @Initials(_selectedSession.ClientName) }
                         </div>
                         <div>
-                            <div class="fw-bold fs-6">@_selectedSession.ClientName</div>
-                            <small class="text-muted">@_selectedSession.SessionTypeName</small>
+                            <div class="fw-bold fs-6">@(_isClientRole ? _selectedSession.ClientName : _selectedSession.DisplayName)</div>
+                            <small class="text-muted">@_selectedSession.SessionTypeName@(_selectedSession.IsPair ? " · w parze" : "")</small>
                         </div>
                     </div>
+
+                    @if (_selectedSession.IsPair && _selectedSession.PartnerName is not null)
+                    {
+                        <div class="pair-box mb-3">
+                            <div class="pair-box-title"><i class="bi bi-people me-1"></i>Trening w parze
+                                <InfoTip Title="Jak działa trening w parze">
+                                    Każda osoba ma własną wizytę: swój grafik, przypomnienie i możliwość odwołania.
+                                    Gdy jedna odwoła, druga trenuje sama. Ze wspólnego pakietu „Duet” za trening schodzi 1,
+                                    a bez niego — po 1 z pakietu każdej osoby.
+                                </InfoTip>
+                            </div>
+                            <div class="pair-person">
+                                <span>@_selectedSession.ClientName</span>
+                                <span class="badge @StatusBadge(_selectedSession.Status)">@StatusLabel(_selectedSession.Status)</span>
+                            </div>
+                            <div class="pair-person">
+                                <span>@_selectedSession.PartnerName</span>
+                                <span class="d-flex align-items-center gap-2">
+                                    <span class="badge @StatusBadge(_selectedSession.PartnerStatus ?? SessionStatus.Scheduled)">@StatusLabel(_selectedSession.PartnerStatus ?? SessionStatus.Scheduled)</span>
+                                    @if (_canEdit && _selectedSession.PartnerStatus is SessionStatus.Cancelled or SessionStatus.NoShow
+                                         && _selectedSession.PartnerSessionId is int psid)
+                                    {
+                                        <button class="btn btn-link btn-sm p-0" @onclick="() => RestorePartner(psid)" disabled="@_busy">Przywróć</button>
+                                    }
+                                </span>
+                            </div>
+                            <div class="pair-box-hint">
+                                @PackageHint(_selectedSession)
+                            </div>
+                        </div>
+                    }
 
                     <div class="session-detail-list">
                         <div class="session-detail-row">
@@ -153,15 +184,39 @@
                     {
                         <div class="d-grid gap-2 mt-3">
                             <button class="btn btn-success btn-sm"
-                                    @onclick='async () => await ChangeStatus(SessionStatus.Completed)' disabled="@_busy">
-                                <i class="bi bi-check-circle me-1"></i>Oznacz jako ukończona
+                                    @onclick='async () => await ChangeStatus(SessionStatus.Completed, includePartner: true)' disabled="@_busy">
+                                <i class="bi bi-check-circle me-1"></i>@(PairActive ? "Oznacz jako ukończony (oboje)" : "Oznacz jako ukończona")
                             </button>
                             @if (!_confirmNoShow)
                             {
                                 <button class="btn btn-warning btn-sm"
                                         @onclick="() => _confirmNoShow = true" disabled="@_busy">
-                                    <i class="bi bi-person-x me-1"></i>Klient nie przyszedł
+                                    <i class="bi bi-person-x me-1"></i>@(PairActive ? "Ktoś nie przyszedł" : "Klient nie przyszedł")
                                 </button>
+                            }
+                            else if (PairActive)
+                            {
+                                <div class="p-2 rounded border border-warning-subtle text-center">
+                                    <div class="small fw-semibold mb-2">Kto nie przyszedł?</div>
+                                    <div class="d-flex flex-wrap gap-2 justify-content-center">
+                                        <button class="btn btn-warning btn-sm"
+                                                @onclick='async () => { _confirmNoShow = false; await ChangeStatus(SessionStatus.NoShow); }' disabled="@_busy">
+                                            @_selectedSession.ClientName
+                                        </button>
+                                        <button class="btn btn-warning btn-sm"
+                                                @onclick='async () => { _confirmNoShow = false; await ChangeStatus(SessionStatus.NoShow, targetId: _selectedSession.PartnerSessionId); }' disabled="@_busy">
+                                            @_selectedSession.PartnerName
+                                        </button>
+                                        <button class="btn btn-warning btn-sm"
+                                                @onclick='async () => { _confirmNoShow = false; await ChangeStatus(SessionStatus.NoShow, includePartner: true); }' disabled="@_busy">
+                                            Oboje
+                                        </button>
+                                        <button class="btn btn-outline-secondary btn-sm"
+                                                @onclick="() => _confirmNoShow = false">
+                                            Wróć
+                                        </button>
+                                    </div>
+                                </div>
                             }
                             else
                             {
@@ -194,6 +249,10 @@
                             {
                                 <div class="p-3 rounded border border-primary-subtle">
                                     <label class="form-label small fw-semibold mb-1">Nowy termin</label>
+                                    @if (PairActive)
+                                    {
+                                        <div class="small text-muted mb-1">Przeniesiemy trening dla obu osób — każda dostanie wiadomość.</div>
+                                    }
                                     <input type="datetime-local" class="form-control form-control-sm mb-2"
                                            @bind="_rescheduleDateTime" @bind:format="yyyy-MM-ddTHH:mm"
                                            @bind:after="() => _rescheduleOverlap = false" />
@@ -229,6 +288,24 @@
                             @if (_showCancelForm)
                             {
                                 <div class="p-3 rounded border border-danger-subtle">
+                                    @if (PairActive)
+                                    {
+                                        <div class="small fw-semibold mb-1">Kogo odwołać?</div>
+                                        <div class="d-flex flex-column gap-1 mb-2 small">
+                                            <label class="form-check">
+                                                <input class="form-check-input" type="radio" name="cscope" checked="@(_cancelScope == 0)" @onchange="() => _cancelScope = 0" />
+                                                <span class="form-check-label">Cały trening (oboje)</span>
+                                            </label>
+                                            <label class="form-check">
+                                                <input class="form-check-input" type="radio" name="cscope" checked="@(_cancelScope == _selectedSession.Id)" @onchange="() => _cancelScope = _selectedSession.Id" />
+                                                <span class="form-check-label">Tylko @_selectedSession.ClientName — @_selectedSession.PartnerName trenuje bez pary</span>
+                                            </label>
+                                            <label class="form-check">
+                                                <input class="form-check-input" type="radio" name="cscope" checked="@(_cancelScope == _selectedSession.PartnerSessionId)" @onchange="() => _cancelScope = _selectedSession.PartnerSessionId ?? 0" />
+                                                <span class="form-check-label">Tylko @_selectedSession.PartnerName — @_selectedSession.ClientName trenuje bez pary</span>
+                                            </label>
+                                        </div>
+                                    }
                                     <label class="form-label small mb-1">Powód anulowania (opcjonalny)</label>
                                     <input class="form-control form-control-sm mb-2" @bind="_cancelReason" placeholder="..." />
                                     <div class="form-check small mb-2">
@@ -283,70 +360,6 @@
                         </div>
                     }
 
-                    <!-- Trainer: send invitation -->
-                    @if (_canEdit && (_selectedSession.Status == SessionStatus.Scheduled
-                                   || _selectedSession.Status == SessionStatus.AwaitingPackage))
-                    {
-                        <hr class="my-3" />
-                        <div>
-                            <button class="btn btn-link btn-sm p-0 text-muted text-decoration-none"
-                                    @onclick="ToggleInviteSection">
-                                <i class="bi bi-envelope @(_showInviteSection ? "bi-envelope-open" : "bi-envelope") me-1"></i>
-                                Zaproś klienta na tę sesję
-                                <i class="bi @(_showInviteSection ? "bi-chevron-up" : "bi-chevron-down") ms-1"></i>
-                            </button>
-
-                            @if (_showInviteSection)
-                            {
-                                <div class="mt-2 p-3 rounded border">
-                                    @if (!string.IsNullOrEmpty(_inviteSuccess))
-                                    {
-                                        <div class="alert alert-success py-2 small mb-2">@_inviteSuccess</div>
-                                    }
-                                    @if (!string.IsNullOrEmpty(_inviteError))
-                                    {
-                                        <div class="alert alert-danger py-2 small mb-2">@_inviteError</div>
-                                    }
-
-                                    <div class="d-flex gap-2 mb-3">
-                                        <select class="form-select form-select-sm" @bind="_inviteClientId">
-                                            <option value="0">— wybierz klienta —</option>
-                                            @foreach (var c in _allClients.Where(c => c.Id != _selectedSession.ClientId))
-                                            {
-                                                <option value="@c.Id">@c.FullName</option>
-                                            }
-                                        </select>
-                                        <button class="btn btn-sm btn-primary flex-shrink-0"
-                                                @onclick="SendInvitationAsync"
-                                                disabled="@(_inviteClientId == 0 || _busy)">
-                                            Wyślij
-                                        </button>
-                                    </div>
-
-                                    @if (_invitations.Any())
-                                    {
-                                        <div class="small fw-semibold text-muted mb-1">Wysłane zaproszenia</div>
-                                        @foreach (var inv in _invitations)
-                                        {
-                                            <div class="d-flex align-items-center gap-2 py-1">
-                                                <span class="flex-grow-1 small">@inv.InvitedClientName</span>
-                                                <span class="badge @InvBadge(inv.Status)" style="font-size:.65rem">@InvLabel(inv.Status)</span>
-                                                @if (inv.Status == PTScheduler.Domain.Enums.InvitationStatus.Pending)
-                                                {
-                                                    <button class="btn btn-link btn-sm p-0 text-danger"
-                                                            @onclick="() => RevokeInvitationAsync(inv.Id)"
-                                                            title="Odwołaj zaproszenie">
-                                                        <i class="bi bi-x-lg"></i>
-                                                    </button>
-                                                }
-                                            </div>
-                                        }
-                                    }
-                                </div>
-                            }
-                        </div>
-                    }
-
                     <!-- Client: cancel own session -->
                     @if (_isClientRole && _selectedSession.Status == SessionStatus.Scheduled
                          && CancellationRules.ForClient(_trainerCfg, _selectedSession.StartTime, Clock.LocalNow).Allowed)
@@ -361,6 +374,10 @@
                             else
                             {
                                 <div class="p-3 rounded border border-danger-subtle">
+                                    @if (PairActive)
+                                    {
+                                        <div class="small text-muted mb-2">Odwołujesz tylko swój udział — @_selectedSession.PartnerName trenuje dalej i dostanie o tym wiadomość.</div>
+                                    }
                                     <label class="form-label small mb-1">Powód anulowania (opcjonalny)</label>
                                     <input class="form-control form-control-sm mb-2" @bind="_cancelReason" placeholder="..." />
                                     <div class="d-flex gap-2">
@@ -397,7 +414,7 @@
 
                     <div class="mb-3">
                         <label class="form-label small fw-semibold mb-1">Klient</label>
-                        <select class="form-select form-select-sm" @bind="_bookingClientId">
+                        <select class="form-select form-select-sm" @bind="_bookingClientId" @bind:after="LoadBookingPartnersAsync">
                             <option value="0">— wybierz —</option>
                             @foreach (var c in _allClients)
                             {
@@ -409,12 +426,44 @@
                     <div class="mb-3">
                         <label class="form-label small fw-semibold mb-1">Rodzaj sesji</label>
                         <select class="form-select form-select-sm" @bind="_bookingSessionTypeId"
-                                @bind:after="LoadBookingSlotsAsync">
+                                @bind:after="OnBookingTypeChanged">
                             @foreach (var t in _sessionTypes)
                             {
-                                <option value="@t.Id">@t.Name (@t.DurationMinutes min)</option>
+                                <option value="@t.Id">@t.Name (@t.DurationMinutes min)@(t.IsPair ? " · w parze" : "")</option>
                             }
                         </select>
+                    </div>
+
+                    <div class="mb-3">
+                        <label class="form-check small mb-1">
+                            <input class="form-check-input" type="checkbox" @bind="_bookingWithPartner" @bind:after="LoadBookingPartnersAsync" />
+                            <span class="form-check-label fw-semibold">Trening w parze</span>
+                            <InfoTip Title="Trening w parze">
+                                Obie osoby dostają własną wizytę, potwierdzenie i przypomnienie. Ze wspólnego pakietu „Duet”
+                                schodzi 1 za trening, bez niego — po 1 z pakietu każdej osoby. Gdy jedna odwoła, druga trenuje sama.
+                            </InfoTip>
+                        </label>
+                        @if (_bookingWithPartner)
+                        {
+                            <select class="form-select form-select-sm" @bind="_bookingPartnerId">
+                                <option value="0">— z kim? —</option>
+                                @if (_bookingPartners.Count > 0)
+                                {
+                                    <optgroup label="Para">
+                                        @foreach (var p in _bookingPartners)
+                                        {
+                                            <option value="@p.ClientId">@p.Name</option>
+                                        }
+                                    </optgroup>
+                                }
+                                <optgroup label="Wszyscy podopieczni">
+                                    @foreach (var c in _allClients.Where(c => c.Id != _bookingClientId && _bookingPartners.All(p => p.ClientId != c.Id)))
+                                    {
+                                        <option value="@c.Id">@c.FullName</option>
+                                    }
+                                </optgroup>
+                            </select>
+                        }
                     </div>
 
                     <div class="mb-3">
@@ -476,7 +525,7 @@
                         @if (_bookingOverlap)
                         {
                             <button class="btn btn-warning btn-sm" @onclick="() => ConfirmBooking(true)"
-                                    disabled="@(_bookingBusy || _bookingClientId == 0 || _bookingDateTime == default)">
+                                    disabled="@(_bookingBusy || _bookingClientId == 0 || _bookingDateTime == default || (_bookingWithPartner && _bookingPartnerId == 0))">
                                 @if (_bookingBusy) { <span class="spinner-border spinner-border-sm me-1" /> }
                                 <i class="bi bi-exclamation-triangle me-1"></i>Nałóż mimo to
                             </button>
@@ -484,7 +533,7 @@
                         else
                         {
                             <button class="btn btn-primary btn-sm" @onclick="() => ConfirmBooking(false)"
-                                    disabled="@(_bookingBusy || _bookingClientId == 0 || _bookingDateTime == default)">
+                                    disabled="@(_bookingBusy || _bookingClientId == 0 || _bookingDateTime == default || (_bookingWithPartner && _bookingPartnerId == 0))">
                                 @if (_bookingBusy) { <span class="spinner-border spinner-border-sm me-1" /> }
                                 <i class="bi bi-check-circle me-1"></i>Utwórz sesję
                             </button>
@@ -515,12 +564,13 @@
     private bool _rescheduleOverlap;   // kolizja terminu wykryta — czeka na potwierdzenie nałożenia
     private bool _showRestoreConfirm;
 
-    // Invitations
-    private List<SessionInvitationDto> _invitations = [];
-    private bool _showInviteSection;
-    private int _inviteClientId;
-    private string _inviteError = string.Empty;
-    private string _inviteSuccess = string.Empty;
+    // Trening w parze
+    private int _cancelScope;            // 0 = oboje, inaczej Id wizyty do odwołania
+    private bool _bookingWithPartner;
+    private int _bookingPartnerId;
+    private List<PartnerDto> _bookingPartners = [];
+    private bool PairActive => _selectedSession is { IsPair: true, PartnerActive: true }
+                               && _selectedSession.Status is SessionStatus.Scheduled or SessionStatus.AwaitingPackage;
 
     // Booking panel (trainer books for client)
     private bool _bookingOpen;
@@ -613,22 +663,26 @@
 
             var sessions = await SessionService.GetSessionsAsync(from, to, trainerFilter, clientFilter);
 
+            // Trening w parze to dwie wizyty — trener widzi go raz („Ola + Piotr”).
+            if (!_isClientRole)
+                sessions = sessions.Where(s => !s.IsPairFollower).ToList();
+
             if (_activeStatuses.Count > 0)
                 sessions = sessions.Where(s => _activeStatuses.Contains(s.Status.ToString())).ToList();
 
             var events = sessions.Select(s => (object)new
             {
                 id    = s.Id.ToString(),
-                title = s.ClientName,
+                title = _isClientRole ? s.ClientName : s.DisplayName,
                 start = s.StartTime.ToString("o"),
                 end   = s.EndTime.ToString("o"),
                 extendedProps = new
                 {
                     status      = s.Status.ToString(),
-                    clientName  = s.ClientName,
-                    sessionType = s.SessionTypeName,
+                    clientName  = _isClientRole ? s.ClientName : s.DisplayName,
+                    sessionType = s.SessionTypeName + (s.IsPair && s.PartnerActive ? " · w parze" : ""),
                     trainerName = s.TrainerName,
-                    initials    = Initials(s.ClientName),
+                    initials    = s.IsPair && s.PartnerActive && !_isClientRole ? PairInitials(s) : Initials(s.ClientName),
                     duration    = s.DurationMinutes
                 }
             }).ToList();
@@ -671,10 +725,7 @@
         _showRescheduleForm = false;
         _showRestoreConfirm = false;
         _confirmNoShow      = false;
-        _showInviteSection  = false;
-        _inviteClientId     = 0;
-        _inviteError        = string.Empty;
-        _inviteSuccess      = string.Empty;
+        _cancelScope        = 0;
         _cancelReason       = string.Empty;
         _panelError         = string.Empty;
         _rescheduleOverlap  = false;
@@ -682,8 +733,6 @@
         if (_selectedSession is not null)
         {
             _rescheduleDateTime = _selectedSession.StartTime;
-            if (_canEdit)
-                _invitations = await InvitationService.GetForSessionAsync(sessionId);
         }
         await InvokeAsync(StateHasChanged);
     }
@@ -699,6 +748,9 @@
         _bookingSessionTypeId = _sessionTypes.FirstOrDefault()?.Id ?? 0;
         _bookingDateTime = default;
         _bookingOverlap  = false;
+        _bookingWithPartner = _sessionTypes.FirstOrDefault()?.IsPair == true;
+        _bookingPartnerId = 0;
+        _bookingPartners = [];
         var dt = DateTime.TryParse(dateStr, out var parsed) ? parsed : StudioClock.Now;
         _bookingSlotDate = DateOnly.FromDateTime(dt);
         _bookingOpen    = true;
@@ -713,10 +765,6 @@
         _showCancelForm     = false;
         _showRescheduleForm = false;
         _showRestoreConfirm = false;
-        _showInviteSection  = false;
-        _invitations        = [];
-        _inviteError        = string.Empty;
-        _inviteSuccess      = string.Empty;
         _panelError         = string.Empty;
     }
 
@@ -779,13 +827,54 @@
             await _module.InvokeVoidAsync("refetchEvents");
     }
 
-    private async Task ChangeStatus(SessionStatus status)
+    private async Task OnBookingTypeChanged()
+    {
+        if (_sessionTypes.FirstOrDefault(t => t.Id == _bookingSessionTypeId)?.IsPair == true && !_bookingWithPartner)
+        {
+            _bookingWithPartner = true;
+            await LoadBookingPartnersAsync();
+        }
+        await LoadBookingSlotsAsync();
+    }
+
+    // Partner podpowiadany z par; gdy para jest jedna — wybrany od razu.
+    private async Task LoadBookingPartnersAsync()
+    {
+        _bookingPartners = _bookingClientId > 0 ? await PairService.GetPartnersAsync(_bookingClientId) : [];
+        if (_bookingPartnerId == _bookingClientId) _bookingPartnerId = 0;
+        if (_bookingPartnerId == 0 && _bookingPartners.Count == 1) _bookingPartnerId = _bookingPartners[0].ClientId;
+    }
+
+    private static string PackageHint(SessionDto s) =>
+        s.PackageShared
+            ? "Wspólny pakiet pary: za ten trening schodzi 1."
+            : "Każda osoba korzysta z własnego pakietu.";
+
+    private static string PairInitials(SessionDto s) =>
+        $"{s.ClientName.FirstOrDefault()}{s.PartnerName?.FirstOrDefault()}".ToUpper();
+
+    private async Task RestorePartner(int partnerSessionId)
+    {
+        _busy = true; _panelError = string.Empty;
+        try
+        {
+            await SessionService.RestoreAsync(partnerSessionId);
+            await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionRestored", "Session",
+                partnerSessionId.ToString(), $"Klient: {_selectedSession?.PartnerName} (trening w parze)");
+            if (_selectedSession is not null) await OnEventClick(_selectedSession.Id);
+            if (_module is not null) await _module.InvokeVoidAsync("refetchEvents");
+        }
+        catch (Exception ex) { _panelError = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task ChangeStatus(SessionStatus status, bool includePartner = false, int? targetId = null)
     {
         if (_selectedSession is null) return;
         _busy = true; _panelError = string.Empty;
         try
         {
-            await SessionService.UpdateStatusAsync(_selectedSession.Id, status);
+            await SessionService.UpdateStatusAsync(targetId ?? _selectedSession.Id, status, includePartner: includePartner);
             var action = status == SessionStatus.Completed ? "SessionCompleted" : "SessionNoShow";
             await AuditLogService.LogAsync(_userId, _userEmail, _userRole, action, "Session",
                 _selectedSession.Id.ToString(),
@@ -823,7 +912,11 @@
             }
             else
             {
-                await SessionService.UpdateStatusAsync(_selectedSession.Id, SessionStatus.Cancelled, _cancelReason, chargeSession: _chargeLate);
+                // Trening w parze: domyślnie odwołujemy oboje; można odwołać jedną osobę.
+                var pair = PairActive;
+                var target = pair && _cancelScope != 0 ? _cancelScope : _selectedSession.Id;
+                await SessionService.UpdateStatusAsync(target, SessionStatus.Cancelled, _cancelReason, chargeSession: _chargeLate,
+                    includePartner: pair && _cancelScope == 0);
                 await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionCancelled", "Session",
                     _selectedSession.Id.ToString(), details);
             }
@@ -885,9 +978,11 @@
                 StartTime     = _bookingDateTime,
                 Notes         = string.IsNullOrWhiteSpace(_bookingNotes) ? null : _bookingNotes.Trim()
             };
-            var created = await SessionService.CreateSessionAsync(dto, allowOverlap: allowOverlap);
+            var created = _bookingWithPartner && _bookingPartnerId > 0
+                ? await SessionService.CreatePairSessionAsync(dto, _bookingPartnerId, allowOverlap: allowOverlap)
+                : await SessionService.CreateSessionAsync(dto, allowOverlap: allowOverlap);
             await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionBooked", "Session",
-                created.Id.ToString(), $"Klient: {created.ClientName}, termin: {_bookingDateTime:dd.MM.yyyy HH:mm}{(allowOverlap ? " (nałożono)" : "")}");
+                created.Id.ToString(), $"Klient: {created.DisplayName}, termin: {_bookingDateTime:dd.MM.yyyy HH:mm}{(allowOverlap ? " (nałożono)" : "")}");
             _bookingOverlap = false;
             CloseBookingPanel();
             if (_module is not null) await _module.InvokeVoidAsync("refetchEvents");
@@ -896,55 +991,6 @@
         catch (Exception ex) { _bookingOverlap = false; _bookingError = ex.Message; }
         finally { _bookingBusy = false; }
     }
-
-    private void ToggleInviteSection()
-    {
-        _showInviteSection = !_showInviteSection;
-        _inviteError   = string.Empty;
-        _inviteSuccess = string.Empty;
-    }
-
-    private async Task SendInvitationAsync()
-    {
-        if (_selectedSession is null || _inviteClientId == 0) return;
-        _inviteError = string.Empty; _inviteSuccess = string.Empty;
-        _busy = true;
-        try
-        {
-            await InvitationService.SendAsync(_selectedSession.Id, _inviteClientId, _userId);
-            _inviteSuccess = "Zaproszenie wysłane.";
-            _inviteClientId = 0;
-            _invitations = await InvitationService.GetForSessionAsync(_selectedSession.Id);
-        }
-        catch (Exception ex) { _inviteError = ex.Message; }
-        finally { _busy = false; }
-    }
-
-    private async Task RevokeInvitationAsync(int invitationId)
-    {
-        if (_selectedSession is null) return;
-        _inviteError = string.Empty; _inviteSuccess = string.Empty;
-        try
-        {
-            await InvitationService.RevokeAsync(invitationId);
-            _invitations = await InvitationService.GetForSessionAsync(_selectedSession.Id);
-        }
-        catch (Exception ex) { _inviteError = ex.Message; }
-    }
-
-    private static string InvBadge(PTScheduler.Domain.Enums.InvitationStatus s) => s switch
-    {
-        PTScheduler.Domain.Enums.InvitationStatus.Accepted => "bg-success",
-        PTScheduler.Domain.Enums.InvitationStatus.Declined => "bg-danger",
-        _                                                   => "bg-warning text-dark"
-    };
-
-    private static string InvLabel(PTScheduler.Domain.Enums.InvitationStatus s) => s switch
-    {
-        PTScheduler.Domain.Enums.InvitationStatus.Accepted => "Zaakceptowane",
-        PTScheduler.Domain.Enums.InvitationStatus.Declined => "Odrzucone",
-        _                                                   => "Oczekuje"
-    };
 
     private static string Initials(string name) =>
         string.Concat(name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => p[0])).ToUpper();

@@ -62,5 +62,17 @@ public class Session
     /// </summary>
     public int ReminderAttempts { get; set; }
 
+    /// <summary>
+    /// Trening w parze: każda osoba ma własną wizytę (grafik, przypomnienia, odwołanie, pakiet),
+    /// a wspólny identyfikator łączy je w jeden trening w kalendarzu trenera.
+    /// </summary>
+    public Guid? PairGroupId { get; set; }
+
+    /// <summary>
+    /// Wizyta korzysta ze wspólnego pakietu pary, który za ten trening pobrała już druga osoba
+    /// (za wspólny trening z pakietu „Duet” schodzi 1, nie 2).
+    /// </summary>
+    public bool SharesPackageSlot { get; set; }
+
     public ICollection<SessionInvitation> Invitations { get; set; } = [];
 }

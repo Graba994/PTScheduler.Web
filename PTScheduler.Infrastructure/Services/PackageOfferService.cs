@@ -47,6 +47,7 @@ public class PackageOfferService(IDbContextFactory<ApplicationDbContext> dbFacto
             Price = dto.Price,
             Currency = dto.Currency,
             ValidDays = dto.ValidDays,
+            IsForPair = dto.IsForPair,
             IsActive = dto.IsActive,
             IsFeatured = dto.IsFeatured,
             SortOrder = dto.SortOrder,
@@ -71,6 +72,7 @@ public class PackageOfferService(IDbContextFactory<ApplicationDbContext> dbFacto
         entity.Price = dto.Price;
         entity.Currency = dto.Currency;
         entity.ValidDays = dto.ValidDays;
+        entity.IsForPair = dto.IsForPair;
         entity.IsActive = dto.IsActive;
         entity.IsFeatured = dto.IsFeatured;
         entity.SortOrder = dto.SortOrder;
@@ -99,6 +101,7 @@ public class PackageOfferService(IDbContextFactory<ApplicationDbContext> dbFacto
         Price = o.Price,
         Currency = o.Currency,
         ValidDays = o.ValidDays,
+        IsForPair = o.IsForPair,
         IsActive = o.IsActive,
         IsFeatured = o.IsFeatured,
         SortOrder = o.SortOrder,

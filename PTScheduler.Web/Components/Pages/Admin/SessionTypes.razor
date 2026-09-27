@@ -49,7 +49,7 @@ else
                             @foreach (var t in _types)
                             {
                                 <tr class="@(!t.IsActive ? "opacity-50" : "")">
-                                    <td class="fw-semibold">@t.Name</td>
+                                    <td class="fw-semibold">@t.Name @if (t.IsPair) { <span class="pair-chip ms-1"><i class="bi bi-people-fill"></i>W parze</span> }</td>
                                     <td class="text-center">@t.DurationMinutes</td>
                                     <td class="text-center">
                                         @if (t.IsGroup)
@@ -133,8 +133,13 @@ else
                             <input type="number" class="form-control" min="5" max="480" @bind="_form.DurationMinutes" />
                         </div>
                         <div class="col-6 d-flex align-items-center gap-2 pt-4">
-                            <input type="checkbox" class="form-check-input" id="isGroup" @bind="_form.IsGroup" />
+                            <input type="checkbox" class="form-check-input" id="isGroup" @bind="_form.IsGroup" @bind:after="() => { if (_form.IsGroup) _form.IsPair = false; }" />
                             <label class="form-check-label" for="isGroup">Sesja grupowa</label>
+                        </div>
+                        <div class="col-12 d-flex align-items-center gap-2">
+                            <input type="checkbox" class="form-check-input" id="isPair" @bind="_form.IsPair" @bind:after="() => { if (_form.IsPair) _form.IsGroup = false; }" />
+                            <label class="form-check-label" for="isPair">Trening w parze (2 osoby)</label>
+                            <InfoTip Title="Trening w parze" Text="Przy rezerwacji tego rodzaju treningu aplikacja od razu pyta o partnera. Każda osoba dostaje własną wizytę i przypomnienie. Dodaj też pakiet „dla pary” w Ofercie pakietów — wtedy za wspólny trening schodzi 1." />
                         </div>
                         @if (_form.IsGroup)
                         {
@@ -193,6 +198,7 @@ else
             Name = t.Name,
             DurationMinutes = t.DurationMinutes,
             IsGroup = t.IsGroup,
+            IsPair = t.IsPair,
             MaxParticipants = t.MaxParticipants
         };
         _error = string.Empty;

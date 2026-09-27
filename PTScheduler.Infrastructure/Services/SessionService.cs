@@ -55,7 +55,7 @@ public class SessionService(
             .Where(u => trainerIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id, u => $"{u.FirstName} {u.LastName}".Trim().NullIfEmpty() ?? u.Email ?? "Trener");
 
-        return sessions.Select(s => MapToDto(s, trainers)).ToList();
+        return await WithPairInfoAsync(db, sessions.Select(s => MapToDto(s, trainers)).ToList());
     }
 
     public async Task<List<SessionDto>> GetPastSessionsAsync(string? trainerUserId = null, int? clientId = null, int count = 50)
@@ -89,7 +89,7 @@ public class SessionService(
             .Where(u => trainerIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id,
                 u => $"{u.FirstName} {u.LastName}".Trim().NullIfEmpty() ?? u.Email ?? "Trener");
-        return sessions.Select(s => MapToDto(s, trainers)).ToList();
+        return await WithPairInfoAsync(db, sessions.Select(s => MapToDto(s, trainers)).ToList());
     }
 
     public async Task<SessionDto?> GetSessionAsync(int id)
@@ -105,7 +105,7 @@ public class SessionService(
 
         var trainer = await db.Users.FirstOrDefaultAsync(u => u.Id == session.TrainerUserId);
         var trainerName = $"{trainer?.FirstName} {trainer?.LastName}".Trim().NullIfEmpty() ?? trainer?.Email ?? session.TrainerUserId;
-        return MapToDto(session, new Dictionary<string, string> { [session.TrainerUserId] = trainerName });
+        return (await WithPairInfoAsync(db, [MapToDto(session, new Dictionary<string, string> { [session.TrainerUserId] = trainerName })]))[0];
     }
 
     public async Task<SessionDto> CreateSessionAsync(CreateSessionDto dto, bool allowAwaitingPackage = true, bool allowOverlap = false)
@@ -129,15 +129,7 @@ public class SessionService(
 
         // Pakiet musi być jeszcze ważny w dniu wizyty — wcześniej rezerwacja na
         // termin po dacie ważności pobierała sesję z pakietu, który do tego czasu wygaśnie.
-        var sessionStartUtc = clock.ToUtc(dto.StartTime);
-        var package = await db.SessionPackages
-            .Where(p => p.ClientId == dto.ClientId
-                     && p.SessionTypeId == dto.SessionTypeId
-                     && p.Status == PackageStatus.Active
-                     && p.UsedSessions < p.TotalSessions
-                     && (p.ExpiresAt == null || p.ExpiresAt >= sessionStartUtc))
-            .OrderBy(p => p.ExpiresAt ?? DateTime.MaxValue)
-            .FirstOrDefaultAsync();
+        var package = await FindOwnPackageAsync(db, dto.ClientId, dto.SessionTypeId, clock.ToUtc(dto.StartTime));
 
         if (package is null && !allowAwaitingPackage)
             throw new InvalidOperationException("Nie masz aktywnego pakietu dla tego rodzaju sesji.");
@@ -196,8 +188,136 @@ public class SessionService(
         return (await GetSessionAsync(session.Id))!;
     }
 
+    // Własny pakiet osoby (nie pakiet pary). Musi być ważny w dniu wizyty — wcześniej rezerwacja
+    // na termin po dacie ważności pobierała sesję z pakietu, który do tego czasu wygaśnie.
+    private static Task<SessionPackage?> FindOwnPackageAsync(ApplicationDbContext db, int clientId, int sessionTypeId, DateTime sessionStartUtc) =>
+        db.SessionPackages
+            .Where(p => p.ClientId == clientId
+                     && p.PartnerClientId == null
+                     && p.SessionTypeId == sessionTypeId
+                     && p.Status == PackageStatus.Active
+                     && p.UsedSessions < p.TotalSessions
+                     && (p.ExpiresAt == null || p.ExpiresAt >= sessionStartUtc))
+            .OrderBy(p => p.ExpiresAt ?? DateTime.MaxValue)
+            .FirstOrDefaultAsync();
+
+    // Wspólny pakiet tej pary (kupiony przez którąkolwiek z osób).
+    private static Task<SessionPackage?> FindPairPackageAsync(ApplicationDbContext db, int clientA, int clientB, int sessionTypeId, DateTime sessionStartUtc) =>
+        db.SessionPackages
+            .Where(p => p.PartnerClientId != null
+                     && ((p.ClientId == clientA && p.PartnerClientId == clientB) || (p.ClientId == clientB && p.PartnerClientId == clientA))
+                     && p.SessionTypeId == sessionTypeId
+                     && p.Status == PackageStatus.Active
+                     && p.UsedSessions < p.TotalSessions
+                     && (p.ExpiresAt == null || p.ExpiresAt >= sessionStartUtc))
+            .OrderBy(p => p.ExpiresAt ?? DateTime.MaxValue)
+            .FirstOrDefaultAsync();
+
+    private static void Consume(SessionPackage package)
+    {
+        package.UsedSessions++;
+        if (package.UsedSessions >= package.TotalSessions)
+            package.Status = PackageStatus.Depleted;
+    }
+
+    public async Task<SessionDto> CreatePairSessionAsync(CreateSessionDto dto, int partnerClientId, bool allowAwaitingPackage = true, bool allowOverlap = false)
+    {
+        if (partnerClientId == dto.ClientId)
+            throw new InvalidOperationException("Wybierz drugą osobę do pary.");
+        dto.StartTime = DateTime.SpecifyKind(dto.StartTime, DateTimeKind.Unspecified);
+        await using var db = dbFactory.CreateDbContext();
+        var sessionType = await db.SessionTypes.FindAsync(dto.SessionTypeId)
+            ?? throw new InvalidOperationException("Typ sesji nie istnieje.");
+        if (!await db.Clients.AnyAsync(c => c.Id == partnerClientId))
+            throw new InvalidOperationException("Nie znaleziono partnera.");
+
+        // Jeden trening = jedna kontrola kolizji (dwie wizyty zajmują tę samą godzinę).
+        if (!allowOverlap)
+        {
+            var conflict = await availability.FindConflictAsync(dto.TrainerUserId, dto.StartTime, sessionType.DurationMinutes);
+            if (conflict is not null) throw new SlotConflictException(conflict);
+        }
+
+        // Wspólny pakiet pary: za trening schodzi 1 (pobiera go wizyta osoby rezerwującej).
+        // Bez niego każda osoba korzysta z własnego pakietu.
+        var startUtc = clock.ToUtc(dto.StartTime);
+        var pairPackage = await FindPairPackageAsync(db, dto.ClientId, partnerClientId, dto.SessionTypeId, startUtc);
+        var ownPackage = pairPackage is null ? await FindOwnPackageAsync(db, dto.ClientId, dto.SessionTypeId, startUtc) : null;
+        var partnerPackage = pairPackage is null ? await FindOwnPackageAsync(db, partnerClientId, dto.SessionTypeId, startUtc) : null;
+
+        if (pairPackage is null && ownPackage is null && !allowAwaitingPackage)
+            throw new InvalidOperationException("Nie masz aktywnego pakietu dla tego rodzaju sesji.");
+
+        var groupId = Guid.NewGuid();
+        var lead = new Session
+        {
+            ClientId = dto.ClientId,
+            SessionTypeId = dto.SessionTypeId,
+            TrainerUserId = dto.TrainerUserId,
+            StartTime = dto.StartTime,
+            PackageId = pairPackage?.Id ?? ownPackage?.Id,
+            Status = (pairPackage ?? ownPackage) is not null ? SessionStatus.Scheduled : SessionStatus.AwaitingPackage,
+            Notes = dto.Notes,
+            PairGroupId = groupId,
+            CreatedAt = DateTime.UtcNow
+        };
+        var partner = new Session
+        {
+            ClientId = partnerClientId,
+            SessionTypeId = dto.SessionTypeId,
+            TrainerUserId = dto.TrainerUserId,
+            StartTime = dto.StartTime,
+            PackageId = pairPackage?.Id ?? partnerPackage?.Id,
+            SharesPackageSlot = pairPackage is not null,
+            Status = (pairPackage ?? partnerPackage) is not null ? SessionStatus.Scheduled : SessionStatus.AwaitingPackage,
+            Notes = dto.Notes,
+            PairGroupId = groupId,
+            CreatedAt = DateTime.UtcNow
+        };
+        if (pairPackage is not null) Consume(pairPackage);
+        if (ownPackage is not null) Consume(ownPackage);
+        if (partnerPackage is not null) Consume(partnerPackage);
+
+        // Osobne zapisy, żeby wizyta rezerwującego miała niższe Id (prowadząca w kalendarzu).
+        db.Sessions.Add(lead);
+        await db.SaveChangesAsync();
+        db.Sessions.Add(partner);
+        await db.SaveChangesAsync();
+
+        try
+        {
+            if (await googleMeetService.CanCreateMeetingsAsync(lead.TrainerUserId))
+            {
+                var names = await db.Clients.Where(c => c.Id == lead.ClientId || c.Id == partner.ClientId)
+                    .Select(c => new { c.Id, c.FirstName, c.LastName, c.ApplicationUserId }).ToListAsync();
+                var leadClient = names.FirstOrDefault(c => c.Id == lead.ClientId);
+                var leadUser = leadClient is not null ? await db.Users.FirstOrDefaultAsync(u => u.Id == leadClient.ApplicationUserId) : null;
+                var title = string.Join(" + ", names.OrderBy(c => c.Id == lead.ClientId ? 0 : 1).Select(c => $"{c.FirstName} {c.LastName}".Trim()));
+                var result = await googleMeetService.CreateMeetingAsync(
+                    $"{sessionType.Name} — {title}",
+                    $"Trening w parze: {sessionType.Name}, {sessionType.DurationMinutes} min",
+                    startUtc, sessionType.DurationMinutes, leadUser?.Email, lead.TrainerUserId, lead.Id);
+                if (result is not null)
+                {
+                    lead.MeetingUrl = result.MeetingUrl;
+                    lead.CalendarEventId = result.CalendarEventId;
+                    partner.MeetingUrl = result.MeetingUrl;
+                    await db.SaveChangesAsync();
+                }
+            }
+        }
+        catch (Exception ex) { logger.LogWarning(ex, "Błąd tworzenia Google Meet (SessionId={Id})", lead.Id); }
+
+        foreach (var s in new[] { lead, partner })
+        {
+            try { await SendBookingConfirmationAsync(s, sessionType); }
+            catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila potwierdzającego rezerwację (SessionId={Id})", s.Id); }
+        }
+        return (await GetSessionAsync(lead.Id))!;
+    }
+
     public async Task UpdateStatusAsync(int id, SessionStatus status, string? cancellationReason = null, string? completionNotes = null,
-        bool chargeSession = false)
+        bool chargeSession = false, bool includePartner = false)
     {
         await using var db = dbFactory.CreateDbContext();
         var session = await db.Sessions
@@ -206,35 +326,65 @@ public class SessionService(
             .FirstOrDefaultAsync(s => s.Id == id)
             ?? throw new InvalidOperationException("Session not found.");
 
-        if (status == SessionStatus.Cancelled)
-        {
-            session.CancelledAt = DateTime.UtcNow;
-            session.CancellationReason = cancellationReason;
-            // chargeSession: trener odwołuje w imieniu klienta po terminie — sesja przepada.
-            session.IsLateCancellation = chargeSession;
-            if (!chargeSession)
-                await RefundPackageSlotAsync(db, session);
-        }
-        else if (status == SessionStatus.NoShow && session.Status != SessionStatus.NoShow)
-        {
-            var cfg = await availability.GetConfigAsync(session.TrainerUserId);
-            if (!cfg.NoShowChargesSession)
-                await RefundPackageSlotAsync(db, session);
-        }
+        // Trening w parze: includePartner zmienia status także wizyty drugiej osoby (np. „Odwołaj trening”
+        // albo „Zakończ” dla obojga). Bez niego zmienia się tylko ta jedna wizyta.
+        var siblings = session.PairGroupId is null ? [] : await db.Sessions
+            .Include(s => s.Client)
+            .Include(s => s.SessionType)
+            .Where(s => s.PairGroupId == session.PairGroupId && s.Id != session.Id)
+            .ToListAsync();
+        var targets = new List<Session> { session };
+        if (includePartner)
+            targets.AddRange(siblings.Where(s => s.Status != SessionStatus.Cancelled && s.Status != status));
 
-        if (status == SessionStatus.Completed && completionNotes is not null)
-            session.Notes = completionNotes;
+        var cfg = status == SessionStatus.NoShow ? await availability.GetConfigAsync(session.TrainerUserId) : null;
+        foreach (var t in targets)
+        {
+            if (status == SessionStatus.Cancelled)
+            {
+                t.CancelledAt = DateTime.UtcNow;
+                t.CancellationReason = cancellationReason;
+                // chargeSession: trener odwołuje w imieniu klienta po terminie — sesja przepada.
+                t.IsLateCancellation = chargeSession;
+                if (!chargeSession)
+                    await RefundPackageSlotAsync(db, t);
+            }
+            else if (status == SessionStatus.NoShow && t.Status != SessionStatus.NoShow)
+            {
+                if (!cfg!.NoShowChargesSession)
+                    await RefundPackageSlotAsync(db, t);
+            }
 
-        session.Status = status;
+            if (status == SessionStatus.Completed && completionNotes is not null)
+                t.Notes = completionNotes;
+
+            t.Status = status;
+        }
         await db.SaveChangesAsync();
 
         if (status == SessionStatus.Cancelled)
         {
-            try { if (session.CalendarEventId is not null) await googleMeetService.DeleteMeetingAsync(session.CalendarEventId, session.TrainerUserId); }
-            catch (Exception ex) { logger.LogWarning(ex, "Błąd usuwania Google Meet (SessionId={Id})", session.Id); }
+            // Druga osoba z pary zostaje na treningu — spotkanie Google Meet zostaje, a ona dostaje informację.
+            var remaining = siblings.Where(s => s.Status != SessionStatus.Cancelled).ToList();
+            if (remaining.Count == 0)
+            {
+                foreach (var t in targets.Where(t => t.CalendarEventId is not null))
+                {
+                    try { await googleMeetService.DeleteMeetingAsync(t.CalendarEventId!, t.TrainerUserId); }
+                    catch (Exception ex) { logger.LogWarning(ex, "Błąd usuwania Google Meet (SessionId={Id})", t.Id); }
+                }
+            }
 
-            try { await SendCancellationEmailAsync(session, cancellationReason); }
-            catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila o anulowaniu (SessionId={Id})", session.Id); }
+            foreach (var t in targets)
+            {
+                try { await SendCancellationEmailAsync(t, cancellationReason); }
+                catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila o anulowaniu (SessionId={Id})", t.Id); }
+            }
+            foreach (var r in remaining)
+            {
+                try { await SendPartnerCancelledAsync(r, session); }
+                catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila do partnera (SessionId={Id})", r.Id); }
+            }
         }
     }
 
@@ -248,21 +398,33 @@ public class SessionService(
             .FirstOrDefaultAsync(s => s.Id == id)
             ?? throw new InvalidOperationException("Sesja nie została znaleziona.");
 
-        // Kontrola kolizji, wykluczając samą przenoszoną sesję — inaczej jej
-        // stary rekord (wciąż w bazie) kolidowałby z nowym terminem.
+        // Trening w parze przenosimy w całości — obie wizyty dostają nowy termin.
+        var moved = new List<Session> { session };
+        if (session.PairGroupId is not null)
+            moved.AddRange(await db.Sessions
+                .Include(s => s.Client)
+                .Include(s => s.SessionType)
+                .Where(s => s.PairGroupId == session.PairGroupId && s.Id != session.Id && s.Status != SessionStatus.Cancelled)
+                .ToListAsync());
+
+        // Kontrola kolizji, wykluczając samą przenoszoną sesję (i drugą wizytę tej samej pary) —
+        // inaczej ich stary rekord (wciąż w bazie) kolidowałby z nowym terminem.
         if (!allowOverlap)
         {
             var conflict = await availability.FindConflictAsync(
                 session.TrainerUserId, newStartTime, session.SessionType.DurationMinutes,
-                excludeSessionId: session.Id);
+                excludeSessionId: session.Id, excludePairGroupId: session.PairGroupId);
             if (conflict is not null) throw new SlotConflictException(conflict);
         }
 
         var oldTime = session.StartTime;
-        session.StartTime = newStartTime;
+        foreach (var m in moved) m.StartTime = newStartTime;
         await db.SaveChangesAsync();
-        try { await SendRescheduleEmailAsync(session, oldTime); }
-        catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila o zmianie terminu (SessionId={Id})", session.Id); }
+        foreach (var m in moved)
+        {
+            try { await SendRescheduleEmailAsync(m, oldTime); }
+            catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila o zmianie terminu (SessionId={Id})", m.Id); }
+        }
     }
 
     public async Task RestoreAsync(int id)
@@ -279,6 +441,29 @@ public class SessionService(
         session.CancellationReason = null;
 
         session.IsLateCancellation = false;
+
+        // Wspólny pakiet pary: jeśli za ten trening pakiet pobrała już druga osoba, nic nie schodzi.
+        // Gdy druga osoba odwołała, ta wizyta przejmuje pobranie.
+        if (session.PairGroupId is not null && session.PackageId.HasValue && (session.SharesPackageSlot || session.PackageRefunded))
+        {
+            var covered = await db.Sessions.AnyAsync(x => x.PairGroupId == session.PairGroupId && x.Id != session.Id
+                && x.PackageId == session.PackageId && !x.SharesPackageSlot && !x.PackageRefunded
+                && x.Status != SessionStatus.Cancelled);
+            if (covered)
+            {
+                session.SharesPackageSlot = true;
+                session.PackageRefunded = false;
+                session.Status = SessionStatus.Scheduled;
+                await db.SaveChangesAsync();
+                return;
+            }
+            if (session.SharesPackageSlot)
+            {
+                session.SharesPackageSlot = false;
+                session.PackageRefunded = true;
+            }
+        }
+
         if (session.PackageRefunded && session.PackageId.HasValue)
         {
             var pkg = await db.SessionPackages.FindAsync(session.PackageId.Value);
@@ -353,13 +538,47 @@ public class SessionService(
 
         try { await SendClientCancelledToTrainerAsync(session, reason); }
         catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila o anulowaniu przez klienta (SessionId={Id})", session.Id); }
+
+        // Trening w parze: druga osoba zostaje na treningu i dostaje o tym informację.
+        if (session.PairGroupId is not null)
+        {
+            var remaining = await db.Sessions.Include(s => s.Client).Include(s => s.SessionType)
+                .Where(s => s.PairGroupId == session.PairGroupId && s.Id != session.Id && s.Status != SessionStatus.Cancelled)
+                .ToListAsync();
+            foreach (var r in remaining)
+            {
+                try { await SendPartnerCancelledAsync(r, session); }
+                catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila do partnera (SessionId={Id})", r.Id); }
+            }
+        }
         return decision;
     }
 
     // Zwalnia miejsce sesji w pakiecie (jeśli jeszcze go nie zwolniła).
+    // Wspólny pakiet pary: wizyta, która nie pobrała sesji (SharesPackageSlot), nie ma czego oddawać.
+    // Gdy odwołuje osoba, której wizyta pobrała sesję, a druga zostaje — pobranie przechodzi na drugą.
     private static async Task RefundPackageSlotAsync(ApplicationDbContext db, Session session)
     {
         if (!session.PackageId.HasValue || session.PackageRefunded) return;
+        if (session.SharesPackageSlot)
+        {
+            session.PackageRefunded = true;
+            return;
+        }
+        if (session.PairGroupId is not null)
+        {
+            // Bez filtra statusu w SQL — status mógł już zostać zmieniony w tej samej operacji (w pamięci).
+            var siblings = await db.Sessions.Where(x => x.PairGroupId == session.PairGroupId && x.Id != session.Id).ToListAsync();
+            var heir = siblings.FirstOrDefault(x => x.SharesPackageSlot && x.PackageId == session.PackageId && !x.PackageRefunded
+                && x.Status is SessionStatus.Scheduled or SessionStatus.Completed);
+            if (heir is not null)
+            {
+                heir.SharesPackageSlot = false;
+                session.SharesPackageSlot = true;
+                session.PackageRefunded = true;
+                return;
+            }
+        }
         var pkg = await db.SessionPackages.FindAsync(session.PackageId.Value);
         if (pkg is null || pkg.Status == PackageStatus.Cancelled) return;
         if (pkg.UsedSessions > 0) pkg.UsedSessions--;
@@ -382,6 +601,7 @@ public class SessionService(
                 DurationMinutes = t.DurationMinutes,
                 IsGroup = t.IsGroup,
                 MaxParticipants = t.MaxParticipants,
+                IsPair = t.IsPair,
                 IsActive = t.IsActive
             })
             .ToListAsync();
@@ -432,7 +652,7 @@ public class SessionService(
             .ToDictionaryAsync(u => u.Id,
                 u => $"{u.FirstName} {u.LastName}".Trim() is { Length: > 0 } n ? n : u.Email ?? "Trener");
 
-        return sessions.Select(s => MapToDto(s, trainers)).ToList();
+        return await WithPairInfoAsync(db, sessions.Select(s => MapToDto(s, trainers)).ToList());
     }
 
     public async Task<List<SessionDto>> GetUpcomingAsync(string? trainerUserId = null, int? clientId = null, int count = 10)
@@ -460,7 +680,7 @@ public class SessionService(
             .ToDictionaryAsync(u => u.Id,
                 u => $"{u.FirstName} {u.LastName}".Trim() is { Length: > 0 } n ? n : u.Email ?? "Trener");
 
-        return sessions.Select(s => MapToDto(s, trainers)).ToList();
+        return await WithPairInfoAsync(db, sessions.Select(s => MapToDto(s, trainers)).ToList());
     }
 
     public async Task<List<SessionDto>> GetAwaitingPackageAsync(string? trainerUserId = null)
@@ -482,7 +702,7 @@ public class SessionService(
             .Where(u => trainerIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id,
                 u => $"{u.FirstName} {u.LastName}".Trim().NullIfEmpty() ?? u.Email ?? "Trener");
-        return sessions.Select(s => MapToDto(s, trainers)).ToList();
+        return await WithPairInfoAsync(db, sessions.Select(s => MapToDto(s, trainers)).ToList());
     }
 
     private async Task SendBookingConfirmationAsync(Session session, SessionType sessionType)
@@ -600,6 +820,62 @@ public class SessionService(
         await emailService.SendAsync(clientUser.Email, clientName, subject, html);
     }
 
+    // Uzupełnia informacje o drugiej osobie z pary i o tym, która wizyta jest „prowadząca”
+    // (najniższe Id wśród nieodwołanych) — trener widzi trening w kalendarzu raz.
+    private static async Task<List<SessionDto>> WithPairInfoAsync(ApplicationDbContext db, List<SessionDto> dtos)
+    {
+        var groups = dtos.Where(d => d.PairGroupId.HasValue).Select(d => d.PairGroupId!.Value).Distinct().ToList();
+        if (groups.Count == 0) return dtos;
+        var rows = await db.Sessions.AsNoTracking()
+            .Where(s => s.PairGroupId != null && groups.Contains(s.PairGroupId.Value))
+            .Select(s => new { s.Id, s.PairGroupId, s.ClientId, s.Status, s.SharesPackageSlot, s.Client.FirstName, s.Client.LastName })
+            .ToListAsync();
+        var byGroup = rows.GroupBy(r => r.PairGroupId!.Value).ToDictionary(g => g.Key, g => g.ToList());
+        foreach (var d in dtos.Where(d => d.PairGroupId.HasValue))
+        {
+            if (!byGroup.TryGetValue(d.PairGroupId!.Value, out var members)) continue;
+            var partner = members.Where(m => m.Id != d.Id).OrderBy(m => m.Id).FirstOrDefault();
+            if (partner is not null)
+            {
+                d.PartnerSessionId = partner.Id;
+                d.PartnerClientId = partner.ClientId;
+                d.PartnerName = $"{partner.FirstName} {partner.LastName}".Trim().NullIfEmpty() ?? "Partner";
+                d.PartnerStatus = partner.Status;
+                d.PackageShared = d.SharesPackageSlot || partner.SharesPackageSlot;
+            }
+            var active = members.Where(m => m.Status != SessionStatus.Cancelled).ToList();
+            d.IsPairFollower = d.Id != (active.Count > 0 ? active : members).Min(m => m.Id);
+        }
+        return dtos;
+    }
+
+    private async Task SendPartnerCancelledAsync(Session remaining, Session cancelled)
+    {
+        if (!await emailService.IsEnabledAsync()) return;
+        await using var db = dbFactory.CreateDbContext();
+        var client = await db.Clients.FindAsync(remaining.ClientId);
+        if (client is null) return;
+        if (!await notificationPrefs.IsEnabledAsync(client.ApplicationUserId, NotificationTypes.SessionCancelledByTrainer)) return;
+        var clientUser = await db.Users.FirstOrDefaultAsync(u => u.Id == client.ApplicationUserId);
+        if (clientUser?.Email is null) return;
+        var partner = await db.Clients.FindAsync(cancelled.ClientId);
+        var trainer = await db.Users.FirstOrDefaultAsync(u => u.Id == remaining.TrainerUserId);
+        var trainerName = $"{trainer?.FirstName} {trainer?.LastName}".Trim().NullIfEmpty() ?? trainer?.Email ?? "Trener";
+        var clientName = $"{client.FirstName} {client.LastName}".Trim().NullIfEmpty() ?? clientUser.Email;
+        var sessionType = await db.SessionTypes.FindAsync(remaining.SessionTypeId);
+        var vars = new Dictionary<string, string>
+        {
+            ["ClientName"] = clientName,
+            ["PartnerName"] = partner?.FirstName.NullIfEmpty() ?? "Partner",
+            ["TrainerName"] = trainerName,
+            ["SessionType"] = sessionType?.Name ?? "",
+            ["SessionDate"] = remaining.StartTime.ToString("dddd, dd MMMM yyyy"),
+            ["SessionTime"] = remaining.StartTime.ToString("HH:mm")
+        };
+        var (subject, html) = await emailTemplateService.RenderAsync("pair-partner-cancelled", vars);
+        await emailService.SendAsync(clientUser.Email, clientName, subject, html);
+    }
+
     private static SessionDto MapToDto(Session s, Dictionary<string, string> trainers) => new()
     {
         Id = s.Id,
@@ -616,7 +892,9 @@ public class SessionService(
         Notes = s.Notes,
         CancellationReason = s.CancellationReason,
         IsLateCancellation = s.IsLateCancellation,
-        MeetingUrl = s.MeetingUrl
+        MeetingUrl = s.MeetingUrl,
+        PairGroupId = s.PairGroupId,
+        SharesPackageSlot = s.SharesPackageSlot
     };
 }
 

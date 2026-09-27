@@ -436,5 +436,42 @@ public class EmailTemplateService(
             "#D97706",
             "Wiadomość automatyczna — nie odpowiadaj na ten email.",
             ["ClientName", "PackageName", "ExpiresAt", "RemainingCredits", "TrainerName"]),
+
+        ["pair-partner-cancelled"] = new(
+            "pair-partner-cancelled", "Trening w parze: partner odwołał", "bi-people",
+            "{{PartnerName}} nie będzie na treningu {{SessionDate}}",
+            "Zmiana w treningu w parze 👥",
+            """
+            <p style="color:#374151;font-size:15px">Cześć <strong>{{ClientName}}</strong>!</p>
+            <p style="color:#374151;font-size:15px"><strong>{{PartnerName}}</strong> odwołuje swój udział we wspólnym treningu. <strong>Twój trening zostaje</strong> — trenujesz tego dnia z trenerem bez pary.</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0">
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;width:40%">Typ wizyty</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{SessionType}}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Data i godzina</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{SessionDate}} o {{SessionTime}}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Trener</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{TrainerName}}</td></tr>
+            </table>
+            <p style="color:#6b7280;font-size:13px">Jeśli też nie możesz przyjść, odwołaj wizytę w aplikacji w zakładce Grafik.</p>
+            """,
+            "#7C3AED",
+            "Wiadomość automatyczna — nie odpowiadaj na ten email.",
+            ["ClientName", "PartnerName", "TrainerName", "SessionType", "SessionDate", "SessionTime"]),
+
+        ["pair-package-shared"] = new(
+            "pair-package-shared", "Pakiet dla pary: partner kupił", "bi-people-fill",
+            "{{BuyerName}} kupuje pakiet {{PackageName}} — trenujecie razem",
+            "Macie wspólny pakiet 🎉",
+            """
+            <p style="color:#374151;font-size:15px">Cześć <strong>{{ClientName}}</strong>!</p>
+            <p style="color:#374151;font-size:15px"><strong>{{BuyerName}}</strong> kupuje pakiet <strong>{{PackageName}}</strong> dla Was obojga. Pakiet jest już przypisany także do Ciebie.</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0">
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;width:40%">Wspólnych treningów</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{TotalSessions}}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Trener</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{TrainerName}}</td></tr>
+              {{ExpiresRow}}
+            </table>
+            <p style="color:#374151;font-size:14px">Jak to działa: za każdy wspólny trening z pakietu schodzi 1. Gdy jedna osoba odwoła, druga może przyjść sama — wtedy też schodzi 1.</p>
+            {{ActionButton}}
+            """,
+            "#7C3AED",
+            "Wiadomość automatyczna — nie odpowiadaj na ten email.",
+            ["ClientName", "BuyerName", "PackageName", "TotalSessions", "TrainerName", "ExpiresAt", "ExpiresRow", "ActionLink", "ActionButton"]),
     };
 }

@@ -13,6 +13,8 @@ public class PackageOfferDto
     public decimal Price { get; set; }
     public string Currency { get; set; } = "PLN";
     public int? ValidDays { get; set; }
+    /// <summary>Pakiet dla pary: kupuje jedna osoba, korzystają obie (1 za wspólny trening).</summary>
+    public bool IsForPair { get; set; }
     public bool IsActive { get; set; }
     public bool IsFeatured { get; set; }
     public int SortOrder { get; set; }
@@ -29,6 +31,8 @@ public class SavePackageOfferDto
     public decimal Price { get; set; }
     public string Currency { get; set; } = "PLN";
     public int? ValidDays { get; set; }
+    /// <summary>Pakiet dla pary: kupuje jedna osoba, korzystają obie (1 za wspólny trening).</summary>
+    public bool IsForPair { get; set; }
     public bool IsActive { get; set; } = true;
     public bool IsFeatured { get; set; }
     public int SortOrder { get; set; }

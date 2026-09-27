@@ -4,7 +4,6 @@
 @using System.Globalization
 @inject ISessionService SessionService
 @inject IClientService ClientService
-@inject ISessionInvitationService InvitationService
 @inject IBodyMeasurementService MeasurementService
 @inject IJSRuntime JS
 @inject NavigationManager Nav
@@ -75,53 +74,6 @@ else
             <ReviewPrompt ClientId="_client.Id" />
         }
 
-        @if (_invitations.Any())
-        {
-            <div class="cd-invites">
-                <div class="cd-invites-head">
-                    <i class="bi bi-envelope-fill"></i>
-                    <span>Zaproszenia na sesje (@_invitations.Count)</span>
-                </div>
-                @foreach (var inv in _invitations)
-                {
-                    <div class="cd-invite">
-                        <div class="cd-invite-when">
-                            <div class="cd-invite-day">@inv.SessionStartTime.ToString("dd.MM")</div>
-                            <div class="cd-invite-time">@inv.SessionStartTime.ToString("HH:mm")</div>
-                        </div>
-                        <div class="cd-invite-body">
-                            <div class="cd-invite-title">@inv.SessionTypeName · @inv.DurationMinutes min</div>
-                            <div class="cd-invite-trainer"><i class="bi bi-person"></i>@inv.TrainerName</div>
-                        </div>
-                        @if (_respondingId == inv.Id)
-                        {
-                            <div class="cd-invite-actions w-100">
-                                <input class="form-control form-control-sm mb-2" placeholder="Notatka..." @bind="_respondNote" />
-                                <div class="d-flex gap-2">
-                                    <button class="btn btn-sm btn-success flex-grow-1" @onclick="() => RespondAsync(inv.Id, true)">
-                                        <i class="bi bi-check-lg me-1"></i>Akceptuj
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-danger flex-grow-1" @onclick="() => RespondAsync(inv.Id, false)">
-                                        <i class="bi bi-x-lg me-1"></i>Odrzuć
-                                    </button>
-                                </div>
-                                @if (_respondError is not null)
-                                {
-                                    <div class="text-danger small mt-1">@_respondError</div>
-                                }
-                            </div>
-                        }
-                        else
-                        {
-                            <button class="btn btn-sm btn-primary" @onclick="() => StartRespond(inv.Id)">
-                                Odpowiedz
-                            </button>
-                        }
-                    </div>
-                }
-            </div>
-        }
-
         <!-- HERO: next session countdown -->
         <div class="cd-hero @HeroToneClass()">
             @if (_nextSession is null)
@@ -147,6 +99,10 @@ else
                 <div class="cd-hero-when">@FormatWhen(_nextSession.StartTime)</div>
 
                 <div class="cd-hero-meta">
+                    @if (_nextSession.IsPair && _nextSession.PartnerActive)
+                    {
+                        <span><i class="bi bi-people-fill"></i>z: @_nextSession.PartnerName</span>
+                    }
                     <span><i class="bi bi-person"></i>@_nextSession.TrainerName</span>
                     <span><i class="bi bi-clock"></i>@_nextSession.DurationMinutes min</span>
                     <span><i class="bi bi-bookmark"></i>@_nextSession.SessionTypeName</span>
@@ -168,6 +124,12 @@ else
                 @if (_cancelConfirmId == _nextSession.Id)
                 {
                     <div class="cd-hero-confirm">
+                        @if (_nextSession.IsPair && _nextSession.PartnerActive)
+                        {
+                            <div class="cd-hero-err mb-2" style="opacity:.85">
+                                <i class="bi bi-people me-1"></i>Odwołujesz tylko siebie — @_nextSession.PartnerName trenuje dalej i dostanie wiadomość.
+                            </div>
+                        }
                         @if (_cancelDecision is not null)
                         {
                             <div class="cd-hero-err mb-2" style="@(_cancelDecision.RefundsSession ? "opacity:.85" : "")">
@@ -437,15 +399,9 @@ else
     private PTScheduler.Application.Scheduling.CancellationDecision? _cancelDecision;
     private List<SessionDto> _recentPast = [];
     private int _upcomingCount;
-    private List<SessionInvitationDto> _invitations = [];
     private BodyMeasurementDto? _latestMeasurement;
     private List<(string Date, double Value)> _chartPoints = [];
     private string? _errorMsg;
-
-    // Invitation responding
-    private int? _respondingId;
-    private string? _respondNote;
-    private string? _respondError;
 
     // Session cancel
     private int? _cancelConfirmId;
@@ -510,8 +466,6 @@ else
                     _noShowCount = pastSessions.Count(s => s.Status == SessionStatus.NoShow);
                     _streakCount = CalcStreak(pastSessions);
 
-                    _invitations   = await InvitationService.GetPendingForClientAsync(_client.Id);
-
                     var measurements = await MeasurementService.GetAsync(_client.Id);
                     _latestMeasurement = measurements.OrderByDescending(m => m.MeasurementDate).FirstOrDefault();
                     var weightHistory = measurements.Where(m => m.WeightKg.HasValue).OrderByDescending(m => m.MeasurementDate).ToList();
@@ -554,31 +508,6 @@ else
                     "Waga", "kg");
             }
             catch { /* chart helper may be missing in some renderers; ignore */ }
-        }
-    }
-
-    // ---- Invitations ----
-
-    private void StartRespond(int invitationId)
-    {
-        _respondingId = invitationId;
-        _respondNote  = null;
-        _respondError = null;
-    }
-
-    private async Task RespondAsync(int invitationId, bool accept)
-    {
-        _respondError = null;
-        try
-        {
-            await InvitationService.RespondAsync(invitationId, accept, _respondNote);
-            _respondingId = null;
-            if (_client is not null)
-                _invitations = await InvitationService.GetPendingForClientAsync(_client.Id);
-        }
-        catch (Exception ex)
-        {
-            _respondError = ex.Message;
         }
     }
 

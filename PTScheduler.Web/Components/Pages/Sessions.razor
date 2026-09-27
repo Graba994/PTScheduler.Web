@@ -123,7 +123,7 @@ else
                                 <div class="session-tile-weekday">@s.StartTime.ToString("ddd", _pl)</div>
                             </div>
                             <div class="session-tile-info">
-                                <div class="session-tile-client">@s.ClientName</div>
+                                <div class="session-tile-client">@(_isClientRole ? s.ClientName : s.DisplayName)</div>
                                 <div class="session-tile-type">@s.SessionTypeName</div>
                                 <div class="session-tile-time">
                                     <i class="bi bi-clock me-1 text-muted"></i>@s.StartTime.ToString("HH:mm") – @s.EndTime.ToString("HH:mm")
@@ -178,7 +178,7 @@ else
                                 <div class="session-tile-weekday">@s.StartTime.ToString("ddd", _pl)</div>
                             </div>
                             <div class="session-tile-info">
-                                <div class="session-tile-client">@s.ClientName</div>
+                                <div class="session-tile-client">@(_isClientRole ? s.ClientName : s.DisplayName)</div>
                                 <div class="session-tile-type">@s.SessionTypeName</div>
                                 <div class="session-tile-time">
                                     <i class="bi bi-clock me-1 text-muted"></i>@s.StartTime.ToString("HH:mm") – @s.EndTime.ToString("HH:mm")
@@ -417,7 +417,7 @@ else
                             @Initials(_selectedSession.ClientName)
                         </div>
                         <div>
-                            <div class="fw-bold fs-6">@_selectedSession.ClientName</div>
+                            <div class="fw-bold fs-6">@(_isClientRole ? _selectedSession.ClientName : _selectedSession.DisplayName)</div>
                             <small class="text-muted">@_selectedSession.SessionTypeName</small>
                         </div>
                     </div>
@@ -773,6 +773,12 @@ else
 
             _upcoming = await SessionService.GetUpcomingAsync(trainerFilter, clientFilter, count: 100);
             _past     = await SessionService.GetPastSessionsAsync(trainerFilter, clientFilter, count: 100);
+            // Trening w parze to dwie wizyty — trener widzi go raz („Ola + Piotr”).
+            if (!_isClientRole && clientFilter is null)
+            {
+                _upcoming = _upcoming.Where(s => !s.IsPairFollower).ToList();
+                _past = _past.Where(s => !s.IsPairFollower).ToList();
+            }
         }
         finally
         {
@@ -1020,7 +1026,8 @@ else
         _busy = true; _panelError = string.Empty;
         try
         {
-            await SessionService.UpdateStatusAsync(_selectedSession.Id, status);
+            // Trening w parze: „ukończona” dotyczy obojga; nieobecność — tylko tej osoby.
+            await SessionService.UpdateStatusAsync(_selectedSession.Id, status, includePartner: status == SessionStatus.Completed);
             var action = status == SessionStatus.Completed ? "SessionCompleted" : "SessionNoShow";
             await AuditLogService.LogAsync(_userId, _userEmail, _userRole, action, "Session",
                 _selectedSession.Id.ToString(),
@@ -1040,7 +1047,7 @@ else
         try
         {
             await SessionService.UpdateStatusAsync(_selectedSession.Id, SessionStatus.Completed,
-                completionNotes: string.IsNullOrWhiteSpace(_completionNote) ? null : _completionNote.Trim());
+                completionNotes: string.IsNullOrWhiteSpace(_completionNote) ? null : _completionNote.Trim(), includePartner: true);
             _showCompleteForm = false;
             _completionNote = string.Empty;
             await LoadSessionsAsync();
@@ -1066,7 +1073,9 @@ else
             }
             else
             {
-                await SessionService.UpdateStatusAsync(_selectedSession.Id, SessionStatus.Cancelled, _cancelReason, chargeSession: _chargeLate);
+                // Trening w parze odwołujemy w całości; pojedynczą osobę można odwołać w Kalendarzu.
+                await SessionService.UpdateStatusAsync(_selectedSession.Id, SessionStatus.Cancelled, _cancelReason, chargeSession: _chargeLate,
+                    includePartner: !_isClientRole);
                 await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionCancelled", "Session",
                     _selectedSession.Id.ToString(), baseDetails + suffix);
             }

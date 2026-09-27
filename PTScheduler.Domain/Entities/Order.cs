@@ -21,6 +21,12 @@ public class Order
     // Package order target (null for course orders).
     public int? PackageOfferId { get; set; }
 
+    /// <summary>Pakiet dla pary: partner, który dostanie pakiet razem z kupującym.</summary>
+    public int? PartnerClientId { get; set; }
+
+    /// <summary>Adres aplikacji z chwili zakupu — do linków w wiadomościach wysyłanych po płatności.</summary>
+    public string? AppBaseUrl { get; set; }
+
     /// <summary>Opłacany okres karnetu cyklicznego (Kind = Membership).</summary>
     public int? MembershipPeriodId { get; set; }
 

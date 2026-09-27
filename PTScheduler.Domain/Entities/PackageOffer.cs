@@ -26,6 +26,9 @@ public class PackageOffer
     /// <summary>Optional validity in days from purchase (null = no expiry).</summary>
     public int? ValidDays { get; set; }
 
+    /// <summary>Pakiet dla pary: kupuje jedna osoba, korzystają obie; za wspólny trening schodzi 1.</summary>
+    public bool IsForPair { get; set; }
+
     public bool IsActive { get; set; } = true;
     public bool IsFeatured { get; set; }
     public int SortOrder { get; set; }

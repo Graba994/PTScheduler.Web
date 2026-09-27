@@ -60,6 +60,10 @@ else
                                 <div>
                                     <div class="fw-bold" style="font-size:1rem">@p.Name</div>
                                     <div class="text-muted small">@p.SessionTypeName · @p.DurationMinutes min</div>
+                                    @if (p.IsForPair)
+                                    {
+                                        <span class="pair-chip mt-1" title="Za wspólny trening schodzi 1. Gdy jedno z Was odwoła, drugie może przyjść samo."><i class="bi bi-people-fill"></i>Wspólny z: @(p.ClientId == _clientId ? p.PartnerName : p.ClientName)</span>
+                                    }
                                 </div>
                                 <span class="badge @(p.IsPaid ? "bg-success" : "bg-warning text-dark")">
                                     @(p.IsPaid ? "Opłacony" : "Nieopłacony")
@@ -198,6 +202,7 @@ else
 }
 
 @code {
+    private int _clientId;
     private List<SessionPackageDto> _packages = [];
     private List<SessionPackageDto> _active = [];
     private decimal _unpaidTotal;
@@ -210,6 +215,7 @@ else
         var client = await ClientService.GetClientByUserIdAsync(uid);
         if (client is not null)
         {
+            _clientId = client.Id;
             _packages = await PackageService.GetPackagesAsync(client.Id);
             _active   = _packages.Where(p => p.Status == PackageStatus.Active).ToList();
             _unpaidTotal = _packages

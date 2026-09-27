@@ -239,6 +239,16 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             .HasForeignKey(s => s.PackageId)
             .OnDelete(DeleteBehavior.SetNull);
 
+        // Trening w parze: wizyty obu osób łączy PairGroupId.
+        builder.Entity<Session>()
+            .HasIndex(s => s.PairGroupId);
+
+        builder.Entity<SessionPackage>()
+            .HasOne(p => p.PartnerClient)
+            .WithMany()
+            .HasForeignKey(p => p.PartnerClientId)
+            .OnDelete(DeleteBehavior.SetNull);
+
         builder.Entity<Session>()
             .HasOne(s => s.Series)
             .WithMany(sr => sr.Sessions)

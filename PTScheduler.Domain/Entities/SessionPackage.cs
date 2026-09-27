@@ -16,6 +16,10 @@ public class SessionPackage
     public int SessionTypeId { get; set; }
     public SessionType SessionType { get; set; } = null!;
 
+    /// <summary>Pakiet dla pary: druga osoba, która korzysta z tego pakietu na wspólnych treningach.</summary>
+    public int? PartnerClientId { get; set; }
+    public Client? PartnerClient { get; set; }
+
     public int TotalSessions { get; set; }
     public int UsedSessions { get; set; } = 0;
 

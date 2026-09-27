@@ -34,6 +34,7 @@ public class SessionTypeService(IDbContextFactory<ApplicationDbContext> dbFactor
             DurationMinutes = dto.DurationMinutes,
             IsGroup = dto.IsGroup,
             MaxParticipants = dto.IsGroup ? dto.MaxParticipants : null,
+            IsPair = dto.IsPair && !dto.IsGroup,
             IsActive = true
         };
         db.SessionTypes.Add(entity);
@@ -50,6 +51,7 @@ public class SessionTypeService(IDbContextFactory<ApplicationDbContext> dbFactor
         entity.DurationMinutes = dto.DurationMinutes;
         entity.IsGroup = dto.IsGroup;
         entity.MaxParticipants = dto.IsGroup ? dto.MaxParticipants : null;
+        entity.IsPair = dto.IsPair && !dto.IsGroup;
         await db.SaveChangesAsync();
     }
 
@@ -69,6 +71,7 @@ public class SessionTypeService(IDbContextFactory<ApplicationDbContext> dbFactor
         DurationMinutes = t.DurationMinutes,
         IsGroup = t.IsGroup,
         MaxParticipants = t.MaxParticipants,
+        IsPair = t.IsPair,
         IsActive = t.IsActive,
         SessionCount = sessionCount
     };

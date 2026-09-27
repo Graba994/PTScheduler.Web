@@ -7,6 +7,10 @@ public class SessionPackageDto
     public int Id { get; set; }
     public int ClientId { get; set; }
     public string ClientName { get; set; } = string.Empty;
+    /// <summary>Pakiet dla pary: druga osoba, która z niego korzysta.</summary>
+    public int? PartnerClientId { get; set; }
+    public string? PartnerName { get; set; }
+    public bool IsForPair => PartnerClientId.HasValue;
     public string CreatedByUserId { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public string? Notes { get; set; }
@@ -58,6 +62,9 @@ public class ExpiringPackageDto
 public class CreateSessionPackageDto
 {
     public int ClientId { get; set; }
+    /// <summary>Pakiet dla pary — druga osoba (za wspólny trening schodzi 1).</summary>
+    public int? PartnerClientId { get; set; }
+    public bool IsPaid { get; set; }
     public string CreatedByUserId { get; set; } = string.Empty;
     public string Name { get; set; } = string.Empty;
     public int SessionTypeId { get; set; }

@@ -32,5 +32,7 @@ public interface ITrainerAvailabilityService
     /// termin jest wolny. Jak <see cref="IsSlotFreeAsync"/>, ale z detalami do
     /// komunikatu dla trenera.
     /// </summary>
-    Task<SlotConflictDto?> FindConflictAsync(string trainerUserId, DateTime start, int durationMinutes, int? excludeSessionId = null);
+    /// <param name="excludePairGroupId">Pomija wizyty tego treningu w parze (np. przy przenoszeniu obu naraz).</param>
+    Task<SlotConflictDto?> FindConflictAsync(string trainerUserId, DateTime start, int durationMinutes, int? excludeSessionId = null,
+        Guid? excludePairGroupId = null);
 }

@@ -238,10 +238,23 @@ public class GoogleCalendarService(
             var bySession = ours.GroupBy(e => e.SessionId!.Value).ToDictionary(g => g.Key, g => g.ToList());
             var keep = new HashSet<string>();
 
+            // Trening w parze to dwie wizyty o tej samej godzinie — do kalendarza trafia jedno
+            // wydarzenie (na wizycie prowadzącej, z imionami obu osób), drugą traktujemy jak nieobecną.
+            var pairFollowers = new HashSet<int>();
+            var pairPartnerNames = new Dictionary<int, string>();
+            foreach (var g in sessions.Where(x => x.PairGroupId != null).GroupBy(x => x.PairGroupId))
+            {
+                var active = g.Where(x => x.Status != SessionStatus.Cancelled).OrderBy(x => x.Id).ToList();
+                if (active.Count < 2) continue;
+                foreach (var f in active.Skip(1)) pairFollowers.Add(f.Id);
+                var partnerName = $"{active[1].Client?.FirstName} {active[1].Client?.LastName}".Trim();
+                if (partnerName.Length > 0) pairPartnerNames[active[0].Id] = partnerName;
+            }
+
             foreach (var s in sessions)
             {
                 bySession.TryGetValue(s.Id, out var linked);
-                if (s.Status == SessionStatus.Cancelled)
+                if (s.Status == SessionStatus.Cancelled || pairFollowers.Contains(s.Id))
                 {
                     foreach (var e in linked ?? []) { await api.DeleteAsync(token, e.Id, ct); deleted++; }
                     if (s.CalendarEventId is not null && (linked is null || linked.All(e => e.Id != s.CalendarEventId)) && s.CalendarSyncFingerprint is not null)
@@ -257,7 +270,7 @@ public class GoogleCalendarService(
                     continue;
                 }
 
-                var write = BuildEvent(s, conn.ShowClientName, app);
+                var write = BuildEvent(s, conn.ShowClientName, app, pairPartnerNames.GetValueOrDefault(s.Id));
                 var fp = Fingerprint(write);
                 var primary = linked?.FirstOrDefault(e => e.Id == s.CalendarEventId) ?? linked?.FirstOrDefault();
 
@@ -328,10 +341,11 @@ public class GoogleCalendarService(
         return null;
     }
 
-    private GoogleEventWrite BuildEvent(Session s, bool showClientName, string app)
+    private GoogleEventWrite BuildEvent(Session s, bool showClientName, string app, string? partnerName = null)
     {
         var typeName = s.SessionType?.Name ?? "Wizyta";
         var clientName = $"{s.Client?.FirstName} {s.Client?.LastName}".Trim();
+        if (partnerName is not null) clientName = clientName.Length > 0 ? $"{clientName} + {partnerName}" : partnerName;
         var summary = showClientName && clientName.Length > 0 ? $"{typeName} — {clientName}" : typeName;
         if (s.Status == SessionStatus.AwaitingPackage) summary += " (czeka na pakiet)";
 

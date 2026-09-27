@@ -3,6 +3,7 @@
 @using PTScheduler.Application.Scheduling
 @inject IClientService ClientService
 @inject ISessionService SessionService
+@inject IPairService PairService
 @inject ITrainerAvailabilityService AvailabilityService
 @inject ITrainerConfigService TrainerConfigService
 @inject IAppClock Clock
@@ -133,7 +134,13 @@ else
                             <div class="text-muted small text-uppercase">@s.StartTime.ToString("MMM")</div>
                         </div>
                         <div class="flex-grow-1 text-break" style="min-width:0">
-                            <div class="fw-semibold">@s.SessionTypeName</div>
+                            <div class="fw-semibold">
+                                @s.SessionTypeName
+                                @if (s.IsPair)
+                                {
+                                    <span class="pair-chip ms-1"><i class="bi bi-people-fill"></i>@(s.PartnerActive ? $"z: {s.PartnerName}" : $"{s.PartnerName} nie przyjdzie")</span>
+                                }
+                            </div>
                             <div class="text-muted small">
                                 <i class="bi bi-clock me-1"></i>@s.StartTime.ToString("HH:mm") — @s.EndTime.ToString("HH:mm")
                                 &nbsp;·&nbsp;<i class="bi bi-person me-1"></i>@s.TrainerName
@@ -189,7 +196,7 @@ else
                     {
                         <tr>
                             <td class="text-nowrap small">@s.StartTime.ToString("dd.MM.yy HH:mm")</td>
-                            <td class="small">@s.SessionTypeName</td>
+                            <td class="small">@s.SessionTypeName@(s.IsPair ? $" · z: {s.PartnerName}" : "")</td>
                             <td class="small text-muted d-none d-md-table-cell">@s.TrainerName</td>
                             <td><span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span></td>
                         </tr>
@@ -211,6 +218,10 @@ else
                     <i class="bi bi-exclamation-triangle-fill text-warning fs-2 d-block mb-3"></i>
                     <p class="mb-1 fw-semibold">Odwołać trening?</p>
                     <p class="text-muted small mb-3">@cancelTarget.SessionTypeName — @cancelTarget.StartTime.ToString("dd.MM.yyyy HH:mm")</p>
+                    @if (cancelTarget.IsPair && cancelTarget.PartnerActive)
+                    {
+                        <div class="alert alert-light border py-2 small text-start"><i class="bi bi-people me-1"></i>Odwołujesz tylko siebie — @cancelTarget.PartnerName trenuje dalej i dostanie wiadomość.</div>
+                    }
                     @{ var decision = CancellationRules.ForClient(_trainerCfg, cancelTarget.StartTime, Clock.LocalNow); }
                     <div class="alert @(decision.RefundsSession ? "alert-light border" : "alert-warning") py-2 small text-start">
                         <i class="bi @(decision.RefundsSession ? "bi-info-circle" : "bi-exclamation-triangle") me-1"></i>@decision.Message
@@ -300,24 +311,53 @@ else
                                     <div class="col-12 col-sm-6">
                                         <div class="border rounded-3 p-3 h-100 @(isSelected ? "border-primary bg-primary-subtle" : "border-2")"
                                              style="cursor:pointer;transition:all .15s"
-                                             @onclick="() => { selectedType = t; bookingError = string.Empty; }">
+                                             @onclick="() => { selectedType = t; bookingError = string.Empty; if (t.IsPair && partners.Count > 0) withPartner = true; }">
                                             <div class="d-flex align-items-start gap-2">
                                                 <div class="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0"
                                                      style="width:36px;height:36px;background:@(isSelected ? "var(--c-primary)" : "var(--c-step-bg, #f3f4f6)")">
-                                                    <i class="bi @(t.IsGroup ? "bi-people-fill" : "bi-person-fill")"
+                                                    <i class="bi @(t.IsGroup || t.IsPair ? "bi-people-fill" : "bi-person-fill")"
                                                        style="color:@(isSelected ? "white" : "var(--c-muted, #6b7280)");font-size:.9rem"></i>
                                                 </div>
                                                 <div>
                                                     <div class="fw-semibold small">@t.Name</div>
-                                                    <div class="text-muted small">@t.DurationMinutes min · @(t.IsGroup ? "grupowa" : "indywidualna")</div>
+                                                    <div class="text-muted small">@t.DurationMinutes min · @(t.IsGroup ? "grupowa" : t.IsPair ? "w parze" : "indywidualna")</div>
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
                                 }
                             </div>
+                            @if (partners.Count > 0 || selectedType?.IsPair == true)
+                            {
+                                <div class="mt-4">
+                                    <div class="small fw-semibold mb-2">Z kim trenujesz?</div>
+                                    <div class="pair-toggle">
+                                        <button type="button" class="@(withPartner ? "" : "active")" disabled="@(selectedType?.IsPair == true)"
+                                                @onclick="() => withPartner = false"><i class="bi bi-person-fill"></i>Tylko ja</button>
+                                        <button type="button" class="@(withPartner ? "active" : "")" disabled="@(partners.Count == 0)"
+                                                @onclick="() => withPartner = true"><i class="bi bi-people-fill"></i>Z partnerem</button>
+                                    </div>
+                                    @if (withPartner && partners.Count > 1)
+                                    {
+                                        <select class="form-select form-select-sm mt-2" @bind="partnerId">
+                                            @foreach (var p in partners)
+                                            {
+                                                <option value="@p.ClientId">@p.Name</option>
+                                            }
+                                        </select>
+                                    }
+                                    @if (selectedType?.IsPair == true && partners.Count == 0)
+                                    {
+                                        <div class="alert alert-light border small mt-2 mb-0">Ten trening jest dla pary. Poproś trenera, żeby połączył Cię w parę z osobą, z którą trenujesz — albo kup pakiet dla pary w sklepie.</div>
+                                    }
+                                    else if (withPartner)
+                                    {
+                                        <PairHowItWorks Variant="book" Title="@($"Trening z: {PartnerName}")" Class="mt-2" />
+                                    }
+                                </div>
+                            }
                             <div class="text-end mt-4">
-                                <button class="btn btn-primary" @onclick="GoToStep2" disabled="@(selectedType is null)">
+                                <button class="btn btn-primary" @onclick="GoToStep2" disabled="@(selectedType is null || (selectedType.IsPair && !withPartner))">
                                     Dalej <i class="bi bi-arrow-right ms-1"></i>
                                 </button>
                             </div>
@@ -394,6 +434,13 @@ else
                                     <td class="text-muted small fw-semibold" style="width:40%">Typ wizyty</td>
                                     <td class="fw-semibold">@selectedType!.Name</td>
                                 </tr>
+                                @if (withPartner)
+                                {
+                                    <tr>
+                                        <td class="text-muted small fw-semibold">Trenujesz z</td>
+                                        <td class="fw-semibold"><i class="bi bi-people-fill me-1"></i>@PartnerName</td>
+                                    </tr>
+                                }
                                 <tr>
                                     <td class="text-muted small fw-semibold">Czas trwania</td>
                                     <td>@selectedType!.DurationMinutes minut</td>
@@ -477,6 +524,12 @@ else
     private AvailableSlotDto? selectedSlot;
     private bool loadingSlots;
 
+    // Trening w parze
+    private List<PartnerDto> partners = [];
+    private bool withPartner;
+    private int partnerId;
+    private string PartnerName => partners.FirstOrDefault(p => p.ClientId == partnerId)?.Name ?? "partner";
+
     protected override async Task OnInitializedAsync()
     {
         var auth = await AuthStateProvider.GetAuthenticationStateAsync();
@@ -523,6 +576,9 @@ else
 
         if (!sessionTypes.Any())
             sessionTypes = await SessionService.GetSessionTypesAsync();
+        partners = await PairService.GetPartnersAsync(client!.Id);
+        partnerId = partners.FirstOrDefault()?.ClientId ?? 0;
+        withPartner = false;
 
         bookingOpen = true;
     }
@@ -609,10 +665,12 @@ else
                 StartTime = selectedSlot.Start,
                 Notes = string.IsNullOrWhiteSpace(bookingNotes) ? null : bookingNotes.Trim()
             };
-            var created = await SessionService.CreateSessionAsync(dto);
+            var created = withPartner && partnerId > 0
+                ? await SessionService.CreatePairSessionAsync(dto, partnerId)
+                : await SessionService.CreateSessionAsync(dto);
 
             await AuditLogService.LogAsync(_userId, _userEmail, "Client", "ClientSelfBooked", "Session",
-                created.Id.ToString(), $"Typ: {selectedType.Name}, termin: {selectedSlot.Start:dd.MM.yyyy HH:mm}");
+                created.Id.ToString(), $"Typ: {selectedType.Name}, termin: {selectedSlot.Start:dd.MM.yyyy HH:mm}{(withPartner ? $", z: {PartnerName}" : "")}");
 
             bookingOpen = false;
             showSuccess = true;

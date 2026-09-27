@@ -64,6 +64,7 @@ else
                                     <div class="text-muted small"><i class="bi bi-clock me-1"></i>@o.SessionTypeName · @o.DurationMinutes min</div>
                                 </div>
                                 <div class="d-flex gap-1">
+                                    @if (o.IsForPair) { <span class="pair-chip"><i class="bi bi-people-fill"></i>Dla pary</span> }
                                     @if (o.IsFeatured) { <span class="badge bg-warning text-dark">Wyróżniony</span> }
                                     @if (o.IsActive) { <span class="badge bg-success">Aktywny</span> }
                                     else { <span class="badge bg-secondary">Nieaktywny</span> }
@@ -119,7 +120,20 @@ else
                     <div class="row g-3">
                         <div class="col-12">
                             <label class="form-label">Nazwa <span class="text-danger">*</span></label>
-                            <input class="form-control" @bind="_form.Name" placeholder="np. Pakiet 10 treningów" maxlength="100" />
+                            <input class="form-control" @bind="_form.Name" placeholder="@(_form.IsForPair ? "np. Duet — 10 treningów" : "np. Pakiet 10 treningów")" maxlength="100" />
+                        </div>
+                        <div class="col-12">
+                            <div class="pair-toggle">
+                                <button type="button" class="@(_form.IsForPair ? "" : "active")" @onclick="() => _form.IsForPair = false"><i class="bi bi-person-fill"></i>Dla jednej osoby</button>
+                                <button type="button" class="@(_form.IsForPair ? "active" : "")" @onclick="SetPair"><i class="bi bi-people-fill"></i>Dla pary</button>
+                            </div>
+                            @if (_form.IsForPair)
+                            {
+                                <div class="small text-muted mt-2">
+                                    Kupuje jedna osoba i przy zakupie wskazuje partnera — pakiet należy do obojga. Za wspólny trening schodzi 1.
+                                    Cena to kwota za całość (za oboje), np. 10 treningów × 190 zł = 1 900 zł.
+                                </div>
+                            }
                         </div>
                         <div class="col-12">
                             <label class="form-label">Opis</label>
@@ -240,6 +254,7 @@ else
             Price = o.Price,
             Currency = o.Currency,
             ValidDays = o.ValidDays,
+            IsForPair = o.IsForPair,
             IsActive = o.IsActive,
             IsFeatured = o.IsFeatured,
             SortOrder = o.SortOrder
@@ -274,4 +289,14 @@ else
         try { await OfferService.SetActiveAsync(o.Id, active); await LoadAsync(); }
         catch { Toast.Error("Nie udało się zmienić statusu pakietu."); }
     }
+
+    // Pakiet dla pary zwykle dotyczy treningu „w parze” — podpowiadamy taki rodzaj sesji.
+    private void SetPair()
+    {
+        _form.IsForPair = true;
+        if (_sessionTypes.FirstOrDefault(t => t.IsPair) is { } pairType
+            && _sessionTypes.FirstOrDefault(t => t.Id == _form.SessionTypeId)?.IsPair != true)
+            _form.SessionTypeId = pairType.Id;
+    }
 }
+

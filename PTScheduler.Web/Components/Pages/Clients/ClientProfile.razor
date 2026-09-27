@@ -4,6 +4,7 @@
 @inject IClientService ClientService
 @inject ISessionService SessionService
 @inject ISessionPackageService PackageService
+@inject IPairService PairService
 @inject IUserManagementService UserManagementService
 @inject IBodyMeasurementService MeasurementService
 @inject IAuditLogService AuditLogService
@@ -442,7 +443,10 @@ else if (client is not null)
                                         {
                                             <tr>
                                                 <td class="text-nowrap">@s.StartTime.ToString("dd.MM.yy HH:mm")</td>
-                                                <td>@s.SessionTypeName <span class="text-muted small">(@s.DurationMinutes min)</span></td>
+                                                <td>
+                                                    @s.SessionTypeName <span class="text-muted small">(@s.DurationMinutes min)</span>
+                                                    @if (s.IsPair) { <span class="pair-chip ms-1"><i class="bi bi-people-fill"></i>z: @s.PartnerName</span> }
+                                                </td>
                                                 <td class="text-muted small d-none d-md-table-cell">@s.TrainerName</td>
                                                 <td><span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span></td>
                                                 <td class="text-muted small text-truncate d-none d-md-table-cell" style="max-width:180px" title="@s.Notes">@s.Notes</td>
@@ -496,7 +500,13 @@ else if (client is not null)
                             {
                                 <div class="border rounded p-3 mb-2 @(pkg.Status == PackageStatus.Active ? "" : "opacity-75")">
                                     <div class="d-flex justify-content-between align-items-start mb-1 flex-wrap gap-1">
-                                        <div class="fw-semibold small">@pkg.Name</div>
+                                        <div class="fw-semibold small">
+                                            @pkg.Name
+                                            @if (pkg.IsForPair)
+                                            {
+                                                <span class="pair-chip ms-1"><i class="bi bi-people-fill"></i>Wspólny: @(pkg.ClientId == Id ? pkg.PartnerName : pkg.ClientName)</span>
+                                            }
+                                        </div>
                                         <div class="d-flex gap-1 align-items-center flex-wrap">
                                             <span class="badge @PackageBadge(pkg.Status)">@PackageLabel(pkg.Status)</span>
                                             @if (pkg.IsPaid)
@@ -728,6 +738,23 @@ else if (client is not null)
                     }
                     <div class="row g-3">
                         <div class="col-12">
+                            <div class="pair-toggle">
+                                <button type="button" class="@(_pkgForPair ? "" : "active")" @onclick="() => { _pkgForPair = false; newPkg.PartnerClientId = null; UpdatePkgName(); }"><i class="bi bi-person-fill"></i>Tylko @client!.FirstName</button>
+                                <button type="button" class="@(_pkgForPair ? "active" : "")" @onclick="SetPkgForPair"><i class="bi bi-people-fill"></i>Dla pary</button>
+                            </div>
+                            @if (_pkgForPair)
+                            {
+                                <select class="form-select mt-2" @bind="_pkgPartnerId" @bind:after="UpdatePkgName">
+                                    <option value="0">— z kim trenuje? —</option>
+                                    @foreach (var c in PartnerChoices)
+                                    {
+                                        <option value="@c.Id">@c.Name</option>
+                                    }
+                                </select>
+                                <div class="form-text">Pakiet należy do obojga — oboje widzą go od razu. Za wspólny trening schodzi 1.</div>
+                            }
+                        </div>
+                        <div class="col-12">
                             <label class="form-label">Typ sesji <span class="text-danger">*</span></label>
                             <select class="form-select" @bind="newPkg.SessionTypeId" @bind:after="UpdatePkgName">
                                 <option value="0">— wybierz —</option>
@@ -764,6 +791,10 @@ else if (client is not null)
                             <textarea class="form-control" rows="2" @bind="newPkg.Notes"></textarea>
                         </div>
                         <div class="col-12">
+                            <div class="form-check mb-2">
+                                <input type="checkbox" class="form-check-input" id="newPkgPaid" @bind="newPkg.IsPaid" />
+                                <label class="form-check-label" for="newPkgPaid">Opłacony (np. gotówka lub przelew)</label>
+                            </div>
                             <div class="form-check">
                                 <input type="checkbox" class="form-check-input" id="newPkgHidden" @bind="newPkg.IsHidden" />
                                 <label class="form-check-label" for="newPkgHidden">
@@ -865,13 +896,30 @@ else if (client is not null)
                     <div class="row g-3">
                         <div class="col-12">
                             <label class="form-label">Typ sesji <span class="text-danger">*</span></label>
-                            <select class="form-select" @bind="bookingDto.SessionTypeId">
+                            <select class="form-select" @bind="bookingDto.SessionTypeId" @bind:after="OnBookingTypeChanged">
                                 <option value="0">— wybierz —</option>
                                 @foreach (var t in sessionTypes)
                                 {
-                                    <option value="@t.Id">@t.Name (@t.DurationMinutes min)</option>
+                                    <option value="@t.Id">@t.Name (@t.DurationMinutes min)@(t.IsPair ? " · w parze" : "")</option>
                                 }
                             </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-check">
+                                <input class="form-check-input" type="checkbox" @bind="_bookingWithPartner" @bind:after="EnsureAllClientsAsync" />
+                                <span class="form-check-label">Trening w parze</span>
+                            </label>
+                            @if (_bookingWithPartner)
+                            {
+                                <select class="form-select mt-1" @bind="_bookingPartnerId">
+                                    <option value="0">— z kim? —</option>
+                                    @foreach (var c in PartnerChoices)
+                                    {
+                                        <option value="@c.Id">@c.Name</option>
+                                    }
+                                </select>
+                                <div class="form-text">Obie osoby dostaną własną wizytę i przypomnienie. Wspólny pakiet — schodzi 1; bez niego po 1 z pakietu każdej osoby.</div>
+                            }
                         </div>
                         <div class="col-6">
                             <label class="form-label">Data <span class="text-danger">*</span></label>
@@ -950,6 +998,46 @@ else if (client is not null)
     private string bookingError = string.Empty;
     private bool bookingOverlap;   // kolizja terminu wykryta — czeka na potwierdzenie nałożenia
     private List<SessionTypeDto> sessionTypes = [];
+
+    // Trening w parze
+    private List<PartnerDto> _partners = [];
+    private List<ClientSummaryDto> _allClients = [];
+    private bool _pkgForPair;
+    private int _pkgPartnerId;
+    private bool _bookingWithPartner;
+    private int _bookingPartnerId;
+
+    // Najpierw osoby z pary, potem pozostali podopieczni.
+    private IEnumerable<(int Id, string Name)> PartnerChoices =>
+        _partners.Select(p => (p.ClientId, p.Name + " (para)"))
+            .Concat(_allClients.Where(c => c.Id != Id && _partners.All(p => p.ClientId != c.Id)).Select(c => (c.Id, c.FullName)));
+
+    private async Task EnsureAllClientsAsync()
+    {
+        if (_partners.Count == 0) _partners = await PairService.GetPartnersAsync(Id);
+        if (_allClients.Count == 0) _allClients = await SessionService.GetClientsAsync(_isAdmin ? null : currentUserId);
+        if (_bookingPartnerId == 0 && _partners.Count > 0) _bookingPartnerId = _partners[0].ClientId;
+    }
+
+    private async Task OnBookingTypeChanged()
+    {
+        if (sessionTypes.FirstOrDefault(t => t.Id == bookingDto.SessionTypeId)?.IsPair == true && !_bookingWithPartner)
+        {
+            _bookingWithPartner = true;
+            await EnsureAllClientsAsync();
+        }
+    }
+
+    private async Task SetPkgForPair()
+    {
+        _pkgForPair = true;
+        await EnsureAllClientsAsync();
+        if (_pkgPartnerId == 0 && _partners.Count > 0) _pkgPartnerId = _partners[0].ClientId;
+        if (sessionTypes.FirstOrDefault(t => t.IsPair) is { } pairType
+            && sessionTypes.FirstOrDefault(t => t.Id == newPkg.SessionTypeId)?.IsPair != true)
+            newPkg.SessionTypeId = pairType.Id;
+        UpdatePkgName();
+    }
 
     private List<SessionPackageDto>? packages;
     private bool addPackageOpen;
@@ -1394,6 +1482,8 @@ else if (client is not null)
             TotalSessions = 10,
             PricePerSession = 0
         };
+        _pkgForPair = false;
+        _pkgPartnerId = 0;
         pkgError = string.Empty;
         addPackageOpen = true;
     }
@@ -1402,20 +1492,22 @@ else if (client is not null)
     {
         var type = sessionTypes.FirstOrDefault(t => t.Id == newPkg.SessionTypeId);
         if (type is not null && newPkg.TotalSessions > 0)
-            newPkg.Name = $"Pakiet {newPkg.TotalSessions}×{type.Name}";
+            newPkg.Name = _pkgForPair ? $"Duet {newPkg.TotalSessions}×{type.Name}" : $"Pakiet {newPkg.TotalSessions}×{type.Name}";
     }
 
     private async Task SavePackage()
     {
         if (newPkg.SessionTypeId == 0) { pkgError = "Wybierz typ sesji."; return; }
         if (newPkg.TotalSessions < 1) { pkgError = "Podaj liczbę sesji."; return; }
+        if (_pkgForPair && _pkgPartnerId == 0) { pkgError = "Wybierz, z kim trenuje."; return; }
+        newPkg.PartnerClientId = _pkgForPair ? _pkgPartnerId : null;
         isBusy = true;
         pkgError = string.Empty;
         try
         {
             await PackageService.CreatePackageAsync(newPkg);
             await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "PackageCreated", "SessionPackage",
-                null, $"Klient: {client?.FullName}, pakiet: {newPkg.Name}, sesji: {newPkg.TotalSessions}");
+                null, $"Klient: {client?.FullName}, pakiet: {newPkg.Name}, sesji: {newPkg.TotalSessions}{(_pkgForPair ? " (dla pary)" : "")}");
             addPackageOpen = false;
             packages = await PackageService.GetPackagesAsync(Id);
             client = await ClientService.GetClientAsync(Id);
@@ -1505,6 +1597,8 @@ else if (client is not null)
         bookingTime = new TimeOnly(now.Hour, 0);
         bookingError = string.Empty;
         bookingOverlap = false;
+        _bookingWithPartner = false;
+        _bookingPartnerId = 0;
         bookingOpen = true;
     }
 
@@ -1513,6 +1607,7 @@ else if (client is not null)
     private async Task SubmitBooking(bool allowOverlap = false)
     {
         if (bookingDto.SessionTypeId == 0) { bookingError = "Wybierz typ sesji."; return; }
+        if (_bookingWithPartner && _bookingPartnerId == 0) { bookingError = "Wybierz, z kim trenuje."; return; }
         if (!DateTime.TryParse($"{bookingDate} {bookingTime:HH:mm}", out var startTime))
         { bookingError = "Nieprawidłowa data lub godzina."; return; }
 
@@ -1521,9 +1616,11 @@ else if (client is not null)
         bookingError = string.Empty;
         try
         {
-            var created = await SessionService.CreateSessionAsync(bookingDto, allowOverlap: allowOverlap);
+            var created = _bookingWithPartner
+                ? await SessionService.CreatePairSessionAsync(bookingDto, _bookingPartnerId, allowOverlap: allowOverlap)
+                : await SessionService.CreateSessionAsync(bookingDto, allowOverlap: allowOverlap);
             await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "SessionBooked", "Session",
-                created.Id.ToString(), $"Klient: {client?.FullName}, termin: {bookingDto.StartTime:dd.MM.yyyy HH:mm}{(allowOverlap ? " (nałożono)" : "")}");
+                created.Id.ToString(), $"Klient: {created.DisplayName}, termin: {bookingDto.StartTime:dd.MM.yyyy HH:mm}{(allowOverlap ? " (nałożono)" : "")}");
             bookingOverlap = false;
             bookingOpen = false;
             sessions = await SessionService.GetClientSessionsAsync(Id, 200);
