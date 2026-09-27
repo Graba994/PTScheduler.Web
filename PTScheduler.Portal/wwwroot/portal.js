@@ -50,3 +50,29 @@ window.ptLogs = {
     atBottom: function (el) { return !el || el.scrollHeight - el.scrollTop - el.clientHeight < 40; },
     toBottom: function (el) { if (el) el.scrollTop = el.scrollHeight; }
 };
+
+// Kalkulator odzyskanego czasu na stronie głównej (te same wzory co w Home.razor).
+(function () {
+    var pl = new Intl.NumberFormat('pl-PL');
+    function set(root, key, text) {
+        var el = root.querySelector('[data-calc-out="' + key + '"]');
+        if (el) el.textContent = text;
+    }
+    function update(root) {
+        var clients = +root.querySelector('[data-calc="clients"]').value;
+        var rate = +root.querySelector('[data-calc="rate"]').value;
+        var minutes = +root.getAttribute('data-minutes') || 35;
+        var plan = parseFloat((root.getAttribute('data-plan') || '0').replace(',', '.'));
+        var hours = clients * minutes / 60;
+        var value = Math.round(hours * rate / 10) * 10;
+        set(root, 'clients', String(clients));
+        set(root, 'rate', pl.format(rate) + ' zł');
+        set(root, 'hours', pl.format(Math.round(hours)));
+        set(root, 'value', pl.format(value) + ' zł');
+        if (plan > 0) set(root, 'ratio', Math.max(1, Math.floor(hours * rate / plan)) + '×');
+    }
+    document.addEventListener('input', function (e) {
+        var root = e.target.closest && e.target.closest('[data-lp-calc]');
+        if (root) update(root);
+    });
+})();

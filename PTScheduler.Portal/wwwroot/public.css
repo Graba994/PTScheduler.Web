@@ -239,7 +239,8 @@ body:has(.pts-nav) { background: var(--pts-bg); color: var(--pts-text); font-fam
 .lp-row-main { flex: 1; min-width: 0; }
 .lp-row-main small { display: block; color: var(--pts-text-secondary); font-size: .76rem; }
 .lp-row-amount { font-weight: 800; font-variant-numeric: tabular-nums; }
-.lp-chat { display: grid; gap: 8px; }
+.lp-chat { display: grid; gap: 8px; align-content: start; }
+.lp-live .lp-chat { min-height: 168px; }
 .lp-bubble { max-width: 80%; padding: 9px 12px; border-radius: 14px; font-size: .85rem; line-height: 1.4; }
 .lp-bubble.in { background: var(--pts-surface-alt); border-bottom-left-radius: 4px; }
 .lp-bubble.out { background: var(--pts-primary); color: #fff; margin-left: auto; border-bottom-right-radius: 4px; }
@@ -490,3 +491,231 @@ body:has(.pts-nav) { background: var(--pts-bg); color: var(--pts-text); font-fam
     .lp-review { width: 280px; }
 }
 @media (prefers-reduced-motion: reduce) { .lp-app * { transition: none; } }
+
+/* ═════════════════════════════════════════════════════════════
+   Żywe panele korzyści — pętle CSS (10 s), bez JavaScriptu.
+   Przy prefers-reduced-motion pokazujemy stan końcowy bez ruchu.
+   ═════════════════════════════════════════════════════════════ */
+.lp-live { --loop: 10s; }
+.lp-swap { display: inline-grid; }
+.lp-swap > span { grid-area: 1 / 1; display: inline-flex; align-items: center; justify-content: center; }
+.lp-swap > span:first-child { animation: lp-swap-out var(--loop, 10s) infinite; }
+.lp-swap > span:last-child { animation: lp-swap-in var(--loop, 10s) infinite; }
+@keyframes lp-swap-out { 0%, 32% { opacity: 1; transform: none; } 36%, 93% { opacity: 0; transform: translateY(-6px); } 98%, 100% { opacity: 1; transform: none; } }
+@keyframes lp-swap-in { 0%, 32% { opacity: 0; transform: translateY(6px); } 36%, 93% { opacity: 1; transform: none; } 98%, 100% { opacity: 0; transform: translateY(6px); } }
+
+/* A. Kalendarz: kursor klika wolny termin, rezerwacja wskakuje, przychodzi powiadomienie */
+.lp-cal-target { position: relative; overflow: visible; animation: lp-slot-fill var(--loop) infinite; }
+.lp-cal-new { display: block; animation: lp-slot-text var(--loop) infinite; }
+.lp-cursor {
+    position: absolute; left: 55%; top: 45%; z-index: 3; font-size: 1.35rem; color: var(--pts-text);
+    filter: drop-shadow(0 3px 6px rgba(0,0,0,.25)); pointer-events: none;
+    animation: lp-cursor var(--loop) infinite cubic-bezier(.45,.05,.3,1);
+}
+.lp-cursor i { color: #fff; -webkit-text-stroke: 1.2px #1A1625; }
+.lp-ripple {
+    position: absolute; left: 50%; top: 50%; width: 36px; height: 36px; margin: -18px 0 0 -18px; border-radius: 50%;
+    background: var(--pts-primary); opacity: 0; animation: lp-ripple var(--loop) infinite; pointer-events: none;
+}
+@keyframes lp-cursor {
+    0% { opacity: 0; transform: translate(150px, 120px); }
+    8% { opacity: 1; }
+    26% { opacity: 1; transform: translate(0, 0); }
+    29% { transform: translate(0, 0) scale(.82); }
+    32% { transform: translate(0, 0) scale(1); }
+    42% { opacity: 1; transform: translate(0, 0); }
+    50%, 100% { opacity: 0; transform: translate(40px, 40px); }
+}
+@keyframes lp-ripple { 0%, 28% { opacity: 0; transform: scale(.3); } 30% { opacity: .35; } 42%, 100% { opacity: 0; transform: scale(2.4); } }
+@keyframes lp-slot-fill {
+    0%, 29% { background: var(--pts-surface-alt); box-shadow: none; }
+    32% { background: #DDD6FE; box-shadow: 0 0 0 3px rgba(124,58,237,.35); }
+    40%, 92% { background: #EDE9FE; box-shadow: 0 0 0 0 rgba(124,58,237,0); color: #5B21B6; }
+    97%, 100% { background: var(--pts-surface-alt); }
+}
+@keyframes lp-slot-text { 0%, 29% { opacity: 0; transform: scale(.6); } 34% { opacity: 1; transform: scale(1.12); } 38%, 92% { opacity: 1; transform: none; } 97%, 100% { opacity: 0; } }
+.lp-toast-live { animation: lp-toast var(--loop) infinite; }
+.lp-toast-live i { color: #FBBF24; }
+.lp-toast-live small { display: block; opacity: .75; font-size: .72rem; margin-top: 2px; }
+@keyframes lp-toast { 0%, 38% { opacity: 0; transform: translateY(16px) scale(.96); } 45%, 88% { opacity: 1; transform: none; } 94%, 100% { opacity: 0; transform: translateY(8px); } }
+
+/* B. Płatności: BLIK zatwierdzony → nowa wpłata wjeżdża na górę listy */
+.lp-rows-live { display: flex; flex-direction: column; gap: 0; min-height: 212px; }
+.lp-rows-live > .lp-row + .lp-row { margin-top: 10px; }
+.lp-row-new { overflow: hidden; animation: lp-row-in var(--loop) infinite; border-color: #A7F3D0; background: #F0FDF7; }
+@keyframes lp-row-in {
+    0%, 30% { max-height: 0; opacity: 0; padding-block: 0; border-width: 0; margin-bottom: -10px; }
+    38%, 92% { max-height: 80px; opacity: 1; padding-block: 11px; border-width: 1px; margin-bottom: 0; }
+    98%, 100% { max-height: 0; opacity: 0; padding-block: 0; border-width: 0; margin-bottom: -10px; }
+}
+.lp-pop { animation: lp-pop var(--loop) infinite; }
+@keyframes lp-pop { 0%, 38% { transform: scale(0); } 43% { transform: scale(1.18); } 47%, 92% { transform: scale(1); } 97%, 100% { transform: scale(0); } }
+.lp-blik {
+    position: absolute; right: -16px; top: 54px; width: 190px; padding: 12px 14px; border-radius: 16px;
+    background: #110E1B; color: #fff; box-shadow: var(--pts-shadow-lg); animation: lp-blik var(--loop) infinite;
+}
+.lp-blik-head { display: flex; align-items: center; gap: 8px; font-size: .74rem; opacity: .85; }
+.lp-blik-logo { font-weight: 900; font-size: .72rem; letter-spacing: .02em; padding: 2px 6px; border-radius: 5px; background: #fff; color: #110E1B; }
+.lp-blik-amount { font-family: var(--pts-font-display); font-size: 1.35rem; font-weight: 700; margin: 6px 0 4px; }
+.lp-blik-ok { display: flex; align-items: center; gap: 6px; font-size: .78rem; color: #6EE7B7; font-weight: 700; animation: lp-blik-ok var(--loop) infinite; }
+@keyframes lp-blik { 0%, 4% { opacity: 0; transform: translateY(12px) scale(.94); } 10%, 30% { opacity: 1; transform: none; } 36%, 100% { opacity: 0; transform: translateY(-8px) scale(.97); } }
+@keyframes lp-blik-ok { 0%, 17% { opacity: 0; transform: translateX(-6px); } 21%, 100% { opacity: 1; transform: none; } }
+
+/* C. Klient: wiadomość → trener pisze → odpowiedź; wykres postępu się rysuje */
+.lp-avatar-sm { display: inline-grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; margin-right: 8px; background: linear-gradient(135deg, #FF6B35, #F5A623); color: #fff; font-size: .66rem; font-weight: 800; vertical-align: middle; }
+.lp-b1 { animation: lp-b1 var(--loop) infinite; }
+.lp-b2 { animation: lp-b2 var(--loop) infinite; }
+.lp-b3 { animation: lp-b3 var(--loop) infinite; }
+@keyframes lp-b1 { 0%, 3% { opacity: 0; transform: translateY(8px); } 8%, 93% { opacity: 1; transform: none; } 98%, 100% { opacity: 0; } }
+@keyframes lp-b2 { 0%, 29% { opacity: 0; transform: translateY(8px); max-height: 0; } 34%, 93% { opacity: 1; transform: none; max-height: 80px; } 98%, 100% { opacity: 0; max-height: 0; } }
+@keyframes lp-b3 { 0%, 55% { opacity: 0; transform: translateY(8px); max-height: 0; } 60%, 93% { opacity: 1; transform: none; max-height: 60px; } 98%, 100% { opacity: 0; max-height: 0; } }
+.lp-b2, .lp-b3 { overflow: hidden; }
+.lp-typing { display: flex; gap: 4px; margin-left: auto; padding: 10px 12px; border-radius: 14px; background: color-mix(in srgb, var(--pts-primary) 14%, transparent); width: fit-content; animation: lp-typing var(--loop) infinite; overflow: hidden; }
+.lp-typing i { width: 6px; height: 6px; border-radius: 50%; background: var(--pts-primary); animation: lp-dot 1s infinite; }
+.lp-typing i:nth-child(2) { animation-delay: .15s; } .lp-typing i:nth-child(3) { animation-delay: .3s; }
+@keyframes lp-typing { 0%, 12% { opacity: 0; max-height: 0; padding-block: 0; } 15%, 28% { opacity: 1; max-height: 40px; padding-block: 10px; } 31%, 100% { opacity: 0; max-height: 0; padding-block: 0; margin-top: -8px; } }
+@keyframes lp-dot { 0%, 60%, 100% { transform: translateY(0); opacity: .5; } 30% { transform: translateY(-4px); opacity: 1; } }
+.lp-chart { margin-top: 14px; padding: 12px 12px 6px; border-radius: 12px; background: var(--pts-surface-alt); }
+.lp-chart-head { display: flex; justify-content: space-between; font-size: .76rem; color: var(--pts-text-secondary); margin-bottom: 4px; }
+.lp-chart-head b { color: var(--pts-primary-dark); }
+.lp-chart svg { width: 100%; height: auto; aspect-ratio: 312 / 102; display: block; overflow: visible; }
+.lp-chart-grid { stroke: #E2DDF0; stroke-width: 1; stroke-dasharray: 3 4; fill: none; }
+.lp-chart-line { fill: none; stroke: var(--pts-primary); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 100; animation: lp-draw var(--loop) infinite; }
+.lp-chart-area { animation: lp-area var(--loop) infinite; }
+.lp-chart-dot { fill: var(--pts-primary); stroke: #fff; stroke-width: 2; transform-box: fill-box; transform-origin: center; animation: lp-chart-dot var(--loop) infinite; }
+@keyframes lp-draw { 0%, 34% { stroke-dashoffset: 100; } 70%, 94% { stroke-dashoffset: 0; } 100% { stroke-dashoffset: 100; } }
+@keyframes lp-area { 0%, 50% { opacity: 0; } 72%, 94% { opacity: 1; } 100% { opacity: 0; } }
+@keyframes lp-chart-dot { 0%, 68% { transform: scale(0); } 74% { transform: scale(1.4); } 78%, 94% { transform: scale(1); } 100% { transform: scale(0); } }
+
+/* D. Polecenia: nowe polecenie wjeżdża, nagroda, gwiazdki się zapalają */
+.lp-row-slide { animation: lp-row-slide var(--loop) infinite; }
+@keyframes lp-row-slide { 0%, 5% { opacity: 0; transform: translateX(-18px); } 12%, 93% { opacity: 1; transform: none; } 98%, 100% { opacity: 0; } }
+.lp-row-slide .lp-pop { animation-name: lp-pop-early; }
+@keyframes lp-pop-early { 0%, 24% { transform: scale(0); } 30% { transform: scale(1.18); } 34%, 93% { transform: scale(1); } 98%, 100% { transform: scale(0); } }
+.lp-stars-fill { white-space: nowrap; }
+.lp-stars-fill i { font-style: normal; color: #E5E1EE; display: inline-block; animation: lp-star var(--loop) infinite both; }
+.lp-stars-fill i:nth-child(2) { animation-delay: .25s; } .lp-stars-fill i:nth-child(3) { animation-delay: .5s; }
+.lp-stars-fill i:nth-child(4) { animation-delay: .75s; } .lp-stars-fill i:nth-child(5) { animation-delay: 1s; }
+@keyframes lp-star { 0%, 44% { color: #E5E1EE; transform: scale(1); } 47% { color: #F5A623; transform: scale(1.35); } 50%, 93% { color: #F5A623; transform: scale(1); } 98%, 100% { color: #E5E1EE; } }
+
+/* E. Podgląd brandingu: motywy zmieniają się same (18 s), kliknięcie zatrzymuje wybrany */
+@property --a-p { syntax: "<color>"; inherits: true; initial-value: #0284C7; }
+@property --a-pl { syntax: "<color>"; inherits: true; initial-value: #E0F2FE; }
+@property --a-to { syntax: "<color>"; inherits: true; initial-value: #06B6D4; }
+.lp-app { animation: lp-themes 18s infinite; }
+.lp-app * { transition: none; }
+@keyframes lp-themes {
+    0%, 13%      { --a-p: #0284C7; --a-pl: #E0F2FE; --a-to: #06B6D4; }
+    16.6%, 29.6% { --a-p: #16A34A; --a-pl: #DCFCE7; --a-to: #10B981; }
+    33.3%, 46.3% { --a-p: #EA580C; --a-pl: #FFEDD5; --a-to: #FBBF24; }
+    50%, 63%     { --a-p: #9333EA; --a-pl: #F3E8FF; --a-to: #EC4899; }
+    66.6%, 79.6% { --a-p: #E11D48; --a-pl: #FFE4E6; --a-to: #F43F5E; }
+    83.3%, 96.3% { --a-p: #475569; --a-pl: #F1F5F9; --a-to: #64748B; }
+    100%         { --a-p: #0284C7; --a-pl: #E0F2FE; --a-to: #06B6D4; }
+}
+.lp-demo:has(.lp-demo-swatches input:checked) .lp-app { animation: none; }
+.lp-demo:has(.lp-demo-swatches input:checked) .lp-app * { transition: background-color .35s ease, color .35s ease, border-color .35s ease; }
+/* Podświetlenie próbki i nazwy w rytm automatu */
+.lp-demo:not(:has(.lp-demo-swatches input:checked)) .lp-demo-swatches label { animation: lp-sw-auto 18s infinite; animation-delay: calc(var(--i) * 3s - 18s); }
+@keyframes lp-sw-auto { 0%, 15% { box-shadow: 0 0 0 3px var(--pts-surface), 0 0 0 5px var(--sw); transform: scale(1.08); } 17%, 100% { box-shadow: 0 0 0 2px var(--pts-surface), 0 0 0 3px transparent; transform: none; } }
+.lp-demo-names { display: inline-grid; }
+.lp-demo-names span { display: inline !important; grid-area: 1 / 1; opacity: 0; }
+.lp-demo:not(:has(.lp-demo-swatches input:checked)) .lp-demo-names span { animation: lp-name-auto 18s infinite; animation-delay: calc(var(--i) * 3s - 18s); }
+@keyframes lp-name-auto { 0%, 15% { opacity: 1; } 17%, 100% { opacity: 0; } }
+.lp-demo:has(#lp-t-ocean:checked) .lp-demo-names [data-t="ocean"],
+.lp-demo:has(#lp-t-forest:checked) .lp-demo-names [data-t="forest"],
+.lp-demo:has(#lp-t-sunset:checked) .lp-demo-names [data-t="sunset"],
+.lp-demo:has(#lp-t-lavender:checked) .lp-demo-names [data-t="lavender"],
+.lp-demo:has(#lp-t-rose:checked) .lp-demo-names [data-t="rose"],
+.lp-demo:has(#lp-t-slate:checked) .lp-demo-names [data-t="slate"] { opacity: 1; }
+.lp-demo:has(#lp-t-ocean:checked) .lp-app { --a-p: #0284C7; --a-pl: #E0F2FE; --a-to: #06B6D4; }
+
+/* ── Dowód społeczny ── */
+.lp-proof { background: var(--pts-surface); border-bottom: 1px solid var(--pts-border); }
+.lp-proof-inner { display: flex; justify-content: center; align-items: center; gap: 14px 36px; flex-wrap: wrap; padding: 16px 24px; font-size: .92rem; color: var(--pts-text-secondary); }
+.lp-proof-item { display: inline-flex; align-items: center; gap: 8px; color: inherit; text-decoration: none; }
+.lp-proof-item b { color: var(--pts-text); font-size: 1.05rem; }
+.lp-proof-item i { color: var(--pts-primary); }
+a.lp-proof-item:hover { color: var(--pts-primary); }
+
+/* ── Kalkulator odzyskanego czasu ── */
+.lp-calc-section { padding-top: 24px; }
+.lp-calc { display: grid; grid-template-columns: 1.1fr .9fr; gap: 40px; align-items: center; padding: 40px; border-radius: 28px; background: var(--pts-surface); border: 1px solid var(--pts-border); box-shadow: var(--pts-shadow-lg); }
+.lp-calc-field { display: block; margin-top: 22px; }
+.lp-calc-field > span { display: flex; justify-content: space-between; font-weight: 700; margin-bottom: 8px; }
+.lp-calc-field output { color: var(--pts-primary); font-variant-numeric: tabular-nums; }
+.lp-calc-field input[type=range] { width: 100%; accent-color: var(--pts-primary); height: 28px; cursor: pointer; }
+.lp-calc-note { font-size: .82rem; color: var(--pts-text-secondary); margin: 18px 0 0; }
+.lp-calc-result {
+    text-align: center; padding: 32px 26px; border-radius: 22px; color: #fff; position: relative; overflow: hidden;
+    background: linear-gradient(150deg, #3B0F8C, var(--pts-primary) 55%, #0E9F7E);
+}
+.lp-calc-result::after { content: ""; position: absolute; width: 260px; height: 260px; border-radius: 50%; background: rgba(255,255,255,.08); right: -90px; top: -90px; }
+.lp-calc-big { font-family: var(--pts-font-display); font-size: clamp(3rem, 7vw, 4.6rem); font-weight: 800; line-height: 1; font-variant-numeric: tabular-nums; }
+.lp-calc-label { opacity: .85; margin: 6px 0 16px; }
+.lp-calc-value { font-size: 1.15rem; }
+.lp-calc-value b { font-size: 1.35rem; }
+.lp-calc-vs { margin: 12px auto 22px; font-size: .9rem; opacity: .9; max-width: 32ch; }
+.lp-calc-result .lp-btn { position: relative; z-index: 1; }
+.lp-calc-safe { margin-top: 12px; font-size: .82rem; opacity: .85; display: flex; align-items: center; justify-content: center; gap: 6px; }
+
+/* ── Kroki: kolejno się podświetlają ── */
+.lp-step { position: relative; }
+.lp-step-time { position: absolute; top: 22px; right: 22px; display: inline-flex; align-items: center; gap: 5px; font-size: .76rem; font-weight: 700; color: var(--pts-accent-dark); background: #E6FBF4; padding: 3px 9px; border-radius: 999px; }
+.lp-steps-live .lp-step { animation: lp-step-hl 9s infinite; animation-delay: calc(var(--i) * 3s - 9s); }
+@keyframes lp-step-hl {
+    0%, 28% { border-color: var(--pts-primary); box-shadow: 0 16px 40px rgba(124,58,237,.16); transform: translateY(-4px); }
+    33%, 100% { border-color: var(--pts-border); box-shadow: none; transform: none; }
+}
+.lp-steps-cta { text-align: center; margin-top: 32px; }
+
+/* ── Końcowe CTA: odwrócenie ryzyka ── */
+.lp-cta-safe { display: flex; justify-content: center; gap: 10px 24px; flex-wrap: wrap; margin-top: 22px; font-size: .9rem; color: rgba(255,255,255,.85); }
+.lp-cta-safe span { display: inline-flex; align-items: center; gap: 7px; }
+
+/* ── Przyklejony przycisk na telefonie ── */
+.lp-sticky-cta { display: none; }
+@media (max-width: 700px) {
+    .lp-sticky-cta {
+        display: flex; align-items: center; justify-content: center; gap: 8px; position: fixed; left: 12px; right: 12px; bottom: 12px; z-index: 90;
+        padding: 14px 18px; border-radius: 16px; background: var(--pts-energy); color: #fff; font-weight: 800; text-decoration: none;
+        box-shadow: 0 12px 32px rgba(255,107,53,.4);
+    }
+    .lp-sticky-cta small { font-weight: 600; opacity: .85; }
+    .lp { padding-bottom: 76px; }
+    @supports (animation-timeline: scroll()) {
+        .lp-sticky-cta { animation: lp-sticky linear both; animation-timeline: scroll(root); animation-range: 0 500px; }
+        @keyframes lp-sticky { 0%, 70% { opacity: 0; transform: translateY(24px); pointer-events: none; } 100% { opacity: 1; transform: none; pointer-events: auto; } }
+    }
+}
+
+/* ── Wejście sekcji przy przewijaniu (tam, gdzie przeglądarka to wspiera) ── */
+@supports (animation-timeline: view()) {
+    .lp-job-text, .lp-job .lp-panel, .lp-calc, .lp-step, .lp-coach, .lp-price {
+        animation: lp-reveal linear both; animation-timeline: view(); animation-range: entry 0% entry 40%;
+    }
+    .lp-steps-live .lp-step { animation: lp-step-hl 9s infinite; animation-delay: calc(var(--i) * 3s - 9s); animation-timeline: auto; }
+    @keyframes lp-reveal { from { opacity: 0; transform: translateY(28px); } to { opacity: 1; transform: none; } }
+}
+
+@media (max-width: 900px) {
+    .lp-calc { grid-template-columns: 1fr; padding: 24px; gap: 24px; }
+    .lp-blik { right: 8px; top: auto; bottom: -26px; }
+    .lp-toast-live { right: 8px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .lp-live *, .lp-live, .lp-app, .lp-demo-swatches label, .lp-demo-names span, .lp-steps-live .lp-step, .lp-sticky-cta,
+    .lp-job-text, .lp-job .lp-panel, .lp-calc, .lp-step, .lp-coach, .lp-price { animation: none !important; }
+    .lp-cursor, .lp-ripple, .lp-typing, .lp-blik, .lp-swap > span:first-child { display: none !important; }
+    .lp-cal-target { background: #EDE9FE; color: #5B21B6; }
+    .lp-chart-line { stroke-dashoffset: 0; }
+    .lp-stars-fill i { color: #F5A623; }
+    .lp-demo:not(:has(input:checked)) .lp-demo-names [data-t="ocean"] { opacity: 1; }
+}
+@media (max-width: 600px) {
+    .lp-cal { grid-template-columns: 34px repeat(5, 1fr); gap: 4px; }
+    .lp-cal-c { font-size: .6rem; padding: 4px 3px; height: 32px; }
+    .lp-cal-t { font-size: .66rem; line-height: 32px; }
+    .lp-toast-live { left: 8px; right: 8px; max-width: none; bottom: -22px; }
+}
