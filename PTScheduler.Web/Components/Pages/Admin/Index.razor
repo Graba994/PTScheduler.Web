@@ -13,16 +13,18 @@
 @inject IModuleSettingsService ModuleSettings
 @inject AuthenticationStateProvider AuthState
 @inject ILoggerFactory LoggerFactory
+@inject EntitlementService Entitlements
+@using PTScheduler.Web.Components.Layout
 @rendermode PTScheduler.Web.RenderModes.Server
 
-<AppTitle Page="Panel zarządzania" />
+<AppTitle Page="Zarządzanie" />
 
-<div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-    <h4 class="page-title mb-0"><i class="bi bi-shield-fill-check me-2" style="color:var(--c-primary)"></i>Panel zarządzania</h4>
-    <div class="d-flex gap-2 align-items-center">
-        <span class="badge bg-body-secondary text-body"><i class="bi bi-person-fill me-1"></i>@_userEmail</span>
-        <span class="badge bg-primary">@_role</span>
+<div class="set-head">
+    <div>
+        <h4 class="set-title"><i class="bi bi-sliders2"></i>Zarządzanie</h4>
+        <p class="set-sub">Wszystko, co ustawiasz raz — oferta, płatności, powiadomienia i wygląd aplikacji. Kliknij <i class="bi bi-info-circle"></i>, żeby zobaczyć, do czego służy dana opcja.</p>
     </div>
+    <span class="badge bg-body-secondary text-body"><i class="bi bi-person-fill me-1"></i>@_userEmail · @_role</span>
 </div>
 
 @if (_loading)
@@ -31,52 +33,84 @@
 }
 else
 {
-    <!-- Quick stats -->
-    <div class="row g-3 mb-4">
-        <div class="col-6 col-md-3">
-            <div class="adm-stat-card">
-                <div class="adm-stat-icon" style="background:rgba(59,130,246,.12);color:#3b82f6"><i class="bi bi-people-fill"></i></div>
-                <div class="adm-stat-body">
-                    <div class="adm-stat-value">@_stats.Users</div>
-                    <div class="adm-stat-label">Użytkownicy</div>
+    @if (_access.IsOwner && _steps.Count > 0 && _steps.Any(x => !x.Done))
+    {
+        var done = _steps.Count(x => x.Done);
+        <section class="set-start" aria-labelledby="set-start-title">
+            <div class="set-start-head">
+                <div>
+                    <h5 id="set-start-title"><i class="bi bi-rocket-takeoff"></i>Pierwsze kroki</h5>
+                    <div class="text-muted small">Zrób to raz, a aplikacja będzie gotowa dla klientów.</div>
                 </div>
+                <div class="set-start-count"><b>@done</b> z @_steps.Count</div>
             </div>
-        </div>
-        <div class="col-6 col-md-3">
-            <div class="adm-stat-card">
-                <div class="adm-stat-icon" style="background:rgba(16,185,129,.12);color:#10b981"><i class="bi bi-person-check-fill"></i></div>
-                <div class="adm-stat-body">
-                    <div class="adm-stat-value">@_stats.Clients</div>
-                    <div class="adm-stat-label">Klienci</div>
-                </div>
+            <div class="set-progress" role="progressbar" aria-valuenow="@done" aria-valuemin="0" aria-valuemax="@_steps.Count"><div style="width:@(done * 100 / _steps.Count)%"></div></div>
+            <ol class="set-steps">
+                @foreach (var step in _steps)
+                {
+                    <li class="@(step.Done ? "done" : "")">
+                        <a href="@step.Href">
+                            <span class="set-step-check"><i class="bi @(step.Done ? "bi-check-lg" : step.Icon)"></i></span>
+                            <span class="set-step-text"><b>@step.Title</b><small>@step.Hint</small></span>
+                            @if (!step.Done) { <i class="bi bi-chevron-right ms-auto text-muted"></i> }
+                        </a>
+                    </li>
+                }
+            </ol>
+        </section>
+    }
+
+    @if (!_isHighestPlan && _access.IsOwner)
+    {
+        <a href="/admin/upgrade" class="set-upgrade">
+            <i class="bi bi-rocket-takeoff-fill"></i>
+            <span><b>Potrzebujesz więcej?</b> Sprawdź wyższy plan — SMS-y, płatności online, kursy i zespół.</span>
+            <i class="bi bi-chevron-right ms-auto"></i>
+        </a>
+    }
+
+    @foreach (var group in AdminMenu.Groups)
+    {
+        var items = group.Items.Where(_access.Sees).ToList();
+        if (items.Count == 0) continue;
+        <section class="set-group set-tone-@group.Tone" aria-label="@group.Title">
+            <h6 class="set-group-title"><i class="bi @group.Icon"></i>@group.Title</h6>
+            <div class="set-grid">
+                @foreach (var item in items)
+                {
+                    var locked = item.PlanFlag is not null && !Entitlements.IsAllowed(item.PlanFlag);
+                    var status = item.StatusKey is not null ? _status.GetValueOrDefault(item.StatusKey) : default;
+                    <div class="set-tile @(locked ? "locked" : "")">
+                        <span class="set-tile-icon"><i class="bi @item.Icon"></i></span>
+                        <div class="set-tile-body">
+                            <a class="set-tile-link" href="/@item.Href">@item.Title</a>
+                            <div class="set-tile-desc">@item.Description</div>
+                            @if (locked)
+                            {
+                                <span class="set-chip set-chip-plan"><i class="bi bi-lock-fill"></i>Plan @(item.PlanName ?? "Pro")</span>
+                            }
+                            else if (status.Text is not null)
+                            {
+                                <span class="set-chip set-chip-@status.Tone">@status.Text</span>
+                            }
+                        </div>
+                        <InfoTip Title="@item.Title" Text="@item.Info" Class="set-tile-info" />
+                    </div>
+                }
             </div>
-        </div>
-        <div class="col-6 col-md-3">
-            <div class="adm-stat-card">
-                <div class="adm-stat-icon" style="background:rgba(139,92,246,.12);color:#8b5cf6"><i class="bi bi-calendar-check-fill"></i></div>
-                <div class="adm-stat-body">
-                    <div class="adm-stat-value">@_stats.Sessions</div>
-                    <div class="adm-stat-label">Sesje (ogółem)</div>
-                </div>
-            </div>
-        </div>
-        <div class="col-6 col-md-3">
-            <div class="adm-stat-card">
-                <div class="adm-stat-icon" style="background:rgba(245,158,11,.12);color:#f59e0b"><i class="bi bi-box-seam-fill"></i></div>
-                <div class="adm-stat-body">
-                    <div class="adm-stat-value">@_stats.Packages</div>
-                    <div class="adm-stat-label">Pakiety</div>
-                </div>
-            </div>
-        </div>
+        </section>
+    }
+
+    <div class="set-foot">
+        <a href="/admin/feedback"><i class="bi bi-chat-heart me-1"></i>Oceń aplikację i napisz, czego brakuje</a>
     </div>
 
-    <div class="row g-4">
-        <!-- Left column -->
-        <div class="col-12 col-lg-8">
+    @if (_isAdmin)
+    {
+        <details class="set-tech">
+            <summary><i class="bi bi-cpu me-2"></i>Szczegóły techniczne <span class="text-muted small">(stan systemu, baza, ostatnia aktywność)</span></summary>
+            <div class="mt-3">
             <!-- System status -->
-            @if (_isAdmin)
-            {
                 <div class="card mb-4">
                     <div class="card-header bg-transparent d-flex align-items-center justify-content-between">
                         <span class="fw-semibold"><i class="bi bi-heart-pulse me-2 text-success"></i>Stan systemu</span>
@@ -181,7 +215,6 @@ else
                         </div>
                     </div>
                 }
-            }
 
             <!-- Recent activity -->
             <div class="card">
@@ -224,82 +257,9 @@ else
                     }
                 </div>
             </div>
-        </div>
-
-        <!-- Right column -->
-        <div class="col-12 col-lg-4">
-            <!-- Quick links -->
-            <div class="card mb-4">
-                <div class="card-header bg-transparent fw-semibold">
-                    <i class="bi bi-lightning-fill me-2" style="color:#f59e0b"></i>Szybkie akcje
-                </div>
-                <div class="card-body p-0">
-                    <div class="adm-quick-links">
-                        <a href="/admin/users" class="adm-qlink"><i class="bi bi-people-fill"></i><span>Użytkownicy</span><i class="bi bi-chevron-right ms-auto"></i></a>
-                        <a href="/admin/session-types" class="adm-qlink"><i class="bi bi-clock-fill"></i><span>Typy sesji</span><i class="bi bi-chevron-right ms-auto"></i></a>
-                        <a href="/admin/package-offers" class="adm-qlink"><i class="bi bi-box-seam-fill"></i><span>Pakiety na sprzedaż</span><i class="bi bi-chevron-right ms-auto"></i></a>
-                        <a href="/admin/payments" class="adm-qlink"><i class="bi bi-credit-card-fill"></i><span>Płatności</span><i class="bi bi-chevron-right ms-auto"></i></a>
-                        <a href="/admin/courses" class="adm-qlink"><i class="bi bi-mortarboard-fill"></i><span>Kursy</span><i class="bi bi-chevron-right ms-auto"></i></a>
-                        <a href="/admin/branding" class="adm-qlink"><i class="bi bi-palette-fill"></i><span>Wygląd</span><i class="bi bi-chevron-right ms-auto"></i></a>
-                        <a href="/admin/email" class="adm-qlink"><i class="bi bi-envelope-fill"></i><span>Email</span><i class="bi bi-chevron-right ms-auto"></i></a>
-                        @if (_isAdmin)
-                        {
-                            <a href="/admin/backup" class="adm-qlink"><i class="bi bi-archive-fill"></i><span>Backup</span><i class="bi bi-chevron-right ms-auto"></i></a>
-                            <a href="/admin/settings" class="adm-qlink"><i class="bi bi-database-fill"></i><span>Baza danych</span><i class="bi bi-chevron-right ms-auto"></i></a>
-                        }
-                    </div>
-                </div>
             </div>
-
-            <!-- User breakdown -->
-            <div class="card mb-4">
-                <div class="card-header bg-transparent fw-semibold">
-                    <i class="bi bi-pie-chart-fill me-2" style="color:#8b5cf6"></i>Użytkownicy wg roli
-                </div>
-                <div class="card-body">
-                    @foreach (var r in _roleCounts)
-                    {
-                        var pct = _stats.Users > 0 ? (int)Math.Round((double)r.Count / _stats.Users * 100) : 0;
-                        <div class="mb-3">
-                            <div class="d-flex justify-content-between mb-1" style="font-size:.85rem">
-                                <span class="fw-semibold">@r.Role</span>
-                                <span class="text-muted">@r.Count (@pct%)</span>
-                            </div>
-                            <div class="progress" style="height:6px;border-radius:3px">
-                                <div class="progress-bar" style="width:@pct%;background:@r.Color;border-radius:3px"></div>
-                            </div>
-                        </div>
-                    }
-                </div>
-            </div>
-
-            <!-- Orders summary -->
-            <div class="card">
-                <div class="card-header bg-transparent fw-semibold">
-                    <i class="bi bi-bag-check-fill me-2" style="color:#10b981"></i>Zamówienia
-                </div>
-                <div class="card-body">
-                    <div class="d-flex justify-content-between mb-2" style="font-size:.9rem">
-                        <span class="text-muted">Ogółem</span><span class="fw-bold">@_stats.Orders</span>
-                    </div>
-                    <div class="d-flex justify-content-between mb-2" style="font-size:.9rem">
-                        <span class="text-muted">Opłacone</span><span class="fw-bold text-success">@_stats.PaidOrders</span>
-                    </div>
-                    <div class="d-flex justify-content-between mb-2" style="font-size:.9rem">
-                        <span class="text-muted">Oczekujące</span><span class="fw-bold text-warning">@_stats.PendingOrders</span>
-                    </div>
-                    @if (_stats.Revenue > 0)
-                    {
-                        <hr />
-                        <div class="d-flex justify-content-between" style="font-size:.9rem">
-                            <span class="text-muted">Przychód online</span>
-                            <span class="fw-bold" style="color:var(--c-primary)">@_stats.Revenue.ToString("N2") PLN</span>
-                        </div>
-                    }
-                </div>
-            </div>
-        </div>
-    </div>
+        </details>
+    }
 }
 
 <style>
@@ -382,6 +342,13 @@ else
     private bool _coursesEnabled;
 
     private AdminStats _stats = new();
+
+    // Strona „Zarządzanie”: kto co widzi, pierwsze kroki i stan kafelków.
+    private AdminAccess _access = new();
+    private bool _isHighestPlan;
+    private sealed record SetupStep(string Title, string Hint, string Href, string Icon, bool Done);
+    private List<SetupStep> _steps = [];
+    private Dictionary<string, (string? Text, string Tone)> _status = [];
     private List<AuditLogDto> _recentLogs = [];
     private List<RoleCount> _roleCounts = [];
     private List<TableSize> _tableSizes = [];
@@ -393,7 +360,7 @@ else
         _isAdmin = auth.User.IsInRole(Roles.Admin);
         _role = _isAdmin ? "Admin"
               : auth.User.IsInRole(Roles.Trainer) ? "Trener"
-              : auth.User.IsInRole(Roles.Subordinate) ? "Podwładny" : "—";
+              : auth.User.IsInRole(Roles.Subordinate) ? "Asystent trenera" : "—";
 
         _dotnetVersion = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription;
         _environment = Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? "Production";
@@ -414,9 +381,66 @@ else
             _appVersion = "nieznana (zbudowano bez wersji)";
         }
 
+        _access = await AdminAccess.LoadAsync(AuthState, Permission);
+        _isHighestPlan = Entitlements.Current.Id is "studio" or "unlimited";
         await LoadDataAsync();
+        await LoadHubAsync(auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "");
         _loading = false;
     }
+
+    /// <summary>Stan kafelków („3 rodzaje”, „Do ustawienia”) i lista pierwszych kroków.</summary>
+    private async Task LoadHubAsync(string userId)
+    {
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            var windows = await db.TrainerAvailabilities.AsNoTracking()
+                .Where(a => a.TrainerUserId == userId && a.IsActive && a.DayOfWeek != null)
+                .Select(a => new { a.StartTime, a.EndTime }).ToListAsync();
+            var weeklyHours = windows.Sum(w => (w.EndTime - w.StartTime).TotalHours);
+            var sessionTypes = await db.SessionTypes.CountAsync(t => t.IsActive);
+            var packages = await db.PackageOffers.CountAsync(p => p.IsActive);
+            var memberships = await db.MembershipPlans.CountAsync();
+            var coupons = await db.Coupons.CountAsync(c => c.IsActive);
+            var courses = await db.Courses.CountAsync();
+            var hasLogo = await db.AppBrandings.AnyAsync(b => b.LogoPath != null && b.LogoPath != "");
+
+            static (string?, string) Count(int n, string one, string few, string many, string empty = "Brak") =>
+                n == 0 ? (empty, "warn") : ($"{n} {Pl(n, one, few, many)}", "ok");
+
+            _status = new()
+            {
+                ["availability"] = weeklyHours > 0 ? ($"{weeklyHours:0.#} h w tygodniu", "ok") : ("Do ustawienia", "warn"),
+                ["sessionTypes"] = Count(sessionTypes, "rodzaj", "rodzaje", "rodzajów", "Do ustawienia"),
+                ["packages"] = Count(packages, "pakiet", "pakiety", "pakietów"),
+                ["memberships"] = memberships == 0 ? ("Brak", "muted") : ($"{memberships} {Pl(memberships, "karnet", "karnety", "karnetów")}", "ok"),
+                ["payments"] = _paymentsEnabled ? ("Włączone", "ok") : ("Wyłączone", "muted"),
+                ["coupons"] = coupons == 0 ? ("Brak", "muted") : ($"{coupons} {Pl(coupons, "aktywny", "aktywne", "aktywnych")}", "ok"),
+                ["courses"] = courses == 0 ? ("Brak", "muted") : ($"{courses} {Pl(courses, "kurs", "kursy", "kursów")}", "ok"),
+                ["branding"] = hasLogo ? ("Logo dodane", "ok") : ("Dodaj logo", "warn"),
+                ["users"] = ($"{_stats.Users} {Pl(_stats.Users, "konto", "konta", "kont")}", "muted")
+            };
+
+            // Tylko kroki, które ta osoba może wykonać (asystent bez uprawnień do wyglądu nie dostanie linku do niego).
+            _steps = [];
+            if (_access.Can(PTScheduler.Domain.Constants.Permissions.ManageBranding))
+                _steps.Add(new("Dodaj logo i kolory", "Klienci zobaczą Twoją markę", "/admin/branding", "bi-palette", hasLogo));
+            _steps.Add(new("Ustaw godziny pracy", "Kiedy klienci mogą się zapisać", "/trainer/availability", "bi-clock", weeklyHours > 0));
+            if (_access.Can(PTScheduler.Domain.Constants.Permissions.ManageSessionTypes))
+                _steps.Add(new("Dodaj rodzaj treningu", "Np. trening personalny 60 min", "/admin/session-types", "bi-lightning-charge", sessionTypes > 0));
+            if (_access.Can(PTScheduler.Domain.Constants.Permissions.ManageClients))
+                _steps.Add(new("Zaproś pierwszego klienta", "Wyślij link albo dodaj ręcznie", "/clients", "bi-person-plus", _stats.Clients > 0));
+            if (_access.Can(PTScheduler.Domain.Constants.Permissions.ManagePayments) && Entitlements.IsAllowed("PaymentsEnabled"))
+                _steps.Add(new("Włącz płatności online", "BLIK i karta — pieniądze od razu u Ciebie", "/admin/payments", "bi-credit-card", _paymentsEnabled));
+        }
+        catch (Exception ex)
+        {
+            LoggerFactory.CreateLogger("AdminHub").LogWarning(ex, "Nie udało się policzyć stanu ustawień.");
+        }
+    }
+
+    private static string Pl(int n, string one, string few, string many) =>
+        n == 1 ? one : n % 10 is >= 2 and <= 4 && n % 100 is < 12 or > 14 ? few : many;
 
     private async Task Refresh()
     {
@@ -449,7 +473,7 @@ else
             [
                 new("Admin", users.Count(u => u.Role == "Admin"), "#3b82f6"),
                 new("Trener", users.Count(u => u.Role == "Trainer"), "#10b981"),
-                new("Podwładny", users.Count(u => u.Role == "Subordinate"), "#f59e0b"),
+                new("Asystent trenera", users.Count(u => u.Role == "Subordinate"), "#f59e0b"),
                 new("Klient", users.Count(u => u.Role == "Client"), "#8b5cf6"),
             ];
 
