@@ -133,118 +133,125 @@ public sealed partial class UpgradeOrchestrator : IDisposable
         Log(job, "success", "Building", "Obraz ptportal:pending zbudowany.");
 
         // ── TEST ────────────────────────────────────────────────
+        // Kontener próbny ma te same sieci co Portal (np. sieć z bazą danych), ale bez portów,
+        // aliasów i restartów. Jeśli nie wstanie — przerywamy, zanim dotkniemy działającego Portalu.
         SetStage(job, UpgradeStage.Testing);
         var testName = $"ptportal-test-{DateTime.UtcNow:yyyyMMddHHmmss}";
-        Log(job, "info", "Testing", $"Uruchamiam kontener testowy '{testName}'...");
+        Log(job, "info", "Testing", $"Uruchamiam próbną wersję obok działającego Portalu ('{testName}')...");
 
+        string testId;
+        var testStarted = DateTime.UtcNow;
         try
         {
-            var testConfig = CloneConfig(inspect, "ptportal:pending");
-            testConfig.HostConfig.PortBindings = null;
-            var testResp = await _docker.Containers.CreateContainerAsync(
-                new CreateContainerParameters
-                {
-                    Name = testName,
-                    Image = testConfig.Image,
-                    Env = testConfig.Env,
-                    HostConfig = testConfig.HostConfig
-                });
-            await _docker.Containers.StartContainerAsync(testResp.ID, new ContainerStartParameters());
+            testId = await CreateLikeAsync(inspect, testName, "ptportal:pending", testContainer: true);
+            await _docker.Containers.StartContainerAsync(testId, new ContainerStartParameters());
         }
         catch (Exception ex)
         {
-            Fail(job, "Testing", $"Nie udało się uruchomić kontenera testowego: {ex.Message}");
+            Fail(job, "Testing", $"Nie udało się uruchomić wersji próbnej: {ex.Message}. Portal działa bez zmian.");
             await SafeRemoveContainer(testName);
             await SafeRemoveImage("ptportal:pending");
             return;
         }
 
-        Log(job, "info", "Testing", "Czekam 20s na stabilność kontenera...");
-        await Task.Delay(20_000);
-
-        bool testRunning;
-        try
+        var (testOk, testHow) = await WaitForReadyAsync(testId, $"http://{testName}:{_portalPort}/health",
+            TimeSpan.FromSeconds(120), testStarted, allowLogFallback: true);
+        if (!testOk)
         {
-            var testInspect = await _docker.Containers.InspectContainerAsync(testName);
-            testRunning = testInspect.State.Running;
-        }
-        catch { testRunning = false; }
-
-        if (!testRunning)
-        {
-            var logs = await GetContainerLogs(testName, 60);
-            Log(job, "error", "Testing", $"Kontener testowy padł w ciągu 20s.\n{logs}");
-            await SafeRemoveContainer(testName);
+            var logs = await GetContainerLogs(testId, 60);
+            Log(job, "error", "Testing", $"Wersja próbna nie działa ({testHow}). Ostatnie logi:\n{logs}");
+            await SafeStopAndRemove(testId);
             await SafeRemoveImage("ptportal:pending");
-            Fail(job, "Testing", "Nowa wersja portalu nie uruchamia się poprawnie.");
+            Fail(job, "Testing", $"Nowa wersja Portalu nie wstała ({testHow}) — przerwano przed podmianą, Portal działa bez zmian.");
             return;
         }
-
-        var testHealthy = await WaitForHealth(testName, _portalPort, TimeSpan.FromSeconds(40));
-        await SafeStopAndRemove(testName);
-
-        if (!testHealthy)
-        {
-            Log(job, "warn", "Testing", "Health check nie odpowiedział, ale kontener działa — kontynuuję.");
-        }
-        else
-        {
-            Log(job, "success", "Testing", "Test przeszedł: kontener stabilny, health OK.");
-        }
+        await SafeStopAndRemove(testId);
+        Log(job, "success", "Testing", $"Wersja próbna działa ({testHow}).");
 
         // ── SWAP ────────────────────────────────────────────────
+        // Stary kontener nie jest usuwany, tylko odkładany — przy problemie wraca dokładnie on
+        // (ze wszystkimi sieciami, wolumenami i ustawieniami).
         SetStage(job, UpgradeStage.Swapping);
-        Log(job, "info", "Swapping", "Tagowanie ptportal:latest → ptportal:previous...");
         await SafeTagImage(_portalImage, "ptportal", "previous");
+        var backupName = $"{_portalContainer}-prev-{DateTime.UtcNow:yyyyMMddHHmmss}";
 
-        Log(job, "info", "Swapping", $"Zatrzymuję kontener '{_portalContainer}'...");
-        await SafeStopAndRemove(_portalContainer);
+        Log(job, "info", "Swapping", $"Zatrzymuję obecny Portal (zostaje jako '{backupName}')...");
+        try { await _docker.Containers.StopContainerAsync(inspect.ID, new ContainerStopParameters { WaitBeforeKillSeconds = 20 }); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Portal był już zatrzymany."); }
+        try { await _docker.Containers.RenameContainerAsync(inspect.ID, new ContainerRenameParameters { NewName = backupName }, CancellationToken.None); }
+        catch (Exception ex)
+        {
+            await SafeStart(inspect.ID);
+            await SafeRemoveImage("ptportal:pending");
+            Fail(job, "Swapping", $"Nie udało się odłożyć obecnego Portalu: {ex.Message}. Uruchomiono go ponownie.");
+            return;
+        }
 
-        Log(job, "info", "Swapping", "Tagowanie ptportal:pending → ptportal:latest...");
         await SafeTagImage("ptportal:pending", "ptportal", "latest");
-
-        Log(job, "info", "Swapping", "Uruchamiam nowy kontener portalu...");
+        string? newId = null;
+        var swapStarted = DateTime.UtcNow;
         try
         {
-            var newConfig = CloneConfig(inspect, _portalImage);
-            var resp = await _docker.Containers.CreateContainerAsync(
-                new CreateContainerParameters
-                {
-                    Name = _portalContainer,
-                    Image = newConfig.Image,
-                    Env = newConfig.Env,
-                    ExposedPorts = newConfig.ExposedPorts,
-                    HostConfig = newConfig.HostConfig
-                });
-            await _docker.Containers.StartContainerAsync(resp.ID, new ContainerStartParameters());
+            newId = await CreateLikeAsync(inspect, _portalContainer, _portalImage);
+            await _docker.Containers.StartContainerAsync(newId, new ContainerStartParameters());
+            Log(job, "success", "Swapping", "Nowy Portal uruchomiony.");
         }
         catch (Exception ex)
         {
-            Log(job, "error", "Swapping", $"Start nowego kontenera nie powiódł się: {ex.Message}");
-            await PerformRollback(job, inspect);
+            Log(job, "error", "Swapping", $"Nowy Portal nie wystartował: {ex.Message}");
+            await RestorePortalAsync(job, newId, inspect.ID, backupName);
             return;
         }
-        Log(job, "success", "Swapping", "Nowy kontener uruchomiony.");
 
         // ── VERIFY ──────────────────────────────────────────────
         SetStage(job, UpgradeStage.Verifying);
-        Log(job, "info", "Verifying", "Weryfikuję health nowego portalu (max 90s)...");
-
-        var verified = await WaitForHealth(_portalContainer, _portalPort, TimeSpan.FromSeconds(90));
-        if (!verified)
+        Log(job, "info", "Verifying", "Sprawdzam nowy Portal (max 120 s)...");
+        var (ok, how) = await WaitForReadyAsync(newId, $"http://{_portalContainer}:{_portalPort}/health",
+            TimeSpan.FromSeconds(120), swapStarted, allowLogFallback: true);
+        if (!ok)
         {
-            var logs = await GetContainerLogs(_portalContainer, 50);
-            Log(job, "error", "Verifying", $"Portal nie odpowiada po 90s.\n{logs}");
-            await PerformRollback(job, inspect);
+            var logs = await GetContainerLogs(newId, 50);
+            Log(job, "error", "Verifying", $"Nowy Portal nie działa ({how}). Ostatnie logi:\n{logs}");
+            await RestorePortalAsync(job, newId, inspect.ID, backupName);
             return;
         }
 
         // ── DONE ────────────────────────────────────────────────
+        try { await _docker.Containers.RemoveContainerAsync(inspect.ID, new ContainerRemoveParameters { Force = true }); }
+        catch (Exception ex) { Log(job, "warn", "Done", $"Nie usunięto poprzedniego kontenera ({backupName}): {ex.Message}"); }
         await SafeRemoveImage("ptportal:pending");
         job.Stage = UpgradeStage.Done;
         job.Status = UpgradeStatus.Success;
         Log(job, "success", "Done",
-            $"Aktualizacja portalu zakończona pomyślnie. {Short(job.CommitBefore)} → {Short(job.CommitAfter)}");
+            $"Portal zaktualizowany ({how}). {Short(job.CommitBefore)} → {Short(job.CommitAfter)}");
+    }
+
+    /// <summary>Usuwa nieudany nowy Portal i przywraca odłożony — dokładnie ten sam kontener co przed aktualizacją.</summary>
+    private async Task RestorePortalAsync(UpgradeJob job, string? newId, string originalId, string backupName)
+    {
+        Log(job, "warn", "Verifying", "Przywracam poprzedni Portal...");
+        try
+        {
+            if (newId is not null)
+                await _docker.Containers.RemoveContainerAsync(newId, new ContainerRemoveParameters { Force = true });
+            else
+                await SafeRemoveContainer(_portalContainer);
+            await _docker.Containers.RenameContainerAsync(originalId, new ContainerRenameParameters { NewName = _portalContainer }, CancellationToken.None);
+            await SafeTagImage("ptportal:previous", "ptportal", "latest");
+            var restartedAt = DateTime.UtcNow;
+            await _docker.Containers.StartContainerAsync(originalId, new ContainerStartParameters());
+            var (ok, how) = await WaitForReadyAsync(originalId, $"http://{_portalContainer}:{_portalPort}/health",
+                TimeSpan.FromSeconds(90), restartedAt, allowLogFallback: true);
+            job.Status = ok ? UpgradeStatus.RolledBack : UpgradeStatus.Failed;
+            job.Error = ok ? "Nowa wersja nie wstała — przywrócono poprzedni Portal." : $"Przywrócono poprzedni kontener, ale on też nie odpowiada ({how}).";
+            Log(job, ok ? "warn" : "error", "Verifying", ok ? $"Poprzedni Portal działa ({how})." : job.Error);
+        }
+        catch (Exception ex)
+        {
+            job.Status = UpgradeStatus.Failed;
+            job.Error = $"Przywracanie nie powiodło się: {ex.Message}. Poprzedni kontener leży jako '{backupName}' — uruchom go: docker rename {backupName} {_portalContainer} && docker start {_portalContainer}";
+            Log(job, "error", "Verifying", job.Error);
+        }
     }
 
     // ── Tenant upgrade (obraz) + opcjonalne wdrożenie ───────────────
@@ -547,15 +554,41 @@ public sealed partial class UpgradeOrchestrator : IDisposable
     /// Nowy kontener jak stary, ale z nowym obrazem: cała konfiguracja hosta (wolumeny, porty,
     /// limity pamięci/CPU, polityka restartu, logi), etykiety, zmienne i sieci z aliasami.
     /// </summary>
-    private async Task<string> CreateLikeAsync(ContainerInspectResponse src, string name, string image)
+    /// <param name="testContainer">
+    /// Kontener próbny: bez publikowanych portów (zajęte przez działający), bez aliasów sieciowych
+    /// (inaczej część ruchu trafiałaby do próby) i bez automatycznych restartów.
+    /// </param>
+    private async Task<string> CreateLikeAsync(ContainerInspectResponse src, string name, string image, bool testContainer = false)
     {
         var host = src.HostConfig;
         var primary = host.NetworkMode ?? "bridge";
         var networks = src.NetworkSettings?.Networks ?? new Dictionary<string, EndpointSettings>();
         var shortId = src.ID.Length >= 12 ? src.ID[..12] : src.ID;
         IList<string>? AliasesOf(EndpointSettings e) =>
-            e.Aliases?.Where(a => a != shortId && a != src.ID).ToList() is { Count: > 0 } list ? list : null;
+            testContainer ? null
+            : e.Aliases?.Where(a => a != shortId && a != src.ID).ToList() is { Count: > 0 } list ? list : null;
 
+        var savedPorts = host.PortBindings;
+        var savedRestart = host.RestartPolicy;
+        if (testContainer)
+        {
+            host.PortBindings = null;
+            host.RestartPolicy = new RestartPolicy { Name = RestartPolicyKind.No };
+        }
+        try
+        {
+            return await CreateLikeCoreAsync(src, name, image, host, primary, networks, AliasesOf);
+        }
+        finally
+        {
+            host.PortBindings = savedPorts;
+            host.RestartPolicy = savedRestart;
+        }
+    }
+
+    private async Task<string> CreateLikeCoreAsync(ContainerInspectResponse src, string name, string image, HostConfig host,
+        string primary, IDictionary<string, EndpointSettings> networks, Func<EndpointSettings, IList<string>?> AliasesOf)
+    {
         var create = new CreateContainerParameters
         {
             Name = name,
@@ -565,7 +598,7 @@ public sealed partial class UpgradeOrchestrator : IDisposable
             Labels = src.Config.Labels,
             HostConfig = host,
             NetworkingConfig = networks.TryGetValue(primary, out var primaryEndpoint)
-                ? new NetworkingConfig { EndpointsConfig = new Dictionary<string, EndpointSettings> { [primary] = new() { Aliases = AliasesOf(primaryEndpoint) } } }
+                ? new NetworkingConfig { EndpointsConfig = new Dictionary<string, EndpointSettings> { [primary] = new() { Aliases = AliasesOf(primaryEndpoint), Links = primaryEndpoint.Links } } }
                 : null
         };
         var created = await _docker.Containers.CreateContainerAsync(create);
@@ -578,7 +611,7 @@ public sealed partial class UpgradeOrchestrator : IDisposable
                 await _docker.Networks.ConnectNetworkAsync(net, new NetworkConnectParameters
                 {
                     Container = created.ID,
-                    EndpointConfig = new EndpointSettings { Aliases = AliasesOf(endpoint) }
+                    EndpointConfig = new EndpointSettings { Aliases = AliasesOf(endpoint), Links = endpoint.Links }
                 });
             }
             catch (Exception ex) { _logger.LogWarning(ex, "Nie podłączono {Container} do sieci {Network}.", name, net); }
@@ -591,9 +624,18 @@ public sealed partial class UpgradeOrchestrator : IDisposable
     /// a gdy Guardian w ogóle nie widzi tego adresu — kontener działa bez restartów
     /// i aplikacja zgłosiła w logach, że wystartowała.
     /// </summary>
-    private async Task<(bool Ok, string How)> WaitForTenantReadyAsync(string containerId, string host, int port, DateTime startedAt)
+    private Task<(bool Ok, string How)> WaitForTenantReadyAsync(string containerId, string host, int port, DateTime startedAt) =>
+        WaitForReadyAsync(containerId, $"http://{host}:{port}/health", TenantReadyTimeout, startedAt, allowLogFallback: true,
+            unreachableHint: $"Guardian nie widzi {host}:{port} — ustaw GUARDIAN_TENANT_HOST");
+
+    /// <summary>
+    /// Czy kontener działa: /health pod podanym adresem; gdy Guardian w ogóle nie widzi tego adresu
+    /// (inna sieć), wystarczy start aplikacji w logach i brak restartów. Zatrzymanie albo restarty = porażka.
+    /// </summary>
+    private async Task<(bool Ok, string How)> WaitForReadyAsync(string containerId, string healthUrl, TimeSpan timeout,
+        DateTime startedAt, bool allowLogFallback, string? unreachableHint = null)
     {
-        var deadline = DateTime.UtcNow + TenantReadyTimeout;
+        var deadline = DateTime.UtcNow + timeout;
         var httpReachable = false;
         string? lastHttp = null;
 
@@ -611,24 +653,25 @@ public sealed partial class UpgradeOrchestrator : IDisposable
             var sw = Stopwatch.StartNew();
             try
             {
-                using var resp = await _healthHttp.GetAsync($"http://{host}:{port}/health");
+                using var resp = await _healthHttp.GetAsync(healthUrl);
                 httpReachable = true;
                 if (resp.IsSuccessStatusCode) return (true, $"odpowiada na /health w {sw.ElapsedMilliseconds} ms");
                 lastHttp = $"/health zwraca HTTP {(int)resp.StatusCode}";
             }
-            catch (HttpRequestException) { /* aplikacja jeszcze wstaje albo host niewidoczny z Guardiana */ }
+            catch (HttpRequestException) { /* jeszcze wstaje albo adres niewidoczny z Guardiana */ }
             catch (TaskCanceledException) { lastHttp = "/health nie odpowiada w 10 s"; }
 
             await Task.Delay(3_000);
         }
 
-        if (!httpReachable)
+        if (!httpReachable && allowLogFallback)
         {
             var logs = await GetContainerLogs(containerId, 300, startedAt);
-            if (logs.Contains("Application started", StringComparison.OrdinalIgnoreCase)
-                || logs.Contains("Now listening on", StringComparison.OrdinalIgnoreCase))
-                return (true, $"aplikacja wystartowała wg logów (Guardian nie widzi {host}:{port} — ustaw GUARDIAN_TENANT_HOST)");
-            return (false, $"brak odpowiedzi z {host}:{port} i brak startu w logach");
+            var crashed = logs.Contains("Unhandled exception", StringComparison.OrdinalIgnoreCase);
+            if (!crashed && (logs.Contains("Application started", StringComparison.OrdinalIgnoreCase)
+                || logs.Contains("Now listening on", StringComparison.OrdinalIgnoreCase)))
+                return (true, $"aplikacja wystartowała wg logów{(unreachableHint is null ? "" : $" ({unreachableHint})")}");
+            return (false, crashed ? "aplikacja zgłosiła nieobsłużony wyjątek (szczegóły w logach)" : $"brak odpowiedzi z {healthUrl} i brak startu w logach");
         }
         return (false, lastHttp ?? "brak odpowiedzi /health");
     }
@@ -649,66 +692,63 @@ public sealed partial class UpgradeOrchestrator : IDisposable
     private async Task ExecuteRollbackAsync(UpgradeJob job)
     {
         Log(job, "info", "Swapping", "Sprawdzam obraz ptportal:previous...");
-
         try { await _docker.Images.InspectImageAsync("ptportal:previous"); }
         catch
         {
-            Fail(job, "Swapping", "Brak obrazu ptportal:previous. Rollback niemożliwy.");
+            Fail(job, "Swapping", "Brak obrazu ptportal:previous — nie ma do czego wrócić.");
             return;
         }
 
-        ContainerInspectResponse? inspect = null;
-        try { inspect = await _docker.Containers.InspectContainerAsync(_portalContainer); }
-        catch (Exception ex) { _logger.LogWarning(ex, "Nie udało się zinspekcjonować kontenera portalu {Container} — nowy kontener powstanie bez sklonowanej konfiguracji.", _portalContainer); }
-
-        Log(job, "info", "Swapping", "Zatrzymuję aktualny kontener...");
-        await SafeStopAndRemove(_portalContainer);
-
-        Log(job, "info", "Swapping", "Tagowanie ptportal:previous → ptportal:latest...");
-        await SafeTagImage("ptportal:previous", "ptportal", "latest");
-
-        Log(job, "info", "Swapping", "Uruchamiam portal z poprzedniej wersji...");
-        if (inspect is not null)
+        ContainerInspectResponse current;
+        try { current = await _docker.Containers.InspectContainerAsync(_portalContainer); }
+        catch
         {
-            try
-            {
-                var cfg = CloneConfig(inspect, _portalImage);
-                var resp = await _docker.Containers.CreateContainerAsync(
-                    new CreateContainerParameters
-                    {
-                        Name = _portalContainer,
-                        Image = cfg.Image,
-                        Env = cfg.Env,
-                        ExposedPorts = cfg.ExposedPorts,
-                        HostConfig = cfg.HostConfig
-                    });
-                await _docker.Containers.StartContainerAsync(resp.ID, new ContainerStartParameters());
-            }
-            catch (Exception ex)
-            {
-                Fail(job, "Swapping", $"Nie udało się uruchomić kontenera: {ex.Message}");
-                return;
-            }
+            Fail(job, "Swapping", $"Nie ma kontenera '{_portalContainer}' — uruchom Portal ręcznie (docker compose / szablon Unraid).");
+            return;
         }
-        else
+
+        var backupName = $"{_portalContainer}-prev-{DateTime.UtcNow:yyyyMMddHHmmss}";
+        Log(job, "info", "Swapping", $"Odkładam obecny Portal jako '{backupName}'...");
+        try { await _docker.Containers.StopContainerAsync(current.ID, new ContainerStopParameters { WaitBeforeKillSeconds = 20 }); } catch { /* już zatrzymany */ }
+        await _docker.Containers.RenameContainerAsync(current.ID, new ContainerRenameParameters { NewName = backupName }, CancellationToken.None);
+
+        string? newId = null;
+        var startedAt = DateTime.UtcNow;
+        try
         {
-            Fail(job, "Swapping", "Brak konfiguracji kontenera — uruchom portal ręcznie.");
+            // Ta sama konfiguracja i wszystkie sieci co obecny kontener — tylko obraz z poprzedniej wersji.
+            newId = await CreateLikeAsync(current, _portalContainer, "ptportal:previous");
+            await _docker.Containers.StartContainerAsync(newId, new ContainerStartParameters());
+        }
+        catch (Exception ex)
+        {
+            Log(job, "error", "Swapping", $"Nie udało się uruchomić poprzedniej wersji: {ex.Message}");
+            if (newId is not null) await SafeRemoveContainer(newId);
+            await _docker.Containers.RenameContainerAsync(current.ID, new ContainerRenameParameters { NewName = _portalContainer }, CancellationToken.None);
+            await SafeStart(current.ID);
+            Fail(job, "Swapping", "Przywracanie nie powiodło się — uruchomiono z powrotem obecny Portal.");
             return;
         }
 
         SetStage(job, UpgradeStage.Verifying);
-        var healthy = await WaitForHealth(_portalContainer, _portalPort, TimeSpan.FromSeconds(60));
+        var (ok, how) = await WaitForReadyAsync(newId, $"http://{_portalContainer}:{_portalPort}/health",
+            TimeSpan.FromSeconds(90), startedAt, allowLogFallback: true);
         job.Stage = UpgradeStage.Done;
-
-        if (healthy)
+        if (ok)
         {
+            await SafeRemoveContainer(current.ID);
+            await SafeTagImage("ptportal:previous", "ptportal", "latest");
             job.Status = UpgradeStatus.RolledBack;
-            Log(job, "success", "Done", "Rollback zakończony — portal działa na poprzedniej wersji.");
+            Log(job, "success", "Done", $"Portal działa na poprzedniej wersji ({how}).");
         }
         else
         {
-            job.Status = UpgradeStatus.Failed;
-            Log(job, "error", "Done", "Kontener uruchomiony, ale health check nie odpowiada.");
+            var logs = await GetContainerLogs(newId, 40);
+            Log(job, "error", "Done", $"Poprzednia wersja też nie działa ({how}). Ostatnie logi:\n{logs}");
+            await SafeRemoveContainer(newId);
+            await _docker.Containers.RenameContainerAsync(current.ID, new ContainerRenameParameters { NewName = _portalContainer }, CancellationToken.None);
+            await SafeStart(current.ID);
+            Fail(job, "Done", "Poprzednia wersja nie wstała — przywrócono kontener sprzed tej operacji. Sprawdź logi (np. połączenie z bazą).");
         }
     }
 
@@ -867,90 +907,9 @@ public sealed partial class UpgradeOrchestrator : IDisposable
         return Cli("git", all, _repoDir, 5);
     }
 
-    private async Task PerformRollback(UpgradeJob job, ContainerInspectResponse originalInspect)
-    {
-        Log(job, "warn", "Verifying", "Rozpoczynam rollback...");
-        await SafeStopAndRemove(_portalContainer);
-        await SafeTagImage("ptportal:previous", "ptportal", "latest");
 
-        try
-        {
-            var cfg = CloneConfig(originalInspect, _portalImage);
-            var resp = await _docker.Containers.CreateContainerAsync(
-                new CreateContainerParameters
-                {
-                    Name = _portalContainer,
-                    Image = cfg.Image,
-                    Env = cfg.Env,
-                    ExposedPorts = cfg.ExposedPorts,
-                    HostConfig = cfg.HostConfig
-                });
-            await _docker.Containers.StartContainerAsync(resp.ID, new ContainerStartParameters());
-            var ok = await WaitForHealth(_portalContainer, _portalPort, TimeSpan.FromSeconds(60));
 
-            if (ok)
-            {
-                job.Status = UpgradeStatus.RolledBack;
-                Log(job, "warn", "Verifying", "Rollback OK — portal przywrócony.");
-            }
-            else
-            {
-                job.Status = UpgradeStatus.Failed;
-                Log(job, "error", "Verifying", "Rollback: kontener działa, ale health check nie przechodzi.");
-            }
-        }
-        catch (Exception ex)
-        {
-            job.Status = UpgradeStatus.Failed;
-            Log(job, "error", "Verifying", $"Rollback nie powiódł się: {ex.Message}");
-        }
-    }
 
-    private record ClonedConfig(string Image, IList<string> Env,
-        IDictionary<string, EmptyStruct>? ExposedPorts, HostConfig HostConfig);
-
-    private ClonedConfig CloneConfig(ContainerInspectResponse src, string newImage)
-    {
-        var env = (src.Config.Env ?? [])
-            .Where(e => !e.StartsWith("PTS_BUILD_", StringComparison.Ordinal))
-            .ToList();
-
-        return new ClonedConfig(
-            newImage,
-            env,
-            src.Config.ExposedPorts,
-            new HostConfig
-            {
-                Binds = src.HostConfig.Binds,
-                Mounts = src.HostConfig.Mounts,
-                NetworkMode = src.HostConfig.NetworkMode ?? "bridge",
-                RestartPolicy = src.HostConfig.RestartPolicy
-                    ?? new RestartPolicy { Name = RestartPolicyKind.UnlessStopped },
-                PortBindings = src.HostConfig.PortBindings,
-                ExtraHosts = src.HostConfig.ExtraHosts,
-                LogConfig = src.HostConfig.LogConfig,
-                Memory = src.HostConfig.Memory,
-                MemorySwap = src.HostConfig.MemorySwap,
-                NanoCPUs = src.HostConfig.NanoCPUs,
-                PidsLimit = src.HostConfig.PidsLimit
-            });
-    }
-
-    private async Task<bool> WaitForHealth(string container, int port, TimeSpan timeout)
-    {
-        var deadline = DateTime.UtcNow + timeout;
-        while (DateTime.UtcNow < deadline)
-        {
-            try
-            {
-                var resp = await _healthHttp.GetAsync($"http://{container}:{port}/health");
-                if (resp.IsSuccessStatusCode) return true;
-            }
-            catch { /* kontener jeszcze wstaje — celowo cicho, pętla ponawia do deadline'u */ }
-            await Task.Delay(3_000);
-        }
-        return false;
-    }
 
     private async Task<string> GetContainerLogs(string container, int tail, DateTime? sinceUtc = null)
     {

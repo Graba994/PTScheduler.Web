@@ -87,7 +87,9 @@ public class DockerService : IDisposable
                 Running = response.State.Running,
                 StartedAt = response.State.StartedAt,
                 Image = response.Config.Image,
-                MemoryUsage = 0
+                MemoryUsage = 0,
+                RestartCount = response.RestartCount,
+                ExitCode = response.State.ExitCode
             };
         }
         catch
@@ -164,6 +166,65 @@ public class DockerService : IDisposable
             sb.Append(System.Text.Encoding.UTF8.GetString(buffer, 0, result.Count));
         }
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Logi z podziałem na linie. Docker dokleja znacznik czasu do każdej linii, więc stdout i stderr
+    /// układamy w prawdziwej kolejności (osobne strumienie inaczej się rozjeżdżają).
+    /// </summary>
+    public async Task<List<ContainerLogLine>> GetContainerLogLinesAsync(string containerName, int tail, DateTime? sinceUtc, CancellationToken ct = default)
+    {
+        var parameters = new ContainerLogsParameters
+        {
+            ShowStdout = true,
+            ShowStderr = true,
+            Timestamps = true,
+            Tail = Math.Clamp(tail, 10, 5000).ToString(),
+            Since = sinceUtc is { } since ? new DateTimeOffset(DateTime.SpecifyKind(since, DateTimeKind.Utc)).ToUnixTimeSeconds().ToString() : null
+        };
+
+        using var stream = await _client.Containers.GetContainerLogsAsync(containerName, false, parameters, ct);
+        var stdout = new System.Text.StringBuilder();
+        var stderr = new System.Text.StringBuilder();
+        var buffer = new byte[16384];
+        while (true)
+        {
+            var read = await stream.ReadOutputAsync(buffer, 0, buffer.Length, ct);
+            if (read.EOF || read.Count == 0) break;
+            var text = System.Text.Encoding.UTF8.GetString(buffer, 0, read.Count);
+            (read.Target == Docker.DotNet.MultiplexedStream.TargetStream.StandardError ? stderr : stdout).Append(text);
+        }
+
+        var lines = Split(stdout.ToString(), false).Concat(Split(stderr.ToString(), true))
+            .OrderBy(l => l.TimeUtc ?? DateTime.MinValue)
+            .ToList();
+        return lines;
+
+        static IEnumerable<ContainerLogLine> Split(string raw, bool isErr)
+        {
+            foreach (var line in raw.Split('\n'))
+            {
+                if (line.Length == 0) continue;
+                var clean = line.TrimEnd('\r');
+                var space = clean.IndexOf(' ');
+                DateTime? time = null;
+                if (space > 19 && space < 40)
+                {
+                    var stamp = clean[..space];
+                    // RFC3339 z nanosekundami — .NET przyjmuje do 7 cyfr po przecinku.
+                    var dot = stamp.IndexOf('.');
+                    if (dot > 0 && stamp.EndsWith('Z') && stamp.Length - dot - 2 > 7)
+                        stamp = stamp[..(dot + 8)] + "Z";
+                    if (DateTime.TryParse(stamp, System.Globalization.CultureInfo.InvariantCulture,
+                            System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var t))
+                    {
+                        time = t;
+                        clean = clean[(space + 1)..];
+                    }
+                }
+                yield return new ContainerLogLine(time, isErr, clean);
+            }
+        }
     }
 
     public async Task<SystemInfo> GetSystemInfoAsync()
@@ -496,7 +557,12 @@ public class ContainerInfo
     public string? StartedAt { get; set; }
     public string? Image { get; set; }
     public long MemoryUsage { get; set; }
+    public long RestartCount { get; set; }
+    public long ExitCode { get; set; }
 }
+
+/// <summary>Jedna linia logu kontenera: czas z Dockera, czy ze stderr, treść.</summary>
+public sealed record ContainerLogLine(DateTime? TimeUtc, bool FromStderr, string Text);
 
 public class TenantContainerStatus
 {
