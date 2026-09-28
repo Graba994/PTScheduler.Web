@@ -25,8 +25,16 @@
         <h4 class="set-title"><i class="bi bi-sliders2"></i>Zarządzanie</h4>
         <p class="set-sub">Wszystko, co ustawiasz raz — oferta, płatności, powiadomienia i wygląd aplikacji. Kliknij <i class="bi bi-info-circle"></i>, żeby zobaczyć, do czego służy dana opcja.</p>
     </div>
-    <span class="badge bg-body-secondary text-body"><i class="bi bi-person-fill me-1"></i>@_userEmail · @_role</span>
+    <div class="d-flex flex-column align-items-end gap-2">
+        <span class="badge bg-body-secondary text-body"><i class="bi bi-person-fill me-1"></i>@_userEmail · @_role</span>
+        @if (_isAdmin) { <ViewToggle Sidebar="false" /> }
+    </div>
 </div>
+
+@if (!_loading)
+{
+    <SettingsSearch Access="_access" Class="set-search" />
+}
 
 @if (_loading)
 {
@@ -94,6 +102,20 @@ else
     @foreach (var group in AdminMenu.Groups.Where(g => !g.Advanced))
     {
         @RenderGroup(group)
+    }
+
+    var locked = AdminMenu.Groups.SelectMany(g => g.Items).Where(i => _access.Sees(i) && IsLocked(i)).ToList();
+    @if (_access.IsOwner && locked.Count > 0)
+    {
+        <details class="set-more">
+            <summary><i class="bi bi-lock"></i>W wyższym planie (@locked.Count)</summary>
+            <div class="set-done mb-3">
+                @foreach (var item in locked)
+                {
+                    <a href="/admin/upgrade" title="@item.Description"><i class="bi bi-lock-fill text-secondary"></i>@item.Title <small>plan @(item.PlanName ?? "Pro")</small></a>
+                }
+            </div>
+        </details>
     }
 
     @if (AdminMenu.Groups.Any(g => g.Advanced && g.Items.Any(_access.Sees)))
@@ -352,7 +374,8 @@ else
     // Grupa kafelków: skonfigurowane opcje zwinięte do małych „✓”, żeby na wierzchu zostało to, co do zrobienia.
     private RenderFragment RenderGroup(AdminMenuGroup group) => __builder =>
     {
-        var items = group.Items.Where(_access.Sees).ToList();
+        // Opcje spoza planu nie zaśmiecają listy — są zebrane w „W wyższym planie”.
+        var items = group.Items.Where(i => _access.Sees(i) && !IsLocked(i)).ToList();
         if (items.Count == 0) return;
         var configured = items.Where(i => _setup.StatusOf(i).IsConfigured && !(i.PlanFlag is not null && !Entitlements.IsAllowed(i.PlanFlag))).ToList();
         var open = items.Except(configured).ToList();
@@ -401,6 +424,7 @@ else
     private AdminAccess _access = new();
     private bool _isHighestPlan;
     private SetupState _setup = new();
+    private bool IsLocked(AdminMenuItem i) => i.PlanFlag is not null && !Entitlements.IsAllowed(i.PlanFlag);
     private List<AuditLogDto> _recentLogs = [];
     private List<RoleCount> _roleCounts = [];
     private List<TableSize> _tableSizes = [];

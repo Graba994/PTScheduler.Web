@@ -4,73 +4,125 @@
 @inject PTScheduler.Application.Interfaces.IPermissionService Permission
 @inject NavigationManager Nav
 @inject SetupGuide Guide
+@inject EntitlementService Entitlements
 
-@* Ustawienia: bez długiego menu bocznego. Strona „Zarządzanie” to kafelki, a na podstronach jest tylko
-   powrót, nazwa bieżącej opcji z wyjaśnieniem (i) i „Przejdź do…” do szybkiej zmiany. *@
-<div class="setx">
-    @if (!_isHub)
-    {
-        <div class="setx-bar">
-            <a class="setx-back" href="/admin" title="Wszystkie ustawienia">
-                <i class="bi bi-arrow-left"></i><span>Ustawienia</span>
-            </a>
-            <div class="setx-crumb">
-                @if (_current is { } c)
-                {
-                    <span class="setx-crumb-group">@c.Group.Title</span>
-                    <i class="bi bi-chevron-right setx-crumb-sep"></i>
-                    <span class="setx-crumb-item"><i class="bi @c.Item.Icon"></i>@c.Item.Title</span>
-                    <InfoTip Title="@c.Item.Title" Text="@c.Item.Info" />
-                }
-            </div>
-            <button type="button" class="setx-jump-btn" popovertarget="setx-jump">
-                <i class="bi bi-grid-3x3-gap-fill"></i><span>Przejdź do…</span>
-            </button>
-            <div popover id="setx-jump" class="setx-jump" role="dialog" aria-label="Przejdź do ustawienia">
-                <div class="setx-jump-head">
-                    <strong>Przejdź do</strong>
-                    <button type="button" class="btn-close" popovertarget="setx-jump" popovertargetaction="hide" aria-label="Zamknij"></button>
-                </div>
-                <div class="setx-jump-grid">
-                    @foreach (var group in AdminMenu.Groups)
+@* Ustawienia w dwóch widokach (wybór zapamiętany w ciasteczku, przełącza administrator):
+   „Kafelki” — strona Zarządzanie z kafelkami, na podstronach tylko powrót i „Przejdź do…”;
+   „Menu boczne” — klasyczna lista wszystkich ustawień po lewej, z wyszukiwarką. *@
+@if (_sidebar)
+{
+    <div class="setx setx-side">
+        <aside class="setx-sidebar" aria-label="Ustawienia">
+            <SettingsSearch Access="_access" Placeholder="Szukaj ustawienia…" Class="ss-compact" />
+            <a href="/admin" class="setx-side-link setx-side-home @(_isHub ? "active" : "")"><i class="bi bi-grid-1x2-fill"></i><span>Wszystkie ustawienia</span></a>
+            @foreach (var group in AdminMenu.Groups)
+            {
+                var items = VisibleItems(group).ToList();
+                if (items.Count == 0) continue;
+                <div class="setx-side-group set-tone-@group.Tone">
+                    <div class="setx-side-title"><i class="bi @group.Icon"></i>@group.Title</div>
+                    @foreach (var item in items)
                     {
-                        var items = group.Items.Where(_access.Sees).ToList();
-                        if (items.Count == 0) continue;
-                        <div class="setx-jump-group set-tone-@group.Tone">
-                            <div class="setx-jump-title"><i class="bi @group.Icon"></i>@group.Title</div>
-                            @foreach (var item in items)
-                            {
-                                var done = _state?.StatusOf(item).IsConfigured == true;
-                                <a href="/@item.Href" class="@(_current?.Item == item ? "active" : "")">
-                                    <i class="bi @item.Icon"></i><span>@item.Title</span>
-                                    @if (done) { <i class="bi bi-check-circle-fill setx-jump-ok" title="Skonfigurowane"></i> }
-                                </a>
-                            }
-                        </div>
+                        var done = _state?.StatusOf(item).IsConfigured == true;
+                        <a href="/@item.Href" class="setx-side-link @(_current?.Item == item ? "active" : "")" title="@item.Description">
+                            <i class="bi @item.Icon"></i><span>@item.Title</span>
+                            @if (done) { <i class="bi bi-check-circle-fill setx-jump-ok" title="Skonfigurowane"></i> }
+                        </a>
+                    }
+                </div>
+            }
+            <div class="setx-side-foot">
+                <ViewToggle Sidebar="true" />
+            </div>
+        </aside>
+        <div class="setx-main">
+            @if (!_isHub && _state is not null) { <SetupGuideBar State="_state" /> }
+            @Body
+        </div>
+    </div>
+}
+else
+{
+    <div class="setx">
+        @if (!_isHub)
+        {
+            <div class="setx-bar">
+                <a class="setx-back" href="/admin" title="Wszystkie ustawienia">
+                    <i class="bi bi-arrow-left"></i><span>Ustawienia</span>
+                </a>
+                <div class="setx-crumb">
+                    @if (_current is { } c)
+                    {
+                        <span class="setx-crumb-group">@c.Group.Title</span>
+                        <i class="bi bi-chevron-right setx-crumb-sep"></i>
+                        <span class="setx-crumb-item"><i class="bi @c.Item.Icon"></i>@c.Item.Title</span>
+                        <InfoTip Title="@c.Item.Title" Text="@c.Item.Info" />
+                    }
+                </div>
+                <button type="button" class="setx-jump-btn" popovertarget="setx-jump">
+                    <i class="bi bi-search"></i><span>Przejdź do…</span>
+                </button>
+                <div popover id="setx-jump" class="setx-jump" role="dialog" aria-label="Przejdź do ustawienia">
+                    <div class="setx-jump-head">
+                        <strong>Przejdź do</strong>
+                        <button type="button" class="btn-close" popovertarget="setx-jump" popovertargetaction="hide" aria-label="Zamknij"></button>
+                    </div>
+                    <SettingsSearch Access="_access" Class="mb-3" />
+                    <div class="setx-jump-grid">
+                        @foreach (var group in AdminMenu.Groups)
+                        {
+                            var items = VisibleItems(group).ToList();
+                            if (items.Count == 0) continue;
+                            <div class="setx-jump-group set-tone-@group.Tone">
+                                <div class="setx-jump-title"><i class="bi @group.Icon"></i>@group.Title</div>
+                                @foreach (var item in items)
+                                {
+                                    var done = _state?.StatusOf(item).IsConfigured == true;
+                                    <a href="/@item.Href" class="@(_current?.Item == item ? "active" : "")">
+                                        <i class="bi @item.Icon"></i><span>@item.Title</span>
+                                        @if (done) { <i class="bi bi-check-circle-fill setx-jump-ok" title="Skonfigurowane"></i> }
+                                    </a>
+                                }
+                            </div>
+                        }
+                    </div>
+                    @if (_access.IsAdmin)
+                    {
+                        <div class="setx-jump-foot"><ViewToggle Sidebar="false" /></div>
                     }
                 </div>
             </div>
+            @if (_state is not null) { <SetupGuideBar State="_state" /> }
+        }
+        <div class="setx-page">
+            @Body
         </div>
-        @if (_state is not null) { <SetupGuideBar State="_state" /> }
-    }
-    <div class="setx-page">
-        @Body
     </div>
-</div>
+}
 
 @code {
+    public const string ViewCookie = "pt-admin-view";
+
+    [CascadingParameter] public HttpContext? HttpContext { get; set; }
+
     private bool _isHub;
+    private bool _sidebar;
     private AdminAccess _access = new();
     private SetupState? _state;
     private (AdminMenuGroup Group, AdminMenuItem Item)? _current;
+
+    // W menu nie pokazujemy opcji spoza planu — tylko to, z czego da się skorzystać.
+    private IEnumerable<AdminMenuItem> VisibleItems(AdminMenuGroup group) =>
+        group.Items.Where(i => _access.Sees(i) && (i.PlanFlag is null || Entitlements.IsAllowed(i.PlanFlag)));
 
     protected override async Task OnInitializedAsync()
     {
         var path = Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].Trim('/');
         _isHub = path.Equals("admin", StringComparison.OrdinalIgnoreCase);
-        if (_isHub) return;
         _current = AdminMenu.Find(path);
         _access = await AdminAccess.LoadAsync(AuthState, Permission);
+        _sidebar = _access.IsAdmin && HttpContext?.Request.Cookies[ViewCookie] == "sidebar";
+        if (_isHub && !_sidebar) return;
         var auth = await AuthState.GetAuthenticationStateAsync();
         _state = await Guide.GetAsync(auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "", _access);
     }

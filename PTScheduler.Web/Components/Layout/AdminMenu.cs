@@ -222,6 +222,56 @@ public static class AdminMenu
         ], Advanced: true)
     ];
 
+    /// <summary>Miejsca spoza listy ustawień, które też warto znaleźć wyszukiwarką.</summary>
+    public static readonly IReadOnlyList<AdminMenuItem> Extra =
+    [
+        new("trainer/pairs", "bi-people-fill", "Treningi w parach", "Pary podopiecznych i pakiety dla pary", "", StatusKey: null),
+        new("trainer/intro-config", "bi-person-lines-fill", "Pierwsza wizyta", "Rezerwacja pierwszego treningu ze strony", ""),
+        new("trainer/series", "bi-repeat", "Serie wizyt", "Stałe, powtarzalne terminy", "", PlanFlag: "RecurringSessions"),
+        new("admin/upgrade", "bi-rocket-takeoff-fill", "Ulepsz plan", "Więcej funkcji, SMS-y, zespół", "", OwnerOnly: true),
+        new("admin/feedback", "bi-chat-heart", "Oceń aplikację", "Napisz, czego brakuje", ""),
+        new("Account/Manage", "bi-person-gear", "Moje konto", "Hasło, e-mail, logowanie kluczem dostępu", ""),
+    ];
+
+    /// <summary>Słowa, po których ludzie szukają ustawienia, choć nie ma ich w nazwie ani opisie.</summary>
+    public static readonly IReadOnlyDictionary<string, string> SearchWords = new Dictionary<string, string>
+    {
+        ["trainer/availability"] = "grafik dostępność urlop wolne sloty terminy kalendarz",
+        ["admin/session-types"] = "usługi cennik cena czas trwania",
+        ["admin/package-offers"] = "cennik oferta karnet wejścia",
+        ["admin/memberships"] = "abonament subskrypcja miesięczny",
+        ["admin/modules"] = "moduły włącz wyłącz ćwiczenia aktywność dieta",
+        ["admin/payments"] = "przelewy24 stripe blik karta zapłata faktura",
+        ["admin/coupons"] = "promocja zniżka kod rabat",
+        ["admin/vouchers"] = "prezent karta podarunkowa",
+        ["admin/sms"] = "wiadomości tekstowe przypomnienie",
+        ["admin/email"] = "poczta smtp mail",
+        ["admin/email-templates"] = "szablony maili treść powiadomień",
+        ["admin/push"] = "notyfikacje telefon",
+        ["admin/branding"] = "logo kolory motyw nazwa studia favicon",
+        ["admin/site"] = "strona główna witryna landing www szablon widgety wizytówka",
+        ["admin/google-calendar"] = "synchronizacja kalendarz google",
+        ["admin/users"] = "konta trenerzy asystenci pracownicy zespół",
+        ["admin/permissions"] = "role dostęp asystent",
+        ["admin/backup"] = "backup przywracanie",
+        ["admin/export"] = "csv excel pobierz rodo",
+        ["admin/audit-logs"] = "logi dziennik zdarzeń",
+        ["admin/demo"] = "przykładowe dane wyczyść",
+        ["Account/Manage"] = "hasło e-mail profil dwuetapowe 2fa",
+    };
+
+    /// <summary>Tekst do wyszukiwania bez polskich znaków i wielkości liter („Wygląd” = „wyglad”).</summary>
+    public static string Normalize(string? text)
+    {
+        if (string.IsNullOrEmpty(text)) return "";
+        var s = text.ToLowerInvariant().Replace('ł', 'l').Normalize(System.Text.NormalizationForm.FormD);
+        var sb = new System.Text.StringBuilder(s.Length);
+        foreach (var ch in s)
+            if (System.Globalization.CharUnicodeInfo.GetUnicodeCategory(ch) != System.Globalization.UnicodeCategory.NonSpacingMark)
+                sb.Append(ch);
+        return sb.ToString();
+    }
+
     /// <summary>Pozycja i grupa dla bieżącej ścieżki (np. „admin/branding/…”).</summary>
     public static (AdminMenuGroup Group, AdminMenuItem Item)? Find(string path)
     {

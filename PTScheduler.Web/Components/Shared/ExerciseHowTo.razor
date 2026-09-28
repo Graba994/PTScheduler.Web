@@ -1,0 +1,115 @@
+@* „Jak wykonać?” — podgląd ćwiczenia w trakcie treningu: film lub zdjęcia, kroki, partie mięśni.
+   Wysuwa się od dołu (na telefonie jak arkusz), trening zostaje pod spodem bez zmian. *@
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Domain.Enums
+@using PTScheduler.Domain.Rules
+
+<div class="howto-backdrop" @onclick="Close">
+    <div class="howto" role="dialog" aria-label="@($"Jak wykonać: {Name}")" @onclick:stopPropagation="true">
+        <div class="howto-handle" @onclick="Close"><span></span></div>
+        <div class="howto-head">
+            <div class="min-w-0">
+                <div class="howto-kicker">Jak wykonać</div>
+                <h5 class="howto-title">@Name</h5>
+            </div>
+            <button type="button" class="btn-close" aria-label="Zamknij" @onclick="Close"></button>
+        </div>
+
+        @if (Detail is null)
+        {
+            <div class="text-center py-5">
+                @if (Loading) { <div class="spinner-border text-primary"></div> }
+                else { <div class="text-muted">Nie udało się wczytać opisu ćwiczenia.</div> }
+            </div>
+        }
+        else
+        {
+            var d = Detail;
+            var hasVideo = d.VideoType != ExerciseVideoType.None && !string.IsNullOrWhiteSpace(d.VideoRef);
+            <div class="howto-body">
+                @if (hasVideo && d.VideoType == ExerciseVideoType.Url)
+                {
+                    <video class="howto-video" src="@d.VideoRef" controls playsinline preload="metadata"></video>
+                }
+                else if (hasVideo)
+                {
+                    <VideoPlayer Url="@(d.VideoType == ExerciseVideoType.YouTube ? d.VideoRef : null)"
+                                 BunnyVideoId="@(d.VideoType == ExerciseVideoType.Bunny ? d.VideoRef : null)" ShowPlaceholder="false" />
+                }
+
+                @if (d.ImageUrls.Count > 0)
+                {
+                    <div class="howto-images @(hasVideo ? "small" : "")">
+                        @foreach (var (img, i) in d.ImageUrls.Select((x, i) => (x, i)))
+                        {
+                            <figure>
+                                <img src="@img" alt="@($"{d.NamePl} — {(i == 0 ? "pozycja wyjściowa" : "ruch")}")" loading="lazy" />
+                                @if (d.ImageUrls.Count == 2) { <figcaption>@(i == 0 ? "Start" : "Ruch")</figcaption> }
+                            </figure>
+                        }
+                    </div>
+                }
+                else if (!hasVideo)
+                {
+                    <div class="howto-noimg"><i class="bi bi-clipboard-pulse"></i></div>
+                }
+
+                @if (!string.IsNullOrWhiteSpace(Note))
+                {
+                    <div class="howto-note"><i class="bi bi-chat-quote-fill"></i><span><b>Od trenera:</b> @Note</span></div>
+                }
+
+                @{
+                    var desc = !string.IsNullOrWhiteSpace(d.DescriptionPl) ? d.DescriptionPl : d.DescriptionEn;
+                    var steps = (desc ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                }
+                <div class="howto-section">Krok po kroku</div>
+                @if (steps.Length > 1)
+                {
+                    <ol class="howto-steps">
+                        @foreach (var step in steps) { <li>@step</li> }
+                    </ol>
+                }
+                else if (steps.Length == 1)
+                {
+                    <p class="howto-text">@steps[0]</p>
+                }
+                else
+                {
+                    <p class="text-muted small">Trener nie dodał jeszcze opisu. Zapytaj na czacie, jeśli coś jest niejasne.</p>
+                }
+
+                @{ var primary = Muscles.Parse(d.PrimaryMuscles); var secondary = Muscles.Parse(d.SecondaryMuscles); }
+                @if (primary.Count > 0 || secondary.Count > 0)
+                {
+                    <div class="howto-section">Pracują mięśnie</div>
+                    <div class="howto-muscles">
+                        @foreach (var m in primary) { <span class="main">@Muscles.Label(m)</span> }
+                        @foreach (var m in secondary) { <span>@Muscles.Label(m)</span> }
+                    </div>
+                }
+                @if (!string.IsNullOrWhiteSpace(d.Equipment))
+                {
+                    <div class="howto-equip"><i class="bi bi-tools me-1"></i>Sprzęt: @d.Equipment</div>
+                }
+                @if (!string.IsNullOrWhiteSpace(d.Attribution))
+                {
+                    <div class="howto-attr"><i class="bi bi-c-circle me-1"></i>@d.Attribution</div>
+                }
+            </div>
+        }
+        <div class="howto-foot">
+            <button type="button" class="btn btn-primary w-100 py-2 fw-semibold" @onclick="Close"><i class="bi bi-arrow-return-left me-1"></i>Wracam do treningu</button>
+        </div>
+    </div>
+</div>
+
+@code {
+    [Parameter] public ExerciseDetailDto? Detail { get; set; }
+    [Parameter] public bool Loading { get; set; }
+    [Parameter] public string Name { get; set; } = "";
+    [Parameter] public string? Note { get; set; }
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private Task Close() => OnClose.InvokeAsync();
+}

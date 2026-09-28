@@ -13,6 +13,7 @@
 @inject IWorkoutLogService WorkoutLog
 @inject IWorkoutSessionService Session
 @inject IClientService ClientService
+@inject IExerciseCatalogService Catalog
 @inject ISurveyService Surveys
 @inject IAppClock Clock
 @inject AuthenticationStateProvider AuthState
@@ -101,6 +102,9 @@ else if (_draft is not null)
                     {
                         <div class="train-ex-note"><i class="bi bi-chat-quote me-1"></i>@ex.Notes</div>
                     }
+                    <button type="button" class="train-howto-btn" @onclick="() => ShowHowToAsync(ex)">
+                        <i class="bi bi-play-circle-fill"></i>Jak wykonać to ćwiczenie?
+                    </button>
                     <div class="train-cols" style="--cols:@Columns(tr).Count">
                         <span class="text-center">#</span>
                         @foreach (var col in Columns(tr))
@@ -146,6 +150,11 @@ else if (_draft is not null)
         </button>
         <button class="btn btn-link text-danger" @onclick="DiscardDraft"><i class="bi bi-x-circle me-1"></i>Odrzuć trening</button>
     </div>
+
+    @if (_howTo is not null)
+    {
+        <ExerciseHowTo Name="@_howTo.NamePl" Note="@_howTo.Notes" Detail="_howToDetail" Loading="_howToLoading" OnClose="() => _howTo = null" />
+    }
 }
 else
 {
@@ -269,6 +278,28 @@ else
     private readonly HashSet<int> _expanded = [];
     private bool _scrollTop;
 
+    // „Jak wykonać?” w trakcie treningu — opis i film z katalogu trenera.
+    private string? _trainerUserId;
+    private DraftExercise? _howTo;
+    private ExerciseDetailDto? _howToDetail;
+    private bool _howToLoading;
+    private readonly Dictionary<int, ExerciseDetailDto?> _howToCache = [];
+
+    private async Task ShowHowToAsync(DraftExercise ex)
+    {
+        _howTo = ex;
+        if (_howToCache.TryGetValue(ex.ExerciseId, out var cached)) { _howToDetail = cached; return; }
+        _howToDetail = null;
+        _howToLoading = true;
+        try
+        {
+            _howToDetail = string.IsNullOrEmpty(_trainerUserId) ? null : await Catalog.GetAsync(_trainerUserId, ex.ExerciseId);
+            _howToCache[ex.ExerciseId] = _howToDetail;
+        }
+        catch (Exception e) { LoggerFactory.CreateLogger("Train").LogWarning(e, "Nie udało się wczytać opisu ćwiczenia {Id}.", ex.ExerciseId); }
+        finally { _howToLoading = false; }
+    }
+
     protected override async Task OnInitializedAsync()
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
@@ -276,6 +307,7 @@ else
         var client = await ClientService.GetClientByUserIdAsync(userId);
         if (client is null) return;
         _clientId = client.Id;
+        _trainerUserId = client.TrainerUserId;
         _storeKey = $"pt_workout_v1_{_clientId}";
         _plans = await PlanService.GetClientPlansAsync(_clientId.Value);
         _history = await WorkoutLog.GetRecentForClientAsync(_clientId.Value, 10);
