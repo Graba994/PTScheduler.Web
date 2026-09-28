@@ -50,11 +50,11 @@ public sealed class ClientNav(
         };
 
         var training = new List<Tab>();
-        if (plans) training.Add(new("/train", "Trenuj", "bi-lightning-charge-fill"));
+        if (plans) training.Add(new("/train", "Trenuj", "pt-ico-dumbbell"));
         if (plans) training.Add(new("/my/workouts", "Postępy", "bi-graph-up-arrow"));
         if (measurements) training.Add(new("/my/measurements", "Pomiary", "bi-rulers"));
         if (training.Count > 0)
-            sections.Add(new("training", "Trening", "bi-lightning-charge-fill", training[0].Href, training));
+            sections.Add(new("training", "Trening", "pt-ico-dumbbell", training[0].Href, training));
 
         sections.Add(new("chat", "Wiadomości", "bi-chat-dots-fill", "/chat", [new("/chat", "Wiadomości", "bi-chat-dots-fill")]));
 

@@ -4204,3 +4204,83 @@ h4[tabindex="-1"]:focus, h5[tabindex="-1"]:focus, h6[tabindex="-1"]:focus { outl
     .cdx-kpi b { font-size: 1.25rem; }
 }
 @media (prefers-reduced-motion: reduce) { .cdx-soon-chip { animation: none; } }
+
+/* ── Motywy treningowe: własne ikony (hantle, kettlebell, talerz) jako maski SVG ──
+   Kolor bierze się z currentColor, więc działają w każdym motywie i w trybie ciemnym. */
+:root {
+    --pt-ico-dumbbell: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect x='6.5' y='10.9' width='11' height='2.2' rx='1.1'/%3E%3Crect x='4.2' y='6.5' width='3.2' height='11' rx='1.2'/%3E%3Crect x='16.6' y='6.5' width='3.2' height='11' rx='1.2'/%3E%3Crect x='1.4' y='8.8' width='2.4' height='6.4' rx='1'/%3E%3Crect x='20.2' y='8.8' width='2.4' height='6.4' rx='1'/%3E%3C/svg%3E");
+    /* Ta sama hantla ukośnie i większa — czytelniejsza w małym rozmiarze (menu, przyciski). */
+    --pt-ico-dumbbell-d: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cg transform='translate(12 12) rotate(-45) scale(1.22) translate(-12 -12)'%3E%3Crect x='6.5' y='10.9' width='11' height='2.2' rx='1.1'/%3E%3Crect x='4.2' y='6.5' width='3.2' height='11' rx='1.2'/%3E%3Crect x='16.6' y='6.5' width='3.2' height='11' rx='1.2'/%3E%3Crect x='1.4' y='8.8' width='2.4' height='6.4' rx='1'/%3E%3Crect x='20.2' y='8.8' width='2.4' height='6.4' rx='1'/%3E%3C/g%3E%3C/svg%3E");
+    --pt-ico-kettlebell: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Ccircle cx='12' cy='15.2' r='6.8'/%3E%3Cpath d='M8.4 10.2V7a3.6 3.6 0 0 1 7.2 0v3.2' fill='none' stroke='black' stroke-width='2.2' stroke-linecap='round'/%3E%3C/svg%3E");
+    /* Kafelek wzoru (hantle + talerz) do tła, np. ekranu logowania. */
+    --pt-pattern-gym: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 132 132'%3E%3Cg transform='translate(10 14) scale(2)'%3E%3Crect x='6.5' y='10.9' width='11' height='2.2' rx='1.1'/%3E%3Crect x='4.2' y='6.5' width='3.2' height='11' rx='1.2'/%3E%3Crect x='16.6' y='6.5' width='3.2' height='11' rx='1.2'/%3E%3Crect x='1.4' y='8.8' width='2.4' height='6.4' rx='1'/%3E%3Crect x='20.2' y='8.8' width='2.4' height='6.4' rx='1'/%3E%3C/g%3E%3Cg transform='translate(80 76) scale(1.4)'%3E%3Cpath fill-rule='evenodd' d='M12 1.8a10.2 10.2 0 1 0 0 20.4 10.2 10.2 0 0 0 0-20.4zm0 3a7.2 7.2 0 1 1 0 14.4 7.2 7.2 0 0 1 0-14.4zm0 4.6a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2z'/%3E%3C/g%3E%3C/svg%3E");
+    --pt-ico-plate: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Cpath fill-rule='evenodd' d='M12 1.8a10.2 10.2 0 1 0 0 20.4 10.2 10.2 0 0 0 0-20.4zm0 3a7.2 7.2 0 1 1 0 14.4 7.2 7.2 0 0 1 0-14.4zm0 4.6a2.6 2.6 0 1 0 0 5.2 2.6 2.6 0 0 0 0-5.2z'/%3E%3C/svg%3E");
+}
+
+/* Ikona w tekście: <i class="pt-ico pt-ico-dumbbell"></i> (działa też razem z klasą .bi) */
+.pt-ico, .bi.pt-ico-dumbbell, .bi.pt-ico-kettlebell, .bi.pt-ico-plate {
+    display: inline-block; width: 1.2em; height: 1.2em; vertical-align: -.22em; flex-shrink: 0;
+    background-color: currentColor;
+    -webkit-mask: var(--pt-ico, var(--pt-ico-dumbbell-d)) center / contain no-repeat;
+    mask: var(--pt-ico, var(--pt-ico-dumbbell-d)) center / contain no-repeat;
+}
+.sidebar-link i.pt-ico-dumbbell { width: 1.125rem; height: 1.125rem; }
+.pt-ico-dumbbell { --pt-ico: var(--pt-ico-dumbbell-d); }
+.pt-ico-kettlebell { --pt-ico: var(--pt-ico-kettlebell); }
+.pt-ico-plate { --pt-ico: var(--pt-ico-plate); }
+
+/* Znak wodny w tle kafelka: klasa .pt-mark + wariant ikony. Za treścią, lekko obrócony. */
+.pt-mark { position: relative; isolation: isolate; overflow: hidden; }
+.pt-mark::after {
+    content: ""; position: absolute; z-index: -1; pointer-events: none;
+    right: var(--pt-mark-x, -12px); bottom: var(--pt-mark-y, -16px);
+    width: var(--pt-mark-size, 92px); height: var(--pt-mark-size, 92px);
+    background-color: var(--pt-mark-color, currentColor); opacity: var(--pt-mark-opacity, .06);
+    -webkit-mask: var(--pt-mark-ico, var(--pt-ico-dumbbell)) center / contain no-repeat;
+    mask: var(--pt-mark-ico, var(--pt-ico-dumbbell)) center / contain no-repeat;
+    transform: rotate(var(--pt-mark-rot, -24deg));
+    transition: transform .6s ease, opacity .3s ease;
+}
+.pt-mark:hover::after { transform: rotate(calc(var(--pt-mark-rot, -24deg) + 8deg)) scale(1.06); opacity: calc(var(--pt-mark-opacity, .06) + .03); }
+.pt-mark-kettlebell { --pt-mark-ico: var(--pt-ico-kettlebell); --pt-mark-rot: 12deg; }
+.pt-mark-plate { --pt-mark-ico: var(--pt-ico-plate); --pt-mark-rot: 0deg; }
+
+/* Kafelki statystyk w całej aplikacji: co drugi z innym sprzętem, bardzo delikatnie. */
+.stat-card, .ad-kpi, .cdx-kpi { position: relative; isolation: isolate; overflow: hidden; }
+.stat-card::after, .ad-kpi::after, .cdx-kpi::after {
+    content: ""; position: absolute; z-index: -1; pointer-events: none; right: -14px; bottom: -18px;
+    width: 84px; height: 84px; background-color: var(--c-primary); opacity: .055;
+    -webkit-mask: var(--pt-ico-dumbbell) center / contain no-repeat; mask: var(--pt-ico-dumbbell) center / contain no-repeat;
+    transform: rotate(-24deg); transition: transform .6s ease, opacity .3s ease;
+}
+.stat-card:nth-child(3n+2)::after, .ad-kpi:nth-child(3n+2)::after, .cdx-kpi:nth-child(3n+2)::after {
+    -webkit-mask-image: var(--pt-ico-kettlebell); mask-image: var(--pt-ico-kettlebell); transform: rotate(12deg);
+}
+.stat-card:nth-child(3n)::after, .ad-kpi:nth-child(3n)::after, .cdx-kpi:nth-child(3n)::after {
+    -webkit-mask-image: var(--pt-ico-plate); mask-image: var(--pt-ico-plate); transform: none;
+}
+.col-6:nth-child(3n+2) > .stat-card::after, .col-md-3:nth-child(3n+2) > .stat-card::after, .col-xl-3:nth-child(3n+2) > .stat-card::after {
+    -webkit-mask-image: var(--pt-ico-kettlebell); mask-image: var(--pt-ico-kettlebell); transform: rotate(12deg);
+}
+.col-6:nth-child(3n) > .stat-card::after, .col-md-3:nth-child(3n) > .stat-card::after, .col-xl-3:nth-child(3n) > .stat-card::after {
+    -webkit-mask-image: var(--pt-ico-plate); mask-image: var(--pt-ico-plate); transform: none;
+}
+.stat-card:hover::after, .ad-kpi:hover::after, .cdx-kpi:hover::after { opacity: .09; }
+
+/* Karta „następny trening” klienta: duże hantle zamiast koła. */
+.cdx-next::after {
+    border: 0; width: 210px; height: 210px; right: -38px; bottom: -58px; border-radius: 0;
+    background-color: #fff; opacity: .1;
+    -webkit-mask: var(--pt-ico-dumbbell) center / contain no-repeat; mask: var(--pt-ico-dumbbell) center / contain no-repeat;
+    transform: rotate(-28deg);
+}
+/* Pasek „Pierwsze kroki” i baner roli administratora — mały talerz / kettlebell w tle. */
+.ad-setup { position: relative; isolation: isolate; overflow: hidden; }
+.ad-setup::after {
+    content: ""; position: absolute; z-index: -1; right: 18%; top: -26px; width: 120px; height: 120px; pointer-events: none;
+    background-color: var(--c-primary); opacity: .07;
+    -webkit-mask: var(--pt-ico-plate) center / contain no-repeat; mask: var(--pt-ico-plate) center / contain no-repeat;
+}
+@media (prefers-reduced-motion: reduce) {
+    .pt-mark::after, .stat-card::after, .ad-kpi::after, .cdx-kpi::after { transition: none; }
+}
