@@ -13,6 +13,12 @@
             <AuthorizeView Roles="Client">
                 <Authorized><ClientTabs /></Authorized>
             </AuthorizeView>
+            @if (ShowAdminBanner)
+            {
+                <AuthorizeView Roles="Admin">
+                    <Authorized><AdminRoleBanner /></Authorized>
+                </AuthorizeView>
+            }
             <ErrorBoundary @ref="_errorBoundary">
                 <ChildContent>@Body</ChildContent>
                 <ErrorContent>
@@ -109,6 +115,19 @@
     {
         _clientSections = await ClientNav.GetSectionsAsync();
         _clientSection = PTScheduler.Web.Services.ClientNav.Match(_clientSections, Nav.ToBaseRelativePath(Nav.Uri)).Section;
+    }
+
+    // Baner „Jesteś na koncie Administratora” — na stronach pracy trenera, nie w ustawieniach.
+    private static readonly string[] TrainerWork = ["app", "calendar", "sessions", "clients", "trainer", "chat"];
+
+    private bool ShowAdminBanner
+    {
+        get
+        {
+            var current = Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].TrimStart('/');
+            var first = current.Split('/')[0];
+            return TrainerWork.Contains(first, StringComparer.OrdinalIgnoreCase);
+        }
     }
 
     private string IsActive(string path)

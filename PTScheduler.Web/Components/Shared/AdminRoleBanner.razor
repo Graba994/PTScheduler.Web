@@ -1,0 +1,42 @@
+@* Wyraźna informacja na koncie Administratora: to konto służy do ustawień aplikacji.
+   Treningi prowadzi się na profilu trenera — tylko jego widzą klienci i zapisy online. *@
+@inject PTScheduler.Application.Interfaces.IUserManagementService Users
+
+<div class="admin-role-banner" role="note">
+    <div class="arb-ic"><i class="bi bi-shield-lock-fill"></i></div>
+    <div class="arb-txt">
+        <b>Jesteś na koncie Administratora</b>
+        @if (_hasTrainer)
+        {
+            <span>Tu ustawiasz aplikację: ceny, płatności, wygląd i konta. Żeby prowadzić treningi, zaloguj się na profil trenera — tylko on jest widoczny dla klientów w zapisach.</span>
+        }
+        else
+        {
+            <span>To konto służy do ustawień i nie przyjmuje zapisów klientów. Utwórz swój profil trenera (z innym adresem e-mail) i na nim prowadź treningi.</span>
+        }
+    </div>
+    <div class="arb-act">
+        @if (_hasTrainer)
+        {
+            <form action="Account/Logout" method="post">
+                <AntiforgeryToken />
+                <input type="hidden" name="ReturnUrl" value="/Account/Login" />
+                <button type="submit" class="btn btn-sm arb-btn"><i class="bi bi-person-badge me-1"></i>Zaloguj się jako trener</button>
+            </form>
+        }
+        else
+        {
+            <a href="/admin/users" class="btn btn-sm arb-btn"><i class="bi bi-person-plus me-1"></i>Utwórz profil trenera</a>
+        }
+    </div>
+</div>
+
+@code {
+    private bool _hasTrainer;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _hasTrainer = (await Users.GetTrainersAsync()).Count > 0; }
+        catch { _hasTrainer = false; }
+    }
+}

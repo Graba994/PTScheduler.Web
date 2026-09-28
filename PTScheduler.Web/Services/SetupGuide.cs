@@ -60,6 +60,10 @@ public sealed class SetupGuide(
             var courses = await db.Courses.CountAsync();
             var users = await db.Users.CountAsync();
             var clients = await db.Clients.CountAsync();
+            var trainers = await (from ur in db.UserRoles
+                                  join r in db.Roles on ur.RoleId equals r.Id
+                                  where r.Name == Domain.Constants.Roles.Trainer
+                                  select ur.UserId).CountAsync();
             var hasLogo = await db.AppBrandings.AnyAsync(b => b.LogoPath != null && b.LogoPath != "");
             var paymentsEnabled = false;
             try { paymentsEnabled = (await paymentSettings.GetAsync()).Enabled; }
@@ -87,7 +91,12 @@ public sealed class SetupGuide(
             {
                 if (access.IsAdmin)
                     steps.Add(new("Dodaj logo i kolory", "Klienci zobaczą Twoją markę", "/admin/branding", "bi-palette", hasLogo));
-                steps.Add(new("Ustaw godziny pracy", "Kiedy klienci mogą się zapisać", "/trainer/availability", "bi-clock", weeklyHours > 0));
+                // Konto administratora nie prowadzi treningów (nie ma go w zapisach online) —
+                // właściciel zakłada sobie profil trenera i tam ustawia godziny pracy.
+                if (access.IsAdmin)
+                    steps.Add(new("Utwórz swój profil trenera", "Na nim prowadzisz treningi i przyjmujesz zapisy", "/admin/users", "bi-person-badge", trainers > 0));
+                else
+                    steps.Add(new("Ustaw godziny pracy", "Kiedy klienci mogą się zapisać", "/trainer/availability", "bi-clock", weeklyHours > 0));
                 if (access.IsAdmin)
                     steps.Add(new("Dodaj rodzaj treningu", "Np. trening personalny 60 min", "/admin/session-types", "bi-lightning-charge", sessionTypes > 0));
                 if (access.Can(Perms.ManageClients))
