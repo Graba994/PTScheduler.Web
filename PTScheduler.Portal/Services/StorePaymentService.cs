@@ -34,6 +34,11 @@ public class StorePaymentService(
         if (!string.IsNullOrWhiteSpace(p24MerchantId) && !string.IsNullOrWhiteSpace(p24ApiKey))
             gateways.Add("przelewy24");
 
+        var autopayService = await settings.GetAsync(SiteSettingsService.Keys.AutopayServiceId);
+        var autopayKey = await settings.GetAsync(SiteSettingsService.Keys.AutopaySharedKey);
+        if (!string.IsNullOrWhiteSpace(autopayService) && !string.IsNullOrWhiteSpace(autopayKey))
+            gateways.Add("autopay");
+
         return gateways;
     }
 
@@ -46,6 +51,7 @@ public class StorePaymentService(
             "stripe" => await CreateStripePaymentAsync(amount, description, orderGroupId, returnUrl),
             "payu" => await CreatePayuPaymentAsync(amount, description, orderGroupId, returnUrl, notifyBaseUrl, buyerEmail),
             "przelewy24" => await CreateP24PaymentAsync(amount, description, orderGroupId, returnUrl, notifyBaseUrl, buyerEmail),
+            "autopay" => await CreateAutopayPaymentAsync(amount, description, orderGroupId, buyerEmail),
             _ => (null, null, $"Nieznana bramka płatności: {gateway}")
         };
     }
@@ -321,6 +327,58 @@ public class StorePaymentService(
             logger.LogError(ex, "P24 payment creation failed");
             return (null, null, ex.Message);
         }
+    }
+
+    // Autopay: adres ITN i powrotu ustawia się w panelu Autopay (pokazujemy je w Konfiguracji → Bramki płatności).
+    private async Task<(string? PaymentUrl, string? ExternalId, string? Error)> CreateAutopayPaymentAsync(
+        decimal amount, string description, string orderGroupId, string? buyerEmail)
+    {
+        var serviceId = (await settings.GetAsync(SiteSettingsService.Keys.AutopayServiceId))?.Trim();
+        var key = (await settings.GetAsync(SiteSettingsService.Keys.AutopaySharedKey))?.Trim();
+        if (string.IsNullOrWhiteSpace(serviceId) || string.IsNullOrWhiteSpace(key))
+            return (null, null, "Autopay nie jest skonfigurowany.");
+        var sandbox = await settings.GetAsync(SiteSettingsService.Keys.AutopaySandbox) == "true";
+        var url = AutopayProtocol.StartUrl(sandbox, serviceId, key, orderGroupId, amount, description, "PLN", buyerEmail);
+        return (url, orderGroupId, null);
+    }
+
+    /// <summary>
+    /// ITN Autopay: sprawdza hash, przy SUCCESS oznacza zamówienia jako opłacone i zwraca XML,
+    /// którego oczekuje Autopay (CONFIRMED — przyjęte, NOTCONFIRMED — Autopay ponowi powiadomienie).
+    /// </summary>
+    public async Task<string?> HandleAutopayItnAsync(string formBody)
+    {
+        var serviceId = (await settings.GetAsync(SiteSettingsService.Keys.AutopayServiceId))?.Trim() ?? "";
+        var key = (await settings.GetAsync(SiteSettingsService.Keys.AutopaySharedKey))?.Trim() ?? "";
+        if (serviceId.Length == 0 || key.Length == 0) return null;
+
+        var payload = AutopayProtocol.TransactionsFromForm(formBody);
+        var itn = payload is null ? null : AutopayProtocol.ParseItn(payload, key);
+        if (itn is null || itn.Transactions.Count == 0) return null;
+
+        if (!itn.HashValid || itn.ServiceId != serviceId)
+        {
+            logger.LogWarning("Autopay ITN: niezgodny hash albo ServiceID.");
+            return AutopayProtocol.ConfirmationXml(itn.ServiceId, itn.Transactions.Select(t => (t.OrderId, false)), key);
+        }
+
+        var results = new List<(string OrderId, bool Confirmed)>();
+        foreach (var tx in itn.Transactions)
+        {
+            await using var db = dbFactory.CreateDbContext();
+            var orders = await db.ServiceOrders.AsNoTracking()
+                .Where(o => o.PaymentExternalId == tx.OrderId && o.PaymentGateway == "autopay")
+                .Select(o => o.Status).ToListAsync();
+            if (orders.Count == 0) { results.Add((tx.OrderId, false)); continue; }
+
+            // Opłacone tylko raz — powtórzone ITN potwierdzamy bez ponownego księgowania.
+            if (tx.PaymentStatus.Equals("SUCCESS", StringComparison.OrdinalIgnoreCase)
+                && orders.Any(s => s == ServiceOrderStatus.AwaitingPayment))
+                results.Add((tx.OrderId, await HandlePaymentConfirmationAsync("autopay", tx.OrderId)));
+            else
+                results.Add((tx.OrderId, true));
+        }
+        return AutopayProtocol.ConfirmationXml(serviceId, results, key);
     }
 
     public async Task<bool> VerifyPayuNotification(string body, string? signatureHeader)

@@ -59,10 +59,10 @@ public static class PaymentProviderCatalog
             ]),
 
         new("autopay", "Autopay", "bi-cash-coin",
-            "Autopay (dawniej Blue Media / BM). Dane z panelu Autopay → Konfiguracja → Ustawienia techniczne.",
+            "Autopay (dawniej Blue Media): BLIK, szybkie przelewy, karty, Google Pay i Apple Pay. Dane z panelu Autopay → Konfiguracja serwisu (osobne dla serwisu testowego i produkcyjnego).",
             [
-                new("ServiceId", "ServiceID"),
-                new("SharedKey", "Klucz współdzielony (hash)", Secret: true),
+                new("ServiceId", "Identyfikator serwisu (ServiceID)"),
+                new("SharedKey", "Klucz współdzielony", Secret: true),
             ]),
     ];
 

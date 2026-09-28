@@ -757,8 +757,18 @@ app.MapPost("/payments/{provider}/notify",
     using var reader = new StreamReader(ctx.Request.Body);
     var body = await reader.ReadToEndAsync();
     var headers = ctx.Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString(), StringComparer.OrdinalIgnoreCase);
-    var ok = await payments.HandleNotifyAsync(provider, body, headers);
-    return ok ? Results.Ok() : Results.BadRequest();
+    var result = await payments.HandleNotifyAsync(provider, body, headers);
+    // Autopay oczekuje HTTP 200 z XML (CONFIRMED / NOTCONFIRMED) także wtedy, gdy nie przyjmujemy powiadomienia.
+    if (result.Body is not null) return Results.Content(result.Body, result.ContentType ?? "text/plain", System.Text.Encoding.UTF8);
+    return result.Ok ? Results.Ok() : Results.BadRequest();
+});
+
+// Autopay: powrót klienta z bramki (adres ustawiany w panelu Autopay). Status płatności przychodzi osobno w ITN,
+// więc tylko prowadzimy na stronę zamówienia, która pokazuje jego aktualny stan.
+app.MapGet("/payments/autopay/return", (HttpContext ctx) =>
+{
+    var orderId = PTScheduler.Infrastructure.Services.Payments.AutopayProtocol.SafeOrderId(ctx.Request.Query["OrderID"].ToString());
+    return Results.Redirect(orderId is null ? "/app" : $"/payment/success?order={orderId}");
 });
 
 app.Run();

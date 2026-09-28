@@ -7,6 +7,7 @@
 @inject IPermissionService Permission
 @inject EntitlementService Entitlements
 @inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Płatności online" />
@@ -104,6 +105,18 @@ else
                                         </div>
                                     }
                                 </div>
+                                @if (meta.Key == PaymentProviders.AutoPay)
+                                {
+                                    @* Autopay nie przyjmuje adresów w transakcji — ustawia się je raz w panelu serwisu. *@
+                                    <div class="alert alert-info small mt-3 mb-0">
+                                        <div class="fw-semibold mb-2"><i class="bi bi-link-45deg me-1"></i>Wpisz te adresy w panelu Autopay (Konfiguracja serwisu):</div>
+                                        <label class="form-label small mb-1">Adres powiadomień o płatnościach (ITN)</label>
+                                        <input class="form-control form-control-sm mb-2" readonly value="@($"{BaseUrl}/payments/autopay/notify")" aria-label="Adres ITN" />
+                                        <label class="form-label small mb-1">Adres powrotu klienta po płatności</label>
+                                        <input class="form-control form-control-sm mb-2" readonly value="@($"{BaseUrl}/payments/autopay/return")" aria-label="Adres powrotu" />
+                                        <div>Algorytm hasha: <b>SHA256</b>, separator <b>|</b>. W trybie sandbox płatności idą przez bramkę testową Autopay (testpay.autopay.eu).</div>
+                                    </div>
+                                }
                             }
                             else
                             {
@@ -151,6 +164,8 @@ else
 
     private static void SetField(PaymentProviderConfigDto cfg, string key, string? value)
         => cfg.Fields[key] = value ?? string.Empty;
+
+    private string BaseUrl => Nav.BaseUri.TrimEnd('/');
 
     private async Task Save()
     {

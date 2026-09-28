@@ -359,6 +359,29 @@ app.MapPost("/api/webhooks/payu", async (HttpContext ctx, StorePaymentService st
     return Results.Ok();
 });
 
+// Autopay ITN (application/x-www-form-urlencoded, pole „transactions”). Odpowiedź: XML confirmationList, zawsze HTTP 200.
+app.MapPost("/api/webhooks/autopay", async (HttpContext ctx, StorePaymentService storePayment) =>
+{
+    using var reader = new StreamReader(ctx.Request.Body);
+    var body = await reader.ReadToEndAsync();
+    var xml = await storePayment.HandleAutopayItnAsync(body);
+    return xml is null ? Results.BadRequest() : Results.Content(xml, "application/xml", System.Text.Encoding.UTF8);
+});
+
+// Autopay: powrót trenera z bramki — wraca do swojego sklepu (status przychodzi osobno w ITN).
+app.MapGet("/api/webhooks/autopay/return", async (HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory) =>
+{
+    var orderId = AutopayProtocol.SafeOrderId(ctx.Request.Query["OrderID"].ToString());
+    if (orderId is null) return Results.Redirect("/");
+    await using var db = dbFactory.CreateDbContext();
+    var domain = await db.ServiceOrders.AsNoTracking()
+        .Where(o => o.PaymentExternalId == orderId && o.PaymentGateway == "autopay")
+        .Select(o => o.Tenant.Domain).FirstOrDefaultAsync();
+    return string.IsNullOrWhiteSpace(domain)
+        ? Results.Redirect("/")
+        : Results.Redirect($"https://{domain}/admin/sklep?payment=success");
+});
+
 // Przelewy24 notification webhook
 app.MapPost("/api/webhooks/przelewy24", async (HttpContext ctx, StorePaymentService storePayment, ILogger<Program> logger) =>
 {

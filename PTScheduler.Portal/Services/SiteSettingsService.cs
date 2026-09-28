@@ -52,6 +52,9 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string P24ApiKey = "p24_api_key";
         public const string P24Crc = "p24_crc";
         public const string P24Sandbox = "p24_sandbox";
+        public const string AutopayServiceId = "autopay_service_id";
+        public const string AutopaySharedKey = "autopay_shared_key";
+        public const string AutopaySandbox = "autopay_sandbox";
         public const string StorePaymentGateway = "store_payment_gateway";
         public const string AdminNotificationEmail = "admin_notification_email";
         /// <summary>Dane sprzedawcy w nagłówku PDF oferty trenera (nazwa, adres, NIP, konto — wiele linii).</summary>

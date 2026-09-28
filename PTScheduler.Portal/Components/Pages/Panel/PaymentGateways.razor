@@ -2,6 +2,7 @@
 @layout AdminLayout
 @attribute [Authorize(Roles = "Admin")]
 @inject SiteSettingsService Settings
+@inject NavigationManager Nav
 @rendermode InteractiveServer
 
 <PageTitle>Bramki płatności — PTScheduler Portal</PageTitle>
@@ -45,9 +46,16 @@ else
                         <i class="bi bi-bank me-1"></i>Przelewy24
                     </span>
                 }
+                @if (AutopayReady)
+                {
+                    <span class="badge bg-success-subtle text-success-emphasis px-3 py-2">
+                        <i class="bi bi-cash-coin me-1"></i>Autopay
+                    </span>
+                }
                 @if (string.IsNullOrWhiteSpace(_form.StripeSecretKey) &&
                      (string.IsNullOrWhiteSpace(_form.PayuPosId) || string.IsNullOrWhiteSpace(_form.PayuClientSecret)) &&
-                     (string.IsNullOrWhiteSpace(_form.P24MerchantId) || string.IsNullOrWhiteSpace(_form.P24ApiKey)))
+                     (string.IsNullOrWhiteSpace(_form.P24MerchantId) || string.IsNullOrWhiteSpace(_form.P24ApiKey)) &&
+                     !AutopayReady)
                 {
                     <span class="text-muted small">Brak skonfigurowanych bramek. Zamówienia będą przyjmowane bez płatności online.</span>
                 }
@@ -172,6 +180,44 @@ else
         }
     </div>
 
+    <!-- Autopay -->
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white fw-semibold d-flex align-items-center gap-2" style="cursor:pointer" @onclick="() => _showAutopay = !_showAutopay">
+            <i class="bi bi-cash-coin text-primary"></i>
+            <span>Autopay</span>
+            @if (AutopayReady)
+            {
+                <span class="badge bg-success ms-auto me-2">Aktywny</span>
+            }
+            <i class="bi @(_showAutopay ? "bi-chevron-up" : "bi-chevron-down") ms-auto"></i>
+        </div>
+        @if (_showAutopay)
+        {
+            <div class="card-body">
+                <p class="small text-muted">Autopay (dawniej Blue Media): BLIK, szybkie przelewy, karty, Google Pay i Apple Pay. Dane z panelu Autopay → Konfiguracja serwisu.</p>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Identyfikator serwisu (ServiceID)</label>
+                    <input class="form-control font-monospace" @bind="_form.AutopayServiceId" placeholder="np. 902123" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Klucz współdzielony</label>
+                    <input type="password" class="form-control font-monospace" @bind="_form.AutopaySharedKey" autocomplete="off" />
+                    <div class="form-text">Algorytm hasha w panelu Autopay: SHA256, separator |</div>
+                </div>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" @bind="_form.AutopaySandbox" id="autopaySandbox" />
+                    <label class="form-check-label small" for="autopaySandbox">Tryb testowy (testpay.autopay.eu)</label>
+                </div>
+                <div class="alert alert-info py-2 small mt-3 mb-0">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Wpisz w panelu Autopay:<br />
+                    <strong>Adres ITN:</strong> <code>@PortalBase/api/webhooks/autopay</code><br />
+                    <strong>Adres powrotu:</strong> <code>@PortalBase/api/webhooks/autopay/return</code>
+                </div>
+            </div>
+        }
+    </div>
+
     <button class="btn btn-primary" @onclick="Save" disabled="@_saving">
         @if (_saving)
         {
@@ -185,7 +231,9 @@ else
     private GatewayForm _form = new();
     private bool _loading = true;
     private bool _saving, _saved;
-    private bool _showStripe, _showPayu = true, _showP24 = true;
+    private bool _showStripe, _showPayu = true, _showP24 = true, _showAutopay = true;
+    private bool AutopayReady => !string.IsNullOrWhiteSpace(_form.AutopayServiceId) && !string.IsNullOrWhiteSpace(_form.AutopaySharedKey);
+    private string PortalBase => Nav.BaseUri.TrimEnd('/');
 
     protected override async Task OnInitializedAsync()
     {
@@ -199,7 +247,10 @@ else
             SiteSettingsService.Keys.P24PosId,
             SiteSettingsService.Keys.P24ApiKey,
             SiteSettingsService.Keys.P24Crc,
-            SiteSettingsService.Keys.P24Sandbox);
+            SiteSettingsService.Keys.P24Sandbox,
+            SiteSettingsService.Keys.AutopayServiceId,
+            SiteSettingsService.Keys.AutopaySharedKey,
+            SiteSettingsService.Keys.AutopaySandbox);
 
         _form.StripeSecretKey = keys[SiteSettingsService.Keys.StripeSecretKey];
         _form.PayuPosId = keys[SiteSettingsService.Keys.PayuPosId];
@@ -211,6 +262,9 @@ else
         _form.P24ApiKey = keys[SiteSettingsService.Keys.P24ApiKey];
         _form.P24Crc = keys[SiteSettingsService.Keys.P24Crc];
         _form.P24Sandbox = keys[SiteSettingsService.Keys.P24Sandbox] == "true";
+        _form.AutopayServiceId = keys[SiteSettingsService.Keys.AutopayServiceId];
+        _form.AutopaySharedKey = keys[SiteSettingsService.Keys.AutopaySharedKey];
+        _form.AutopaySandbox = keys[SiteSettingsService.Keys.AutopaySandbox] == "true";
         _loading = false;
     }
 
@@ -227,7 +281,10 @@ else
             [SiteSettingsService.Keys.P24PosId] = _form.P24PosId.Trim(),
             [SiteSettingsService.Keys.P24ApiKey] = _form.P24ApiKey.Trim(),
             [SiteSettingsService.Keys.P24Crc] = _form.P24Crc.Trim(),
-            [SiteSettingsService.Keys.P24Sandbox] = _form.P24Sandbox ? "true" : "false"
+            [SiteSettingsService.Keys.P24Sandbox] = _form.P24Sandbox ? "true" : "false",
+            [SiteSettingsService.Keys.AutopayServiceId] = _form.AutopayServiceId.Trim(),
+            [SiteSettingsService.Keys.AutopaySharedKey] = _form.AutopaySharedKey.Trim(),
+            [SiteSettingsService.Keys.AutopaySandbox] = _form.AutopaySandbox ? "true" : "false"
         });
         _saving = false; _saved = true;
     }
@@ -244,5 +301,8 @@ else
         public string P24ApiKey { get; set; } = "";
         public string P24Crc { get; set; } = "";
         public bool P24Sandbox { get; set; }
+        public string AutopayServiceId { get; set; } = "";
+        public string AutopaySharedKey { get; set; } = "";
+        public bool AutopaySandbox { get; set; }
     }
 }

@@ -26,8 +26,8 @@ public interface IPaymentService
     Task<PaymentInitResult> StartSessionCheckoutAsync(string userId, int sessionId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp);
     Task<PaymentInitResult> StartGiftVoucherCheckoutAsync(string userId, int voucherId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp);
 
-    /// <summary>Handles a gateway webhook for the given provider. Returns true if accepted.</summary>
-    Task<bool> HandleNotifyAsync(string providerKey, string rawBody, IReadOnlyDictionary<string, string> headers);
+    /// <summary>Handles a gateway webhook for the given provider (Ok = accepted; Body = odpowiedź wymagana przez bramkę).</summary>
+    Task<PaymentNotifyResponse> HandleNotifyAsync(string providerKey, string rawBody, IReadOnlyDictionary<string, string> headers);
 
     /// <summary>Completes (or cancels) a Simulator order from the internal test page.</summary>
     Task<bool> CompleteSimulatorAsync(string extOrderId, bool paid);
@@ -42,3 +42,6 @@ public interface IPaymentService
 
     Task<List<OrderDto>> GetPaidOrdersAsync(DateTime from);
 }
+
+/// <summary>Wynik obsługi powiadomienia bramki; Body — treść, której bramka oczekuje w odpowiedzi (np. XML Autopay).</summary>
+public sealed record PaymentNotifyResponse(bool Ok, string? Body = null, string? ContentType = null);

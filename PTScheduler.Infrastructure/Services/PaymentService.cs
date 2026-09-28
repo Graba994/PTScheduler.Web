@@ -286,14 +286,14 @@ public class PaymentService(
         return new(true, result.RedirectUrl, null);
     }
 
-    public async Task<bool> HandleNotifyAsync(string providerKey, string rawBody, IReadOnlyDictionary<string, string> headers)
+    public async Task<PaymentNotifyResponse> HandleNotifyAsync(string providerKey, string rawBody, IReadOnlyDictionary<string, string> headers)
     {
         var provider = Provider(providerKey);
-        if (provider is null) { logger.LogWarning("Notify for unknown provider {Provider}", providerKey); return false; }
+        if (provider is null) { logger.LogWarning("Notify for unknown provider {Provider}", providerKey); return new(false); }
 
         var settings = await settingsService.GetAsync();
         var providerCfg = settings.Provider(providerKey);
-        if (providerCfg is null) return false;
+        if (providerCfg is null) return new(false);
 
         var runtime = new ProviderRuntimeConfig
         {
@@ -303,10 +303,11 @@ public class PaymentService(
         };
 
         var res = await provider.HandleNotifyAsync(rawBody, headers, runtime);
-        if (!res.Valid || string.IsNullOrEmpty(res.ExtOrderId)) return false;
+        if (!res.Valid || string.IsNullOrEmpty(res.ExtOrderId))
+            return new(false, res.Respond?.Invoke(false), res.ContentTypeIfAny());
 
-        await ApplyOutcomeAsync(res.ExtOrderId, res.Outcome);
-        return true;
+        var handled = await ApplyOutcomeAsync(res.ExtOrderId, res.Outcome);
+        return new(handled, res.Respond?.Invoke(handled), res.ContentTypeIfAny());
     }
 
     public async Task<bool> CompleteSimulatorAsync(string extOrderId, bool paid)
@@ -318,11 +319,12 @@ public class PaymentService(
         return true;
     }
 
-    private async Task ApplyOutcomeAsync(string extOrderId, PaymentOutcome outcome)
+    /// <returns>false, gdy nie ma takiego zamówienia.</returns>
+    private async Task<bool> ApplyOutcomeAsync(string extOrderId, PaymentOutcome outcome)
     {
         await using var db = dbFactory.CreateDbContext();
         var order = await db.Orders.FirstOrDefaultAsync(o => o.ExtOrderId == extOrderId);
-        if (order is null) return;
+        if (order is null) return false;
 
         if (outcome == PaymentOutcome.Paid)
         {
@@ -363,6 +365,7 @@ public class PaymentService(
         {
             if (order.Status == OrderStatus.Pending) { order.Status = OrderStatus.Failed; await db.SaveChangesAsync(); }
         }
+        return true;
     }
 
     private async Task LogOrderPaidAsync(Order order)

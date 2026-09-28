@@ -28,10 +28,19 @@ public sealed record ProviderCheckoutResult(
     string? Error,
     string? ProviderOrderId = null);
 
+/// <param name="Respond">
+/// Bramki, które wymagają konkretnej odpowiedzi na powiadomienie (np. Autopay — XML z CONFIRMED),
+/// budują ją tutaj; argument mówi, czy zamówienie zostało znalezione i obsłużone.
+/// </param>
 public sealed record ProviderNotifyResult(
     bool Valid,
     string? ExtOrderId,
-    PaymentOutcome Outcome);
+    PaymentOutcome Outcome,
+    Func<bool, string>? Respond = null,
+    string ResponseContentType = "application/xml")
+{
+    public string? ContentTypeIfAny() => Respond is null ? null : ResponseContentType;
+}
 
 /// <summary>One payment gateway. Implementations are stateless and resolved by <see cref="Key"/>.</summary>
 public interface IPaymentProvider
