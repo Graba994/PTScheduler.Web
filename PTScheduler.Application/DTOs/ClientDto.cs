@@ -21,6 +21,8 @@ public class ClientDto
 
     public ClientStatus Status { get; set; } = ClientStatus.Active;
     public bool AllowSelfBooking { get; set; }
+    /// <summary>Zaufany klient: „zapłacę u trenera” bez akceptacji i bez limitu.</summary>
+    public bool TrustedForDeferredPayment { get; set; }
     public string? TrainerUserId { get; set; }
     public SessionPackageSummaryDto? ActivePackage { get; set; }
     public List<SessionPackageSummaryDto> AllPackages { get; set; } = [];

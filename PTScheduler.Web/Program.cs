@@ -164,6 +164,7 @@ builder.Services.AddHostedService<SessionReminderService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.EntitlementSyncService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.PackageReminderService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.KsefStatusService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.OffPackageHoldService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.MembershipBillingService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.ReferralRewardService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.CalendarSyncService>();

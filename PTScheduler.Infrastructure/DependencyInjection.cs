@@ -63,6 +63,7 @@ public static class DependencyInjection
         services.AddScoped<ISessionTypeService, SessionTypeService>();
         services.AddScoped<IIntroSessionService, IntroSessionService>();
         services.AddScoped<ISessionService, SessionService>();
+        services.AddScoped<IOffPackageService, OffPackageService>();
         services.AddScoped<IClientService, ClientService>();
         services.AddScoped<IAuditLogService, AuditLogService>();
         services.AddScoped<ITrainerAvailabilityService, TrainerAvailabilityService>();

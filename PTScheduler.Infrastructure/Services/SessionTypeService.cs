@@ -35,6 +35,8 @@ public class SessionTypeService(IDbContextFactory<ApplicationDbContext> dbFactor
             IsGroup = dto.IsGroup,
             MaxParticipants = dto.IsGroup ? dto.MaxParticipants : null,
             IsPair = dto.IsPair && !dto.IsGroup,
+            SinglePrice = dto.SinglePrice is > 0 ? Math.Round(dto.SinglePrice.Value, 2) : null,
+            RequiresPackage = dto.RequiresPackage,
             IsActive = true
         };
         db.SessionTypes.Add(entity);
@@ -52,6 +54,8 @@ public class SessionTypeService(IDbContextFactory<ApplicationDbContext> dbFactor
         entity.IsGroup = dto.IsGroup;
         entity.MaxParticipants = dto.IsGroup ? dto.MaxParticipants : null;
         entity.IsPair = dto.IsPair && !dto.IsGroup;
+        entity.SinglePrice = dto.SinglePrice is > 0 ? Math.Round(dto.SinglePrice.Value, 2) : null;
+        entity.RequiresPackage = dto.RequiresPackage;
         await db.SaveChangesAsync();
     }
 
@@ -72,6 +76,8 @@ public class SessionTypeService(IDbContextFactory<ApplicationDbContext> dbFactor
         IsGroup = t.IsGroup,
         MaxParticipants = t.MaxParticipants,
         IsPair = t.IsPair,
+        SinglePrice = t.SinglePrice,
+        RequiresPackage = t.RequiresPackage,
         IsActive = t.IsActive,
         SessionCount = sessionCount
     };

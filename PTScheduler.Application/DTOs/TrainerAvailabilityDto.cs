@@ -37,6 +37,12 @@ public class TrainerConfigDto
     public int CancellationWindowHours { get; set; } = 24;
     public LateCancellationPolicy LateCancellationPolicy { get; set; } = LateCancellationPolicy.Block;
     public bool NoShowChargesSession { get; set; } = true;
+
+    // Rezerwacja bez pakietu
+    public bool OffPackageOnline { get; set; } = true;
+    public bool OffPackageAtTrainer { get; set; } = true;
+    public bool OffPackageNeedsApproval { get; set; } = true;
+    public int OffPackageUnpaidLimit { get; set; } = 1;
 }
 
 public class AvailableSlotDto

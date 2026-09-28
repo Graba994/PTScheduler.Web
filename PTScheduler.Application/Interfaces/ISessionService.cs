@@ -13,13 +13,13 @@ public interface ISessionService
     /// <see cref="Exceptions.SlotConflictException"/>. Trener może świadomie
     /// nałożyć terminy, przekazując true.
     /// </param>
-    Task<SessionDto> CreateSessionAsync(CreateSessionDto dto, bool allowAwaitingPackage = true, bool allowOverlap = false);
+    Task<SessionDto> CreateSessionAsync(CreateSessionDto dto, bool allowAwaitingPackage = true, bool allowOverlap = false, bool sendConfirmation = true);
     /// <summary>
     /// Trening w parze: dwie powiązane wizyty (osoba z <paramref name="dto"/> i partner) o tej samej godzinie.
     /// Wspólny pakiet pary pobiera 1 trening; bez niego każda osoba korzysta z własnego pakietu.
     /// Zwraca wizytę osoby z <paramref name="dto"/>.
     /// </summary>
-    Task<SessionDto> CreatePairSessionAsync(CreateSessionDto dto, int partnerClientId, bool allowAwaitingPackage = true, bool allowOverlap = false);
+    Task<SessionDto> CreatePairSessionAsync(CreateSessionDto dto, int partnerClientId, bool allowAwaitingPackage = true, bool allowOverlap = false, bool sendConfirmation = true);
     /// <param name="chargeSession">Przy odwołaniu: sesja przepada (późne odwołanie klienta).</param>
     /// <param name="includePartner">Trening w parze: ten sam status dostaje też wizyta drugiej osoby.</param>
     Task UpdateStatusAsync(int id, SessionStatus status, string? cancellationReason = null, string? completionNotes = null,

@@ -35,6 +35,9 @@ public class Order
 
     /// <summary>Kupowany bon podarunkowy (Kind = GiftVoucher).</summary>
     public int? GiftVoucherId { get; set; }
+
+    /// <summary>Opłata za pojedynczy trening zarezerwowany poza pakietem (OrderKind.Session).</summary>
+    public int? SessionId { get; set; }
     public PackageOffer? PackageOffer { get; set; }
 
     // Our unique order reference sent to the gateway as extOrderId.

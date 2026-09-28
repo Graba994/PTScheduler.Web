@@ -58,6 +58,7 @@ public class ClientService(
                 LastSessionDate = stats?.LastDate,
                 Status = c.Status,
                 AllowSelfBooking = c.AllowSelfBooking,
+                TrustedForDeferredPayment = c.TrustedForDeferredPayment,
                 TrainerUserId = c.TrainerUserId
             };
         }).ToList();
@@ -122,6 +123,7 @@ public class ClientService(
             LastSessionDate = stats?.LastDate,
             Status = c.Status,
             AllowSelfBooking = c.AllowSelfBooking,
+                TrustedForDeferredPayment = c.TrustedForDeferredPayment,
             TrainerUserId = c.TrainerUserId,
             ActivePackage = activePackage is null ? null : MapPkg(activePackage),
             AllPackages = packages.Select(MapPkg).ToList()

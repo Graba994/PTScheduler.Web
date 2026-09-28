@@ -35,6 +35,16 @@ public class SessionDto
     public bool IsPairFollower { get; set; }
     /// <summary>Wizyta korzysta ze wspólnego pakietu, który za ten trening pobrała druga osoba.</summary>
     public bool SharesPackageSlot { get; set; }
+
+    // Rezerwacja poza pakietem
+    public string? OffPackagePayment { get; set; }
+    public bool AwaitingApproval { get; set; }
+    public DateTime? HoldUntil { get; set; }
+    public DateTime? PaidAt { get; set; }
+    public string? PaidVia { get; set; }
+    /// <summary>Trening poza pakietem do rozliczenia u trenera (potwierdzony, jeszcze nieopłacony).</summary>
+    public bool UnpaidAtTrainer => OffPackagePayment == "trainer" && PaidAt is null && !AwaitingApproval
+        && Status is not SessionStatus.Cancelled;
     /// <summary>Trening rozliczany ze wspólnego pakietu pary (1 za trening).</summary>
     public bool PackageShared { get; set; }
     public bool IsPair => PairGroupId.HasValue;
@@ -64,6 +74,10 @@ public class SessionTypeDto
     public bool IsPair { get; set; }
     public bool IsActive { get; set; } = true;
     public int SessionCount { get; set; }
+    /// <summary>Cena pojedynczego treningu online (poza pakietem). Null = nie można kupić pojedynczo.</summary>
+    public decimal? SinglePrice { get; set; }
+    /// <summary>Tylko z pakietem.</summary>
+    public bool RequiresPackage { get; set; }
 }
 
 public class CreateSessionTypeDto
@@ -73,6 +87,8 @@ public class CreateSessionTypeDto
     public bool IsGroup { get; set; }
     public int? MaxParticipants { get; set; }
     public bool IsPair { get; set; }
+    public decimal? SinglePrice { get; set; }
+    public bool RequiresPackage { get; set; }
 }
 
 public class ClientSummaryDto

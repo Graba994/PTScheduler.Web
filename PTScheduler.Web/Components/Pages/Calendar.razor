@@ -149,13 +149,7 @@
                         </div>
                     </div>
 
-                    @if (_selectedSession.Status == SessionStatus.AwaitingPackage)
-                    {
-                        <div class="alert alert-warning py-2 small mb-3">
-                            <i class="bi bi-exclamation-triangle-fill me-1"></i>
-                            Termin zablokowany — klient nie ma aktywnego pakietu. Skontaktuj się w sprawie finansów.
-                        </div>
-                    }
+                    <OffPackagePanel Session="_selectedSession" CanManage="!_isClientRole" OnChanged="OnOffPackageChanged" />
 
                     @if (!string.IsNullOrEmpty(_selectedSession.Notes))
                     {
@@ -866,6 +860,13 @@
         }
         catch (Exception ex) { _panelError = ex.Message; }
         finally { _busy = false; }
+    }
+
+    private async Task OnOffPackageChanged()
+    {
+        if (_selectedSession is null) return;
+        _selectedSession = await SessionService.GetSessionAsync(_selectedSession.Id);
+        if (_module is not null) await _module.InvokeVoidAsync("refetchEvents");
     }
 
     private async Task ChangeStatus(SessionStatus status, bool includePartner = false, int? targetId = null)

@@ -6,5 +6,6 @@ public enum OrderKind
     Course,   // access to a course
     Package,  // a session package (bookable credits)
     Membership, // opłata za okres karnetu cyklicznego
-    GiftVoucher // bon podarunkowy
+    GiftVoucher, // bon podarunkowy
+    Session     // pojedynczy trening poza pakietem, opłacony przy rezerwacji
 }

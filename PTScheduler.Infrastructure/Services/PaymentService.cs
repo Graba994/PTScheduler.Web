@@ -374,6 +374,7 @@ public class PaymentService(
                 OrderKind.Course => "kurs",
                 OrderKind.Membership => "karnet",
                 OrderKind.GiftVoucher => "bon podarunkowy",
+                OrderKind.Session => "trening poza pakietem",
                 _ => "pakiet"
             };
             var details = $"Kupujący: {order.ApplicationUserId}, kwota: {order.Amount:0.00} {order.Currency}, bramka: {order.Provider}"
@@ -404,6 +405,72 @@ public class PaymentService(
             await GrantPackageAsync(db, order, offerId);
         else if (order.Kind == OrderKind.GiftVoucher && order.GiftVoucherId is int voucherId)
             await GiftVoucherLedger.ActivateAsync(db, voucherId, clock.UtcNow);
+        else if (order.Kind == OrderKind.Session && order.SessionId is int sessionId)
+            await ConfirmPaidSessionAsync(db, order, sessionId);
+    }
+
+    // Trening poza pakietem opłacony online: termin zostaje potwierdzony. Gdy płatność przyszła po
+    // wygaśnięciu 15-minutowej blokady, przywracamy wizytę, jeśli godzina jest nadal wolna;
+    // inaczej zostawiamy ślad w historii zmian — trener umawia inny termin albo zwraca pieniądze.
+    private async Task ConfirmPaidSessionAsync(ApplicationDbContext db, Order order, int sessionId)
+    {
+        var session = await db.Sessions.Include(s => s.SessionType).FirstOrDefaultAsync(s => s.Id == sessionId);
+        if (session is null) return;
+        session.PaidAt = DateTime.UtcNow;
+        session.PaidVia = "online";
+        session.OffPackagePayment = Domain.Rules.OffPackageRules.PayOnline;
+        session.HoldUntil = null;
+
+        if (session.Status == SessionStatus.AwaitingPackage)
+        {
+            session.Status = SessionStatus.Scheduled;
+            return;
+        }
+        if (session.Status != SessionStatus.Cancelled) return;
+
+        var end = session.StartTime.AddMinutes(session.SessionType.DurationMinutes);
+        var taken = await db.Sessions.Include(s => s.SessionType)
+            .Where(s => s.Id != session.Id && s.TrainerUserId == session.TrainerUserId && s.Status != SessionStatus.Cancelled
+                        && s.StartTime < end && s.StartTime >= session.StartTime.AddHours(-6))
+            .ToListAsync();
+        if (!taken.Any(s => s.StartTime.AddMinutes(s.SessionType.DurationMinutes) > session.StartTime))
+        {
+            session.Status = SessionStatus.Scheduled;
+            session.CancelledAt = null;
+            session.CancellationReason = null;
+            return;
+        }
+        try
+        {
+            await auditLog.LogAsync(SystemUserId, SystemUserEmail, SystemRole, "SessionPaidAfterExpiry", "Session", session.Id.ToString(),
+                $"Klient zapłacił za trening {session.StartTime:dd.MM HH:mm} po wygaśnięciu rezerwacji, a termin jest już zajęty — umów inny termin albo zwróć {order.Amount:0.00} {order.Currency}.",
+                AuditSeverity.Warning);
+        }
+        catch (Exception ex) { logger.LogError(ex, "Audit log write failed for late session payment {OrderId}", order.Id); }
+    }
+
+    public async Task<PaymentInitResult> StartSessionCheckoutAsync(string userId, int sessionId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var session = await db.Sessions.Include(s => s.SessionType).Include(s => s.Client)
+            .FirstOrDefaultAsync(s => s.Id == sessionId);
+        if (session is null || session.Client.ApplicationUserId != userId) return new(false, null, "Nie znaleziono rezerwacji.");
+        if (session.PaidAt is not null) return new(false, null, "Ten trening jest już opłacony.");
+        if (session.SessionType.SinglePrice is not decimal price || price <= 0)
+            return new(false, null, "Tego treningu nie można opłacić pojedynczo — wybierz pakiet.");
+
+        var name = $"{session.SessionType.Name} {session.StartTime:dd.MM HH:mm}";
+        var order = new Order
+        {
+            ApplicationUserId = userId,
+            Kind = OrderKind.Session,
+            SessionId = session.Id,
+            AppBaseUrl = appBaseUrl,
+            Amount = price,
+            Description = $"Trening: {name}",
+            CreatedAt = DateTime.UtcNow
+        };
+        return await StartAsync(db, order, providerKey, name, appBaseUrl, buyerEmail, customerIp);
     }
 
     private static async Task GrantCourseAsync(ApplicationDbContext db, Order order, int courseId)
@@ -489,7 +556,7 @@ public class PaymentService(
                 Id = o.Id,
                 ItemTitle = o.Kind == OrderKind.Package
                     ? (o.PackageOffer != null ? o.PackageOffer.Name : "Pakiet")
-                    : o.Kind == OrderKind.Membership || o.Kind == OrderKind.GiftVoucher
+                    : o.Kind == OrderKind.Membership || o.Kind == OrderKind.GiftVoucher || o.Kind == OrderKind.Session
                         ? (o.Description ?? "Karnet")
                         : (o.Course != null ? o.Course.Title : "Kurs"),
                 Kind = o.Kind.ToString(),
@@ -517,7 +584,7 @@ public class PaymentService(
                 Id = o.Id,
                 ItemTitle = o.Kind == OrderKind.Package
                     ? (o.PackageOffer != null ? o.PackageOffer.Name : "Pakiet")
-                    : o.Kind == OrderKind.Membership || o.Kind == OrderKind.GiftVoucher
+                    : o.Kind == OrderKind.Membership || o.Kind == OrderKind.GiftVoucher || o.Kind == OrderKind.Session
                         ? (o.Description ?? "Karnet")
                         : (o.Course != null ? o.Course.Title : "Kurs"),
                 Kind = o.Kind.ToString(),
@@ -545,7 +612,7 @@ public class PaymentService(
                 Id = o.Id,
                 ItemTitle = o.Kind == OrderKind.Package
                     ? (o.PackageOffer != null ? o.PackageOffer.Name : "Pakiet")
-                    : o.Kind == OrderKind.Membership || o.Kind == OrderKind.GiftVoucher
+                    : o.Kind == OrderKind.Membership || o.Kind == OrderKind.GiftVoucher || o.Kind == OrderKind.Session
                         ? (o.Description ?? "Karnet")
                         : (o.Course != null ? o.Course.Title : "Kurs"),
                 Kind = o.Kind.ToString(),

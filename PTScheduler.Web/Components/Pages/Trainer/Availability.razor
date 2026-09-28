@@ -223,6 +223,54 @@ else
                 </div>
                 <InfoTip Title="Lista klientów" Text="Przydaje się, gdy prowadzisz treningi w parach lub małych grupach — klient może zaprosić znajomego ćwiczącego u Ciebie. Domyślnie wyłączone (prywatność)." />
             </div>
+
+            <div class="av-rule-group">
+                <div class="av-rule-group-title"><i class="bi bi-wallet2"></i>Gdy klient rezerwuje trening, którego nie ma w pakiecie
+                    <InfoTip Title="Rezerwacja bez pakietu" Text="Klient zawsze widzi „Kup pakiet”. Tu decydujesz, czy może też zapłacić online za pojedynczy trening albo zapłacić u Ciebie. Zaufanym klientom (przełącznik w profilu klienta) terminy potwierdzają się bez akceptacji." />
+                </div>
+                <div class="av-rule av-rule-switch">
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" role="switch" id="opOnline" checked="@_cfg.OffPackageOnline"
+                               @onchange="e => SetConfig(c => c.OffPackageOnline = e.Value is true)" />
+                        <label class="form-check-label fw-semibold" for="opOnline">Płatność online za pojedynczy trening</label>
+                    </div>
+                    <InfoTip Title="Pojedynczy trening online" Text="Klient płaci BLIK-iem albo kartą przy rezerwacji, a termin od razu się potwierdza. Działa dla rodzajów treningów z ceną pojedynczego treningu (Zarządzanie → Rodzaje treningów) i przy włączonych płatnościach online. Nieopłacony termin wraca do grafiku po 15 minutach." />
+                </div>
+                <div class="av-rule av-rule-switch">
+                    <div class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" role="switch" id="opTrainer" checked="@_cfg.OffPackageAtTrainer"
+                               @onchange="e => SetConfig(c => c.OffPackageAtTrainer = e.Value is true)" />
+                        <label class="form-check-label fw-semibold" for="opTrainer">„Zapłacę u trenera” (gotówka, przelew)</label>
+                    </div>
+                    <InfoTip Title="Płatność u trenera" Text="Klient rezerwuje teraz, a płaci Ci przy treningu. Po wpłacie odhaczasz w wizycie „Opłacone gotówką / przelewem”." />
+                </div>
+                @if (_cfg.OffPackageAtTrainer)
+                {
+                    <div class="av-rule">
+                        <div class="av-rule-label">Potwierdzanie terminu</div>
+                        <div class="av-choices">
+                            <button type="button" class="av-choice @(_cfg.OffPackageNeedsApproval ? "active" : "")" @onclick="() => SetConfig(c => c.OffPackageNeedsApproval = true)">
+                                <b>Zawsze akceptuję</b><small>Klient wysyła prośbę, Ty potwierdzasz albo odrzucasz</small>
+                            </button>
+                            <button type="button" class="av-choice @(!_cfg.OffPackageNeedsApproval ? "active" : "")" @onclick="() => SetConfig(c => c.OffPackageNeedsApproval = false)">
+                                <b>Od razu, z limitem</b><small>Termin potwierdza się sam, dopóki klient nie ma zaległości</small>
+                            </button>
+                        </div>
+                    </div>
+                    @if (!_cfg.OffPackageNeedsApproval)
+                    {
+                        <div class="av-rule">
+                            <div class="av-rule-label">Najwyżej nieopłaconych treningów naraz <InfoTip Title="Limit" Text="Gdy klient ma już tyle nieopłaconych treningów, kolejna rezerwacja trafia do Ciebie do akceptacji." /></div>
+                            <div class="av-seg">
+                                @foreach (var n in new[] { 1, 2, 3, 0 })
+                                {
+                                    <button type="button" class="@(_cfg.OffPackageUnpaidLimit == n ? "active" : "")" @onclick="() => SetConfig(c => c.OffPackageUnpaidLimit = n)">@(n == 0 ? "Bez limitu" : n.ToString())</button>
+                                }
+                            </div>
+                        </div>
+                    }
+                }
+            </div>
         </div>
 
         <div class="av-preview">

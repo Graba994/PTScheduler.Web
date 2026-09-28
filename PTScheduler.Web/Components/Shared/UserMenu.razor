@@ -5,6 +5,7 @@
 @inject ISessionService SessionService
 @inject AuthenticationStateProvider AuthState
 @inject PTScheduler.Web.Services.UpsellService Upsell
+@inject IOffPackageService OffPackage
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Application.DTOs
@@ -373,6 +374,11 @@
 
             if (_role is Roles.Admin or Roles.Trainer)
             {
+                var off = await OffPackage.GetCountsAsync(trainerFilter);
+                if (off.Requests > 0)
+                    _notifs.Add(new("Prośby o termin", $"{off.Requests} do akceptacji — klient zapłaci u Ciebie",
+                        "bi-hand-index-thumb", "var(--c-info)", "/sessions"));
+
                 var pending = await ClientService.GetPendingClientsAsync(trainerFilter);
                 if (pending.Count > 0)
                     _notifs.Add(new("Klienci oczekujący",

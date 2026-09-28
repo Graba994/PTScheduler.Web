@@ -74,5 +74,16 @@ public class Session
     /// </summary>
     public bool SharesPackageSlot { get; set; }
 
+    // ── Rezerwacja poza pakietem (klient nie miał pakietu na ten rodzaj treningu) ──
+    /// <summary>„online” — płaci przy rezerwacji, „trainer” — płaci u trenera (gotówka, przelew). Null = z pakietu.</summary>
+    public string? OffPackagePayment { get; set; }
+    /// <summary>Prośba o termin z płatnością u trenera — czeka na akceptację trenera.</summary>
+    public bool AwaitingApproval { get; set; }
+    /// <summary>Termin trzymany do opłacenia online (UTC); po tym czasie nieopłacona rezerwacja wygasa.</summary>
+    public DateTime? HoldUntil { get; set; }
+    /// <summary>Kiedy trening poza pakietem został opłacony (UTC) i jak („online”, „gotówka”, „przelew”).</summary>
+    public DateTime? PaidAt { get; set; }
+    public string? PaidVia { get; set; }
+
     public ICollection<SessionInvitation> Invitations { get; set; } = [];
 }

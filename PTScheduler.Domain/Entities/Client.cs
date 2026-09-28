@@ -24,6 +24,8 @@ public class Client
     public string? TrainerUserId { get; set; }
     public ClientStatus Status { get; set; } = ClientStatus.Active;
     public bool AllowSelfBooking { get; set; } = false;
+    /// <summary>Zaufany klient: rezerwacja z płatnością u trenera bez akceptacji i bez limitu nieopłaconych wizyt.</summary>
+    public bool TrustedForDeferredPayment { get; set; }
     public DateTime? TermsAcceptedAt { get; set; }
 
     public ICollection<Session> Sessions { get; set; } = [];

@@ -87,6 +87,10 @@ public class TrainerAvailabilityService(IDbContextFactory<ApplicationDbContext> 
         cfg.CancellationWindowHours = Math.Clamp(dto.CancellationWindowHours, 0, 168);
         cfg.LateCancellationPolicy = dto.LateCancellationPolicy;
         cfg.NoShowChargesSession = dto.NoShowChargesSession;
+        cfg.OffPackageOnline = dto.OffPackageOnline;
+        cfg.OffPackageAtTrainer = dto.OffPackageAtTrainer;
+        cfg.OffPackageNeedsApproval = dto.OffPackageNeedsApproval;
+        cfg.OffPackageUnpaidLimit = Math.Clamp(dto.OffPackageUnpaidLimit, 0, 10);
         await db.SaveChangesAsync();
     }
 
@@ -214,6 +218,10 @@ public class TrainerAvailabilityService(IDbContextFactory<ApplicationDbContext> 
                 CancellationWindowHours = cfg.CancellationWindowHours,
                 LateCancellationPolicy = cfg.LateCancellationPolicy,
                 NoShowChargesSession = cfg.NoShowChargesSession,
+                OffPackageOnline = cfg.OffPackageOnline,
+                OffPackageAtTrainer = cfg.OffPackageAtTrainer,
+                OffPackageNeedsApproval = cfg.OffPackageNeedsApproval,
+                OffPackageUnpaidLimit = cfg.OffPackageUnpaidLimit,
             };
     }
 

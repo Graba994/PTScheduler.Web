@@ -6,6 +6,7 @@
 @inject IPairService PairService
 @inject ISessionPackageService PackageService
 @inject IPackageOfferService OfferService
+@inject IOffPackageService OffPackage
 @inject ITrainerAvailabilityService AvailabilityService
 @inject ITrainerConfigService TrainerConfigService
 @inject IAppClock Clock
@@ -138,9 +139,21 @@ else
                         <div class="flex-grow-1 text-break" style="min-width:0">
                             <div class="fw-semibold">
                                 @s.SessionTypeName
-                                @if (s.Status == SessionStatus.AwaitingPackage)
+                                @if (s.AwaitingApproval)
                                 {
-                                    <span class="badge bg-warning-subtle text-warning-emphasis ms-1" title="Tego treningu nie było w Twoim pakiecie — trener potwierdzi płatność">Do opłacenia</span>
+                                    <span class="badge bg-info-subtle text-info-emphasis ms-1">Czeka na potwierdzenie trenera</span>
+                                }
+                                else if (s.HoldUntil is not null && s.Status == SessionStatus.AwaitingPackage)
+                                {
+                                    <span class="badge bg-warning-subtle text-warning-emphasis ms-1">Czeka na płatność online</span>
+                                }
+                                else if (s.UnpaidAtTrainer)
+                                {
+                                    <span class="badge bg-light text-body border ms-1"><i class="bi bi-cash-coin me-1"></i>Płatność u trenera</span>
+                                }
+                                else if (s.Status == SessionStatus.AwaitingPackage)
+                                {
+                                    <span class="badge bg-warning-subtle text-warning-emphasis ms-1" title="Tego treningu nie było w Twoim pakiecie — trener odezwie się w sprawie płatności">Do opłacenia</span>
                                 }
                                 @if (s.IsPair)
                                 {
@@ -503,22 +516,66 @@ else
                                         }
                                         else
                                         {
-                                            <span class="fw-semibold text-warning-emphasis"><i class="bi bi-wallet2 me-1"></i>Poza pakietem — do rozliczenia z trenerem</span>
+                                            <span class="fw-semibold text-warning-emphasis"><i class="bi bi-wallet2 me-1"></i>@(payChoice == "online" && offOpts?.SinglePrice is { } price ? $"Online — {price:0.##} zł" : payChoice == "trainer" ? "U trenera — gotówka albo przelew" : "Poza pakietem")</span>
                                         }
                                     </td>
                                 </tr>
                             </table>
                         </div>
-                        @if (payWith is null)
+                        @if (payWith is null && offOpts is not null)
                         {
-                            <div class="bk-nopkg">
-                                <i class="bi bi-exclamation-circle"></i>
-                                <div>
-                                    <b>Tego treningu nie masz w pakiecie.</b>
-                                    <div>Termin zarezerwujemy, a trener odezwie się w sprawie płatności (np. gotówką albo przelewem). Taniej wyjdzie z pakietem.</div>
-                                    <a href="/packages" class="btn btn-sm btn-outline-primary mt-2"><i class="bi bi-bag me-1"></i>Zobacz pakiety</a>
+                            @if (offOpts.RequiresPackage || (!offOpts.CanPayOnline || withPartner) && offOpts.AtTrainer == PTScheduler.Domain.Rules.AtTrainerMode.Disabled)
+                            {
+                                <div class="bk-nopkg">
+                                    <i class="bi bi-box-seam"></i>
+                                    <div>
+                                        <b>@(offOpts.RequiresPackage ? "Ten trening jest dostępny tylko w pakiecie." : "Tego treningu nie masz w pakiecie.")</b>
+                                        <div>Wybierz pakiet — po zakupie wróć i zarezerwuj termin z pakietu.</div>
+                                        <a href="/packages" class="btn btn-sm btn-primary mt-2"><i class="bi bi-bag me-1"></i>Zobacz pakiety</a>
+                                    </div>
                                 </div>
-                            </div>
+                            }
+                            else
+                            {
+                                <div class="bk-pay">
+                                    <div class="bk-pay-title">Tego treningu nie masz w pakiecie — jak chcesz zapłacić?</div>
+                                    <a href="/packages" class="bk-pay-opt link">
+                                        <i class="bi bi-box-seam"></i>
+                                        <span><b>Kup pakiet</b><small>Najtaniej — kolejne treningi zarezerwujesz już z pakietu.</small></span>
+                                        <i class="bi bi-chevron-right ms-auto"></i>
+                                    </a>
+                                    @if (offOpts.CanPayOnline && !withPartner)
+                                    {
+                                        <label class="bk-pay-opt @(payChoice == "online" ? "active" : "")">
+                                            <input type="radio" name="bkpay" checked="@(payChoice == "online")" @onchange='() => payChoice = "online"' />
+                                            <i class="bi bi-credit-card"></i>
+                                            <span><b>Zapłać teraz online — @offOpts.SinglePrice!.Value.ToString("0.##") zł</b><small>BLIK, karta albo przelew. Termin od razu potwierdzony.</small></span>
+                                        </label>
+                                        @if (payChoice == "online" && offOpts.Providers.Count > 1)
+                                        {
+                                            <div class="bk-providers">
+                                                @foreach (var pr in offOpts.Providers)
+                                                {
+                                                    <button type="button" class="@(providerKey == pr.Key ? "active" : "")" @onclick="() => providerKey = pr.Key"><i class="bi @pr.Icon me-1"></i>@pr.Name</button>
+                                                }
+                                            </div>
+                                        }
+                                    }
+                                    @if (offOpts.AtTrainer != PTScheduler.Domain.Rules.AtTrainerMode.Disabled)
+                                    {
+                                        <label class="bk-pay-opt @(payChoice == "trainer" ? "active" : "")">
+                                            <input type="radio" name="bkpay" checked="@(payChoice == "trainer")" @onchange='() => payChoice = "trainer"' />
+                                            <i class="bi bi-cash-coin"></i>
+                                            <span>
+                                                <b>Zapłacę u trenera</b>
+                                                <small>@(offOpts.AtTrainer == PTScheduler.Domain.Rules.AtTrainerMode.Instant
+                                                    ? "Gotówką albo przelewem, przy treningu. Termin od razu potwierdzony."
+                                                    : "Gotówką albo przelewem. Wyślemy prośbę — trener potwierdzi termin, dostaniesz powiadomienie.")</small>
+                                            </span>
+                                        </label>
+                                    }
+                                </div>
+                            }
                         }
 
                         <div class="mb-3">
@@ -533,9 +590,9 @@ else
                             <button class="btn btn-outline-secondary" @onclick="() => { bookingStep = 2; }">
                                 <i class="bi bi-arrow-left me-1"></i>Wróć
                             </button>
-                            <button class="btn btn-primary" @onclick="ConfirmBooking" disabled="@isBusy">
+                            <button class="btn btn-primary" @onclick="ConfirmBooking" disabled="@(isBusy || !CanConfirm)">
                                 @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                                <i class="bi bi-check-lg me-1"></i>@(CoveringPackage(selectedType!, selectedSlot!.Start) is null ? "Zarezerwuj (płatność u trenera)" : "Zarezerwuj z pakietu")
+                                <i class="bi @(ConfirmIcon) me-1"></i>@ConfirmLabel
                             </button>
                         </div>
                     }
@@ -554,7 +611,7 @@ else
             <div class="d-flex">
                 <div class="toast-body">
                     <i class="bi bi-check-circle-fill me-2"></i>
-                    @(lastBookingAwaiting ? "Termin zarezerwowany — trener potwierdzi płatność." : "Wizyta zarezerwowana! Sprawdź email z potwierdzeniem.")
+                    @successText
                 </div>
                 <button type="button" class="btn-close btn-close-white me-2 m-auto" @onclick="() => showSuccess = false"></button>
             </div>
@@ -586,7 +643,11 @@ else
     // Aktywne pakiety klienta (także wspólne z parą) i oferta pakietów — do podpowiedzi przy rezerwacji.
     private List<SessionPackageDto> myPackages = [];
     private List<PackageOfferDto> offers = [];
-    private bool lastBookingAwaiting;
+    private string successText = "Wizyta zarezerwowana! Sprawdź email z potwierdzeniem.";
+    // Poza pakietem: co może klient (online / u trenera) i co wybrał.
+    private OffPackageOptionsDto? offOpts;
+    private string? payChoice;
+    private string providerKey = "";
     private SessionTypeDto? selectedType;
     private DateOnly selectedDate = DateOnly.FromDateTime(StudioClock.Today.AddDays(1));
     private List<AvailableSlotDto> availableSlots = [];
@@ -686,8 +747,34 @@ else
         }
 
         bookingError = string.Empty;
+        await LoadOffPackageOptions();
         bookingStep = 3;
     }
+
+    private async Task LoadOffPackageOptions()
+    {
+        offOpts = null;
+        payChoice = null;
+        if (selectedType is null || selectedSlot is null || CoveringPackage(selectedType, selectedSlot.Start) is not null) return;
+        try
+        {
+            offOpts = await OffPackage.GetOptionsAsync(client!.Id, selectedType.Id);
+            providerKey = offOpts.Providers.FirstOrDefault()?.Key ?? "";
+            // Domyślny wybór: płatność online (termin od razu potwierdzony), inaczej „u trenera”.
+            payChoice = offOpts.CanPayOnline && !withPartner ? "online"
+                : offOpts.AtTrainer != PTScheduler.Domain.Rules.AtTrainerMode.Disabled ? "trainer" : null;
+        }
+        catch { offOpts = null; }
+    }
+
+    private bool Covered => selectedType is not null && selectedSlot is not null && CoveringPackage(selectedType, selectedSlot.Start) is not null;
+    private bool CanConfirm => Covered || payChoice is not null;
+    private string ConfirmLabel => Covered ? "Zarezerwuj z pakietu"
+        : payChoice == "online" ? "Przejdź do płatności"
+        : payChoice == "trainer" && offOpts?.AtTrainer == PTScheduler.Domain.Rules.AtTrainerMode.NeedsApproval ? "Wyślij prośbę do trenera"
+        : payChoice == "trainer" ? "Zarezerwuj (płatność u trenera)"
+        : "Zarezerwuj";
+    private string ConfirmIcon => payChoice == "online" && !Covered ? "bi-credit-card" : payChoice == "trainer" && !Covered ? "bi-send" : "bi-check-lg";
 
     private async Task SlotPrevDay()
     {
@@ -743,14 +830,27 @@ else
                 StartTime = selectedSlot.Start,
                 Notes = string.IsNullOrWhiteSpace(bookingNotes) ? null : bookingNotes.Trim()
             };
-            var created = withPartner && partnerId > 0
-                ? await SessionService.CreatePairSessionAsync(dto, partnerId)
-                : await SessionService.CreateSessionAsync(dto);
+            if (!Covered && payChoice == "online")
+            {
+                var pay = await OffPackage.BookOnlineAsync(_userId, dto, providerKey, Nav.BaseUri, _userEmail, string.Empty);
+                if (pay.Ok && pay.RedirectUrl is not null) { Nav.NavigateTo(pay.RedirectUrl, forceLoad: true); return; }
+                bookingError = pay.Error ?? "Nie udało się rozpocząć płatności.";
+                return;
+            }
+
+            var created = !Covered && payChoice == "trainer"
+                ? await OffPackage.BookAtTrainerAsync(_userId, dto, withPartner && partnerId > 0 ? partnerId : null)
+                : withPartner && partnerId > 0
+                    ? await SessionService.CreatePairSessionAsync(dto, partnerId)
+                    : await SessionService.CreateSessionAsync(dto);
 
             await AuditLogService.LogAsync(_userId, _userEmail, "Client", "ClientSelfBooked", "Session",
                 created.Id.ToString(), $"Typ: {selectedType.Name}, termin: {selectedSlot.Start:dd.MM.yyyy HH:mm}{(withPartner ? $", z: {PartnerName}" : "")}");
 
-            lastBookingAwaiting = created.Status == SessionStatus.AwaitingPackage;
+            successText = created.AwaitingApproval ? "Prośba wysłana — trener potwierdzi termin, dostaniesz powiadomienie."
+                : created.UnpaidAtTrainer ? "Termin zarezerwowany — zapłacisz u trenera przy treningu."
+                : created.Status == SessionStatus.AwaitingPackage ? "Termin zarezerwowany — trener odezwie się w sprawie płatności."
+                : "Wizyta zarezerwowana! Sprawdź email z potwierdzeniem.";
             bookingOpen = false;
             showSuccess = true;
             await RefreshSessions();

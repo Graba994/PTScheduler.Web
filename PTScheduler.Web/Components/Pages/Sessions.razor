@@ -134,7 +134,7 @@ else
                                         <i class="bi bi-person me-1"></i>@s.TrainerName
                                     </div>
                                 }
-                                @if (s.Status == SessionStatus.AwaitingPackage)
+                                @if (s.Status == SessionStatus.AwaitingPackage && !s.AwaitingApproval && s.HoldUntil is null)
                                 {
                                     <div class="awaiting-pkg-label">
                                         <i class="bi bi-exclamation-triangle-fill me-1"></i>Poza pakietem — wymaga opłaty
@@ -142,7 +142,13 @@ else
                                 }
                             </div>
                             <div class="session-tile-meta">
-                                <span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span>
+                                @if (s.AwaitingApproval) { <span class="badge bg-info text-white">Prośba o termin</span> }
+                                else if (s.HoldUntil is not null && s.Status == SessionStatus.AwaitingPackage) { <span class="badge bg-primary-subtle text-primary">Płatność online w toku</span> }
+                                else
+                                {
+                                    <span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span>
+                                    @if (s.UnpaidAtTrainer) { <span class="badge bg-warning-subtle text-warning-emphasis ms-1">Do rozliczenia</span> }
+                                }
                                 <i class="bi bi-chevron-right text-muted" style="font-size:.75rem"></i>
                             </div>
                         </div>
@@ -189,7 +195,7 @@ else
                                         <i class="bi bi-person me-1"></i>@s.TrainerName
                                     </div>
                                 }
-                                @if (s.Status == SessionStatus.AwaitingPackage)
+                                @if (s.Status == SessionStatus.AwaitingPackage && !s.AwaitingApproval && s.HoldUntil is null)
                                 {
                                     <div class="awaiting-pkg-label">
                                         <i class="bi bi-exclamation-triangle-fill me-1"></i>Poza pakietem — wymaga opłaty
@@ -197,7 +203,13 @@ else
                                 }
                             </div>
                             <div class="session-tile-meta">
-                                <span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span>
+                                @if (s.AwaitingApproval) { <span class="badge bg-info text-white">Prośba o termin</span> }
+                                else if (s.HoldUntil is not null && s.Status == SessionStatus.AwaitingPackage) { <span class="badge bg-primary-subtle text-primary">Płatność online w toku</span> }
+                                else
+                                {
+                                    <span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span>
+                                    @if (s.UnpaidAtTrainer) { <span class="badge bg-warning-subtle text-warning-emphasis ms-1">Do rozliczenia</span> }
+                                }
                                 <i class="bi bi-chevron-right text-muted" style="font-size:.75rem"></i>
                             </div>
                         </div>
@@ -476,14 +488,8 @@ else
                         <div class="alert alert-danger py-2 small">@_panelError</div>
                     }
 
-                    <!-- AwaitingPackage warning -->
-                    @if (_selectedSession.Status == SessionStatus.AwaitingPackage)
-                    {
-                        <div class="alert alert-warning py-2 small mb-3">
-                            <i class="bi bi-exclamation-triangle-fill me-1"></i>
-                            Termin zarezerwowany, lecz klient nie ma aktywnego pakietu. Skontaktuj się z klientem w sprawie finansów.
-                        </div>
-                    }
+                    <!-- Poza pakietem: prośba, płatność online, rozliczenie u trenera -->
+                    <OffPackagePanel Session="_selectedSession" CanManage="_canEdit" OnChanged="OnOffPackageChanged" />
 
                     <!-- Trainer/Admin actions for Scheduled or AwaitingPackage sessions -->
                     @if (_canEdit && (_selectedSession.Status == SessionStatus.Scheduled || _selectedSession.Status == SessionStatus.AwaitingPackage))
@@ -1019,6 +1025,13 @@ else
     }
     private void ShowRescheduleForm() { _showRescheduleForm = true; _showCancelForm = false; }
     private void ShowRestoreConfirm() => _showRestoreConfirm = true;
+
+    private async Task OnOffPackageChanged()
+    {
+        if (_selectedSession is null) return;
+        _selectedSession = await SessionService.GetSessionAsync(_selectedSession.Id);
+        await LoadSessionsAsync();
+    }
 
     private async Task ChangeStatus(SessionStatus status)
     {

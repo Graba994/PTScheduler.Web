@@ -1,6 +1,7 @@
 @page "/clients/{Id:int}"
 @implements IAsyncDisposable
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@inject IOffPackageService OffPackage
 @inject IClientService ClientService
 @inject ISessionService SessionService
 @inject ISessionPackageService PackageService
@@ -209,6 +210,16 @@ else if (client is not null)
                                 <input class="form-check-input" type="checkbox" role="switch"
                                        checked="@client.AllowSelfBooking"
                                        @onchange="ToggleSelfBooking" />
+                            </div>
+                        </div>
+                        <div class="d-flex align-items-center justify-content-between mt-2">
+                            <span class="small text-muted d-flex align-items-center gap-1">Zaufany klient
+                                <InfoTip Title="Zaufany klient" Text="Gdy nie ma treningu w pakiecie i wybierze „Zapłacę u trenera”, termin potwierdza się od razu — bez Twojej akceptacji i bez limitu nieopłaconych treningów." />
+                            </span>
+                            <div class="form-check form-switch mb-0">
+                                <input class="form-check-input" type="checkbox" role="switch"
+                                       checked="@client.TrustedForDeferredPayment"
+                                       @onchange="ToggleTrusted" />
                             </div>
                         </div>
                     }
@@ -1471,6 +1482,15 @@ else if (client is not null)
         client = await ClientService.GetClientAsync(Id);
         await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "ClientSelfBookingToggled", "Client",
             Id.ToString(), $"Klient: {client?.FullName}, samodzielna rezerwacja: {allow}");
+    }
+
+    private async Task ToggleTrusted(ChangeEventArgs e)
+    {
+        var trusted = (bool)(e.Value ?? false);
+        await OffPackage.SetTrustedAsync(Id, trusted);
+        client = await ClientService.GetClientAsync(Id);
+        await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "ClientTrustedToggled", "Client",
+            Id.ToString(), $"Klient: {client?.FullName}, zaufany (płatność u trenera bez akceptacji): {trusted}");
     }
 
     private void OpenAddPackage()

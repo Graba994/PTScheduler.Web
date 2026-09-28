@@ -22,6 +22,8 @@ public interface IPaymentService
     Task<PaymentInitResult> StartPackageCheckoutAsync(string userId, int packageOfferId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp, string? couponCode = null, InvoiceBuyerDto? invoiceBuyer = null, int? partnerClientId = null);
 
     /// <summary>Zakup bonu podarunkowego (bon utworzony wcześniej jako oczekujący).</summary>
+    /// <summary>Opłata online za pojedynczy trening zarezerwowany poza pakietem (termin trzymany 15 min).</summary>
+    Task<PaymentInitResult> StartSessionCheckoutAsync(string userId, int sessionId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp);
     Task<PaymentInitResult> StartGiftVoucherCheckoutAsync(string userId, int voucherId, string providerKey, string appBaseUrl, string buyerEmail, string customerIp);
 
     /// <summary>Handles a gateway webhook for the given provider. Returns true if accepted.</summary>

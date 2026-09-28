@@ -9,6 +9,7 @@ namespace PTScheduler.Infrastructure.Services;
 /// Nowy pakiet od razu obsługuje wizyty, które czekały na pakiet.
 /// Pakiet osoby: każda jej czekająca wizyta pobiera 1.
 /// Pakiet pary: każdy wspólny trening tej pary pobiera 1 (pierwsza wizyta pobiera, druga współdzieli).
+/// Pomija wizyty w trakcie płatności online (HoldUntil) — te opłaca zamówienie.
 /// </summary>
 internal static class PackageAllocation
 {
@@ -20,7 +21,7 @@ internal static class PackageAllocation
             var waiting = await db.Sessions
                 .Where(s => s.PairGroupId != null && s.SessionTypeId == package.SessionTypeId
                             && (s.ClientId == package.ClientId || s.ClientId == partnerId)
-                            && s.Status == SessionStatus.AwaitingPackage)
+                            && s.Status == SessionStatus.AwaitingPackage && s.HoldUntil == null)
                 .OrderBy(s => s.StartTime).ThenBy(s => s.Id)
                 .ToListAsync();
             var groupIds = waiting.Select(s => s.PairGroupId!.Value).Distinct().ToList();
@@ -40,6 +41,7 @@ internal static class PackageAllocation
                 {
                     s.PackageId = package.Id;
                     s.Status = SessionStatus.Scheduled;
+                    ClearOffPackage(s);
                     s.SharesPackageSlot = !first;
                     s.PackageRefunded = false;
                     first = false;
@@ -51,7 +53,7 @@ internal static class PackageAllocation
         {
             var waiting = await db.Sessions
                 .Where(s => s.ClientId == package.ClientId && s.SessionTypeId == package.SessionTypeId
-                            && s.Status == SessionStatus.AwaitingPackage)
+                            && s.Status == SessionStatus.AwaitingPackage && s.HoldUntil == null)
                 .OrderBy(s => s.StartTime)
                 .ToListAsync();
             foreach (var s in waiting)
@@ -59,11 +61,20 @@ internal static class PackageAllocation
                 if (package.UsedSessions >= package.TotalSessions) break;
                 s.PackageId = package.Id;
                 s.Status = SessionStatus.Scheduled;
+                ClearOffPackage(s);
                 package.UsedSessions++;
             }
         }
 
         if (package.UsedSessions >= package.TotalSessions && package.Status == PackageStatus.Active)
             package.Status = PackageStatus.Depleted;
+    }
+
+    // Wizyta czekająca na akceptację albo na płatność online — pakiet ją opłaca, więc prośba i blokada znikają.
+    private static void ClearOffPackage(Session s)
+    {
+        s.OffPackagePayment = null;
+        s.AwaitingApproval = false;
+        s.HoldUntil = null;
     }
 }

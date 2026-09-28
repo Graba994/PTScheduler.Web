@@ -49,7 +49,11 @@ else
                             @foreach (var t in _types)
                             {
                                 <tr class="@(!t.IsActive ? "opacity-50" : "")">
-                                    <td class="fw-semibold">@t.Name @if (t.IsPair) { <span class="pair-chip ms-1"><i class="bi bi-people-fill"></i>W parze</span> }</td>
+                                    <td class="fw-semibold">
+                                        @t.Name @if (t.IsPair) { <span class="pair-chip ms-1"><i class="bi bi-people-fill"></i>W parze</span> }
+                                        @if (t.RequiresPackage) { <span class="badge bg-light text-body border ms-1">tylko z pakietem</span> }
+                                        else if (t.SinglePrice is { } sp) { <span class="badge bg-success-subtle text-success ms-1">pojedynczo @sp.ToString("0.##") zł</span> }
+                                    </td>
                                     <td class="text-center">@t.DurationMinutes</td>
                                     <td class="text-center">
                                         @if (t.IsGroup)
@@ -150,6 +154,22 @@ else
                                        @onchange="e => _form.MaxParticipants = string.IsNullOrEmpty(e.Value?.ToString()) ? null : int.Parse(e.Value!.ToString()!)" />
                             </div>
                         }
+                        <div class="col-12 col-sm-6">
+                            <label class="form-label">Cena pojedynczego treningu <span class="text-muted small">(opcjonalnie)</span>
+                                <InfoTip Title="Pojedynczy trening online" Text="Klient bez pakietu może zapłacić za ten jeden trening online przy rezerwacji (BLIK, karta). Zostaw puste, jeśli sprzedajesz ten trening tylko w pakietach albo rozliczasz się u siebie." />
+                            </label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" min="0" step="1" placeholder="np. 150"
+                                       value="@(_form.SinglePrice?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) ?? "")"
+                                       @onchange="e => _form.SinglePrice = decimal.TryParse(e.Value?.ToString()?.Replace(',', '.'), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var v) && v > 0 ? v : null" />
+                                <span class="input-group-text">zł</span>
+                            </div>
+                        </div>
+                        <div class="col-12 col-sm-6 form-check form-switch d-flex align-items-center gap-2 ps-5 pt-sm-4">
+                            <input type="checkbox" class="form-check-input" id="reqPkg" @bind="_form.RequiresPackage" />
+                            <label class="form-check-label" for="reqPkg">Tylko z pakietem</label>
+                            <InfoTip Title="Tylko z pakietem" Text="Bez pakietu klient nie zarezerwuje tego treningu — zobaczy tylko „Kup pakiet”. Przydaje się np. przy zajęciach z karnetem." />
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -199,7 +219,9 @@ else
             DurationMinutes = t.DurationMinutes,
             IsGroup = t.IsGroup,
             IsPair = t.IsPair,
-            MaxParticipants = t.MaxParticipants
+            MaxParticipants = t.MaxParticipants,
+            SinglePrice = t.SinglePrice,
+            RequiresPackage = t.RequiresPackage
         };
         _error = string.Empty;
         _modalOpen = true;

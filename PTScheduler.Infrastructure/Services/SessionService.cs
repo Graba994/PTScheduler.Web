@@ -108,7 +108,7 @@ public class SessionService(
         return (await WithPairInfoAsync(db, [MapToDto(session, new Dictionary<string, string> { [session.TrainerUserId] = trainerName })]))[0];
     }
 
-    public async Task<SessionDto> CreateSessionAsync(CreateSessionDto dto, bool allowAwaitingPackage = true, bool allowOverlap = false)
+    public async Task<SessionDto> CreateSessionAsync(CreateSessionDto dto, bool allowAwaitingPackage = true, bool allowOverlap = false, bool sendConfirmation = true)
     {
         // Godzina przychodzi z <input type="datetime-local"> jako zegar ścienny.
         // Zapisujemy ją bez konwersji — 14:00 wpisane przez trenera to 14:00
@@ -183,8 +183,12 @@ public class SessionService(
         }
         catch (Exception ex) { logger.LogWarning(ex, "Błąd tworzenia Google Meet (SessionId={Id})", session.Id); }
 
-        try { await SendBookingConfirmationAsync(session, sessionType); }
-        catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila potwierdzającego rezerwację (SessionId={Id})", session.Id); }
+        // Prośba o termin (poza pakietem, do akceptacji trenera) nie dostaje maila „zarezerwowano”.
+        if (sendConfirmation)
+        {
+            try { await SendBookingConfirmationAsync(session, sessionType); }
+            catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila potwierdzającego rezerwację (SessionId={Id})", session.Id); }
+        }
         return (await GetSessionAsync(session.Id))!;
     }
 
@@ -220,7 +224,7 @@ public class SessionService(
             package.Status = PackageStatus.Depleted;
     }
 
-    public async Task<SessionDto> CreatePairSessionAsync(CreateSessionDto dto, int partnerClientId, bool allowAwaitingPackage = true, bool allowOverlap = false)
+    public async Task<SessionDto> CreatePairSessionAsync(CreateSessionDto dto, int partnerClientId, bool allowAwaitingPackage = true, bool allowOverlap = false, bool sendConfirmation = true)
     {
         if (partnerClientId == dto.ClientId)
             throw new InvalidOperationException("Wybierz drugą osobę do pary.");
@@ -308,7 +312,7 @@ public class SessionService(
         }
         catch (Exception ex) { logger.LogWarning(ex, "Błąd tworzenia Google Meet (SessionId={Id})", lead.Id); }
 
-        foreach (var s in new[] { lead, partner })
+        foreach (var s in sendConfirmation ? new[] { lead, partner } : [])
         {
             try { await SendBookingConfirmationAsync(s, sessionType); }
             catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila potwierdzającego rezerwację (SessionId={Id})", s.Id); }
@@ -602,7 +606,9 @@ public class SessionService(
                 IsGroup = t.IsGroup,
                 MaxParticipants = t.MaxParticipants,
                 IsPair = t.IsPair,
-                IsActive = t.IsActive
+                IsActive = t.IsActive,
+                SinglePrice = t.SinglePrice,
+                RequiresPackage = t.RequiresPackage
             })
             .ToListAsync();
     }
@@ -691,7 +697,8 @@ public class SessionService(
             .AsNoTracking()
             .Include(s => s.Client)
             .Include(s => s.SessionType)
-            .Where(s => s.Status == SessionStatus.AwaitingPackage && s.StartTime >= now);
+            .Where(s => s.Status == SessionStatus.AwaitingPackage && s.StartTime >= now
+                        && !s.AwaitingApproval && s.HoldUntil == null);   // prośby i płatności online mają osobne miejsca
 
         if (trainerUserId is not null)
             query = query.Where(s => s.TrainerUserId == trainerUserId);
@@ -894,7 +901,12 @@ public class SessionService(
         IsLateCancellation = s.IsLateCancellation,
         MeetingUrl = s.MeetingUrl,
         PairGroupId = s.PairGroupId,
-        SharesPackageSlot = s.SharesPackageSlot
+        SharesPackageSlot = s.SharesPackageSlot,
+        OffPackagePayment = s.OffPackagePayment,
+        AwaitingApproval = s.AwaitingApproval,
+        HoldUntil = s.HoldUntil,
+        PaidAt = s.PaidAt,
+        PaidVia = s.PaidVia
     };
 }
 
