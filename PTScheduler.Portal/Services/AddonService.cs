@@ -15,12 +15,77 @@ public class AddonService(
     IDbContextFactory<PortalDbContext> dbFactory,
     SiteSettingsService settings,
     TenantService tenants,
+    StoreTicketService tickets,
     ILogger<AddonService> logger)
 {
+    /// <summary>
+    /// Pozycja co miesiąc, dopisywana do abonamentu jednym kliknięciem: limity (SMS-y, wideo)
+    /// albo usługa z realizacją (np. pakiet wsparcia — wtedy dodatkowo zgłoszenie dla zespołu).
+    /// </summary>
     public static bool IsMonthlyAddon(ServiceItem item) =>
         item.PriceType == "monthly"
-        && item.FulfillmentType is "credit_cdn_bandwidth" or "credit_cdn_storage" or "credit_sms"
-        && item.CreditAmount > 0;
+        && (item.FulfillmentType == "manual"
+            || (item.FulfillmentType is "credit_cdn_bandwidth" or "credit_cdn_storage" or "credit_sms" && item.CreditAmount > 0));
+
+    /// <summary>
+    /// Dodaje dodatek od razu: z abonamentem płaconym kartą (Stripe) jako pozycję subskrypcji,
+    /// bez karty — do miesięcznego rachunku (oferta trenera). Limity rosną natychmiast.
+    /// </summary>
+    /// <returns>Mode: „card” albo „invoice”.</returns>
+    public async Task<(bool Ok, string? Error, string? Mode)> AddAsync(int tenantId, int serviceItemId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Id == tenantId);
+        var item = await db.ServiceItems.AsNoTracking().FirstOrDefaultAsync(i => i.Id == serviceItemId && i.IsActive);
+        if (tenant is null || item is null || !IsMonthlyAddon(item)) return (false, "Nie ma takiego dodatku.", null);
+        if (tenant.Status is TenantStatus.Suspended or TenantStatus.Destroyed || tenant.BillingStatus == "past_due")
+            return (false, "Najpierw ureguluj abonament — potem dodasz dodatki.", null);
+
+        string mode;
+        if (await CanAutoBillAsync(tenant, item))
+        {
+            var (ok, error) = await AddToSubscriptionAsync(tenantId, serviceItemId);
+            if (!ok) return (false, error, null);
+            mode = "card";
+        }
+        else
+        {
+            await AddToInvoiceAsync(tenantId, item);
+            mode = "invoice";
+        }
+
+        // Usługa z realizacją (np. pakiet wsparcia): zespół dostaje zgłoszenie do zrobienia.
+        if (StoreTicketService.IsTicket(item))
+        {
+            await using var tdb = dbFactory.CreateDbContext();
+            var price = await tdb.TenantServicePrices.AsNoTracking()
+                .Where(p => p.TenantId == tenantId && p.ServiceItemId == item.Id)
+                .Select(p => (decimal?)p.CustomPrice).FirstOrDefaultAsync() ?? item.DefaultPrice;
+            var order = new ServiceOrder
+            {
+                TenantId = tenantId, ServiceItemId = item.Id, Price = price,
+                Notes = "Dodatek miesięczny — rozliczany razem z abonamentem.",
+                Status = ServiceOrderStatus.Pending, ChargedToBillAt = DateTime.UtcNow
+            };
+            tdb.ServiceOrders.Add(order);
+            await tdb.SaveChangesAsync();
+            await tickets.NotifyNewTicketsAsync([order.Id]);
+        }
+        return (true, null, mode);
+    }
+
+    /// <summary>Bez karty: dodatek aktywny od razu, a kwota dolicza się do miesięcznego rachunku.</summary>
+    private async Task AddToInvoiceAsync(int tenantId, ServiceItem item)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var existing = await db.TenantAddons.FirstOrDefaultAsync(a => a.TenantId == tenantId && a.ServiceItemId == item.Id
+            && a.Status == TenantAddonStatus.Active && a.StripeSubscriptionItemId == null);
+        if (existing is not null) existing.Quantity++;
+        else db.TenantAddons.Add(new TenantAddon { TenantId = tenantId, ServiceItemId = item.Id });
+        db.TenantEvents.Add(new TenantEvent { TenantId = tenantId, EventType = TenantEventTypes.AddonChanged, Detail = $"Dodatek miesięczny do rachunku: {item.Name}" });
+        await db.SaveChangesAsync();
+        await tenants.PushEntitlementsAsync(tenantId);
+    }
 
     /// <summary>
     /// Co trener ma ponad plan: GB z aktywnych dodatków i pozycji oferty, SMS-y miesięcznie z oferty

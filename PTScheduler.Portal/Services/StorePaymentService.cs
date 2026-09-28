@@ -14,6 +14,7 @@ public class StorePaymentService(
     IDbContextFactory<PortalDbContext> dbFactory,
     CreditService creditService,
     TenantService tenantService,
+    StoreTicketService tickets,
     ILogger<StorePaymentService> logger)
 {
     public async Task<List<string>> GetAvailableGatewaysAsync()
@@ -110,10 +111,14 @@ public class StorePaymentService(
                 catch (Exception ex) { logger.LogError(ex, "Auto-fulfill failed for order {Id}", order.Id); }
             }
         }
-        // Opłacony dodatek miesięczny podnosi limity — instancja dostaje je od razu.
-        if (creditService.AddonActivated)
-            foreach (var tenantId in paidOrders.Select(o => o.TenantId).Distinct())
-                await tenantService.PushEntitlementsAsync(tenantId);
+        // Opłacone doładowania i dodatki zmieniają limity — instancja dostaje je od razu.
+        foreach (var tenantId in paidOrders.Select(o => o.TenantId).Distinct())
+            await tenantService.PushEntitlementsAsync(tenantId);
+
+        // Opłacone usługi z realizacją: zgłoszenie „do zrobienia” i powiadomienie administratora.
+        await tickets.NotifyNewTicketsAsync(paidOrders
+            .Where(o => serviceItems.TryGetValue(o.ServiceItemId, out var si) && StoreTicketService.IsTicket(si))
+            .Select(o => o.Id).ToList());
 
         return true;
     }

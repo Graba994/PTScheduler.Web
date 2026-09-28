@@ -204,6 +204,15 @@ public class CreditService(
         return false;
     }
 
+    /// <summary>SMS od platformy (np. do administratora) — z konta SMSAPI platformy, bez limitu trenera.</summary>
+    public async Task<(bool Success, string? Error)> SendPlatformSmsAsync(string phone, string message)
+    {
+        var token = await settings.GetAsync(SiteSettingsService.Keys.PlatformSmsApiToken);
+        if (string.IsNullOrWhiteSpace(token)) return (false, "SMS nie są skonfigurowane na platformie.");
+        var senderName = await settings.GetAsync(SiteSettingsService.Keys.PlatformSmsSenderName);
+        return await SendSmsApiAsync(token, senderName, phone, message);
+    }
+
     private async Task<(bool Success, string? Error)> SendSmsApiAsync(
         string apiToken, string senderName, string phone, string message)
     {

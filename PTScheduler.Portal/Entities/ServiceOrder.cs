@@ -17,6 +17,8 @@ public class ServiceOrder
     public string? PaymentGateway { get; set; }
     public string? PaymentExternalId { get; set; }
     public DateTime? PaidAt { get; set; }
+    /// <summary>Kiedy kwotę dopisano do rachunku trenera (oferta → jednorazowe opłaty), gdy nie zapłacił online.</summary>
+    public DateTime? ChargedToBillAt { get; set; }
 
     public Tenant Tenant { get; set; } = null!;
     public ServiceItem ServiceItem { get; set; } = null!;

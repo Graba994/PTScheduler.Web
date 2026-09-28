@@ -103,12 +103,22 @@ else if (_catalog.Count > 0)
                                         @(item.MonthlyAddon ? "+" : "")@item.Price.ToString("0") zł
                                         <small>@(item.PriceType == "monthly" ? "/ mies." : "")</small>
                                     </div>
-                                    @if (item.MonthlyAddon && item.AutoBilling)
+                                    @if (item.MonthlyAddon)
                                     {
                                         @if (_confirmAdd == item.Id)
                                         {
                                             <div class="sh-confirm">
-                                                <span>Doliczymy <b>@item.Price.ToString("0") zł</b> do abonamentu (za bieżący miesiąc proporcjonalnie).</span>
+                                                <span>
+                                                    @if (item.AutoBilling)
+                                                    {
+                                                        <text>Działa od razu. Doliczymy <b>@item.Price.ToString("0") zł</b> do płatności kartą za abonament (za bieżący miesiąc proporcjonalnie).</text>
+                                                    }
+                                                    else
+                                                    {
+                                                        <text>Działa od razu. <b>@item.Price.ToString("0") zł / mies.</b> doliczymy do najbliższego rachunku za abonament.</text>
+                                                    }
+                                                    Rezygnujesz jednym kliknięciem.
+                                                </span>
                                                 <div class="d-flex gap-2">
                                                     <button class="btn btn-sm btn-primary" @onclick="() => AddAddonAsync(item.Id)" disabled="@_ordering">
                                                         @if (_ordering) { <span class="spinner-border spinner-border-sm me-1"></span> }
@@ -132,9 +142,13 @@ else if (_catalog.Count > 0)
                                         </button>
                                     }
                                 </div>
-                                @if (item.MonthlyAddon && !item.AutoBilling)
+                                @if (item.MonthlyAddon && item.Category == "support")
                                 {
-                                    <div class="sh-note">Teraz płacisz za pierwszy miesiąc, kolejne rozliczamy co miesiąc.</div>
+                                    <div class="sh-note">Po dodaniu zespół platformy dostaje zgłoszenie i odezwie się do Ciebie.</div>
+                                }
+                                else if (!item.MonthlyAddon && item.AddonKind is null)
+                                {
+                                    <div class="sh-note">Zamówienie trafia do zespołu jako zgłoszenie — zwykle odzywamy się w 1 dzień roboczy.</div>
                                 }
                             </article>
                         }
@@ -166,7 +180,11 @@ else if (_catalog.Count > 0)
                             </li>
                         }
                     </ul>
-                    <div class="sh-total"><span>Do zapłaty teraz</span><b>@Total().ToString("0") zł</b></div>
+                    <div class="sh-total"><span>@(_gateways.Count > 0 ? "Do zapłaty teraz" : "Razem")</span><b>@Total().ToString("0") zł</b></div>
+                    @if (_gateways.Count == 0)
+                    {
+                        <div class="sh-note mt-1">Doładowania działają od razu, a kwotę doliczymy do najbliższego rachunku. Usługi trafią do zespołu jako zgłoszenie.</div>
+                    }
 
                     <label class="form-label small fw-semibold mt-3 mb-1" for="sh-notes">Uwagi (opcjonalnie)</label>
                     <textarea id="sh-notes" class="form-control form-control-sm" rows="2" @bind="_notes" placeholder="np. preferowany termin realizacji"></textarea>
@@ -196,7 +214,7 @@ else if (_catalog.Count > 0)
                     {
                         <button class="btn btn-primary w-100 mt-3" @onclick="PlaceOrder" disabled="@_ordering">
                             @if (_ordering) { <span class="spinner-border spinner-border-sm me-2"></span> }
-                            <i class="bi bi-bag-check me-1"></i>Zamów
+                            <i class="bi bi-bag-check me-1"></i>Zamów @Total().ToString("0") zł
                         </button>
                     }
                     <button class="btn btn-link btn-sm w-100 mt-1 text-muted" @onclick="() => _selected.Clear()">Wyczyść koszyk</button>
@@ -584,7 +602,8 @@ else if (_catalog.Count > 0)
 
             _selected.Clear();
             _notes = null;
-            _success = "Zamówienie zostało złożone. Administrator portalu zostanie powiadomiony.";
+            _success = OrderMessage(await resp.Content.ReadAsStringAsync());
+            await LoadCatalog(); // doładowania i dodatki są już aktywne
         }
         catch (Exception ex)
         {
@@ -594,6 +613,24 @@ else if (_catalog.Count > 0)
         {
             _ordering = false;
         }
+    }
+
+    // Co się stało z zamówieniem: doładowania działają od razu, usługi idą do zespołu jako zgłoszenie.
+    private static string OrderMessage(string json)
+    {
+        int Get(System.Text.Json.JsonElement root, string name) =>
+            root.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Number ? v.GetInt32() : 0;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var r = doc.RootElement;
+            var parts = new List<string>();
+            if (Get(r, "fulfilled") + Get(r, "addons") > 0) parts.Add("Gotowe — działa od razu, a kwotę doliczymy do najbliższego rachunku.");
+            if (Get(r, "tickets") > 0) parts.Add("Usługę przekazaliśmy zespołowi platformy — odezwiemy się zwykle w 1 dzień roboczy.");
+            if (parts.Count > 0) return string.Join(" ", parts);
+        }
+        catch { /* starszy Portal bez szczegółów */ }
+        return "Zamówienie przyjęte. Zespół platformy dostał powiadomienie.";
     }
 
     private async Task PlaceOrderWithPayment()

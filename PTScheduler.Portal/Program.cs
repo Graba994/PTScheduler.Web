@@ -72,6 +72,7 @@ builder.Services.AddScoped<CreditService>();
 builder.Services.AddScoped<BunnyPlatformService>();
 builder.Services.AddScoped<GoogleOAuthBroker>();
 builder.Services.AddScoped<TenantMailRelay>();
+builder.Services.AddScoped<StoreTicketService>();
 builder.Services.AddScoped<AddonService>();
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<StorePaymentService>();
@@ -598,8 +599,9 @@ app.MapPost("/api/store/{slug}/addons", async (
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
     if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
-    var (ok, error) = await addons.AddToSubscriptionAsync(tenant.Id, body.ServiceItemId);
-    return ok ? Results.Ok(new { ok = true }) : Results.Json(new { error }, statusCode: StatusCodes.Status409Conflict);
+    // Kartą (Stripe) albo do miesięcznego rachunku — w obu przypadkach limit rośnie od razu.
+    var (ok, error, mode) = await addons.AddAsync(tenant.Id, body.ServiceItemId);
+    return ok ? Results.Ok(new { ok = true, mode }) : Results.Json(new { error }, statusCode: StatusCodes.Status409Conflict);
 });
 
 app.MapDelete("/api/store/{slug}/addons/{id:int}", async (
@@ -619,8 +621,10 @@ app.MapPost("/api/store/{slug}/order", async (
     IDbContextFactory<PortalDbContext> dbFactory,
     IConfiguration config,
     StorePaymentService storePayment,
-    EmailService emailService,
-    SiteSettingsService siteSettings,
+    AddonService addons,
+    CreditService creditService,
+    TenantService tenantService,
+    StoreTicketService tickets,
     ILoggerFactory loggerFactory) =>
 {
     await using var db = dbFactory.CreateDbContext();
@@ -647,6 +651,8 @@ app.MapPost("/api/store/{slug}/order", async (
     var usePayment = !string.IsNullOrWhiteSpace(gateway);
 
     var orders = new List<ServiceOrder>();
+    var items = new Dictionary<int, ServiceItem>();
+    var addonsAdded = 0;
     foreach (var itemEl in itemsEl.EnumerateArray())
     {
         var serviceItemId = itemEl.GetInt32();
@@ -654,6 +660,15 @@ app.MapPost("/api/store/{slug}/order", async (
         if (serviceItem is null) continue;
 
         if (overrides.TryGetValue(serviceItemId, out var ov) && ov.IsHidden) continue;
+
+        // Dodatek miesięczny bez płatności online: od razu do abonamentu (jak przycisk „Dodaj do abonamentu”).
+        if (!usePayment && AddonService.IsMonthlyAddon(serviceItem))
+        {
+            var (added, _, _) = await addons.AddAsync(tenant.Id, serviceItemId);
+            if (added) addonsAdded++;
+            continue;
+        }
+        items[serviceItemId] = serviceItem;
 
         var price = overrides.TryGetValue(serviceItemId, out var ovp) ? ovp.CustomPrice : serviceItem.DefaultPrice;
 
@@ -671,31 +686,41 @@ app.MapPost("/api/store/{slug}/order", async (
     }
 
     if (orders.Count == 0)
-        return Results.BadRequest(new { error = "Żaden z wybranych elementów nie jest dostępny." });
+        return addonsAdded > 0
+            ? Results.Json(new { success = true, count = 0, addons = addonsAdded, fulfilled = 0, tickets = 0 })
+            : Results.BadRequest(new { error = "Żaden z wybranych elementów nie jest dostępny." });
 
     db.ServiceOrders.AddRange(orders);
     await db.SaveChangesAsync();
 
-    _ = Task.Run(async () =>
+    if (!usePayment)
     {
-        try
+        // Bez płatności online: doładowania (np. SMS) działają od razu, a kwota trafia na najbliższy rachunek;
+        // usługi z realizacją stają się zgłoszeniami „do zrobienia” z e-mailem / SMS-em do administratora.
+        var ticketIds = new List<int>();
+        foreach (var o in orders)
         {
-            var adminEmail = await siteSettings.GetAsync(SiteSettingsService.Keys.AdminNotificationEmail);
-            if (string.IsNullOrWhiteSpace(adminEmail)) return;
-            foreach (var o in orders)
-            {
-                var si = await dbFactory.CreateDbContext().ServiceItems.AsNoTracking().FirstOrDefaultAsync(s => s.Id == o.ServiceItemId);
-                var html = emailService.NewServiceOrderAdminEmailBody(
-                    tenant.OwnerName ?? "—", tenant.CompanyName ?? "—",
-                    si?.Name ?? "—", o.Price, o.Id, o.Notes);
-                await emailService.SendAsync(adminEmail, $"Nowe zamówienie: {si?.Name ?? "usługa"} — {tenant.CompanyName ?? tenant.OwnerName}", html);
-            }
+            // Usługę doliczamy dopiero po wykonaniu (Zgłoszenia → Zakończ), żeby odrzucona nie trafiła na rachunek.
+            if (StoreTicketService.IsTicket(items[o.ServiceItemId])) ticketIds.Add(o.Id);
+            else StoreTicketService.ChargeToBill(db, o, items[o.ServiceItemId]);
         }
-        catch (Exception ex)
+        await db.SaveChangesAsync();
+
+        var fulfilled = 0;
+        foreach (var o in orders.Where(o => !StoreTicketService.IsTicket(items[o.ServiceItemId])))
         {
-            loggerFactory.CreateLogger("StoreOrders").LogError(ex, "Nie udało się wysłać powiadomienia e-mail o nowym zamówieniu tenanta {Slug}.", slug);
+            try { await creditService.FulfillOrderAsync(o, items[o.ServiceItemId]); fulfilled++; }
+            catch (Exception ex) { loggerFactory.CreateLogger("StoreOrders").LogError(ex, "Automatyczna realizacja zamówienia #{Id} nie powiodła się.", o.Id); }
         }
-    });
+        if (fulfilled > 0) await tenantService.PushEntitlementsAsync(tenant.Id);
+        await tickets.NotifyNewTicketsAsync(ticketIds);
+
+        return Results.Json(new
+        {
+            success = true, count = orders.Count, orderIds = orders.Select(o => o.Id).ToArray(),
+            addons = addonsAdded, fulfilled, tickets = ticketIds.Count
+        });
+    }
 
     if (usePayment && !string.IsNullOrWhiteSpace(returnUrl))
     {

@@ -1,5 +1,6 @@
 @inherits LayoutComponentBase
 @inject PTScheduler.Portal.Services.UpdateNotifier UpdateNotifier
+@inject Microsoft.EntityFrameworkCore.IDbContextFactory<PTScheduler.Portal.Data.PortalDbContext> DbFactory
 
 <div class="portal-shell">
     <!-- Pasek górny na telefonie -->
@@ -40,8 +41,12 @@
             <NavLink href="/panel/services" class="portal-nav-item" title="Katalog usług">
                 <i class="bi bi-shop"></i><span class="portal-label">Katalog usług</span>
             </NavLink>
-            <NavLink href="/panel/orders" class="portal-nav-item" title="Zamówienia">
-                <i class="bi bi-bag-check"></i><span class="portal-label">Zamówienia</span>
+            <NavLink href="/panel/orders" class="portal-nav-item" title="Zgłoszenia">
+                <i class="bi bi-bag-check"></i><span class="portal-label">Zgłoszenia</span>
+                @if (_todo > 0)
+                {
+                    <span class="portal-dot" title="@($"Do zrobienia: {_todo}")"></span>
+                }
             </NavLink>
             <NavLink href="/panel/finances" class="portal-nav-item" title="Finanse">
                 <i class="bi bi-cash-stack"></i><span class="portal-label">Finanse</span>
@@ -97,3 +102,21 @@
         </div>
     </main>
 </div>
+
+@code {
+    private int _todo;
+
+    // Zgłoszenia ze sklepu czekające na zespół (nowe, zaakceptowane, w realizacji).
+    protected override async Task OnInitializedAsync()
+    {
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            _todo = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.CountAsync(db.ServiceOrders,
+                o => o.Status == PTScheduler.Portal.Entities.ServiceOrderStatus.Pending
+                  || o.Status == PTScheduler.Portal.Entities.ServiceOrderStatus.Accepted
+                  || o.Status == PTScheduler.Portal.Entities.ServiceOrderStatus.InProgress);
+        }
+        catch { _todo = 0; } // menu nie może się wywrócić przez bazę
+    }
+}

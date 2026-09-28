@@ -57,6 +57,12 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string AutopaySandbox = "autopay_sandbox";
         public const string StorePaymentGateway = "store_payment_gateway";
         public const string AdminNotificationEmail = "admin_notification_email";
+        /// <summary>Numer administratora na SMS-y o nowych zgłoszeniach ze sklepu.</summary>
+        public const string AdminNotificationPhone = "admin_notification_phone";
+        /// <summary>"false" wyłącza e-maile o nowych zgłoszeniach (domyślnie włączone, gdy jest adres).</summary>
+        public const string NotifyTicketsEmail = "notify_tickets_email";
+        /// <summary>"true" włącza SMS-y o nowych zgłoszeniach (przez konto SMS platformy).</summary>
+        public const string NotifyTicketsSms = "notify_tickets_sms";
         /// <summary>Dane sprzedawcy w nagłówku PDF oferty trenera (nazwa, adres, NIP, konto — wiele linii).</summary>
         public const string OfferSellerDetails = "offer_seller_details";
 
