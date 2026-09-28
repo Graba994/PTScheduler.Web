@@ -1,0 +1,129 @@
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject IHttpContextAccessor HttpContextAccessor
+@inject PTScheduler.Application.Interfaces.IClientDocumentService DocumentSvc
+@inject PTScheduler.Application.Interfaces.IClientService ClientService
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Dokumenty do akceptacji (regulamin, zgody): klient decyduje przed dalszym korzystaniem z aplikacji.
+   Regulamin trzeba zaakceptować; zgodę można odrzucić — decyzja i tak zostaje zapisana. *@
+@if (_current is not null)
+{
+    var doc = _current;
+    var required = doc.Kind == PTScheduler.Domain.Constants.DocumentKinds.Required;
+    <div class="health-gate-backdrop">
+        <div class="card doc-gate-card shadow-lg" role="dialog" aria-modal="true" aria-labelledby="docGateTitle">
+            <div class="card-body p-4 d-flex flex-column gap-3">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="doc-gate-icon"><i class="bi @(required ? "bi-file-earmark-check" : "bi-person-check")"></i></div>
+                    <div class="flex-grow-1">
+                        <div class="text-muted small">
+                            @(required ? "Do akceptacji" : "Twoja zgoda")
+                            @if (_pending.Count > 1)
+                            {
+                                <span> · @(_index + 1) z @_pending.Count</span>
+                            }
+                        </div>
+                        <h5 class="fw-bold mb-0" id="docGateTitle">@doc.Title</h5>
+                    </div>
+                </div>
+                @if (doc.DecidedVersion is not null)
+                {
+                    <div class="alert alert-info py-2 small mb-0">
+                        <i class="bi bi-info-circle me-1"></i>Treść dokumentu się zmieniła — przeczytaj nową wersję.
+                    </div>
+                }
+                <div class="doc-gate-content">@doc.Content</div>
+                @if (_error is not null)
+                {
+                    <div class="alert alert-danger py-2 small mb-0">@_error</div>
+                }
+                <div class="d-flex flex-column flex-sm-row gap-2 justify-content-end">
+                    @if (required)
+                    {
+                        <button class="btn btn-primary" disabled="@_busy" @onclick="() => Decide(true)">
+                            <i class="bi bi-check-lg me-1"></i>Akceptuję
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-outline-secondary" disabled="@_busy" @onclick="() => Decide(false)">Nie zgadzam się</button>
+                        <button class="btn btn-primary" disabled="@_busy" @onclick="() => Decide(true)">
+                            <i class="bi bi-check-lg me-1"></i>Zgadzam się
+                        </button>
+                    }
+                </div>
+                @if (!required)
+                {
+                    <div class="text-muted small text-center">Decyzję możesz zmienić w każdej chwili w zakładce <strong>Moje dokumenty</strong>.</div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [PersistentState] public string? ClientIp { get; set; }
+
+    private List<PTScheduler.Application.DTOs.ClientDocumentStatusDto> _pending = [];
+    private PTScheduler.Application.DTOs.ClientDocumentStatusDto? _current;
+    private int _index;
+    private int _clientId;
+    private bool _busy;
+    private string? _error;
+
+    protected override void OnInitialized()
+    {
+        // Podczas prerenderingu mamy żądanie HTTP — zapamiętujemy adres IP na potrzeby historii akceptacji.
+        ClientIp ??= HttpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var path = "/" + Nav.ToBaseRelativePath(Nav.Uri);
+            if (path.StartsWith("/my/documents", StringComparison.OrdinalIgnoreCase)) return;
+
+            var user = (await AuthState.GetAuthenticationStateAsync()).User;
+            if (!user.IsInRole(PTScheduler.Domain.Constants.Roles.Client)) return;
+            var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+            var client = await ClientService.GetClientByUserIdAsync(userId);
+            if (client is null) return;
+            _clientId = client.Id;
+
+            _pending = (await DocumentSvc.GetForClientAsync(client.Id)).Where(d => d.Pending).ToList();
+            if (_pending.Count == 0) return;
+            _index = 0;
+            _current = _pending[0];
+            StateHasChanged();
+        }
+        catch { } // Nie blokujemy aplikacji, gdy sprawdzenie się nie uda.
+    }
+
+    private async Task Decide(bool accepted)
+    {
+        if (_current is null) return;
+        _busy = true;
+        _error = null;
+        try
+        {
+            await DocumentSvc.DecideAsync(_clientId, _current.DocumentId, accepted, ClientIp);
+            _index++;
+            _current = _index < _pending.Count ? _pending[_index] : null;
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            _error = ex.Message;
+        }
+        catch
+        {
+            _error = "Nie udało się zapisać decyzji. Spróbuj ponownie.";
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+}

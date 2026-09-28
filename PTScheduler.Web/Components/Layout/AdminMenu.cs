@@ -83,7 +83,7 @@ public static class AdminMenu
     /// <summary>Strony z atrybutem Authorize(Roles = "Admin,Trainer") — bez asystenta.</summary>
     public static readonly HashSet<string> AdminOrTrainer = new(StringComparer.OrdinalIgnoreCase)
     {
-        "admin/coupons", "admin/sklep", "admin/sms", "admin/google-meet", "admin/video", "admin/export", "trainer/intro-config", "admin/automations"
+        "admin/coupons", "admin/sklep", "admin/sms", "admin/google-meet", "admin/video", "admin/export", "trainer/intro-config", "admin/automations", "admin/documents"
     };
 
     public static readonly IReadOnlyList<AdminMenuGroup> Groups =
@@ -142,6 +142,10 @@ public static class AdminMenu
             new("admin/automations", "bi-magic", "Automatyzacje",
                 "Powitanie, powroty, urodziny",
                 "Wiadomości, które aplikacja wysyła sama: seria powitalna dla nowych klientów, zaproszenie do powrotu po przerwie albo po końcu pakietu (z kuponem) i życzenia urodzinowe. Widzisz, kto dostał wiadomość i kto wrócił.",
+                Permissions.ManageClients),
+            new("admin/documents", "bi-file-earmark-check", "Dokumenty i zgody",
+                "Regulamin, wizerunek, oświadczenie zdrowotne",
+                "Klient akceptuje regulamin i zgody w aplikacji przy logowaniu — Ty widzisz, kto i kiedy to zrobił. Zmienisz treść? Możesz poprosić wszystkich o ponowną akceptację.",
                 Permissions.ManageClients),
             new("admin/sms", "bi-chat-dots-fill", "Przypomnienia SMS",
                 "SMS dzień przed treningiem",
@@ -248,6 +252,7 @@ public static class AdminMenu
     public static readonly IReadOnlyDictionary<string, string> SearchWords = new Dictionary<string, string>
     {
         ["trainer/availability"] = "grafik dostępność urlop wolne sloty terminy kalendarz",
+        ["admin/documents"] = "dokumenty regulamin zgoda wizerunek rodo oświadczenie zdrowotne akceptacja podpis",
         ["admin/automations"] = "automatyczne wiadomości powitanie urodziny życzenia powrót odzyskiwanie kupon marketing",
         ["admin/session-types"] = "usługi cennik cena czas trwania",
         ["admin/package-offers"] = "cennik oferta karnet wejścia",

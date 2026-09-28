@@ -75,6 +75,7 @@ public static class DependencyInjection
         services.AddScoped<IEmailService, SmtpEmailService>();
         services.AddScoped<IBodyMeasurementService, BodyMeasurementService>();
         services.AddScoped<IAutomationService, AutomationService>();
+        services.AddScoped<IClientDocumentService, ClientDocumentService>();
         services.AddScoped<ITrainerConfigService, TrainerConfigService>();
         services.AddScoped<INotificationPreferencesService, NotificationPreferencesService>();
         services.AddScoped<IPublicBookingService, PublicBookingService>();

@@ -1,0 +1,261 @@
+@page "/admin/documents"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer")]
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@inject IClientDocumentService DocumentSvc
+@inject IAppClock Clock
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Dokumenty i zgody" />
+
+<div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <div>
+        <h4 class="page-title mb-1"><i class="bi bi-file-earmark-check me-2" style="color:var(--c-primary)"></i>Dokumenty i zgody</h4>
+        <p class="text-muted small mb-0">Regulamin, oświadczenia i zgody, które klienci akceptują w aplikacji. Widzisz, kto i kiedy to zrobił.</p>
+    </div>
+    @if (_edit is null)
+    {
+        <button class="btn btn-primary btn-sm" @onclick="() => StartNew()"><i class="bi bi-plus-lg me-1"></i>Nowy dokument</button>
+    }
+</div>
+
+@if (_message is not null)
+{
+    <div class="alert @(_msgError ? "alert-danger" : "alert-success") alert-dismissible py-2 small">
+        @_message
+        <button type="button" class="btn-close" @onclick="() => _message = null"></button>
+    </div>
+}
+
+@if (_edit is not null)
+{
+    <section class="dc-card dc-editor">
+        <h6 class="fw-bold mb-3">@(_edit.Id is null ? "Nowy dokument" : "Edycja dokumentu")</h6>
+        <div class="row g-3">
+            <div class="col-12 col-md-7">
+                <label class="form-label small fw-semibold" for="dc-title">Tytuł</label>
+                <input id="dc-title" class="form-control" maxlength="150" @bind="_edit.Title" />
+            </div>
+            <div class="col-12 col-md-5">
+                <label class="form-label small fw-semibold d-block">Rodzaj</label>
+                <div class="dc-kind">
+                    <button type="button" class="@(_edit.Kind == DocumentKinds.Required ? "active" : "")" @onclick="() => _edit.Kind = DocumentKinds.Required">
+                        <i class="bi bi-check2-square"></i><span><b>Wymagany</b><small>trzeba zaakceptować</small></span>
+                    </button>
+                    <button type="button" class="@(_edit.Kind == DocumentKinds.Consent ? "active" : "")" @onclick="() => _edit.Kind = DocumentKinds.Consent">
+                        <i class="bi bi-hand-thumbs-up"></i><span><b>Zgoda</b><small>tak albo nie</small></span>
+                    </button>
+                </div>
+            </div>
+            <div class="col-12">
+                <label class="form-label small fw-semibold" for="dc-content">Treść</label>
+                <textarea id="dc-content" class="form-control" rows="12" @bind="_edit.Content"></textarea>
+                <div class="form-text">Akapity oddziel pustą linią. Klient zobaczy treść w aplikacji przed akceptacją.</div>
+            </div>
+            @if (_edit.Id is not null)
+            {
+                <div class="col-12">
+                    <label class="form-check">
+                        <input type="checkbox" class="form-check-input" @bind="_edit.AskAgain" />
+                        <span class="form-check-label">Po zmianie treści poproś wszystkich klientów o ponowną akceptację</span>
+                    </label>
+                    <div class="form-text">Wyłącz przy poprawce literówki — decyzje klientów zostaną.</div>
+                </div>
+            }
+        </div>
+        <div class="d-flex gap-2 mt-3">
+            <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">
+                @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                <i class="bi bi-floppy me-1"></i>Zapisz
+            </button>
+            <button class="btn btn-outline-secondary" @onclick="() => _edit = null">Anuluj</button>
+        </div>
+    </section>
+}
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_docs.Count == 0 && _edit is null)
+{
+    <section class="dc-card text-center py-4">
+        <div class="dc-empty-ic"><i class="bi bi-file-earmark-text"></i></div>
+        <h6 class="fw-bold">Nie masz jeszcze dokumentów</h6>
+        <p class="text-muted small mx-auto" style="max-width:52ch">Zacznij od gotowego wzoru i dopasuj go do siebie. Nowi i obecni klienci zobaczą go przy następnym wejściu do aplikacji.</p>
+        <div class="d-flex gap-2 justify-content-center flex-wrap">
+            @foreach (var t in DocumentKinds.Templates)
+            {
+                <button class="btn btn-outline-primary btn-sm" @onclick="() => StartNew(t)"><i class="bi bi-plus-lg me-1"></i>@t.Title</button>
+            }
+        </div>
+    </section>
+}
+else
+{
+    @foreach (var d in _docs)
+    {
+        var decided = d.AcceptedCount + d.DeclinedCount;
+        var pct = d.ClientCount == 0 ? 0 : decided * 100 / d.ClientCount;
+        <section class="dc-card">
+            <div class="dc-head">
+                <span class="dc-ic @(d.Kind == DocumentKinds.Consent ? "consent" : "")"><i class="bi @(d.Kind == DocumentKinds.Consent ? "bi-hand-thumbs-up" : "bi-file-earmark-check")"></i></span>
+                <div class="min-w-0 flex-grow-1">
+                    <div class="dc-title">@d.Title</div>
+                    <div class="dc-meta">
+                        <span class="dc-badge">@(d.Kind == DocumentKinds.Consent ? "Zgoda" : "Wymagany")</span>
+                        wersja @d.Version · zmieniony @Clock.ToWallClock(d.UpdatedAt).ToString("dd.MM.yyyy")
+                    </div>
+                </div>
+                <div class="dc-actions">
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleDecisions(d.Id)"><i class="bi bi-people me-1"></i>Decyzje klientów</button>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => StartEdit(d)"><i class="bi bi-pencil"></i></button>
+                    @if (_confirmArchive == d.Id)
+                    {
+                        <button class="btn btn-sm btn-danger" @onclick="() => ArchiveAsync(d.Id)">Usuń</button>
+                        <button class="btn btn-sm btn-link" @onclick="() => _confirmArchive = null">Nie</button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-sm btn-outline-danger" title="Usuń z aplikacji (historia zostaje)" @onclick="() => _confirmArchive = d.Id"><i class="bi bi-archive"></i></button>
+                    }
+                </div>
+            </div>
+            <div class="dc-progress">
+                <div class="dc-bar"><span style="width:@(d.ClientCount == 0 ? 0 : d.AcceptedCount * 100 / d.ClientCount)%"></span><i style="width:@(d.ClientCount == 0 ? 0 : d.DeclinedCount * 100 / d.ClientCount)%"></i></div>
+                <small>
+                    @if (d.Kind == DocumentKinds.Consent)
+                    {
+                        <text>@d.AcceptedCount zgód · @d.DeclinedCount odmów · @(d.ClientCount - decided) bez decyzji</text>
+                    }
+                    else
+                    {
+                        <text>Zaakceptowało @d.AcceptedCount z @d.ClientCount klientów (@pct%)</text>
+                    }
+                </small>
+            </div>
+
+            @if (_decisionsFor == d.Id)
+            {
+                <div class="table-responsive mt-2">
+                    <table class="table table-sm align-middle small mb-0">
+                        <thead class="text-muted"><tr><th>Klient</th><th>Stan</th><th>Kiedy</th></tr></thead>
+                        <tbody>
+                            @foreach (var x in _decisions)
+                            {
+                                <tr>
+                                    <td><a href="@($"/clients/{x.ClientId}")">@x.ClientName</a></td>
+                                    <td>
+                                        @if (x.Accepted == true) { <span class="badge bg-success-subtle text-success-emphasis">@(d.Kind == DocumentKinds.Consent ? "zgoda" : "zaakceptowano")</span> }
+                                        else if (x.Accepted == false) { <span class="badge bg-danger-subtle text-danger-emphasis">brak zgody</span> }
+                                        else if (x.Version is not null) { <span class="badge bg-warning-subtle text-warning-emphasis">poprzednia wersja</span> }
+                                        else { <span class="text-muted">czeka</span> }
+                                    </td>
+                                    <td class="text-muted">@(x.DecidedAtUtc is { } at ? Clock.ToWallClock(at).ToString("dd.MM.yyyy HH:mm") : "—")</td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+    }
+    @if (_edit is null)
+    {
+        <div class="small text-muted mt-2">
+            Dodaj też: @foreach (var t in DocumentKinds.Templates.Where(t => _docs.All(d => d.Title != t.Title)))
+            {
+                <button class="btn btn-link btn-sm p-0 me-2" @onclick="() => StartNew(t)">@t.Title</button>
+            }
+        </div>
+    }
+}
+
+<style>
+    .dc-card { padding: 1rem 1.15rem; border-radius: 16px; border: 1px solid var(--bs-border-color); background: var(--bs-body-bg); margin-bottom: .85rem; }
+    .dc-editor { border-color: var(--c-primary); }
+    .dc-kind { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }
+    .dc-kind button { display: flex; align-items: center; gap: .55rem; padding: .5rem .7rem; border-radius: 10px; border: 1px solid var(--bs-border-color); background: var(--bs-body-bg); text-align: left; color: inherit; }
+    .dc-kind button.active { border-color: var(--c-primary); background: var(--c-primary-light); }
+    .dc-kind button .bi { color: var(--c-primary); font-size: 1.1rem; }
+    .dc-kind b { display: block; font-size: .85rem; }
+    .dc-kind small { display: block; font-size: .72rem; color: var(--bs-secondary-color); }
+    .dc-head { display: flex; align-items: center; gap: .75rem; flex-wrap: wrap; }
+    .dc-ic { width: 40px; height: 40px; border-radius: 12px; display: grid; place-items: center; flex-shrink: 0; background: var(--c-primary-light); color: var(--c-primary); font-size: 1.15rem; }
+    .dc-ic.consent { background: color-mix(in srgb, var(--c-success) 14%, transparent); color: var(--c-success); }
+    .dc-title { font-weight: 700; }
+    .dc-meta { font-size: .78rem; color: var(--bs-secondary-color); }
+    .dc-badge { display: inline-block; padding: 0 .45rem; border-radius: 99px; background: var(--bs-tertiary-bg); font-weight: 600; margin-right: .3rem; }
+    .dc-actions { display: flex; gap: .35rem; flex-wrap: wrap; }
+    .dc-progress { margin-top: .75rem; }
+    .dc-bar { position: relative; display: flex; height: 7px; border-radius: 99px; background: var(--bs-border-color); overflow: hidden; margin-bottom: .3rem; }
+    .dc-bar span { background: var(--c-success); }
+    .dc-bar i { background: var(--c-danger); }
+    .dc-progress small { color: var(--bs-secondary-color); font-size: .78rem; }
+    .dc-empty-ic { width: 56px; height: 56px; margin: 0 auto .75rem; border-radius: 16px; display: grid; place-items: center; background: var(--c-primary-light); color: var(--c-primary); font-size: 1.6rem; }
+</style>
+
+@code {
+    private List<ClientDocumentDto> _docs = [];
+    private List<DocumentDecisionDto> _decisions = [];
+    private int? _decisionsFor;
+    private int? _confirmArchive;
+    private SaveClientDocumentDto? _edit;
+    private bool _loading = true, _saving;
+    private string? _message;
+    private bool _msgError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        _loading = false;
+    }
+
+    private async Task LoadAsync() => _docs = await DocumentSvc.GetAllAsync();
+
+    private void StartNew(DocumentKinds.Template? template = null) =>
+        _edit = new SaveClientDocumentDto
+        {
+            Title = template?.Title ?? "",
+            Kind = template?.Kind ?? DocumentKinds.Required,
+            Content = template?.Content ?? ""
+        };
+
+    private void StartEdit(ClientDocumentDto d) =>
+        _edit = new SaveClientDocumentDto { Id = d.Id, Title = d.Title, Kind = d.Kind, Content = d.Content, AskAgain = true };
+
+    private async Task SaveAsync()
+    {
+        if (_edit is null) return;
+        _saving = true;
+        try
+        {
+            await DocumentSvc.SaveAsync(_edit);
+            _message = _edit.Id is null
+                ? "Dodano dokument — klienci zobaczą go przy następnym wejściu do aplikacji."
+                : "Zapisano zmiany.";
+            _msgError = false;
+            _edit = null;
+            await LoadAsync();
+        }
+        catch (ArgumentException ex) { _message = ex.Message; _msgError = true; }
+        finally { _saving = false; }
+    }
+
+    private async Task ArchiveAsync(int id)
+    {
+        await DocumentSvc.ArchiveAsync(id);
+        _confirmArchive = null;
+        _message = "Dokument usunięty z aplikacji. Historia decyzji klientów została zachowana.";
+        _msgError = false;
+        await LoadAsync();
+    }
+
+    private async Task ToggleDecisions(int id)
+    {
+        if (_decisionsFor == id) { _decisionsFor = null; return; }
+        _decisions = await DocumentSvc.GetDecisionsAsync(id);
+        _decisionsFor = id;
+    }
+}

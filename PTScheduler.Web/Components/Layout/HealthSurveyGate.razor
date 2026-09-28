@@ -3,6 +3,7 @@
 @inject NavigationManager Nav
 @inject PTScheduler.Application.Interfaces.ISurveyService Surveys
 @inject PTScheduler.Application.Interfaces.IClientService ClientService
+@inject PTScheduler.Application.Interfaces.IClientDocumentService DocumentSvc
 @rendermode PTScheduler.Web.RenderModes.Server
 
 @* Przy pierwszym logowaniu klienta (i dopóki nie wypełni): ankieta zdrowotna. „Później” — do końca sesji. *@
@@ -44,6 +45,8 @@
             var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
             var client = await ClientService.GetClientByUserIdAsync(userId);
             if (client is null || !await Surveys.IsHealthSurveyPendingAsync(client.Id)) return;
+            // Najpierw dokumenty do akceptacji (osobne okno) — ankieta pojawi się przy następnym wejściu.
+            if (!path.StartsWith("/my/documents", StringComparison.OrdinalIgnoreCase) && await DocumentSvc.HasPendingAsync(client.Id)) return;
 
             var later = await JS.InvokeAsync<string?>("sessionStorage.getItem", "pts.health.later");
             if (later == "1") return;

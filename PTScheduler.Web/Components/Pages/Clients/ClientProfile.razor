@@ -26,6 +26,7 @@
 @inject IProgressionService Progression
 @inject ISurveyService Surveys
 @inject IChatService Chat
+@inject IClientDocumentService DocumentSvc
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <PageTitle>@(client?.FullName ?? "Profil klienta")</PageTitle>
@@ -839,6 +840,51 @@ else if (client is not null)
                         <div class="small text-muted">Podsumowanie postępów w PDF dla klienta <PlanBadge Flag="ClientReports" RequiredPlan="Business" /></div>
                     }
                 </section>
+                <section class="cp-card">
+                    <div class="cp-card-head">
+                        <h6 class="cp-card-title mb-0"><i class="bi bi-file-earmark-check"></i>Dokumenty i zgody</h6>
+                        <a href="/admin/documents" class="btn btn-link btn-sm p-0">Zarządzaj</a>
+                    </div>
+                    @if (_documents.Count == 0)
+                    {
+                        <div class="small text-muted">Nie masz jeszcze dokumentów do akceptacji. Dodaj regulamin albo zgodę na wizerunek — klient zaakceptuje je w aplikacji.</div>
+                    }
+                    else
+                    {
+                        <ul class="list-unstyled mb-0 d-flex flex-column gap-2 small">
+                            @foreach (var d in _documents)
+                            {
+                                <li class="d-flex align-items-start gap-2">
+                                    @if (d.Pending)
+                                    {
+                                        <i class="bi bi-hourglass-split text-warning"></i>
+                                    }
+                                    else if (d.Accepted == true)
+                                    {
+                                        <i class="bi bi-check-circle-fill text-success"></i>
+                                    }
+                                    else
+                                    {
+                                        <i class="bi bi-x-circle-fill text-secondary"></i>
+                                    }
+                                    <div>
+                                        <div class="fw-semibold">@d.Title</div>
+                                        <div class="text-muted">
+                                            @if (d.Pending)
+                                            {
+                                                @(d.DecidedVersion is null ? "Czeka na decyzję klienta" : "Nowa wersja — czeka na decyzję")
+                                            }
+                                            else
+                                            {
+                                                @((d.Accepted == true ? (d.Kind == PTScheduler.Domain.Constants.DocumentKinds.Required ? "Zaakceptowano " : "Zgoda udzielona ") : "Brak zgody · ") + Clock.ToWallClock(d.DecidedAtUtc!.Value).ToString("dd.MM.yyyy HH:mm"))
+                                            }
+                                        </div>
+                                    </div>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </section>
             </div>
 
             <div class="cp-col">
@@ -1445,6 +1491,7 @@ else if (client is not null)
     };
 
     private ClientAccountStatus? _account;
+    private List<ClientDocumentStatusDto> _documents = [];
     private string? _inviteLink;
     private string _inviteMsg = string.Empty;
     private bool _inviteError;
@@ -1661,6 +1708,8 @@ else if (client is not null)
     {
         try { _account = await Invitations.GetAccountStatusAsync(Id); }
         catch { _account = null; } // Status konta jest pomocniczy — nie blokuje profilu.
+        try { _documents = await DocumentSvc.GetForClientAsync(Id); }
+        catch { _documents = []; }
     }
 
     private async Task SendInvite(bool email)

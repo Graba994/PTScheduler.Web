@@ -19,6 +19,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<BodyMeasurement> BodyMeasurements => Set<BodyMeasurement>();
     public DbSet<AutomationRule> AutomationRules => Set<AutomationRule>();
     public DbSet<AutomationLog> AutomationLogs => Set<AutomationLog>();
+    public DbSet<ClientDocument> ClientDocuments => Set<ClientDocument>();
+    public DbSet<DocumentAcceptance> DocumentAcceptances => Set<DocumentAcceptance>();
     public DbSet<TrainerNote> TrainerNotes => Set<TrainerNote>();
     public DbSet<SessionPackage> SessionPackages => Set<SessionPackage>();
     public DbSet<IntroSessionConfig> IntroSessionConfigs => Set<IntroSessionConfig>();
@@ -447,6 +449,18 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             e.Property(r => r.Subject).HasMaxLength(200);
             e.Property(r => r.Message).HasMaxLength(2000);
             e.Property(r => r.ButtonText).HasMaxLength(60);
+        });
+        builder.Entity<ClientDocument>(e =>
+        {
+            e.Property(d => d.Title).HasMaxLength(150);
+            e.Property(d => d.Kind).HasMaxLength(20);
+        });
+        builder.Entity<DocumentAcceptance>(e =>
+        {
+            e.HasOne(a => a.Document).WithMany().HasForeignKey(a => a.DocumentId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(a => a.Client).WithMany().HasForeignKey(a => a.ClientId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(a => new { a.DocumentId, a.ClientId });
+            e.Property(a => a.IpAddress).HasMaxLength(45);
         });
         builder.Entity<AutomationLog>(e =>
         {
