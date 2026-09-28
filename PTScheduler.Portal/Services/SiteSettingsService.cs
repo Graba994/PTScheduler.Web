@@ -66,6 +66,16 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         /// <summary>Dane sprzedawcy w nagłówku PDF oferty trenera (nazwa, adres, NIP, konto — wiele linii).</summary>
         public const string OfferSellerDetails = "offer_seller_details";
 
+        // Automatyczne rachunki trenerów
+        /// <summary>„true” — Portal sam wystawia miesięczne rachunki i przypomina o płatności.</summary>
+        public const string BillingAutoEnabled = "billing_auto_enabled";
+        /// <summary>Dzień miesiąca wystawienia rachunku (1–28).</summary>
+        public const string BillingDay = "billing_day";
+        /// <summary>Termin płatności w dniach od wystawienia.</summary>
+        public const string BillingDueDays = "billing_due_days";
+        /// <summary>„false” — bez automatycznych przypomnień o zaległościach.</summary>
+        public const string BillingReminders = "billing_reminders";
+
         // Update tracking
         public const string LastTenantBuildCommit = "last_tenant_build_commit";
         public const string LastTenantBuildTime = "last_tenant_build_time";

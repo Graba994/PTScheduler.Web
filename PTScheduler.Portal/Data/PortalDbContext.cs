@@ -31,6 +31,8 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<TenantAddon> TenantAddons => Set<TenantAddon>();
     public DbSet<TenantOfferItem> TenantOfferItems => Set<TenantOfferItem>();
     public DbSet<TenantSmsCounter> TenantSmsCounters => Set<TenantSmsCounter>();
+    public DbSet<TenantBill> TenantBills => Set<TenantBill>();
+    public DbSet<TenantBillLine> TenantBillLines => Set<TenantBillLine>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -148,6 +150,34 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.HasIndex(x => x.TenantId);
             e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
             e.HasOne(x => x.ServiceItem).WithMany().HasForeignKey(x => x.ServiceItemId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        b.Entity<TenantBill>(e =>
+        {
+            e.Property(x => x.Number).HasMaxLength(32);
+            e.Property(x => x.Amount).HasPrecision(12, 2);
+            e.Property(x => x.Currency).HasMaxLength(3);
+            e.Property(x => x.PaidVia).HasMaxLength(32);
+            e.Property(x => x.PayToken).HasMaxLength(64);
+            e.Property(x => x.PaymentGateway).HasMaxLength(32);
+            e.Property(x => x.PaymentExternalId).HasMaxLength(200);
+            e.Property(x => x.AdminNote).HasMaxLength(1000);
+            e.HasIndex(x => x.Number).IsUnique();
+            e.HasIndex(x => x.PayToken).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.PeriodStart });
+            e.Property(x => x.PaymentSessionId).HasMaxLength(64);
+            e.HasIndex(x => x.PaymentExternalId);
+            e.HasIndex(x => x.PaymentSessionId);
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(x => x.Lines).WithOne(l => l.Bill).HasForeignKey(l => l.BillId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<TenantBillLine>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(200);
+            e.Property(x => x.Detail).HasMaxLength(500);
+            e.Property(x => x.UnitPrice).HasPrecision(12, 2);
+            e.Property(x => x.Amount).HasPrecision(12, 2);
         });
 
         b.Entity<TenantSmsCounter>(e =>

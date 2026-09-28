@@ -15,8 +15,12 @@ public class StorePaymentService(
     CreditService creditService,
     TenantService tenantService,
     StoreTicketService tickets,
+    IServiceProvider services,
     ILogger<StorePaymentService> logger)
 {
+    // Rachunki trenerów płacone tymi samymi bramkami (BillingService zależy od tej klasy — pobieramy go leniwie).
+    private BillingService Billing => services.GetRequiredService<BillingService>();
+
     public async Task<List<string>> GetAvailableGatewaysAsync()
     {
         var gateways = new List<string>();
@@ -59,6 +63,8 @@ public class StorePaymentService(
 
     public async Task<bool> HandlePaymentConfirmationAsync(string gateway, string externalId)
     {
+        if (await Billing.TryConfirmAsync(gateway, externalId, externalId)) return true;
+
         await using var db = dbFactory.CreateDbContext();
 
         var orders = await db.ServiceOrders
@@ -374,7 +380,15 @@ public class StorePaymentService(
             var orders = await db.ServiceOrders.AsNoTracking()
                 .Where(o => o.PaymentExternalId == tx.OrderId && o.PaymentGateway == "autopay")
                 .Select(o => o.Status).ToListAsync();
-            if (orders.Count == 0) { results.Add((tx.OrderId, false)); continue; }
+            if (orders.Count == 0)
+            {
+                // Rachunek trenera (nie zamówienie ze sklepu).
+                var isBill = await Billing.IsBillPaymentAsync("autopay", tx.OrderId);
+                if (isBill && tx.PaymentStatus.Equals("SUCCESS", StringComparison.OrdinalIgnoreCase))
+                    await Billing.TryConfirmAsync("autopay", tx.OrderId, tx.OrderId);
+                results.Add((tx.OrderId, isBill));
+                continue;
+            }
 
             // Opłacone tylko raz — powtórzone ITN potwierdzamy bez ponownego księgowania.
             if (tx.PaymentStatus.Equals("SUCCESS", StringComparison.OrdinalIgnoreCase)

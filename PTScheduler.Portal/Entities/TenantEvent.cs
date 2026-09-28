@@ -36,4 +36,6 @@ public static class TenantEventTypes
     public const string CreditAdded = "credit_added";
     public const string CreditDeducted = "credit_deducted";
     public const string OfferChanged = "offer_changed";
+    public const string BillIssued = "bill_issued";
+    public const string BillPaid = "bill_paid";
 }

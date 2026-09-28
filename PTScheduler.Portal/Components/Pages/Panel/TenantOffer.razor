@@ -2,6 +2,7 @@
 @layout AdminLayout
 @attribute [Authorize(Roles = "Admin")]
 @inject OfferService OfferSvc
+@inject BillingService Billing
 @inject SiteSettingsService SiteSettings
 @inject AuthenticationStateProvider AuthState
 @rendermode InteractiveServer
@@ -279,6 +280,65 @@ else
             }
         </section>
 
+        <section class="pp-card of-wide" aria-labelledby="of-bills-title">
+            <div class="pp-card-head">
+                <div class="pp-icon"><i class="bi bi-receipt"></i></div>
+                <div class="min-w-0 flex-grow-1">
+                    <h2 class="pp-card-title" id="of-bills-title">Rachunki</h2>
+                    <div class="pp-card-sub">Rachunek za @BillingService.PeriodLabel(BillingService.CurrentPeriod).ToLowerInvariant(): @(_currentBill is not null ? $"wystawiony ({_currentBill.Number})" : _draft.Count == 0 ? "nie ma nic do rozliczenia" : $"do wystawienia — {OfferService.Money(_draft.Sum(l => l.Amount))}")</div>
+                </div>
+                <a href="/panel/billing" class="btn btn-sm btn-outline-secondary">Wszystkie rachunki</a>
+            </div>
+            @if (_currentBill is null && _draft.Count > 0)
+            {
+                <ul class="list-unstyled small mb-2">
+                    @foreach (var l in _draft)
+                    {
+                        <li class="d-flex justify-content-between gap-3 py-1 border-bottom">
+                            <span>@l.Name@(l.Quantity > 1 ? $" × {l.Quantity}" : "") <span class="text-muted">@l.Detail</span></span>
+                            <span class="text-nowrap">@OfferService.Money(l.Amount)</span>
+                        </li>
+                    }
+                </ul>
+                <button class="btn btn-sm btn-primary" disabled="@_saving" @onclick="IssueBillAsync"><i class="bi bi-send me-1"></i>Wystaw i wyślij rachunek teraz</button>
+            }
+            @if (_bills.Count > 0)
+            {
+                <div class="table-responsive mt-3">
+                    <table class="table table-sm small mb-0 align-middle">
+                        <tbody>
+                            @foreach (var b in _bills.Take(12))
+                            {
+                                <tr>
+                                    <td><a href="@($"/rachunek/{b.PayToken}")" target="_blank" class="text-decoration-none fw-semibold">@b.Number</a></td>
+                                    <td class="text-muted">@BillingService.PeriodLabel(b.PeriodStart)</td>
+                                    <td class="text-end text-nowrap">@OfferService.Money(b.Amount)</td>
+                                    <td class="text-end">
+                                        @if (b.Status == TenantBillStatus.Paid)
+                                        {
+                                            <span class="badge bg-success-subtle text-success-emphasis">opłacony</span>
+                                        }
+                                        else if (b.Status == TenantBillStatus.Cancelled)
+                                        {
+                                            <span class="badge bg-secondary-subtle text-secondary-emphasis">anulowany</span>
+                                        }
+                                        else if (BillingService.Today > b.DueDate)
+                                        {
+                                            <span class="badge bg-danger-subtle text-danger-emphasis">po terminie</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-warning-subtle text-warning-emphasis">do @b.DueDate.ToString("dd.MM")</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+
         <details class="pp-card of-wide">
             <summary class="pp-card-title" style="cursor:pointer">Dane sprzedawcy na PDF <span class="pp-card-sub fw-normal">— ustawiasz raz, dla wszystkich ofert</span></summary>
             <div class="mt-3">
@@ -320,6 +380,23 @@ else
     {
         _offer = await OfferSvc.GetAsync(Id);
         if (_offer is not null && _catalog.Count == 0) _catalog = await OfferSvc.CatalogAsync(Id);
+        if (_offer is null) return;
+        _bills = await Billing.ListAsync(Id, 24);
+        _currentBill = _bills.FirstOrDefault(b => b.PeriodStart == BillingService.CurrentPeriod && b.Status != TenantBillStatus.Cancelled);
+        _draft = _currentBill is null ? await Billing.DraftAsync(Id, BillingService.CurrentPeriod) : [];
+    }
+
+    private List<TenantBill> _bills = [];
+    private TenantBill? _currentBill;
+    private List<BillLineDraft> _draft = [];
+
+    private async Task IssueBillAsync()
+    {
+        _saving = true;
+        var (ok, msg, _) = await Billing.IssueAsync(Id, BillingService.CurrentPeriod);
+        (_message, _messageOk) = (msg, ok);
+        await LoadAsync();
+        _saving = false;
     }
 
     private void OpenForm()

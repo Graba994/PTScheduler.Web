@@ -221,6 +221,47 @@ else if (_catalog.Count > 0)
                 }
             </section>
 
+            @if (_bills.Count > 0)
+            {
+                <section class="sh-active">
+                    <h6 class="sh-side-title"><i class="bi bi-receipt"></i>Twoje rachunki</h6>
+                    @foreach (var b in _bills)
+                    {
+                        <div class="sh-addon">
+                            <div class="min-w-0">
+                                <b>@b.Period</b>
+                                <small>
+                                    @b.Number ·
+                                    @if (b.Paid)
+                                    {
+                                        <span class="text-success"><i class="bi bi-check-circle"></i> opłacony</span>
+                                    }
+                                    else if (b.Overdue)
+                                    {
+                                        <span class="text-danger">po terminie (@b.DueDate?.ToString("d.MM"))</span>
+                                    }
+                                    else
+                                    {
+                                        <span>do zapłaty do @b.DueDate?.ToString("d.MM")</span>
+                                    }
+                                </small>
+                            </div>
+                            <div class="text-end">
+                                <div class="fw-semibold text-nowrap">@b.Amount.ToString("0.00") zł</div>
+                                @if (!b.Paid && !string.IsNullOrEmpty(b.PayUrl))
+                                {
+                                    <a class="btn btn-sm btn-primary mt-1" href="@b.PayUrl" target="_blank" rel="noopener">Zapłać</a>
+                                }
+                                else if (!string.IsNullOrEmpty(b.PayUrl))
+                                {
+                                    <a class="small" href="@b.PayUrl" target="_blank" rel="noopener">Zobacz</a>
+                                }
+                            </div>
+                        </div>
+                    }
+                </section>
+            }
+
             @if (_addons.Count > 0)
             {
                 <section class="sh-active">
@@ -354,6 +395,7 @@ else if (_catalog.Count > 0)
     public string? AddonQuery { get; set; }
 
     private List<ActiveAddon> _addons = new();
+    private List<TrainerBill> _bills = new();
     private int? _confirmAdd;
     private int? _confirmCancel;
 
@@ -456,6 +498,24 @@ else if (_catalog.Count > 0)
                         MonthlyAddon = el.TryGetProperty("monthlyAddon", out var ma) && ma.GetBoolean(),
                         AutoBilling = el.TryGetProperty("autoBilling", out var ab) && ab.GetBoolean(),
                         AddonKind = el.TryGetProperty("addonKind", out var ak) ? ak.GetString() : null
+                    });
+                }
+            }
+
+            _bills.Clear();
+            if (root.TryGetProperty("bills", out var billsEl) && billsEl.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var el in billsEl.EnumerateArray())
+                {
+                    _bills.Add(new TrainerBill
+                    {
+                        Number = el.GetProperty("number").GetString() ?? "",
+                        Period = el.TryGetProperty("period", out var pe) ? pe.GetString() ?? "" : "",
+                        Amount = el.GetProperty("amount").GetDecimal(),
+                        Paid = el.TryGetProperty("paid", out var pd) && pd.GetBoolean(),
+                        DueDate = el.TryGetProperty("dueDate", out var dd) && DateOnly.TryParse(dd.GetString(), System.Globalization.CultureInfo.InvariantCulture, out var due) ? due : null,
+                        Overdue = el.TryGetProperty("overdue", out var od) && od.GetBoolean(),
+                        PayUrl = el.TryGetProperty("payUrl", out var pu) ? pu.GetString() : null
                     });
                 }
             }
@@ -748,6 +808,17 @@ else if (_catalog.Count > 0)
         public bool MonthlyAddon { get; set; }
         public bool AutoBilling { get; set; }
         public string? AddonKind { get; set; }
+    }
+
+    private class TrainerBill
+    {
+        public string Number { get; set; } = "";
+        public string Period { get; set; } = "";
+        public decimal Amount { get; set; }
+        public bool Paid { get; set; }
+        public DateOnly? DueDate { get; set; }
+        public bool Overdue { get; set; }
+        public string? PayUrl { get; set; }
     }
 
     private class ActiveAddon

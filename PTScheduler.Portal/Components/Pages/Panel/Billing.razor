@@ -1,0 +1,315 @@
+@page "/panel/billing"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject BillingService BillingSvc
+@inject IJSRuntime JS
+@rendermode InteractiveServer
+
+<PageTitle>Rachunki — PTScheduler Portal</PageTitle>
+
+<PanelHeader Title="Rachunki trenerów" Icon="bi-receipt" IconClass="pp-tone-ok"
+             Subtitle="Co miesiąc Portal wystawia rachunek z oferty trenera, wysyła e-mail z linkiem do płatności online i przypomina o zaległościach.">
+    <Actions>
+        <div class="d-flex gap-2 flex-wrap">
+            <select class="form-select form-select-sm" style="width:auto" @bind="_filter">
+                <option value="open">Do zapłaty</option>
+                <option value="overdue">Po terminie</option>
+                <option value="paid">Opłacone</option>
+                <option value="all">Wszystkie</option>
+            </select>
+            <button class="btn btn-sm btn-primary" @onclick="IssueMissingAsync" disabled="@_busy">
+                <i class="bi bi-receipt me-1"></i>Wystaw brakujące za @BillingService.PeriodLabel(BillingService.CurrentPeriod).ToLowerInvariant()
+            </button>
+        </div>
+    </Actions>
+</PanelHeader>
+
+@if (_message is not null)
+{
+    <div class="alert @(_msgError ? "alert-danger" : "alert-success") alert-dismissible py-2 small">
+        @_message
+        <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button>
+    </div>
+}
+
+@if (_settings is not null && !_settings.AutoEnabled)
+{
+    <StatusBanner Tone="warn" Icon="bi-pause-circle" Title="Automatyczne rachunki są wyłączone">
+        Włącz je poniżej — Portal sam wystawi rachunki w dniu rozliczenia i będzie przypominał o płatnościach. Do tego czasu możesz wystawiać rachunki ręcznie.
+    </StatusBanner>
+}
+else if (_overdue.Count > 0)
+{
+    <StatusBanner Tone="warn" Icon="bi-exclamation-triangle-fill" Title="@($"{_overdue.Count} {PanelUi.Plural(_overdue.Count, "rachunek po terminie", "rachunki po terminie", "rachunków po terminie")} — {Money(_overdue.Sum(b => b.Amount))}")">
+        Trener dostaje przypomnienie w dniu terminu i tydzień później. Po dwóch tygodniach dostaniesz osobną wiadomość, żeby zdecydować, co dalej.
+    </StatusBanner>
+}
+
+<div class="pp-stats">
+    <StatTile Label="Do zapłaty" Value="@Money(_open.Sum(b => b.Amount))" Meta="@($"{_open.Count} {PanelUi.Plural(_open.Count, "rachunek", "rachunki", "rachunków")}")" Icon="bi-hourglass-split" Tone="info" />
+    <StatTile Label="Po terminie" Value="@Money(_overdue.Sum(b => b.Amount))" Meta="@($"{_overdue.Count}")" Icon="bi-exclamation-circle" Tone="@(_overdue.Count > 0 ? "warn" : "muted")" />
+    <StatTile Label="Wpłynęło w tym miesiącu" Value="@Money(_paidThisMonth)" Icon="bi-check2-circle" Tone="ok" />
+    <StatTile Label="Następne rachunki" Value="@NextRunLabel" Meta="@(_settings?.AutoEnabled == true ? "automatycznie" : "automat wyłączony")" Icon="bi-calendar-event" Tone="muted" />
+</div>
+
+<details class="card border-0 shadow-sm mb-3" open="@(_settings?.AutoEnabled != true)">
+    <summary class="card-body py-2 d-flex align-items-center gap-2" style="cursor:pointer">
+        <i class="bi bi-gear text-primary"></i><span class="fw-semibold">Ustawienia automatu</span>
+        <span class="small text-muted ms-auto">@SettingsSummary</span>
+    </summary>
+    @if (_settings is not null)
+    {
+        <div class="card-body pt-0">
+            <div class="row g-3 align-items-end">
+                <div class="col-md-4">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="bAuto" @bind="_settings.AutoEnabled" />
+                        <label class="form-check-label" for="bAuto">Wystawiaj rachunki automatycznie</label>
+                    </div>
+                    <div class="form-check form-switch mt-2">
+                        <input class="form-check-input" type="checkbox" id="bRem" @bind="_settings.Reminders" />
+                        <label class="form-check-label" for="bRem">Przypominaj o zaległościach</label>
+                    </div>
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label small fw-semibold" for="bDay">Dzień wystawienia</label>
+                    <input id="bDay" type="number" min="1" max="28" class="form-control form-control-sm" @bind="_settings.BillingDay" />
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label small fw-semibold" for="bDue">Termin płatności (dni)</label>
+                    <input id="bDue" type="number" min="1" max="60" class="form-control form-control-sm" @bind="_settings.DueDays" />
+                </div>
+                <div class="col-md-2">
+                    <button class="btn btn-sm btn-primary w-100" @onclick="SaveSettingsAsync"><i class="bi bi-floppy me-1"></i>Zapisz</button>
+                </div>
+            </div>
+            <div class="small text-muted mt-3">
+                Na rachunek trafia: abonament (chyba że trener płaci kartą przez Stripe), dodatki miesięczne, opłaty z oferty trenera
+                i jednorazowe zakupy ze sklepu. Gratisy nie są doliczane. Trenerzy w okresie próbnym nie dostają rachunków.
+                Dane sprzedawcy na rachunku ustawisz w ofercie trenera (dane sprzedawcy do PDF).
+            </div>
+        </div>
+    }
+</details>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (Filtered.Count == 0)
+{
+    <div class="card border-0 shadow-sm">
+        <div class="card-body text-center text-muted py-5">
+            <i class="bi bi-receipt fs-1 d-block mb-2"></i>
+            <p class="mb-0">@(_filter switch { "open" => "Wszystko opłacone — nie ma rachunków do zapłaty.", "overdue" => "Nikt nie zalega z płatnością.", "paid" => "Brak opłaconych rachunków.", _ => "Nie wystawiono jeszcze żadnego rachunku." })</p>
+        </div>
+    </div>
+}
+else
+{
+    <div class="card border-0 shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0 small">
+                <thead>
+                    <tr>
+                        <th>Rachunek</th>
+                        <th>Trener</th>
+                        <th class="text-end">Kwota</th>
+                        <th>Stan</th>
+                        <th class="text-end">Akcje</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var bill in Filtered)
+                    {
+                        var b = bill;
+                        var overdue = IsOverdue(b);
+                        <tr>
+                            <td>
+                                <button class="btn btn-link btn-sm p-0 fw-semibold text-decoration-none" @onclick="() => _expanded = _expanded == b.Id ? null : b.Id">@b.Number</button>
+                                <div class="text-muted">@BillingService.PeriodLabel(b.PeriodStart)</div>
+                            </td>
+                            <td>
+                                <a href="@($"/panel/tenants/{b.TenantId}/oferta")" class="text-decoration-none">@(b.Tenant?.CompanyName is { Length: > 0 } c ? c : b.Tenant?.Slug)</a>
+                                <div class="text-muted">@b.Tenant?.OwnerEmail</div>
+                            </td>
+                            <td class="text-end fw-semibold" style="font-variant-numeric:tabular-nums">@Money(b.Amount)</td>
+                            <td>
+                                @if (b.Status == TenantBillStatus.Paid)
+                                {
+                                    <span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-check-circle me-1"></i>Opłacony @Local(b.PaidAt!.Value).ToString("dd.MM") · @ViaLabel(b.PaidVia)</span>
+                                }
+                                else if (b.Status == TenantBillStatus.Cancelled)
+                                {
+                                    <span class="badge bg-secondary-subtle text-secondary-emphasis">Anulowany</span>
+                                }
+                                else if (overdue)
+                                {
+                                    <span class="badge bg-danger-subtle text-danger-emphasis"><i class="bi bi-exclamation-circle me-1"></i>@(BillingService.Today.DayNumber - b.DueDate.DayNumber) dni po terminie</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-warning-subtle text-warning-emphasis"><i class="bi bi-hourglass-split me-1"></i>do @b.DueDate.ToString("dd.MM")</span>
+                                }
+                                <div class="text-muted mt-1">
+                                    @(b.EmailSentAt is null ? "e-mail nie wyszedł" : "e-mail wysłany")@(b.ReminderCount > 0 ? $" · przypomnienia: {b.ReminderCount}" : "")
+                                </div>
+                            </td>
+                            <td class="text-end text-nowrap">
+                                <button class="btn btn-sm btn-outline-secondary" title="Kopiuj link do płatności" @onclick="() => CopyLinkAsync(b)"><i class="bi bi-link-45deg"></i></button>
+                                <a class="btn btn-sm btn-outline-secondary" title="Otwórz rachunek" href="@($"/rachunek/{b.PayToken}")" target="_blank"><i class="bi bi-box-arrow-up-right"></i></a>
+                                @if (b.Status == TenantBillStatus.Issued)
+                                {
+                                    <button class="btn btn-sm btn-outline-secondary" title="Wyślij przypomnienie" @onclick="() => RunAsync(() => BillingSvc.SendReminderAsync(b.Id))"><i class="bi bi-envelope"></i></button>
+                                    <button class="btn btn-sm btn-outline-success" title="Oznacz jako opłacony (przelew, gotówka)" @onclick="() => RunAsync(() => BillingSvc.MarkPaidAsync(b.Id))"><i class="bi bi-check-lg"></i></button>
+                                    @if (_confirmCancel == b.Id)
+                                    {
+                                        <button class="btn btn-sm btn-danger" @onclick="() => RunAsync(() => BillingSvc.CancelAsync(b.Id))">Anuluj rachunek</button>
+                                        <button class="btn btn-sm btn-link" @onclick="() => _confirmCancel = null">Nie</button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-sm btn-outline-danger" title="Anuluj rachunek" @onclick="() => _confirmCancel = b.Id"><i class="bi bi-x-lg"></i></button>
+                                    }
+                                }
+                            </td>
+                        </tr>
+                        @if (_expanded == b.Id)
+                        {
+                            <tr class="table-light">
+                                <td colspan="5">
+                                    <ul class="list-unstyled mb-0">
+                                        @foreach (var l in b.Lines)
+                                        {
+                                            <li class="d-flex justify-content-between gap-3 py-1">
+                                                <span>@l.Name@(l.Quantity > 1 ? $" × {l.Quantity}" : "") <span class="text-muted">@l.Detail</span></span>
+                                                <span class="text-nowrap">@Money(l.Amount)</span>
+                                            </li>
+                                        }
+                                    </ul>
+                                    <div class="text-muted mt-1">Wystawiony @Local(b.IssuedAt).ToString("dd.MM.yyyy HH:mm")@(b.PaymentGateway is not null ? $" · płatność rozpoczęta przez {ViaLabel(b.PaymentGateway)}" : "")</div>
+                                </td>
+                            </tr>
+                        }
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private List<TenantBill> _bills = [];
+    private List<TenantBill> _open = [];
+    private List<TenantBill> _overdue = [];
+    private decimal _paidThisMonth;
+    private BillingSettings? _settings;
+    private string _filter = "open";
+    private bool _loading = true, _busy, _msgError;
+    private string? _message;
+    private int? _expanded, _confirmCancel;
+
+    private List<TenantBill> Filtered => _filter switch
+    {
+        "open" => _open,
+        "overdue" => _overdue,
+        "paid" => _bills.Where(b => b.Status == TenantBillStatus.Paid).ToList(),
+        _ => _bills
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _settings = await BillingSvc.GetSettingsAsync();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _bills = await BillingSvc.ListAsync();
+        _open = _bills.Where(b => b.Status == TenantBillStatus.Issued).ToList();
+        _overdue = _open.Where(IsOverdue).ToList();
+        var monthStart = BillingService.CurrentPeriod;
+        _paidThisMonth = _bills.Where(b => b.Status == TenantBillStatus.Paid && b.PaidAt is { } p && DateOnly.FromDateTime(Local(p)) >= monthStart).Sum(b => b.Amount);
+        _loading = false;
+    }
+
+    private static bool IsOverdue(TenantBill b) => b.Status == TenantBillStatus.Issued && BillingService.Today > b.DueDate;
+
+    private string NextRunLabel
+    {
+        get
+        {
+            if (_settings is null) return "—";
+            var today = BillingService.Today;
+            var thisMonth = new DateOnly(today.Year, today.Month, _settings.BillingDay);
+            var next = today < thisMonth ? thisMonth : thisMonth.AddMonths(1);
+            return next.ToString("dd.MM.yyyy");
+        }
+    }
+
+    private string SettingsSummary => _settings is null ? "" : _settings.AutoEnabled
+        ? $"włączone · {_settings.BillingDay}. dnia miesiąca · {_settings.DueDays} dni na płatność{(_settings.Reminders ? " · z przypomnieniami" : "")}"
+        : "wyłączone";
+
+    private async Task SaveSettingsAsync()
+    {
+        if (_settings is null) return;
+        await BillingSvc.SaveSettingsAsync(_settings);
+        _settings = await BillingSvc.GetSettingsAsync();
+        (_message, _msgError) = ("Zapisano ustawienia rachunków.", false);
+    }
+
+    private async Task IssueMissingAsync()
+    {
+        _busy = true;
+        var period = BillingService.CurrentPeriod;
+        int issued = 0, skipped = 0;
+        var errors = new List<string>();
+        foreach (var id in await BillingSvc.EligibleTenantIdsAsync(period))
+        {
+            var (ok, msg, _) = await BillingSvc.IssueAsync(id, period);
+            if (ok) issued++;
+            else if (msg.StartsWith("Nie ma nic")) skipped++;
+            else errors.Add(msg);
+        }
+        _busy = false;
+        _message = issued == 0 && errors.Count == 0
+            ? $"Nie ma nowych rachunków do wystawienia{(skipped > 0 ? $" ({skipped} {PanelUi.Plural(skipped, "trener nie ma", "trenerów nie ma", "trenerów nie ma")} nic do rozliczenia)" : "")}."
+            : $"Wystawiono {issued} {PanelUi.Plural(issued, "rachunek", "rachunki", "rachunków")}.{(errors.Count > 0 ? " Błędy: " + string.Join("; ", errors) : "")}";
+        _msgError = errors.Count > 0;
+        await LoadAsync();
+    }
+
+    private async Task RunAsync(Func<Task<(bool Ok, string Message)>> action)
+    {
+        var (ok, msg) = await action();
+        (_message, _msgError) = (msg, !ok);
+        _confirmCancel = null;
+        await LoadAsync();
+    }
+
+    private async Task CopyLinkAsync(TenantBill b)
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", BillingSvc.PayUrl(b));
+            (_message, _msgError) = ($"Skopiowano link do rachunku {b.Number}.", false);
+        }
+        catch { (_message, _msgError) = (BillingSvc.PayUrl(b), false); }
+    }
+
+    private static string ViaLabel(string? via) => via switch
+    {
+        "manual" => "ręcznie",
+        "autopay" => "Autopay",
+        "payu" => "PayU",
+        "przelewy24" => "Przelewy24",
+        "stripe" => "Stripe",
+        null => "—",
+        _ => via
+    };
+
+    private static string Money(decimal v) => v.ToString("#,0.00", new System.Globalization.CultureInfo("pl-PL")) + " zł";
+    private static DateTime Local(DateTime utc) => ContainerLogService.ToLocal(utc);
+}

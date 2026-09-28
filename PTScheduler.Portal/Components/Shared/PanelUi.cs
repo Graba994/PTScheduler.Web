@@ -52,6 +52,8 @@ public static class PanelUi
         TenantEventTypes.CreditAdded => "Doładowanie kredytów",
         TenantEventTypes.CreditDeducted => "Pobranie kredytów",
         TenantEventTypes.OfferChanged => "Zmiana oferty",
+        TenantEventTypes.BillIssued => "Wystawiony rachunek",
+        TenantEventTypes.BillPaid => "Opłacony rachunek",
         _ => type
     };
 
@@ -76,18 +78,20 @@ public static class PanelUi
         TenantEventTypes.CreditAdded => "bi-plus-square",
         TenantEventTypes.CreditDeducted => "bi-dash-square",
         TenantEventTypes.OfferChanged => "bi-file-earmark-text",
+        TenantEventTypes.BillIssued => "bi-receipt",
+        TenantEventTypes.BillPaid => "bi-receipt-cutoff",
         _ => "bi-circle"
     };
 
     public static string EventTone(string type) => type switch
     {
         TenantEventTypes.Created or TenantEventTypes.Provisioned or TenantEventTypes.Resumed
-            or TenantEventTypes.PaymentReceived or TenantEventTypes.HealthRecovered or TenantEventTypes.CreditAdded => "ok",
+            or TenantEventTypes.PaymentReceived or TenantEventTypes.HealthRecovered or TenantEventTypes.CreditAdded or TenantEventTypes.BillPaid => "ok",
         TenantEventTypes.Suspended or TenantEventTypes.Deleted or TenantEventTypes.PaymentFailed or TenantEventTypes.TrialExpired
             or TenantEventTypes.HealthDown or TenantEventTypes.InactivitySuspended or TenantEventTypes.CleanupDeleted => "danger",
         TenantEventTypes.TrialWarning or TenantEventTypes.InactivityWarning or TenantEventTypes.CleanupWarning => "warn",
         TenantEventTypes.PlanChanged or TenantEventTypes.AddonChanged or TenantEventTypes.DomainChanged
-            or TenantEventTypes.TrialStarted or TenantEventTypes.GraceExtended => "info",
+            or TenantEventTypes.TrialStarted or TenantEventTypes.GraceExtended or TenantEventTypes.BillIssued => "info",
         _ => "muted"
     };
 

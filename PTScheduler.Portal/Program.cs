@@ -76,6 +76,8 @@ builder.Services.AddScoped<StoreTicketService>();
 builder.Services.AddScoped<AddonService>();
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<StorePaymentService>();
+builder.Services.AddScoped<BillingService>();
+builder.Services.AddHostedService<BillingBackgroundService>();
 builder.Services.AddScoped<BackupService>();
 builder.Services.AddHostedService<BackupScheduler>();
 builder.Services.AddSingleton<UpdateNotifier>();
@@ -370,10 +372,11 @@ app.MapPost("/api/webhooks/autopay", async (HttpContext ctx, StorePaymentService
 });
 
 // Autopay: powrót trenera z bramki — wraca do swojego sklepu (status przychodzi osobno w ITN).
-app.MapGet("/api/webhooks/autopay/return", async (HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory) =>
+app.MapGet("/api/webhooks/autopay/return", async (HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory, BillingService billing) =>
 {
     var orderId = AutopayProtocol.SafeOrderId(ctx.Request.Query["OrderID"].ToString());
     if (orderId is null) return Results.Redirect("/");
+    if (await billing.PayUrlBySessionAsync(orderId) is { } billUrl) return Results.Redirect(billUrl);
     await using var db = dbFactory.CreateDbContext();
     var domain = await db.ServiceOrders.AsNoTracking()
         .Where(o => o.PaymentExternalId == orderId && o.PaymentGateway == "autopay")
@@ -416,6 +419,11 @@ app.MapPost("/api/webhooks/przelewy24", async (HttpContext ctx, StorePaymentServ
                     if (!string.IsNullOrWhiteSpace(externalId))
                         await storePayment.HandlePaymentConfirmationAsync("przelewy24", externalId);
                 }
+                else
+                {
+                    // Rachunek trenera: sessionId to nasz identyfikator płatności.
+                    await ctx.RequestServices.GetRequiredService<BillingService>().TryConfirmAsync("przelewy24", null, sessionId);
+                }
             }
         }
     }
@@ -426,6 +434,17 @@ app.MapPost("/api/webhooks/przelewy24", async (HttpContext ctx, StorePaymentServ
 
     return Results.Ok();
 });
+
+// Rachunek trenera: rozpoczęcie płatności online z publicznej strony rachunku (link z e-maila).
+app.MapPost("/rachunek/{token}/pay", async (string token, HttpContext ctx, BillingService billing) =>
+{
+    var form = await ctx.Request.ReadFormAsync();
+    var gateway = form["gateway"].ToString();
+    var (url, error) = await billing.StartPaymentAsync(token, gateway);
+    return url is not null
+        ? Results.Redirect(url)
+        : Results.Redirect($"/rachunek/{Uri.EscapeDataString(token)}?error={Uri.EscapeDataString(error ?? "nieznany błąd")}");
+}).DisableAntiforgery();
 
 // Backup file download — admin only. The BackupEntry.Id determines
 // which file to stream; the path is stored in the entry so nothing
@@ -538,7 +557,8 @@ app.MapGet("/api/store/{slug}", async (
     IDbContextFactory<PortalDbContext> dbFactory,
     IConfiguration config,
     StorePaymentService storePayment,
-    AddonService addons) =>
+    AddonService addons,
+    BillingService billing) =>
 {
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
@@ -588,7 +608,24 @@ app.MapGet("/api/store/{slug}", async (
 
     var gateways = await storePayment.GetAvailableGatewaysAsync();
 
-    return Results.Json(new { tenantId = tenant.Id, companyName = tenant.CompanyName, catalog, gateways, addons = active });
+    // Rachunki trenera (Portal wystawia je co miesiąc) — trener widzi je w sklepie i płaci jednym kliknięciem.
+    var today = BillingService.Today;
+    var bills = (await billing.ListAsync(tenant.Id, 12))
+        .Where(b => b.Status != TenantBillStatus.Cancelled)
+        .Select(b => new
+        {
+            b.Number,
+            Period = BillingService.PeriodLabel(b.PeriodStart),
+            b.Amount,
+            Paid = b.Status == TenantBillStatus.Paid,
+            DueDate = b.DueDate.ToString("yyyy-MM-dd"),
+            Overdue = b.Status == TenantBillStatus.Issued && today > b.DueDate,
+            PayUrl = billing.PayUrl(b)
+        })
+        .Take(6)
+        .ToList();
+
+    return Results.Json(new { tenantId = tenant.Id, companyName = tenant.CompanyName, catalog, gateways, addons = active, bills });
 });
 
 // Dodatki miesięczne: dopisanie do abonamentu (Stripe) i rezygnacja.
