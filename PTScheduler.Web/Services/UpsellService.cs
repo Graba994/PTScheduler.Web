@@ -79,12 +79,12 @@ public sealed class UpsellService(
             }
             if (left <= 0)
                 list.Add(new("sms-out", "critical", "bi-chat-dots-fill", "SMS-y się skończyły",
-                    "Przypomnienia SMS nie wychodzą do klientów. Dokup pakiet — dokupione SMS-y nie wygasają.",
-                    "Dokup SMS-y", ShopHref));
+                    "Przypomnienia SMS nie wychodzą do klientów. Dodaj więcej SMS-ów do abonamentu — działa od razu.",
+                    "Więcej SMS-ów", ShopHref + "?dodatek=sms"));
             else if (left <= Math.Max(10, limit / 5))
                 list.Add(new("sms-low", "warn", "bi-chat-dots-fill", $"Zostało {left} SMS-ów",
-                    "Starczy na kilka dni przypomnień. Dokup pakiet, zanim klienci przestaną je dostawać.",
-                    "Dokup SMS-y", ShopHref));
+                    "Starczy na kilka dni przypomnień. Większy miesięczny limit SMS-ów dodasz do abonamentu jednym kliknięciem.",
+                    "Więcej SMS-ów", ShopHref + "?dodatek=sms"));
         });
 
         await Safe(async () =>
@@ -97,12 +97,12 @@ public sealed class UpsellService(
             var pct = (int)(100 * used / total);
             if (pct >= 95)
                 list.Add(new("video-full", "critical", "bi-camera-reels-fill", $"Miejsce na wideo zajęte w {Math.Min(pct, 100)}%",
-                    "Nowe filmy się nie zmieszczą. Dokup miejsce — lekcje i instruktaże będą dalej działać.",
-                    "Więcej miejsca", ShopHref));
+                    "Nowe filmy się nie zmieszczą. Dodaj miejsce do abonamentu — lekcje i instruktaże będą dalej działać.",
+                    "Więcej miejsca", ShopHref + "?dodatek=miejsce"));
             else if (pct >= 80)
                 list.Add(new("video-low", "warn", "bi-camera-reels-fill", $"Miejsce na wideo zajęte w {pct}%",
-                    "Zostało niewiele miejsca na nowe filmy. Warto dokupić je wcześniej.",
-                    "Więcej miejsca", ShopHref));
+                    "Zostało niewiele miejsca na nowe filmy. Warto powiększyć je wcześniej.",
+                    "Więcej miejsca", ShopHref + "?dodatek=miejsce"));
         });
 
         await Safe(async () =>

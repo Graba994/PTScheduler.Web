@@ -115,6 +115,33 @@ public class SurveyTests
     }
 
     [Fact]
+    public async Task Filled_Together_With_Trainer_Is_Reviewed_And_Does_Not_Notify()
+    {
+        var (f, _) = TestDb.CreateFresh();
+        await using (var db = f.CreateDbContext())
+        {
+            db.Clients.Add(new Client { Id = 1, ApplicationUserId = "cu", FirstName = "Anna", LastName = "Nowak", TrainerUserId = "t1" });
+            await db.SaveChangesAsync();
+        }
+        var push = new Mock<IWebPushService>();
+        var svc = new SurveyService(f, push.Object, TestClock.AtWallClock(new DateTime(2026, 6, 30, 12, 0, 0)), NullLogger<SurveyService>.Instance);
+
+        var (errors, response) = await svc.SubmitAsync(1, SurveyKind.HealthIntake, ValidHealth(heart: true),
+            healthDataConsent: true, filledByStaffUserId: "t1");
+
+        errors.Should().BeEmpty();
+        response!.FilledWithTrainer.Should().BeTrue();
+        response.ReviewedAtUtc.Should().NotBeNull();
+        (await svc.GetLatestAsync(1, SurveyKind.HealthIntake))!.FilledWithTrainer.Should().BeTrue();
+        push.Verify(p => p.SendAsync(It.IsAny<string>(), It.IsAny<PushMessageDto>()), Times.Never);
+
+        // Klient aktualizuje ją później sam — znów „jego” ankieta i powiadomienie dla trenera.
+        var (_, again) = await svc.SubmitAsync(1, SurveyKind.HealthIntake, ValidHealth(heart: true), healthDataConsent: true);
+        again!.FilledWithTrainer.Should().BeFalse();
+        push.Verify(p => p.SendAsync("t1", It.IsAny<PushMessageDto>()), Times.Once);
+    }
+
+    [Fact]
     public async Task PostWorkout_Same_Day_Overwrites_And_Unflagged_Does_Not_Push()
     {
         var (f, _) = TestDb.CreateFresh();

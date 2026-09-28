@@ -6,7 +6,7 @@ using Stripe;
 namespace PTScheduler.Portal.Services;
 
 /// <summary>
-/// Miesięczne dodatki do abonamentu trenera (transfer i przestrzeń wideo).
+/// Miesięczne dodatki do abonamentu trenera (SMS-y, transfer i przestrzeń wideo).
 /// Z subskrypcją Stripe dodatek staje się jej pozycją — Stripe dolicza go co
 /// miesiąc razem z planem, a rezygnacja usuwa pozycję z proporcjonalnym
 /// rozliczeniem. Bez Stripe dodatek aktywuje opłacone zamówienie w sklepie.
@@ -19,7 +19,7 @@ public class AddonService(
 {
     public static bool IsMonthlyAddon(ServiceItem item) =>
         item.PriceType == "monthly"
-        && item.FulfillmentType is "credit_cdn_bandwidth" or "credit_cdn_storage"
+        && item.FulfillmentType is "credit_cdn_bandwidth" or "credit_cdn_storage" or "credit_sms"
         && item.CreditAmount > 0;
 
     /// <summary>
@@ -47,7 +47,8 @@ public class AddonService(
                        + offer.Where(o => o.Effect == OfferEffect.VideoStorageGb).Sum(o => o.TotalEffect),
             BandwidthGb: rows.Where(r => r.FulfillmentType == "credit_cdn_bandwidth").Sum(r => r.Quantity * r.CreditAmount)
                          + offer.Where(o => o.Effect == OfferEffect.VideoBandwidthGb).Sum(o => o.TotalEffect),
-            SmsPerMonth: offer.Where(o => o.Effect == OfferEffect.Sms && o.Billing != OfferBilling.OneTime).Sum(o => o.TotalEffect),
+            SmsPerMonth: rows.Where(r => r.FulfillmentType == "credit_sms").Sum(r => r.Quantity * r.CreditAmount)
+                         + offer.Where(o => o.Effect == OfferEffect.Sms && o.Billing != OfferBilling.OneTime).Sum(o => o.TotalEffect),
             HasSmsCredits: smsCredits > 0);
     }
 

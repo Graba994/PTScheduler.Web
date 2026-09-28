@@ -133,15 +133,15 @@ public static class AdminMenu
                 "Każdy klient dostaje swój link. Gdy polecona osoba odbędzie pierwszy trening, aplikacja sama przyzna nagrodę (np. darmową sesję).",
                 Permissions.ManagePayments, "ReferralProgram", "Pro"),
             new("admin/sklep", "bi-shop", "Sklep usług",
-                "Dokup SMS-y, miejsce na wideo, pomoc",
-                "Dodatki do Twojego abonamentu: pakiety SMS, więcej miejsca i transferu na wideo, pomoc przy konfiguracji. Płacisz tylko za to, czego potrzebujesz.",
+                "Więcej SMS-ów i miejsca na wideo, pomoc",
+                "Dodatki do Twojego abonamentu: więcej SMS-ów, miejsca i transferu na wideo co miesiąc, pomoc przy konfiguracji. Płacisz tylko za to, czego potrzebujesz, i rezygnujesz jednym kliknięciem.",
                 OwnerOnly: true)
         ]),
         new("Klienci i powiadomienia", "bi-bell", "violet",
         [
             new("admin/sms", "bi-chat-dots-fill", "Przypomnienia SMS",
                 "SMS dzień przed treningiem",
-                "Klient dostaje SMS-a dzień przed treningiem — mniej nieobecności. SMS-y idą z limitu Twojego planu, a gdy się skończą, z dokupionych pakietów.",
+                "Klient dostaje SMS-a dzień przed treningiem — mniej nieobecności. SMS-y idą z miesięcznego limitu planu i dodatków; jednorazowe doładowania czekają w odwodzie.",
                 Permissions.ManageSms, "SmsReminders", "Pro"),
             new("admin/email", "bi-envelope-fill", "E-maile",
                 "Nadawca i wysyłka wiadomości",

@@ -247,8 +247,9 @@ else if (client is not null)
                     }
                     else
                     {
-                        <ol class="cp-feed">
-                            @foreach (var f in _feed)
+                        var hidden = _feed.Count - _feedShown;
+                        <ol class="cp-feed @(hidden > 0 ? "has-more" : "")">
+                            @foreach (var f in _feed.Take(_feedShown))
                             {
                                 <li>
                                     <span class="cp-feed-ic @f.Tone"><i class="bi @f.Icon"></i></span>
@@ -267,6 +268,20 @@ else if (client is not null)
                                 </li>
                             }
                         </ol>
+                        @if (hidden > 0)
+                        {
+                            <button type="button" class="cp-feed-more" @onclick="() => _feedShown += 10">
+                                <span class="cp-feed-more-ic"><i class="bi bi-chevron-double-down"></i></span>
+                                <span>Pokaż starsze <b>(@hidden)</b></span>
+                            </button>
+                        }
+                        else if (_feedShown > FeedStart)
+                        {
+                            <button type="button" class="cp-feed-more" @onclick="() => _feedShown = FeedStart">
+                                <span class="cp-feed-more-ic"><i class="bi bi-chevron-double-up"></i></span>
+                                <span>Zwiń</span>
+                            </button>
+                        }
                     }
                 </section>
             </div>
@@ -1158,6 +1173,8 @@ else if (client is not null)
     private int _pastShown = 20;
     private List<AttentionItem> _attention = [];
     private List<FeedItem> _feed = [];
+    private const int FeedStart = 5;
+    private int _feedShown = FeedStart;
 
     private List<WorkoutJournalDayDto> _journal = [];
     private List<TrainingPlanListItemDto> _plans = [];
@@ -1265,6 +1282,9 @@ else if (client is not null)
                 ? $"Ankieta zdrowotna: {_health.FlagCount} {Plural(_health.FlagCount, "odpowiedź wymaga", "odpowiedzi wymagają", "odpowiedzi wymaga")} uwagi"
                 : "Nowa ankieta zdrowotna do przejrzenia", "surveys"));
 
+        if (_health is null)
+            list.Add(new("info", "bi-clipboard2-pulse", "Brak ankiety zdrowotnej — wypełnijcie ją razem na najbliższym spotkaniu", Href: $"/clients/{Id}/ankieta/zdrowie"));
+
         var flagged = _postWorkout.Values.Count(r => r.FlagCount > 0 && r.ReviewedAtUtc is null);
         if (flagged > 0)
             list.Add(new("danger", "bi-exclamation-octagon", $"{flagged} {Plural(flagged, "ankieta", "ankiety", "ankiet")} po treningu z sygnałem ostrzegawczym (ból, złe samopoczucie)", "surveys"));
@@ -1319,7 +1339,7 @@ else if (client is not null)
     private void ComputeFeed()
     {
         var feed = new List<FeedItem>();
-        foreach (var s in Past.Take(15))
+        foreach (var s in Past.Take(40))
         {
             feed.Add(s.Status switch
             {
@@ -1329,7 +1349,7 @@ else if (client is not null)
                 _ => new(s.StartTime, "bi-calendar", "muted", s.SessionTypeName, null, "sessions")
             });
         }
-        foreach (var d in _journal.Take(15))
+        foreach (var d in _journal.Take(40))
         {
             var sub = $"{d.Exercises.Count} {Plural(d.Exercises.Count, "ćwiczenie", "ćwiczenia", "ćwiczeń")} · {d.SetCount} serii"
                       + (d.TotalVolume > 0 ? $" · {d.TotalVolume:N0} kg" : "");
@@ -1344,7 +1364,7 @@ else if (client is not null)
         if (_lastClientMessageAt is { } lm && !string.IsNullOrWhiteSpace(_lastClientMessage))
             feed.Add(new(Clock.ToWallClock(lm), "bi-chat-dots", "info", "Wiadomość od klienta", Truncate(_lastClientMessage, 90), null));
 
-        _feed = feed.Where(f => f.When <= StudioClock.Now.AddHours(1)).OrderByDescending(f => f.When).Take(12).ToList();
+        _feed = feed.Where(f => f.When <= StudioClock.Now.AddHours(1)).OrderByDescending(f => f.When).Take(40).ToList();
     }
 
     private void RefreshPanel()
@@ -1613,6 +1633,7 @@ else if (client is not null)
         _age = client.DateOfBirth is { } dob ? AgeOn(dob) : null;
         _tab = "overview";
         _pastShown = 20;
+        _feedShown = FeedStart;
         RefreshPanel();
 
         // Wynik zaproszenia wysłanego przy zakładaniu klienta (ClientNew → ?invite=…), tylko raz.

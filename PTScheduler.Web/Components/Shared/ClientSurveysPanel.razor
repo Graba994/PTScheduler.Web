@@ -15,6 +15,19 @@
 }
 else
 {
+    <!-- Wspólne wypełnianie na spotkaniu -->
+    <div class="survey-together mb-3">
+        <span class="survey-together-ic"><i class="bi bi-people-fill"></i></span>
+        <div class="survey-together-txt">
+            <b>Wypełnij wspólnie z klientem</b>
+            <span>Na spotkaniu otwórz ankietę na swoim telefonie albo tablecie i wypełnijcie ją razem — zapisze się w profilu klienta.</span>
+        </div>
+        <div class="survey-together-btns">
+            <a class="btn btn-primary btn-sm" href="@($"/clients/{ClientId}/ankieta/zdrowie")"><i class="bi bi-clipboard2-pulse me-1"></i>Ankieta zdrowotna</a>
+            <a class="btn btn-outline-primary btn-sm" href="@($"/clients/{ClientId}/ankieta/po-treningu")"><i class="bi bi-emoji-smile me-1"></i>Po treningu</a>
+        </div>
+    </div>
+
     <!-- Ankieta zdrowotna -->
     <div class="card shadow-sm mb-3">
         <div class="card-body p-4">
@@ -23,7 +36,7 @@ else
                 @if (_health is not null)
                 {
                     <div class="d-flex align-items-center gap-2">
-                        <span class="text-muted small">wypełniona @Clock.ToWallClock(_health.SubmittedAtUtc).ToString("dd.MM.yyyy")</span>
+                        <span class="text-muted small">wypełniona @Clock.ToWallClock(_health.SubmittedAtUtc).ToString("dd.MM.yyyy")@(_health.FilledWithTrainer ? " wspólnie z trenerem" : "")</span>
                         @if (_health.ReviewedAtUtc is null)
                         {
                             <button class="btn btn-sm btn-outline-success" @onclick="() => ReviewAsync(_health)">
@@ -41,7 +54,8 @@ else
             @if (_health is null)
             {
                 <p class="text-muted small mb-0">
-                    Klient nie wypełnił jeszcze ankiety. Zobaczy ją po zalogowaniu@(_healthEnabled ? "" : " (obecnie wyłączona w Admin → Ankiety)").
+                    Klient nie wypełnił jeszcze ankiety. Zobaczy ją po zalogowaniu@(_healthEnabled ? "" : " (obecnie wyłączona w Admin → Ankiety)")
+                    — albo <a href="@($"/clients/{ClientId}/ankieta/zdrowie")">wypełnijcie ją razem</a> na najbliższym spotkaniu.
                 </p>
             }
             else
@@ -168,7 +182,7 @@ else
                             @foreach (var r in _recent)
                             {
                                 <tr class="@(r.FlagCount > 0 ? "table-warning" : "")">
-                                    <td>@r.WorkoutDate?.ToString("dd.MM")</td>
+                                    <td class="text-nowrap">@r.WorkoutDate?.ToString("dd.MM")@if (r.FilledWithTrainer) { <i class="bi bi-people-fill text-primary ms-1" title="Wypełniona wspólnie z trenerem"></i> }</td>
                                     <td>@Num(r, SurveyKeys.Rpe)</td>
                                     <td>@Num(r, SurveyKeys.Duration)</td>
                                     <td>@Num(r, SurveyKeys.Energy)</td>

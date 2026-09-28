@@ -75,7 +75,7 @@ public class SurveyService(
 
     public async Task<(List<string> Errors, SurveyResponseDto? Response)> SubmitAsync(
         int clientId, SurveyKind kind, IReadOnlyDictionary<string, SurveyAnswerInput> answers, DateOnly? workoutDate = null,
-        bool healthDataConsent = false)
+        bool healthDataConsent = false, string? filledByStaffUserId = null)
     {
         if (kind == SurveyKind.HealthIntake && !healthDataConsent)
             return (["Zaznacz zgodę na przetwarzanie danych o zdrowiu — bez niej trener nie może przyjąć ankiety."], null);
@@ -101,13 +101,16 @@ public class SurveyService(
         entity.AnswersJson = SurveyJson.Serialize(evaluated);
         entity.FlagCount = evaluated.Count(a => a.Flagged);
         entity.SubmittedAt = clock.UtcNow;
-        entity.ReviewedAt = null;
-        entity.ReviewedByUserId = null;
+        // Wypełniona wspólnie: trener omówił odpowiedzi na miejscu, więc od razu „przejrzana”.
+        var together = !string.IsNullOrWhiteSpace(filledByStaffUserId);
+        entity.FilledByStaffUserId = together ? filledByStaffUserId : null;
+        entity.ReviewedAt = together ? clock.UtcNow : null;
+        entity.ReviewedByUserId = together ? filledByStaffUserId : null;
         if (kind == SurveyKind.HealthIntake) entity.HealthDataConsentAt = clock.UtcNow;
         await db.SaveChangesAsync();
 
         var dto = Map(entity);
-        await NotifyTrainerAsync(client, dto);
+        if (!together) await NotifyTrainerAsync(client, dto);
         return ([], dto);
     }
 
@@ -211,6 +214,7 @@ public class SurveyService(
         SubmittedAtUtc = r.SubmittedAt,
         Answers = SurveyJson.Deserialize(r.AnswersJson, new List<SurveyAnswer>()),
         FlagCount = r.FlagCount,
-        ReviewedAtUtc = r.ReviewedAt
+        ReviewedAtUtc = r.ReviewedAt,
+        FilledWithTrainer = r.FilledByStaffUserId != null
     };
 }

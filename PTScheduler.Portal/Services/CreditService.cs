@@ -162,8 +162,8 @@ public class CreditService(
             var (ok, _) = await DeductCreditAsync(tenantId, "sms", 1);
             if (!ok)
                 return new(false, status.MonthlyLimit > 0
-                    ? $"Wykorzystano miesięczny limit SMS ({status.MonthlyLimit}) i nie ma dokupionych SMS-ów."
-                    : "Brak SMS-ów do wysłania — dokup pakiet SMS.", true);
+                    ? $"Wykorzystano miesięczny limit SMS ({status.MonthlyLimit}). Dodaj SMS-y do abonamentu w sklepie."
+                    : "Brak SMS-ów do wysłania — dodaj SMS-y do abonamentu w sklepie.", true);
         }
 
         var senderName = await settings.GetAsync(SiteSettingsService.Keys.PlatformSmsSenderName);

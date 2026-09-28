@@ -544,7 +544,13 @@ app.MapGet("/api/store/{slug}", async (
                 // Dodatek miesięczny: podnosi limit, dopóki jest aktywny. autoBilling = dopisanie do abonamentu kartą.
                 MonthlyAddon = AddonService.IsMonthlyAddon(s),
                 AutoBilling = autoBill[s.Id],
-                AddonKind = s.FulfillmentType == "credit_cdn_bandwidth" ? "bandwidth" : s.FulfillmentType == "credit_cdn_storage" ? "storage" : null
+                AddonKind = s.FulfillmentType switch
+                {
+                    "credit_cdn_bandwidth" => "bandwidth",
+                    "credit_cdn_storage" => "storage",
+                    "credit_sms" => "sms",
+                    _ => null
+                }
             };
         })
         .ToList();

@@ -445,6 +445,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
              .HasForeignKey(r => r.ClientId)
              .OnDelete(DeleteBehavior.Cascade);
             e.HasIndex(r => new { r.ClientId, r.Kind, r.WorkoutDate });
+            e.Property(r => r.FilledByStaffUserId).HasMaxLength(450);
         });
 
         builder.Entity<ChatMessage>(e =>

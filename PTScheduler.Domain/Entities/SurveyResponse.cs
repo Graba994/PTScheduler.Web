@@ -30,4 +30,10 @@ public class SurveyResponse
     /// (art. 9 ust. 2 lit. a RODO) — wymagany dla ankiety zdrowotnej.
     /// </summary>
     public DateTime? HealthDataConsentAt { get; set; }
+
+    /// <summary>
+    /// Trener (albo asystent), który wypełnił ankietę razem z klientem na spotkaniu;
+    /// null — klient wypełnił ją sam w aplikacji.
+    /// </summary>
+    public string? FilledByStaffUserId { get; set; }
 }

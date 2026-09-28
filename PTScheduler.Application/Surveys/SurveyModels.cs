@@ -99,6 +99,8 @@ public sealed class SurveyResponseDto
     public List<SurveyAnswer> Answers { get; set; } = [];
     public int FlagCount { get; set; }
     public DateTime? ReviewedAtUtc { get; set; }
+    /// <summary>Wypełniona wspólnie z trenerem na spotkaniu (a nie samodzielnie przez klienta).</summary>
+    public bool FilledWithTrainer { get; set; }
 
     public SurveyAnswer? this[string key] => Answers.FirstOrDefault(a => a.Key == key);
 }

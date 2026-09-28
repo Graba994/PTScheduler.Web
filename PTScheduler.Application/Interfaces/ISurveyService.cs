@@ -12,9 +12,11 @@ public interface ISurveyService
 
     /// <summary>Zapisuje odpowiedzi; zwraca błędy walidacji (pusta lista = zapisano). Powiadamia trenera.</summary>
     /// <param name="healthDataConsent">Wyraźna zgoda na dane o zdrowiu — wymagana dla ankiety zdrowotnej.</param>
+    /// <param name="filledByStaffUserId">Trener wypełniający ankietę razem z klientem — wtedy bez powiadomienia „nowa ankieta”
+    /// (trener właśnie ją widzi), a ankieta od razu jest przejrzana.</param>
     Task<(List<string> Errors, SurveyResponseDto? Response)> SubmitAsync(
         int clientId, SurveyKind kind, IReadOnlyDictionary<string, SurveyAnswerInput> answers, DateOnly? workoutDate = null,
-        bool healthDataConsent = false);
+        bool healthDataConsent = false, string? filledByStaffUserId = null);
 
     /// <summary>Wycofanie zgody: usuwa ankiety zdrowotne klienta (art. 7 ust. 3 i art. 17 RODO).</summary>
     Task WithdrawHealthConsentAsync(int clientId);
