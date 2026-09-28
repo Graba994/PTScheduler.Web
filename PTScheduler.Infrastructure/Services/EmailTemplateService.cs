@@ -153,6 +153,20 @@ public class EmailTemplateService(
 
     private static readonly Dictionary<string, DefaultTemplate> Defaults = new()
     {
+        ["automation"] = new(
+            "automation", "Automatyczne wiadomości (powitanie, powrót, urodziny)", "bi-magic",
+            "{{Subject}}",
+            "{{Subject}}",
+            """
+            {{Body}}
+            <div style="text-align:center;margin:24px 0">
+              <a href="{{Link}}" style="background:{{AccentColor}};color:white;text-decoration:none;padding:12px 32px;border-radius:6px;font-weight:600;font-size:15px;display:inline-block">{{ButtonText}}</a>
+            </div>
+            """,
+            "#4F46E5",
+            "Te wiadomości wyłączysz w ustawieniach konta → Powiadomienia → „Wiadomości od trenera”.",
+            ["Subject", "ClientName", "Body", "ButtonText", "Link", "CompanyName", "AccentColor"]),
+
         ["session-booked"] = new(
             "session-booked", "Potwierdzenie rezerwacji", "bi-calendar-check",
             "Potwierdzenie rezerwacji wizyty",

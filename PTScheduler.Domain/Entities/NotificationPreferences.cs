@@ -15,6 +15,7 @@ public class NotificationPreferences
     public bool ClientCancelledSession { get; set; } = true;
     public bool NewClientPending { get; set; } = true;
     public bool ExpiringPackages { get; set; } = true;
+    public bool TrainerMessages { get; set; } = true;
 
     public bool ShowHints { get; set; } = true;
 }

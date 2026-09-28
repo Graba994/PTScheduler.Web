@@ -163,6 +163,7 @@ builder.Services.AddScoped<PTScheduler.Web.Services.SetupGuide>();
 builder.Services.AddHostedService<SessionReminderService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.EntitlementSyncService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.PackageReminderService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.AutomationBackgroundService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.KsefStatusService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.OffPackageHoldService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.MembershipBillingService>();

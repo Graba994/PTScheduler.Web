@@ -10,4 +10,6 @@ public static class NotificationTypes
     public const string NewClientPending = nameof(NewClientPending);
     public const string ExpiringPackages = nameof(ExpiringPackages);
     public const string SessionReminders = nameof(SessionReminders);
+    /// <summary>Automatyczne wiadomości od trenera: powitanie, „dawno Cię nie było”, życzenia urodzinowe.</summary>
+    public const string TrainerMessages = nameof(TrainerMessages);
 }

@@ -74,6 +74,7 @@ public static class DependencyInjection
         services.AddSingleton<PlatformEmailProvider>();
         services.AddScoped<IEmailService, SmtpEmailService>();
         services.AddScoped<IBodyMeasurementService, BodyMeasurementService>();
+        services.AddScoped<IAutomationService, AutomationService>();
         services.AddScoped<ITrainerConfigService, TrainerConfigService>();
         services.AddScoped<INotificationPreferencesService, NotificationPreferencesService>();
         services.AddScoped<IPublicBookingService, PublicBookingService>();

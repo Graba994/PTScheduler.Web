@@ -17,6 +17,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<Session> Sessions => Set<Session>();
     public DbSet<SessionType> SessionTypes => Set<SessionType>();
     public DbSet<BodyMeasurement> BodyMeasurements => Set<BodyMeasurement>();
+    public DbSet<AutomationRule> AutomationRules => Set<AutomationRule>();
+    public DbSet<AutomationLog> AutomationLogs => Set<AutomationLog>();
     public DbSet<TrainerNote> TrainerNotes => Set<TrainerNote>();
     public DbSet<SessionPackage> SessionPackages => Set<SessionPackage>();
     public DbSet<IntroSessionConfig> IntroSessionConfigs => Set<IntroSessionConfig>();
@@ -437,6 +439,24 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         builder.Entity<TrainerConfig>(e => e.HasIndex(c => c.CalendarFeedToken).IsUnique());
 
         builder.Entity<SurveyTemplate>(e => e.HasIndex(t => t.Kind).IsUnique());
+
+        builder.Entity<AutomationRule>(e =>
+        {
+            e.HasIndex(r => r.Kind).IsUnique();
+            e.Property(r => r.Kind).HasMaxLength(40);
+            e.Property(r => r.Subject).HasMaxLength(200);
+            e.Property(r => r.Message).HasMaxLength(2000);
+            e.Property(r => r.ButtonText).HasMaxLength(60);
+        });
+        builder.Entity<AutomationLog>(e =>
+        {
+            e.HasOne(l => l.Client).WithMany().HasForeignKey(l => l.ClientId).OnDelete(DeleteBehavior.Cascade);
+            e.HasIndex(l => new { l.ClientId, l.Kind });
+            e.HasIndex(l => l.SentAt);
+            e.Property(l => l.Kind).HasMaxLength(40);
+            e.Property(l => l.Channels).HasMaxLength(40);
+            e.Property(l => l.CouponCode).HasMaxLength(40);
+        });
 
         builder.Entity<SurveyResponse>(e =>
         {

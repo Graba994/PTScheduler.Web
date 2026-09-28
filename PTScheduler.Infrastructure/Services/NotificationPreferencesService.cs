@@ -24,6 +24,7 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
             ClientCancelledSession = prefs.ClientCancelledSession,
             NewClientPending = prefs.NewClientPending,
             ExpiringPackages = prefs.ExpiringPackages,
+            TrainerMessages = prefs.TrainerMessages,
         };
     }
 
@@ -44,6 +45,7 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
         prefs.ClientCancelledSession = dto.ClientCancelledSession;
         prefs.NewClientPending = dto.NewClientPending;
         prefs.ExpiringPackages = dto.ExpiringPackages;
+        prefs.TrainerMessages = dto.TrainerMessages;
         await db.SaveChangesAsync();
     }
 
@@ -59,6 +61,7 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
             NotificationTypes.ClientCancelledSession => prefs.ClientCancelledSession,
             NotificationTypes.NewClientPending => prefs.NewClientPending,
             NotificationTypes.ExpiringPackages => prefs.ExpiringPackages,
+            NotificationTypes.TrainerMessages => prefs.TrainerMessages,
             NotificationTypes.SessionReminders => prefs.SessionReminders,
             _ => true
         };
