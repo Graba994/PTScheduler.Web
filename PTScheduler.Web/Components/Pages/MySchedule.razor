@@ -4,6 +4,8 @@
 @inject IClientService ClientService
 @inject ISessionService SessionService
 @inject IPairService PairService
+@inject ISessionPackageService PackageService
+@inject IPackageOfferService OfferService
 @inject ITrainerAvailabilityService AvailabilityService
 @inject ITrainerConfigService TrainerConfigService
 @inject IAppClock Clock
@@ -136,6 +138,10 @@ else
                         <div class="flex-grow-1 text-break" style="min-width:0">
                             <div class="fw-semibold">
                                 @s.SessionTypeName
+                                @if (s.Status == SessionStatus.AwaitingPackage)
+                                {
+                                    <span class="badge bg-warning-subtle text-warning-emphasis ms-1" title="Tego treningu nie było w Twoim pakiecie — trener potwierdzi płatność">Do opłacenia</span>
+                                }
                                 @if (s.IsPair)
                                 {
                                     <span class="pair-chip ms-1"><i class="bi bi-people-fill"></i>@(s.PartnerActive ? $"z: {s.PartnerName}" : $"{s.PartnerName} nie przyjdzie")</span>
@@ -295,6 +301,29 @@ else
                     @if (bookingStep == 1)
                     {
                         <p class="text-muted small mb-3">Wybierz typ wizyty, który chcesz zarezerwować.</p>
+                        @if (myPackages.Count > 0)
+                        {
+                            <div class="bk-pkgs">
+                                <div class="bk-pkgs-title"><i class="bi bi-box-seam"></i>W Twoich pakietach — rezerwujesz bez dopłat:</div>
+                                @foreach (var g in myPackages.GroupBy(p => (p.SessionTypeId, p.IsForPair)))
+                                {
+                                    var first = g.First();
+                                    var left = g.Sum(p => p.RemainingCredits);
+                                    var soonest = g.Where(p => p.ExpiresAt.HasValue).Select(p => p.ExpiresAt!.Value).OrderBy(d => d).FirstOrDefault();
+                                    <div class="bk-pkg">
+                                        <span class="bk-pkg-name">@first.SessionTypeName@(first.IsForPair ? " (dla pary)" : "")</span>
+                                        <span class="bk-pkg-left">zostało <b>@left</b> @(left == 1 ? "trening" : left % 10 is >= 2 and <= 4 && left % 100 is < 12 or > 14 ? "treningi" : "treningów")@(g.Count() > 1 ? $" w {g.Count()} pakietach" : "")@(soonest != default ? $" · najbliższy ważny do {soonest.ToLocalTime():dd.MM}" : "")</span>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="bk-pkgs bk-pkgs-none">
+                                <i class="bi bi-info-circle"></i>
+                                <span>Nie masz aktywnego pakietu. Możesz zarezerwować termin — trener potwierdzi płatność — albo najpierw <a href="/packages">wybrać pakiet</a> w lepszej cenie.</span>
+                            </div>
+                        }
                         @if (!sessionTypes.Any())
                         {
                             <div class="text-center text-muted py-4">
@@ -305,9 +334,11 @@ else
                         else
                         {
                             <div class="row g-3">
-                                @foreach (var t in sessionTypes)
+                                @foreach (var t in sessionTypes.OrderBy(x => CoveringPackage(x) is null))
                                 {
                                     var isSelected = selectedType?.Id == t.Id;
+                                    var cover = CoveringPackage(t);
+                                    var offer = CheapestOffer(t);
                                     <div class="col-12 col-sm-6">
                                         <div class="border rounded-3 p-3 h-100 @(isSelected ? "border-primary bg-primary-subtle" : "border-2")"
                                              style="cursor:pointer;transition:all .15s"
@@ -321,6 +352,14 @@ else
                                                 <div>
                                                     <div class="fw-semibold small">@t.Name</div>
                                                     <div class="text-muted small">@t.DurationMinutes min · @(t.IsGroup ? "grupowa" : t.IsPair ? "w parze" : "indywidualna")</div>
+                                                    @if (cover is not null)
+                                                    {
+                                                        <span class="bk-cover ok"><i class="bi bi-check-circle-fill"></i>W pakiecie · zostało @LeftFor(t, cover)</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="bk-cover"><i class="bi bi-wallet2"></i>Poza pakietem@(offer is not null ? $" · pakiety od {offer.Price / Math.Max(1, offer.SessionsCount):0} zł/trening" : "")</span>
+                                                    }
                                                 </div>
                                             </div>
                                         </div>
@@ -429,7 +468,7 @@ else
                         <p class="text-muted small mb-3">Sprawdź szczegóły i zatwierdź rezerwację.</p>
 
                         <div class="border rounded-3 p-4 bg-light mb-3">
-                            <table class="table table-sm table-borderless mb-0 align-middle">
+                            <table class="table table-sm table-borderless mb-0 align-middle" style="--bs-table-bg:transparent">
                                 <tr>
                                     <td class="text-muted small fw-semibold" style="width:40%">Typ wizyty</td>
                                     <td class="fw-semibold">@selectedType!.Name</td>
@@ -453,8 +492,34 @@ else
                                     <td class="text-muted small fw-semibold">Godzina</td>
                                     <td class="fw-semibold">@selectedSlot!.Start.ToString("HH:mm") — @selectedSlot!.End.ToString("HH:mm")</td>
                                 </tr>
+                                @{ var payWith = CoveringPackage(selectedType!, selectedSlot!.Start); }
+                                <tr>
+                                    <td class="text-muted small fw-semibold">Płatność</td>
+                                    <td>
+                                        @if (payWith is not null)
+                                        {
+                                            <span class="text-success fw-semibold"><i class="bi bi-check-circle-fill me-1"></i>Z pakietu „@payWith.Name”</span>
+                                            <div class="small text-muted">po rezerwacji zostanie @(payWith.RemainingCredits - 1) z @payWith.TotalSessions</div>
+                                        }
+                                        else
+                                        {
+                                            <span class="fw-semibold text-warning-emphasis"><i class="bi bi-wallet2 me-1"></i>Poza pakietem — do rozliczenia z trenerem</span>
+                                        }
+                                    </td>
+                                </tr>
                             </table>
                         </div>
+                        @if (payWith is null)
+                        {
+                            <div class="bk-nopkg">
+                                <i class="bi bi-exclamation-circle"></i>
+                                <div>
+                                    <b>Tego treningu nie masz w pakiecie.</b>
+                                    <div>Termin zarezerwujemy, a trener odezwie się w sprawie płatności (np. gotówką albo przelewem). Taniej wyjdzie z pakietem.</div>
+                                    <a href="/packages" class="btn btn-sm btn-outline-primary mt-2"><i class="bi bi-bag me-1"></i>Zobacz pakiety</a>
+                                </div>
+                            </div>
+                        }
 
                         <div class="mb-3">
                             <label class="form-label form-label-sm fw-semibold">Notatki (opcjonalnie)</label>
@@ -470,7 +535,7 @@ else
                             </button>
                             <button class="btn btn-primary" @onclick="ConfirmBooking" disabled="@isBusy">
                                 @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                                <i class="bi bi-check-lg me-1"></i>Zarezerwuj
+                                <i class="bi bi-check-lg me-1"></i>@(CoveringPackage(selectedType!, selectedSlot!.Start) is null ? "Zarezerwuj (płatność u trenera)" : "Zarezerwuj z pakietu")
                             </button>
                         </div>
                     }
@@ -489,7 +554,7 @@ else
             <div class="d-flex">
                 <div class="toast-body">
                     <i class="bi bi-check-circle-fill me-2"></i>
-                    Wizyta zarezerwowana! Sprawdź email z potwierdzeniem.
+                    @(lastBookingAwaiting ? "Termin zarezerwowany — trener potwierdzi płatność." : "Wizyta zarezerwowana! Sprawdź email z potwierdzeniem.")
                 </div>
                 <button type="button" class="btn-close btn-close-white me-2 m-auto" @onclick="() => showSuccess = false"></button>
             </div>
@@ -518,6 +583,10 @@ else
     private string bookingError = string.Empty;
     private string bookingNotes = string.Empty;
     private List<SessionTypeDto> sessionTypes = [];
+    // Aktywne pakiety klienta (także wspólne z parą) i oferta pakietów — do podpowiedzi przy rezerwacji.
+    private List<SessionPackageDto> myPackages = [];
+    private List<PackageOfferDto> offers = [];
+    private bool lastBookingAwaiting;
     private SessionTypeDto? selectedType;
     private DateOnly selectedDate = DateOnly.FromDateTime(StudioClock.Today.AddDays(1));
     private List<AvailableSlotDto> availableSlots = [];
@@ -558,9 +627,10 @@ else
     {
         var all = await SessionService.GetClientSessionsAsync(client!.Id, 500);
         var now = StudioClock.Now;
-        upcoming = all.Where(s => s.Status == SessionStatus.Scheduled && s.StartTime >= now)
+        // Wizyta „do opłacenia” (poza pakietem) też jest nadchodząca — wcześniej znikała z listy.
+        upcoming = all.Where(s => (s.Status is SessionStatus.Scheduled or SessionStatus.AwaitingPackage) && s.StartTime >= now)
                       .OrderBy(s => s.StartTime).ToList();
-        past = all.Where(s => s.StartTime < now || s.Status != SessionStatus.Scheduled)
+        past = all.Where(s => s.StartTime < now || s.Status is not (SessionStatus.Scheduled or SessionStatus.AwaitingPackage))
                   .OrderByDescending(s => s.StartTime).ToList();
     }
 
@@ -577,6 +647,14 @@ else
         if (!sessionTypes.Any())
             sessionTypes = await SessionService.GetSessionTypesAsync();
         partners = await PairService.GetPartnersAsync(client!.Id);
+        try
+        {
+            myPackages = (await PackageService.GetPackagesAsync(client.Id))
+                .Where(p => p.Status == PackageStatus.Active && p.RemainingCredits > 0 && !p.IsExpiredByDate)
+                .OrderBy(p => p.ExpiresAt ?? DateTime.MaxValue).ToList();
+            offers = await OfferService.GetActiveOffersAsync();
+        }
+        catch { myPackages = []; offers = []; }
         partnerId = partners.FirstOrDefault()?.ClientId ?? 0;
         withPartner = false;
 
@@ -672,6 +750,7 @@ else
             await AuditLogService.LogAsync(_userId, _userEmail, "Client", "ClientSelfBooked", "Session",
                 created.Id.ToString(), $"Typ: {selectedType.Name}, termin: {selectedSlot.Start:dd.MM.yyyy HH:mm}{(withPartner ? $", z: {PartnerName}" : "")}");
 
+            lastBookingAwaiting = created.Status == SessionStatus.AwaitingPackage;
             bookingOpen = false;
             showSuccess = true;
             await RefreshSessions();
@@ -682,6 +761,36 @@ else
         }
         finally { isBusy = false; }
     }
+
+    // Pakiet, z którego zejdzie ten trening (jak w SessionService: ten sam rodzaj, ważny w dniu wizyty;
+    // przy treningu z partnerem najpierw wspólny pakiet pary, potem własny).
+    private SessionPackageDto? CoveringPackage(SessionTypeDto type, DateTime? at = null)
+    {
+        var day = (at ?? StudioClock.Now).Date;
+        bool Valid(SessionPackageDto p) => p.SessionTypeId == type.Id && p.RemainingCredits > 0
+            && (p.ExpiresAt is null || p.ExpiresAt.Value.ToLocalTime().Date >= day);
+        if (withPartner && partnerId > 0)
+        {
+            var pair = myPackages.FirstOrDefault(p => Valid(p) && p.IsForPair
+                && (p.PartnerClientId == partnerId || p.ClientId == partnerId));
+            if (pair is not null) return pair;
+        }
+        else if (type.IsPair)
+        {
+            // Trening dla pary, partner jeszcze niewybrany — wystarczy dowolny wspólny pakiet tego rodzaju.
+            var pair = myPackages.FirstOrDefault(p => Valid(p) && p.IsForPair);
+            if (pair is not null) return pair;
+        }
+        return myPackages.FirstOrDefault(p => Valid(p) && !p.IsForPair && p.ClientId == client!.Id);
+    }
+
+    // Ile treningów tego rodzaju zostało łącznie (we wszystkich pakietach tego samego typu — własnych albo pary).
+    private int LeftFor(SessionTypeDto type, SessionPackageDto cover) =>
+        myPackages.Where(p => p.SessionTypeId == type.Id && p.IsForPair == cover.IsForPair).Sum(p => p.RemainingCredits);
+
+    private PackageOfferDto? CheapestOffer(SessionTypeDto type) =>
+        offers.Where(o => o.SessionTypeId == type.Id && o.SessionsCount > 0)
+              .OrderBy(o => o.Price / o.SessionsCount).FirstOrDefault();
 
     private void ConfirmCancel(SessionDto s)
     {
@@ -728,6 +837,7 @@ else
         SessionStatus.Completed => "Zakończona",
         SessionStatus.Cancelled => "Anulowana",
         SessionStatus.NoShow    => "Nieobecność",
+        SessionStatus.AwaitingPackage => "Do opłacenia",
         _ => s.ToString()
     };
 }
