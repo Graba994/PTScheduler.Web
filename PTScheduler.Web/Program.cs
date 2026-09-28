@@ -128,6 +128,8 @@ builder.Services.Configure<SecurityStampValidatorOptions>(options =>
     });
 builder.Services.AddScoped<PTScheduler.Web.Services.AccountSwitchService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.AdminDashboardService>();
+builder.Services.AddMemoryCache();
+builder.Services.AddScoped<PTScheduler.Web.Services.UpsellService>();
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration, builder.Environment.ContentRootPath);

@@ -1,0 +1,43 @@
+@* Na dashboardzie właściciela: co się kończy (SMS-y, wideo, klienci) i spokojna podpowiedź wyższego planu. *@
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Web.Services
+@inject UpsellService Upsell
+@inject AuthenticationStateProvider AuthState
+
+@if (_notices.Count > 0)
+{
+    <div class="ups-strip">
+        @foreach (var n in _notices.Where(n => n.IsUrgent))
+        {
+            <div class="ups-card ups-@n.Level">
+                <span class="ups-ic"><i class="bi @n.Icon"></i></span>
+                <div class="ups-txt">
+                    <b>@n.Title</b>
+                    <span>@n.Text</span>
+                </div>
+                <a href="@n.CtaHref" class="btn btn-sm ups-btn">@n.CtaLabel <i class="bi bi-arrow-right"></i></a>
+            </div>
+        }
+        @foreach (var n in _notices.Where(n => !n.IsUrgent))
+        {
+            <a href="@n.CtaHref" class="ups-tip">
+                <i class="bi @n.Icon"></i>
+                <span><b>@n.Title.</b> @n.Text</span>
+                <span class="ups-tip-cta">@n.CtaLabel <i class="bi bi-chevron-right"></i></span>
+            </a>
+        }
+    </div>
+}
+
+@code {
+    private List<UpsellNotice> _notices = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        // Kupuje właściciel: administrator studia albo trener (nie asystent).
+        if (!user.IsInRole(Roles.Admin) && !user.IsInRole(Roles.Trainer)) return;
+        try { _notices = await Upsell.GetAsync(); } catch { _notices = []; }
+    }
+}

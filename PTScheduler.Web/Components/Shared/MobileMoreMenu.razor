@@ -4,6 +4,7 @@
 @inject AuthenticationStateProvider AuthState
 @inject PTScheduler.Application.Interfaces.IMarketingSettingsService MarketingSettings
 @inject PTScheduler.Web.Services.ClientNav ClientNavigation
+@inject PTScheduler.Web.Services.UpsellService Upsell
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Domain.Constants
 @using System.Security.Claims
@@ -124,10 +125,33 @@
                 <div class="mobile-sheet-section">
                     <div class="mobile-sheet-label">Administracja</div>
                     <div class="mobile-sheet-grid">
-                        <a href="/admin/users" class="mobile-sheet-tile" @onclick="CloseSheet">
+                        <a href="/admin" class="mobile-sheet-tile" @onclick="CloseSheet">
                             <i class="bi bi-shield-fill-check"></i>
-                            <span>Panel admina</span>
+                            <span>Zarządzanie</span>
                         </a>
+                    </div>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+
+        @* Sklep i plan — zawsze pod ręką dla właściciela studia. *@
+        <AuthorizeView Roles="Admin,Trainer">
+            <Authorized>
+                <div class="mobile-sheet-section">
+                    <div class="mobile-sheet-label">Plan i dodatki</div>
+                    <div class="mobile-sheet-grid">
+                        <a href="/admin/sklep" class="mobile-sheet-tile position-relative" @onclick="CloseSheet">
+                            <i class="bi bi-bag-heart-fill"></i>
+                            <span>Sklep</span>
+                            @if (_urgent) { <span class="nav-dot"></span> }
+                        </a>
+                        @if (Entitlements.Current.Id != "unlimited")
+                        {
+                            <a href="/admin/upgrade" class="mobile-sheet-tile" @onclick="CloseSheet">
+                                <i class="bi bi-rocket-takeoff-fill"></i>
+                                <span>Ulepsz plan</span>
+                            </a>
+                        }
                     </div>
                 </div>
             </Authorized>
@@ -218,6 +242,7 @@
     private bool _referralsEnabled;
     private bool _mustChangePassword;
     private bool _canSwitch;
+    private bool _urgent;
     private IReadOnlyList<PTScheduler.Web.Services.ClientNav.Section> _clientSections = [];
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -230,6 +255,8 @@
             _email = user.FindFirst(ClaimTypes.Email)?.Value ?? _name;
             _mustChangePassword = user.HasClaim(PTScheduler.Web.Services.AppClaimsPrincipalFactory.MustChangePasswordClaim, "1");
             _canSwitch = user.IsInRole(Roles.Admin) || PTScheduler.Web.Services.AccountSwitchService.IsSwitched(user);
+            if (user.IsInRole(Roles.Admin) || user.IsInRole(Roles.Trainer))
+                try { _urgent = (await Upsell.GetAsync()).Any(n => n.IsUrgent); } catch { }
             var parts = _name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             _initials = parts.Length >= 2
                 ? $"{parts[0][0]}{parts[^1][0]}".ToUpper()

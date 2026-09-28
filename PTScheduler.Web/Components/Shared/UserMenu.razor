@@ -4,6 +4,7 @@
 @inject IClientService ClientService
 @inject ISessionService SessionService
 @inject AuthenticationStateProvider AuthState
+@inject PTScheduler.Web.Services.UpsellService Upsell
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Application.DTOs
@@ -290,6 +291,7 @@
     private string? _role;
     private bool _mustChangePassword;
     private bool _canSwitch;
+    private bool _isTrainer;
     private List<NotifItem> _notifs = [];
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -303,6 +305,7 @@
             _email  = user.FindFirst(ClaimTypes.Email)?.Value ?? _name;
             _mustChangePassword = user.HasClaim(PTScheduler.Web.Services.AppClaimsPrincipalFactory.MustChangePasswordClaim, "1");
             _canSwitch = user.IsInRole(Roles.Admin) || PTScheduler.Web.Services.AccountSwitchService.IsSwitched(user);
+            _isTrainer = user.IsInRole(Roles.Trainer);
 
             var parts = _name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             _initials = parts.Length >= 2
@@ -359,6 +362,12 @@
             if (_mustChangePassword)
                 _notifs.Add(new("Ustaw własne hasło", "Obecne nadała Ci inna osoba — zmień je",
                     "bi-shield-lock-fill", "var(--c-danger)", "/Account/Manage/ChangePassword"));
+
+            // Coś się kończy (SMS-y, wideo, limit klientów) — właściciel widzi to też w dzwonku.
+            if (_role is Roles.Admin || _isTrainer)
+                foreach (var u in (await Upsell.GetAsync()).Where(n => n.IsUrgent))
+                    _notifs.Add(new(u.Title, u.CtaLabel, u.Icon,
+                        u.Level == "critical" ? "var(--c-danger)" : "var(--c-warning)", u.CtaHref));
 
             var trainerFilter = _role == Roles.Admin ? null : _userId;
 

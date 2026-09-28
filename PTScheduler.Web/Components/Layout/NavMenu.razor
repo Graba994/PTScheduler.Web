@@ -3,6 +3,7 @@
 @using PTScheduler.Domain.Constants
 @inject PTScheduler.Web.Services.ClientNav ClientNavigation
 @inject NavigationManager Navigation
+@inject PTScheduler.Web.Services.UpsellService Upsell
 
 <!-- Sidebar brand -->
 <a href="/app" class="sidebar-brand">
@@ -110,7 +111,25 @@
             <i class="bi bi-shield-fill-check"></i><span>Zarządzanie</span>
         </NavLink>
     </AuthorizeView>
+    @* Sklep usług — zawsze pod ręką dla właściciela; kropka, gdy coś się kończy. *@
+    <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer}")">
+        <NavLink class="sidebar-link" href="admin/sklep">
+            <i class="bi bi-bag-heart-fill"></i><span>Sklep</span>
+            @if (_urgent) { <span class="nav-dot" title="Coś się kończy — zajrzyj"></span> }
+        </NavLink>
+    </AuthorizeView>
 </div>
+
+@if (_showPlan)
+{
+    <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer}")">
+        <a href="/admin/upgrade" class="plan-pill" title="Zobacz, co daje wyższy plan">
+            <i class="bi bi-rocket-takeoff"></i>
+            <span>Plan <b>@Entitlements.Current.Name</b></span>
+            <span class="plan-pill-cta">Ulepsz</span>
+        </a>
+    </AuthorizeView>
+}
 
 <!-- Dev credit -->
 <div style="padding:0 1rem .25rem;text-align:center">
@@ -148,6 +167,10 @@
         _clientSection = PTScheduler.Web.Services.ClientNav.Match(_clientSections, Navigation.ToBaseRelativePath(Navigation.Uri)).Section;
     }
 
+    private bool _urgent;
+    // „Ulepsz” pokazujemy tylko, gdy instancja ma plan z Portalu (samodzielna instalacja jest bez ograniczeń).
+    private bool _showPlan => Entitlements.Current.Id != "unlimited";
+
     protected override async Task OnInitializedAsync()
     {
         try
@@ -158,6 +181,7 @@
         }
         catch { } // Best-effort: fall back to defaults if branding unavailable
 
+        try { _urgent = (await Upsell.GetAsync()).Any(n => n.IsUrgent); } catch { }
     }
 
 }
