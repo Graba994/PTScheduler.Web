@@ -105,7 +105,7 @@ else
     }
 
     var locked = AdminMenu.Groups.SelectMany(g => g.Items).Where(i => _access.Sees(i) && IsLocked(i)).ToList();
-    @if (_access.IsOwner && locked.Count > 0)
+    @if (_access.IsOwner && !_isHighestPlan && locked.Count > 0)
     {
         <details class="set-more">
             <summary><i class="bi bi-lock"></i>W wyższym planie (@locked.Count)</summary>
@@ -458,7 +458,7 @@ else
         }
 
         _access = await AdminAccess.LoadAsync(AuthState, Permission);
-        _isHighestPlan = Entitlements.Current.Id is "studio" or "unlimited";
+        _isHighestPlan = !PlanCatalog.HasUpgrade(Entitlements.Current);
         await LoadDataAsync();
         await LoadHubAsync(auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "");
         _loading = false;

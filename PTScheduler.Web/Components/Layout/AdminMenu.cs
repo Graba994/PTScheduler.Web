@@ -83,7 +83,7 @@ public static class AdminMenu
     /// <summary>Strony z atrybutem Authorize(Roles = "Admin,Trainer") — bez asystenta.</summary>
     public static readonly HashSet<string> AdminOrTrainer = new(StringComparer.OrdinalIgnoreCase)
     {
-        "admin/coupons", "admin/sklep", "admin/sms", "admin/google-meet", "admin/video", "admin/export"
+        "admin/coupons", "admin/sklep", "admin/sms", "admin/google-meet", "admin/video", "admin/export", "trainer/intro-config"
     };
 
     public static readonly IReadOnlyList<AdminMenuGroup> Groups =
@@ -106,6 +106,9 @@ public static class AdminMenu
                 "Stała liczba treningów co miesiąc",
                 "Karnet odnawia się co miesiąc — np. 8 treningów za 640 zł. Dobre dla stałych klientów: płacą z góry, a Ty masz przewidywalny przychód.",
                 Permissions.ManagePackages, StatusKey: "memberships"),
+            new("trainer/intro-config", "bi-person-lines-fill", "Pierwsza wizyta",
+                "Trening próbny dla nowych osób ze strony",
+                "Ustal, jak nowa osoba może umówić pierwszy trening prosto z Twojej strony — rodzaj zajęć, cena i kilka pytań na start. Najprostsza droga od „ciekawe” do pierwszej wizyty."),
             new("admin/modules", "bi-toggles", "Funkcje aplikacji",
                 "Włącz albo ukryj moduły",
                 "Ukryj to, z czego nie korzystasz (np. kursy albo plany treningowe) — klienci zobaczą prostszą aplikację. Możesz to zmienić w każdej chwili.",
@@ -231,7 +234,6 @@ public static class AdminMenu
     public static readonly IReadOnlyList<AdminMenuItem> Extra =
     [
         new("trainer/pairs", "bi-people-fill", "Treningi w parach", "Pary podopiecznych i pakiety dla pary", "", StatusKey: null),
-        new("trainer/intro-config", "bi-person-lines-fill", "Pierwsza wizyta", "Rezerwacja pierwszego treningu ze strony", ""),
         new("trainer/series", "bi-repeat", "Serie wizyt", "Stałe, powtarzalne terminy", "", PlanFlag: "RecurringSessions"),
         new("admin/upgrade", "bi-rocket-takeoff-fill", "Ulepsz plan", "Więcej funkcji, SMS-y, zespół", "", OwnerOnly: true),
         new("admin/feedback", "bi-chat-heart", "Oceń aplikację", "Napisz, czego brakuje", ""),

@@ -1,6 +1,8 @@
 @page "/upgrade"
 @attribute [Authorize]
 @inject EntitlementService Entitlements
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
 
 <PageTitle>Zwiększ możliwości — @Entitlements.Current.Name</PageTitle>
 
@@ -94,6 +96,13 @@
 
     protected override async Task OnInitializedAsync()
     {
+        // Właściciel studia dostaje stronę z konkretnymi planami i korzyściami.
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        if (user.IsInRole("Admin") || user.IsInRole("Trainer"))
+        {
+            Nav.NavigateTo("/admin/upgrade");
+            return;
+        }
         try
         {
             var c = await Entitlements.CheckClientLimitAsync();

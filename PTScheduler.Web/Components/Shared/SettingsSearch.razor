@@ -33,5 +33,6 @@
     private IEnumerable<(string Group, AdminMenuItem Item)> Entries =>
         AdminMenu.Groups.SelectMany(g => g.Items.Select(i => (Group: g.Title, Item: i)))
             .Concat(AdminMenu.Extra.Select(i => (Group: "Skróty", Item: i)))
-            .Where(x => Access.Sees(x.Item) && (x.Item.PlanFlag is null || Entitlements.IsAllowed(x.Item.PlanFlag)));
+            .Where(x => Access.Sees(x.Item) && (x.Item.PlanFlag is null || Entitlements.IsAllowed(x.Item.PlanFlag)))
+            .Where(x => x.Item.Href != "admin/upgrade" || PlanCatalog.HasUpgrade(Entitlements.Current));
 }

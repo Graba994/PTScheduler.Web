@@ -56,6 +56,8 @@ public sealed class UpsellService(
     {
         var list = new List<UpsellNotice>();
         var plan = entitlements.Current;
+        // Na najwyższym planie nie ma czego proponować — tylko sklep (SMS-y, miejsce na wideo).
+        var canUpgrade = PlanCatalog.HasUpgrade(plan);
 
         await Safe(async () =>
         {
@@ -105,7 +107,7 @@ public sealed class UpsellService(
 
         await Safe(async () =>
         {
-            if (plan.MaxClients == int.MaxValue || plan.MaxClients <= 0) return;
+            if (!canUpgrade || plan.MaxClients == int.MaxValue || plan.MaxClients <= 0) return;
             await using var db = dbFactory.CreateDbContext();
             var active = await db.Clients.CountAsync(c => c.Status == ClientStatus.Active);
             if (active >= plan.MaxClients)
@@ -119,7 +121,7 @@ public sealed class UpsellService(
         });
 
         // Spokojna podpowiedź planu — jedna, zmienia się co dzień.
-        var locked = Tips.Where(t => !entitlements.IsAllowed(t.Flag)).ToList();
+        var locked = canUpgrade ? Tips.Where(t => !entitlements.IsAllowed(t.Flag)).ToList() : [];
         if (locked.Count > 0)
         {
             var t = locked[DateTime.UtcNow.DayOfYear % locked.Count];

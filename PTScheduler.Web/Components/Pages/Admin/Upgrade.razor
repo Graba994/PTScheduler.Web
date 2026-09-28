@@ -1,315 +1,174 @@
 @page "/admin/upgrade"
-@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer")]
 @inject EntitlementService Entitlements
-@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Ulepsz plan" />
 
-<div class="page-header">
-    <h4 class="page-title"><i class="bi bi-rocket-takeoff-fill me-2" style="color:var(--c-primary)"></i>Ulepsz swój plan</h4>
-</div>
+@* Tylko plany wyższe od obecnego, a przy każdym — co konkretnie zyskasz (bez rzeczy, które już masz).
+   Kolejny plan pokazuje tylko to, co dochodzi ponad poprzedni, żeby nie powtarzać tej samej listy. *@
 
-<div class="upgrade-current">
-    <div class="upgrade-current-badge">Twój obecny plan</div>
-    <div class="upgrade-current-name">@_currentPlan.Name</div>
-    <div class="upgrade-current-price">
-        @(_currentPlan.Price == 0 ? "Za darmo" : $"{_currentPlan.Price:0} zł/mies.")
-    </div>
-</div>
-
-@if (_higherPlans.Count == 0)
-{
-    <div class="alert alert-success">
-        <i class="bi bi-check-circle-fill me-1"></i>
-        Masz najwyższy plan — wszystkie funkcje są odblokowane!
-    </div>
-}
-else
-{
-    <div class="upgrade-grid">
-        @foreach (var plan in _higherPlans)
-        {
-            <div class="upgrade-card @(plan.Recommended ? "upgrade-recommended" : "")">
-                @if (plan.Recommended)
-                {
-                    <div class="upgrade-badge">Polecany</div>
-                }
-                <div class="upgrade-name">@plan.Name</div>
-                <div class="upgrade-price">@plan.Price.ToString("0") <span>zł/mies.</span></div>
-                <div class="upgrade-desc">@plan.Description</div>
-                <ul class="upgrade-features">
-                    @foreach (var f in plan.Features)
-                    {
-                        <li class="@(f.IsNew ? "upgrade-new" : "")">
-                            <i class="bi @(f.IsNew ? "bi-plus-circle-fill" : "bi-check-circle-fill")"></i>
-                            @f.Label
-                            @if (f.IsNew)
-                            {
-                                <span class="upgrade-new-tag">Nowe</span>
-                            }
-                        </li>
-                    }
-                </ul>
-                <a href="mailto:kontakt@@ptscheduler.pl?subject=Zmiana%20planu%20na%20@plan.Name"
-                   class="btn btn-primary w-100">
-                    <i class="bi bi-arrow-up-circle me-1"></i>Przejdź na @plan.Name
-                </a>
+<div class="upg">
+    @if (_offers.Count == 0)
+    {
+        <div class="upg-top upg-top-max">
+            <span class="upg-top-ic"><i class="bi bi-trophy-fill"></i></span>
+            <div>
+                <div class="upg-eyebrow">Twój plan</div>
+                <h4 class="upg-title">@_current.Name — masz wszystko, co oferujemy</h4>
+                <p class="upg-lead">Wszystkie funkcje są odblokowane i nie masz limitu klientów. Gdy zabraknie SMS-ów albo miejsca na wideo, dokupisz je w sklepie.</p>
+                <a href="/admin/sklep" class="btn btn-primary btn-sm"><i class="bi bi-bag-heart-fill me-1"></i>Przejdź do sklepu</a>
             </div>
-        }
-    </div>
+        </div>
+    }
+    else
+    {
+        <div class="upg-top">
+            <span class="upg-top-ic"><i class="bi bi-rocket-takeoff-fill"></i></span>
+            <div>
+                <div class="upg-eyebrow">Teraz masz plan @_current.Name@(_current.MonthlyPrice > 0 ? $" · {_current.MonthlyPrice:0} zł/mies." : "")</div>
+                <h4 class="upg-title">Co zyskasz w wyższym planie</h4>
+                <p class="upg-lead">Mniej pracy przy organizacji, więcej czasu na treningi — i narzędzia, dzięki którym klienci zostają z Tobą na dłużej.</p>
+            </div>
+        </div>
 
-    <div class="alert alert-info small mt-4">
-        <i class="bi bi-info-circle me-1"></i>
-        Zmiana planu następuje natychmiast po potwierdzeniu. Skontaktuj się z nami lub kliknij przycisk powyżej.
-    </div>
-}
+        <div class="upg-grid">
+            @for (var i = 0; i < _offers.Count; i++)
+            {
+                var offer = _offers[i];
+                var first = i == 0;
+                <article class="upg-card @(first ? "upg-card-rec" : "")">
+                    @if (first)
+                    {
+                        <span class="upg-badge"><i class="bi bi-stars me-1"></i>Następny krok</span>
+                    }
+                    <header class="upg-head">
+                        <div class="upg-name">@offer.Plan.Name</div>
+                        <div class="upg-price">@offer.Plan.Price.ToString("0") <small>zł/mies.</small></div>
+                        @if (offer.Diff > 0 && _current.MonthlyPrice > 0)
+                        {
+                            <div class="upg-diff">+@offer.Diff.ToString("0") zł miesięcznie względem obecnego</div>
+                        }
+                        <p class="upg-tag">@offer.Plan.Tagline</p>
+                    </header>
+
+                    @if (!first)
+                    {
+                        <div class="upg-plus"><i class="bi bi-check2-all"></i>Wszystko z planu @_offers[i - 1].Plan.Name, a do tego:</div>
+                    }
+                    <ul class="upg-benefits">
+                        @foreach (var b in offer.Benefits)
+                        {
+                            <li>
+                                <span class="upg-b-ic"><i class="bi @b.Icon"></i></span>
+                                <span><b>@b.Title</b><small>@b.Text</small></span>
+                            </li>
+                        }
+                    </ul>
+
+                    <a class="btn @(first ? "btn-primary" : "btn-outline-primary") w-100 mt-auto" href="@MailTo(offer.Plan)">
+                        <i class="bi bi-arrow-up-circle me-1"></i>Chcę plan @offer.Plan.Name
+                    </a>
+                </article>
+            }
+        </div>
+
+        <p class="upg-note">
+            <i class="bi bi-shield-check"></i>
+            <span>Zmieniasz plan bez utraty danych — klienci, pakiety i grafik zostają na miejscu. Napisz do nas, a przełączymy plan w kilka minut.
+            Zabrakło tylko SMS-ów albo miejsca na wideo? Dokupisz je w <a href="/admin/sklep">sklepie</a>, bez zmiany planu.</span>
+        </p>
+    }
+</div>
 
 <style>
-    .upgrade-current {
+    .upg { max-width: 1080px; }
+    .upg-top {
+        position: relative; overflow: hidden;
+        display: flex; gap: 16px; align-items: flex-start;
         background: var(--c-primary-light, #EEF2FF);
-        border: 2px solid var(--c-primary, #4F46E5);
-        border-radius: 12px;
-        padding: 20px 24px;
-        margin-bottom: 32px;
-        text-align: center;
+        border: 1px solid color-mix(in srgb, var(--c-primary, #4F46E5) 25%, transparent);
+        border-radius: 16px; padding: 22px 24px; margin-bottom: 24px;
     }
-    .upgrade-current-badge {
-        display: inline-block;
-        font-size: 0.72rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.08em;
-        color: var(--c-primary);
-        margin-bottom: 4px;
+    .upg-top::after {
+        content: ""; position: absolute; right: -18px; bottom: -26px; width: 150px; height: 150px;
+        background: var(--c-primary, #4F46E5); opacity: .07; transform: rotate(-30deg);
+        -webkit-mask: var(--pt-ico-dumbbell) center / contain no-repeat; mask: var(--pt-ico-dumbbell) center / contain no-repeat;
+        pointer-events: none;
     }
-    .upgrade-current-name {
-        font-size: 1.4rem;
-        font-weight: 800;
+    .upg-top-ic {
+        flex-shrink: 0; width: 46px; height: 46px; border-radius: 12px;
+        display: grid; place-items: center; font-size: 1.35rem;
+        background: var(--c-primary, #4F46E5); color: #fff;
     }
-    .upgrade-current-price {
-        font-size: 0.92rem;
-        color: #6B7280;
+    .upg-top-max .upg-top-ic { background: #F59E0B; }
+    .upg-eyebrow { font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--c-primary, #4F46E5); }
+    .upg-title { font-weight: 800; margin: 2px 0 6px; text-wrap: balance; }
+    .upg-lead { color: #4B5563; margin: 0 0 10px; max-width: 62ch; }
+
+    .upg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 20px; align-items: stretch; }
+    .upg-card {
+        position: relative; display: flex; flex-direction: column; gap: 14px;
+        background: #fff; border: 1px solid #E5E7EB; border-radius: 16px; padding: 24px 20px 20px;
+    }
+    .upg-card-rec { border: 2px solid var(--c-primary, #4F46E5); box-shadow: 0 8px 28px rgba(79,70,229,.12); }
+    .upg-badge {
+        position: absolute; top: -12px; left: 20px;
+        background: var(--c-primary, #4F46E5); color: #fff;
+        font-size: .72rem; font-weight: 700; padding: 3px 12px; border-radius: 20px;
+    }
+    .upg-name { font-size: 1.15rem; font-weight: 800; }
+    .upg-price { font-size: 1.9rem; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    .upg-price small { font-size: .85rem; font-weight: 500; color: #6B7280; }
+    .upg-diff { font-size: .78rem; color: #6B7280; margin-top: 2px; }
+    .upg-tag { margin: 8px 0 0; font-size: .9rem; color: #374151; }
+    .upg-plus { font-size: .82rem; font-weight: 600; color: #059669; display: flex; gap: 6px; align-items: center; }
+
+    .upg-benefits { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+    .upg-benefits li { display: flex; gap: 10px; align-items: flex-start; }
+    .upg-benefits b { display: block; font-size: .9rem; color: #111827; }
+    .upg-benefits small { display: block; font-size: .8rem; color: #6B7280; line-height: 1.35; }
+    .upg-b-ic {
+        flex-shrink: 0; width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center;
+        background: color-mix(in srgb, var(--c-primary, #4F46E5) 10%, transparent); color: var(--c-primary, #4F46E5);
     }
 
-    .upgrade-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
-        gap: 24px;
-    }
+    .upg-note { display: flex; gap: 8px; margin-top: 22px; font-size: .85rem; color: #6B7280; max-width: 80ch; }
+    .upg-note i { color: #10B981; margin-top: 2px; }
 
-    .upgrade-card {
-        background: #fff;
-        border: 2px solid #E5E7EB;
-        border-radius: 16px;
-        padding: 28px 24px;
-        position: relative;
-        transition: border-color 0.2s, box-shadow 0.2s;
-    }
-    .upgrade-card:hover {
-        border-color: #D1D5DB;
-        box-shadow: 0 4px 24px rgba(0,0,0,0.06);
-    }
-    .upgrade-recommended {
-        border-color: var(--c-primary);
-        box-shadow: 0 4px 24px rgba(79,70,229,0.12);
-    }
-    .upgrade-badge {
-        position: absolute;
-        top: -12px;
-        left: 50%;
-        transform: translateX(-50%);
-        background: var(--c-primary);
-        color: #fff;
-        font-size: 0.72rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        padding: 4px 14px;
-        border-radius: 20px;
-    }
-    .upgrade-name {
-        font-size: 1.2rem;
-        font-weight: 800;
-        text-align: center;
-        margin-bottom: 4px;
-    }
-    .upgrade-price {
-        text-align: center;
-        font-size: 1.8rem;
-        font-weight: 800;
-        margin-bottom: 4px;
-    }
-    .upgrade-price span {
-        font-size: 0.85rem;
-        font-weight: 500;
-        color: #6B7280;
-    }
-    .upgrade-desc {
-        text-align: center;
-        font-size: 0.85rem;
-        color: #6B7280;
-        margin-bottom: 20px;
-    }
-    .upgrade-features {
-        list-style: none;
-        padding: 0;
-        margin: 0 0 24px;
-    }
-    .upgrade-features li {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 6px 0;
-        font-size: 0.88rem;
-        color: #374151;
-        border-bottom: 1px solid #F3F4F6;
-    }
-    .upgrade-features li:last-child { border-bottom: none; }
-    .upgrade-features li i {
-        font-size: 0.92rem;
-        color: #10B981;
-        flex-shrink: 0;
-    }
-    .upgrade-features li.upgrade-new i {
-        color: var(--c-primary);
-    }
-    .upgrade-new-tag {
-        font-size: 0.65rem;
-        font-weight: 700;
-        text-transform: uppercase;
-        letter-spacing: 0.06em;
-        color: #fff;
-        background: var(--c-primary);
-        padding: 1px 6px;
-        border-radius: 4px;
-        margin-left: auto;
-    }
+    [data-theme$="-dark"] .upg-top { background: rgba(79,70,229,.12); }
+    [data-theme$="-dark"] .upg-lead, [data-theme$="-dark"] .upg-tag { color: #CBD5E1; }
+    [data-theme$="-dark"] .upg-card { background: #1E293B; border-color: #334155; }
+    [data-theme$="-dark"] .upg-card-rec { border-color: var(--c-primary); }
+    [data-theme$="-dark"] .upg-benefits b { color: #F1F5F9; }
+    [data-theme$="-dark"] .upg-benefits small, [data-theme$="-dark"] .upg-price small,
+    [data-theme$="-dark"] .upg-diff, [data-theme$="-dark"] .upg-note { color: #94A3B8; }
 
-    [data-theme$="-dark"] .upgrade-current { background: rgba(79,70,229,0.1); }
-    [data-theme$="-dark"] .upgrade-card { background: #1E293B; border-color: #334155; }
-    [data-theme$="-dark"] .upgrade-card:hover { border-color: #475569; }
-    [data-theme$="-dark"] .upgrade-recommended { border-color: var(--c-primary); }
-    [data-theme$="-dark"] .upgrade-features li { color: #CBD5E1; border-color: #334155; }
+    @@media (max-width: 575.98px) {
+        .upg-top { padding: 18px 16px; }
+        .upg-top-ic { width: 40px; height: 40px; font-size: 1.15rem; }
+    }
 </style>
 
 @code {
-    private PlanInfo _currentPlan = new("Start", 0, "");
-    private List<UpgradePlan> _higherPlans = [];
+    private Entitlements _current = null!;
+    private List<Offer> _offers = [];
+
+    private sealed record Offer(PlanCatalog.Plan Plan, decimal Diff, IReadOnlyList<PlanCatalog.Benefit> Benefits);
 
     protected override void OnInitialized()
     {
-        var e = Entitlements.Current;
-        _currentPlan = new PlanInfo(e.Name, e.MonthlyPrice, e.Id);
-
-        var allPlans = BuildPlanCatalog();
-        var currentOrder = allPlans.FindIndex(p => p.Id == e.Id);
-        if (currentOrder < 0) currentOrder = 0;
-
-        _higherPlans = allPlans
-            .Skip(currentOrder + 1)
-            .Select(p => ToUpgradePlan(p, e))
-            .ToList();
-
-        if (_higherPlans.Count > 0)
+        _current = Entitlements.Current;
+        var shown = new HashSet<string>();
+        foreach (var plan in PlanCatalog.HigherThan(_current))
         {
-            _higherPlans[0].Recommended = true;
+            // Każdy kolejny plan: tylko to, czego nie było w poprzednim.
+            var benefits = PlanCatalog.GainsFor(plan, _current).Where(b => shown.Add(b.Title)).ToList();
+            if (benefits.Count == 0) continue;
+            _offers.Add(new(plan, plan.Price - _current.MonthlyPrice, benefits));
         }
     }
 
-    private static List<PlanDef> BuildPlanCatalog() =>
-    [
-        new("start", "Start", 0, "Testuj za darmo przez 7 dni",
-            3, false, false, false, false, false, false, false, false, false, "preview", false, false),
-        new("starter", "Starter", 49, "Podstawowe narzędzia dla trenera",
-            15, true, true, false, false, false, false, true, false, false, "basic", false, false),
-        new("pro", "Pro", 99, "Pełna funkcjonalność dla aktywnych trenerów",
-            50, true, true, true, true, true, true, true, true, true, "full", true, true),
-        new("studio", "Business", 199, "Bez limitów, pełna kontrola, priorytetowe wsparcie",
-            int.MaxValue, true, true, true, true, true, true, true, true, true, "premium", true, true),
-    ];
-
-    private static UpgradePlan ToUpgradePlan(PlanDef plan, Entitlements current)
-    {
-        var features = new List<FeatureItem>();
-
-        var clientsLabel = plan.MaxClients >= 9999 ? "Nielimitowani klienci" : $"Do {plan.MaxClients} klientów";
-        features.Add(new(clientsLabel, plan.MaxClients > current.MaxClients));
-
-        if (plan.HasBranding)
-        {
-            var label = plan.BrandingTier switch
-            {
-                "basic" => "Podstawowy branding (kolory bazowe)",
-                "full" => "Pełny branding (wszystkie kolory)",
-                "premium" => "Branding premium (kolory premium)",
-                _ => "Branding"
-            };
-            features.Add(new(label, !HasBrandingAccess(current.BrandingTier, plan.BrandingTier)));
-        }
-
-        if (plan.HasPayments)
-            features.Add(new("Płatności online", !current.PaymentsEnabled));
-
-        if (plan.HasFinancialReports)
-            features.Add(new("Raporty finansowe", !current.FinancialReports));
-
-        if (plan.HasCourses)
-            features.Add(new("Kursy wideo", !current.CoursesEnabled));
-
-        if (plan.HasTrainingPlans)
-            features.Add(new("Moduł treningowy (plany, trening, postępy)", !current.TrainingPlansEnabled));
-
-        if (plan.HasSms)
-            features.Add(new("SMS-y i push", !current.SmsReminders));
-
-        if (plan.HasGoogleMeet)
-            features.Add(new("Integracja Google Meet", !current.IntegrationGoogleMeet));
-
-        if (plan.HasReferrals)
-            features.Add(new("Program poleceń (nagrody za nowych klientów)", !current.ReferralProgram));
-
-        if (plan.HasAdvancedAnalytics)
-            features.Add(new("Zaawansowane statystyki", !current.AdvancedAnalytics));
-
-        if (plan.HasDataExport)
-            features.Add(new("Eksport danych (CSV/JSON)", !current.DataExport));
-
-        if (plan.HasLogo)
-            features.Add(new("Własne logo i favicon", !current.CustomLogo));
-
-        features.Add(new("Grafik i rezerwacje", false));
-        features.Add(new("Przypomnienia email", false));
-
-        return new UpgradePlan
-        {
-            Name = plan.Name,
-            Price = plan.Price,
-            Description = plan.Description,
-            Features = features
-        };
-    }
-
-    private static bool HasBrandingAccess(string currentTier, string targetTier)
-    {
-        var order = new[] { "preview", "basic", "full", "premium" };
-        return Array.IndexOf(order, currentTier) >= Array.IndexOf(order, targetTier);
-    }
-
-    private record PlanInfo(string Name, decimal Price, string Id);
-
-    private record PlanDef(string Id, string Name, decimal Price, string Description,
-        int MaxClients, bool HasPayments, bool HasLogo, bool HasCourses, bool HasSms,
-        bool HasGoogleMeet, bool HasAdvancedAnalytics, bool HasFinancialReports,
-        bool HasDataExport, bool HasBranding, string BrandingTier, bool HasTrainingPlans, bool HasReferrals);
-
-    private class UpgradePlan
-    {
-        public string Name { get; set; } = "";
-        public decimal Price { get; set; }
-        public string Description { get; set; } = "";
-        public List<FeatureItem> Features { get; set; } = [];
-        public bool Recommended { get; set; }
-    }
-
-    private record FeatureItem(string Label, bool IsNew);
+    private string MailTo(PlanCatalog.Plan plan) =>
+        "mailto:kontakt" + "@" + "ptscheduler.pl?subject=" + Uri.EscapeDataString($"Zmiana planu na {plan.Name}")
+        + "&body=" + Uri.EscapeDataString($"Dzień dobry,\nchcę przejść z planu {_current.Name} na {plan.Name}.\n");
 }
