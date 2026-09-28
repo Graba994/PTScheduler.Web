@@ -261,6 +261,20 @@ else
                         </button>
                     </div>
 
+                    <div class="btn-group btn-group-sm w-100 mb-3" role="group" aria-label="Które konto">
+                        <button type="button" class="btn @(_adminAccount == "owner" ? "btn-dark" : "btn-outline-dark")" @onclick='() => SwitchAdminAccount("owner")'>
+                            <i class="bi bi-person-badge me-1"></i>Właściciel studia
+                        </button>
+                        <button type="button" class="btn @(_adminAccount == "root" ? "btn-dark" : "btn-outline-dark")" @onclick='() => SwitchAdminAccount("root")'>
+                            <i class="bi bi-tools me-1"></i>Konto techniczne (root)
+                        </button>
+                    </div>
+                    <p class="small text-muted mb-3">
+                        @(_adminAccount == "root"
+                            ? "Twoje konto operatora: pełne ustawienia, funkcje techniczne i przełączanie na dowolne konto do testów."
+                            : "Konto administratora, które trener założył w kreatorze. Reset hasła wymusi jego zmianę przy logowaniu.")
+                    </p>
+
                     @if (_adminInfo is not null && _adminInfo.Found)
                     {
                         <dl class="row mb-0 small">
@@ -1416,6 +1430,19 @@ else
         public DateTime Timestamp { get; init; }
     }
 
+    // "owner" — administrator studia (z kreatora), "root" — konto techniczne operatora.
+    private string _adminAccount = "owner";
+
+    private async Task SwitchAdminAccount(string account)
+    {
+        if (_adminAccount == account) return;
+        _adminAccount = account;
+        _adminInfo = null;
+        _adminResetMessage = null;
+        _newAdminPassword = "";
+        await LoadAdminInfo();
+    }
+
     private async Task LoadAdminInfo()
     {
         if (_tenant is null || _tenant.Status != TenantStatus.Active) return;
@@ -1426,7 +1453,8 @@ else
             var forwardHost = Config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220";
             var secret = PTScheduler.Portal.Services.TenantSecrets.For(_tenant, Config);
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-            using var req = new HttpRequestMessage(HttpMethod.Get, $"http://{forwardHost}:{_tenant.Port}/internal/admin-info");
+            using var req = new HttpRequestMessage(HttpMethod.Get,
+                $"http://{forwardHost}:{_tenant.Port}/internal/admin-info{(_adminAccount == "root" ? "?account=root" : "")}");
             if (!string.IsNullOrEmpty(secret))
                 req.Headers.Add("X-Internal-Secret", secret);
             var resp = await http.SendAsync(req);
@@ -1467,6 +1495,8 @@ else
                 _adminResetError = true;
                 return;
             }
+            if (_adminAccount == "root")
+                payload["account"] = "root";
 
             req.Content = new StringContent(
                 System.Text.Json.JsonSerializer.Serialize(payload),

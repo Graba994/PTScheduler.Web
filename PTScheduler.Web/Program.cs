@@ -116,6 +116,18 @@ builder.Services.ConfigureApplicationCookie(options =>
     options.SlidingExpiration = true;
 });
 builder.Services.AddAntiforgery(options => options.Cookie.Name = $".PTS.{cookieScope}.AF");
+// Odświeżanie ciasteczka (znacznik bezpieczeństwa) buduje tożsamość od nowa — znacznik
+// „przełączono z konta X” trzeba przenieść, inaczej po chwili zniknąłby przycisk powrotu.
+builder.Services.Configure<SecurityStampValidatorOptions>(options =>
+    options.OnRefreshingPrincipal = ctx =>
+    {
+        var from = ctx.CurrentPrincipal?.FindFirst(PTScheduler.Web.Services.AccountSwitchService.OriginalUserClaim);
+        if (from is not null && ctx.NewPrincipal?.Identity is System.Security.Claims.ClaimsIdentity id)
+            id.AddClaim(new System.Security.Claims.Claim(from.Type, from.Value));
+        return Task.CompletedTask;
+    });
+builder.Services.AddScoped<PTScheduler.Web.Services.AccountSwitchService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.AdminDashboardService>();
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration, builder.Environment.ContentRootPath);
@@ -255,6 +267,7 @@ app.Use(async (ctx, next) =>
     if (ctx.User.Identity?.IsAuthenticated == true
         && ctx.User.IsInRole(PTScheduler.Domain.Constants.Roles.Admin)
         && ctx.User.HasClaim(PTScheduler.Web.Services.AppClaimsPrincipalFactory.MustChangePasswordClaim, "1")
+        && !PTScheduler.Web.Services.AccountSwitchService.IsSwitched(ctx.User)
         && HttpMethods.IsGet(ctx.Request.Method))
     {
         var path = ctx.Request.Path;
@@ -288,12 +301,12 @@ app.MapGet("/db-error/retry", async (StartupHealth h, IServiceProvider sp, ILogg
     return h.DatabaseAvailable ? Results.Redirect("/") : Results.Redirect("/db-error");
 });
 
-// Backup download endpoint (admin only)
+// Backup download endpoint (konto techniczne — jak strona /admin/backup)
 app.MapGet("/admin/backup/download", async (
     PTScheduler.Application.Interfaces.IBackupService backupService,
     HttpContext ctx) =>
 {
-    if (!ctx.User.IsInRole(PTScheduler.Domain.Constants.Roles.Admin))
+    if (!ctx.User.IsInRole(PTScheduler.Domain.Constants.Roles.Root))
         return Results.Forbid();
 
     var data = await backupService.ExportAsync();
@@ -621,13 +634,13 @@ app.MapGet("/internal/admin-info",
 {
     if (!InternalSecretMatches(ctx)) return Results.NotFound();
 
-    var admins = await userManager.GetUsersInRoleAsync(PTScheduler.Domain.Constants.Roles.Admin);
-    var admin = admins.FirstOrDefault();
+    var admin = await FindManagedAdminAsync(userManager, ctx.Request.Query["account"]);
     if (admin is null) return Results.Json(new { found = false });
 
     return Results.Json(new
     {
         found = true,
+        isRoot = await userManager.IsInRoleAsync(admin, PTScheduler.Domain.Constants.Roles.Root),
         email = admin.Email,
         firstName = admin.FirstName,
         lastName = admin.LastName,
@@ -648,9 +661,9 @@ app.MapPost("/internal/admin-reset",
 
     var newPassword = root.TryGetProperty("password", out var p) ? p.GetString() : null;
     var newEmail = root.TryGetProperty("email", out var e) ? e.GetString() : null;
+    var account = root.TryGetProperty("account", out var a) ? a.GetString() : null;
 
-    var admins = await userManager.GetUsersInRoleAsync(PTScheduler.Domain.Constants.Roles.Admin);
-    var admin = admins.FirstOrDefault();
+    var admin = await FindManagedAdminAsync(userManager, account);
     if (admin is null) return Results.Json(new { success = false, error = "Brak konta admin" });
 
     if (!string.IsNullOrWhiteSpace(newEmail) && newEmail != admin.Email)
@@ -748,6 +761,16 @@ app.MapPost("/payments/{provider}/notify",
 app.Run();
 
 // ---- helpers ----
+
+// Portal zarządza kontem właściciela studia (domyślnie) albo kontem technicznym (account=root).
+// Przed kreatorem /setup właściciela jeszcze nie ma — wtedy jedynym kontem jest root.
+static async Task<ApplicationUser?> FindManagedAdminAsync(UserManager<ApplicationUser> userManager, string? account)
+{
+    if (string.Equals(account, "root", StringComparison.OrdinalIgnoreCase))
+        return (await userManager.GetUsersInRoleAsync(PTScheduler.Domain.Constants.Roles.Root)).FirstOrDefault();
+    return await DbInitializer.FindOwnerAdminAsync(userManager)
+        ?? (await userManager.GetUsersInRoleAsync(PTScheduler.Domain.Constants.Roles.Admin)).FirstOrDefault();
+}
 
 // Wywołania Portal → tenant. Brak sekretu albo zły nagłówek = 404 (nie zdradzamy,
 // że endpoint istnieje). Porównanie w stałym czasie.

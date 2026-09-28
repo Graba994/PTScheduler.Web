@@ -79,8 +79,10 @@ The setup wizard offers two modes:
 - **Self-setup (free)** — trainer configures name, email, password
 - **Admin setup (paid)** — displays contact info, then basic config
 
-After setup, the default `root@admin.local` account is replaced with
-the trainer's email and password.
+Setup creates a separate studio administrator account with the trainer's email and
+password. The technical `root@admin.local` account (role `Root`, random password) stays
+for the platform operator — set its password in Portal → tenant → "Konto techniczne (root)".
+One-click account switching can be disabled with `ACCOUNT_SWITCHING_ENABLED=false`.
 
 ## Resource Usage (per tenant)
 

@@ -63,4 +63,23 @@
     });
 
     window.PTSettingsSearch = { filter: filter, key: key };
+
+    // Prosty filtr listy (np. „Przełącz konto”): [data-filter] > [data-filter-item data-text].
+    window.PTListFilter = function (input) {
+        var box = input.closest('[data-filter]');
+        if (!box) return;
+        var words = norm(input.value).split(/\s+/).filter(Boolean);
+        var shown = 0;
+        box.querySelectorAll('[data-filter-item]').forEach(function (el) {
+            var text = el.getAttribute('data-text') || '';
+            var ok = words.every(function (w) { return text.indexOf(w) >= 0; });
+            el.hidden = !ok;
+            if (ok) shown++;
+        });
+        box.querySelectorAll('[data-filter-group]').forEach(function (g) {
+            g.hidden = !g.querySelector('[data-filter-item]:not([hidden])');
+        });
+        var empty = box.querySelector('[data-filter-empty]');
+        if (empty) empty.hidden = shown > 0;
+    };
 })();

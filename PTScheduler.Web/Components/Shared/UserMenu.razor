@@ -96,6 +96,13 @@
                     <i class="bi bi-gear-fill" style="font-size:1rem;flex-shrink:0"></i>
                     <span>Ustawienia konta</span>
                 </a>
+                @if (_canSwitch)
+                {
+                    <a href="/switch-account" class="um-item" @onclick="Close">
+                        <i class="bi bi-people-fill" style="color:var(--c-primary);font-size:1rem;flex-shrink:0"></i>
+                        <span>Przełącz konto</span>
+                    </a>
+                }
 
                 <!-- Legal -->
                 <a href="/legal/terms" class="um-item" @onclick="Close">
@@ -282,6 +289,7 @@
     private string? _userId;
     private string? _role;
     private bool _mustChangePassword;
+    private bool _canSwitch;
     private List<NotifItem> _notifs = [];
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -294,6 +302,7 @@
             _name   = user.Identity?.Name ?? string.Empty;
             _email  = user.FindFirst(ClaimTypes.Email)?.Value ?? _name;
             _mustChangePassword = user.HasClaim(PTScheduler.Web.Services.AppClaimsPrincipalFactory.MustChangePasswordClaim, "1");
+            _canSwitch = user.IsInRole(Roles.Admin) || PTScheduler.Web.Services.AccountSwitchService.IsSwitched(user);
 
             var parts = _name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             _initials = parts.Length >= 2

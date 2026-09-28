@@ -10,6 +10,7 @@
 
     <main class="app-main">
         <div class="app-content">
+            <SwitchedBanner />
             <AuthorizeView Roles="Client">
                 <Authorized><ClientTabs /></Authorized>
             </AuthorizeView>
@@ -43,9 +44,14 @@
 <AuthorizeView>
     <Authorized>
         <TrainerContactCache />
-        <PasskeyPrompt />
-        <PushPrompt />
-        <HealthSurveyGate />
+        @* Po przełączeniu na cudze konto nie proponujemy klucza dostępu, powiadomień ani ankiety
+           w imieniu tej osoby — i nic nie zasłania przycisku powrotu. *@
+        @if (!PTScheduler.Web.Services.AccountSwitchService.IsSwitched(context.User))
+        {
+            <PasskeyPrompt />
+            <PushPrompt />
+            <HealthSurveyGate />
+        }
     </Authorized>
 </AuthorizeView>
 

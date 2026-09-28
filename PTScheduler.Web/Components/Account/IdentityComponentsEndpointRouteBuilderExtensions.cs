@@ -53,6 +53,26 @@ namespace Microsoft.AspNetCore.Routing
                 return TypedResults.LocalRedirect($"~/{safeReturn.TrimStart('/')}");
             });
 
+            // Przełączanie kont jednym kliknięciem (AccountSwitchService pilnuje, kto na kogo).
+            accountGroup.MapPost("/SwitchTo", async (
+                ClaimsPrincipal user,
+                [FromServices] AccountSwitchService switcher,
+                [FromForm] string userId) =>
+            {
+                var error = await switcher.SwitchToAsync(user, userId);
+                return error is null
+                    ? TypedResults.LocalRedirect("~/app")
+                    : TypedResults.LocalRedirect($"~/switch-account?error={Uri.EscapeDataString(error)}");
+            }).RequireAuthorization();
+
+            accountGroup.MapPost("/SwitchBack", async (
+                ClaimsPrincipal user,
+                [FromServices] AccountSwitchService switcher) =>
+            {
+                var error = await switcher.SwitchBackAsync(user);
+                return TypedResults.LocalRedirect(error is null ? "~/app" : "~/Account/Login");
+            }).RequireAuthorization();
+
             accountGroup.MapPost("/PasskeyCreationOptions", async (
                 HttpContext context,
                 [FromServices] UserManager<ApplicationUser> userManager,

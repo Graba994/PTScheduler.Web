@@ -49,16 +49,53 @@ public class AdminSeedTests
     }
 
     [Fact]
-    public async Task Renamed_Admin_Does_Not_Resurrect_Default_Account_On_Restart()
+    public async Task Fresh_Default_Admin_Is_Technical_Root()
     {
         var (sp, users) = await CreateAsync();
         await using var _ = sp;
-        await AddAdminAsync(users, "wlasciciel@studio.pl", "Tajne1234!");
 
         await DbInitializer.SeedAdminAsync(users);
 
-        (await users.FindByEmailAsync(DbInitializer.DefaultAdminEmail)).Should().BeNull();
-        (await users.GetUsersInRoleAsync(Roles.Admin)).Should().ContainSingle();
+        var root = await users.FindByEmailAsync(DbInitializer.DefaultAdminEmail);
+        (await users.IsInRoleAsync(root!, Roles.Root)).Should().BeTrue();
+        (await DbInitializer.FindOwnerAdminAsync(users)).Should().BeNull("przed kreatorem nie ma jeszcze administratora studia");
+    }
+
+    [Fact]
+    public async Task Renamed_Admin_Gets_Separate_Technical_Root_With_Random_Password()
+    {
+        var (sp, users) = await CreateAsync();
+        await using var _ = sp;
+        var owner = await AddAdminAsync(users, "wlasciciel@studio.pl", "Tajne1234!");
+
+        await DbInitializer.SeedAdminAsync(users);
+        await DbInitializer.SeedAdminAsync(users); // restart nie zakłada kolejnego konta
+
+        var root = await users.FindByEmailAsync(DbInitializer.DefaultAdminEmail);
+        root.Should().NotBeNull();
+        (await users.IsInRoleAsync(root!, Roles.Root)).Should().BeTrue();
+        (await users.CheckPasswordAsync(root!, "password")).Should().BeFalse();
+        (await users.GetUsersInRoleAsync(Roles.Root)).Should().ContainSingle();
+        (await users.IsInRoleAsync(owner, Roles.Root)).Should().BeFalse("właściciel ma mniej funkcji niż konto techniczne");
+        (await DbInitializer.FindOwnerAdminAsync(users))!.Id.Should().Be(owner.Id);
+    }
+
+    [Fact]
+    public async Task Existing_Root_With_Legacy_Password_Must_Change_It()
+    {
+        var (sp, users) = await CreateAsync();
+        await using var _ = sp;
+        var root = new ApplicationUser { UserName = DbInitializer.DefaultAdminEmail, Email = DbInitializer.DefaultAdminEmail };
+        await users.CreateAsync(root);
+        root.PasswordHash = users.PasswordHasher.HashPassword(root, "password");
+        await users.UpdateAsync(root);
+        await users.AddToRoleAsync(root, Roles.Admin);
+
+        await DbInitializer.SeedAdminAsync(users);
+
+        root = (await users.FindByIdAsync(root.Id))!;
+        (await users.IsInRoleAsync(root, Roles.Root)).Should().BeTrue();
+        root.MustChangePassword.Should().BeTrue();
     }
 
     [Fact]
@@ -73,9 +110,14 @@ public class AdminSeedTests
         await users.UpdateAsync(root);
         await users.AddToRoleAsync(root, Roles.Admin);
 
+        var legacyId = root.Id;
+
         await DbInitializer.SeedAdminAsync(users);
 
-        (await users.FindByEmailAsync(DbInitializer.DefaultAdminEmail)).Should().BeNull();
+        // „Wskrzeszone” konto ze znanym hasłem znika; konto techniczne powstaje od nowa z losowym hasłem.
+        (await users.FindByIdAsync(legacyId)).Should().BeNull();
+        var fresh = await users.FindByEmailAsync(DbInitializer.DefaultAdminEmail);
+        (await users.CheckPasswordAsync(fresh!, "password")).Should().BeFalse();
         (await users.FindByEmailAsync("wlasciciel@studio.pl")).Should().NotBeNull();
     }
 }

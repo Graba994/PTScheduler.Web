@@ -30,8 +30,21 @@ docker compose up -d
 Aplikacja dostępna pod `http://localhost:8080`.
 
 Przy pierwszym uruchomieniu aplikacja otworzy kreator `/setup` — tam ustawiasz
-nazwę firmy oraz własny login i hasło administratora. Konto startowe
-`root@admin.local` ma losowe hasło i nie da się na nie zalogować przed kreatorem.
+nazwę firmy oraz własny login i hasło administratora studia.
+
+Konta administracyjne:
+
+- **Administrator studia** — zakłada go kreator `/setup` (e-mail i hasło właściciela).
+  Ustawienia studia, zespół, oferta; może przełączać się jednym kliknięciem na profile
+  trenerów i asystentów.
+- **Konto techniczne `root@admin.local`** (rola `Root`) — dla operatora platformy. Ma
+  wszystko, co administrator studia, plus kopie zapasowe, bazę danych, dane demo i sekcję
+  „Technika” na dashboardzie; przełącza się na dowolne konto (także klienta) do testów.
+  Startuje z losowym hasłem — ustawiasz je w Portalu (Instancja → Konto administratora →
+  „Konto techniczne (root)”).
+
+Przełączanie kont (bez hasła, z zapisem w historii zmian) wyłączysz zmienną
+`ACCOUNT_SWITCHING_ENABLED=false`.
 
 ---
 

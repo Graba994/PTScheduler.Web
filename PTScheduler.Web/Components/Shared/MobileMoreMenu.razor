@@ -177,6 +177,14 @@
                 <span>Ustawienia konta</span>
                 <i class="bi bi-chevron-right ms-auto" style="font-size:.7rem;opacity:.4"></i>
             </a>
+            @if (_canSwitch)
+            {
+                <a href="/switch-account" class="mobile-sheet-link" @onclick="CloseSheet">
+                    <i class="bi bi-people-fill"></i>
+                    <span>Przełącz konto</span>
+                    <i class="bi bi-chevron-right ms-auto" style="font-size:.7rem;opacity:.4"></i>
+                </a>
+            }
             <a href="/legal/terms" class="mobile-sheet-link" @onclick="CloseSheet">
                 <i class="bi bi-file-earmark-text"></i>
                 <span>Regulamin</span>
@@ -209,6 +217,7 @@
     private string _email = "";
     private bool _referralsEnabled;
     private bool _mustChangePassword;
+    private bool _canSwitch;
     private IReadOnlyList<PTScheduler.Web.Services.ClientNav.Section> _clientSections = [];
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
@@ -220,6 +229,7 @@
             _name = user.Identity?.Name ?? "";
             _email = user.FindFirst(ClaimTypes.Email)?.Value ?? _name;
             _mustChangePassword = user.HasClaim(PTScheduler.Web.Services.AppClaimsPrincipalFactory.MustChangePasswordClaim, "1");
+            _canSwitch = user.IsInRole(Roles.Admin) || PTScheduler.Web.Services.AccountSwitchService.IsSwitched(user);
             var parts = _name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             _initials = parts.Length >= 2
                 ? $"{parts[0][0]}{parts[^1][0]}".ToUpper()

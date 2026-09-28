@@ -47,7 +47,7 @@ public static class DbInitializer
 
     public static async Task SeedRolesAsync(RoleManager<IdentityRole> roleManager)
     {
-        string[] roles = [Roles.Admin, Roles.Trainer, Roles.Subordinate, Roles.Client];
+        string[] roles = [Roles.Admin, Roles.Root, Roles.Trainer, Roles.Subordinate, Roles.Client];
         foreach (var role in roles)
         {
             if (!await roleManager.RoleExistsAsync(role))
@@ -73,17 +73,36 @@ public static class DbInitializer
     {
         var admins = await userManager.GetUsersInRoleAsync(Roles.Admin);
         if (admins.Count > 0)
-        {
             await RemoveResurrectedDefaultAdminAsync(userManager, admins);
-            return;
-        }
+        await EnsureRootAsync(userManager);
+    }
+
+    /// <summary>
+    /// Konto techniczne operatora: root@admin.local z rolami Admin i Root. Jest osobno od
+    /// administratora studia (tego zakłada kreator /setup), więc instalacje, w których kreator
+    /// kiedyś przemianował root na adres właściciela, dostają nowe konto techniczne — zawsze
+    /// z losowym hasłem (ustawia je operator przez Portal), nigdy ze znanym.
+    /// </summary>
+    public static async Task EnsureRootAsync(UserManager<ApplicationUser> userManager)
+    {
+        if ((await userManager.GetUsersInRoleAsync(Roles.Root)).Count > 0) return;
 
         const string email = DefaultAdminEmail;
         var existing = await userManager.FindByEmailAsync(email);
         if (existing is not null)
         {
-            // Konto istnieje, ale straciło rolę — przywracamy rolę, hasło zostaje.
-            await userManager.AddToRoleAsync(existing, Roles.Admin);
+            // Konto istnieje (np. straciło rolę albo sprzed podziału ról) — dokładamy role.
+            // Ze starym hasłem z README wymuszamy zmianę przy logowaniu (bez odcinania dostępu).
+            if (existing.PasswordHash is not null
+                && userManager.PasswordHasher.VerifyHashedPassword(existing, existing.PasswordHash, LegacyDefaultPassword)
+                    != PasswordVerificationResult.Failed)
+            {
+                existing.MustChangePassword = true;
+                await userManager.UpdateAsync(existing);
+            }
+            if (!await userManager.IsInRoleAsync(existing, Roles.Admin))
+                await userManager.AddToRoleAsync(existing, Roles.Admin);
+            await userManager.AddToRoleAsync(existing, Roles.Root);
             return;
         }
 
@@ -94,8 +113,8 @@ public static class DbInitializer
             NormalizedEmail = email.ToUpperInvariant(),
             NormalizedUserName = email.ToUpperInvariant(),
             EmailConfirmed = true,
-            FirstName = "Admin",
-            LastName = "System",
+            FirstName = "Root",
+            LastName = "Techniczne",
             SecurityStamp = Guid.NewGuid().ToString(),
             MustChangePassword = true
         };
@@ -103,6 +122,15 @@ public static class DbInitializer
         admin.PasswordHash = userManager.PasswordHasher.HashPassword(admin, NewRandomPassword());
         await userManager.UpdateAsync(admin);
         await userManager.AddToRoleAsync(admin, Roles.Admin);
+        await userManager.AddToRoleAsync(admin, Roles.Root);
+    }
+
+    /// <summary>Administrator studia (właściciel) — admin bez roli Root. Null przed kreatorem /setup.</summary>
+    public static async Task<ApplicationUser?> FindOwnerAdminAsync(UserManager<ApplicationUser> userManager)
+    {
+        var admins = await userManager.GetUsersInRoleAsync(Roles.Admin);
+        var roots = (await userManager.GetUsersInRoleAsync(Roles.Root)).Select(r => r.Id).ToHashSet();
+        return admins.Where(a => !roots.Contains(a.Id)).OrderBy(a => a.Email).FirstOrDefault();
     }
 
     private static async Task RemoveResurrectedDefaultAdminAsync(

@@ -26,6 +26,15 @@ public class SiteBuilderTests
     }
 
     [Fact]
+    public void EveryTemplate_HasOwnContent_AndKnownTheme()
+    {
+        var headlines = SiteWidgets.Templates.Select(t => SiteWidgets.BuildTemplate(t.Key).Blocks[0].Title).ToList();
+        headlines.Should().OnlyHaveUniqueItems("każdy szablon ma własny nagłówek, a nie treść szablonu domyślnego");
+        SiteWidgets.Templates.Should().OnlyContain(t => SiteWidgets.Themes.Any(th => th.Key == t.Theme));
+        SiteWidgets.Themes.Select(t => t.Key).Should().OnlyHaveUniqueItems();
+    }
+
+    [Fact]
     public void EveryWidget_HasDefaultContent()
     {
         foreach (var w in SiteWidgets.Catalog)

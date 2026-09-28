@@ -21,7 +21,9 @@ public sealed record AdminMenuItem(
     /// <summary>Ukryte w instancji zarządzanej przez Portal (tam robi to platforma).</summary>
     bool HideWhenManaged = false,
     /// <summary>Klucz stanu wyliczanego na stronie „Zarządzanie” (np. liczba typów treningów).</summary>
-    string? StatusKey = null);
+    string? StatusKey = null,
+    /// <summary>Tylko konto techniczne (Root) — funkcje, którymi administrator studia nie musi się zajmować.</summary>
+    bool RootOnly = false);
 
 /// <param name="Advanced">Rzadko używane — na stronie „Zarządzanie” schowane pod „Więcej ustawień”.</param>
 public sealed record AdminMenuGroup(string Title, string Icon, string Tone, IReadOnlyList<AdminMenuItem> Items, bool Advanced = false);
@@ -30,6 +32,8 @@ public sealed record AdminMenuGroup(string Title, string Icon, string Tone, IRea
 public sealed class AdminAccess
 {
     public bool IsAdmin { get; init; }
+    /// <summary>Konto techniczne operatora (root@admin.local).</summary>
+    public bool IsRoot { get; init; }
     public bool IsTrainer { get; init; }
     public HashSet<string> Granted { get; init; } = [];
 
@@ -39,6 +43,7 @@ public sealed class AdminAccess
     public bool Sees(AdminMenuItem item) =>
         Can(item.Permission)
         && (!item.OwnerOnly || IsOwner)
+        && (!item.RootOnly || IsRoot)
         // Strony dostępne tylko dla wybranych ról — bez tego kafelek prowadził do „Brak dostępu”.
         && (IsAdmin || !AdminMenu.AdminOnly.Contains(item.Href))
         && (IsOwner || !AdminMenu.AdminOrTrainer.Contains(item.Href))
@@ -47,7 +52,8 @@ public sealed class AdminAccess
     public static async Task<AdminAccess> LoadAsync(AuthenticationStateProvider authState, IPermissionService permissions)
     {
         var auth = await authState.GetAuthenticationStateAsync();
-        if (auth.User.IsInRole(Roles.Admin)) return new AdminAccess { IsAdmin = true };
+        if (auth.User.IsInRole(Roles.Admin))
+            return new AdminAccess { IsAdmin = true, IsRoot = auth.User.IsInRole(Roles.Root) };
 
         var role = auth.User.IsInRole(Roles.Trainer) ? Roles.Trainer
                  : auth.User.IsInRole(Roles.Subordinate) ? Roles.Subordinate
@@ -71,8 +77,7 @@ public static class AdminMenu
     public static readonly HashSet<string> AdminOnly = new(StringComparer.OrdinalIgnoreCase)
     {
         "admin/session-types", "admin/modules", "admin/email", "admin/email-templates", "admin/push", "admin/surveys",
-        "admin/branding", "admin/site", "admin/users", "admin/permissions", "admin/backup", "admin/audit-logs",
-        "admin/settings", "admin/demo"
+        "admin/branding", "admin/site", "admin/users", "admin/permissions", "admin/audit-logs"
     };
 
     /// <summary>Strony z atrybutem Authorize(Roles = "Admin,Trainer") — bez asystenta.</summary>
@@ -202,7 +207,7 @@ public static class AdminMenu
             new("admin/backup", "bi-archive-fill", "Kopie zapasowe",
                 "Kopia danych na wszelki wypadek",
                 "Kopie Twoich danych robią się automatycznie. Tu możesz zrobić dodatkową kopię albo pobrać ją na dysk.",
-                Permissions.ManageBackup),
+                Permissions.ManageBackup, RootOnly: true),
             new("admin/export", "bi-download", "Eksport danych",
                 "Klienci, wizyty i płatności do Excela",
                 "Pobierz dane do arkusza — np. dla księgowej albo do własnych analiz.",
@@ -214,11 +219,11 @@ public static class AdminMenu
             new("admin/settings", "bi-database-fill", "Baza danych",
                 "Połączenie z bazą (instalacja własna)",
                 "Ustawienia bazy danych dla instalacji na własnym serwerze.",
-                Permissions.ManageBackup, HideWhenManaged: true),
+                Permissions.ManageBackup, HideWhenManaged: true, RootOnly: true),
             new("admin/demo", "bi-database-fill-gear", "Dane demo i reset",
                 "Przykładowe dane do wypróbowania",
                 "Wgraj przykładowych klientów i wizyty, żeby zobaczyć aplikację w akcji — albo wyczyść je przed startem.",
-                Permissions.ManageBackup)
+                Permissions.ManageBackup, RootOnly: true)
         ], Advanced: true)
     ];
 
