@@ -2,22 +2,13 @@
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
+@using PTScheduler.Web.Components.Site
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Admin)]
+@implements IDisposable
 @inject ISiteContentService SiteContentService
 @rendermode PTScheduler.Web.RenderModes.Server
 
-<AppTitle Page="Strona główna" />
-
-<div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-    <h4 class="page-title mb-0"><i class="bi bi-globe me-2" style="color:var(--c-primary)"></i>Strona główna (Welcome)</h4>
-    <div class="d-flex gap-2">
-        <a class="btn btn-outline-secondary" href="/" target="_blank"><i class="bi bi-box-arrow-up-right me-1"></i>Podgląd</a>
-        <button class="btn btn-primary" @onclick="Save" disabled="@(_content is null || _saving)">
-            @if (_saving) { <span class="spinner-border spinner-border-sm me-2"></span> }
-            <i class="bi bi-save me-1"></i>Zapisz
-        </button>
-    </div>
-</div>
+<AppTitle Page="Twoja strona" />
 
 @if (_content is null)
 {
@@ -25,450 +16,400 @@
 }
 else
 {
-    @if (!string.IsNullOrEmpty(_message)) { <div class="alert alert-success"><i class="bi bi-check-circle me-2"></i>@_message</div> }
-    @if (!string.IsNullOrEmpty(_error)) { <div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-2"></i>@_error</div> }
-
-    <!-- Templates -->
-    <div class="card mb-3">
-        <div class="card-header"><i class="bi bi-palette2 me-2"></i>Szablony</div>
-        <div class="card-body">
-            <p class="text-muted small">Zastosuj gotowy szablon (wypełni treść i styl — potem edytuj dowolnie). Zapisze się dopiero po kliknięciu „Zapisz".</p>
-            <div class="d-flex flex-wrap gap-2">
-                @foreach (var t in SiteTemplates.All)
+    <div class="sb-top">
+        <div>
+            <h4 class="set-title mb-1"><i class="bi bi-globe2"></i>Twoja strona</h4>
+            <div class="sb-status">
+                @if (_saving) { <span><span class="spinner-border spinner-border-sm me-1"></span>Zapisuję szkic…</span> }
+                else if (_hasDraft) { <span class="text-warning-emphasis"><i class="bi bi-pencil-square me-1"></i>Masz nieopublikowane zmiany — widzisz je tylko Ty</span> }
+                else { <span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>Strona jest aktualna</span> }
+            </div>
+        </div>
+        <div class="sb-top-actions">
+            <a class="btn btn-sm btn-outline-secondary" href="/" target="_blank"><i class="bi bi-box-arrow-up-right me-1"></i>Zobacz stronę</a>
+            @if (_hasDraft)
+            {
+                @if (_confirmDiscard)
                 {
-                    <button class="btn @(_content.Template == t.Key ? "btn-primary" : "btn-outline-primary")" @onclick="() => ApplyTemplate(t.Key)">
-                        @t.Name<br /><span class="small opacity-75">@t.Desc</span>
-                    </button>
+                    <button class="btn btn-sm btn-outline-danger" @onclick="DiscardAsync">Tak, odrzuć</button>
+                    <button class="btn btn-sm btn-link" @onclick="() => _confirmDiscard = false">Nie</button>
                 }
-            </div>
+                else
+                {
+                    <button class="btn btn-sm btn-link text-muted" @onclick="() => _confirmDiscard = true">Odrzuć zmiany</button>
+                }
+                <button class="btn btn-sm btn-primary sb-publish" @onclick="PublishAsync" disabled="@_saving"><i class="bi bi-rocket-takeoff me-1"></i>Opublikuj</button>
+            }
         </div>
     </div>
 
-    <!-- Style -->
-    <div class="card mb-3">
-        <div class="card-header"><i class="bi bi-brush me-2"></i>Styl i tło</div>
-        <div class="card-body row g-3">
-            <div class="col-12 col-md-4">
-                <label class="form-label fw-semibold">Szablon (styl)</label>
-                <select class="form-select" @bind="_content.Template">
-                    @foreach (var t in SiteTemplates.All) { <option value="@t.Key">@t.Name</option> }
-                </select>
-            </div>
-            <div class="col-12 col-md-4">
-                <label class="form-label fw-semibold">Tło sekcji hero</label>
-                <select class="form-select" @bind="_content.HeroBackground">
-                    <option value="gradient">Gradient</option>
-                    <option value="solid">Jednolite</option>
-                    <option value="image">Obrazek</option>
-                </select>
-            </div>
-            <div class="col-12 col-md-4 d-flex align-items-end">
-                <div class="form-check form-switch">
-                    <input class="form-check-input" type="checkbox" @bind="_content.Animations" id="swAnim" />
-                    <label class="form-check-label" for="swAnim">Animacje (wjazdy + licznik statystyk)</label>
-                </div>
-            </div>
-            <div class="col-12 col-md-6">
-                <label class="form-label fw-semibold d-flex justify-content-between gap-2"><span>Gradient hero — od</span><ColorField @bind-Value="_content.HeroGradientFrom" /></label>
-                <div class="form-text">Puste = kolory z szablonu / akcentu</div>
-            </div>
-            <div class="col-12 col-md-6">
-                <label class="form-label fw-semibold d-flex justify-content-between gap-2"><span>Gradient hero — do</span><ColorField @bind-Value="_content.HeroGradientTo" /></label>
-            </div>
-            <div class="col-12">
-                <label class="form-label fw-semibold">URL obrazka hero (gdy tło = Obrazek)</label>
-                <input class="form-control" @bind="_content.HeroImageUrl" placeholder="https://..." />
-            </div>
-        </div>
-    </div>
-
-    <!-- Global colors -->
-    <div class="card mb-3">
-        <div class="card-header"><i class="bi bi-palette me-2"></i>Kolory globalne</div>
-        <div class="card-body row g-3">
-            <div class="col-12 col-md-6 col-lg-4 d-flex align-items-center justify-content-between gap-2">
-                <span class="fw-semibold small">Kolor akcentu</span><ColorField @bind-Value="_content.AccentOverride" />
-            </div>
-            <div class="col-12 col-md-6 col-lg-4 d-flex align-items-center justify-content-between gap-2">
-                <span class="fw-semibold small">Tło strony</span><ColorField @bind-Value="_content.PageBackground" />
-            </div>
-            <div class="col-12 col-md-6 col-lg-4 d-flex align-items-center justify-content-between gap-2">
-                <span class="fw-semibold small">Nagłówki sekcji</span><ColorField @bind-Value="_content.HeadingColor" />
-            </div>
-            <div class="col-12 col-md-6 col-lg-4 d-flex align-items-center justify-content-between gap-2">
-                <span class="fw-semibold small">Tekst / akapity</span><ColorField @bind-Value="_content.BodyTextColor" />
-            </div>
-            <div class="col-12 col-md-6 col-lg-4 d-flex align-items-center justify-content-between gap-2">
-                <span class="fw-semibold small">Tekst przycisków</span><ColorField @bind-Value="_content.ButtonTextColor" />
-            </div>
-        </div>
-    </div>
-
-    <!-- Hero -->
-    <div class="card mb-3">
-        <div class="card-header"><i class="bi bi-card-heading me-2"></i>Sekcja główna (hero)</div>
-        <div class="card-body row g-3">
-            <div class="col-12 col-md-6">
-                <label class="form-label fw-semibold d-flex align-items-center justify-content-between gap-2">
-                    <span>Etykieta (eyebrow)</span>
-                    <ColorField @bind-Value="_content.HeroEyebrowColor" />
-                </label>
-                <input class="form-control" @bind="_content.HeroEyebrow" maxlength="60" />
-            </div>
-            <div class="col-12">
-                <label class="form-label fw-semibold d-flex align-items-center justify-content-between gap-2">
-                    <span>Nagłówek</span>
-                    <ColorField @bind-Value="_content.HeroTitleColor" />
-                </label>
-                <input class="form-control" @bind="_content.HeroTitle" maxlength="200" />
-            </div>
-            <div class="col-12">
-                <label class="form-label fw-semibold d-flex align-items-center justify-content-between gap-2">
-                    <span>Podtytuł</span>
-                    <ColorField @bind-Value="_content.HeroSubtitleColor" />
-                </label>
-                <textarea class="form-control" rows="2" @bind="_content.HeroSubtitle" maxlength="400"></textarea>
-            </div>
-            <div class="col-6 col-md-3">
-                <label class="form-label fw-semibold">Przycisk 1 — tekst</label>
-                <input class="form-control" @bind="_content.PrimaryCtaLabel" maxlength="60" />
-            </div>
-            <div class="col-6 col-md-3">
-                <label class="form-label fw-semibold">Przycisk 1 — link</label>
-                <input class="form-control" @bind="_content.PrimaryCtaUrl" />
-            </div>
-            <div class="col-6 col-md-3">
-                <label class="form-label fw-semibold">Przycisk 2 — tekst</label>
-                <input class="form-control" @bind="_content.SecondaryCtaLabel" maxlength="60" />
-            </div>
-            <div class="col-6 col-md-3">
-                <label class="form-label fw-semibold">Przycisk 2 — link</label>
-                <input class="form-control" @bind="_content.SecondaryCtaUrl" />
-            </div>
-        </div>
-    </div>
-
-    <!-- Movable sections -->
-    <h5 class="mt-4 mb-2"><i class="bi bi-layout-text-window me-2"></i>Sekcje strony</h5>
-    <p class="text-muted small">Włączaj, edytuj i zmieniaj kolejność sekcji. Hero jest zawsze na górze, stopka na dole.</p>
-
-    @foreach (var key in _content.SectionOrder)
+    @if (_message is not null)
     {
-        <div class="card mb-3">
-            <div class="card-header d-flex align-items-center gap-2">
-                <span class="fw-semibold flex-grow-1"><i class="bi @SectionIcon(key) me-2"></i>@SectionName(key)</span>
-                <button class="btn btn-sm btn-outline-secondary" title="W górę" @onclick="() => MoveSection(key, -1)"><i class="bi bi-arrow-up"></i></button>
-                <button class="btn btn-sm btn-outline-secondary" title="W dół" @onclick="() => MoveSection(key, 1)"><i class="bi bi-arrow-down"></i></button>
-                <div class="form-check form-switch m-0 ms-2">
-                    <input class="form-check-input" type="checkbox" checked="@IsSectionOn(key)" @onchange="e => SetSectionOn(key, (bool)(e.Value ?? false))" />
-                </div>
+        <div class="alert alert-success py-2 small d-flex align-items-center gap-2"><i class="bi bi-check-circle-fill"></i>@_message</div>
+    }
+
+    @if (_content.LayoutVersion < 2)
+    {
+        <div class="sb-upgrade">
+            <div>
+                <b>Nowy kreator strony</b>
+                <div class="small">Widgety z animacjami, zdjęcia, metamorfozy, wolne terminy na żywo. Twoje obecne teksty możemy przenieść.</div>
             </div>
-            <div class="card-body">
-                @switch (key)
-                {
-                    case "stats":
-                        @foreach (var s in _content.Stats)
-                        {
-                            <div class="row g-2 mb-2 align-items-center">
-                                <div class="col"><input class="form-control" placeholder="Wartość (np. 150+)" @bind="s.Value" /></div>
-                                <div class="col"><input class="form-control" placeholder="Opis (np. klientów)" @bind="s.Label" /></div>
-                                <div class="col-auto"><button class="btn btn-outline-danger" @onclick="() => _content.Stats.Remove(s)"><i class="bi bi-x-lg"></i></button></div>
-                            </div>
-                        }
-                        <button class="btn btn-sm btn-outline-primary" @onclick="() => _content.Stats.Add(new())"><i class="bi bi-plus-lg me-1"></i>Dodaj statystykę</button>
-                        break;
-
-                    case "features":
-                        <label class="form-label fw-semibold">Tytuł sekcji</label>
-                        <input class="form-control mb-3" @bind="_content.FeaturesTitle" />
-                        @foreach (var f in _content.Features)
-                        {
-                            <div class="row g-2 mb-2">
-                                <div class="col-12 col-md-3"><input class="form-control" placeholder="Ikona (bi-star)" @bind="f.Icon" /></div>
-                                <div class="col-12 col-md-3"><input class="form-control" placeholder="Tytuł" @bind="f.Title" /></div>
-                                <div class="col"><input class="form-control" placeholder="Opis" @bind="f.Text" /></div>
-                                <div class="col-auto"><button class="btn btn-outline-danger" @onclick="() => _content.Features.Remove(f)"><i class="bi bi-x-lg"></i></button></div>
-                            </div>
-                        }
-                        <div class="d-flex justify-content-between align-items-center">
-                            <button class="btn btn-sm btn-outline-primary" @onclick="() => _content.Features.Add(new())"><i class="bi bi-plus-lg me-1"></i>Dodaj punkt</button>
-                            <a class="small text-muted" href="https://icons.getbootstrap.com" target="_blank">lista ikon <i class="bi bi-box-arrow-up-right"></i></a>
-                        </div>
-                        break;
-
-                    case "about":
-                        <label class="form-label fw-semibold">Tytuł</label>
-                        <input class="form-control mb-3" @bind="_content.AboutTitle" />
-                        <label class="form-label fw-semibold">Treść (HTML)</label>
-                        <textarea class="form-control mb-3 font-monospace" rows="5" style="font-size:.85rem" @bind="_content.AboutHtml"></textarea>
-                        <label class="form-label fw-semibold">URL obrazka (opcjonalnie)</label>
-                        <input class="form-control" @bind="_content.AboutImageUrl" placeholder="https://..." />
-                        break;
-
-                    case "modules":
-                        <label class="form-label fw-semibold">Tytuł sekcji</label>
-                        <input class="form-control mb-3" @bind="_content.SectionTitle" />
-                        <div class="border rounded p-3 mb-2">
-                            <div class="form-check form-switch mb-2">
-                                <input class="form-check-input" type="checkbox" @bind="_content.ShowSchedulerCard" id="swSched" />
-                                <label class="form-check-label fw-semibold" for="swSched">Karta: Trening &amp; grafik</label>
-                            </div>
-                            <input class="form-control mb-2" placeholder="Tytuł" @bind="_content.SchedulerCardTitle" />
-                            <textarea class="form-control" rows="2" placeholder="Opis" @bind="_content.SchedulerCardText"></textarea>
-                        </div>
-                        <div class="border rounded p-3">
-                            <div class="form-check form-switch mb-2">
-                                <input class="form-check-input" type="checkbox" @bind="_content.ShowCoursesCard" id="swCourses" />
-                                <label class="form-check-label fw-semibold" for="swCourses">Karta: Kursy &amp; mentoring</label>
-                            </div>
-                            <input class="form-control mb-2" placeholder="Tytuł" @bind="_content.CoursesCardTitle" />
-                            <textarea class="form-control mb-2" rows="2" placeholder="Opis" @bind="_content.CoursesCardText"></textarea>
-                            <div class="form-check form-switch">
-                                <input class="form-check-input" type="checkbox" @bind="_content.CoursesComingSoon" id="swSoon" />
-                                <label class="form-check-label" for="swSoon">Oznacz jako „Wkrótce" (znika sam po opublikowaniu pierwszego kursu)</label>
-                            </div>
-                        </div>
-                        <div class="border rounded p-3">
-                            <div class="form-check form-switch mb-2">
-                                <input class="form-check-input" type="checkbox" @bind="_content.ShowPackagesCard" id="swPkgs" />
-                                <label class="form-check-label fw-semibold" for="swPkgs">Karta: Pakiety treningowe</label>
-                            </div>
-                            <input class="form-control mb-2" placeholder="Tytuł" @bind="_content.PackagesCardTitle" />
-                            <textarea class="form-control" rows="2" placeholder="Opis" @bind="_content.PackagesCardText"></textarea>
-                        </div>
-                        break;
-
-                    case "offer":
-                        <label class="form-label fw-semibold">Tytuł sekcji</label>
-                        <input class="form-control mb-3" @bind="_content.OfferTitle" />
-                        @foreach (var o in _content.Offers)
-                        {
-                            <div class="border rounded p-3 mb-2">
-                                <div class="row g-2 mb-2">
-                                    <div class="col"><input class="form-control" placeholder="Nazwa" @bind="o.Name" /></div>
-                                    <div class="col-6 col-md-3"><input class="form-control" placeholder="Cena" @bind="o.Price" /></div>
-                                    <div class="col-6 col-md-3"><input class="form-control" placeholder="Okres (/mies.)" @bind="o.Period" /></div>
-                                    <div class="col-auto"><button class="btn btn-outline-danger" @onclick="() => _content.Offers.Remove(o)"><i class="bi bi-x-lg"></i></button></div>
-                                </div>
-                                <input class="form-control mb-2" placeholder="Krótki opis" @bind="o.Description" />
-                                <label class="form-label small text-muted mb-1">Cechy (jedna na linię)</label>
-                                <textarea class="form-control mb-2" rows="3" value="@string.Join("\n", o.Features)"
-                                          @onchange="e => o.Features = SplitLines(e.Value)"></textarea>
-                                <div class="row g-2 align-items-center">
-                                    <div class="col"><input class="form-control" placeholder="Tekst przycisku" @bind="o.CtaLabel" /></div>
-                                    <div class="col"><input class="form-control" placeholder="Link przycisku" @bind="o.CtaUrl" /></div>
-                                    <div class="col-auto form-check form-switch m-0">
-                                        <input class="form-check-input" type="checkbox" @bind="o.Highlighted" id="@($"hot{o.GetHashCode()}")" />
-                                        <label class="form-check-label small" for="@($"hot{o.GetHashCode()}")">Polecany</label>
-                                    </div>
-                                </div>
-                            </div>
-                        }
-                        <button class="btn btn-sm btn-outline-primary" @onclick="() => _content.Offers.Add(new())"><i class="bi bi-plus-lg me-1"></i>Dodaj pakiet</button>
-                        break;
-
-                    case "testimonials":
-                        <label class="form-label fw-semibold">Tytuł sekcji</label>
-                        <input class="form-control mb-3" @bind="_content.TestimonialsTitle" />
-                        @foreach (var t in _content.Testimonials)
-                        {
-                            <div class="row g-2 mb-2">
-                                <div class="col-12 col-md-3"><input class="form-control" placeholder="Autor" @bind="t.Author" /></div>
-                                <div class="col-12 col-md-3"><input class="form-control" placeholder="Rola (opcjonalnie)" @bind="t.Role" /></div>
-                                <div class="col"><input class="form-control" placeholder="Treść opinii" @bind="t.Text" /></div>
-                                <div class="col-auto"><button class="btn btn-outline-danger" @onclick="() => _content.Testimonials.Remove(t)"><i class="bi bi-x-lg"></i></button></div>
-                            </div>
-                        }
-                        <button class="btn btn-sm btn-outline-primary" @onclick="() => _content.Testimonials.Add(new())"><i class="bi bi-plus-lg me-1"></i>Dodaj opinię</button>
-                        break;
-
-                    case "faq":
-                        <label class="form-label fw-semibold">Tytuł sekcji</label>
-                        <input class="form-control mb-3" @bind="_content.FaqTitle" />
-                        @foreach (var q in _content.Faqs)
-                        {
-                            <div class="row g-2 mb-2">
-                                <div class="col-12 col-md-4"><input class="form-control" placeholder="Pytanie" @bind="q.Question" /></div>
-                                <div class="col"><input class="form-control" placeholder="Odpowiedź" @bind="q.Answer" /></div>
-                                <div class="col-auto"><button class="btn btn-outline-danger" @onclick="() => _content.Faqs.Remove(q)"><i class="bi bi-x-lg"></i></button></div>
-                            </div>
-                        }
-                        <button class="btn btn-sm btn-outline-primary" @onclick="() => _content.Faqs.Add(new())"><i class="bi bi-plus-lg me-1"></i>Dodaj pytanie</button>
-                        break;
-
-                    case "cta":
-                        <label class="form-label fw-semibold">Nagłówek</label>
-                        <input class="form-control mb-2" @bind="_content.CtaTitle" />
-                        <label class="form-label fw-semibold">Tekst</label>
-                        <input class="form-control mb-2" @bind="_content.CtaText" />
-                        <div class="row g-2 mb-3">
-                            <div class="col"><input class="form-control" placeholder="Tekst przycisku" @bind="_content.CtaButtonLabel" /></div>
-                            <div class="col"><input class="form-control" placeholder="Link przycisku" @bind="_content.CtaButtonUrl" /></div>
-                        </div>
-                        <div class="row g-3">
-                            <div class="col-6 col-md-4 d-flex align-items-center justify-content-between gap-2"><span class="small">Tło — od</span><ColorField @bind-Value="_content.CtaBgFrom" /></div>
-                            <div class="col-6 col-md-4 d-flex align-items-center justify-content-between gap-2"><span class="small">Tło — do</span><ColorField @bind-Value="_content.CtaBgTo" /></div>
-                            <div class="col-6 col-md-4 d-flex align-items-center justify-content-between gap-2"><span class="small">Tekst</span><ColorField @bind-Value="_content.CtaTextColor" /></div>
-                            <div class="col-6 col-md-4 d-flex align-items-center justify-content-between gap-2"><span class="small">Przycisk — tło</span><ColorField @bind-Value="_content.CtaButtonBg" /></div>
-                            <div class="col-6 col-md-4 d-flex align-items-center justify-content-between gap-2"><span class="small">Przycisk — tekst</span><ColorField @bind-Value="_content.CtaButtonTextColor" /></div>
-                        </div>
-                        break;
-                }
+            <div class="d-flex gap-2 flex-wrap">
+                <button class="btn btn-sm btn-primary" @onclick="ConvertLegacy">Przenieś moje teksty</button>
+                <button class="btn btn-sm btn-outline-primary" @onclick='() => _tab = "look"'>Wybierz szablon</button>
             </div>
         </div>
     }
 
-    <!-- Social media -->
-    <div class="card mb-3">
-        <div class="card-header d-flex align-items-center justify-content-between">
-            <span><i class="bi bi-share me-2"></i>Social media</span>
-            <div class="form-check form-switch m-0">
-                <input class="form-check-input" type="checkbox" @bind="_content.ShowSocial" id="swSocial" />
-                <label class="form-check-label small" for="swSocial">Pokaż</label>
+    <div class="sb-mobile-switch">
+        <button class="@(!_showPreviewMobile ? "active" : "")" @onclick="() => _showPreviewMobile = false"><i class="bi bi-sliders"></i>Edycja</button>
+        <button class="@(_showPreviewMobile ? "active" : "")" @onclick="() => _showPreviewMobile = true"><i class="bi bi-eye"></i>Podgląd</button>
+    </div>
+
+    <div class="sb-main @(_showPreviewMobile ? "show-preview" : "")">
+        <aside class="sb-panel">
+            <div class="sb-tabs">
+                <button class="@(_tab == "blocks" ? "active" : "")" @onclick='() => _tab = "blocks"'><i class="bi bi-grid-1x2"></i>Widgety</button>
+                <button class="@(_tab == "look" ? "active" : "")" @onclick='() => _tab = "look"'><i class="bi bi-palette"></i>Wygląd</button>
+                <button class="@(_tab == "settings" ? "active" : "")" @onclick='() => _tab = "settings"'><i class="bi bi-gear"></i>Ustawienia</button>
             </div>
-        </div>
-        <div class="card-body">
-            <p class="text-muted small">Włącz i dodaj profile — ikony pojawią się na dole strony głównej.</p>
-            @foreach (var s in _content.Socials)
+
+            @if (_tab == "blocks")
             {
-                <div class="row g-2 mb-2 align-items-center">
-                    <div class="col-12 col-md-4">
-                        <select class="form-select" @bind="s.Icon">
-                            <option value="bi-facebook">Facebook</option>
-                            <option value="bi-instagram">Instagram</option>
-                            <option value="bi-youtube">YouTube</option>
-                            <option value="bi-tiktok">TikTok</option>
-                            <option value="bi-twitter-x">X (Twitter)</option>
-                            <option value="bi-linkedin">LinkedIn</option>
-                            <option value="bi-whatsapp">WhatsApp</option>
-                            <option value="bi-telegram">Telegram</option>
-                            <option value="bi-globe">Strona WWW</option>
-                        </select>
-                    </div>
-                    <div class="col"><input class="form-control" placeholder="https://..." @bind="s.Url" /></div>
-                    <div class="col-auto"><button class="btn btn-outline-danger" @onclick="() => _content.Socials.Remove(s)"><i class="bi bi-x-lg"></i></button></div>
+                @if (_content.LayoutVersion < 2)
+                {
+                    <div class="sb-empty">Najpierw przenieś teksty albo wybierz szablon — potem ułożysz stronę z widgetów.</div>
+                }
+                else
+                {
+                    <div class="sb-hint mb-2">Kliknij widget, żeby go edytować. Strzałki zmieniają kolejność, oko ukrywa sekcję.</div>
+                    <ul class="sb-blocks">
+                        @for (var i = 0; i < _content.Blocks.Count; i++)
+                        {
+                            var b = _content.Blocks[i];
+                            var idx = i;
+                            var w = SiteWidgets.Find(b.Type);
+                            var open = _selectedId == b.Id;
+                            <li class="sb-block @(open ? "open" : "") @(b.Visible ? "" : "hidden-block")" @key="b.Id">
+                                <div class="sb-block-head">
+                                    <button type="button" class="sb-block-title" @onclick="() => Select(b.Id)">
+                                        <span class="sb-block-ic"><i class="bi @(w?.Icon ?? "bi-square")"></i></span>
+                                        <span class="sb-block-name"><b>@(w?.Name ?? b.Type)</b><small>@Summary(b)</small></span>
+                                    </button>
+                                    <span class="sb-block-tools">
+                                        <button type="button" title="Wyżej" disabled="@(idx == 0)" @onclick="() => MoveBlock(idx, -1)"><i class="bi bi-arrow-up"></i></button>
+                                        <button type="button" title="Niżej" disabled="@(idx == _content.Blocks.Count - 1)" @onclick="() => MoveBlock(idx, 1)"><i class="bi bi-arrow-down"></i></button>
+                                        <button type="button" title="@(b.Visible ? "Ukryj" : "Pokaż")" @onclick="() => ToggleVisible(b)"><i class="bi @(b.Visible ? "bi-eye" : "bi-eye-slash")"></i></button>
+                                    </span>
+                                </div>
+                                @if (open)
+                                {
+                                    <div class="sb-block-body">
+                                        <SiteBlockEditor Block="b" OnChange="Changed" />
+                                        <div class="sb-block-foot">
+                                            <button type="button" class="btn btn-sm btn-link text-muted p-0" @onclick="() => Duplicate(idx)"><i class="bi bi-copy me-1"></i>Duplikuj</button>
+                                            @if (_confirmDelete == b.Id)
+                                            {
+                                                <span class="small">Usunąć ten widget?</span>
+                                                <button type="button" class="btn btn-sm btn-danger" @onclick="() => Remove(idx)">Usuń</button>
+                                                <button type="button" class="btn btn-sm btn-link p-0" @onclick="() => _confirmDelete = null">Nie</button>
+                                            }
+                                            else
+                                            {
+                                                <button type="button" class="btn btn-sm btn-link text-danger p-0" @onclick="() => _confirmDelete = b.Id"><i class="bi bi-trash me-1"></i>Usuń widget</button>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                            </li>
+                        }
+                    </ul>
+                    <button type="button" class="sb-add" @onclick="() => _gallery = true"><i class="bi bi-plus-circle-fill"></i>Dodaj widget</button>
+                }
+            }
+            else if (_tab == "look")
+            {
+                <div class="sb-section-title">Gotowe szablony</div>
+                <div class="sb-hint mb-2">Szablon to cała strona z przykładową treścią — potem podmieniasz teksty i zdjęcia.</div>
+                <div class="sb-templates">
+                    @foreach (var t in SiteWidgets.Templates)
+                    {
+                        var th = SiteWidgets.ThemeOf(t.Theme);
+                        <div class="sb-template @(_content.Template == t.Key && _content.LayoutVersion >= 2 ? "current" : "")">
+                            <div class="sb-template-art" style="--bg:@th.Bg;--sf:@th.Surface;--ink:@th.Ink;--ac:@(string.IsNullOrEmpty(th.Accent) ? "var(--c-primary)" : th.Accent)">
+                                <span class="a"></span><span class="b"></span><span class="c"></span><i class="bi @t.Icon"></i>
+                            </div>
+                            <div class="sb-template-body">
+                                <b>@t.Name</b>
+                                <small>@t.Description</small>
+                                @if (_confirmTemplate == t.Key)
+                                {
+                                    <div class="sb-template-confirm">
+                                        <span>Zastąpi obecne widgety. Na pewno?</span>
+                                        <button class="btn btn-sm btn-primary" @onclick="() => ApplyTemplate(t.Key)">Tak, użyj</button>
+                                        <button class="btn btn-sm btn-link p-0" @onclick="() => _confirmTemplate = null">Nie</button>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-sm btn-outline-primary mt-1" @onclick="() => AskTemplate(t.Key)">Użyj szablonu</button>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div class="sb-section-title mt-3">Motyw kolorów</div>
+                <div class="sb-themes">
+                    @foreach (var th in SiteWidgets.Themes)
+                    {
+                        <button type="button" class="sb-theme @(_content.Theme == th.Key ? "active" : "")" @onclick="() => SetTheme(th.Key)" title="@th.Description">
+                            <span class="sb-theme-sw" style="background:@th.Bg"><i style="background:@(string.IsNullOrEmpty(th.Accent) ? "var(--c-primary)" : th.Accent)"></i><i style="background:@th.Surface"></i><i style="background:@th.Ink"></i></span>
+                            <span>@th.Name</span>
+                        </button>
+                    }
+                </div>
+                <div class="sb-row mt-3">
+                    <label class="sb-label">Własny kolor akcentu (przyciski, wyróżnienia)</label>
+                    <ColorField Value="@_content.AccentOverride" ValueChanged="v => { _content.AccentOverride = v; return Changed(); }" />
+                    <div class="sb-hint">Puste = kolor z motywu (w motywie „Studio” — kolor Twojej marki).</div>
+                </div>
+                <div class="sb-row">
+                    <label class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" checked="@_content.Animations" @onchange="e => { _content.Animations = (bool)(e.Value ?? false); return Changed(); }" />
+                        <span class="form-check-label">Animacje (pojawianie się sekcji, liczniki, przewijane paski)</span>
+                    </label>
                 </div>
             }
-            <button class="btn btn-sm btn-outline-primary" @onclick="() => _content.Socials.Add(new())"><i class="bi bi-plus-lg me-1"></i>Dodaj profil</button>
-        </div>
+            else
+            {
+                <div class="sb-section-title">Przycisk na telefonie</div>
+                <div class="sb-row">
+                    <label class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" checked="@_content.StickyCta" @onchange="e => { _content.StickyCta = (bool)(e.Value ?? false); return Changed(); }" />
+                        <span class="form-check-label">Przyklejony przycisk na dole ekranu (więcej rezerwacji z telefonu)</span>
+                    </label>
+                </div>
+                @if (_content.StickyCta)
+                {
+                    <div class="sb-row">
+                        <label class="sb-label">Napis i cel przycisku</label>
+                        <div class="sb-two">
+                            <input class="form-control form-control-sm" value="@_content.StickyCtaLabel" @onchange='e => { _content.StickyCtaLabel = e.Value?.ToString() ?? "Umów trening"; return Changed(); }' />
+                            <SiteLinkField Value="@_content.StickyCtaUrl" ValueChanged='v => { _content.StickyCtaUrl = v ?? "/book"; return Changed(); }' />
+                        </div>
+                    </div>
+                }
+                <div class="sb-section-title mt-3">Google i udostępnianie</div>
+                <div class="sb-row">
+                    <label class="sb-label">Opis strony (widoczny w Google i w podglądzie linku)</label>
+                    <textarea class="form-control form-control-sm" rows="3" maxlength="300" placeholder="np. Trener personalny w Warszawie — treningi 1:1, w parach i online. Umów pierwszy trening." @onchange="e => { _content.SeoDescription = e.Value?.ToString(); return Changed(); }">@_content.SeoDescription</textarea>
+                </div>
+                <div class="sb-row">
+                    <label class="sb-label">Tekst w stopce</label>
+                    <input class="form-control form-control-sm" placeholder="© 2026 Twoja nazwa" value="@_content.FooterText" @onchange="e => { _content.FooterText = string.IsNullOrWhiteSpace(e.Value?.ToString()) ? null : e.Value!.ToString(); return Changed(); }" />
+                </div>
+            }
+        </aside>
+
+        <section class="sb-preview">
+            <div class="sb-preview-bar">
+                <span class="sb-dot"></span><span class="sb-dot"></span><span class="sb-dot"></span>
+                <span class="sb-preview-url">Podgląd szkicu</span>
+                <div class="sb-seg sb-seg-sm">
+                    <button type="button" class="@(_device == "desktop" ? "active" : "")" @onclick='() => _device = "desktop"' title="Komputer"><i class="bi bi-display"></i></button>
+                    <button type="button" class="@(_device == "phone" ? "active" : "")" @onclick='() => _device = "phone"' title="Telefon"><i class="bi bi-phone"></i></button>
+                </div>
+            </div>
+            <div class="sb-frame-wrap @_device">
+                <iframe class="sb-frame" src="@PreviewSrc" title="Podgląd strony"></iframe>
+            </div>
+        </section>
     </div>
 
-    <!-- Footer -->
-    <div class="card mb-3">
-        <div class="card-header"><i class="bi bi-dash-square me-2"></i>Stopka</div>
-        <div class="card-body">
-            <label class="form-label fw-semibold">Tekst stopki (puste = © rok + nazwa)</label>
-            <input class="form-control" @bind="_content.FooterText" />
+    @if (_gallery)
+    {
+        <div class="sb-modal-backdrop" @onclick="() => _gallery = false">
+            <div class="sb-modal" @onclick:stopPropagation="true">
+                <div class="sb-modal-head">
+                    <b>Dodaj widget</b>
+                    <button type="button" class="btn-close" @onclick="() => _gallery = false"></button>
+                </div>
+                <div class="sb-modal-body">
+                    @foreach (var group in SiteWidgets.Catalog.GroupBy(w => w.Group))
+                    {
+                        <div class="sb-section-title">@group.Key</div>
+                        <div class="sb-widget-grid">
+                            @foreach (var w in group)
+                            {
+                                <button type="button" class="sb-widget" @onclick="() => AddBlock(w.Type)">
+                                    <span class="sb-widget-ic"><i class="bi @w.Icon"></i></span>
+                                    <span><b>@w.Name @if (w.Live) { <em>na żywo</em> }</b><small>@w.Description</small></span>
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
         </div>
-    </div>
-
-    <div class="d-flex gap-2 mb-4">
-        <button class="btn btn-primary" @onclick="Save" disabled="@_saving">
-            @if (_saving) { <span class="spinner-border spinner-border-sm me-2"></span> }
-            <i class="bi bi-save me-1"></i>Zapisz
-        </button>
-        <a class="btn btn-outline-secondary" href="/" target="_blank"><i class="bi bi-box-arrow-up-right me-1"></i>Podgląd strony</a>
-    </div>
+    }
 }
 
 @code {
     private SiteContentDto? _content;
+    private string _tab = "blocks";
+    private string? _selectedId;
+    private string? _confirmDelete;
+    private string? _confirmTemplate;
+    private bool _confirmDiscard;
+    private bool _gallery;
     private bool _saving;
-    private string _message = string.Empty;
-    private string _error = string.Empty;
+    private bool _hasDraft;
+    private bool _showPreviewMobile;
+    private string _device = "desktop";
+    private string? _message;
+    private int _version;
+    private CancellationTokenSource? _debounce;
+
+    private string PreviewSrc => $"/?draft=1&v={_version}" + (_selectedId is null ? "" : $"#b-{_selectedId}");
 
     protected override async Task OnInitializedAsync()
     {
-        _content = await SiteContentService.GetAsync();
+        _content = await SiteContentService.GetDraftAsync();
+        _hasDraft = await SiteContentService.HasUnpublishedDraftAsync();
     }
 
-    private void ApplyTemplate(string key)
-    {
-        _content = SiteTemplates.Build(key);
-        _message = "Zastosowano szablon — sprawdź i zapisz.";
-        _error = string.Empty;
-    }
+    private static string Summary(SiteBlock b) =>
+        !string.IsNullOrWhiteSpace(b.Title) ? b.Title!
+        : b.Items.Count > 0 ? string.Join(" · ", b.Items.Select(i => i.Title ?? i.Value).Where(x => !string.IsNullOrWhiteSpace(x)).Take(3))
+        : "";
 
-    private void MoveSection(string key, int dir)
+    // Każda zmiana: szkic zapisuje się po chwili bezczynności, a podgląd się odświeża.
+    private Task Changed()
     {
-        if (_content is null) return;
-        var list = _content.SectionOrder;
-        var idx = list.IndexOf(key);
-        var target = idx + dir;
-        if (idx < 0 || target < 0 || target >= list.Count) return;
-        list.RemoveAt(idx);
-        list.Insert(target, key);
-    }
-
-    private bool IsSectionOn(string key) => key switch
-    {
-        "stats" => _content!.ShowStats,
-        "features" => _content!.ShowFeatures,
-        "about" => _content!.ShowAbout,
-        "modules" => _content!.ShowModules,
-        "offer" => _content!.ShowOffer,
-        "testimonials" => _content!.ShowTestimonials,
-        "faq" => _content!.ShowFaq,
-        "cta" => _content!.ShowCta,
-        _ => false
-    };
-
-    private void SetSectionOn(string key, bool on)
-    {
-        if (_content is null) return;
-        switch (key)
+        _message = null;
+        _debounce?.Cancel();
+        _debounce = new CancellationTokenSource();
+        var token = _debounce.Token;
+        _ = Task.Run(async () =>
         {
-            case "stats": _content.ShowStats = on; break;
-            case "features": _content.ShowFeatures = on; break;
-            case "about": _content.ShowAbout = on; break;
-            case "modules": _content.ShowModules = on; break;
-            case "offer": _content.ShowOffer = on; break;
-            case "testimonials": _content.ShowTestimonials = on; break;
-            case "faq": _content.ShowFaq = on; break;
-            case "cta": _content.ShowCta = on; break;
-        }
+            try
+            {
+                await Task.Delay(700, token);
+                await InvokeAsync(async () =>
+                {
+                    _saving = true;
+                    StateHasChanged();
+                    await SiteContentService.SaveDraftAsync(_content!);
+                    _hasDraft = true;
+                    _saving = false;
+                    _version++;
+                    StateHasChanged();
+                });
+            }
+            catch (TaskCanceledException) { }
+        });
+        return Task.CompletedTask;
     }
 
-    private static string SectionName(string key) => key switch
-    {
-        "stats" => "Statystyki",
-        "features" => "Zalety / dlaczego warto",
-        "about" => "O mnie",
-        "modules" => "Moduły (karty)",
-        "offer" => "Oferta / cennik",
-        "testimonials" => "Opinie",
-        "faq" => "FAQ",
-        "cta" => "Baner CTA",
-        _ => key
-    };
+    private void Select(string id) => _selectedId = _selectedId == id ? null : id;
 
-    private static string SectionIcon(string key) => key switch
+    private async Task MoveBlock(int idx, int dir)
     {
-        "stats" => "bi-bar-chart",
-        "features" => "bi-stars",
-        "about" => "bi-person-badge",
-        "modules" => "bi-grid-1x2",
-        "offer" => "bi-tag",
-        "testimonials" => "bi-chat-quote",
-        "faq" => "bi-question-circle",
-        "cta" => "bi-megaphone",
-        _ => "bi-square"
-    };
+        var j = idx + dir;
+        if (_content is null || j < 0 || j >= _content.Blocks.Count) return;
+        (_content.Blocks[idx], _content.Blocks[j]) = (_content.Blocks[j], _content.Blocks[idx]);
+        await Changed();
+    }
 
-    private static List<string> SplitLines(object? value) =>
-        (value?.ToString() ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
-
-    private async Task Save()
+    private async Task ToggleVisible(SiteBlock b)
     {
-        if (_content is null) return;
+        b.Visible = !b.Visible;
+        await Changed();
+    }
+
+    private async Task Duplicate(int idx)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(_content!.Blocks[idx]);
+        var copy = System.Text.Json.JsonSerializer.Deserialize<SiteBlock>(json)!;
+        copy.Id = Guid.NewGuid().ToString("N")[..8];
+        _content.Blocks.Insert(idx + 1, copy);
+        _selectedId = copy.Id;
+        await Changed();
+    }
+
+    private async Task Remove(int idx)
+    {
+        _content!.Blocks.RemoveAt(idx);
+        _selectedId = null;
+        _confirmDelete = null;
+        await Changed();
+    }
+
+    // Nowy widget trafia za zaznaczony (albo przed stopkowe „Kontakt”, gdy nic nie jest zaznaczone).
+    private async Task AddBlock(string type)
+    {
+        var block = SiteWidgets.Create(type);
+        var blocks = _content!.Blocks;
+        var at = _selectedId is not null ? blocks.FindIndex(b => b.Id == _selectedId) + 1
+               : blocks.FindLastIndex(b => b.Type != "contact") + 1;
+        blocks.Insert(Math.Clamp(at, 0, blocks.Count), block);
+        _selectedId = block.Id;
+        _gallery = false;
+        _tab = "blocks";
+        await Changed();
+    }
+
+    private void AskTemplate(string key)
+    {
+        if (_content!.LayoutVersion < 2 || _content.Blocks.Count == 0) { _ = ApplyTemplate(key); return; }
+        _confirmTemplate = key;
+    }
+
+    private async Task ApplyTemplate(string key)
+    {
+        _content = SiteWidgets.BuildTemplate(key, _content);
+        _confirmTemplate = null;
+        _selectedId = null;
+        _tab = "blocks";
+        await Changed();
+    }
+
+    private async Task ConvertLegacy()
+    {
+        _content = SiteWidgets.FromLegacy(_content!);
+        _tab = "blocks";
+        await Changed();
+    }
+
+    private async Task SetTheme(string key)
+    {
+        _content!.Theme = key;
+        await Changed();
+    }
+
+    private async Task PublishAsync()
+    {
+        _debounce?.Cancel();
         _saving = true;
-        _message = _error = string.Empty;
-        try
-        {
-            await SiteContentService.SaveAsync(_content);
-            _message = "Zapisano. Zmiany są już widoczne na stronie głównej.";
-        }
-        catch (Exception ex) { _error = $"Błąd zapisu: {ex.Message}"; }
-        finally { _saving = false; }
+        await SiteContentService.SaveDraftAsync(_content!);
+        await SiteContentService.PublishDraftAsync();
+        _saving = false;
+        _hasDraft = false;
+        _message = "Opublikowano — strona główna jest już zaktualizowana.";
     }
+
+    private async Task DiscardAsync()
+    {
+        _debounce?.Cancel();
+        await SiteContentService.DiscardDraftAsync();
+        _content = await SiteContentService.GetAsync();
+        _hasDraft = false;
+        _confirmDiscard = false;
+        _selectedId = null;
+        _version++;
+    }
+
+    public void Dispose() => _debounce?.Cancel();
 }

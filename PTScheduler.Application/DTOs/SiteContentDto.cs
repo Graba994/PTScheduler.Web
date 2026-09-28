@@ -7,6 +7,19 @@ namespace PTScheduler.Application.DTOs;
 /// </summary>
 public class SiteContentDto
 {
+    // ---- Kreator z widgetami (wersja 2) ----
+    /// <summary>2 = strona składana z widgetów (<see cref="Blocks"/>); 0 = stary układ sekcji.</summary>
+    public int LayoutVersion { get; set; }
+    /// <summary>Motyw kolorów i typografii strony (patrz <see cref="SiteWidgets.Themes"/>).</summary>
+    public string Theme { get; set; } = "studio";
+    public List<SiteBlock> Blocks { get; set; } = [];
+    /// <summary>Na telefonie przyklejony przycisk „Umów trening” na dole ekranu.</summary>
+    public bool StickyCta { get; set; } = true;
+    public string StickyCtaLabel { get; set; } = "Umów pierwszy trening";
+    public string StickyCtaUrl { get; set; } = "/book";
+    /// <summary>Opis strony dla Google i podglądu linku (meta description).</summary>
+    public string? SeoDescription { get; set; }
+
     // ---- Global style ----
     public string Template { get; set; } = "classic";       // classic | gradient | dark | minimal
     public bool Animations { get; set; } = true;            // scroll-reveal + stat counters
@@ -154,4 +167,46 @@ public class FaqItem
 {
     public string Question { get; set; } = "";
     public string Answer { get; set; } = "";
+}
+
+/// <summary>Jeden widget strony głównej. Pola są wspólne — każdy typ używa tych, które mają sens.</summary>
+public class SiteBlock
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
+    public string Type { get; set; } = "text";
+    public bool Visible { get; set; } = true;
+    /// <summary>Wariant wyglądu widgetu (np. hero: split / full / center).</summary>
+    public string? Variant { get; set; }
+    /// <summary>Tło sekcji: default | tint | dark | accent | image.</summary>
+    public string Background { get; set; } = "default";
+    public string? BackgroundImageUrl { get; set; }
+
+    public string? Eyebrow { get; set; }
+    public string? Title { get; set; }
+    public string? Subtitle { get; set; }
+    public string? Text { get; set; }
+    public string? ImageUrl { get; set; }
+    public string? VideoUrl { get; set; }
+    public string? CtaLabel { get; set; }
+    public string? CtaUrl { get; set; }
+    public string? Cta2Label { get; set; }
+    public string? Cta2Url { get; set; }
+    /// <summary>Dane na żywo z aplikacji (pakiety z oferty, opinie klientów).</summary>
+    public bool UseLiveData { get; set; } = true;
+    public List<SiteBlockItem> Items { get; set; } = [];
+}
+
+public class SiteBlockItem
+{
+    public string? Icon { get; set; }
+    public string? Title { get; set; }
+    public string? Text { get; set; }
+    public string? Value { get; set; }
+    public string? ImageUrl { get; set; }
+    /// <summary>Drugie zdjęcie (np. „po” w metamorfozie).</summary>
+    public string? ImageUrl2 { get; set; }
+    public string? Url { get; set; }
+    public string? Badge { get; set; }
+    public bool Highlight { get; set; }
+    public List<string> Bullets { get; set; } = [];
 }

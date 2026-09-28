@@ -11,9 +11,30 @@
 @inject IReviewService ReviewService
 @inject ICourseService CourseService
 @inject NavigationManager Nav
+@inject IPackageOfferService OfferService
+@inject IPublicBookingService PublicBooking
+@using PTScheduler.Web.Components.Site
 
 <PageTitle>@_companyName — trening personalny i mentoring</PageTitle>
 
+@if (_content.LayoutVersion >= 2 && _preview)
+{
+    @* Podgląd szkicu w kreatorze — tak, jak zobaczy go gość (bez „Moja aplikacja”). *@
+    <SitePage Content="_content" CompanyName="@_companyName" LogoPath="@_logoPath" IsAuthenticated="false" Reviews="_reviews" Offers="_offers" Slots="_slots" />
+}
+else if (_content.LayoutVersion >= 2)
+{
+    <AuthorizeView>
+        <Authorized>
+            <SitePage Content="_content" CompanyName="@_companyName" LogoPath="@_logoPath" IsAuthenticated="true" Reviews="_reviews" Offers="_offers" Slots="_slots" />
+        </Authorized>
+        <NotAuthorized>
+            <SitePage Content="_content" CompanyName="@_companyName" LogoPath="@_logoPath" IsAuthenticated="false" Reviews="_reviews" Offers="_offers" Slots="_slots" />
+        </NotAuthorized>
+    </AuthorizeView>
+}
+else
+{
 <div class="wp tmpl-@_content.Template" style="@WpStyle">
 
     <!-- Top bar -->
@@ -226,7 +247,7 @@
                         @foreach (var t in _content.ShowTestimonials ? _content.Testimonials : [])
                         {
                             <figure class="wp-quote">
-                                <div class="wp-quote-mark">"</div>
+                                <div class="wp-quote-mark">&ldquo;</div>
                                 <blockquote>@t.Text</blockquote>
                                 <figcaption><strong>@t.Author</strong>@if (!string.IsNullOrEmpty(t.Role)) { <span> · @t.Role</span> }</figcaption>
                             </figure>
@@ -287,6 +308,7 @@
         </span>
     </footer>
 </div>
+}
 
 <style>
     .wp { min-height: 100vh; display: flex; flex-direction: column;
@@ -490,6 +512,11 @@
 
     private PTScheduler.Application.Marketing.PublicReviewsDto _reviews = new();
     private bool _hasPublishedCourses;
+    private List<PackageOfferDto> _offers = [];
+    [SupplyParameterFromQuery(Name = "draft")] public int? Draft { get; set; }
+    private bool _preview;
+    [CascadingParameter] private Task<AuthenticationState>? AuthStateTask { get; set; }
+    private List<BookingDayDto> _slots = [];
 
     private string RevealCls => _content.Animations ? "wp-reveal" : "";
 
@@ -526,7 +553,10 @@
         }
         catch { } // Best-effort
 
-        try { _content = await SiteContentService.GetAsync(); }
+        // Podgląd szkicu z kreatora (tylko dla administratora): /?draft=1
+        if (Draft == 1 && AuthStateTask is not null)
+            _preview = (await AuthStateTask).User.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+        try { _content = _preview ? await SiteContentService.GetDraftAsync() : await SiteContentService.GetAsync(); }
         catch { }
 
         try { _coursesEnabled = (await ModuleSettings.GetAsync()).CoursesEnabled; }
@@ -537,5 +567,26 @@
 
         try { _hasPublishedCourses = _coursesEnabled && (await CourseService.GetCoursesAsync(includeUnpublished: false)).Count > 0; }
         catch { }
+
+        // Dane na żywo dla widgetów: pakiety z oferty i najbliższe wolne terminy (tylko gdy strona ich używa).
+        if (_content.LayoutVersion >= 2)
+        {
+            var visible = _content.Blocks.Where(b => b.Visible).ToList();
+            if (visible.Any(b => b.Type == "offer" && b.UseLiveData))
+            {
+                try { _offers = await OfferService.GetActiveOffersAsync(); }
+                catch { }
+            }
+            if (visible.Any(b => b.Type == "slots"))
+            {
+                try
+                {
+                    var intro = await PublicBooking.GetActiveOfferAsync();
+                    if (intro.IsAvailable)
+                        _slots = await PublicBooking.GetUpcomingSlotsAsync(intro.TrainerUserId, intro.DurationMinutes, 7);
+                }
+                catch { }
+            }
+        }
     }
 }
