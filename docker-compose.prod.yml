@@ -44,6 +44,10 @@ services:
         condition: service_healthy
     ports:
       - "${PORTAL_PORT:-8081}:8081"
+    # Bez tego host.docker.internal (domyślny Portal__ForwardHost) nie istnieje na Linuksie
+    # i Portal nie widzi instancji trenerów — health check pokazywał „nie odpowiada”.
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     environment:
       ConnectionStrings__DefaultConnection: >-
         Host=portal-db;Port=5432;Database=${PORTAL_DB_NAME:-ptportal};

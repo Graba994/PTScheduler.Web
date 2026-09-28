@@ -402,11 +402,30 @@ else
                     <hr class="my-3" />
                     <div class="d-flex justify-content-between align-items-center mb-2">
                         <div class="pp-label"><i class="bi bi-activity me-1"></i>HTTP health</div>
-                        @if (_tenant.LastHealthCheckAt is not null)
-                        {
-                            <span class="text-muted small">sprawdzone @_tenant.LastHealthCheckAt?.ToLocalTime().ToString("HH:mm:ss")</span>
-                        }
+                        <span class="d-flex align-items-center gap-2">
+                            @if (_tenant.LastHealthCheckAt is not null)
+                            {
+                                <span class="text-muted small">sprawdzone @_tenant.LastHealthCheckAt?.ToLocalTime().ToString("HH:mm:ss")</span>
+                            }
+                            <button class="btn btn-sm btn-outline-secondary py-0" @onclick="CheckHealthNow" disabled="@_checkingHealth">
+                                @if (_checkingHealth) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                Sprawdź teraz
+                            </button>
+                        </span>
                     </div>
+                    @if (_healthProbe is not null)
+                    {
+                        <div class="small mb-2 @(_healthProbe.Ok ? "text-success" : "text-danger")">
+                            @if (_healthProbe.Ok)
+                            {
+                                <span><i class="bi bi-check-circle me-1"></i>Odpowiada przez <code>@_healthProbe.Base</code> (@_healthProbe.Ms ms)</span>
+                            }
+                            else
+                            {
+                                <span class="font-monospace">@_healthProbe.Error</span>
+                            }
+                        </div>
+                    }
                     @if (_tenant.IsHealthy == true)
                     {
                         <div class="alert alert-success py-2 small mb-0">
@@ -1017,6 +1036,35 @@ else
     [Parameter] public int Id { get; set; }
 
     private Tenant? _tenant;
+    private bool _checkingHealth;
+    private PTScheduler.Portal.Services.TenantEndpoint.ProbeResult? _healthProbe;
+
+    // Ręczne sprawdzenie wszystkich adresów instancji — od razu aktualizuje stan zapisany w Portalu.
+    private async Task CheckHealthNow()
+    {
+        if (_tenant is null) return;
+        _checkingHealth = true;
+        try
+        {
+            _healthProbe = await PTScheduler.Portal.Services.TenantEndpoint.ProbeAsync(Config, _tenant);
+            await using var db = DbFactory.CreateDbContext();
+            var t = await db.Tenants.FirstOrDefaultAsync(x => x.Id == _tenant.Id);
+            if (t is not null)
+            {
+                t.LastHealthCheckAt = DateTime.UtcNow;
+                t.LastHealthResponseMs = _healthProbe.Ms;
+                t.LastHealthError = _healthProbe.Ok ? null : _healthProbe.Error;
+                if (_healthProbe.Ok) { t.IsHealthy = true; t.UnhealthySinceUtc = null; t.DownAlertSent = false; }
+                await db.SaveChangesAsync();
+                _tenant.IsHealthy = t.IsHealthy;
+                _tenant.LastHealthCheckAt = t.LastHealthCheckAt;
+                _tenant.LastHealthResponseMs = t.LastHealthResponseMs;
+                _tenant.LastHealthError = t.LastHealthError;
+                _tenant.UnhealthySinceUtc = t.UnhealthySinceUtc;
+            }
+        }
+        finally { _checkingHealth = false; }
+    }
     private TenantContainerStatus? _containerStatus;
     private bool _provisioning;
     private string? _provisionOutput;
@@ -1402,10 +1450,10 @@ else
         _metricsError = null;
         try
         {
-            var forwardHost = Config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220";
+            var tenantBase = await PTScheduler.Portal.Services.TenantEndpoint.BaseUrlAsync(Config, _tenant);
             var secret = PTScheduler.Portal.Services.TenantSecrets.For(_tenant, Config);
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-            using var req = new HttpRequestMessage(HttpMethod.Get, $"http://{forwardHost}:{_tenant.Port}/internal/metrics");
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"{tenantBase}/internal/metrics");
             if (!string.IsNullOrEmpty(secret))
                 req.Headers.Add("X-Internal-Secret", secret);
             var resp = await http.SendAsync(req);
@@ -1450,11 +1498,11 @@ else
         _adminError = null;
         try
         {
-            var forwardHost = Config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220";
+            var tenantBase = await PTScheduler.Portal.Services.TenantEndpoint.BaseUrlAsync(Config, _tenant);
             var secret = PTScheduler.Portal.Services.TenantSecrets.For(_tenant, Config);
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
             using var req = new HttpRequestMessage(HttpMethod.Get,
-                $"http://{forwardHost}:{_tenant.Port}/internal/admin-info{(_adminAccount == "root" ? "?account=root" : "")}");
+                $"{tenantBase}/internal/admin-info{(_adminAccount == "root" ? "?account=root" : "")}");
             if (!string.IsNullOrEmpty(secret))
                 req.Headers.Add("X-Internal-Secret", secret);
             var resp = await http.SendAsync(req);
@@ -1476,10 +1524,10 @@ else
         _adminResetMessage = null;
         try
         {
-            var forwardHost = Config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220";
+            var tenantBase = await PTScheduler.Portal.Services.TenantEndpoint.BaseUrlAsync(Config, _tenant);
             var secret = PTScheduler.Portal.Services.TenantSecrets.For(_tenant, Config);
             using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(10) };
-            using var req = new HttpRequestMessage(HttpMethod.Post, $"http://{forwardHost}:{_tenant.Port}/internal/admin-reset");
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"{tenantBase}/internal/admin-reset");
             if (!string.IsNullOrEmpty(secret))
                 req.Headers.Add("X-Internal-Secret", secret);
 

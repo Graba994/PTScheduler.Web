@@ -292,8 +292,8 @@ public class TenantService(
         if (string.IsNullOrEmpty(secret) || tenant.Port <= 0) return false;
         try
         {
-            using var req = new HttpRequestMessage(HttpMethod.Post,
-                $"http://{ForwardHost}:{tenant.Port}/internal/entitlements/reload")
+            var baseUrl = await TenantEndpoint.BaseUrlAsync(config, tenant);
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/internal/entitlements/reload")
             {
                 Content = new StringContent(await EntitlementsJsonAsync(tenant.Id, plan), System.Text.Encoding.UTF8, "application/json")
             };

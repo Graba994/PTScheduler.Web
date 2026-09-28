@@ -5,16 +5,16 @@ using PTScheduler.Portal.Entities;
 
 namespace PTScheduler.Portal.Services;
 
-// Every 2 min, ping http://localhost:{port}/health for each Active tenant.
-// Updates the health columns on the Tenant. When a tenant flips from
-// healthy to unhealthy, send one email to platform admin (subsequent
-// checks stay quiet until the tenant recovers).
+// Co 2 minuty sprawdza /health każdej aktywnej instancji (kilka adresów po kolei — TenantEndpoint).
+// „Nie odpowiada” dopiero, gdy żaden adres nie działa przez co najmniej 3 minuty (np. restart po
+// aktualizacji nie wywołuje alarmu). Przy zmianie stanu jeden e-mail do administratora.
 public class HealthMonitorService(
     IServiceScopeFactory scopeFactory,
     ILogger<HealthMonitorService> logger) : BackgroundService
 {
-    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(5) };
-    private const string HealthCheckPath = "/health";
+    private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(8) };
+    /// <summary>Tyle musi trwać brak odpowiedzi, zanim oznaczymy instancję i wyślemy alarm.</summary>
+    private static readonly TimeSpan DownAfter = TimeSpan.FromMinutes(3);
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
@@ -36,7 +36,6 @@ public class HealthMonitorService(
         var email = scope.ServiceProvider.GetRequiredService<EmailService>();
         var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
 
-        var forwardHost = config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220";
         var adminEmail = config.GetValue<string>("Portal:AdminEmail") ?? "admin@ptscheduler.pl";
 
         await using var db = await dbFactory.CreateDbContextAsync(ct);
@@ -46,20 +45,32 @@ public class HealthMonitorService(
 
         foreach (var t in tenants)
         {
-            var (ok, ms, error) = await ProbeAsync(forwardHost, t.Port, ct);
+            var probe = await TenantEndpoint.ProbeAsync(config, t, ct);
+            var (ok, ms, error) = (probe.Ok, probe.Ms, probe.Error);
             var wasHealthy = t.IsHealthy;
 
-            t.IsHealthy = ok;
             t.LastHealthCheckAt = DateTime.UtcNow;
             t.LastHealthResponseMs = ms;
             t.LastHealthError = ok ? null : error;
+            if (ok)
+            {
+                t.IsHealthy = true;
+                if (!probe.Base!.Contains($":{t.Port}", StringComparison.Ordinal))
+                    logger.LogWarning("Instancja {Slug} odpowiada tylko przez {Base} — sprawdź Portal:ForwardHost (port {Port}).", t.Slug, probe.Base, t.Port);
+            }
+            else
+            {
+                // Pojedyncza nieudana próba (restart kontenera, chwilowe obciążenie) jeszcze nie jest awarią.
+                t.UnhealthySinceUtc ??= DateTime.UtcNow;
+                if (DateTime.UtcNow - t.UnhealthySinceUtc.Value >= DownAfter) t.IsHealthy = false;
+            }
 
             if (ok)
             {
                 try
                 {
                     var secret = TenantSecrets.For(t, config);
-                    var activityDate = await FetchLastActivityAsync(forwardHost, t.Port, secret, ct);
+                    var activityDate = await FetchLastActivityAsync(probe.Base!, secret, ct);
                     if (activityDate.HasValue)
                     {
                         t.LastActivityAt = activityDate.Value;
@@ -74,10 +85,8 @@ public class HealthMonitorService(
 
             if (!ok)
             {
-                t.UnhealthySinceUtc ??= DateTime.UtcNow;
-
-                // Alert on first flip to unhealthy after being healthy (or on first-ever failure)
-                if ((wasHealthy == true || wasHealthy is null) && !t.DownAlertSent)
+                // Alarm raz — gdy instancja właśnie została uznana za nieodpowiadającą.
+                if (t.IsHealthy == false && !t.DownAlertSent)
                 {
                     db.TenantEvents.Add(new TenantEvent
                     {
@@ -93,7 +102,7 @@ public class HealthMonitorService(
             }
             else
             {
-                if (wasHealthy == false)
+                if (wasHealthy == false && t.DownAlertSent)
                 {
                     var downtime = t.UnhealthySinceUtc.HasValue
                         ? DateTime.UtcNow - t.UnhealthySinceUtc.Value
@@ -116,25 +125,10 @@ public class HealthMonitorService(
         await db.SaveChangesAsync(ct);
     }
 
-    private static async Task<(bool Ok, int Ms, string? Error)> ProbeAsync(
-        string host, int port, CancellationToken ct)
-    {
-        var sw = Stopwatch.StartNew();
-        try
-        {
-            using var resp = await _http.GetAsync($"http://{host}:{port}{HealthCheckPath}", ct);
-            sw.Stop();
-            if (resp.IsSuccessStatusCode) return (true, (int)sw.ElapsedMilliseconds, null);
-            return (false, (int)sw.ElapsedMilliseconds, $"HTTP {(int)resp.StatusCode}");
-        }
-        catch (TaskCanceledException) { return (false, (int)sw.ElapsedMilliseconds, "timeout"); }
-        catch (Exception ex) { return (false, (int)sw.ElapsedMilliseconds, ex.Message); }
-    }
-
     private static async Task<DateTime?> FetchLastActivityAsync(
-        string host, int port, string secret, CancellationToken ct)
+        string baseUrl, string secret, CancellationToken ct)
     {
-        using var req = new HttpRequestMessage(HttpMethod.Get, $"http://{host}:{port}/internal/last-activity");
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl}/internal/last-activity");
         if (!string.IsNullOrEmpty(secret))
             req.Headers.Add("X-Internal-Secret", secret);
         using var resp = await _http.SendAsync(req, ct);
