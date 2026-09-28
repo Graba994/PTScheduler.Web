@@ -24,9 +24,13 @@
     return;
 }
 
-<h4 class="mb-0 fw-bold mb-3">
-    <i class="bi bi-rulers me-2"></i>Moje pomiary
-</h4>
+<div class="d-flex align-items-center justify-content-between gap-2 mb-3 flex-wrap">
+    <h4 class="mb-0 fw-bold"><i class="bi bi-rulers me-2"></i>Moje pomiary</h4>
+    @if (_tab == Tab.Measurements && _clientId is not null && !_adding)
+    {
+        <button class="btn btn-primary btn-sm" @onclick="StartAdd"><i class="bi bi-plus-lg me-1"></i>Dodaj pomiar</button>
+    }
+</div>
 
 <div class="seg-tabs mb-4" role="tablist" aria-label="Pomiary i zdjęcia">
     <button type="button" role="tab" class="seg-tab @(_tab == Tab.Measurements ? "active" : "")" aria-selected="@(_tab == Tab.Measurements ? "true" : "false")"
@@ -34,6 +38,76 @@
     <button type="button" role="tab" class="seg-tab @(_tab == Tab.Photos ? "active" : "")" aria-selected="@(_tab == Tab.Photos ? "true" : "false")"
             @onclick="() => SelectTab(Tab.Photos)"><i class="bi bi-camera"></i>Zdjęcia sylwetki</button>
 </div>
+
+@if (_tab == Tab.Measurements && _adding)
+{
+    <div class="card border-0 shadow-sm mb-4 mm-form">
+        <div class="card-body">
+            <h6 class="fw-bold mb-3"><i class="bi bi-plus-circle me-2 text-primary"></i>Nowy pomiar</h6>
+            @if (_formError is not null)
+            {
+                <div class="alert alert-danger py-2 small">@_formError</div>
+            }
+            <div class="row g-3 align-items-end">
+                <div class="col-6 col-sm-4">
+                    <label class="form-label small fw-semibold" for="mm-date">Data</label>
+                    <input id="mm-date" type="date" class="form-control" max="@_today.ToString("yyyy-MM-dd")"
+                           value="@_new.MeasurementDate.ToString("yyyy-MM-dd")"
+                           @onchange="e => { if (DateOnly.TryParse(e.Value?.ToString(), CultureInfo.InvariantCulture, out var d)) _new.MeasurementDate = d; }" />
+                </div>
+                <div class="col-6 col-sm-4">
+                    <label class="form-label small fw-semibold" for="mm-weight">Waga</label>
+                    <div class="input-group">
+                        <input id="mm-weight" type="number" inputmode="decimal" step="0.1" min="20" max="400" class="form-control mm-big"
+                               placeholder="np. 72,5" @bind="_new.WeightKg" />
+                        <span class="input-group-text">kg</span>
+                    </div>
+                </div>
+            </div>
+
+            @if (!_more)
+            {
+                <button type="button" class="btn btn-link btn-sm px-0 mt-2" @onclick="() => _more = true">
+                    <i class="bi bi-chevron-down me-1"></i>Dodaj też obwody i tkankę tłuszczową
+                </button>
+            }
+            else
+            {
+                <div class="row g-3 mt-1">
+                    @MeasureField("Tkanka tłuszczowa", "%", () => _new.BodyFatPercent, v => _new.BodyFatPercent = v)
+                    @MeasureField("Talia", "cm", () => _new.WaistCm, v => _new.WaistCm = v)
+                    @MeasureField("Biodra", "cm", () => _new.HipsCm, v => _new.HipsCm = v)
+                    @MeasureField("Klatka piersiowa", "cm", () => _new.ChestCm, v => _new.ChestCm = v)
+                    @MeasureField("Udo", "cm", () => _new.ThighCm, v => _new.ThighCm = v)
+                    @MeasureField("Ramię", "cm", () => _new.ArmCm, v => _new.ArmCm = v)
+                </div>
+                <div class="form-text">Mierz zawsze w tym samym miejscu i o podobnej porze — najlepiej rano, na czczo.</div>
+            }
+
+            <div class="mt-3">
+                <label class="form-label small fw-semibold" for="mm-notes">Notatka (opcjonalnie)</label>
+                <input id="mm-notes" class="form-control" maxlength="300" placeholder="np. po weekendzie, po treningu" @bind="_new.Notes" />
+            </div>
+
+            <div class="d-flex gap-2 mt-3">
+                <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">
+                    @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                    <i class="bi bi-check-lg me-1"></i>Zapisz
+                </button>
+                <button class="btn btn-outline-secondary" @onclick="() => _adding = false" disabled="@_saving">Anuluj</button>
+            </div>
+            <div class="form-text mt-2"><i class="bi bi-info-circle me-1"></i>Trener zobaczy Twój pomiar w swoim panelu.</div>
+        </div>
+    </div>
+}
+
+@if (_saved is not null)
+{
+    <div class="alert alert-success alert-dismissible py-2 small">
+        <i class="bi bi-check-circle me-1"></i>@_saved
+        <button type="button" class="btn-close" @onclick="() => _saved = null"></button>
+    </div>
+}
 
 @if (_tab == Tab.Photos)
 {
@@ -62,8 +136,14 @@ else if (_measurements.Count == 0)
     <div class="empty-state py-5">
         <div class="empty-state-icon">📏</div>
         <div class="empty-state-title">Brak pomiarów</div>
-        <div class="empty-state-desc">Twój trener jeszcze nie wprowadził żadnych pomiarów. Pojawią się po pierwszej sesji. Zdjęcia sylwetki możesz dodawać już teraz — w zakładce obok.</div>
-        <button type="button" class="btn btn-outline-primary btn-sm mt-3" @onclick="() => SelectTab(Tab.Photos)"><i class="bi bi-camera me-1"></i>Zdjęcia sylwetki</button>
+        <div class="empty-state-desc">Wpisz swoją wagę albo obwody — zobaczysz postępy na wykresie. Pomiary może też dodawać Twój trener, a zdjęcia sylwetki dodasz w zakładce obok.</div>
+        <div class="d-flex gap-2 justify-content-center flex-wrap mt-3">
+            @if (_clientId is not null && !_adding)
+            {
+                <button type="button" class="btn btn-primary btn-sm" @onclick="StartAdd"><i class="bi bi-plus-lg me-1"></i>Dodaj pierwszy pomiar</button>
+            }
+            <button type="button" class="btn btn-outline-primary btn-sm" @onclick="() => SelectTab(Tab.Photos)"><i class="bi bi-camera me-1"></i>Zdjęcia sylwetki</button>
+        </div>
     </div>
 }
 else
@@ -82,7 +162,11 @@ else
                             @card.Latest <span class="text-muted" style="font-size:.85rem;font-weight:400">@card.Unit</span>
                         </div>
                         <div class="mt-1 small @card.TrendClass" style="font-size:.78rem">
-                            @if (card.Delta is not null)
+                            @if (card.Delta == 0)
+                            {
+                                <span class="text-muted">bez zmian vs poprzedni</span>
+                            }
+                            else if (card.Delta is not null)
                             {
                                 @((card.Delta > 0 ? "↑ +" : "↓ ") + card.Delta?.ToString("0.#", _pl) + " " + card.Unit)
                                 <span class="text-muted ms-1">vs poprzedni</span>
@@ -141,7 +225,7 @@ else
                     <summary>
                         <div class="hist-date"><b>@m.MeasurementDate.Day</b><span>@m.MeasurementDate.ToString("MMM yy", _pl)</span></div>
                         <div class="hist-main">
-                            <div class="hist-title">@(m.WeightKg.HasValue ? $"{Fmt(m.WeightKg)} kg" : "Pomiar")</div>
+                            <div class="hist-title">@(m.WeightKg.HasValue ? $"{Fmt(m.WeightKg)} kg" : "Pomiar") @if (m.AddedByClient) { <span class="mm-own">Ty</span> }</div>
                             <div class="hist-sub">
                                 @if (m.WeightKg.HasValue && prev?.WeightKg is decimal pw)
                                 {
@@ -160,6 +244,7 @@ else
                         @if (_hasArm)   { <div><small>Ramię</small>@Fmt(m.ArmCm) cm</div> }
                         @if (_hasFat)   { <div><small>Tkanka tł.</small>@Fmt(m.BodyFatPercent) %</div> }
                         @if (!string.IsNullOrWhiteSpace(m.Notes)) { <div class="wide"><small>Notatka</small>@m.Notes</div> }
+                        @if (m.AddedByClient) { <div class="wide">@DeleteButton(m)</div> }
                     </div>
                 </details>
             }
@@ -177,13 +262,14 @@ else
                         @if (_hasThigh)  { <th class="text-end">Udo (cm)</th> }
                         @if (_hasArm)    { <th class="text-end">Ramię (cm)</th> }
                         @if (_hasNotes)  { <th>Notatki</th> }
+                        <th></th>
                     </tr>
                 </thead>
                 <tbody>
                     @foreach (var m in _measurements)
                     {
                         <tr>
-                            <td class="text-nowrap small">@m.MeasurementDate.ToString("dd.MM.yyyy")</td>
+                            <td class="text-nowrap small">@m.MeasurementDate.ToString("dd.MM.yyyy") @if (m.AddedByClient) { <span class="mm-own" title="Dodane przez Ciebie">Ty</span> }</td>
                             @if (_hasWeight) { <td class="text-end small">@Fmt(m.WeightKg)</td> }
                             @if (_hasFat)    { <td class="text-end small">@Fmt(m.BodyFatPercent)</td> }
                             @if (_hasChest)  { <td class="text-end small">@Fmt(m.ChestCm)</td> }
@@ -192,6 +278,7 @@ else
                             @if (_hasThigh)  { <td class="text-end small">@Fmt(m.ThighCm)</td> }
                             @if (_hasArm)    { <td class="text-end small">@Fmt(m.ArmCm)</td> }
                             @if (_hasNotes)  { <td class="small text-muted">@(m.Notes ?? "—")</td> }
+                            <td class="text-end">@if (m.AddedByClient) { @DeleteButton(m) }</td>
                         </tr>
                     }
                 </tbody>
@@ -203,6 +290,89 @@ else
 
 @code {
     private static readonly CultureInfo _pl = new("pl-PL");
+
+    // ── Pomiar wpisany przez klienta ──
+    private bool _adding, _more, _saving;
+    private string? _formError, _saved;
+    private int? _confirmDelete;
+    private DateOnly _today = DateOnly.FromDateTime(StudioClock.Today);
+    private CreateBodyMeasurementDto _new = new();
+
+    private void StartAdd()
+    {
+        _today = DateOnly.FromDateTime(StudioClock.Today);
+        _new = new CreateBodyMeasurementDto { MeasurementDate = _today, WeightKg = _measurements.FirstOrDefault(m => m.WeightKg.HasValue)?.WeightKg };
+        _more = false;
+        _formError = null;
+        _saved = null;
+        _adding = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        if (_clientId is not int clientId) return;
+        _saving = true;
+        _formError = null;
+        try
+        {
+            _new.ClientId = clientId;
+            _new.AddedByClient = true;
+            await MeasurementService.AddAsync(_new);
+            _adding = false;
+            _saved = "Zapisano pomiar. Trener zobaczy go w swoim panelu.";
+            await ReloadAsync();
+        }
+        catch (ArgumentException ex) { _formError = ex.Message; }
+        catch (Exception) { _formError = "Nie udało się zapisać pomiaru. Spróbuj ponownie."; }
+        finally { _saving = false; }
+    }
+
+    private async Task DeleteOwnAsync(int id)
+    {
+        if (_clientId is not int clientId) return;
+        _confirmDelete = null;
+        if (await MeasurementService.DeleteOwnAsync(id, clientId)) await ReloadAsync();
+    }
+
+    private async Task ReloadAsync()
+    {
+        _measurements = [.. (await MeasurementService.GetAsync(_clientId!.Value)).OrderByDescending(m => m.MeasurementDate)];
+        _cards.Clear();
+        _chartMetrics.Clear();
+        DetectColumns();
+        BuildCards();
+        BuildChartMetrics();
+        _chartPending = true;
+    }
+
+    private RenderFragment DeleteButton(BodyMeasurementDto m) => __builder =>
+    {
+        if (_confirmDelete == m.Id)
+        {
+            <span class="d-inline-flex align-items-center gap-1 small">
+                Usunąć?
+                <button class="btn btn-sm btn-danger py-0" @onclick="() => DeleteOwnAsync(m.Id)">Tak</button>
+                <button class="btn btn-sm btn-link py-0" @onclick="() => _confirmDelete = null">Nie</button>
+            </span>
+        }
+        else
+        {
+            <button class="btn btn-sm btn-link text-danger p-0" title="Usuń swój pomiar" @onclick="() => _confirmDelete = m.Id"><i class="bi bi-trash3"></i></button>
+        }
+    };
+
+    private RenderFragment MeasureField(string label, string unit, Func<decimal?> get, Action<decimal?> set) => __builder =>
+    {
+        <div class="col-6 col-sm-4">
+            <label class="form-label small fw-semibold">@label</label>
+            <div class="input-group input-group-sm">
+                <input type="number" inputmode="decimal" step="0.1" class="form-control" aria-label="@label"
+                       value="@get()?.ToString(CultureInfo.InvariantCulture)"
+                       @onchange="e => set(decimal.TryParse(e.Value?.ToString()?.Replace(',', '.'), NumberStyles.Number, CultureInfo.InvariantCulture, out var v) ? v : null)" />
+                <span class="input-group-text">@unit</span>
+            </div>
+        </div>
+    };
 
     private enum Tab { Measurements, Photos }
     [SupplyParameterFromQuery(Name = "tab")] public string? TabQuery { get; set; }
@@ -274,16 +444,22 @@ else
     private void BuildCards()
     {
         if (_measurements.Count == 0) return;  // empty state — no cards to render
-        var latest = _measurements[0];
-        var prev   = _measurements.Count > 1 ? _measurements[1] : null;
 
-        if (_hasWeight) _cards.Add(Card("Waga",              "kg", latest.WeightKg,      prev?.WeightKg));
-        if (_hasFat)    _cards.Add(Card("Tkanka tłuszczowa", "%",  latest.BodyFatPercent, prev?.BodyFatPercent));
-        if (_hasChest)  _cards.Add(Card("Klatka piersiowa",  "cm", latest.ChestCm,        prev?.ChestCm));
-        if (_hasWaist)  _cards.Add(Card("Talia",             "cm", latest.WaistCm,        prev?.WaistCm));
-        if (_hasHips)   _cards.Add(Card("Biodra",            "cm", latest.HipsCm,         prev?.HipsCm));
-        if (_hasThigh)  _cards.Add(Card("Udo",               "cm", latest.ThighCm,        prev?.ThighCm));
-        if (_hasArm)    _cards.Add(Card("Ramię",             "cm", latest.ArmCm,          prev?.ArmCm));
+        // Każda miara osobno: ostatnia znana wartość i poprzednia (klient może wpisać np. samą wagę).
+        void Add(bool has, string label, string unit, Func<BodyMeasurementDto, decimal?> pick)
+        {
+            if (!has) return;
+            var values = _measurements.Select(pick).Where(v => v.HasValue).Take(2).ToList();
+            _cards.Add(Card(label, unit, values.ElementAtOrDefault(0), values.ElementAtOrDefault(1)));
+        }
+
+        Add(_hasWeight, "Waga",              "kg", m => m.WeightKg);
+        Add(_hasFat,    "Tkanka tłuszczowa", "%",  m => m.BodyFatPercent);
+        Add(_hasChest,  "Klatka piersiowa",  "cm", m => m.ChestCm);
+        Add(_hasWaist,  "Talia",             "cm", m => m.WaistCm);
+        Add(_hasHips,   "Biodra",            "cm", m => m.HipsCm);
+        Add(_hasThigh,  "Udo",               "cm", m => m.ThighCm);
+        Add(_hasArm,    "Ramię",             "cm", m => m.ArmCm);
     }
 
     private void BuildChartMetrics()
@@ -296,7 +472,7 @@ else
         if (_hasThigh)  _chartMetrics.Add(new("thigh",  "Udo",          "cm", m => m.ThighCm));
         if (_hasArm)    _chartMetrics.Add(new("arm",    "Ramię",        "cm", m => m.ArmCm));
 
-        _activeMetric = _chartMetrics[0].Key;
+        if (_chartMetrics.Count > 0 && _chartMetrics.All(m => m.Key != _activeMetric)) _activeMetric = _chartMetrics[0].Key;
     }
 
     private async Task SelectMetricAsync(string key)
@@ -355,3 +531,12 @@ else
         public Func<BodyMeasurementDto, decimal?> Selector { get; } = selector;
     }
 }
+
+<style>
+    .mm-form { border-left: 3px solid var(--c-primary) !important; }
+    .mm-big { font-size: 1.15rem; font-weight: 700; }
+    .mm-own {
+        display: inline-block; margin-left: .35rem; padding: 0 .45rem; border-radius: 99px; vertical-align: middle;
+        font-size: .65rem; font-weight: 700; background: var(--c-primary-light); color: var(--c-primary);
+    }
+</style>

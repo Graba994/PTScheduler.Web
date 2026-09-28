@@ -704,7 +704,7 @@ else if (client is not null)
                             var m = measurements[i];
                             var prev = i + 1 < measurements.Count ? measurements[i + 1] : null;
                             <tr>
-                                <td class="text-nowrap fw-semibold">@m.MeasurementDate.ToString("dd.MM.yyyy")</td>
+                                <td class="text-nowrap fw-semibold">@m.MeasurementDate.ToString("dd.MM.yyyy") @if (m.AddedByClient) { <span class="badge bg-info-subtle text-info-emphasis fw-normal ms-1" title="Wpisane przez klienta w aplikacji">od klienta</span> }</td>
                                 <td>@MeasCell(m.WeightKg, prev?.WeightKg, "kg", false)</td>
                                 <td>@MeasCell(m.BodyFatPercent, prev?.BodyFatPercent, "%", false)</td>
                                 <td>@MeasCell(m.WaistCm, prev?.WaistCm, "cm", false)</td>
@@ -1357,7 +1357,7 @@ else if (client is not null)
             feed.Add(new(d.Date.ToDateTime(new TimeOnly(12, 0)), "pt-ico-dumbbell", "violet", "Trening z planu", sub, "activity"));
         }
         foreach (var m in measurements?.Take(5) ?? [])
-            feed.Add(new(m.MeasurementDate.ToDateTime(new TimeOnly(9, 0)), "bi-rulers", "info", "Nowy pomiar",
+            feed.Add(new(m.MeasurementDate.ToDateTime(new TimeOnly(9, 0)), "bi-rulers", "info", m.AddedByClient ? "Klient wpisał pomiar" : "Nowy pomiar",
                 m.WeightKg is { } w ? $"waga {w:0.#} kg" + (m.BodyFatPercent is { } f ? $" · tłuszcz {f:0.#}%" : "") : null, "measurements"));
         foreach (var p in packages?.Take(5) ?? [])
             feed.Add(new(Clock.ToWallClock(p.PurchasedAt), "bi-bag-check", "ok", p.Name, p.IsPaid ? "nowy pakiet · opłacony" : "nowy pakiet · czeka na płatność", "packages"));
