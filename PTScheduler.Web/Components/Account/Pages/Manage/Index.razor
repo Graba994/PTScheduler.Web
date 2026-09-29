@@ -1,6 +1,7 @@
 @page "/Account/Manage"
 @rendermode PTScheduler.Web.RenderModes.Server
 @inject IAccountService AccountSvc
+@inject ISurveyService SurveySvc
 @inject INotificationPreferencesService PrefsSvc
 @inject ITrainerConfigService TrainerCfg
 @inject AuthenticationStateProvider AuthState
@@ -183,6 +184,10 @@
                 </a>
             }
         </div>
+        @if (a.ClientId is int reviewClientId)
+        {
+            <div class="mt-2"><ReviewPrompt ClientId="reviewClientId" EditMode="true" /></div>
+        }
     </section>
 }
 
@@ -332,6 +337,33 @@
                 <i class="bi bi-chevron-right acct-row-chevron"></i>
             </a>
         }
+        @if (a.ClientId is not null)
+        {
+            <a class="acct-row" href="/my/survey/zdrowie?returnUrl=%2FAccount%2FManage">
+                <span class="acct-row-icon green"><i class="bi bi-clipboard2-pulse"></i></span>
+                <span class="acct-row-main"><span class="acct-row-title d-block">Ankieta zdrowotna</span><span class="acct-row-sub">Zdrowie, urazy i cele — trener dopasuje do nich plan</span></span>
+                <i class="bi bi-chevron-right acct-row-chevron"></i>
+            </a>
+            <div class="acct-row flex-wrap">
+                <span class="acct-row-icon slate"><i class="bi bi-heart-pulse"></i></span>
+                <span class="acct-row-main">
+                    <span class="acct-row-title d-block">Zgoda na dane o zdrowiu</span>
+                    <span class="acct-row-sub">@(_healthWithdrawn ? "Wycofana — ankieta zdrowotna została usunięta." : "Wycofanie usuwa Twoją ankietę zdrowotną.")</span>
+                </span>
+                @if (!_healthWithdrawn)
+                {
+                    @if (_confirmWithdraw)
+                    {
+                        <button class="btn btn-sm btn-danger" @onclick="WithdrawHealthConsentAsync">Tak, usuń ankietę</button>
+                        <button class="btn btn-sm btn-link" @onclick="() => _confirmWithdraw = false">Anuluj</button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmWithdraw = true">Wycofaj zgodę</button>
+                    }
+                }
+            </div>
+        }
         <a class="acct-row" href="/Account/Manage/PersonalData">
             <span class="acct-row-icon slate"><i class="bi bi-download"></i></span>
             <span class="acct-row-main"><span class="acct-row-title d-block">Pobierz moje dane</span><span class="acct-row-sub">Kopia danych z konta (RODO)</span></span>
@@ -355,7 +387,7 @@
     private AccountOverviewDto? _account;
     private SaveAccountProfileDto _form = new();
     private string _userId = "";
-    private bool _saving, _uploading, _confirmReset, _showHints = true;
+    private bool _saving, _uploading, _confirmReset, _showHints = true, _confirmWithdraw, _healthWithdrawn;
     private string? _profileError, _avatarError, _toast, _calendarUrl;
     private string _theme = "light";
     private CancellationTokenSource? _toastCts;
@@ -427,6 +459,15 @@
         await AccountSvc.RemoveAvatarAsync(_userId);
         await LoadAsync();
         _ = ToastAsync("Zdjęcie usunięte");
+    }
+
+    private async Task WithdrawHealthConsentAsync()
+    {
+        if (_account?.ClientId is not int clientId) return;
+        await SurveySvc.WithdrawHealthConsentAsync(clientId);
+        _confirmWithdraw = false;
+        _healthWithdrawn = true;
+        _ = ToastAsync("Zgoda wycofana");
     }
 
     // ── Kalendarz ──
