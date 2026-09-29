@@ -272,6 +272,7 @@ public class MembershipService(
 
         foreach (var (userId, message) in notify)
         {
+            message.Category ??= PTScheduler.Domain.Constants.NotificationTypes.PushPackages;
             try { await push.SendAsync(userId, message); }
             catch (Exception ex) { logger.LogWarning(ex, "Membership push to {UserId} failed.", userId); }
         }

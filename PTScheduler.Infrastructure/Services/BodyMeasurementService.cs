@@ -73,6 +73,7 @@ public class BodyMeasurementService(
         {
             await push.SendAsync(client.TrainerUserId, new PushMessageDto
             {
+                Category = PTScheduler.Domain.Constants.NotificationTypes.PushClientActivity,
                 Title = $"📏 {name}: nowy pomiar",
                 Body = $"Klient wpisał {what} ({m.MeasurementDate:dd.MM}).",
                 Url = $"/clients/{client.Id}?tab=measurements"

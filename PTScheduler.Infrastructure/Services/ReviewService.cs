@@ -77,6 +77,7 @@ public class ReviewService(
             {
                 await push.SendAsync(client.TrainerUserId, new PushMessageDto
                 {
+                    Category = PTScheduler.Domain.Constants.NotificationTypes.PushClientActivity,
                     Title = $"Nowa opinia {new string('★', rating)}{new string('☆', 5 - rating)}",
                     Body = $"{review.DisplayName}: {(text is null ? "(bez komentarza)" : text.Length > 100 ? text[..97] + "…" : text)}",
                     Url = "/admin/reviews"

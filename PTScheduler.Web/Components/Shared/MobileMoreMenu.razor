@@ -5,6 +5,7 @@
 @inject PTScheduler.Application.Interfaces.IMarketingSettingsService MarketingSettings
 @inject PTScheduler.Web.Services.ClientNav ClientNavigation
 @inject PTScheduler.Web.Services.UpsellService Upsell
+@inject PTScheduler.Application.Interfaces.IAccountService AccountSvc
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Domain.Constants
 @using System.Security.Claims
@@ -27,7 +28,7 @@
         <div class="mobile-sheet-handle" @onclick="CloseSheet"><span></span></div>
 
         <div class="mobile-sheet-user">
-            <div class="mobile-sheet-avatar">@_initials</div>
+            <div class="mobile-sheet-avatar">@if (_avatarUrl is not null) { <img src="@_avatarUrl" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover" /> } else { @_initials }</div>
             <div style="min-width:0;flex:1">
                 <div class="fw-semibold text-truncate">@_name</div>
                 <div class="text-muted text-truncate" style="font-size:.75rem">@_email</div>
@@ -166,10 +167,6 @@
                                 <span>@sec.Label</span>
                             </a>
                         }
-                        <a href="/my/profile" class="mobile-sheet-tile" @onclick="CloseSheet">
-                            <i class="bi bi-person-circle"></i>
-                            <span>Mój profil</span>
-                        </a>
                         @if (_referralsEnabled)
                         {
                             <a href="/my/referrals" class="mobile-sheet-tile" @onclick="CloseSheet">
@@ -194,7 +191,7 @@
             }
             <a href="/Account/Manage" class="mobile-sheet-link" @onclick="CloseSheet">
                 <i class="bi bi-gear-fill"></i>
-                <span>Ustawienia konta</span>
+                <span>Moje konto i ustawienia</span>
                 <i class="bi bi-chevron-right ms-auto" style="font-size:.7rem;opacity:.4"></i>
             </a>
             @if (_canSwitch)
@@ -233,6 +230,7 @@
     private bool _dark;
     private bool _canInstallPwa;
     private string _initials = "";
+    private string? _avatarUrl;
     private string _name = "";
     private string _email = "";
     private bool _referralsEnabled;
@@ -251,6 +249,7 @@
             _email = user.FindFirst(ClaimTypes.Email)?.Value ?? _name;
             _mustChangePassword = user.HasClaim(PTScheduler.Web.Services.AppClaimsPrincipalFactory.MustChangePasswordClaim, "1");
             _canSwitch = user.IsInRole(Roles.Admin) || PTScheduler.Web.Services.AccountSwitchService.IsSwitched(user);
+            try { if (user.FindFirst(ClaimTypes.NameIdentifier)?.Value is { } uid) _avatarUrl = await AccountSvc.GetAvatarUrlAsync(uid); } catch { }
             if (user.IsInRole(Roles.Admin) || user.IsInRole(Roles.Trainer))
                 try { _urgent = (await Upsell.GetAsync()).Any(n => n.IsUrgent); } catch { }
             var parts = _name.Split(' ', StringSplitOptions.RemoveEmptyEntries);

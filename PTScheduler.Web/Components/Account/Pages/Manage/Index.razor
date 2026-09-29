@@ -1,134 +1,523 @@
 @page "/Account/Manage"
-@using System.ComponentModel.DataAnnotations
-@using Microsoft.AspNetCore.Identity
-@inject UserManager<ApplicationUser> UserManager
-@inject SignInManager<ApplicationUser> SignInManager
-@inject IdentityRedirectManager RedirectManager
+@rendermode PTScheduler.Web.RenderModes.Server
+@inject IAccountService AccountSvc
+@inject INotificationPreferencesService PrefsSvc
+@inject ITrainerConfigService TrainerCfg
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject IAppClock Clock
+@inject PTScheduler.Web.Services.HintStateService HintState
+@using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Forms
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using System.Globalization
 
-<PageTitle>Dane konta</PageTitle>
+<AppTitle Page="Moje konto" />
 
-<div class="manage-card">
-    <h5 class="fw-bold mb-1">Dane konta</h5>
-    <p class="text-muted small mb-4">Podstawowe informacje widoczne w systemie.</p>
+@if (_account is null)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    return;
+}
 
-    <StatusMessage />
+@{
+    var a = _account;
+    var (done, total) = SecurityScore(a);
+}
 
-    <EditForm Model="Input" FormName="profile" OnValidSubmit="OnValidSubmitAsync" method="post">
-        <DataAnnotationsValidator />
+<!-- Nagłówek: zdjęcie, imię, rola -->
+<section class="acct-hero" aria-label="Moje konto">
+    <div class="acct-avatar-wrap">
+        <div class="acct-avatar" aria-hidden="true">
+            @if (!string.IsNullOrEmpty(a.AvatarUrl))
+            {
+                <img src="@a.AvatarUrl" alt="" />
+            }
+            else
+            {
+                @a.Initials
+            }
+        </div>
+        <span class="acct-avatar-edit" aria-hidden="true">
+            @if (_uploading)
+            {
+                <span class="spinner-border spinner-border-sm"></span>
+            }
+            else
+            {
+                <i class="bi bi-camera-fill"></i>
+            }
+        </span>
+        <InputFile OnChange="UploadAvatarAsync" accept="image/*" title="Zmień zdjęcie profilowe" aria-label="Zmień zdjęcie profilowe" disabled="@_uploading" />
+    </div>
+    <div class="min-w-0">
+        <div class="acct-hero-name">@a.FullName</div>
+        <div class="acct-hero-sub">@a.Email</div>
+        <span class="acct-role">@RoleLabel(a.Role)</span>
+        @if (a.ClientSinceUtc is { } since)
+        {
+            <div class="acct-hero-sub" style="font-size:.8rem">Z nami od @Pl.DateTimeFormat.MonthGenitiveNames[since.Month - 1] @since.Year</div>
+        }
+        @if (!string.IsNullOrEmpty(a.AvatarUrl))
+        {
+            <div class="acct-hero-actions">
+                <button type="button" class="btn btn-link text-danger" @onclick="RemoveAvatarAsync">Usuń zdjęcie</button>
+            </div>
+        }
+        else
+        {
+            <div class="acct-hero-sub mt-1" style="font-size:.8rem"><i class="bi bi-camera me-1"></i>Dotknij koła, żeby dodać zdjęcie</div>
+        }
+    </div>
+</section>
 
-        <div class="row g-3 mb-3">
+@if (_avatarError is not null)
+{
+    <div class="alert alert-danger py-2 small mb-0">@_avatarError</div>
+}
+
+<!-- Face ID / odcisk palca -->
+@if (a.PasskeyCount == 0)
+{
+    <section class="acct-promo">
+        <div class="acct-promo-icon"><i class="bi bi-fingerprint"></i></div>
+        <div class="flex-grow-1">
+            <div class="acct-promo-title">Loguj się jednym dotknięciem</div>
+            <div class="acct-promo-text">Włącz Face ID albo odcisk palca — bez wpisywania hasła, szybciej i bezpieczniej. Twój odcisk nie opuszcza telefonu.</div>
+        </div>
+        <a href="/Account/Manage/Passkeys" class="btn">Włącz</a>
+    </section>
+}
+
+<!-- Profil -->
+<section id="profil">
+    <h2 class="acct-group-title">Profil</h2>
+    <div class="acct-card">
+        <div class="row g-3">
             <div class="col-sm-6">
-                <label class="form-label fw-semibold">Imię</label>
-                <InputText @bind-Value="Input.FirstName" class="form-control" placeholder="Imię" />
-                <ValidationMessage For="() => Input.FirstName" class="text-danger small" />
+                <label class="form-label" for="pf-first">Imię</label>
+                <input id="pf-first" class="form-control" maxlength="50" autocomplete="given-name" @bind="_form.FirstName" />
             </div>
             <div class="col-sm-6">
-                <label class="form-label fw-semibold">Nazwisko</label>
-                <InputText @bind-Value="Input.LastName" class="form-control" placeholder="Nazwisko" />
-                <ValidationMessage For="() => Input.LastName" class="text-danger small" />
+                <label class="form-label" for="pf-last">Nazwisko</label>
+                <input id="pf-last" class="form-control" maxlength="50" autocomplete="family-name" @bind="_form.LastName" />
+            </div>
+            <div class="col-sm-6">
+                <label class="form-label" for="pf-phone">Telefon</label>
+                <input id="pf-phone" type="tel" class="form-control" maxlength="20" autocomplete="tel" placeholder="np. 600 100 200" @bind="_form.Phone" />
+            </div>
+            @if (a.ClientId is not null)
+            {
+                <div class="col-sm-6">
+                    <label class="form-label" for="pf-dob">Data urodzenia</label>
+                    <input id="pf-dob" type="date" class="form-control" max="@DateTime.Today.ToString("yyyy-MM-dd")"
+                           value="@_form.DateOfBirth?.ToString("yyyy-MM-dd")"
+                           @onchange="e => _form.DateOfBirth = DateOnly.TryParse(e.Value?.ToString(), CultureInfo.InvariantCulture, out var d) ? d : null" />
+                </div>
+                <div class="col-12">
+                    <label class="form-label" for="pf-goal">Mój cel treningowy</label>
+                    <textarea id="pf-goal" class="form-control" rows="2" maxlength="500" placeholder="np. schudnąć 5 kg, przebiec 10 km, mniej bólu pleców" @bind="_form.TrainingGoal"></textarea>
+                </div>
+            }
+            <div class="col-12">
+                <div class="d-flex align-items-center justify-content-between gap-2 flex-wrap">
+                    <div class="small text-muted">
+                        E-mail do logowania: <strong>@a.Email</strong>
+                        @if (!a.EmailConfirmed)
+                        {
+                            <span class="badge bg-warning-subtle text-warning-emphasis ms-1">niepotwierdzony</span>
+                        }
+                        · <a href="/Account/Manage/Email">Zmień</a>
+                    </div>
+                    <button class="btn btn-primary" @onclick="SaveProfileAsync" disabled="@_saving">
+                        @if (_saving)
+                        {
+                            <span class="spinner-border spinner-border-sm me-1"></span>
+                        }
+                        Zapisz
+                    </button>
+                </div>
+                @if (_profileError is not null)
+                {
+                    <div class="alert alert-danger py-2 small mt-2 mb-0">@_profileError</div>
+                }
             </div>
         </div>
+    </div>
+</section>
 
-        <div class="mb-3">
-            <label class="form-label fw-semibold">E-mail</label>
-            <input type="text" value="@_email" class="form-control" disabled />
-            <div class="form-text">Adres e-mail służy do logowania i nie może być zmieniony tutaj.</div>
+@if (a.Trainer is { } t)
+{
+    <section id="trener">
+        <h2 class="acct-group-title">Mój trener</h2>
+        <div class="acct-list">
+            <div class="acct-row">
+                <div class="acct-avatar" style="width:44px;height:44px;font-size:1rem;cursor:default">
+                    @if (!string.IsNullOrEmpty(t.AvatarUrl))
+                    {
+                        <img src="@t.AvatarUrl" alt="" />
+                    }
+                    else
+                    {
+                        @Initials(t.Name)
+                    }
+                </div>
+                <div class="acct-row-main">
+                    <div class="acct-row-title">@t.Name</div>
+                    <div class="acct-row-sub">@(t.Phone ?? t.Email)</div>
+                </div>
+            </div>
+            <a class="acct-row" href="/chat">
+                <span class="acct-row-icon"><i class="bi bi-chat-dots"></i></span>
+                <span class="acct-row-main"><span class="acct-row-title d-block">Napisz wiadomość</span></span>
+                <i class="bi bi-chevron-right acct-row-chevron"></i>
+            </a>
+            @if (!string.IsNullOrWhiteSpace(t.Phone))
+            {
+                <a class="acct-row" href="@($"tel:{t.Phone.Replace(" ", "")}")">
+                    <span class="acct-row-icon green"><i class="bi bi-telephone"></i></span>
+                    <span class="acct-row-main"><span class="acct-row-title d-block">Zadzwoń</span><span class="acct-row-sub">@t.Phone</span></span>
+                    <i class="bi bi-chevron-right acct-row-chevron"></i>
+                </a>
+            }
         </div>
+    </section>
+}
 
-        <div class="mb-4">
-            <label class="form-label fw-semibold">Numer telefonu</label>
-            <InputText @bind-Value="Input.PhoneNumber" class="form-control" placeholder="+48 000 000 000" />
-            <ValidationMessage For="() => Input.PhoneNumber" class="text-danger small" />
+<!-- Logowanie i bezpieczeństwo -->
+<section id="bezpieczenstwo">
+    <h2 class="acct-group-title">Logowanie i bezpieczeństwo</h2>
+    <div class="acct-card mb-2">
+        <div class="acct-meter">
+            <span class="small">Bezpieczeństwo konta</span>
+            <div class="acct-meter-track"><div class="acct-meter-fill @(done < total ? "warn" : "")" style="width:@(total == 0 ? 0 : done * 100 / total)%"></div></div>
+            <span class="acct-meter-label">@done/@total</span>
         </div>
+    </div>
+    <div class="acct-list">
+        <a class="acct-row" href="/Account/Manage/Passkeys">
+            <span class="acct-row-icon"><i class="bi bi-fingerprint"></i></span>
+            <span class="acct-row-main">
+                <span class="acct-row-title d-block">Face ID i odcisk palca</span>
+                <span class="acct-row-sub">Logowanie bez hasła na tym telefonie lub komputerze</span>
+            </span>
+            <span class="acct-row-value @(a.PasskeyCount > 0 ? "ok" : "warn")">@(a.PasskeyCount > 0 ? $"Włączone ({a.PasskeyCount})" : "Wyłączone")</span>
+            <i class="bi bi-chevron-right acct-row-chevron"></i>
+        </a>
+        <a class="acct-row" href="@(a.HasPassword ? "/Account/Manage/ChangePassword" : "/Account/Manage/SetPassword")">
+            <span class="acct-row-icon slate"><i class="bi bi-key"></i></span>
+            <span class="acct-row-main"><span class="acct-row-title d-block">Hasło</span></span>
+            <span class="acct-row-value">@(a.HasPassword ? "Zmień" : "Ustaw hasło")</span>
+            <i class="bi bi-chevron-right acct-row-chevron"></i>
+        </a>
+        @if (a.IsStaff)
+        {
+            <a class="acct-row" href="/Account/Manage/TwoFactorAuthentication">
+                <span class="acct-row-icon slate"><i class="bi bi-shield-check"></i></span>
+                <span class="acct-row-main">
+                    <span class="acct-row-title d-block">Weryfikacja dwuetapowa</span>
+                    <span class="acct-row-sub">Kod z aplikacji przy logowaniu hasłem</span>
+                </span>
+                <span class="acct-row-value @(a.TwoFactorEnabled ? "ok" : "")">@(a.TwoFactorEnabled ? "Włączona" : "Wyłączona")</span>
+                <i class="bi bi-chevron-right acct-row-chevron"></i>
+            </a>
+        }
+        @if (a.Role is "Admin" or "Trainer")
+        {
+            <a class="acct-row" href="/Account/Manage/FinancePin">
+                <span class="acct-row-icon slate"><i class="bi bi-shield-lock"></i></span>
+                <span class="acct-row-main"><span class="acct-row-title d-block">PIN finansów</span><span class="acct-row-sub">Chroni ukryte finanse</span></span>
+                <i class="bi bi-chevron-right acct-row-chevron"></i>
+            </a>
+        }
+        <a class="acct-row" href="/Account/Manage/LoginHistory">
+            <span class="acct-row-icon slate"><i class="bi bi-laptop"></i></span>
+            <span class="acct-row-main">
+                <span class="acct-row-title d-block">Urządzenia i logowania</span>
+                <span class="acct-row-sub">@(a.LastLoginUtc is { } last ? $"Ostatnio: {Clock.ToWallClock(last).ToString("d MMMM, HH:mm", Pl)}" : "Historia logowań")</span>
+            </span>
+            <i class="bi bi-chevron-right acct-row-chevron"></i>
+        </a>
+    </div>
+</section>
 
-        <button type="submit" class="btn btn-primary">
-            <i class="bi bi-check-lg me-1"></i>Zapisz zmiany
-        </button>
-    </EditForm>
-</div>
+<!-- Powiadomienia -->
+<section id="powiadomienia">
+    <h2 class="acct-group-title">Powiadomienia</h2>
+    <div class="acct-list">
+        <a class="acct-row" href="/Account/Manage/Notifications">
+            <span class="acct-row-icon amber"><i class="bi bi-bell"></i></span>
+            <span class="acct-row-main">
+                <span class="acct-row-title d-block">E-mail, push i SMS</span>
+                <span class="acct-row-sub">Wybierz, o czym i jak chcesz wiedzieć</span>
+            </span>
+            <i class="bi bi-chevron-right acct-row-chevron"></i>
+        </a>
+    </div>
+</section>
 
-<div class="manage-card mt-3">
-    <h5 class="fw-bold mb-1">Aplikacja mobilna</h5>
-    <p class="text-muted small mb-3">Zainstaluj PTScheduler jako aplikację na swoim urządzeniu.</p>
-    <PwaInstall />
-    <p class="text-muted" style="font-size:.75rem">
-        Aplikacja działa jak natywna — bez przeglądarki, z ikoną na pulpicie.
-    </p>
-</div>
+<!-- Kalendarz -->
+<section id="kalendarz">
+    <h2 class="acct-group-title">@(a.IsStaff ? "Wizyty w moim kalendarzu" : "Moje treningi w kalendarzu")</h2>
+    <div class="acct-card">
+        <p class="small text-muted mb-3">
+            @(a.IsStaff
+                ? "Wszystkie wizyty w kalendarzu Google, Apple albo Outlook na telefonie. Kalendarz sam się aktualizuje — nowe, przesunięte i odwołane wizyty pojawią się bez Twojego udziału."
+                : "Twoje treningi w kalendarzu Google albo Apple na telefonie. Kalendarz sam się aktualizuje — gdy trener przesunie albo odwoła wizytę, zobaczysz to od razu.")
+        </p>
+        @if (_calendarUrl is null)
+        {
+            <button class="btn btn-outline-primary" @onclick="EnableCalendarAsync"><i class="bi bi-calendar-plus me-1"></i>Dodaj do kalendarza</button>
+        }
+        else
+        {
+            <div class="acct-cal-actions mb-2">
+                <a class="btn btn-outline-primary" href="@GoogleCalendarUrl" target="_blank" rel="noopener"><i class="bi bi-google me-1"></i>Kalendarz Google</a>
+                <a class="btn btn-outline-primary" href="@WebcalUrl"><i class="bi bi-apple me-1"></i>iPhone / Mac</a>
+                <button class="btn btn-outline-secondary" @onclick="CopyCalendarAsync"><i class="bi bi-link-45deg me-1"></i>Kopiuj link</button>
+            </div>
+            <div class="small text-muted">
+                Link jest prywatny — nie udostępniaj go.
+                @if (_confirmReset)
+                {
+                    <span class="ms-1">Stary link przestanie działać.</span>
+                    <button class="btn btn-link btn-sm p-0 ms-1 text-danger" @onclick="ResetCalendarAsync">Tak, nowy link</button>
+                    <button class="btn btn-link btn-sm p-0 ms-2" @onclick="() => _confirmReset = false">Anuluj</button>
+                }
+                else
+                {
+                    <button class="btn btn-link btn-sm p-0 ms-1" @onclick="() => _confirmReset = true">Wygeneruj nowy link</button>
+                }
+            </div>
+        }
+    </div>
+</section>
+
+<!-- Aplikacja i wygląd -->
+<section id="aplikacja">
+    <h2 class="acct-group-title">Aplikacja i wygląd</h2>
+    <div class="acct-card d-flex flex-column gap-3">
+        <div>
+            <div class="form-label">Motyw</div>
+            <div class="acct-seg" role="radiogroup" aria-label="Motyw">
+                <button type="button" role="radio" aria-checked="@(_theme == "light" ? "true" : "false")" class="@(_theme == "light" ? "active" : "")" @onclick='() => SetThemeAsync("light")'><i class="bi bi-sun"></i>Jasny</button>
+                <button type="button" role="radio" aria-checked="@(_theme == "dark" ? "true" : "false")" class="@(_theme == "dark" ? "active" : "")" @onclick='() => SetThemeAsync("dark")'><i class="bi bi-moon-stars"></i>Ciemny</button>
+                <button type="button" role="radio" aria-checked="@(_theme == "auto" ? "true" : "false")" class="@(_theme == "auto" ? "active" : "")" @onclick='() => SetThemeAsync("auto")'><i class="bi bi-circle-half"></i>Jak w telefonie</button>
+            </div>
+        </div>
+        <div class="d-flex align-items-center justify-content-between gap-3">
+            <div>
+                <div class="fw-semibold small">Podpowiedzi</div>
+                <div class="small text-muted">Krótkie wskazówki przy nowych funkcjach</div>
+            </div>
+            <div class="form-check form-switch m-0">
+                <input class="form-check-input" type="checkbox" role="switch" aria-label="Podpowiedzi" checked="@_showHints" @onchange="ToggleHintsAsync" style="width:2.6em;height:1.4em" />
+            </div>
+        </div>
+        <PwaInstall />
+    </div>
+</section>
+
+<!-- Prywatność i dane -->
+<section id="prywatnosc">
+    <h2 class="acct-group-title">Prywatność i dane</h2>
+    <div class="acct-list">
+        @if (a.ClientId is not null)
+        {
+            <a class="acct-row" href="/my/documents">
+                <span class="acct-row-icon"><i class="bi bi-file-earmark-check"></i></span>
+                <span class="acct-row-main"><span class="acct-row-title d-block">Moje dokumenty i zgody</span><span class="acct-row-sub">Regulamin, zgoda na wizerunek</span></span>
+                <i class="bi bi-chevron-right acct-row-chevron"></i>
+            </a>
+        }
+        <a class="acct-row" href="/Account/Manage/PersonalData">
+            <span class="acct-row-icon slate"><i class="bi bi-download"></i></span>
+            <span class="acct-row-main"><span class="acct-row-title d-block">Pobierz moje dane</span><span class="acct-row-sub">Kopia danych z konta (RODO)</span></span>
+            <i class="bi bi-chevron-right acct-row-chevron"></i>
+        </a>
+        <a class="acct-row danger" href="/Account/Manage/DeletePersonalData">
+            <span class="acct-row-icon red"><i class="bi bi-trash3"></i></span>
+            <span class="acct-row-main"><span class="acct-row-title d-block">Usuń konto</span><span class="acct-row-sub">Trwale usuwa konto i dane</span></span>
+            <i class="bi bi-chevron-right acct-row-chevron"></i>
+        </a>
+    </div>
+</section>
+
+@if (_toast is not null)
+{
+    <div class="acct-toast" role="status"><i class="bi bi-check-circle-fill"></i>@_toast</div>
+}
 
 @code {
-    private ApplicationUser? user;
-    private string _email = string.Empty;
-    private string? phoneNumber;
-
-    [CascadingParameter]
-    private HttpContext HttpContext { get; set; } = default!;
-
-    [SupplyParameterFromForm]
-    private InputModel Input { get; set; } = default!;
+    private static readonly CultureInfo Pl = new("pl-PL");
+    private AccountOverviewDto? _account;
+    private SaveAccountProfileDto _form = new();
+    private string _userId = "";
+    private bool _saving, _uploading, _confirmReset, _showHints = true;
+    private string? _profileError, _avatarError, _toast, _calendarUrl;
+    private string _theme = "light";
+    private CancellationTokenSource? _toastCts;
 
     protected override async Task OnInitializedAsync()
     {
-        Input ??= new();
-
-        user = await UserManager.GetUserAsync(HttpContext.User);
-        if (user is null)
-        {
-            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
-            return;
-        }
-
-        _email    = user.Email ?? string.Empty;
-        phoneNumber = await UserManager.GetPhoneNumberAsync(user);
-
-        Input.FirstName  ??= user.FirstName ?? string.Empty;
-        Input.LastName   ??= user.LastName  ?? string.Empty;
-        Input.PhoneNumber ??= phoneNumber;
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        _userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        await LoadAsync();
+        _showHints = (await PrefsSvc.GetAsync(_userId)).ShowHints;
     }
 
-    private async Task OnValidSubmitAsync()
+    protected override async Task OnAfterRenderAsync(bool firstRender)
     {
-        if (user is null)
+        if (!firstRender) return;
+        try
         {
-            RedirectManager.RedirectToInvalidUser(UserManager, HttpContext);
-            return;
+            _theme = await JS.InvokeAsync<string>("PTTheme.mode");
+            StateHasChanged();
         }
-
-        user.FirstName = Input.FirstName?.Trim();
-        user.LastName  = Input.LastName?.Trim();
-        var updateResult = await UserManager.UpdateAsync(user);
-        if (!updateResult.Succeeded)
-        {
-            RedirectManager.RedirectToCurrentPageWithStatus(
-                "Błąd: " + string.Join(" ", updateResult.Errors.Select(e => e.Description)), HttpContext);
-            return;
-        }
-
-        if (Input.PhoneNumber != phoneNumber)
-        {
-            var phoneResult = await UserManager.SetPhoneNumberAsync(user, Input.PhoneNumber);
-            if (!phoneResult.Succeeded)
-            {
-                RedirectManager.RedirectToCurrentPageWithStatus(
-                    "Błąd: Nie udało się zapisać numeru telefonu.", HttpContext);
-                return;
-            }
-        }
-
-        await SignInManager.RefreshSignInAsync(user);
-        RedirectManager.RedirectToCurrentPageWithStatus("Dane zostały zaktualizowane.", HttpContext);
+        catch { }
     }
 
-    private sealed class InputModel
+    private async Task LoadAsync()
     {
-        [MaxLength(50)]
-        public string? FirstName { get; set; }
-
-        [MaxLength(50)]
-        public string? LastName { get; set; }
-
-        [Phone(ErrorMessage = "Nieprawidłowy numer telefonu.")]
-        [Display(Name = "Phone number")]
-        public string? PhoneNumber { get; set; }
+        _account = await AccountSvc.GetOverviewAsync(_userId);
+        if (_account is null) return;
+        _form = new SaveAccountProfileDto
+        {
+            FirstName = _account.FirstName, LastName = _account.LastName, Phone = _account.Phone,
+            DateOfBirth = _account.DateOfBirth, TrainingGoal = _account.TrainingGoal
+        };
     }
+
+    private async Task SaveProfileAsync()
+    {
+        _saving = true;
+        _profileError = null;
+        try
+        {
+            await AccountSvc.SaveProfileAsync(_userId, _form);
+            await LoadAsync();
+            _ = ToastAsync("Zapisano");
+        }
+        catch (ArgumentException ex) { _profileError = ex.Message; }
+        finally { _saving = false; }
+    }
+
+    private async Task UploadAvatarAsync(InputFileChangeEventArgs e)
+    {
+        _avatarError = null;
+        _uploading = true;
+        try
+        {
+            await using var stream = e.File.OpenReadStream(PTScheduler.Infrastructure.Services.AccountService.MaxAvatarBytes);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            await AccountSvc.SetAvatarAsync(_userId, ms.ToArray());
+            await LoadAsync();
+            _ = ToastAsync("Zdjęcie zapisane");
+        }
+        catch (ArgumentException ex) { _avatarError = ex.Message; }
+        catch (IOException) { _avatarError = "Zdjęcie jest za duże (maks. 15 MB)."; }
+        finally { _uploading = false; }
+    }
+
+    private async Task RemoveAvatarAsync()
+    {
+        await AccountSvc.RemoveAvatarAsync(_userId);
+        await LoadAsync();
+        _ = ToastAsync("Zdjęcie usunięte");
+    }
+
+    // ── Kalendarz ──
+
+    private async Task EnableCalendarAsync()
+    {
+        var token = _account!.IsStaff
+            ? await TrainerCfg.GetOrCreateCalendarFeedTokenAsync(_userId)
+            : await AccountSvc.GetOrCreateCalendarTokenAsync(_userId);
+        _calendarUrl = FeedUrl(token);
+    }
+
+    private async Task ResetCalendarAsync()
+    {
+        var token = _account!.IsStaff
+            ? await TrainerCfg.RegenerateCalendarFeedTokenAsync(_userId)
+            : await AccountSvc.ResetCalendarTokenAsync(_userId);
+        _calendarUrl = FeedUrl(token);
+        _confirmReset = false;
+        _ = ToastAsync("Nowy link gotowy — dodaj go ponownie w kalendarzu");
+    }
+
+    private string FeedUrl(string token) =>
+        $"{Nav.BaseUri.TrimEnd('/')}/calendar/{(_account!.IsStaff ? "feed" : "my")}/{token}.ics";
+
+    private string WebcalUrl => _calendarUrl is null ? "" : "webcal://" + _calendarUrl[(_calendarUrl.IndexOf("://", StringComparison.Ordinal) + 3)..];
+    private string GoogleCalendarUrl => "https://calendar.google.com/calendar/r?cid=" + Uri.EscapeDataString(WebcalUrl);
+
+    private async Task CopyCalendarAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", _calendarUrl);
+            _ = ToastAsync("Link skopiowany");
+        }
+        catch { _ = ToastAsync("Skopiuj link ręcznie: " + _calendarUrl); }
+    }
+
+    // ── Aplikacja ──
+
+    private async Task SetThemeAsync(string mode)
+    {
+        _theme = mode;
+        try { await JS.InvokeAsync<bool>("PTTheme.setMode", mode); } catch { }
+    }
+
+    private async Task ToggleHintsAsync(ChangeEventArgs e)
+    {
+        _showHints = e.Value is true || (e.Value is string s && s == "true");
+        var prefs = await PrefsSvc.GetAsync(_userId);
+        prefs.ShowHints = _showHints;
+        await PrefsSvc.SaveAsync(_userId, prefs);
+        HintState.Set(_showHints);
+        _ = ToastAsync(_showHints ? "Podpowiedzi włączone" : "Podpowiedzi wyłączone");
+    }
+
+    // ── Pomocnicze ──
+
+    private async Task ToastAsync(string text)
+    {
+        _toastCts?.Cancel();
+        _toastCts = new CancellationTokenSource();
+        var token = _toastCts.Token;
+        _toast = text;
+        StateHasChanged();
+        try
+        {
+            await Task.Delay(2500, token);
+            _toast = null;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (TaskCanceledException) { }
+    }
+
+    private static (int Done, int Total) SecurityScore(AccountOverviewDto a)
+    {
+        var checks = new List<bool> { a.HasPassword || a.PasskeyCount > 0, a.EmailConfirmed, a.PasskeyCount > 0, !string.IsNullOrWhiteSpace(a.Phone) };
+        if (a.IsStaff) checks.Add(a.TwoFactorEnabled || a.PasskeyCount > 0);
+        return (checks.Count(c => c), checks.Count);
+    }
+
+    private static string RoleLabel(string role) => role switch
+    {
+        "Admin" => "Administrator",
+        "Trainer" => "Trener",
+        "Subordinate" => "Asystent trenera",
+        "Client" => "Klient",
+        _ => role
+    };
+
+    private static string Initials(string name) =>
+        string.Concat(name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpperInvariant(p[0]))) is { Length: > 0 } i ? i : "?";
+
 }

@@ -105,6 +105,9 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             e.HasIndex(r => r.RedeemedAt);
         });
 
+        builder.Entity<ApplicationUser>().Property(u => u.CalendarFeedToken).HasMaxLength(64);
+        builder.Entity<ApplicationUser>().HasIndex(u => u.CalendarFeedToken).IsUnique();
+
         builder.Entity<ApplicationUser>()
             .HasOne(u => u.Supervisor)
             .WithMany(u => u.Subordinates)

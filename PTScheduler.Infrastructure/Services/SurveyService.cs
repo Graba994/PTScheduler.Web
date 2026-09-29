@@ -201,6 +201,7 @@ public class SurveyService(
             _ => null
         };
         if (message is null) return;
+        message.Category = PTScheduler.Domain.Constants.NotificationTypes.PushClientActivity;
         try { await push.SendAsync(client.TrainerUserId, message); }
         catch (Exception ex) { logger.LogWarning(ex, "Push for survey {Id} failed.", response.Id); }
     }

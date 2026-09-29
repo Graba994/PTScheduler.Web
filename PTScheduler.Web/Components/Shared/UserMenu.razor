@@ -6,6 +6,7 @@
 @inject AuthenticationStateProvider AuthState
 @inject PTScheduler.Web.Services.UpsellService Upsell
 @inject IOffPackageService OffPackage
+@inject IAccountService AccountSvc
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Application.DTOs
@@ -19,7 +20,7 @@
 
         <button class="um-trigger" @ref="_triggerBtn" @onclick="Toggle" title="Menu użytkownika">
             <div class="um-avatar">
-                @_initials
+                @if (_avatarUrl is not null) { <img src="@_avatarUrl" alt="" class="um-avatar-img" /> } else { @_initials }
                 @if (_badge > 0)
                 {
                     <span class="um-badge">@(_badge > 9 ? "9+" : _badge.ToString())</span>
@@ -38,7 +39,7 @@
 
                 <!-- User header -->
                 <div class="um-header">
-                    <div class="um-avatar um-avatar-lg">@_initials</div>
+                    <div class="um-avatar um-avatar-lg">@if (_avatarUrl is not null) { <img src="@_avatarUrl" alt="" class="um-avatar-img" /> } else { @_initials }</div>
                     <div style="min-width:0">
                         <div class="fw-semibold text-truncate">@_name</div>
                         <div class="text-muted text-truncate" style="font-size:.72rem">@_email</div>
@@ -96,7 +97,7 @@
                 <!-- Account settings -->
                 <a href="/Account/Manage" class="um-item" @onclick="Close">
                     <i class="bi bi-gear-fill" style="font-size:1rem;flex-shrink:0"></i>
-                    <span>Ustawienia konta</span>
+                    <span>Moje konto</span>
                 </a>
                 @if (_canSwitch)
                 {
@@ -166,6 +167,7 @@
         letter-spacing: .03em;
     }
     .um-avatar-lg { width: 42px; height: 42px; font-size: .95rem; }
+    .um-avatar-img { width: 100%; height: 100%; border-radius: 50%; object-fit: cover; }
 
     .um-badge {
         position: absolute;
@@ -285,6 +287,7 @@
     private bool _dark;
     private bool _canInstallPwa;
     private string _initials = "?";
+    private string? _avatarUrl;
     private string _name = string.Empty;
     private string _email = string.Empty;
     private int _badge;
@@ -307,6 +310,7 @@
             _mustChangePassword = user.HasClaim(PTScheduler.Web.Services.AppClaimsPrincipalFactory.MustChangePasswordClaim, "1");
             _canSwitch = user.IsInRole(Roles.Admin) || PTScheduler.Web.Services.AccountSwitchService.IsSwitched(user);
             _isTrainer = user.IsInRole(Roles.Trainer);
+            try { if (_userId is not null) _avatarUrl = await AccountSvc.GetAvatarUrlAsync(_userId); } catch { }
 
             var parts = _name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             _initials = parts.Length >= 2

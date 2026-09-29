@@ -13,4 +13,13 @@ public class NotificationPreferencesDto
     public bool TrainerMessages { get; set; } = true;
 
     public bool ShowHints { get; set; } = true;
+
+    public bool PushReminders { get; set; } = true;
+    public bool PushSessions { get; set; } = true;
+    public bool PushPackages { get; set; } = true;
+    public bool PushMessages { get; set; } = true;
+    public bool PushTrainerMessages { get; set; } = true;
+    public bool PushClientActivity { get; set; } = true;
+    public bool SmsReminders { get; set; } = true;
+    public bool SmsTrainerMessages { get; set; } = true;
 }

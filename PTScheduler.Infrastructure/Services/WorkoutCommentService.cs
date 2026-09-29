@@ -92,6 +92,7 @@ public class WorkoutCommentService(
             {
                 await push.SendAsync(client.ApplicationUserId, new PushMessageDto
                 {
+                    Category = PTScheduler.Domain.Constants.NotificationTypes.PushMessages,
                     Title = $"💬 {authorName} o Twoim treningu ({day})",
                     Body = preview,
                     Url = "/my/workouts"
@@ -101,6 +102,7 @@ public class WorkoutCommentService(
             {
                 await push.SendAsync(client.TrainerUserId, new PushMessageDto
                 {
+                    Category = PTScheduler.Domain.Constants.NotificationTypes.PushMessages,
                     Title = $"💬 {client.FirstName} {client.LastName} — trening {day}".Trim(),
                     Body = preview,
                     Url = $"/trainer/activity/{client.Id}"

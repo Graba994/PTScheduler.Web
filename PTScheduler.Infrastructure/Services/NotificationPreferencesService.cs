@@ -25,6 +25,15 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
             NewClientPending = prefs.NewClientPending,
             ExpiringPackages = prefs.ExpiringPackages,
             TrainerMessages = prefs.TrainerMessages,
+            ShowHints = prefs.ShowHints,
+            PushReminders = prefs.PushReminders,
+            PushSessions = prefs.PushSessions,
+            PushPackages = prefs.PushPackages,
+            PushMessages = prefs.PushMessages,
+            PushTrainerMessages = prefs.PushTrainerMessages,
+            PushClientActivity = prefs.PushClientActivity,
+            SmsReminders = prefs.SmsReminders,
+            SmsTrainerMessages = prefs.SmsTrainerMessages,
         };
     }
 
@@ -46,6 +55,15 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
         prefs.NewClientPending = dto.NewClientPending;
         prefs.ExpiringPackages = dto.ExpiringPackages;
         prefs.TrainerMessages = dto.TrainerMessages;
+        prefs.ShowHints = dto.ShowHints;
+        prefs.PushReminders = dto.PushReminders;
+        prefs.PushSessions = dto.PushSessions;
+        prefs.PushPackages = dto.PushPackages;
+        prefs.PushMessages = dto.PushMessages;
+        prefs.PushTrainerMessages = dto.PushTrainerMessages;
+        prefs.PushClientActivity = dto.PushClientActivity;
+        prefs.SmsReminders = dto.SmsReminders;
+        prefs.SmsTrainerMessages = dto.SmsTrainerMessages;
         await db.SaveChangesAsync();
     }
 
@@ -63,6 +81,14 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
             NotificationTypes.ExpiringPackages => prefs.ExpiringPackages,
             NotificationTypes.TrainerMessages => prefs.TrainerMessages,
             NotificationTypes.SessionReminders => prefs.SessionReminders,
+            NotificationTypes.PushReminders => prefs.PushReminders,
+            NotificationTypes.PushSessions => prefs.PushSessions,
+            NotificationTypes.PushPackages => prefs.PushPackages,
+            NotificationTypes.PushMessages => prefs.PushMessages,
+            NotificationTypes.PushTrainerMessages => prefs.PushTrainerMessages,
+            NotificationTypes.PushClientActivity => prefs.PushClientActivity,
+            NotificationTypes.SmsReminders => prefs.SmsReminders,
+            NotificationTypes.SmsTrainerMessages => prefs.SmsTrainerMessages,
             _ => true
         };
     }

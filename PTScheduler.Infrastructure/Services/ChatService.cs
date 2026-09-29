@@ -136,6 +136,7 @@ public class ChatService(
             {
                 await push.SendAsync(recipient, new PushMessageDto
                 {
+                    Category = PTScheduler.Domain.Constants.NotificationTypes.PushMessages,
                     Title = $"💬 {(string.IsNullOrWhiteSpace(senderName) ? "Nowa wiadomość" : senderName)}",
                     Body = body.Length > 120 ? body[..117] + "…" : body,
                     Url = fromStaff ? "/chat" : $"/chat?client={clientId}"

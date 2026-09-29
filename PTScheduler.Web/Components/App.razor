@@ -22,7 +22,7 @@
                 setAttrIfChanged('data-effective-mode', dark ? 'dark' : 'light');
             }
             function getCookie() {
-                var match = document.cookie.match(/ptscheduler-dark=([01])/);
+                var match = document.cookie.match(/ptscheduler-dark=([01a])/);
                 return match ? match[1] : null;
             }
             function getStored() {
@@ -34,14 +34,23 @@
                 document.cookie = 'ptscheduler-dark=' + (dark ? '1' : '0') + '; path=/; max-age=31536000; SameSite=Lax';
                 try { localStorage.setItem('ptscheduler-dark', dark ? '1' : '0'); } catch (e) { }
             }
+            var systemDark = window.matchMedia ? window.matchMedia('(prefers-color-scheme: dark)') : null;
             function apply() {
                 var pref = getStored();
-                if (pref !== null) {
+                if (pref === 'a') {
+                    applyDark(!!(systemDark && systemDark.matches)); // jak w systemie telefonu / komputera
+                } else if (pref !== null) {
                     applyDark(pref === '1');
                 } else {
                     applyDark(false); // domyślnie tryb jasny
                 }
             }
+            function saveMode(mode) {
+                var v = mode === 'auto' ? 'a' : mode === 'dark' ? '1' : '0';
+                document.cookie = 'ptscheduler-dark=' + v + '; path=/; max-age=31536000; SameSite=Lax';
+                try { localStorage.setItem('ptscheduler-dark', v); } catch (e) { }
+            }
+            try { if (systemDark) systemDark.addEventListener('change', function () { if (getStored() === 'a') apply(); }); } catch (e) { }
             window.PTTheme = {
                 isDark: function () { return h.getAttribute('data-effective-mode') === 'dark'; },
                 toggle: function () {
@@ -50,7 +59,10 @@
                     savePref(dark);
                     return dark;
                 },
-                apply: apply
+                apply: apply,
+                /** 'light' | 'dark' | 'auto' */
+                mode: function () { var p = getStored(); return p === 'a' ? 'auto' : p === '1' ? 'dark' : 'light'; },
+                setMode: function (mode) { saveMode(mode); apply(); return window.PTTheme.isDark(); }
             };
             apply();
             // Re-apply on Blazor enhanced navigation

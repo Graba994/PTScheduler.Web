@@ -131,6 +131,20 @@ namespace Microsoft.AspNetCore.Routing
                 return TypedResults.Challenge(properties, [provider]);
             });
 
+            // Moje konto → Urządzenia i logowania: nowy znacznik bezpieczeństwa unieważnia sesje
+            // na innych urządzeniach, a bieżąca dostaje od razu odświeżone ciasteczko.
+            manageGroup.MapPost("/SignOutOtherDevices", async (
+                HttpContext context,
+                [FromServices] UserManager<ApplicationUser> userManager,
+                [FromServices] SignInManager<ApplicationUser> signInManager) =>
+            {
+                var user = await userManager.GetUserAsync(context.User);
+                if (user is null) return Results.Redirect("/Account/Login");
+                await userManager.UpdateSecurityStampAsync(user);
+                await signInManager.RefreshSignInAsync(user);
+                return Results.Redirect("/Account/Manage/LoginHistory?signedOut=1");
+            });
+
             var loggerFactory = endpoints.ServiceProvider.GetRequiredService<ILoggerFactory>();
             var downloadLogger = loggerFactory.CreateLogger("DownloadPersonalData");
 

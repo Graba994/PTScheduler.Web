@@ -129,6 +129,7 @@ public class PackageReminderService(IServiceScopeFactory scopeFactory, ILogger<P
                     {
                         await push.SendAsync(userId, new PushMessageDto
                         {
+                            Category = PTScheduler.Domain.Constants.NotificationTypes.PushPackages,
                             Title = kind == Kind.Expiring
                                 ? $"Pakiet wygasa {expiresText}"
                                 : $"Zostały Ci {remainingText}",

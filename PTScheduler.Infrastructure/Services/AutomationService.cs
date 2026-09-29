@@ -178,12 +178,15 @@ public class AutomationService(
         {
             try
             {
-                if (!await prefs.IsEnabledAsync(client.ApplicationUserId, NotificationTypes.TrainerMessages)) continue;
                 var def = AutomationKinds.Find(rule.Kind)!;
                 var user = users.GetValueOrDefault(client.ApplicationUserId);
-                var canEmail = channels.Email && rule.ViaEmail && !string.IsNullOrWhiteSpace(user?.Email);
-                var canPush = channels.Push && rule.ViaPush;
-                var canSms = channels.Sms && rule.ViaSms && !string.IsNullOrWhiteSpace(client.Phone);
+                // Klient wybiera kanały w Moje konto → Powiadomienia („Od trenera”: e-mail / push / SMS).
+                var canEmail = channels.Email && rule.ViaEmail && !string.IsNullOrWhiteSpace(user?.Email)
+                               && await prefs.IsEnabledAsync(client.ApplicationUserId, NotificationTypes.TrainerMessages);
+                var canPush = channels.Push && rule.ViaPush
+                              && await prefs.IsEnabledAsync(client.ApplicationUserId, NotificationTypes.PushTrainerMessages);
+                var canSms = channels.Sms && rule.ViaSms && !string.IsNullOrWhiteSpace(client.Phone)
+                             && await prefs.IsEnabledAsync(client.ApplicationUserId, NotificationTypes.SmsTrainerMessages);
                 if (!canEmail && !canPush && !canSms) continue;
 
                 string? code = null;
@@ -231,6 +234,7 @@ public class AutomationService(
                     {
                         var r = await push.SendWithReportAsync(client.ApplicationUserId, new PushMessageDto
                         {
+                            Category = PTScheduler.Domain.Constants.NotificationTypes.PushTrainerMessages,
                             Title = subject,
                             Body = text.Replace('\n', ' ') is { Length: > 180 } t ? t[..177] + "…" : text.Replace('\n', ' '),
                             Url = def.LinkPath

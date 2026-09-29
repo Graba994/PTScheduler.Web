@@ -119,13 +119,17 @@ builder.Services.AddAntiforgery(options => options.Cookie.Name = $".PTS.{cookieS
 // Odświeżanie ciasteczka (znacznik bezpieczeństwa) buduje tożsamość od nowa — znacznik
 // „przełączono z konta X” trzeba przenieść, inaczej po chwili zniknąłby przycisk powrotu.
 builder.Services.Configure<SecurityStampValidatorOptions>(options =>
+{
+    // „Wyloguj ze wszystkich innych urządzeń” (Moje konto) działa najpóźniej po 5 minutach.
+    options.ValidationInterval = TimeSpan.FromMinutes(5);
     options.OnRefreshingPrincipal = ctx =>
     {
         var from = ctx.CurrentPrincipal?.FindFirst(PTScheduler.Web.Services.AccountSwitchService.OriginalUserClaim);
         if (from is not null && ctx.NewPrincipal?.Identity is System.Security.Claims.ClaimsIdentity id)
             id.AddClaim(new System.Security.Claims.Claim(from.Type, from.Value));
         return Task.CompletedTask;
-    });
+    };
+});
 builder.Services.AddScoped<PTScheduler.Web.Services.AccountSwitchService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.AdminDashboardService>();
 builder.Services.AddMemoryCache();
@@ -480,6 +484,68 @@ app.MapGet("/calendar/feed/{token}.ics", async (
     var ics = CalendarLinks.BuildFeed($"{company} — wizyty", events);
     return Results.File(ics, "text/calendar; charset=utf-8");
 });
+
+// Kalendarz klienta (Moje konto → „Moje treningi w kalendarzu”): wizyty klienta w pliku ICS.
+// Kalendarze nie wysyłają ciasteczek — dostęp po sekretnym tokenie; „Nowy link” unieważnia stary.
+app.MapGet("/calendar/my/{token}.ics", async (
+    string token,
+    PTScheduler.Application.Interfaces.IAccountService accounts,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    IAppClock clock,
+    IBrandingService branding) =>
+{
+    var userId = await accounts.FindUserByCalendarTokenAsync(token);
+    if (userId is null) return Results.NotFound();
+
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var from = clock.LocalNow.Date.AddDays(-60);
+    var to = clock.LocalNow.Date.AddDays(366);
+    var sessions = await db.Sessions.AsNoTracking()
+        .Where(s => s.Client.ApplicationUserId == userId && s.StartTime >= from && s.StartTime < to)
+        .Select(s => new { s.Id, s.StartTime, s.Status, s.MeetingUrl, s.TrainerUserId, TypeName = s.SessionType.Name, s.SessionType.DurationMinutes })
+        .ToListAsync();
+    var trainerIds = sessions.Select(s => s.TrainerUserId).Distinct().ToList();
+    var trainers = await db.Users.AsNoTracking().Where(u => trainerIds.Contains(u.Id))
+        .ToDictionaryAsync(u => u.Id, u => (u.FirstName + " " + u.LastName).Trim());
+
+    string company;
+    try { company = (await branding.GetAsync()).CompanyName ?? "PTScheduler"; }
+    catch { company = "PTScheduler"; }
+
+    var events = sessions.Select(s =>
+    {
+        var start = DateTime.SpecifyKind(clock.ToUtc(s.StartTime), DateTimeKind.Utc);
+        var cancelled = s.Status is PTScheduler.Domain.Enums.SessionStatus.Cancelled;
+        var trainer = trainers.GetValueOrDefault(s.TrainerUserId);
+        var description = string.Join("\n", new[]
+        {
+            string.IsNullOrWhiteSpace(trainer) ? null : $"Trener: {trainer}",
+            string.IsNullOrWhiteSpace(s.MeetingUrl) ? null : $"Spotkanie online: {s.MeetingUrl}",
+            s.Status == PTScheduler.Domain.Enums.SessionStatus.AwaitingPackage ? "Czeka na opłacenie pakietu" : null
+        }.Where(l => l is not null));
+        return new CalendarLinks.FeedEvent(
+            Uid: $"my-session-{s.Id}@{company.Replace(" ", "")}.ptscheduler",
+            StartUtc: start,
+            EndUtc: start.AddMinutes(s.DurationMinutes > 0 ? s.DurationMinutes : 60),
+            Title: cancelled ? $"[Odwołany] {s.TypeName} — {company}" : $"{s.TypeName} — {company}",
+            Description: description,
+            Location: null,
+            Url: s.MeetingUrl,
+            Cancelled: cancelled);
+    });
+
+    var ics = CalendarLinks.BuildFeed($"{company} — moje treningi", events);
+    return Results.File(ics, "text/calendar; charset=utf-8");
+});
+
+// Zdjęcia profilowe (prywatny katalog). Tylko dla zalogowanych — Id użytkownika to GUID.
+app.MapGet("/avatars/{userId}.webp", (string userId, HttpContext ctx, PTScheduler.Application.Interfaces.IAccountService accounts) =>
+{
+    var path = accounts.AvatarFilePath(userId);
+    if (path is null) return Results.NotFound();
+    ctx.Response.Headers.CacheControl = "private, max-age=604800"; // adres zmienia się (?v=) przy nowym zdjęciu
+    return Results.File(path, "image/webp");
+}).RequireAuthorization();
 
 // Dynamic PWA manifest — reads branding from DB so name/theme follow admin settings.
 // Served as application/manifest+json; browsers prefer .webmanifest over .json.

@@ -250,7 +250,7 @@ public class OffPackageService(
 
     private async Task NotifyTrainerAsync(SessionDto s, (string Title, string Body) msg)
     {
-        try { await push.SendAsync(s.TrainerUserId, new PushMessageDto { Title = msg.Title, Body = msg.Body, Url = "/sessions" }); }
+        try { await push.SendAsync(s.TrainerUserId, new PushMessageDto { Category = PTScheduler.Domain.Constants.NotificationTypes.PushSessions, Title = msg.Title, Body = msg.Body, Url = "/sessions" }); }
         catch (Exception ex) { logger.LogWarning(ex, "Powiadomienie trenera o rezerwacji poza pakietem nie wyszło (SessionId={Id})", s.Id); }
     }
 
@@ -263,7 +263,7 @@ public class OffPackageService(
         var emailOn = await SafeAsync(email.IsEnabledAsync);
         foreach (var p in people)
         {
-            try { await push.SendAsync(p.Id, new PushMessageDto { Title = title, Body = body, Url = "/my" }); }
+            try { await push.SendAsync(p.Id, new PushMessageDto { Category = PTScheduler.Domain.Constants.NotificationTypes.PushSessions, Title = title, Body = body, Url = "/my" }); }
             catch (Exception ex) { logger.LogWarning(ex, "Push do klienta nie wyszedł"); }
             if (!emailOn || string.IsNullOrEmpty(p.Email)) continue;
             try

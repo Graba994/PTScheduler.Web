@@ -11,63 +11,78 @@
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject PTScheduler.Application.Interfaces.IAppClock Clock
 
-<PageTitle>Historia logowań</PageTitle>
+<AppTitle Page="Urządzenia i logowania" />
 
-<h5 class="fw-bold mb-1">Historia logowań</h5>
-<p class="text-muted small mb-4">Ostatnie 30 logowań na Twoje konto.</p>
+<div>
+    <h1 class="h4 fw-bold mb-1">Urządzenia i logowania</h1>
+    <p class="text-muted small mb-0">Ostatnie logowania na Twoje konto. Nie rozpoznajesz któregoś? Wyloguj inne urządzenia i zmień hasło.</p>
+</div>
+
+@if (SignedOut == "1")
+{
+    <div class="alert alert-success py-2 small mb-0">
+        <i class="bi bi-check-circle me-1"></i>Gotowe — inne urządzenia zostaną wylogowane najpóźniej w ciągu 5 minut. Na tym urządzeniu nic się nie zmienia.
+    </div>
+}
+
+<div class="acct-card d-flex align-items-center gap-3 flex-wrap">
+    <span class="acct-row-icon red"><i class="bi bi-box-arrow-right"></i></span>
+    <div class="flex-grow-1" style="min-width:200px">
+        <div class="fw-semibold">Wyloguj ze wszystkich innych urządzeń</div>
+        <div class="small text-muted">Np. po zgubieniu telefonu albo logowaniu na cudzym komputerze.</div>
+    </div>
+    <form method="post" action="/Account/Manage/SignOutOtherDevices" data-enhance="false">
+        <AntiforgeryToken />
+        <button type="submit" class="btn btn-outline-danger">Wyloguj</button>
+    </form>
+</div>
 
 @if (_logs == null)
 {
-    <div class="text-center py-4">
-        <div class="spinner-border spinner-border-sm text-primary"></div>
-        <span class="ms-2 text-muted small">Ładowanie...</span>
-    </div>
+    <div class="text-center py-4"><div class="spinner-border spinner-border-sm text-primary"></div></div>
 }
 else if (_logs.Count == 0)
 {
-    <div class="text-center py-4 text-muted">
+    <div class="acct-card text-center text-muted">
         <i class="bi bi-clock-history" style="font-size:2rem;opacity:.4"></i>
-        <p class="mt-2 small">Brak zarejestrowanych logowań.</p>
+        <p class="mt-2 small mb-0">Brak zarejestrowanych logowań.</p>
     </div>
 }
 else
 {
-    <div class="table-responsive">
-        <table class="table table-sm" style="font-size:.85rem">
-            <thead>
-                <tr>
-                    <th>Data i czas</th>
-                    <th>Adres IP</th>
-                    <th>Przeglądarka</th>
-                    <th>Status</th>
-                </tr>
-            </thead>
-            <tbody>
-                @foreach (var log in _logs)
+    <div class="acct-list">
+        @foreach (var log in _showAll ? _logs : _logs.Take(10))
+        {
+            var (icon, device) = Device(log.UserAgent);
+            <div class="acct-row">
+                <span class="acct-row-icon @(log.Success ? "slate" : "red")"><i class="bi @icon"></i></span>
+                <span class="acct-row-main">
+                    <span class="acct-row-title d-block">@device</span>
+                    <span class="acct-row-sub">@Clock.ToWallClock(log.LoginTime.ToUniversalTime()).ToString("d MMMM yyyy, HH:mm", Pl)@(string.IsNullOrEmpty(log.IpAddress) ? "" : $" · IP {log.IpAddress}")</span>
+                </span>
+                @if (log.Success)
                 {
-                    <tr>
-                        <td>@Clock.ToWallClock(log.LoginTime.ToUniversalTime()).ToString("dd.MM.yyyy HH:mm")</td>
-                        <td><code style="font-size:.8rem">@(log.IpAddress ?? "—")</code></td>
-                        <td class="text-truncate" style="max-width:220px" title="@log.UserAgent">@ParseBrowser(log.UserAgent)</td>
-                        <td>
-                            @if (log.Success)
-                            {
-                                <span class="badge" style="background:var(--c-success-bg,#dcfce7);color:var(--c-success,#16a34a)">OK</span>
-                            }
-                            else
-                            {
-                                <span class="badge" style="background:var(--c-danger-bg,#fee2e2);color:var(--c-danger,#dc2626)">Nieudane</span>
-                            }
-                        </td>
-                    </tr>
+                    <span class="acct-row-value ok">Udane</span>
                 }
-            </tbody>
-        </table>
+                else
+                {
+                    <span class="acct-row-value" style="color:#DC2626;font-weight:600">Nieudana próba</span>
+                }
+            </div>
+        }
     </div>
+    @if (!_showAll && _logs.Count > 10)
+    {
+        <button class="btn btn-outline-secondary align-self-center" @onclick="() => _showAll = true">Pokaż więcej (@(_logs.Count - 10))</button>
+    }
 }
 
 @code {
+    private bool _showAll;
+    private static readonly System.Globalization.CultureInfo Pl = new("pl-PL");
     private List<LoginLog>? _logs;
+
+    [SupplyParameterFromQuery] public string? SignedOut { get; set; }
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -87,14 +102,23 @@ else
         StateHasChanged();
     }
 
-    private static string ParseBrowser(string? ua)
+    /// <summary>Czytelna nazwa urządzenia z nagłówka przeglądarki, np. „iPhone · Safari”.</summary>
+    private static (string Icon, string Label) Device(string? ua)
     {
-        if (string.IsNullOrEmpty(ua)) return "—";
-        if (ua.Contains("Edg/")) return "Edge";
-        if (ua.Contains("Chrome/")) return "Chrome";
-        if (ua.Contains("Firefox/")) return "Firefox";
-        if (ua.Contains("Safari/") && !ua.Contains("Chrome")) return "Safari";
-        if (ua.Length > 60) return ua[..57] + "...";
-        return ua;
+        if (string.IsNullOrEmpty(ua)) return ("bi-question-circle", "Nieznane urządzenie");
+        var browser = ua.Contains("Edg/") ? "Edge"
+            : ua.Contains("OPR/") ? "Opera"
+            : ua.Contains("Firefox/") ? "Firefox"
+            : ua.Contains("Chrome/") ? "Chrome"
+            : ua.Contains("Safari/") ? "Safari"
+            : "przeglądarka";
+        var (icon, os) = ua.Contains("iPhone") ? ("bi-phone", "iPhone")
+            : ua.Contains("iPad") ? ("bi-tablet", "iPad")
+            : ua.Contains("Android") ? (ua.Contains("Mobile") ? ("bi-phone", "Telefon z Androidem") : ("bi-tablet", "Tablet z Androidem"))
+            : ua.Contains("Mac OS X") ? ("bi-laptop", "Mac")
+            : ua.Contains("Windows") ? ("bi-pc-display", "Komputer z Windows")
+            : ua.Contains("Linux") ? ("bi-pc-display", "Komputer z Linuksem")
+            : ("bi-globe", "Urządzenie");
+        return (icon, $"{os} · {browser}");
     }
 }

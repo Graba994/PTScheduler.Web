@@ -40,6 +40,34 @@ public static class PhotoCompressor
         return new Result(data.ToArray(), w, h);
     }
 
+    /// <summary>Kwadrat ze środka zdjęcia (np. zdjęcie profilowe), przeskalowany do <paramref name="edge"/> px.</summary>
+    /// <exception cref="InvalidDataException">Plik nie jest obsługiwanym obrazem.</exception>
+    public static Result CompressSquare(byte[] input, int edge, int quality)
+    {
+        using var codec = SKCodec.Create(new SKMemoryStream(input))
+            ?? throw new InvalidDataException("Nieobsługiwany format pliku.");
+        using var decoded = SKBitmap.Decode(codec)
+            ?? throw new InvalidDataException("Nie udało się odczytać obrazu.");
+        using var oriented = ApplyOrigin(decoded, codec.EncodedOrigin);
+        var src = oriented ?? decoded;
+
+        var side = Math.Min(src.Width, src.Height);
+        var crop = SKRect.Create((src.Width - side) / 2f, (src.Height - side) / 2f, side, side);
+        var size = Math.Min(edge, side);
+
+        using var surface = SKSurface.Create(new SKImageInfo(size, size, SKColorType.Rgba8888, SKAlphaType.Premul))
+            ?? throw new InvalidDataException("Obraz jest zbyt duży.");
+        surface.Canvas.Clear(SKColors.White);
+        using (var img = SKImage.FromBitmap(src))
+            surface.Canvas.DrawImage(img, crop, new SKRect(0, 0, size, size), new SKSamplingOptions(SKCubicResampler.Mitchell));
+        surface.Canvas.Flush();
+
+        using var snapshot = surface.Snapshot();
+        using var data = snapshot.Encode(SKEncodedImageFormat.Webp, quality)
+            ?? throw new InvalidDataException("Nie udało się zakodować obrazu.");
+        return new Result(data.ToArray(), size, size);
+    }
+
     private static SKBitmap? ApplyOrigin(SKBitmap bmp, SKEncodedOrigin origin)
     {
         if (origin is SKEncodedOrigin.TopLeft or SKEncodedOrigin.Default) return null;

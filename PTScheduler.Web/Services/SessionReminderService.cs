@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
+using PTScheduler.Application.DTOs;
 using PTScheduler.Application.Interfaces;
 using PTScheduler.Domain.Constants;
 using PTScheduler.Domain.Enums;
@@ -36,11 +37,13 @@ public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<S
         var smsService = scope.ServiceProvider.GetRequiredService<ISmsService>();
         var entitlements = scope.ServiceProvider.GetRequiredService<EntitlementService>();
 
+        var push = scope.ServiceProvider.GetRequiredService<IWebPushService>();
         var emailEnabled = entitlements.IsAllowed("EmailReminders") && await emailService.IsEnabledAsync();
         var smsEnabled = entitlements.IsAllowed("SmsReminders") && await smsService.IsEnabledAsync();
-        if (!emailEnabled && !smsEnabled)
+        var pushEnabled = (await push.GetSettingsAsync()).IsConfigured;
+        if (!emailEnabled && !smsEnabled && !pushEnabled)
         {
-            logger.LogDebug("Email and SMS reminders both disabled — skipping reminders cycle.");
+            logger.LogDebug("Email, SMS and push reminders all disabled — skipping reminders cycle.");
             return;
         }
 
@@ -85,12 +88,13 @@ public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<S
             try
             {
                 var clientUser = await userManager.FindByIdAsync(session.Client.ApplicationUserId);
-                var optedIn = await prefs.IsEnabledAsync(session.Client.ApplicationUserId, NotificationTypes.SessionReminders);
+                var emailOptedIn = await prefs.IsEnabledAsync(session.Client.ApplicationUserId, NotificationTypes.SessionReminders);
+                var smsOptedIn = await prefs.IsEnabledAsync(session.Client.ApplicationUserId, NotificationTypes.SmsReminders);
 
                 // Dostępność kanału dla TEJ sesji: kanał włączony w planie/konfiguracji,
-                // klient ma kontakt i nie zrezygnował z przypomnień.
-                var emailApplicable = emailEnabled && optedIn && clientUser?.Email is not null;
-                var smsApplicable   = smsEnabled && optedIn && !string.IsNullOrWhiteSpace(session.Client.Phone);
+                // klient ma kontakt i nie zrezygnował z przypomnień tym kanałem (Moje konto → Powiadomienia).
+                var emailApplicable = emailEnabled && emailOptedIn && clientUser?.Email is not null;
+                var smsApplicable   = smsEnabled && smsOptedIn && !string.IsNullOrWhiteSpace(session.Client.Phone);
 
                 var trainerName = ResolveName(await userManager.FindByIdAsync(session.TrainerUserId));
                 var clientName = $"{session.Client.FirstName} {session.Client.LastName}".Trim();
@@ -192,8 +196,20 @@ public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<S
                 }
                 else if (session.ReminderEmailSentAt is not null && session.ReminderSmsSentAt is not null)
                 {
-                    // Oba kanały rozstrzygnięte — sesja w pełni obsłużona.
+                    // Oba kanały rozstrzygnięte — sesja w pełni obsłużona. Push wysyłamy raz, przy domknięciu
+                    // (najlepszy wysiłek; odbiorca może go wyłączyć w Moje konto → Powiadomienia).
                     session.ReminderSentAt = DateTime.UtcNow;
+                    try
+                    {
+                        await push.SendAsync(session.Client.ApplicationUserId, new PushMessageDto
+                        {
+                            Category = NotificationTypes.PushReminders,
+                            Title = $"Jutro trening o {session.StartTime:HH:mm}",
+                            Body = $"{session.SessionType.Name} u {trainerName}. Do zobaczenia!",
+                            Url = "/my"
+                        });
+                    }
+                    catch (Exception ex) { logger.LogDebug(ex, "Session {Id}: push reminder failed.", session.Id); }
                 }
             }
             catch (Exception ex)

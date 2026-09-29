@@ -118,6 +118,8 @@ public class WebPushService(
         if (!settings.IsConfigured) return new PushSendReport(0, 0, "Powiadomienia push nie są skonfigurowane.");
 
         await using var db = dbFactory.CreateDbContext();
+        if (message.Category is { } category && !await AllowedAsync(db, userId, category))
+            return new PushSendReport(0, 0, "Odbiorca wyłączył ten rodzaj powiadomień push.");
         var subs = await db.PushSubscriptions.Where(s => s.UserId == userId).ToListAsync();
         var sent = 0;
         string? lastError = null;
@@ -128,6 +130,23 @@ public class WebPushService(
             else lastError = error;
         }
         return new PushSendReport(sent, subs.Count - sent, lastError);
+    }
+
+    /// <summary>Czy użytkownik chce dostawać ten rodzaj push (brak ustawień = wszystko włączone).</summary>
+    private static async Task<bool> AllowedAsync(ApplicationDbContext db, string userId, string category)
+    {
+        var p = await db.NotificationPreferences.AsNoTracking().FirstOrDefaultAsync(x => x.UserId == userId);
+        if (p is null) return true;
+        return category switch
+        {
+            PTScheduler.Domain.Constants.NotificationTypes.PushReminders => p.PushReminders,
+            PTScheduler.Domain.Constants.NotificationTypes.PushSessions => p.PushSessions,
+            PTScheduler.Domain.Constants.NotificationTypes.PushPackages => p.PushPackages,
+            PTScheduler.Domain.Constants.NotificationTypes.PushMessages => p.PushMessages,
+            PTScheduler.Domain.Constants.NotificationTypes.PushTrainerMessages => p.PushTrainerMessages,
+            PTScheduler.Domain.Constants.NotificationTypes.PushClientActivity => p.PushClientActivity,
+            _ => true
+        };
     }
 
     public async Task SendToAllAsync(PushMessageDto message)
