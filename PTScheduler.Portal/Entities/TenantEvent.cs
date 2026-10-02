@@ -38,4 +38,7 @@ public static class TenantEventTypes
     public const string OfferChanged = "offer_changed";
     public const string BillIssued = "bill_issued";
     public const string BillPaid = "bill_paid";
+    public const string ErrorSpike = "error_spike";
+    public const string BackupVerified = "backup_verified";
+    public const string BackupVerifyFailed = "backup_verify_failed";
 }

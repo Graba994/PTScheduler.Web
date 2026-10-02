@@ -78,6 +78,8 @@ builder.Services.AddHttpClient();
 builder.Services.AddScoped<StorePaymentService>();
 builder.Services.AddScoped<BillingService>();
 builder.Services.AddHostedService<BillingBackgroundService>();
+builder.Services.AddScoped<ErrorAlertService>();
+builder.Services.AddHostedService<ErrorAlertBackgroundService>();
 builder.Services.AddScoped<BackupService>();
 builder.Services.AddHostedService<BackupScheduler>();
 builder.Services.AddSingleton<UpdateNotifier>();

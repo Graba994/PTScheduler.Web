@@ -68,6 +68,16 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         /// <summary>Dane sprzedawcy w nagłówku PDF oferty trenera (nazwa, adres, NIP, konto — wiele linii).</summary>
         public const string OfferSellerDetails = "offer_seller_details";
 
+        // Alarm przy fali błędów w aplikacjach trenerów
+        public const string ErrorAlertEnabled = "error_alert_enabled";
+        /// <summary>Ile błędów w oknie czasu uruchamia alarm.</summary>
+        public const string ErrorAlertThreshold = "error_alert_threshold";
+        public const string ErrorAlertWindowMinutes = "error_alert_window_minutes";
+        /// <summary>Po alarmie dla danej instancji kolejny najwcześniej po tylu minutach.</summary>
+        public const string ErrorAlertCooldownMinutes = "error_alert_cooldown_minutes";
+        public const string ErrorAlertEmail = "error_alert_email";
+        public const string ErrorAlertSms = "error_alert_sms";
+
         // Automatyczne rachunki trenerów
         /// <summary>„true” — Portal sam wystawia miesięczne rachunki i przypomina o płatności.</summary>
         public const string BillingAutoEnabled = "billing_auto_enabled";

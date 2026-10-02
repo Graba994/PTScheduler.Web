@@ -1,0 +1,159 @@
+@page "/panel/alerts"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject ErrorAlertService AlertSvc
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@rendermode InteractiveServer
+
+<PageTitle>Alarmy — PTScheduler Portal</PageTitle>
+
+<PanelHeader Title="Alarmy" Icon="bi-bell" IconClass="pp-tone-warn"
+             Subtitle="Portal pilnuje logów aplikacji trenerów i daje znać, gdy zaczynają sypać błędami — zanim zadzwoni trener.">
+    <Actions>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="ScanNowAsync" disabled="@_scanning">
+            @if (_scanning) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-search me-1"></i> }
+            Sprawdź teraz
+        </button>
+    </Actions>
+</PanelHeader>
+
+@if (_message is not null)
+{
+    <div class="alert @(_msgError ? "alert-danger" : "alert-success") alert-dismissible py-2 small">
+        @_message
+        <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button>
+    </div>
+}
+
+@if (_settings is not null)
+{
+    <section class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+            <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm"><i class="bi bi-bug"></i></span>Fala błędów</h2>
+            <div class="form-check form-switch mb-3">
+                <input class="form-check-input" type="checkbox" id="eaOn" @bind="_settings.Enabled" />
+                <label class="form-check-label" for="eaOn">Wysyłaj alarm, gdy instancja zaczyna sypać błędami</label>
+            </div>
+            <div class="row g-3 align-items-end">
+                <div class="col-6 col-md-3">
+                    <label class="form-label small fw-semibold" for="eaThr">Liczba błędów</label>
+                    <input id="eaThr" type="number" min="1" class="form-control form-control-sm" @bind="_settings.Threshold" />
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label small fw-semibold" for="eaWin">w ciągu (min)</label>
+                    <input id="eaWin" type="number" min="1" max="120" class="form-control form-control-sm" @bind="_settings.WindowMinutes" />
+                </div>
+                <div class="col-6 col-md-3">
+                    <label class="form-label small fw-semibold" for="eaCd">Kolejny alarm po (min)</label>
+                    <input id="eaCd" type="number" min="5" max="1440" class="form-control form-control-sm" @bind="_settings.CooldownMinutes" />
+                </div>
+                <div class="col-6 col-md-3">
+                    <div class="form-check"><input class="form-check-input" type="checkbox" id="eaMail" @bind="_settings.Email" /><label class="form-check-label small" for="eaMail">E-mail</label></div>
+                    <div class="form-check"><input class="form-check-input" type="checkbox" id="eaSms" @bind="_settings.Sms" /><label class="form-check-label small" for="eaSms">SMS</label></div>
+                </div>
+            </div>
+            <p class="small text-muted mt-3 mb-3">
+                Wiadomość trafia na e-mail i telefon administratora ustawione w Zgłoszeniach (powiadomienia). Sprawdzamy co 2 minuty aplikacje trenerów, Portal i Guardiana.
+                Przykład: 20 błędów w 5 min — pojedyncze błędy (np. ktoś wpisał zły adres) nie budzą nikogo w nocy.
+            </p>
+            <div class="d-flex gap-2">
+                <button class="btn btn-sm btn-primary" @onclick="SaveAsync"><i class="bi bi-floppy me-1"></i>Zapisz</button>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="TestAsync"><i class="bi bi-send me-1"></i>Wyślij test</button>
+            </div>
+        </div>
+    </section>
+}
+
+@if (_scan is not null)
+{
+    <section class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+            <h2 class="pp-card-title mb-2">Błędy w ostatnich @_settings?.WindowMinutes min</h2>
+            @if (_scan.Count == 0)
+            {
+                <p class="small text-muted mb-0">Brak działających instancji do sprawdzenia.</p>
+            }
+            else
+            {
+                <ul class="list-unstyled mb-0 small">
+                    @foreach (var s in _scan.OrderByDescending(s => s.Errors))
+                    {
+                        <li class="d-flex justify-content-between gap-3 py-1 border-bottom">
+                            <span><a href="@($"/panel/logs?c={Uri.EscapeDataString(s.Container)}")">@s.Label</a>
+                                @if (s.Samples.Count > 0) { <span class="text-muted d-block text-truncate" style="max-width:520px">@s.Samples[0]</span> }
+                            </span>
+                            <span class="fw-semibold @(s.Errors >= (_settings?.Threshold ?? 20) ? "text-danger" : s.Errors > 0 ? "text-warning" : "text-success")">@s.Errors</span>
+                        </li>
+                    }
+                </ul>
+            }
+        </div>
+    </section>
+}
+
+<section class="card border-0 shadow-sm">
+    <div class="card-body">
+        <h2 class="pp-card-title mb-2">Ostatnie alarmy</h2>
+        @if (_events.Count == 0)
+        {
+            <p class="small text-muted mb-0">Jeszcze nie było alarmu — i oby tak zostało.</p>
+        }
+        else
+        {
+            <ul class="list-unstyled mb-0 small">
+                @foreach (var e in _events)
+                {
+                    <li class="d-flex justify-content-between gap-3 py-1 border-bottom">
+                        <span><i class="bi @PanelUi.EventIcon(e.EventType) me-1"></i>@PanelUi.EventLabel(e.EventType) — @(e.Tenant?.CompanyName ?? e.Tenant?.Slug): @e.Detail</span>
+                        <span class="text-muted text-nowrap">@ContainerLogService.ToLocal(e.OccurredAt).ToString("dd.MM HH:mm")</span>
+                    </li>
+                }
+            </ul>
+        }
+    </div>
+</section>
+
+@code {
+    private ErrorAlertSettings? _settings;
+    private List<ErrorScan>? _scan;
+    private List<TenantEvent> _events = [];
+    private bool _scanning, _msgError;
+    private string? _message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _settings = await AlertSvc.GetSettingsAsync();
+        await LoadEventsAsync();
+    }
+
+    private async Task LoadEventsAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var types = new[] { TenantEventTypes.ErrorSpike, TenantEventTypes.BackupVerifyFailed, TenantEventTypes.HealthDown };
+        _events = await db.TenantEvents.AsNoTracking().Include(e => e.Tenant)
+            .Where(e => types.Contains(e.EventType))
+            .OrderByDescending(e => e.OccurredAt).Take(30).ToListAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        await AlertSvc.SaveSettingsAsync(_settings!);
+        _settings = await AlertSvc.GetSettingsAsync();
+        (_message, _msgError) = ("Zapisano ustawienia alarmów.", false);
+    }
+
+    private async Task TestAsync()
+    {
+        await AlertSvc.SaveSettingsAsync(_settings!);
+        var (ok, msg) = await AlertSvc.SendTestAsync();
+        (_message, _msgError) = (msg, !ok);
+    }
+
+    private async Task ScanNowAsync()
+    {
+        _scanning = true;
+        try { _scan = await AlertSvc.ScanAsync(_settings?.WindowMinutes ?? 5); }
+        catch (Exception ex) { (_message, _msgError) = ($"Nie udało się odczytać logów: {ex.Message}", true); }
+        _scanning = false;
+    }
+}
