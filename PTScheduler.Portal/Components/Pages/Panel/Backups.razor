@@ -7,12 +7,15 @@
 @inject OffsiteBackupService Offsite
 @inject GoogleOAuthBroker GoogleBroker
 @inject NavigationManager Nav
+@inject BackupMaintenanceService Maintenance
+@inject BackupJobs Jobs
 @rendermode InteractiveServer
+@implements IDisposable
 @using K = PTScheduler.Portal.Services.SiteSettingsService.Keys
 
 <PageTitle>Kopie zapasowe — PTScheduler Portal</PageTitle>
 
-<PanelHeader Title="Kopie zapasowe" Icon="bi-hdd-stack" Subtitle="Codzienne kopie baz danych wszystkich trenerów — z cotygodniowym testem odtworzenia i kopią poza serwerem. Stare kopie usuwają się same.">
+<PanelHeader Title="Kopie zapasowe" Icon="bi-hdd-stack" Subtitle="Pełne kopie trenerów (baza, zdjęcia, dokumenty) i Portalu — z testem odtworzenia, kopią poza serwerem i odtwarzaniem jednym kliknięciem.">
     <Actions>
     <div class="d-flex gap-2">
         <button class="btn btn-primary btn-sm" @onclick="BackupAllNow" disabled="@_busy">
@@ -38,6 +41,73 @@
 }
 
 @{
+    var job = Jobs.Current ?? (Jobs.Last is { CompletedAt: { } done } lastJob && DateTime.UtcNow - done < TimeSpan.FromHours(2) && !_jobDismissed ? lastJob : null);
+}
+@if (job is not null)
+{
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header pp-card-header d-flex align-items-center gap-2 flex-wrap">
+            <span class="pp-card-header-title">
+                <span class="pp-icon pp-icon-sm @(job.Ok is null ? "pp-tone-info" : job.Ok == true ? "pp-tone-ok" : "pp-tone-danger")">
+                    <i class="bi @(job.Ok is null ? "bi-arrow-repeat" : job.Ok == true ? "bi-check2-circle" : "bi-exclamation-triangle")"></i>
+                </span>@job.Title
+            </span>
+            <span class="pp-chip pp-tone-@(job.Ok is null ? "info" : job.Ok == true ? "ok" : "danger") ms-auto">@(job.Ok is null ? "w toku…" : job.Ok == true ? "gotowe" : "z problemami")</span>
+            @if (job.Ok is not null)
+            {
+                <button type="button" class="btn-close btn-close-sm" aria-label="Zamknij" @onclick="() => _jobDismissed = true"></button>
+            }
+        </div>
+        <div class="card-body">
+            @if (job.Result is not null)
+            {
+                <p class="small mb-2 @(job.Ok == true ? "" : "text-danger")">@job.Result</p>
+            }
+            <pre class="small mb-0 bg-light rounded p-2" style="max-height:260px;overflow:auto;white-space:pre-wrap">@string.Join("\n", job.Lines)</pre>
+            @if (job.Ok is null)
+            {
+                <div class="form-text small mt-2">Możesz zamknąć stronę — zadanie dokończy się samo, a dziennik zobaczysz tu po powrocie.</div>
+            }
+        </div>
+    </div>
+}
+
+@if (_restoreEntry is not null)
+{
+    <div class="card border-0 shadow-sm mb-3 border-start border-4 border-warning">
+        <div class="card-body">
+            <h2 class="pp-card-title pp-card-title-icon mb-2"><span class="pp-icon pp-icon-sm pp-tone-warn"><i class="bi bi-arrow-counterclockwise"></i></span>Odtwórz kopię @_restoreEntry.Slug z @_restoreEntry.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</h2>
+            <p class="small text-muted mb-3">
+                Dane w wybranej instancji zostaną zastąpione danymi z kopii@(BackupService.IsBundle(_restoreEntry.FilePath) ? " (baza i pliki)" : " (tylko baza — pliki zostają)").
+                Najpierw Portal zrobi kopię obecnego stanu, więc da się to cofnąć. Aplikacja trenera będzie niedostępna przez kilka minut.
+            </p>
+            <div class="row g-3 align-items-end">
+                <div class="col-md-5">
+                    <label class="form-label small fw-semibold" for="rsTarget">Odtwórz do instancji</label>
+                    <select id="rsTarget" class="form-select" @bind="_restoreTargetId">
+                        @foreach (var t in _tenants)
+                        {
+                            <option value="@t.Id">@t.Slug@(t.Slug == _restoreEntry.Slug ? " (ta sama — w miejsce obecnej)" : $" — {t.CompanyName}")</option>
+                        }
+                    </select>
+                    <div class="form-text small">Żeby najpierw obejrzeć kopię, załóż w Trenerach instancję testową i odtwórz do niej.</div>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold" for="rsConfirm">Wpisz adres instancji, żeby potwierdzić</label>
+                    <input id="rsConfirm" class="form-control font-monospace" autocomplete="off" placeholder="@TargetSlug" @bind="_restoreConfirm" @bind:event="oninput" />
+                </div>
+                <div class="col-md-3 d-flex gap-2">
+                    <button class="btn btn-warning btn-sm" disabled="@(_restoreConfirm?.Trim() != TargetSlug || Jobs.Current is not null)" @onclick="StartRestore">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>Odtwórz
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => _restoreEntry = null">Anuluj</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@{
     var last = _entries.Where(e => e.Status != BackupStatus.Running).OrderByDescending(e => e.CreatedAt).FirstOrDefault();
     var running = _entries.Any(e => e.Status == BackupStatus.Running);
 }
@@ -55,7 +125,7 @@ else if (last is null)
 }
 else if (last.Status == BackupStatus.Completed)
 {
-    <StatusBanner Tone="ok" Icon="bi-shield-check" Title="Kopie robią się codziennie">Ostatnia udana kopia: @last.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm"). Kopie starsze niż @_retentionDays dni usuwają się same.</StatusBanner>
+    <StatusBanner Tone="ok" Icon="bi-shield-check" Title="@($"Kopie robią się {ScheduleLabel(_schedule)}")">Ostatnia udana kopia: @last.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm"). Kopie starsze niż @_retentionDays dni usuwają się same.</StatusBanner>
 }
 else
 {
@@ -75,6 +145,8 @@ else
                 <label class="form-label small fw-semibold">Harmonogram</label>
                 <select class="form-select" @bind="_schedule">
                     <option value="daily">Codziennie 03:00 UTC</option>
+                    <option value="12h">Co 12 godzin (3:00 i 15:00 UTC)</option>
+                    <option value="6h">Co 6 godzin (3, 9, 15, 21 UTC)</option>
                     <option value="off">Wyłączony</option>
                 </select>
             </div>
@@ -204,6 +276,14 @@ else
                         }
                     </div>
                 </div>
+                @if (!_hasEncPassword)
+                {
+                    <div class="col-12 order-first">
+                        <div class="alert alert-warning small py-2 mb-0">
+                            <i class="bi bi-shield-exclamation me-1"></i>Bez hasła szyfrowania poza serwer trafią dane klientów i — w kopii Portalu — hasła platformy (.env). Ustaw hasło poniżej.
+                        </div>
+                    </div>
+                }
                 <div class="col-md-3 col-6">
                     <label class="form-label small fw-semibold" for="offRet">Trzymaj (dni)</label>
                     <input id="offRet" type="number" min="1" class="form-control" @bind="_offsiteRetention" />
@@ -265,7 +345,15 @@ else
                                     }
                                 </td>
                                 <td>@Fmt(e.SizeBytes)</td>
-                                <td><small class="text-muted">@e.Kind</small></td>
+                                <td>
+                                    <small class="text-muted d-block">@KindLabel(e.Kind)</small>
+                                    @if (e.Status == BackupStatus.Completed)
+                                    {
+                                        <small class="text-muted" title="@(BackupService.IsBundle(e.FilePath) ? (e.Slug == "portal" ? "Baza Portalu i konfiguracja platformy (.env)" : "Baza, zdjęcia, logo i dokumenty trenera") : "Starsza kopia — sama baza")">
+                                            <i class="bi @(BackupService.IsBundle(e.FilePath) ? "bi-box-seam" : "bi-database")"></i> @(BackupService.IsBundle(e.FilePath) ? (e.Slug == "portal" ? "baza + .env" : "baza + pliki") : "baza")
+                                        </small>
+                                    }
+                                </td>
                                 <td>
                                     <span class="pp-chip pp-tone-@(e.Status == BackupStatus.Completed ? "ok" : e.Status == BackupStatus.Running ? "info" : "danger")">@(e.Status == BackupStatus.Completed ? "gotowa" : e.Status == BackupStatus.Running ? "w toku" : "błąd")</span>
                                 </td>
@@ -306,6 +394,12 @@ else
                                                 <i class="bi bi-cloud-upload"></i>
                                             </button>
                                         }
+                                        @if (e.Slug != "portal")
+                                        {
+                                            <button class="btn btn-sm btn-outline-warning" @onclick="() => OpenRestore(e)" disabled="@(Jobs.Current is not null)" title="Odtwórz z tej kopii">
+                                                <i class="bi bi-arrow-counterclockwise"></i>
+                                            </button>
+                                        }
                                         <a href="/api/backups/@e.Id/download" class="btn btn-sm btn-outline-primary" title="Pobierz">
                                             <i class="bi bi-download"></i>
                                         </a>
@@ -337,15 +431,55 @@ else
     </div>
 }
 
+<div class="card border-0 shadow-sm mt-3">
+    <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm pp-tone-danger"><i class="bi bi-life-preserver"></i></span>Gdy coś padnie — co robić</div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-lg-4">
+                <h3 class="h6 fw-bold mb-1"><i class="bi bi-person-exclamation me-1"></i>Problem u jednego trenera</h3>
+                <p class="small text-muted mb-0">
+                    Np. ktoś skasował dane albo instancja się zepsuła. W historii poniżej kliknij <i class="bi bi-arrow-counterclockwise"></i> przy wybranej kopii.
+                    Portal najpierw zapisze obecny stan, potem odtworzy bazę i pliki. Zwykle kilka minut.
+                </p>
+            </div>
+            <div class="col-lg-4">
+                <h3 class="h6 fw-bold mb-1"><i class="bi bi-window-x me-1"></i>Portal nie działa</h3>
+                <p class="small text-muted mb-0">
+                    Aplikacje trenerów działają dalej. Otwórz panel Guardiana (port 9090): najpierw „Przywróć poprzedni Portal”, a gdy zepsuta jest baza —
+                    „Kopie Portalu” → <b>Przywróć</b>. Guardian ma własne kopie bazy Portalu i robi je sam, gdy Portal przestaje.
+                </p>
+            </div>
+            <div class="col-lg-4">
+                <h3 class="h6 fw-bold mb-1"><i class="bi bi-hdd-rack me-1"></i>Padł cały serwer</h3>
+                <ol class="small text-muted mb-0 ps-3">
+                    <li>Na nowym serwerze: Docker, <code>git clone</code> repozytorium i Nginx Proxy Manager.</li>
+                    <li>Pobierz najnowszą kopię <code>portal_….tar(.enc)</code> z innego serwera albo Dysku Google.</li>
+                    <li><code>bash deploy/restore.sh portal_….tar.enc</code> — odszyfruje kopię, odtworzy konfigurację i bazę, zbuduje i uruchomi Portal z Guardianem.</li>
+                    <li>Tu kliknij „Odtwórz trenerów bez kontenerów” — Portal pobierze ich kopie spoza serwera i postawi instancje.</li>
+                    <li>Przestaw DNS domen na nowy serwer.</li>
+                </ol>
+            </div>
+        </div>
+        <hr />
+        <div class="d-flex align-items-center gap-3 flex-wrap">
+            <button class="btn btn-outline-danger btn-sm" @onclick="StartRestoreMissing" disabled="@(Jobs.Current is not null)">
+                <i class="bi bi-arrow-counterclockwise me-1"></i>Odtwórz trenerów bez kontenerów
+            </button>
+            <span class="small text-muted">Dotyczy tylko aktywnych trenerów, których instancji nie ma na tym serwerze. Działających instancji nie rusza.</span>
+        </div>
+    </div>
+</div>
+
 <PanelCard Title="Pytania i odpowiedzi" Icon="bi-question-circle" IconClass="pp-tone-muted" Class="mt-3">
     <div class="pp-faq">
         <details>
-            <summary>Jak przywrócić bazę trenera z kopii?</summary>
+            <summary>Jak przywrócić trenera ręcznie, bez Portalu?</summary>
             <div>
                 <ol class="mb-0 ps-3">
-                    <li>Pobierz plik <code>.sql.gz</code> z historii powyżej.</li>
+                    <li>Pobierz plik kopii z historii powyżej. Pakiet <code>.tar</code> rozpakujesz poleceniem <code>tar xf kopia.tar</code> — w środku są <code>database.sql.gz</code>, <code>files.tar.gz</code> (pliki trenera) i <code>manifest.json</code>.</li>
                     <li>W bazie trenera usuń i utwórz od nowa schemat <code>public</code>.</li>
-                    <li>Wgraj kopię: <code>gunzip -c backup.sql.gz | docker exec -i pt-slug-db psql -U ptscheduler -d ptscheduler</code> (zamień <code>slug</code> na adres trenera).</li>
+                    <li>Wgraj bazę: <code>gunzip -c database.sql.gz | docker exec -i pt-slug-db psql -U ptscheduler -d ptscheduler</code> (zamień <code>slug</code> na adres trenera).</li>
+                    <li>Pliki: <code>docker run --rm -i -v pt-slug-branding:/data postgres:17-alpine sh -c 'tar xzf - -C /data' &lt; files.tar.gz</code>.</li>
                 </ol>
             </div>
         </details>
@@ -366,14 +500,21 @@ else
             <p>W katalogu z ustawień powyżej — musi być zamontowany w kontenerze Portalu jako wolumen, inaczej kopie znikną przy aktualizacji Portalu.</p>
         </details>
         <details>
-            <summary>Czy kopia obejmuje zdjęcia i pliki trenerów?</summary>
-            <p>Nie — kopia to baza danych (klienci, wizyty, plany, płatności). Pliki leżą w wolumenach instancji i w bibliotece wideo Bunny.</p>
+            <summary>Co jest w kopii?</summary>
+            <p>U trenera: baza (klienci, wizyty, plany, płatności), logo, zdjęcia sylwetek i profilowe, dokumenty. W kopii Portalu: baza Portalu (lista trenerów, ich domeny, plany, rachunki, ustawienia) i konfiguracja platformy (.env). Filmy są w bibliotece wideo Bunny — tam mają własne kopie.</p>
         </details>
     </div>
 </PanelCard>
 
 @code {
     private List<BackupEntry> _entries = new();
+    private List<Tenant> _tenants = [];
+    private BackupEntry? _restoreEntry;
+    private int _restoreTargetId;
+    private string? _restoreConfirm;
+    private bool _jobDismissed;
+    private Timer? _timer;
+    private string TargetSlug => _tenants.FirstOrDefault(t => t.Id == _restoreTargetId)?.Slug ?? "";
     private bool _busy;
     private string? _message;
     private bool _msgError;
@@ -405,6 +546,7 @@ else
         _schedule = s[SiteSettingsService.Keys.BackupSchedule];
         _retentionDays = int.TryParse(s[SiteSettingsService.Keys.BackupRetentionDays], out var d) ? d : 14;
         await LoadOffsite();
+        if (Jobs.Current is not null) StartPolling();
 
         (_message, _msgError) = GdriveResult switch
         {
@@ -567,7 +709,7 @@ else
     {
         await Offsite.SetSecretAsync(SiteSettingsService.Keys.BackupOffsitePassword, null);
         _hasEncPassword = false;
-        Show("Szyfrowanie wyłączone — kolejne kopie pójdą poza serwer jako zwykłe pliki .sql.gz.", false);
+        Show("Szyfrowanie wyłączone — kolejne kopie pójdą poza serwer bez szyfrowania.", false);
     }
 
     private void Show(string message, bool error)
@@ -578,7 +720,9 @@ else
 
     private async Task Load()
     {
+        try { await BackupSvc.SyncFilesAsync(); } catch { /* katalog kopii niedostępny — pokażemy to, co jest w bazie */ }
         await using var db = DbFactory.CreateDbContext();
+        _tenants = await db.Tenants.AsNoTracking().Where(t => t.Status != TenantStatus.Destroyed).OrderBy(t => t.Slug).ToListAsync();
         _entries = await db.BackupEntries
             .AsNoTracking()
             .OrderByDescending(e => e.CreatedAt)
@@ -589,16 +733,80 @@ else
     private async Task BackupAllNow()
     {
         _busy = true; _message = null;
+        StateHasChanged();
         try
         {
-            var (ok, fail, portalOk) = await BackupSvc.BackupAllAsync(BackupKind.Manual);
-            _message = $"Zakończono. Trenerzy: {ok} OK / {fail} błąd. Portal: {(portalOk ? "OK" : "błąd")}.";
-            _msgError = fail > 0 || !portalOk;
+            var r = await Maintenance.RunCycleAsync(BackupKind.Manual, verify: false, housekeeping: false, notify: false, CancellationToken.None);
+            _message = $"Zakończono. Trenerzy: {r.TenantsOk} OK / {r.TenantsFailed} błąd. Portal: {(r.PortalOk ? "OK" : "błąd")}."
+                + (_savedTarget != OffsiteBackupService.TargetOff ? (r.OffsiteFailed == 0 ? " Wysłano poza serwer." : $" Poza serwer nie trafiło: {r.OffsiteFailed}.") : "");
+            _msgError = r.TenantsFailed > 0 || !r.PortalOk || r.OffsiteFailed > 0;
             await Load();
         }
         catch (Exception ex) { _message = ex.Message; _msgError = true; }
         _busy = false;
     }
+
+    private void OpenRestore(BackupEntry e)
+    {
+        _restoreEntry = e;
+        _restoreTargetId = _tenants.FirstOrDefault(t => t.Slug == e.Slug)?.Id ?? _tenants.FirstOrDefault()?.Id ?? 0;
+        _restoreConfirm = "";
+    }
+
+    private void StartRestore()
+    {
+        if (_restoreEntry is not { } entry || _restoreConfirm?.Trim() != TargetSlug) return;
+        var backupId = entry.Id;
+        var targetId = _restoreTargetId;
+        var (started, error) = Jobs.Start($"Odtwarzanie {entry.Slug} → {TargetSlug}",
+            (sp, log, ct) => sp.GetRequiredService<RestoreService>().RestoreTenantAsync(backupId, targetId, log, ct));
+        if (!started) { Show(error!, true); return; }
+        _restoreEntry = null;
+        _jobDismissed = false;
+        StartPolling();
+    }
+
+    private void StartRestoreMissing()
+    {
+        var (started, error) = Jobs.Start("Odtwarzanie trenerów bez kontenerów",
+            (sp, log, ct) => sp.GetRequiredService<RestoreService>().RestoreMissingAsync(log, ct));
+        if (!started) { Show(error!, true); return; }
+        _jobDismissed = false;
+        StartPolling();
+    }
+
+    private void StartPolling()
+    {
+        _timer ??= new Timer(async _ =>
+        {
+            try
+            {
+                var finished = Jobs.Current is null;
+                if (finished) await InvokeAsync(Load);
+                await InvokeAsync(StateHasChanged);
+                if (finished) { _timer?.Dispose(); _timer = null; }
+            }
+            catch (ObjectDisposedException) { }
+        }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+    }
+
+    public void Dispose() => _timer?.Dispose();
+
+    private static string KindLabel(BackupKind kind) => kind switch
+    {
+        BackupKind.Manual => "ręczna",
+        BackupKind.Scheduled => "automatyczna",
+        BackupKind.PreRestore => "przed odtworzeniem",
+        BackupKind.Guardian => "od Guardiana",
+        _ => "dodana z pliku"
+    };
+
+    private static string ScheduleLabel(string schedule) => schedule switch
+    {
+        "6h" => "co 6 godzin",
+        "12h" => "co 12 godzin",
+        _ => "codziennie"
+    };
 
     private async Task Cleanup()
     {

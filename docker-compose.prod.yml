@@ -61,6 +61,8 @@ services:
       Portal__PortalImage: ptportal:latest
       Portal__GitHubOwner: graba994
       Portal__GitHubRepo: ptscheduler.web
+      # Publiczny adres Portalu (https://…) — linki w e-mailach alarmów, kopii i rachunków.
+      Portal__PublicUrl: ${PORTAL_PUBLIC_URL:-}
       Portal__ContactEmail: ${CONTACT_EMAIL:-kontakt@ptscheduler.pl}
       Portal__SiteName: ${SITE_NAME:-PTScheduler}
       # Nginx Proxy Manager (auto-register tenant subdomains)
@@ -105,12 +107,16 @@ services:
       # Adres, pod którym Guardian widzi porty instancji trenerów (Portal podaje swój Portal:ForwardHost,
       # ta wartość jest zapasem). host.docker.internal = host Dockera dzięki extra_hosts poniżej.
       GUARDIAN_TENANT_HOST: ${GUARDIAN_TENANT_HOST:-host.docker.internal}
+      GUARDIAN_BACKUP_DIR: /opt/ptscheduler/backups
+      GUARDIAN_PORTAL_DB_CONTAINER: ptportal-db
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock
       - ${REPO_DIR:-./}:/opt/ptscheduler/repo
       - guardian-logs:/opt/ptscheduler/guardian/logs
+      # Kopie Portalu: Guardian robi zapasowe i przywraca Portal, gdy ten nie działa.
+      - portal-backups:/opt/ptscheduler/backups
     networks:
       - ptscheduler
 

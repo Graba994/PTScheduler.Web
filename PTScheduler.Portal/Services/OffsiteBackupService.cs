@@ -143,15 +143,154 @@ public class OffsiteBackupService(
         return results;
     }
 
-    /// <summary>Usuwa poza serwerem kopie starsze niż retencja. Zwraca liczbę usuniętych plików.</summary>
+    /// <summary>
+    /// Usuwa poza serwerem kopie starsze niż retencja; po 2 dniach zostaje jedna kopia dziennie.
+    /// Najnowsza kopia każdej instancji zostaje zawsze. Zwraca liczbę usuniętych plików.
+    /// </summary>
     public async Task<int> PruneAsync(CancellationToken ct = default)
     {
         var target = await GetTargetAsync();
         if (target == TargetOff) return 0;
         var s = await settings.GetAsync(SiteSettingsService.Keys.BackupOffsiteRetentionDays);
         if (!int.TryParse(s, out var days) || days <= 0) days = 30;
-        var cutoff = DateTime.UtcNow.AddDays(-days);
-        return target == TargetSftp ? await PruneSftpAsync(cutoff, ct) : await PruneDriveAsync(cutoff, ct);
+        var now = DateTime.UtcNow;
+        var files = await ListRemoteAsync(ct);
+        var keep = files.GroupBy(f => f.Slug).Select(g => g.MaxBy(f => f.CreatedUtc)!.Ref).ToHashSet();
+        var daily = files.GroupBy(f => (f.Slug, f.CreatedUtc.Date)).Select(g => g.MaxBy(f => f.CreatedUtc)!.Ref).ToHashSet();
+        var doomed = files.Where(f => !keep.Contains(f.Ref)
+            && (f.CreatedUtc < now.AddDays(-days) || (f.CreatedUtc < now.AddDays(-2) && !daily.Contains(f.Ref)))).ToList();
+        if (doomed.Count == 0) return 0;
+
+        var removed = 0;
+        if (target == TargetSftp)
+        {
+            using var client = await ConnectSftpAsync(ct);
+            foreach (var f in doomed)
+            {
+                try { client.DeleteFile(f.Ref); removed++; }
+                catch (Exception ex) { logger.LogWarning(ex, "Nie usunięto {File} z serwera SFTP.", f.Ref); }
+            }
+        }
+        else
+        {
+            var (token, _) = await DriveAccessAsync(ct);
+            using var http = httpFactory.CreateClient();
+            http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            foreach (var f in doomed)
+                if ((await http.DeleteAsync($"https://www.googleapis.com/drive/v3/files/{Uri.EscapeDataString(f.Ref)}", ct)).IsSuccessStatusCode) removed++;
+        }
+        return removed;
+    }
+
+    /// <summary>Kopia leżąca poza serwerem. <c>Ref</c> — ścieżka na serwerze SFTP albo identyfikator pliku na Dysku.</summary>
+    public sealed record RemoteBackup(string Slug, string Name, string Ref, DateTime CreatedUtc, long Size);
+
+    /// <summary>Wszystkie kopie poza serwerem (pliki o nazwach <c>slug_yyyyMMdd_HHmmss…</c>).</summary>
+    public async Task<List<RemoteBackup>> ListRemoteAsync(CancellationToken ct = default)
+    {
+        var target = await GetTargetAsync();
+        var result = new List<RemoteBackup>();
+        if (target == TargetSftp)
+        {
+            using var client = await ConnectSftpAsync(ct);
+            var root = await SftpDirAsync();
+            if (!client.Exists(root)) return result;
+            foreach (var dir in client.ListDirectory(root).Where(d => d.IsDirectory && d.Name is not "." and not ".." and not "test"))
+                foreach (var f in client.ListDirectory(dir.FullName).Where(f => f.IsRegularFile && IsBackupName(f.Name)))
+                    result.Add(new RemoteBackup(dir.Name, f.Name, f.FullName, BackupService.FileStamp(f.Name) ?? f.LastWriteTimeUtc, f.Length));
+        }
+        else if (target == TargetGdrive)
+        {
+            var (token, _) = await DriveAccessAsync(ct);
+            var folder = await EnsureDriveFolderAsync(token, ct);
+            using var http = httpFactory.CreateClient();
+            http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
+            var q = $"'{folder}' in parents and trashed = false";
+            string? page = null;
+            do
+            {
+                var url = $"https://www.googleapis.com/drive/v3/files?q={Uri.EscapeDataString(q)}&fields=nextPageToken,files(id,name,createdTime,size)&pageSize=500"
+                    + (page is null ? "" : $"&pageToken={Uri.EscapeDataString(page)}");
+                var list = await http.GetAsync(url, ct);
+                await EnsureDriveOk(list, "odczytać listy plików na Dysku", ct);
+                using var doc = JsonDocument.Parse(await list.Content.ReadAsStringAsync(ct));
+                foreach (var f in doc.RootElement.GetProperty("files").EnumerateArray())
+                {
+                    var name = f.GetProperty("name").GetString() ?? "";
+                    var slug = SlugFromName(name);
+                    if (slug is null || !IsBackupName(name)) continue;
+                    var created = f.TryGetProperty("createdTime", out var c) && c.TryGetDateTime(out var dt) ? dt.ToUniversalTime() : DateTime.MinValue;
+                    var size = f.TryGetProperty("size", out var sz) && long.TryParse(sz.GetString(), out var n) ? n : 0;
+                    result.Add(new RemoteBackup(slug, name, f.GetProperty("id").GetString()!, BackupService.FileStamp(name) ?? created, size));
+                }
+                page = doc.RootElement.TryGetProperty("nextPageToken", out var np) ? np.GetString() : null;
+            } while (page is not null);
+        }
+        return result;
+    }
+
+    /// <summary>Najnowsza kopia instancji poza serwerem (null, gdy brak albo kopia poza serwerem wyłączona).</summary>
+    public async Task<RemoteBackup?> FindLatestAsync(string slug, CancellationToken ct = default) =>
+        (await ListRemoteAsync(ct)).Where(f => f.Slug == slug).MaxBy(f => f.CreatedUtc);
+
+    /// <summary>Pobiera kopię do katalogu i odszyfrowuje ją hasłem z ustawień. Zwraca ścieżkę gotowego pliku.</summary>
+    public async Task<string> DownloadAsync(RemoteBackup remote, string localDir, CancellationToken ct = default)
+    {
+        Directory.CreateDirectory(localDir);
+        var encrypted = remote.Name.EndsWith(".enc", StringComparison.Ordinal);
+        var finalPath = Path.Combine(localDir, encrypted ? remote.Name[..^4] : remote.Name);
+        var partial = Path.Combine(localDir, "." + remote.Name + ".part");
+        string? password = null;
+        if (encrypted && (password = await GetSecretAsync(SiteSettingsService.Keys.BackupOffsitePassword)) is not { Length: > 0 })
+            throw new InvalidOperationException("Kopia jest zaszyfrowana, a w ustawieniach nie ma hasła szyfrowania — wpisz je w „Kopia poza serwerem”.");
+        try
+        {
+            await using (var output = File.Create(partial))
+            {
+                if (await GetTargetAsync() == TargetSftp)
+                {
+                    using var client = await ConnectSftpAsync(ct);
+                    await Task.Run(() => client.DownloadFile(remote.Ref, output), ct);
+                }
+                else
+                {
+                    var (token, _) = await DriveAccessAsync(ct);
+                    using var http = httpFactory.CreateClient("backup-offsite");
+                    using var req = new HttpRequestMessage(HttpMethod.Get, $"https://www.googleapis.com/drive/v3/files/{Uri.EscapeDataString(remote.Ref)}?alt=media");
+                    req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                    using var resp = await http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+                    await EnsureDriveOk(resp, "pobrać pliku z Dysku", ct);
+                    await resp.Content.CopyToAsync(output, ct);
+                }
+            }
+            if (encrypted)
+            {
+                try
+                {
+                    await using var input = File.OpenRead(partial);
+                    await using var output = File.Create(finalPath);
+                    await DecryptAsync(input, output, password!, ct);
+                }
+                catch (CryptographicException)
+                {
+                    try { File.Delete(finalPath); } catch { }
+                    throw new InvalidOperationException("Nie da się odszyfrować kopii — hasło szyfrowania w ustawieniach jest inne niż w chwili wysyłki.");
+                }
+            }
+            else File.Move(partial, finalPath, overwrite: true);
+            return finalPath;
+        }
+        finally { try { File.Delete(partial); } catch { } }
+    }
+
+    private static bool IsBackupName(string name) =>
+        name.EndsWith(".tar", StringComparison.Ordinal) || name.EndsWith(".tar.enc", StringComparison.Ordinal)
+        || name.EndsWith(".sql.gz", StringComparison.Ordinal) || name.EndsWith(".sql.gz.enc", StringComparison.Ordinal);
+
+    private static string? SlugFromName(string name)
+    {
+        var m = System.Text.RegularExpressions.Regex.Match(name, @"^(.+?)_\d{8}_\d{6}");
+        return m.Success ? m.Groups[1].Value : null;
     }
 
     /// <summary>Próba połączenia + zapis i usunięcie małego pliku — sprawdza też uprawnienia do zapisu.</summary>
@@ -293,25 +432,6 @@ public class OffsiteBackupService(
         if (client.Exists(final)) client.DeleteFile(final);
         client.RenameFile(partial, final);
         return final;
-    }
-
-    private async Task<int> PruneSftpAsync(DateTime cutoff, CancellationToken ct)
-    {
-        using var client = await ConnectSftpAsync(ct);
-        var root = await SftpDirAsync();
-        if (!client.Exists(root)) return 0;
-        var removed = 0;
-        foreach (var dir in client.ListDirectory(root).Where(d => d.IsDirectory && d.Name is not "." and not ".."))
-        {
-            foreach (var f in client.ListDirectory(dir.FullName))
-            {
-                if (!f.IsRegularFile || f.LastWriteTimeUtc >= cutoff) continue;
-                if (!f.Name.EndsWith(".sql.gz", StringComparison.Ordinal) && !f.Name.EndsWith(".sql.gz.enc", StringComparison.Ordinal)) continue;
-                client.DeleteFile(f.FullName);
-                removed++;
-            }
-        }
-        return removed;
     }
 
     public Task ForgetSftpFingerprintAsync() => settings.SetAsync(SiteSettingsService.Keys.BackupSftpFingerprint, "");
@@ -477,32 +597,6 @@ public class OffsiteBackupService(
         var folder = await EnsureDriveFolderAsync(token, ct);
         await DriveUploadAsync(token, folder, localPath, name, ct);
         return $"{DriveFolderName}/{name}";
-    }
-
-    private async Task<int> PruneDriveAsync(DateTime cutoff, CancellationToken ct)
-    {
-        var (token, _) = await DriveAccessAsync(ct);
-        var folder = await EnsureDriveFolderAsync(token, ct);
-        using var http = httpFactory.CreateClient();
-        http.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", token);
-        var q = $"'{folder}' in parents and trashed = false and createdTime < '{cutoff:yyyy-MM-ddTHH:mm:ssZ}'";
-        var removed = 0;
-        string? page = null;
-        do
-        {
-            var url = $"https://www.googleapis.com/drive/v3/files?q={Uri.EscapeDataString(q)}&fields=nextPageToken,files(id,name)&pageSize=200"
-                + (page is null ? "" : $"&pageToken={Uri.EscapeDataString(page)}");
-            var list = await http.GetAsync(url, ct);
-            await EnsureDriveOk(list, "odczytać listy plików na Dysku", ct);
-            using var doc = JsonDocument.Parse(await list.Content.ReadAsStringAsync(ct));
-            foreach (var f in doc.RootElement.GetProperty("files").EnumerateArray())
-            {
-                var del = await http.DeleteAsync($"https://www.googleapis.com/drive/v3/files/{f.GetProperty("id").GetString()}", ct);
-                if (del.IsSuccessStatusCode) removed++;
-            }
-            page = doc.RootElement.TryGetProperty("nextPageToken", out var n) ? n.GetString() : null;
-        } while (page is not null);
-        return removed;
     }
 
     private static StringContent JsonContent(object value) =>

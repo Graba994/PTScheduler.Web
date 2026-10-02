@@ -41,4 +41,5 @@ public static class TenantEventTypes
     public const string ErrorSpike = "error_spike";
     public const string BackupVerified = "backup_verified";
     public const string BackupVerifyFailed = "backup_verify_failed";
+    public const string BackupRestored = "backup_restored";
 }

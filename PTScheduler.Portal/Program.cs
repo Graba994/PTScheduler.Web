@@ -83,6 +83,8 @@ builder.Services.AddHostedService<ErrorAlertBackgroundService>();
 builder.Services.AddScoped<BackupService>();
 builder.Services.AddScoped<OffsiteBackupService>();
 builder.Services.AddScoped<BackupMaintenanceService>();
+builder.Services.AddScoped<RestoreService>();
+builder.Services.AddSingleton<BackupJobs>();
 // Wysyłka kopii poza serwer może trwać długo — limit daje CancellationToken, nie HttpClient.
 builder.Services.AddHttpClient("backup-offsite", c => c.Timeout = Timeout.InfiniteTimeSpan);
 builder.Services.AddHostedService<BackupScheduler>();
@@ -485,7 +487,8 @@ app.MapGet("/api/backups/{id:int}/download", async (
     if (entry is null || string.IsNullOrEmpty(entry.FilePath) || !File.Exists(entry.FilePath))
         return Results.NotFound();
 
-    return Results.File(entry.FilePath, "application/gzip", Path.GetFileName(entry.FilePath));
+    var type = BackupService.IsBundle(entry.FilePath) ? "application/x-tar" : "application/gzip";
+    return Results.File(entry.FilePath, type, Path.GetFileName(entry.FilePath), enableRangeProcessing: true);
 }).RequireAuthorization();
 
 // Zdjęcia sylwetek trenerów ze strony głównej (publiczne; trzymane w ustawieniach Portalu).

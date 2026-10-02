@@ -27,7 +27,13 @@ public class BackupEntry
 public enum BackupKind
 {
     Manual,
-    Scheduled
+    Scheduled,
+    /// <summary>Stan sprzed odtworzenia kopii — żeby dało się cofnąć.</summary>
+    PreRestore,
+    /// <summary>Zapasowa kopia bazy Portalu zrobiona przez Guardiana.</summary>
+    Guardian,
+    /// <summary>Plik dodany ręcznie albo pobrany spoza serwera.</summary>
+    Imported
 }
 
 public enum BackupStatus

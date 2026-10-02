@@ -57,6 +57,7 @@ public static class PanelUi
         TenantEventTypes.ErrorSpike => "Fala błędów",
         TenantEventTypes.BackupVerified => "Kopia sprawdzona",
         TenantEventTypes.BackupVerifyFailed => "Kopia nie do odtworzenia",
+        TenantEventTypes.BackupRestored => "Odtworzono z kopii",
         _ => type
     };
 
@@ -86,13 +87,14 @@ public static class PanelUi
         TenantEventTypes.ErrorSpike => "bi-bug",
         TenantEventTypes.BackupVerified => "bi-shield-check",
         TenantEventTypes.BackupVerifyFailed => "bi-shield-x",
+        TenantEventTypes.BackupRestored => "bi-arrow-counterclockwise",
         _ => "bi-circle"
     };
 
     public static string EventTone(string type) => type switch
     {
         TenantEventTypes.Created or TenantEventTypes.Provisioned or TenantEventTypes.Resumed
-            or TenantEventTypes.PaymentReceived or TenantEventTypes.HealthRecovered or TenantEventTypes.CreditAdded or TenantEventTypes.BillPaid or TenantEventTypes.BackupVerified => "ok",
+            or TenantEventTypes.PaymentReceived or TenantEventTypes.HealthRecovered or TenantEventTypes.CreditAdded or TenantEventTypes.BillPaid or TenantEventTypes.BackupVerified or TenantEventTypes.BackupRestored => "ok",
         TenantEventTypes.Suspended or TenantEventTypes.Deleted or TenantEventTypes.PaymentFailed or TenantEventTypes.TrialExpired
             or TenantEventTypes.HealthDown or TenantEventTypes.InactivitySuspended or TenantEventTypes.CleanupDeleted
             or TenantEventTypes.ErrorSpike or TenantEventTypes.BackupVerifyFailed => "danger",
