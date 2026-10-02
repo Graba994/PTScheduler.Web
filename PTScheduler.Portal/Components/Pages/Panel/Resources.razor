@@ -1,0 +1,300 @@
+@page "/panel/resources"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject ResourceReportService ReportSvc
+@inject ResourceMonitorService Monitor
+@rendermode InteractiveServer
+
+<PageTitle>Zasoby — PTScheduler Portal</PageTitle>
+
+<PanelHeader Title="Zasoby" Icon="bi-speedometer2" Subtitle="Ile pamięci, procesora i dysku zużywa każdy trener i cały serwer — z trendem, prognozą zapełnienia dysku i zapasem na kolejnych trenerów.">
+    <Actions>
+        <div class="btn-group btn-group-sm" role="group" aria-label="Okres">
+            @foreach (var (p, label) in Periods)
+            {
+                <button type="button" class="btn @(_period == p ? "btn-primary" : "btn-outline-secondary")" @onclick="() => SetPeriod(p)">@label</button>
+            }
+        </div>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="MeasureNow" disabled="@_measuring" title="Zmierz zużycie teraz, bez czekania na kolejny pomiar">
+            @if (_measuring) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-arrow-clockwise me-1"></i> }
+            Zmierz teraz
+        </button>
+    </Actions>
+</PanelHeader>
+
+@if (_report is null)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_report.LastSampleAt is null)
+{
+    <StatusBanner Tone="muted" Icon="bi-hourglass-split" Title="Zbieram pierwsze pomiary">Portal mierzy zużycie co 5 minut. Pierwsze dane pojawią się za chwilę — możesz też kliknąć „Zmierz teraz”. Trend i prognozy dysku potrzebują kilku dni pomiarów.</StatusBanner>
+}
+else
+{
+    var h = _report.Host;
+    var (range, bucket) = ResourceReportService.Span(_period);
+    var top = _report.Warnings.FirstOrDefault(w => w.Severity == "danger") ?? _report.Warnings.FirstOrDefault(w => w.Severity == "warn");
+    @if (top is not null)
+    {
+        <StatusBanner Tone="@top.Severity" Icon="@(top.Severity == "danger" ? "bi-exclamation-octagon-fill" : "bi-exclamation-triangle-fill")"
+                      Title="@(top.Severity == "danger" ? "Coś wymaga reakcji" : "Warto się przyjrzeć")">
+            @top.Text
+            @if (_report.Warnings.Count > 1)
+            {
+                <span> Wszystkie uwagi — niżej.</span>
+            }
+        </StatusBanner>
+    }
+    else
+    {
+        <StatusBanner Tone="ok" Icon="bi-check-circle-fill" Title="Serwer ma zapas">
+            @(_report.MoreTenants is { } more ? $"Przy obecnym zużyciu zmieści się jeszcze ok. {more} {PanelUi.Plural(more, "trener", "trenerów", "trenerów")}. " : "")
+            Żaden trener nie jest blisko swoich limitów.
+        </StatusBanner>
+    }
+
+    <div class="pp-stats">
+        <StatTile Label="Pamięć serwera" Icon="bi-memory" Tone="@ToneFor(h?.MemPct, 80, 90)"
+                  Value="@(h?.MemPct is { } mp ? $"{mp:0}%" : "—")"
+                  Meta="@(h?.MemUsed is { } mu && h.MemTotal is { } mt ? $"{Size(mu)} z {Size(mt)}" : null)" />
+        <StatTile Label="Procesor" Icon="bi-cpu" Tone="@ToneFor(h?.Load1h is { } l && h.Cores is > 0 ? l * 100 / h.Cores : null, 70, 100)"
+                  Value="@(h?.Load1h is { } load ? load.ToString("0.0") : "—")"
+                  Meta="@(h?.Cores is { } c ? $"średnie obciążenie z godziny · {c:0} rdzeni" : null)" />
+        <StatTile Label="Dysk Dockera" Icon="bi-device-hdd" Tone="@ToneFor(h?.DiskPct, 80, 90)"
+                  Value="@(h?.DiskPct is { } dp ? $"{dp:0}%" : "—")"
+                  Meta="@DiskMeta(h?.DiskUsed, h?.DiskTotal, h?.DiskDaysLeft, h?.DiskGrowthPerDay)" />
+        <StatTile Label="Miejsce na trenerów" Icon="bi-people" Tone="@(_report.MoreTenants is <= 2 ? "warn" : "ok")"
+                  Value="@(_report.MoreTenants is { } m ? $"~{m}" : "—")"
+                  Meta="@(_report.AvgTenantMem is { } avg ? $"kolejnych · trener zużywa średnio {Size(avg)}" : "potrzebne pomiary instancji")" />
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-lg-4">
+            <div class="card border-0 shadow-sm h-100"><div class="card-body">
+                <h2 class="pp-card-title mb-1">Pamięć serwera</h2>
+                <p class="small text-muted mb-3">% zajętej pamięci (bez pamięci podręcznej). Kreska — 90%.</p>
+                <Sparkline Points="h?.Mem ?? []" Range="range" Bucket="bucket" Max="100" Threshold="90" Large="true" Height="140"
+                           Tone="@ToneFor(h?.MemPct, 80, 90)" Format='v => v.ToString("0") + "%"' AriaLabel="Pamięć serwera w czasie" />
+            </div></div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card border-0 shadow-sm h-100"><div class="card-body">
+                <h2 class="pp-card-title mb-1">Procesor serwera</h2>
+                <p class="small text-muted mb-3">Obciążenie względem liczby rdzeni. 100% = wszystkie rdzenie zajęte.</p>
+                <Sparkline Points="h?.Cpu ?? []" Range="range" Bucket="bucket" Max="@CpuScale(h)" Threshold="100" Large="true" Height="140"
+                           Format='v => v.ToString("0") + "%"' AriaLabel="Obciążenie procesora w czasie" />
+            </div></div>
+        </div>
+        <div class="col-lg-4">
+            <div class="card border-0 shadow-sm h-100"><div class="card-body">
+                <h2 class="pp-card-title mb-1">Dysk Dockera</h2>
+                <p class="small text-muted mb-3">
+                    Obrazy, kontenery i dane trenerów.
+                    @if (h?.BackupPct is { } bp)
+                    {
+                        <span>Dysk z kopiami: @bp.ToString("0")%@(h.BackupDaysLeft is { } bd ? $", pełny za ok. {bd:0} dni" : "").</span>
+                    }
+                </p>
+                <Sparkline Points="h?.Disk ?? []" Range="range" Bucket="bucket" Max="100" Threshold="90" Large="true" Height="140"
+                           Tone="@ToneFor(h?.DiskPct, 80, 90)" Format='v => v.ToString("0") + "%"' AriaLabel="Zajętość dysku w czasie" />
+            </div></div>
+        </div>
+    </div>
+
+    @if (_report.Warnings.Count > 1)
+    {
+        <div class="card border-0 shadow-sm mb-3"><div class="card-body">
+            <h2 class="pp-card-title mb-2">Uwagi</h2>
+            <ul class="list-unstyled mb-0 small d-grid gap-1">
+                @foreach (var w in _report.Warnings.OrderBy(w => w.Severity == "danger" ? 0 : 1))
+                {
+                    <li>
+                        <span class="pp-chip pp-tone-@w.Severity me-1"><i class="bi @(w.Severity == "danger" ? "bi-exclamation-octagon" : "bi-exclamation-triangle")"></i>@(w.Severity == "danger" ? "pilne" : "uwaga")</span>
+                        @if (w.TenantId is { } tid)
+                        {
+                            <a href="/panel/tenants/@tid">@w.Text</a>
+                        }
+                        else
+                        {
+                            @w.Text
+                        }
+                    </li>
+                }
+            </ul>
+        </div></div>
+    }
+
+    <div class="card border-0 shadow-sm">
+        <div class="card-header pp-card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+            <span class="pp-card-header-title"><span class="pp-icon pp-icon-sm"><i class="bi bi-people"></i></span>Trenerzy (@_report.Tenants.Count)</span>
+            <span class="small text-muted">Ostatni pomiar: @_report.LastSampleAt.Value.ToLocalTime().ToString("dd.MM HH:mm")</span>
+        </div>
+        <div class="card-body p-0">
+            @if (_report.Tenants.Count == 0)
+            {
+                <div class="pp-empty"><i class="bi bi-people"></i>Brak aktywnych trenerów.</div>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0 small">
+                        <thead class="table-light">
+                            <tr>
+                                <th>Trener</th>
+                                <th style="min-width:180px">Pamięć <span class="fw-normal text-muted">(śr. z godziny / limit)</span></th>
+                                <th>Procesor</th>
+                                <th>Dysk</th>
+                                <th style="min-width:140px">Pamięć — trend</th>
+                                <th>Uwagi</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var t in _report.Tenants.OrderByDescending(t => t.MemPct ?? -1))
+                            {
+                                <tr>
+                                    <td>
+                                        <a href="/panel/tenants/@t.Id" class="fw-semibold font-monospace text-decoration-none">@t.Slug</a>
+                                        <div class="text-muted text-truncate" style="max-width:180px">@t.Company</div>
+                                    </td>
+                                    <td>
+                                        @if (t.Mem is { } mem)
+                                        {
+                                            <div class="d-flex justify-content-between gap-2 pp-res-num">
+                                                <span class="fw-semibold">@Size(mem)</span>
+                                                <span class="text-muted">@(t.MemLimit is { } lim ? $"z {Size(lim)}" : "bez limitu")</span>
+                                            </div>
+                                            @if (t.MemPct is { } pct)
+                                            {
+                                                <div class="pp-meter pp-tone-@(pct >= 95 ? "danger" : pct >= 85 ? "warn" : "ok") mt-1"><div style="width:@(Math.Min(100, (int)pct))%"></div></div>
+                                            }
+                                            <div class="text-muted mt-1 pp-res-num">aplikacja @Size(t.WebMem) · baza @Size(t.DbMem)</div>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted">kontenery nie działają</span>
+                                        }
+                                    </td>
+                                    <td class="pp-res-num">
+                                        @if (t.CpuAvg is { } cpuAvg)
+                                        {
+                                            <div><span class="fw-semibold">@Pct(cpuAvg, t.CpuLimit)</span> <span class="text-muted">śr.</span></div>
+                                            <div class="text-muted">szczyt 24 h: @Pct(t.CpuPeak ?? 0, t.CpuLimit)</div>
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted">—</span>
+                                        }
+                                    </td>
+                                    <td class="pp-res-num">
+                                        @if (t.Disk is { } disk)
+                                        {
+                                            <div class="fw-semibold">@Size(disk)</div>
+                                            <div class="text-muted">baza @Size(t.DbSize) · pliki @Size(t.Files)</div>
+                                            @if (t.DiskGrowthPerMonth is { } g)
+                                            {
+                                                <div class="text-muted">@(g >= 0 ? "+" : "−")@Size((long)Math.Abs(g)) / mies.</div>
+                                            }
+                                        }
+                                        else
+                                        {
+                                            <span class="text-muted">mierzone co godzinę</span>
+                                        }
+                                    </td>
+                                    <td>
+                                        <Sparkline Points="t.MemSeries" Range="range" Bucket="bucket" Max="100" Threshold="85" Height="34"
+                                                   Tone="@(t.Tone == "ok" ? "info" : t.Tone)" Format='v => v.ToString("0") + "% limitu"' AriaLabel="@($"Pamięć {t.Slug} w czasie")" />
+                                    </td>
+                                    <td>
+                                        @if (t.Flags.Count == 0)
+                                        {
+                                            <span class="pp-chip pp-tone-ok"><i class="bi bi-check2"></i>w normie</span>
+                                        }
+                                        @foreach (var f in t.Flags)
+                                        {
+                                            <span class="pp-chip pp-tone-@t.Tone d-inline-flex mb-1"><i class="bi bi-exclamation-triangle"></i>@f</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    </div>
+
+    <PanelCard Title="Jak to liczymy" Icon="bi-question-circle" IconClass="pp-tone-muted" Class="mt-3">
+        <div class="pp-faq">
+            <details>
+                <summary>Skąd te liczby?</summary>
+                <p>Co 5 minut Portal odczytuje statystyki Dockera każdej instancji (aplikacja i baza) oraz zużycie serwera. Co godzinę mierzy rozmiar bazy i plików trenera. Po 2 dniach zostaje jedna próbka na godzinę, historia sięga 120 dni.</p>
+            </details>
+            <details>
+                <summary>Co znaczy „limit pamięci”?</summary>
+                <p>Każdy kontener trenera ma limit (domyślnie 1 GB aplikacja i 512 MB baza), żeby jeden trener nie zabrał pamięci innym. Gdy aplikacja dochodzi do limitu, system ją restartuje — wtedy warto podnieść limit (Portal:TenantWebMemoryMb) albo sprawdzić logi.</p>
+            </details>
+            <details>
+                <summary>Jak liczony jest zapas na trenerów i prognoza dysku?</summary>
+                <p>Zapas: wolna pamięć serwera (z 10% rezerwy) podzielona przez średnie realne zużycie jednego trenera. Prognoza dysku: tempo przyrostu z ostatnich 14 dni (potrzeba co najmniej 2 dni pomiarów). Raz na dobę Portal wysyła e-mail, gdy dysk albo pamięć są na granicy.</p>
+            </details>
+        </div>
+    </PanelCard>
+}
+
+@code {
+    private static readonly (ResourceReportService.Period, string)[] Periods =
+        [(ResourceReportService.Period.Day, "24 h"), (ResourceReportService.Period.Week, "7 dni"), (ResourceReportService.Period.Month, "30 dni")];
+
+    private ResourceReportService.Report? _report;
+    private ResourceReportService.Period _period = ResourceReportService.Period.Week;
+    private bool _measuring;
+
+    protected override async Task OnInitializedAsync() => _report = await ReportSvc.BuildAsync(_period);
+
+    private async Task SetPeriod(ResourceReportService.Period p)
+    {
+        _period = p;
+        _report = await ReportSvc.BuildAsync(_period);
+    }
+
+    private async Task MeasureNow()
+    {
+        _measuring = true;
+        StateHasChanged();
+        try { await Monitor.SampleAsync(CancellationToken.None); }
+        finally { _measuring = false; }
+        _report = await ReportSvc.BuildAsync(_period);
+    }
+
+    private static string ToneFor(double? value, double warn, double danger) =>
+        value is null ? "muted" : value >= danger ? "danger" : value >= warn ? "warn" : "ok";
+
+    private static double CpuScale(ResourceReportService.HostView? h)
+    {
+        var peak = h?.Cpu.Count > 0 ? h.Cpu.Max(p => p.Value) : 0;
+        return peak > 100 ? Math.Ceiling(peak / 50) * 50 : 100;
+    }
+
+    private static string? DiskMeta(long? used, long? total, double? daysLeft, double? perDay)
+    {
+        if (used is null || total is null) return null;
+        var text = $"{Size(used)} z {Size(total)}";
+        if (daysLeft is { } d) return text + $" · pełny za ok. {d:0} dni";
+        if (perDay is { } g && g > 0) return text + $" · +{Size((long)(g * 30))} / mies.";
+        return text;
+    }
+
+    private static string Pct(double cores, double? limit) =>
+        limit is > 0 ? $"{cores * 100 / limit.Value:0}%" : $"{cores:0.00} rdz.";
+
+    private static string Size(long? bytes)
+    {
+        if (bytes is not { } b) return "—";
+        string[] units = ["B", "KB", "MB", "GB", "TB"];
+        double v = b;
+        var i = 0;
+        while (v >= 1024 && i < units.Length - 1) { v /= 1024; i++; }
+        return i >= 3 ? $"{v:0.0} {units[i]}" : $"{v:0} {units[i]}";
+    }
+}

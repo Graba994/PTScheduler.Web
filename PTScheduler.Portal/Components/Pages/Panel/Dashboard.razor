@@ -3,6 +3,7 @@
 @attribute [Authorize(Roles = "Admin")]
 @inject TenantService TenantSvc
 @inject DockerService DockerSvc
+@inject ResourceReportService ResourceReports
 @inject UpdateNotifier UpdateNotifier
 @rendermode InteractiveServer
 
@@ -77,9 +78,12 @@ else
     <div class="row g-3">
         @if (_system is not null)
         {
-            var usedMB = _stats.ActiveTenants * 150;
-            var ramPct = _system.TotalMemoryMB > 0 ? (int)(usedMB * 100 / _system.TotalMemoryMB) : 0;
-            var maxTenants = (int)(_system.TotalMemoryMB / 150);
+            // Z pomiarów (Zasoby), a dopóki ich nie ma — szacunek 150 MB na instancję.
+            var measured = _resources?.Host?.MemTotal is > 0 && _resources.MoreTenants is not null;
+            var totalMB = measured ? _resources!.Host!.MemTotal!.Value / 1048576 : _system.TotalMemoryMB;
+            var usedMB = measured ? _resources!.Host!.MemUsed!.Value / 1048576 : _stats.ActiveTenants * 150;
+            var ramPct = totalMB > 0 ? (int)(usedMB * 100 / totalMB) : 0;
+            var maxTenants = measured ? _stats.ActiveTenants + _resources!.MoreTenants!.Value : (int)(_system.TotalMemoryMB / 150);
             var capacityPct = maxTenants > 0 ? _stats.ActiveTenants * 100 / maxTenants : 0;
             <div class="col-lg-6">
                 <PanelCard Title="Serwer" Subtitle="Zasoby maszyny z kontenerami" Icon="bi-cpu" Class="h-100">
@@ -92,15 +96,17 @@ else
                             <div><dt>Kontenery działające</dt><dd>@_system.RunningContainers z @_system.TotalContainers</dd></div>
                         </dl>
                         <div class="d-flex justify-content-between small mt-3 mb-1">
-                            <span class="text-muted">Pamięć zajęta przez instancje (szacunek)</span>
-                            <span class="fw-semibold">@usedMB / @_system.TotalMemoryMB MB</span>
+                            <span class="text-muted">@(measured ? "Pamięć serwera zajęta (pomiar)" : "Pamięć zajęta przez instancje (szacunek)")</span>
+                            <span class="fw-semibold">@usedMB / @totalMB MB</span>
                         </div>
                         <div class="pp-meter @PanelUi.MeterTone(ramPct)"><div style="width:@(Math.Min(ramPct, 100))%"></div></div>
                     </ChildContent>
                 </PanelCard>
             </div>
             <div class="col-lg-6">
-                <PanelCard Title="Ilu trenerów zmieścisz" Subtitle="Liczone po ok. 150 MB pamięci na instancję" Icon="bi-speedometer" IconClass="pp-icon-cyan" Class="h-100">
+                <PanelCard Title="Ilu trenerów zmieścisz" Subtitle="@(measured ? "Z realnego zużycia trenerów i wolnej pamięci serwera" : "Szacunek: ok. 150 MB pamięci na instancję")" Icon="bi-speedometer" IconClass="pp-icon-cyan" Class="h-100">
+                    <Actions><a href="/panel/resources" class="btn btn-sm btn-outline-secondary">Zasoby</a></Actions>
+                    <ChildContent>
                     <div class="d-flex align-items-baseline gap-2 mb-2">
                         <span class="pp-stat-value">@_stats.ActiveTenants</span>
                         <span class="text-muted">z ok. @maxTenants miejsc</span>
@@ -112,6 +118,7 @@ else
                           : capacityPct > 60 ? "Zostało jeszcze trochę miejsca. Warto zaplanować rozbudowę."
                           : "Dużo wolnego miejsca na nowych trenerów.")
                     </p>
+                    </ChildContent>
                 </PanelCard>
             </div>
         }
@@ -225,6 +232,7 @@ else
 @code {
     private bool _loading = true;
     private DashboardStats _stats = new();
+    private ResourceReportService.Report? _resources;
     private SystemInfo? _system;
     private List<Tenant> _tenants = [];
     private List<TenantEvent> _events = [];
@@ -237,6 +245,7 @@ else
         _events = await TenantSvc.GetRecentEventsAsync(15);
         _payments = await TenantSvc.GetRecentPaymentsAsync(10);
 
+        try { _resources = await ResourceReports.BuildAsync(ResourceReportService.Period.Day); } catch { _resources = null; }
         try { _system = await DockerSvc.GetSystemInfoAsync(); }
         catch { }
 

@@ -85,6 +85,9 @@ builder.Services.AddScoped<OffsiteBackupService>();
 builder.Services.AddScoped<BackupMaintenanceService>();
 builder.Services.AddScoped<RestoreService>();
 builder.Services.AddSingleton<BackupJobs>();
+builder.Services.AddScoped<ResourceReportService>();
+builder.Services.AddSingleton<ResourceMonitorService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<ResourceMonitorService>());
 // Wysyłka kopii poza serwer może trwać długo — limit daje CancellationToken, nie HttpClient.
 builder.Services.AddHttpClient("backup-offsite", c => c.Timeout = Timeout.InfiniteTimeSpan);
 builder.Services.AddHostedService<BackupScheduler>();

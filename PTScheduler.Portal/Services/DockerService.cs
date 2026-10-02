@@ -279,6 +279,53 @@ public class DockerService : IDisposable
         };
     }
 
+    public sealed record ContainerUsage(double CpuCores, double CpuLimitCores, long MemoryBytes, long MemoryLimitBytes);
+
+    private sealed class Capture<T> : IProgress<T>
+    {
+        public T? Value { get; private set; }
+        public void Report(T value) => Value = value;
+    }
+
+    /// <summary>
+    /// Bieżące zużycie kontenera (jeden odczyt statystyk Dockera): rdzenie procesora, pamięć bez
+    /// pamięci podręcznej plików i limity. Null, gdy kontener nie istnieje albo nie działa.
+    /// </summary>
+    public async Task<ContainerUsage?> GetUsageAsync(string containerName, CancellationToken ct = default)
+    {
+        try
+        {
+            var inspect = await _client.Containers.InspectContainerAsync(containerName, ct);
+            if (!inspect.State.Running) return null;
+            var capture = new Capture<ContainerStatsResponse>();
+            await _client.Containers.GetContainerStatsAsync(containerName, new ContainerStatsParameters { Stream = false }, capture, ct);
+            var st = capture.Value;
+            if (st is null) return null;
+
+            double cores = 0;
+            var cpuDelta = (double)st.CPUStats.CPUUsage.TotalUsage - st.PreCPUStats.CPUUsage.TotalUsage;
+            var sysDelta = (double)st.CPUStats.SystemUsage - st.PreCPUStats.SystemUsage;
+            var online = st.CPUStats.OnlineCPUs > 0 ? st.CPUStats.OnlineCPUs : (uint)(st.CPUStats.CPUUsage.PercpuUsage?.Count ?? 1);
+            if (cpuDelta > 0 && sysDelta > 0) cores = cpuDelta / sysDelta * online;
+
+            // Pamięć podręczna plików (inactive_file) to nie zużycie aplikacji — tak samo liczy `docker stats`.
+            var stats = st.MemoryStats.Stats;
+            ulong cache = 0;
+            if (stats is not null)
+                foreach (var key in new[] { "inactive_file", "total_inactive_file" })
+                    if (stats.TryGetValue(key, out var v)) { cache = v; break; }
+            var usage = st.MemoryStats.Usage > cache ? st.MemoryStats.Usage - cache : st.MemoryStats.Usage;
+
+            var limitCores = inspect.HostConfig.NanoCPUs > 0 ? inspect.HostConfig.NanoCPUs / 1e9 : online;
+            return new ContainerUsage(cores, limitCores, (long)usage, (long)st.MemoryStats.Limit);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger.LogDebug(ex, "Nie odczytano statystyk kontenera {Name}.", containerName);
+            return null;
+        }
+    }
+
     public async Task<List<DockerContainer>> ListAllContainersAsync()
     {
         var containers = await _client.Containers.ListContainersAsync(

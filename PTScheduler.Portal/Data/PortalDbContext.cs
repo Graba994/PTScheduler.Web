@@ -33,6 +33,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<TenantSmsCounter> TenantSmsCounters => Set<TenantSmsCounter>();
     public DbSet<TenantBill> TenantBills => Set<TenantBill>();
     public DbSet<TenantBillLine> TenantBillLines => Set<TenantBillLine>();
+    public DbSet<ResourceSample> ResourceSamples => Set<ResourceSample>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -66,6 +67,12 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
         b.Entity<SiteSetting>(e =>
         {
             e.HasKey(s => s.Key);
+        });
+
+        b.Entity<ResourceSample>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.At });
+            e.HasIndex(x => x.At);
         });
 
         b.Entity<BackupEntry>(e =>
