@@ -8,7 +8,8 @@ set -euo pipefail
 #   3. buduje nowy obraz ptguardian:latest,
 #   4. odtwarza kontener z tą samą konfiguracją (zmienne, wolumeny, sieci, porty),
 #      dokładając dostęp do hosta (host.docker.internal) potrzebny do sprawdzania instancji,
-#   5. sprawdza /health — jeśli nowy nie wstanie, przywraca poprzedni kontener.
+#   5. podpina katalog kopii Portalu i wskazuje kontener bazy Portalu (kopie i przywracanie Portalu),
+#   6. sprawdza /health — jeśli nowy nie wstanie, przywraca poprzedni kontener.
 #
 # Użycie (na serwerze):
 #   bash /ścieżka/do/repo/deploy/update-guardian.sh
@@ -73,6 +74,29 @@ while IFS='|' read -r type src dst rw; do
     [[ "$rw" == "false" ]] && spec="$spec:ro"
     ARGS+=(-v "$spec")
 done < <(docker inspect -f '{{range .Mounts}}{{.Type}}|{{if eq .Type "volume"}}{{.Name}}{{else}}{{.Source}}{{end}}|{{.Destination}}|{{.RW}}{{println}}{{end}}' "$CONTAINER")
+
+# Kopie Portalu: Guardian potrzebuje tego samego katalogu kopii co Portal (robi zapasowe i przywraca Portal).
+PORTAL_CONTAINER="${PORTAL_CONTAINER:-ptportal}"
+BACKUP_TARGET="/opt/ptscheduler/backups"
+HAS_BACKUP_MOUNT="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "'"$BACKUP_TARGET"'"}}yes{{end}}{{end}}' "$CONTAINER")"
+if [[ -z "$HAS_BACKUP_MOUNT" ]] && docker inspect "$PORTAL_CONTAINER" >/dev/null 2>&1; then
+    PORTAL_BACKUPS="$(docker inspect -f '{{range .Mounts}}{{if eq .Destination "'"$BACKUP_TARGET"'"}}{{if eq .Type "volume"}}{{.Name}}{{else}}{{.Source}}{{end}}{{end}}{{end}}' "$PORTAL_CONTAINER")"
+    if [[ -n "$PORTAL_BACKUPS" ]]; then
+        ARGS+=(-v "$PORTAL_BACKUPS:$BACKUP_TARGET")
+        ok "Podpinam katalog kopii Portalu: $PORTAL_BACKUPS"
+    else
+        printf '\033[1;33m!\033[0m Portal nie ma zamontowanego %s — kopie Portalu w Guardianie będą niedostępne.\n' "$BACKUP_TARGET"
+    fi
+fi
+if ! docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$CONTAINER" | grep -q '^GUARDIAN_PORTAL_DB_CONTAINER='; then
+    # Nazwa kontenera bazy Portalu = Host= z connection stringa Portalu (np. ptportal-db).
+    DB_HOST="$(docker inspect -f '{{range .Config.Env}}{{println .}}{{end}}' "$PORTAL_CONTAINER" 2>/dev/null \
+        | grep '^ConnectionStrings__DefaultConnection=' | grep -oiE 'Host=[^;]+' | head -1 | cut -d= -f2 || true)"
+    if [[ -n "$DB_HOST" ]] && docker inspect "$DB_HOST" >/dev/null 2>&1; then
+        ARGS+=(-e "GUARDIAN_PORTAL_DB_CONTAINER=$DB_HOST")
+        ok "Baza Portalu: kontener $DB_HOST"
+    fi
+fi
 
 while IFS= read -r p; do
     [[ -n "$p" ]] && ARGS+=(-p "$p")
