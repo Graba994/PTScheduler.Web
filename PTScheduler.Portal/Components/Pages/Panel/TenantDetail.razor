@@ -6,6 +6,7 @@
 @inject StripeService StripeSvc
 @inject IDbContextFactory<PortalDbContext> DbFactory
 @inject NpmService NpmSvc
+@inject NpmHealthService NpmHealth
 @inject NavigationManager Nav
 @inject IConfiguration Config
 @inject EmailService EmailSvc
@@ -768,7 +769,37 @@ else
                     <dl class="row mb-2 small">
                         <dt class="col-5 text-muted">Aktualna domena</dt>
                         <dd class="col-7"><a href="https://@_tenant.Domain" target="_blank">@_tenant.Domain</a></dd>
+                        @if (_https is { } https)
+                        {
+                            <dt class="col-5 text-muted">HTTPS</dt>
+                            <dd class="col-7">
+                                <span class="pp-chip pp-tone-@NpmHealthService.Tone(https.State)">
+                                    <i class="bi @(https.State == NpmHealthService.DomainState.Ok ? "bi-lock-fill" : "bi-unlock-fill")"></i>@NpmHealthService.Label(https.State, https.DaysLeft)
+                                </span>
+                                @if (https.ExpiresUtc is { } exp)
+                                {
+                                    <div class="text-muted mt-1">ważny do @exp.ToLocalTime().ToString("dd.MM.yyyy")</div>
+                                }
+                            </dd>
+                        }
                     </dl>
+                    @if (_https is { } h2)
+                    {
+                        <button class="btn btn-sm @(h2.State == NpmHealthService.DomainState.Ok ? "btn-outline-secondary" : "btn-danger") mb-3" @onclick="RenewHttps" disabled="@_renewingHttps">
+                            @if (_renewingHttps) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            else { <i class="bi bi-arrow-repeat me-1"></i> }
+                            @(h2.State switch
+                            {
+                                NpmHealthService.DomainState.NoProxyHost => "Dodaj do NPM z HTTPS",
+                                NpmHealthService.DomainState.NoCertificate or NpmHealthService.DomainState.NotForced => "Włącz HTTPS",
+                                _ => "Odnów certyfikat"
+                            })
+                        </button>
+                        @if (_renewingHttps)
+                        {
+                            <span class="small text-muted ms-2">Let's Encrypt potrafi odpowiadać do 2 minut…</span>
+                        }
+                    }
                     <div class="row g-2 align-items-end">
                         <div class="col-md-8">
                             <label class="form-label small mb-1">Nowa domena</label>
@@ -1149,6 +1180,8 @@ else
     {
         if (!firstRender) return;
         await LoadOverviewAsync();
+        StateHasChanged();
+        await LoadHttpsAsync(refresh: false);
         StateHasChanged();
     }
 
@@ -1625,6 +1658,40 @@ else
     private List<PaymentRecord>? _paymentRecords;
     private bool _loadingPayments;
 
+    private NpmHealthService.TenantDomain? _https;
+    private bool _renewingHttps;
+
+    private async Task LoadHttpsAsync(bool refresh)
+    {
+        if (_tenant is null) return;
+        try
+        {
+            var report = NpmHealth.Current;
+            if (refresh || report is null) report = await NpmHealth.RefreshAsync();
+            _https = report.Tenants.FirstOrDefault(t => t.TenantId == _tenant.Id);
+        }
+        catch { _https = null; }
+    }
+
+    private async Task RenewHttps()
+    {
+        if (_tenant is null || _https is null) return;
+        _renewingHttps = true;
+        _domainMessage = null;
+        StateHasChanged();
+        try
+        {
+            var (ok, msg) = _https.HostId is { } hostId
+                ? await NpmSvc.RenewCertificateAsync(hostId)
+                : await NpmSvc.RegisterProxyHostAsync(_https.Domain, Config.GetValue<string>("Portal:ForwardHost") ?? "192.168.0.220", _tenant.Port, ssl: true);
+            _domainMessage = msg;
+            _domainError = !ok;
+            await LoadHttpsAsync(refresh: true);
+        }
+        catch (Exception ex) { _domainMessage = ex.Message; _domainError = true; }
+        finally { _renewingHttps = false; }
+    }
+
     private async Task ChangeDomain()
     {
         if (_tenant is null || string.IsNullOrWhiteSpace(_newDomain)) return;
@@ -1661,6 +1728,7 @@ else
             _domainError = !npmOk;
 
             _tenant = await TenantSvc.GetAsync(Id);
+            await LoadHttpsAsync(refresh: true);
         }
         catch (Exception ex) { _domainMessage = ex.Message; _domainError = true; }
         finally { _changingDomain = false; }

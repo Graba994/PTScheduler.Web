@@ -5,6 +5,7 @@
 @inject DockerService DockerSvc
 @inject ResourceReportService ResourceReports
 @inject UpdateNotifier UpdateNotifier
+@inject NpmHealthService NpmHealth
 @rendermode InteractiveServer
 
 <PageTitle>Pulpit — PTScheduler Portal</PageTitle>
@@ -51,6 +52,35 @@ else
             <ChildContent>Utwórz instancję ręcznie albo poczekaj na rejestrację ze strony publicznej — nowi trenerzy pojawią się tutaj.</ChildContent>
             <Actions><a href="/panel/provision" class="btn btn-primary btn-sm">Utwórz instancję</a></Actions>
         </StatusBanner>
+    }
+
+    @if (NpmHealth.Current is { } npmReport)
+    {
+        var httpsProblems = npmReport.Problems;
+        @if (httpsProblems.Count > 0)
+        {
+            <StatusBanner Tone="danger" Icon="bi-unlock-fill" Title="@($"{httpsProblems.Count} {PanelUi.Plural(httpsProblems.Count, "domena bez działającego HTTPS", "domeny bez działającego HTTPS", "domen bez działającego HTTPS")}")">
+                <ChildContent>
+                    <span>Klienci tych trenerów zobaczą ostrzeżenie przeglądarki albo nie wejdą na stronę. Odnów certyfikat jednym kliknięciem.</span>
+                    <div class="d-flex flex-wrap gap-2 mt-2">
+                        @foreach (var d in httpsProblems)
+                        {
+                            <a href="/panel/tenants/@d.TenantId" class="pp-chip pp-tone-@NpmHealthService.Tone(d.State) text-decoration-none" title="@NpmHealthService.Label(d.State, d.DaysLeft)">
+                                <i class="bi bi-unlock"></i>@d.Domain <span class="opacity-75">· @NpmHealthService.Label(d.State, d.DaysLeft)</span>
+                            </a>
+                        }
+                    </div>
+                </ChildContent>
+                <Actions><a href="/panel/npm" class="btn btn-danger btn-sm">Napraw w NPM</a></Actions>
+            </StatusBanner>
+        }
+        else if (npmReport.Error is not null)
+        {
+            <div class="pp-callout pp-tone-warn">
+                <i class="bi bi-shield-exclamation"></i>
+                <div class="flex-grow-1">Nie udało się sprawdzić certyfikatów w Nginx Proxy Manager: @npmReport.Error <a href="/panel/npm" class="fw-semibold">Otwórz NPM</a></div>
+            </div>
+        }
     }
 
     @if (UpdateNotifier.UpgradeAvailable)
@@ -250,6 +280,13 @@ else
         catch { }
 
         _loading = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Zaraz po starcie Portalu nie ma jeszcze wyniku sprawdzenia HTTPS — zrób je teraz, żeby pulpit od razu alarmował.
+        if (!firstRender || NpmHealth.Current is not null) return;
+        try { await NpmHealth.RefreshAsync(); await InvokeAsync(StateHasChanged); } catch { }
     }
 
     private string? GrowthText()

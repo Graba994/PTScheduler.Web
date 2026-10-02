@@ -3,6 +3,7 @@
 @attribute [Authorize(Roles = "Admin")]
 @inject SiteSettingsService Settings
 @inject NpmService NpmSvc
+@inject NpmHealthService NpmHealth
 @rendermode InteractiveServer
 
 <PageTitle>Nginx Proxy Manager — PTScheduler Portal</PageTitle>
@@ -86,85 +87,148 @@ else
     </div>
 </EditForm>
 
+@if (_report?.Problems is { Count: > 0 } problems)
+{
+    <StatusBanner Tone="danger" Icon="bi-unlock-fill" Title="@($"{problems.Count} {PanelUi.Plural(problems.Count, "trener nie ma", "trenerów nie ma", "trenerów nie ma")} działającego HTTPS")">
+        @string.Join(" · ", problems.Select(p => $"{p.Domain}: {NpmHealthService.Label(p.State, p.DaysLeft)}")).
+        Przeglądarki pokazują wtedy „połączenie nie jest bezpieczne”, a aplikacja na telefonie się nie zainstaluje. Kliknij „Napraw” przy wpisie albo „Napraw wszystkie”.
+    </StatusBanner>
+}
+
 <div class="card border-0 shadow-sm">
-    <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">
+    <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center flex-wrap gap-2">
         <span class="pp-card-header-title"><span class="pp-icon pp-icon-sm"><i class="bi bi-list-ul"></i></span>Proxy hosty w NPM</span>
         <div class="d-flex align-items-center gap-2">
-            @if (_hosts.Any(h => !h.SslForced))
+            @if (_hosts.Count(IsFixable) is > 0 and var broken)
             {
-                <button class="btn btn-sm btn-primary" @onclick="EnableHttpsAll" disabled="@_fixing">
+                <button class="btn btn-sm btn-primary" @onclick="EnableHttpsAll" disabled="@(_fixing || _renewingId is not null)">
                     @if (_fixing)
                     {
                         <span class="spinner-border spinner-border-sm me-1"></span>
                     }
-                    <i class="bi bi-lock-fill me-1"></i>Włącz HTTPS dla @_hosts.Count(h => !h.SslForced)
+                    <i class="bi bi-shield-lock-fill me-1"></i>Napraw wszystkie (@broken)
                 </button>
             }
             <span class="badge bg-secondary">@_hosts.Count</span>
         </div>
     </div>
     <div class="card-body p-0">
-        @if (_hosts.Count == 0)
+        @if (_loadingHosts && _hosts.Count == 0)
         {
-            <p class="text-muted small p-3 mb-0">
-                Brak proxy hostów lub NPM jeszcze nie skonfigurowany. Kliknij "Testuj połączenie" żeby zweryfikować.
-            </p>
+            <div class="p-3 small text-muted"><span class="spinner-border spinner-border-sm me-2"></span>Pobieram listę z NPM…</div>
+        }
+        else if (_listError is not null)
+        {
+            <div class="alert alert-danger small m-3 mb-3">
+                <i class="bi bi-exclamation-triangle-fill me-1"></i>@_listError
+            </div>
+        }
+        else if (_hosts.Count == 0)
+        {
+            <p class="text-muted small p-3 mb-0">W NPM nie ma jeszcze żadnych proxy hostów. Pojawią się po dodaniu pierwszego trenera.</p>
         }
         else
         {
             <div class="table-responsive">
-                <table class="table table-hover mb-0 small align-middle">
+                <table class="table table-hover mb-0 small align-middle pp-table-cards">
                     <thead class="table-light">
                         <tr>
                             <th>Domena</th>
+                            <th>Trener</th>
                             <th>Backend</th>
-                            <th>SSL</th>
+                            <th>HTTPS i certyfikat</th>
                             <th>Status</th>
+                            <th></th>
                         </tr>
                     </thead>
                     <tbody>
                         @foreach (var h in _hosts)
                         {
+                            var tenant = _report?.Tenants.FirstOrDefault(t => string.Equals(t.Domain, h.Domain, StringComparison.OrdinalIgnoreCase));
                             <tr>
-                                <td class="fw-semibold">@h.Domain</td>
-                                <td class="text-muted">@h.ForwardHost:@h.ForwardPort</td>
-                                <td>
-                                    @if (h.SslForced)
+                                <td data-label="Domena" class="fw-semibold">
+                                    <a href="@(h.HttpsState == NpmHttpsState.None ? "http" : "https")://@h.Domain" target="_blank" rel="noopener" class="text-decoration-none">@h.Domain</a>
+                                </td>
+                                <td data-label="Trener">
+                                    @if (tenant is not null)
                                     {
-                                        <span class="badge bg-success"><i class="bi bi-lock-fill"></i> HTTPS</span>
+                                        <a href="/panel/tenants/@tenant.TenantId" class="text-decoration-none">@tenant.Slug</a>
                                     }
                                     else
                                     {
-                                        <span class="badge bg-secondary">HTTP</span>
+                                        <span class="text-muted">—</span>
                                     }
                                 </td>
-                                <td>
+                                <td data-label="Backend" class="text-muted font-monospace">@h.ForwardHost:@h.ForwardPort</td>
+                                <td data-label="HTTPS">
+                                    <span class="pp-chip pp-tone-@(h.Enabled ? HttpsTone(h.HttpsState) : "muted")">
+                                        <i class="bi @(h.HttpsState == NpmHttpsState.Ok ? "bi-lock-fill" : h.HttpsState == NpmHttpsState.None ? "bi-unlock-fill" : "bi-exclamation-triangle-fill")"></i>@HttpsLabel(h)
+                                    </span>
+                                    @if (h.CertExpiresUtc is { } exp)
+                                    {
+                                        <div class="text-muted mt-1">ważny do @exp.ToLocalTime().ToString("dd.MM.yyyy")@(string.IsNullOrEmpty(h.CertProvider) ? "" : h.CertProvider == "letsencrypt" ? " · Let's Encrypt" : " · własny")</div>
+                                    }
+                                </td>
+                                <td data-label="Status">
                                     @if (h.Enabled)
                                     {
-                                        <span class="badge bg-success">Aktywny</span>
+                                        <span class="pp-chip pp-tone-ok">aktywny</span>
                                     }
                                     else
                                     {
-                                        <span class="badge bg-warning text-dark">Wyłączony</span>
+                                        <span class="pp-chip pp-tone-warn">wyłączony</span>
                                     }
+                                </td>
+                                <td class="text-end text-nowrap">
+                                    <button class="btn btn-sm @(h.HttpsState == NpmHttpsState.Ok ? "btn-outline-secondary" : "btn-primary")"
+                                            disabled="@(_renewingId is not null || _fixing)" @onclick="() => Renew(h)"
+                                            title="@(h.CertificateId == 0 ? "Wystaw certyfikat Let's Encrypt i włącz HTTPS" : "Odnów certyfikat w Let's Encrypt")">
+                                        @if (_renewingId == h.Id)
+                                        {
+                                            <span class="spinner-border spinner-border-sm me-1"></span>
+                                        }
+                                        else
+                                        {
+                                            <i class="bi @(h.CertificateId == 0 ? "bi-shield-plus" : "bi-arrow-repeat") me-1"></i>
+                                        }
+                                        @(h.CertificateId == 0 ? "Włącz HTTPS" : h.HttpsState == NpmHttpsState.Ok ? "Odnów" : "Napraw")
+                                    </button>
                                 </td>
                             </tr>
                         }
                     </tbody>
                 </table>
             </div>
+            @if (_report?.Tenants.Where(t => t.State == NpmHealthService.DomainState.NoProxyHost).ToList() is { Count: > 0 } missing)
+            {
+                <div class="small p-3 border-top">
+                    <i class="bi bi-exclamation-triangle text-danger me-1"></i>Brak wpisu w NPM dla:
+                    @foreach (var m in missing)
+                    {
+                        <a href="/panel/tenants/@m.TenantId" class="ms-1">@m.Domain</a>
+                    }
+                    — otwórz trenera i kliknij „Dodaj do NPM z HTTPS” (zakładka Infrastruktura).
+                </div>
+            }
+        }
+        @if (_report is not null)
+        {
+            <div class="small text-muted px-3 pb-2 pt-1">Sprawdzono @_report.CheckedAt.ToLocalTime().ToString("HH:mm") · Portal sprawdza HTTPS domen trenerów co 30 minut i alarmuje na pasku u góry.</div>
         }
     </div>
 </div>
 
 <div class="alert alert-info small mt-3">
     <i class="bi bi-info-circle me-1"></i>
-    <strong>Jak działa integracja:</strong> po skonfigurowaniu NPM przy tworzeniu nowego trenera panel automatycznie doda proxy host wskazujący na <code>localhost:{port_trenera}</code>. Możesz też zarządzać hostami ręcznie w interfejsie NPM.
+    <strong>Jak działa integracja:</strong> przy tworzeniu trenera Portal dodaje w NPM jego domenę, wystawia certyfikat Let's Encrypt i wymusza HTTPS. NPM sam odnawia certyfikaty ok. 30 dni przed końcem — gdy do końca zostaje mniej niż 14 dni, odnawianie nie działa (zwykle DNS albo zamknięty port 80) i Portal alarmuje.
 </div>
 
 @code {
     private NpmForm _form = new();
     private bool _saving, _testing, _loadingHosts, _fixing;
+    private int? _renewingId;
+    private string? _listError;
+    private NpmHealthService.Report? _report;
     private string? _message;
     private bool _isError;
     private List<NpmProxyHost> _hosts = new();
@@ -193,8 +257,19 @@ else
         _form.AutoRegister = s[SiteSettingsService.Keys.NpmAutoRegister] != "false";
         _form.AutoSsl = s[SiteSettingsService.Keys.NpmAutoSsl] != "false";
 
-        if (!string.IsNullOrEmpty(_form.Url) && !string.IsNullOrEmpty(_form.Email))
-            _hosts = await NpmSvc.ListProxyHostsAsync();
+        _report = NpmHealth.Current;
+        _hosts = _report?.Hosts ?? [];
+        _loadingHosts = !string.IsNullOrEmpty(_form.Url);
+    }
+
+    // Lista z NPM po wyświetleniu strony — wolny albo nieosiągalny NPM nie blokuje otwarcia panelu.
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && !string.IsNullOrEmpty(_form.Url))
+        {
+            await LoadHosts();
+            StateHasChanged();
+        }
     }
 
     private async Task Save()
@@ -223,26 +298,65 @@ else
         _message = result.Message;
         _isError = !result.Success;
         if (result.Success)
-            _hosts = await NpmSvc.ListProxyHostsAsync();
+            await LoadHosts();
     }
 
     private async Task EnableHttpsAll()
     {
         _fixing = true;
         _message = null;
-        var results = await NpmSvc.EnableHttpsForAllAsync();
+        var results = await NpmSvc.EnableHttpsForAllAsync(TrainerDomains());
         _fixing = false;
         var ok = results.Count(r => r.Ok);
         var failed = results.Where(r => !r.Ok).ToList();
         _message = $"HTTPS włączone: {ok} z {results.Count}." + (failed.Count > 0 ? " Nie udało się: " + string.Join("; ", failed.Select(f => $"{f.Domain} — {f.Message}")) : "");
         _isError = failed.Count > 0;
-        _hosts = await NpmSvc.ListProxyHostsAsync();
+        await LoadHosts();
+    }
+
+    private async Task Renew(NpmProxyHost h)
+    {
+        _renewingId = h.Id;
+        _message = null;
+        StateHasChanged();
+        var (ok, msg) = await NpmSvc.RenewCertificateAsync(h.Id);
+        _renewingId = null;
+        _message = msg;
+        _isError = !ok;
+        await LoadHosts();
     }
 
     private async Task LoadHosts()
     {
         _loadingHosts = true;
-        _hosts = await NpmSvc.ListProxyHostsAsync();
-        _loadingHosts = false;
+        try
+        {
+            _report = await NpmHealth.RefreshAsync();
+            _hosts = _report.Hosts;
+            _listError = _report.Error;
+        }
+        catch (Exception ex) { _listError = ex.Message; }
+        finally { _loadingHosts = false; }
     }
+
+    private List<string> TrainerDomains() => _report?.Tenants.Select(t => t.Domain).ToList() ?? [];
+
+    private bool IsFixable(NpmProxyHost h) =>
+        h.Enabled && h.HttpsState != NpmHttpsState.Ok && TrainerDomains().Contains(h.Domain, StringComparer.OrdinalIgnoreCase);
+
+    private static string HttpsTone(NpmHttpsState s) => s switch
+    {
+        NpmHttpsState.Ok => "ok",
+        NpmHttpsState.NotForced or NpmHttpsState.Expiring => "warn",
+        _ => "danger"
+    };
+
+    private static string HttpsLabel(NpmProxyHost h) => h.HttpsState switch
+    {
+        NpmHttpsState.Ok => $"HTTPS · {h.DaysLeft} dni",
+        NpmHttpsState.NotForced => "certyfikat jest, HTTPS niewymuszone",
+        NpmHttpsState.Expiring => $"wygasa za {Math.Max(0, h.DaysLeft ?? 0)} dni",
+        NpmHttpsState.Expired => "certyfikat wygasł",
+        _ => "brak HTTPS"
+    };
 }

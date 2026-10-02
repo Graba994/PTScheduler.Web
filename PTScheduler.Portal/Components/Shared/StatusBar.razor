@@ -1,5 +1,6 @@
 @implements IAsyncDisposable
 @inject PanelStatusService Status
+@inject NpmHealthService NpmHealth
 
 @* Pasek statusu nad panelem — jak pasek telefonu: zegar po lewej, najważniejsze stany po prawej.
    Pokazujemy tylko to, co mówi „czy wszystko działa?” albo wymaga reakcji; reszta jest na Pulpicie. *@
@@ -24,6 +25,14 @@
             {
                 <a class="sb-item sb-ok" href="/panel/tenants" title="Aktywne instancje trenerów — wszystkie odpowiadają">
                     <i class="bi bi-heart-fill"></i>@_s.ActiveTenants/@_s.ActiveTenants
+                </a>
+            }
+
+            @* 1b. HTTPS domen trenerów (certyfikaty w NPM) *@
+            @if (NpmHealth.Current?.Problems is { Count: > 0 } httpsProblems)
+            {
+                <a class="sb-item sb-danger" href="/panel/npm" title='@($"Domeny bez działającego HTTPS — {string.Join(", ", httpsProblems.Select(x => $"{x.Domain}: {NpmHealthService.Label(x.State, x.DaysLeft)}"))}")'>
+                    <i class="bi bi-unlock-fill"></i>@httpsProblems.Count <span class="sb-label">bez HTTPS</span>
                 </a>
             }
 
@@ -95,7 +104,10 @@
         _cts = new CancellationTokenSource();
         _timer = new PeriodicTimer(TimeSpan.FromSeconds(45));
         _ = RefreshLoopAsync(_cts.Token);
+        NpmHealth.Changed += OnNpmChanged;
     }
+
+    private void OnNpmChanged() => _ = InvokeAsync(StateHasChanged);
 
     private async Task RefreshLoopAsync(CancellationToken ct)
     {
@@ -142,6 +154,7 @@
 
     public ValueTask DisposeAsync()
     {
+        NpmHealth.Changed -= OnNpmChanged;
         _cts?.Cancel();
         _timer?.Dispose();
         _cts?.Dispose();

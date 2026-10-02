@@ -86,6 +86,8 @@ builder.Services.AddScoped<BackupMaintenanceService>();
 builder.Services.AddScoped<RestoreService>();
 builder.Services.AddSingleton<BackupJobs>();
 builder.Services.AddScoped<ResourceReportService>();
+builder.Services.AddSingleton<NpmHealthService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<NpmHealthService>());
 builder.Services.AddSingleton<ResourceMonitorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<ResourceMonitorService>());
 // Wysyłka kopii poza serwer może trwać długo — limit daje CancellationToken, nie HttpClient.
