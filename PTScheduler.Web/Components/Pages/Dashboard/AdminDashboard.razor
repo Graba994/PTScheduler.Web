@@ -10,7 +10,6 @@
 @inject EntitlementService Entitlements
 @inject AuthenticationStateProvider AuthState
 @inject PTScheduler.Application.Interfaces.IPermissionService Permissions
-@inject NavigationManager Nav
 
 @if (_data is null)
 {
@@ -32,22 +31,7 @@ else
         </div>
     </div>
 
-    @if (_welcome)
-    {
-        @* Pierwsze wejście prosto z kreatora w Portalu („Zbuduj swoją aplikację”). *@
-        <div class="ad-welcome">
-            <div class="ad-welcome-burst" aria-hidden="true"><i class="bi bi-stars"></i></div>
-            <div class="min-w-0 flex-grow-1">
-                <div class="ad-welcome-title">Twoja aplikacja działa!</div>
-                <div class="small">Kolor, strona główna i oferta są już ustawione — tak jak w kreatorze. Został jeden krok: profil trenera, na którym klienci zapisują się na treningi (przełączasz się na niego jednym kliknięciem).</div>
-                <div class="d-flex flex-wrap gap-2 mt-2">
-                    <a href="/admin/users" class="btn btn-sm btn-light"><i class="bi bi-person-badge me-1"></i>Utwórz profil trenera</a>
-                    <a href="/" target="_blank" class="btn btn-sm btn-outline-light"><i class="bi bi-globe me-1"></i>Zobacz swoją stronę</a>
-                </div>
-            </div>
-            <button type="button" class="btn-close btn-close-white" aria-label="Zamknij" @onclick="() => _welcome = false"></button>
-        </div>
-    }
+    <WelcomeBanner />
 
     <UpsellStrip />
     <OffPackageAlerts />
@@ -221,11 +205,9 @@ else
     private TechInfo? _tech;
     private SetupState? _setup;
     private bool _canSwitch;
-    private bool _welcome;
 
     protected override async Task OnInitializedAsync()
     {
-        _welcome = Nav.Uri.Contains("witaj=1", StringComparison.Ordinal);
         var user = (await AuthState.GetAuthenticationStateAsync()).User;
         _canSwitch = await Switcher.CanUseAsync(user);
         var access = await AdminAccess.LoadAsync(AuthState, Permissions);

@@ -35,7 +35,12 @@ public class AppLaunchService(IServiceScopeFactory scopes, ILogger<AppLaunchServ
             new(TenantService.ProvisionSteps.Domain, "Ustawiam adres i certyfikat HTTPS"),
         ];
         public bool Done => FinishedAt is not null;
+        /// <summary>Uruchomienie się nie udało (po 3 próbach) — zgłoszenie czeka w kolejce, admin dostał powód.</summary>
         public bool Failed { get; set; }
+        /// <summary>Która próba (1–3) — przy ponawianiu kreator pokazuje „Próbuję jeszcze raz”.</summary>
+        public int Attempt { get; set; } = 1;
+        /// <summary>Zbudowane przez admina dla trenera — trener dostaje e-mail z ustawieniem hasła.</summary>
+        public bool BuiltByAdmin { get; init; }
         /// <summary>Aplikacja działa, ale ustawień z kreatora nie wgrano — trener dokończy konfigurację w aplikacji.</summary>
         public bool SetupFailed { get; set; }
         public string? Error { get; set; }
@@ -52,7 +57,11 @@ public class AppLaunchService(IServiceScopeFactory scopes, ILogger<AppLaunchServ
 
     public Launch? Get(Guid id) => _launches.GetValueOrDefault(id);
 
-    /// <summary>Najwyżej 3 publikacje na godzinę z jednego adresu (ochrona przed zakładaniem instancji hurtem).</summary>
+    /// <summary>Ostatnie uruchamianie danego zgłoszenia (np. po odświeżeniu strony kreatora).</summary>
+    public Launch? FindByTenant(int tenantId) =>
+        _launches.Values.Where(l => l.TenantId == tenantId).OrderByDescending(l => l.StartedAt).FirstOrDefault();
+
+    /// <summary>Najwyżej 5 publikacji na godzinę z jednego adresu (ochrona przed zakładaniem instancji hurtem).</summary>
     public bool TryRegisterAttempt(string? ip)
     {
         var key = string.IsNullOrWhiteSpace(ip) ? "?" : ip;
@@ -61,15 +70,17 @@ public class AppLaunchService(IServiceScopeFactory scopes, ILogger<AppLaunchServ
         lock (list)
         {
             list.RemoveAll(t => now - t > TimeSpan.FromHours(1));
-            if (list.Count >= 3) return false;
+            if (list.Count >= 5) return false;
             list.Add(now);
             return true;
         }
     }
 
-    public Launch Start(int tenantId, string? welcomeToken)
+    /// <param name="autoLaunchTag">„limit” albo „invite” — zapis do dziennego limitu automatycznych uruchomień.</param>
+    public Launch Start(int tenantId, string? welcomeToken, string? autoLaunchTag = null, bool builtByAdmin = false)
     {
-        var launch = new Launch { TenantId = tenantId };
+        var launch = new Launch { TenantId = tenantId, BuiltByAdmin = builtByAdmin };
+        if (autoLaunchTag is not null) _ = RecordAutoLaunchAsync(tenantId, autoLaunchTag);
         _launches[launch.Id] = launch;
         foreach (var old in _launches.Values.Where(l => l.Done && DateTime.UtcNow - l.StartedAt > TimeSpan.FromHours(2)).ToList())
             _launches.TryRemove(old.Id, out _);
@@ -102,34 +113,80 @@ public class AppLaunchService(IServiceScopeFactory scopes, ILogger<AppLaunchServ
         try { Changed?.Invoke(launch.Id); } catch { /* strona mogła się zamknąć */ }
     }
 
+    private async Task RecordAutoLaunchAsync(int tenantId, string tag)
+    {
+        try
+        {
+            using var scope = scopes.CreateScope();
+            await using var db = await scope.ServiceProvider.GetRequiredService<IDbContextFactory<PortalDbContext>>().CreateDbContextAsync();
+            db.TenantEvents.Add(new Entities.TenantEvent { TenantId = tenantId, EventType = Entities.TenantEventTypes.AutoLaunched, Detail = tag });
+            await db.SaveChangesAsync();
+        }
+        catch (Exception ex) { logger.LogWarning(ex, "Nie zapisano automatycznego uruchomienia {TenantId}.", tenantId); }
+    }
+
+    private static readonly TimeSpan[] RetryDelays = [TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(45)];
+
     private async Task RunAsync(Launch launch, string? welcomeToken)
     {
         using var scope = scopes.CreateScope();
         var tenants = scope.ServiceProvider.GetRequiredService<TenantService>();
         var email = scope.ServiceProvider.GetRequiredService<EmailService>();
         var settings = scope.ServiceProvider.GetRequiredService<SiteSettingsService>();
+        var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
         var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<PortalDbContext>>();
 
+        // Do 3 prób: chwilowy problem z Dockerem czy bazą nie powinien kończyć się kolejką.
         var (ok, output) = (false, "");
-        try
+        for (var attempt = 1; attempt <= 3 && !ok; attempt++)
         {
-            (ok, output) = await tenants.ProvisionAsync(launch.TenantId, key => Mark(launch, key));
-        }
-        catch (Exception ex)
-        {
-            output = ex.Message;
-            logger.LogError(ex, "Uruchamianie instancji {TenantId} z kreatora nie powiodło się.", launch.TenantId);
+            launch.Attempt = attempt;
+            if (attempt > 1)
+            {
+                foreach (var st in launch.Steps) st.State = StepState.Waiting;
+                launch.SetupFailed = false;
+                Notify(launch);
+                await Task.Delay(RetryDelays[attempt - 2]);
+            }
+            try
+            {
+                (ok, output) = await tenants.ProvisionAsync(launch.TenantId, key => Mark(launch, key));
+            }
+            catch (Exception ex)
+            {
+                output = ex.Message;
+                logger.LogError(ex, "Uruchamianie instancji {TenantId} z kreatora (próba {Attempt}) nie powiodło się.", launch.TenantId, attempt);
+            }
         }
 
         await using var db = await dbFactory.CreateDbContextAsync();
-        var tenant = await db.Tenants.AsNoTracking().Include(t => t.Plan).FirstOrDefaultAsync(t => t.Id == launch.TenantId);
+        var tenant = await db.Tenants.Include(t => t.Plan).FirstOrDefaultAsync(t => t.Id == launch.TenantId);
         if (tenant is not null) launch.AppUrl = await tenants.PublicUrlAsync(tenant);
+
+        // Sprawdzenie po starcie: strona logowania musi odpowiadać, zanim pokażemy „Gotowe”.
+        if (ok && tenant is not null && !await SmokeTestAsync(config, tenant))
+        {
+            launch.SetupFailed = true;
+            output += "\nSprawdzenie po starcie: strona logowania nie odpowiada.";
+        }
+
+        if (ok && tenant is not null)
+        {
+            try { await scope.ServiceProvider.GetRequiredService<StripeService>().RestartTrialAsync(tenant.Id); }
+            catch (Exception ex) { logger.LogWarning(ex, "Okres próbny {Slug} nie przesunięty.", tenant.Slug); }
+        }
+
+        if (!ok && tenant is not null)
+        {
+            tenant.QueuedReason = $"Uruchomienie nie powiodło się po 3 próbach: {Short(output)}";
+            await db.SaveChangesAsync();
+        }
 
         foreach (var s in launch.Steps)
             if (s.State == StepState.Running) s.State = ok ? StepState.Done : StepState.Failed;
             else if (s.State == StepState.Waiting) s.State = ok ? StepState.Skipped : StepState.Waiting;
         launch.Failed = !ok;
-        launch.Error = ok ? null : "Nie udało się uruchomić aplikacji automatycznie. Zgłoszenie jest zapisane — dokończymy je i damy znać e-mailem.";
+        launch.Error = ok ? null : "Twoja aplikacja jest gotowa i czeka w kolejce do uruchomienia.";
         launch.EnterUrl = ok && launch.AppUrl is not null && welcomeToken is not null && !launch.SetupFailed
             ? $"{launch.AppUrl}/account/welcome?token={Uri.EscapeDataString(welcomeToken)}"
             : launch.AppUrl;
@@ -141,14 +198,47 @@ public class AppLaunchService(IServiceScopeFactory scopes, ILogger<AppLaunchServ
         var (first, _) = TenantSetupPayload.SplitName(tenant.OwnerName);
         try
         {
-            if (ok)
+            if (ok && launch.BuiltByAdmin)
+                await email.SendAsync(tenant.OwnerEmail, $"{tenant.CompanyName} — Twoja aplikacja czeka",
+                    email.AppBuiltForYouEmailBody(first ?? tenant.OwnerName, tenant.CompanyName, launch.AppUrl!, planName));
+            else if (ok)
                 await email.SendAsync(tenant.OwnerEmail, $"{tenant.CompanyName} — Twoja aplikacja działa",
                     email.AppReadyEmailBody(first ?? tenant.OwnerName, tenant.CompanyName, launch.AppUrl!, tenant.OwnerEmail, planName));
+            else
+                await email.SendAsync(tenant.OwnerEmail, $"{tenant.CompanyName} — aplikacja w kolejce do uruchomienia",
+                    email.AppQueuedEmailBody(first ?? tenant.OwnerName, tenant.CompanyName));
             var adminEmail = await settings.GetAsync(SiteSettingsService.Keys.AdminNotificationEmail);
             if (!string.IsNullOrWhiteSpace(adminEmail))
                 await email.SendAsync(adminEmail, ok ? $"Nowy trener: {tenant.CompanyName}" : $"Rejestracja do dokończenia: {tenant.CompanyName}",
                     email.AdminAppLaunchedEmailBody(tenant.OwnerName, tenant.OwnerEmail, tenant.CompanyName, planName, tenant.Phone, launch.AppUrl ?? "", ok, output));
         }
         catch (Exception ex) { logger.LogWarning(ex, "Nie wysłano e-maili po uruchomieniu instancji {Slug}.", tenant.Slug); }
+    }
+
+    private static readonly HttpClient SmokeClient = new() { Timeout = TimeSpan.FromSeconds(10) };
+
+    private static async Task<bool> SmokeTestAsync(IConfiguration config, Entities.Tenant tenant)
+    {
+        for (var i = 0; i < 6; i++)
+        {
+            try
+            {
+                var probe = await TenantEndpoint.ProbeAsync(config, tenant);
+                if (probe.Ok && probe.Base is not null)
+                {
+                    using var resp = await SmokeClient.GetAsync($"{probe.Base}/Account/Login");
+                    if (resp.IsSuccessStatusCode) return true;
+                }
+            }
+            catch (Exception) { /* jeszcze wstaje */ }
+            await Task.Delay(5000);
+        }
+        return false;
+    }
+
+    private static string Short(string s)
+    {
+        var line = s.Split('\n', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault() ?? s;
+        return line.Length > 300 ? line[..300] + "…" : line;
     }
 }

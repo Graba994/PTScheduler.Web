@@ -13,6 +13,8 @@ public class Plan
     public bool IsFeatured { get; set; }
 
     // Stripe Price IDs (created in Stripe Dashboard, one per interval)
+    /// <summary>Produkt w Stripe — Portal zakłada go sam razem z cenami (StripeService.EnsurePricesAsync).</summary>
+    public string? StripeProductId { get; set; }
     public string? StripeMonthlyPriceId { get; set; }
     public string? StripeYearlyPriceId { get; set; }
     public int TrialDays { get; set; } = 14;
@@ -54,6 +56,8 @@ public class Plan
     // "preview" | "basic" | "full" | "premium"
     public string BrandingTier { get; set; } = "preview";
     public bool CustomLogo { get; set; } = true;
+    /// <summary>Własna domena trenera (np. annafit.pl) obok adresu w domenie platformy.</summary>
+    public bool CustomDomain { get; set; }
     public bool CustomFavicon { get; set; } = true;
     public bool CustomEmailTemplates { get; set; }
 

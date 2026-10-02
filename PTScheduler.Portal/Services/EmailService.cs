@@ -102,6 +102,27 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         </html>
         """;
 
+    /// <summary>Koniec okresu próbnego z podpiętą kartą: kiedy i ile pobierzemy oraz jak zrezygnować.</summary>
+    public string TrialEndingWithCardEmailBody(string trainerName, int daysLeft, decimal amount, bool yearly, string planName, string domain) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <h1 style="color: #7c3aed; font-size: 1.4rem;">Za {daysLeft} dni kończy się okres próbny</h1>
+            <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>nic nie musisz robić — aplikacja działa dalej. Po okresie próbnym pobierzemy z karty <strong>{amount:0.##} zł</strong>
+               za plan {WebUtility.HtmlEncode(planName)} ({(yearly ? "za cały rok" : "za miesiąc")}).</p>
+            <p>Chcesz zmienić plan, przejść na rozliczenie {(yearly ? "miesięczne" : "roczne (taniej)")} albo zrezygnować? W aplikacji:
+               <strong>Zarządzanie → Plan → Zarządzaj subskrypcją</strong>. Rezygnacja działa od razu i bez dodatkowych pytań.</p>
+            <p style="text-align: center; margin: 28px 0;">
+                <a href="https://{domain}/admin/upgrade" style="background: #7c3aed; color: white; padding: 12px 26px; border-radius: 8px; text-decoration: none; font-weight: 600;">Zarządzaj subskrypcją</a>
+            </p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">Masz pytania? Odpisz na tego maila.<br>PTScheduler</p>
+        </body>
+        </html>
+        """;
+
     public string TrialWarningEmailBody(string trainerName, int daysLeft) =>
         $"""
         <!DOCTYPE html>
@@ -360,6 +381,89 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                 Masz pytania? Odpisz na tego maila.<br>
                 PTScheduler — platforma dla trenerów personalnych
             </p>
+        </body>
+        </html>
+        """;
+
+    /// <summary>Aplikacja zbudowana przez admina dla trenera: link do ustawienia hasła (/setup z wypełnionymi danymi).</summary>
+    public string AppBuiltForYouEmailBody(string trainerName, string companyName, string appUrl, string planName) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h1 style="color: #7c3aed; margin-bottom: 4px;">Twoja aplikacja czeka!</h1>
+                <p style="color: #6b7280; margin-top: 0;">{WebUtility.HtmlEncode(companyName)}</p>
+            </div>
+            <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>przygotowaliśmy dla Ciebie aplikację — z kolorem, stroną główną i ofertą. Został jeden krok: ustaw hasło i wejdź.</p>
+            <p style="text-align: center; margin: 30px 0;">
+                <a href="{appUrl}/setup" style="background: #7c3aed; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">Ustaw hasło i wejdź</a>
+            </p>
+            <p style="color: #6b7280; font-size: 0.9rem;">Adres aplikacji: <a href="{appUrl}">{WebUtility.HtmlEncode(appUrl)}</a> · plan {WebUtility.HtmlEncode(planName)}</p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">Masz pytania? Odpisz na tego maila.<br>PTScheduler</p>
+        </body>
+        </html>
+        """;
+
+    /// <summary>Zgłoszenie z kreatora czeka w kolejce (limit, tryb akceptacji albo chwilowy problem serwera).</summary>
+    public string AppQueuedEmailBody(string trainerName, string companyName) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <h1 style="color: #7c3aed; font-size: 1.4rem;">Twoja aplikacja jest w kolejce</h1>
+            <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>aplikacja <strong>{WebUtility.HtmlEncode(companyName)}</strong> jest zbudowana i czeka na uruchomienie. Wszystkie ustawienia z kreatora są zapisane —
+               nic nie trzeba wpisywać od nowa. Gdy tylko ją uruchomimy, dostaniesz e-mail z adresem. Zwykle trwa to kilka godzin.</p>
+            <p>Okres próbny liczymy od dnia uruchomienia aplikacji.</p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">Masz pytania? Odpisz na tego maila.<br>PTScheduler</p>
+        </body>
+        </html>
+        """;
+
+    public string CustomDomainActiveEmailBody(string trainerName, string domain) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 560px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <h1 style="color: #059669; font-size: 1.4rem;">{WebUtility.HtmlEncode(domain)} działa!</h1>
+            <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>Twoja domena wskazuje już naszą platformę i ma certyfikat HTTPS. Klienci mogą wchodzić pod
+               <a href="https://{domain}" style="color: #7c3aed;">https://{domain}</a> — poprzedni adres też dalej działa.</p>
+            <p style="color: #6b7280; font-size: 0.875rem;">PTScheduler</p>
+        </body>
+        </html>
+        """;
+
+    public string CustomDomainFailedEmailBody(string trainerName, string domain, string platformHost, string? serverIp) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 560px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <h1 style="color: #d97706; font-size: 1.4rem;">Nie widzimy ustawień DNS dla {WebUtility.HtmlEncode(domain)}</h1>
+            <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>przez 7 dni domena nie wskazała naszego serwera, więc przestaliśmy czekać. Aplikacja działa normalnie pod
+               <a href="https://{platformHost}">{WebUtility.HtmlEncode(platformHost)}</a>.</p>
+            <p>Żeby podłączyć domenę, dodaj u jej dostawcy rekord {(serverIp is null ? "" : $"<b>A</b> dla {WebUtility.HtmlEncode(domain)} → <b>{serverIp}</b> oraz ")}<b>CNAME</b> dla www.{WebUtility.HtmlEncode(domain)} → <b>{WebUtility.HtmlEncode(platformHost)}</b>,
+               a potem odpisz na tego maila — podłączymy ją od razu.</p>
+            <p style="color: #6b7280; font-size: 0.875rem;">PTScheduler</p>
+        </body>
+        </html>
+        """;
+
+    /// <summary>Kod potwierdzający adres e-mail przed publikacją aplikacji z kreatora.</summary>
+    public string VerificationCodeEmailBody(string code) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 520px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <h1 style="color: #7c3aed; font-size: 1.3rem;">Twój kod do publikacji aplikacji</h1>
+            <p>Wpisz ten kod w kreatorze, żeby potwierdzić adres e-mail:</p>
+            <p style="font-size: 2rem; font-weight: 800; letter-spacing: .3em; text-align: center; background: #f5f3ff; padding: 16px; border-radius: 12px;">{code}</p>
+            <p style="color: #6b7280; font-size: 0.875rem;">Kod jest ważny 10 minut. Jeśli to nie Ty — zignoruj tę wiadomość.</p>
         </body>
         </html>
         """;

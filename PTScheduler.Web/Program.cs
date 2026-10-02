@@ -699,13 +699,46 @@ app.MapGet("/health", (StartupHealth h) => Results.Json(new
 
 // Wejście prosto po publikacji aplikacji w Portalu: jednorazowy token (ważny 30 minut) loguje
 // właściciela bez wpisywania hasła, które przed chwilą ustawił w kreatorze.
+// „Zarządzaj subskrypcją” (Zarządzanie → Plan): Portal tworzy link do portalu klienta Stripe —
+// karta, faktury, roczne rozliczenie, anulowanie. Tylko administrator studia.
+app.MapGet("/admin/subscription", async (HttpContext ctx) =>
+{
+    var portalUrl = Environment.GetEnvironmentVariable("PORTAL_URL");
+    var slug = Environment.GetEnvironmentVariable("TENANT_SLUG");
+    var secret = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+    if (string.IsNullOrEmpty(portalUrl) || string.IsNullOrEmpty(slug) || string.IsNullOrEmpty(secret))
+        return Results.Redirect("/admin/upgrade");
+    try
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        using var req = new HttpRequestMessage(HttpMethod.Post, $"{portalUrl.TrimEnd('/')}/api/internal/tenants/{Uri.EscapeDataString(slug)}/billing/portal")
+        {
+            Content = JsonContent.Create(new { returnUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}/admin/upgrade" })
+        };
+        req.Headers.Add("X-Internal-Secret", secret);
+        using var resp = await http.SendAsync(req);
+        var body = await resp.Content.ReadFromJsonAsync<Dictionary<string, string?>>();
+        if (resp.IsSuccessStatusCode && body?.GetValueOrDefault("url") is { Length: > 0 } url) return Results.Redirect(url);
+    }
+    catch (Exception ex) { app.Logger.LogWarning(ex, "Nie udało się otworzyć portalu subskrypcji."); }
+    return Results.Redirect("/admin/upgrade?subskrypcja=blad");
+}).RequireAuthorization(new Microsoft.AspNetCore.Authorization.AuthorizeAttribute { Roles = PTScheduler.Domain.Constants.Roles.Admin });
+
 app.MapGet("/account/welcome",
     async (string? token, ISetupService setup, UserManager<ApplicationUser> users, SignInManager<ApplicationUser> signIn) =>
 {
     var ownerId = await setup.RedeemWelcomeTokenAsync(token);
     var owner = ownerId is null ? null : await users.FindByIdAsync(ownerId);
     if (owner is null) return Results.Redirect("/Account/Login?witaj=1");
-    await signIn.SignInAsync(owner, isPersistent: true);
+    // Od razu na profil trenera (tam ustawia się godziny pracy i przyjmuje zapisy); „Wróć” prowadzi
+    // na konto administratora — tak samo jak przy ręcznym przełączeniu konta.
+    var trainerId = await setup.GetTrainerProfileIdAsync();
+    var trainer = trainerId is null ? null : await users.FindByIdAsync(trainerId);
+    if (trainer is not null)
+        await signIn.SignInWithClaimsAsync(trainer, isPersistent: true,
+            [new Claim(PTScheduler.Web.Services.AccountSwitchService.OriginalUserClaim, owner.Id)]);
+    else
+        await signIn.SignInAsync(owner, isPersistent: true);
     return Results.Redirect("/app?witaj=1");
 });
 

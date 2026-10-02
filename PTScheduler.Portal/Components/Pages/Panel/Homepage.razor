@@ -28,12 +28,22 @@
             <div class="d-flex flex-column gap-2">
                 <label class="d-flex gap-2 align-items-start">
                     <input type="radio" class="form-check-input mt-1" name="regmode" checked="@(_form.RegistrationMode != "review")" @onchange='() => _form.RegistrationMode = "auto"' />
-                    <span><b>Uruchamiaj od razu</b> <span class="badge text-bg-success ms-1">zalecane</span><br /><span class="text-muted small">Aplikacja powstaje w około minutę, trener wchodzi do niej prosto z kreatora. Limit: 3 publikacje na godzinę z jednego adresu IP.</span></span>
+                    <span><b>Uruchamiaj od razu</b> <span class="badge text-bg-success ms-1">zalecane</span><br /><span class="text-muted small">Aplikacja powstaje w około minutę, trener wchodzi do niej prosto z kreatora. Najpierw kod z e-maila i karta, limit 3 publikacji na godzinę z jednego adresu IP.</span></span>
                 </label>
                 <label class="d-flex gap-2 align-items-start">
                     <input type="radio" class="form-check-input mt-1" name="regmode" checked="@(_form.RegistrationMode == "review")" @onchange='() => _form.RegistrationMode = "review"' />
                     <span><b>Czekaj na moją akceptację</b><br /><span class="text-muted small">Zgłoszenie trafia do Trenerów jako „Oczekuje”. Po akceptacji ustawienia z kreatora wgrają się same.</span></span>
                 </label>
+            </div>
+            <div class="row g-2 mt-2 align-items-end">
+                <div class="col-sm-4 col-md-3">
+                    <label class="form-label small fw-semibold">Dzienny limit automatycznych uruchomień</label>
+                    <input type="number" min="0" max="500" class="form-control form-control-sm" @bind="_form.DailyLimit" />
+                </div>
+                <div class="col">
+                    <div class="text-muted small">Ponad limit zgłoszenia czekają w kolejce na Ciebie. Zawsze wymagamy potwierdzenia e-maila kodem i podpięcia karty;
+                        z <a href="/panel/invites">kodem zaproszenia</a> aplikacja startuje od razu niezależnie od trybu i limitu.</div>
+                </div>
             </div>
         </div>
     </div>
@@ -221,6 +231,7 @@
         public string CtaSubtitle { get; set; } = "";
         public string CtaButton { get; set; } = "";
         public string RegistrationMode { get; set; } = "auto";
+        public int DailyLimit { get; set; } = RegistrationGateService.DefaultDailyLimit;
     }
 
     private static readonly string[] _defaultColors = ["#7C3AED", "#06D6A0", "#FF6B35", "#3B82F6", "#EC4899", "#F59E0B", "#EF4444", "#0EA5E9"];
@@ -237,7 +248,8 @@
             SiteSettingsService.Keys.CtaTitle,
             SiteSettingsService.Keys.CtaSubtitle,
             SiteSettingsService.Keys.CtaButton,
-            SiteSettingsService.Keys.RegistrationMode);
+            SiteSettingsService.Keys.RegistrationMode,
+            SiteSettingsService.Keys.RegistrationDailyLimit);
 
         _form.HeroBadge = s[SiteSettingsService.Keys.HeroBadge];
         _form.HeroTitle = s[SiteSettingsService.Keys.HeroTitle];
@@ -249,6 +261,7 @@
         _form.CtaSubtitle = s[SiteSettingsService.Keys.CtaSubtitle];
         _form.CtaButton = s[SiteSettingsService.Keys.CtaButton];
         _form.RegistrationMode = s[SiteSettingsService.Keys.RegistrationMode] == "review" ? "review" : "auto";
+        _form.DailyLimit = int.TryParse(s[SiteSettingsService.Keys.RegistrationDailyLimit], out var lim) ? lim : RegistrationGateService.DefaultDailyLimit;
 
         _trainers = await FeaturedTrainers.LoadAsync(Settings);
     }
@@ -270,6 +283,7 @@
             [SiteSettingsService.Keys.CtaSubtitle] = _form.CtaSubtitle,
             [SiteSettingsService.Keys.CtaButton] = _form.CtaButton,
             [SiteSettingsService.Keys.RegistrationMode] = _form.RegistrationMode,
+            [SiteSettingsService.Keys.RegistrationDailyLimit] = Math.Clamp(_form.DailyLimit, 0, 500).ToString(),
         });
 
         _saving = false;

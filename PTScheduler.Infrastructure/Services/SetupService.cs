@@ -32,8 +32,12 @@ public class SetupService(
         public string? Phone { get; set; }
         public string? SetupMode { get; set; }
         public string? OwnerUserId { get; set; }
+        /// <summary>Profil trenera założony razem z kontem właściciela (zapisy klientów od pierwszej minuty).</summary>
+        public string? TrainerUserId { get; set; }
         public string? WelcomeTokenHash { get; set; }
         public DateTime? WelcomeTokenExpiresUtc { get; set; }
+        /// <summary>Oferta z kreatora już wgrana (powtórka nie dubluje treningów).</summary>
+        public bool OfferApplied { get; set; }
     }
 
     private static OnboardingState ReadState(AppBranding? b)
@@ -107,6 +111,16 @@ public class SetupService(
         branding.SetupCompleted = true;
         branding.SetupMode = mode;
         branding.SetupCompletedAt = DateTime.UtcNow;
+
+        // Aplikacja z kreatora w Portalu (dane z rejestracji): od razu profil trenera, żeby klienci mogli się zapisywać.
+        var state = ReadState(branding);
+        if (string.Equals(state.Email, adminEmail, StringComparison.OrdinalIgnoreCase))
+        {
+            var trainer = await EnsureTrainerProfileAsync(owner);
+            state.TrainerUserId = trainer?.Id ?? state.TrainerUserId;
+            state.OwnerUserId = owner.Id;
+            branding.OnboardingJson = JsonSerializer.Serialize(state);
+        }
         await db.SaveChangesAsync();
     }
 
@@ -155,10 +169,18 @@ public class SetupService(
         state.SetupMode = dto.SetupMode;
 
         // Bez skrótu hasła — tylko wypełniamy /setup; hasło trener ustawi sam.
+        // Bez skrótu (aplikacja zbudowana przez admina dla trenera): oferta, kolor i strona wchodzą od razu,
+        // a hasło trener ustawi w /setup z wypełnionymi danymi.
         if (string.IsNullOrWhiteSpace(dto.PasswordHash) || !email.Contains('@'))
         {
+            if (!state.OfferApplied)
+            {
+                await ApplyOfferAsync(db, dto, "");
+                state.OfferApplied = true;
+            }
             branding.OnboardingJson = JsonSerializer.Serialize(state);
             await db.SaveChangesAsync();
+            await ApplySiteAsync(dto.SiteTemplate, company);
             return new(false, "Dane zapisane — kreator /setup jest wypełniony.");
         }
 
@@ -192,7 +214,13 @@ public class SetupService(
         owner.MustChangePassword = false;
         await userManager.UpdateAsync(owner);
 
-        await ApplyOfferAsync(db, dto, owner.Id);
+        if (!state.OfferApplied)
+        {
+            await ApplyOfferAsync(db, dto, owner.Id);
+            state.OfferApplied = true;
+        }
+        var trainer = await EnsureTrainerProfileAsync(owner);
+        state.TrainerUserId = trainer?.Id;
 
         branding.SetupCompleted = true;
         branding.SetupMode = dto.SetupMode ?? "self";
@@ -201,19 +229,82 @@ public class SetupService(
         branding.OnboardingJson = JsonSerializer.Serialize(state);
         await db.SaveChangesAsync();
 
-        if (!string.IsNullOrWhiteSpace(dto.SiteTemplate))
-        {
-            try
-            {
-                var site = SiteWidgets.BuildTemplate(dto.SiteTemplate);
-                if (company is not null) site.SeoDescription = $"{company} — treningi, wolne terminy i zapisy online.";
-                await siteContent.SaveAsync(site);
-                await siteContent.DiscardDraftAsync();
-            }
-            catch (Exception ex) { logger.LogWarning(ex, "Nie udało się ustawić strony głównej z szablonu {Template}.", dto.SiteTemplate); }
-        }
+        await ApplySiteAsync(dto.SiteTemplate, company);
+        return new(true, "Konto właściciela i profil trenera utworzone, aplikacja skonfigurowana.");
+    }
 
-        return new(true, "Konto właściciela utworzone, aplikacja skonfigurowana.");
+    private async Task ApplySiteAsync(string? template, string? company)
+    {
+        if (string.IsNullOrWhiteSpace(template)) return;
+        try
+        {
+            var site = SiteWidgets.BuildTemplate(template);
+            if (company is not null) site.SeoDescription = $"{company} — treningi, wolne terminy i zapisy online.";
+            await siteContent.SaveAsync(site);
+            await siteContent.DiscardDraftAsync();
+        }
+        catch (Exception ex) { logger.LogWarning(ex, "Nie udało się ustawić strony głównej z szablonu {Template}.", template); }
+    }
+
+    /// <summary>
+    /// Profil trenera dla właściciela: konto Administratora służy do ustawień, a zapisy klientów idą na
+    /// profil trenera. Login profilu to adres właściciela z dopiskiem „+trener” (np. anna+trener@gmail.com)
+    /// i to samo hasło; właściciel przełącza się na niego jednym kliknięciem. Gdy w aplikacji jest już
+    /// trener — nic nie zakładamy.
+    /// </summary>
+    private async Task<ApplicationUser?> EnsureTrainerProfileAsync(ApplicationUser owner)
+    {
+        try
+        {
+            if ((await userManager.GetUsersInRoleAsync(Roles.Trainer)).Count > 0) return null;
+            var email = TrainerAlias(owner.Email ?? "");
+            if (email is null) return null;
+            var existing = await userManager.FindByEmailAsync(email);
+            if (existing is not null) return existing;
+
+            var trainer = new ApplicationUser
+            {
+                UserName = email,
+                Email = email,
+                EmailConfirmed = true,
+                FirstName = owner.FirstName,
+                LastName = owner.LastName,
+                PhoneNumber = owner.PhoneNumber,
+                PasswordHash = owner.PasswordHash,
+                MustChangePassword = false
+            };
+            var created = await userManager.CreateAsync(trainer);
+            if (!created.Succeeded)
+            {
+                logger.LogWarning("Nie założono profilu trenera: {Errors}", string.Join(" ", created.Errors.Select(e => e.Description)));
+                return null;
+            }
+            await userManager.AddToRoleAsync(trainer, Roles.Trainer);
+            return trainer;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Nie udało się założyć profilu trenera dla {Email}.", owner.Email);
+            return null;
+        }
+    }
+
+    /// <summary>anna@gmail.com → anna+trener@gmail.com (null, gdy adres jest nieprawidłowy).</summary>
+    public static string? TrainerAlias(string email)
+    {
+        var at = email.LastIndexOf('@');
+        if (at <= 0 || at == email.Length - 1) return null;
+        var local = email[..at];
+        var plus = local.IndexOf('+');
+        if (plus >= 0) local = local[..plus];
+        return $"{local}+trener{email[at..]}";
+    }
+
+    public async Task<string?> GetTrainerProfileIdAsync()
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var state = ReadState(await db.AppBrandings.AsNoTracking().FirstOrDefaultAsync());
+        return state.TrainerUserId;
     }
 
     /// <summary>Rodzaje treningów i pakiet z kreatora zamiast domyślnych „45/60/90 minut”.</summary>

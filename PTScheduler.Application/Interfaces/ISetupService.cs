@@ -15,4 +15,7 @@ public interface ISetupService
 
     /// <summary>Jednorazowe wejście po publikacji: zwraca Id konta właściciela albo null (zły / zużyty / przeterminowany token).</summary>
     Task<string?> RedeemWelcomeTokenAsync(string? token);
+
+    /// <summary>Profil trenera założony z kreatora (null = brak).</summary>
+    Task<string?> GetTrainerProfileIdAsync();
 }

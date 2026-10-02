@@ -8,6 +8,17 @@
    Kolejny plan pokazuje tylko to, co dochodzi ponad poprzedni, żeby nie powtarzać tej samej listy. *@
 
 <div class="upg">
+    @if (_billingPortal)
+    {
+        <div class="upg-sub">
+            <i class="bi bi-credit-card-2-front"></i>
+            <div class="flex-grow-1">
+                <b>Subskrypcja</b>
+                <div class="small text-muted">Karta, faktury, zmiana na rozliczenie roczne i anulowanie — w każdej chwili, bez dzwonienia do nikogo.</div>
+            </div>
+            <a href="/admin/subscription" class="btn btn-sm btn-outline-primary">Zarządzaj subskrypcją</a>
+        </div>
+    }
     @if (_offers.Count == 0)
     {
         <div class="upg-top upg-top-max">
@@ -82,6 +93,11 @@
 
 <style>
     .upg { max-width: 1080px; }
+    .upg-sub {
+        display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; margin-bottom: 16px;
+        border-radius: 14px; border: 1px solid var(--bs-border-color); background: var(--bs-body-bg);
+    }
+    .upg-sub > i { font-size: 1.4rem; color: var(--c-primary); }
     .upg-top {
         position: relative; overflow: hidden;
         display: flex; gap: 16px; align-items: flex-start;
@@ -155,8 +171,13 @@
 
     private sealed record Offer(PlanCatalog.Plan Plan, decimal Diff, IReadOnlyList<PlanCatalog.Benefit> Benefits);
 
+    private bool _billingPortal;
+
     protected override void OnInitialized()
     {
+        // Zarządzanie kartą i anulowanie przez portal klienta Stripe — tylko gdy instancja jest podpięta do Portalu.
+        _billingPortal = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PORTAL_URL"))
+                         && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET"));
         _current = Entitlements.Current;
         var shown = new HashSet<string>();
         foreach (var plan in PlanCatalog.HigherThan(_current))

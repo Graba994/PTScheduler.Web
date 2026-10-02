@@ -87,6 +87,48 @@ public class SetupBootstrapTests
         package.CreatedByUserId.Should().Be(owner.Id);
 
         site.Verify(s => s.SaveAsync(It.Is<SiteContentDto>(c => c.Template == "women" && c.LayoutVersion == 2)), Times.Once);
+
+        // Profil trenera od pierwszej minuty: anna+trener@…, to samo hasło, rola Trener.
+        var trainer = await users.FindByEmailAsync("anna+trener@example.com");
+        trainer.Should().NotBeNull();
+        (await users.IsInRoleAsync(trainer!, Roles.Trainer)).Should().BeTrue();
+        (await users.IsInRoleAsync(trainer!, Roles.Admin)).Should().BeFalse();
+        (await users.CheckPasswordAsync(trainer!, "Mocne-Haslo-1")).Should().BeTrue();
+        (await setup.GetTrainerProfileIdAsync()).Should().Be(trainer!.Id);
+    }
+
+    [Theory]
+    [InlineData("anna@gmail.com", "anna+trener@gmail.com")]
+    [InlineData("anna+studio@gmail.com", "anna+trener@gmail.com")]
+    [InlineData("zle", null)]
+    public void TrainerAlias_UsesPlusAddress(string email, string? expected) =>
+        SetupService.TrainerAlias(email).Should().Be(expected);
+
+    [Fact]
+    public async Task BuiltByAdmin_AppliesOffer_AndSetupCreatesTrainerProfile()
+    {
+        var (sp, users, setup, site) = await CreateAsync();
+
+        await setup.BootstrapAsync(Dto(passwordHash: null));
+
+        // Oferta, kolor i strona wchodzą od razu, choć hasła jeszcze nie ma.
+        await using (var db = await sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContextAsync())
+        {
+            (await db.SessionTypes.Select(t => t.Name).ToListAsync()).Should().Contain("Trening personalny");
+            (await db.PackageOffers.CountAsync()).Should().Be(1);
+            (await db.AppBrandings.SingleAsync()).ThemeName.Should().Be("rose");
+        }
+        site.Verify(s => s.SaveAsync(It.IsAny<SiteContentDto>()), Times.Once);
+
+        // Ponowne przekazanie (np. powtórka Portalu) nie dubluje oferty.
+        await setup.BootstrapAsync(Dto(passwordHash: null));
+        await using (var db = await sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContextAsync())
+            (await db.PackageOffers.CountAsync()).Should().Be(1);
+
+        await setup.CompleteSetupAsync("self", "Anna Fit Studio", "anna@example.com", "Mocne-Haslo-1");
+        var trainer = await users.FindByEmailAsync("anna+trener@example.com");
+        trainer.Should().NotBeNull("po /setup z danymi z rejestracji powstaje też profil trenera");
+        (await users.IsInRoleAsync(trainer!, Roles.Trainer)).Should().BeTrue();
     }
 
     [Fact]

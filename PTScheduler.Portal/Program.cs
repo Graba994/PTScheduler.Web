@@ -88,6 +88,9 @@ builder.Services.AddSingleton<BackupJobs>();
 builder.Services.AddScoped<ResourceReportService>();
 builder.Services.AddSingleton<NpmHealthService>();
 builder.Services.AddSingleton<AppLaunchService>();
+builder.Services.AddScoped<RegistrationGateService>();
+builder.Services.AddSingleton<CustomDomainService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<CustomDomainService>());
 builder.Services.AddHttpContextAccessor();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<NpmHealthService>());
 builder.Services.AddSingleton<ResourceMonitorService>();
@@ -553,6 +556,27 @@ app.MapGet("/api/internal/tenants/{slug}/entitlements", async (
     var plan = await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == tenant.PlanId);
     if (plan is null) return Results.NotFound();
     return Results.Content(TenantService.SerializeEntitlements(plan, await AddonService.ExtraLimitsAsync(db, tenant.Id)), "application/json");
+});
+
+// „Zarządzaj subskrypcją” w aplikacji trenera: link do portalu klienta Stripe (karta, faktury, anulowanie).
+app.MapPost("/api/internal/tenants/{slug}/billing/portal", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    StripeService stripe,
+    IConfiguration config) =>
+{
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    if (string.IsNullOrWhiteSpace(tenant.StripeCustomerId))
+        return Results.Json(new { error = "Brak podpiętej karty — napisz do nas." }, statusCode: 404);
+    var body = await ctx.Request.ReadFromJsonAsync<Dictionary<string, string?>>();
+    var returnUrl = body?.GetValueOrDefault("returnUrl");
+    if (string.IsNullOrWhiteSpace(returnUrl) || !returnUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
+        returnUrl = $"https://{tenant.Domain}/admin/upgrade";
+    var url = await stripe.CreateCustomerPortalLinkAsync(tenant.StripeCustomerId, returnUrl);
+    return url is null ? Results.Json(new { error = "Stripe nie odpowiada." }, statusCode: 502) : Results.Json(new { url });
 });
 
 // Ocena aplikacji wysyłana przez trenera z instancji tenanta (Zarządzanie → „Oceń aplikację”).

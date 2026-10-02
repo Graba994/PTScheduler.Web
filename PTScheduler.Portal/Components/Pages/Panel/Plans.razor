@@ -3,6 +3,7 @@
 @attribute [Authorize(Roles = "Admin")]
 @inject IDbContextFactory<PortalDbContext> DbFactory
 @inject PTScheduler.Portal.Services.TenantService TenantService
+@inject PTScheduler.Portal.Services.StripeService StripeSvc
 @rendermode InteractiveServer
 
 <PageTitle>Plany cenowe — PTScheduler Portal</PageTitle>
@@ -49,6 +50,17 @@
                 <div class="col-md-3">
                     <label class="form-label small fw-semibold">Cena roczna (zł)</label>
                     <input type="number" class="form-control" @bind="_editing.YearlyPrice" />
+                    @if (_editing.MonthlyPrice > 0 && _editing.YearlyPrice is > 0)
+                    {
+                        var saving = _editing.MonthlyPrice * 12 - _editing.YearlyPrice.Value;
+                        <div class="form-text small @(saving > 0 ? "text-success" : "text-danger")">
+                            @(saving > 0 ? $"Taniej o {saving:0} zł ({saving / _editing.MonthlyPrice:0.#} mies. gratis)" : "Roczna powinna być tańsza niż 12 × miesięczna")
+                        </div>
+                    }
+                    else if (_editing.MonthlyPrice > 0)
+                    {
+                        <div class="form-text small">Np. @((_editing.MonthlyPrice * 10).ToString("0")) zł = 2 miesiące gratis</div>
+                    }
                 </div>
                 <div class="col-md-2">
                     <label class="form-label small fw-semibold">Kolejność</label>
@@ -146,6 +158,7 @@
                             </div>
                         </div>
                         <div class="row g-2">
+                            @Flag("Własna domena (np. annafit.pl)", () => _editing!.CustomDomain, v => _editing!.CustomDomain = v)
                             @Flag("Własne logo", () => _editing!.CustomLogo, v => _editing!.CustomLogo = v)
                             @Flag("Własna favicon", () => _editing!.CustomFavicon, v => _editing!.CustomFavicon = v)
                             @Flag("Szablony email", () => _editing!.CustomEmailTemplates, v => _editing!.CustomEmailTemplates = v)
@@ -172,7 +185,7 @@
                         <div class="col-md-6">
                             <label class="form-label small fw-semibold">Stripe monthly price ID</label>
                             <input class="form-control font-monospace" @bind="_editing!.StripeMonthlyPriceId" placeholder="price_1P..." />
-                            <div class="form-text small">Utwórz w Stripe Dashboard → Products</div>
+                            <div class="form-text small">Zostaw puste — po zapisaniu Portal sam założy produkt i ceny w Stripe (także po zmianie kwoty).</div>
                         </div>
                         <div class="col-md-6">
                             <label class="form-label small fw-semibold">Stripe yearly price ID</label>
@@ -181,7 +194,7 @@
                         <div class="col-md-3">
                             <label class="form-label small fw-semibold">Dni trialu</label>
                             <input type="number" min="0" max="90" class="form-control" @bind="_editing!.TrialDays" />
-                            <div class="form-text small">0 = bez trialu</div>
+                            <div class="form-text small">Karta jest wymagana zawsze; pierwsza opłata po tylu dniach. 0 = od razu.</div>
                         </div>
                     </div>;
                 })
@@ -329,6 +342,10 @@
         {
             _message = "ID i nazwa są wymagane."; _msgError = true; return;
         }
+        if (_editing.MonthlyPrice > 0 && _editing.YearlyPrice is > 0 && _editing.YearlyPrice >= _editing.MonthlyPrice * 12)
+        {
+            _message = "Cena roczna musi być niższa niż 12 × cena miesięczna — inaczej nikt jej nie wybierze."; _msgError = true; return;
+        }
 
         try
         {
@@ -354,6 +371,14 @@
                 : pushed == total ? $"Zapisano. Uprawnienia odświeżone u {total} trenerów."
                 : $"Zapisano. Uprawnienia odświeżone u {pushed}/{total} trenerów — pozostali dostaną je przy następnym starcie.";
             _msgError = false;
+            // Ceny w Stripe idą za planem — kreator rejestracji używa ich przy podpinaniu karty.
+            if (await StripeSvc.IsConfiguredAsync())
+            {
+                var (stripeOk, stripeError) = await StripeSvc.EnsurePricesAsync(planId);
+                _message += stripeOk ? " Ceny w Stripe aktualne." : $" Stripe: {stripeError}";
+                if (!stripeOk) _msgError = true;
+                await Load();
+            }
         }
         catch (Exception ex)
         {

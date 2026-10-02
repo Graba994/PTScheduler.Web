@@ -34,14 +34,22 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<TenantBill> TenantBills => Set<TenantBill>();
     public DbSet<TenantBillLine> TenantBillLines => Set<TenantBillLine>();
     public DbSet<ResourceSample> ResourceSamples => Set<ResourceSample>();
+    public DbSet<InviteCode> InviteCodes => Set<InviteCode>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
         base.OnModelCreating(b);
 
+        b.Entity<InviteCode>(e =>
+        {
+            e.HasIndex(c => c.Code).IsUnique();
+            e.Property(c => c.Code).HasMaxLength(40);
+        });
+
         b.Entity<Tenant>(e =>
         {
             e.HasIndex(t => t.Slug).IsUnique();
+            e.HasIndex(t => t.RegistrationKey);
             e.HasIndex(t => t.Domain).IsUnique();
             e.HasIndex(t => t.Port).IsUnique();
             e.HasOne(t => t.Plan).WithMany(p => p.Tenants).HasForeignKey(t => t.PlanId);

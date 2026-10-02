@@ -25,6 +25,19 @@ public class Tenant
     [System.Text.Json.Serialization.JsonIgnore]
     public string? SetupPayload { get; set; }
     public string? Notes { get; set; }
+    /// <summary>Rozliczenie abonamentu: „monthly” albo „yearly” (wybrane w kreatorze).</summary>
+    public string BillingInterval { get; set; } = "monthly";
+    /// <summary>Dlaczego zgłoszenie czeka w kolejce zamiast uruchomić się samo (dla admina; null = nie czeka).</summary>
+    public string? QueuedReason { get; set; }
+    /// <summary>Losowy klucz kreatora: powrót z płatności kartą wraca do właściwego zgłoszenia (w adresie, nie Id).</summary>
+    public string? RegistrationKey { get; set; }
+    /// <summary>Kod zaproszenia użyty przy rejestracji.</summary>
+    public string? InviteCode { get; set; }
+    /// <summary>Własna domena trenera (np. annafit.pl) — działa obok adresu w domenie platformy.</summary>
+    public string? CustomDomain { get; set; }
+    /// <summary>„waiting” (czekamy na DNS), „active”, „failed” (DNS nie wskazał serwera w 7 dni).</summary>
+    public string? CustomDomainStatus { get; set; }
+    public DateTime? CustomDomainSince { get; set; }
     public string? WebContainerName { get; set; }
     public string? DbContainerName { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

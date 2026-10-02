@@ -186,8 +186,15 @@ public class StripeService(
             tenant = await db.Tenants.FindAsync(id);
         if (tenant is null) return;
 
-        tenant.StripeSubscriptionId = session.SubscriptionId;
-        tenant.BillingStatus = "trialing";
+        if (session.Mode == "setup")
+        {
+            if (tenant.BillingStatus is "none" or "") tenant.BillingStatus = "card";
+        }
+        else
+        {
+            tenant.StripeSubscriptionId = session.SubscriptionId;
+            if (tenant.BillingStatus is not ("active" or "past_due")) tenant.BillingStatus = "trialing";
+        }
         await db.SaveChangesAsync();
 
         db.TenantEvents.Add(new TenantEvent
@@ -198,7 +205,7 @@ public class StripeService(
         });
         await db.SaveChangesAsync();
 
-        logger.LogInformation("Stripe checkout completed for tenant {Slug}, awaiting manual approval", tenant.Slug);
+        logger.LogInformation("Stripe checkout completed for tenant {Slug} ({Mode})", tenant.Slug, session.Mode);
     }
 
     private async Task HandleSubscriptionChangeAsync(Stripe.Subscription sub)
@@ -369,5 +376,203 @@ public class StripeService(
             logger.LogError(ex, "Customer portal link creation failed");
             return null;
         }
+    }
+
+    /// <summary>
+    /// Produkt i ceny planu w Stripe — Portal zakłada je sam z ceny miesięcznej i rocznej planu, więc nie trzeba
+    /// kopiować identyfikatorów „price_…”. Ceny w Stripe są niezmienne: po zmianie kwoty powstaje nowa cena.
+    /// </summary>
+    public async Task<(bool Ok, string? Error)> EnsurePricesAsync(string planId)
+    {
+        if (await ConfigureAsync() is null) return (false, "Stripe nie jest skonfigurowany.");
+        await using var db = dbFactory.CreateDbContext();
+        var plan = await db.Plans.FirstOrDefaultAsync(p => p.Id == planId);
+        if (plan is null) return (false, "Nie ma takiego planu.");
+        if (plan.MonthlyPrice <= 0) return (true, null);
+        try
+        {
+            if (string.IsNullOrWhiteSpace(plan.StripeProductId))
+            {
+                var product = await new ProductService().CreateAsync(new ProductCreateOptions
+                {
+                    Name = $"PTScheduler {plan.Name}",
+                    Metadata = new Dictionary<string, string> { ["planId"] = plan.Id }
+                });
+                plan.StripeProductId = product.Id;
+            }
+            plan.StripeMonthlyPriceId = await EnsurePriceAsync(plan.StripeProductId, plan.StripeMonthlyPriceId, plan.MonthlyPrice, "month", plan.Currency);
+            if (plan.YearlyPrice is > 0)
+                plan.StripeYearlyPriceId = await EnsurePriceAsync(plan.StripeProductId, plan.StripeYearlyPriceId, plan.YearlyPrice.Value, "year", plan.Currency);
+            await db.SaveChangesAsync();
+            return (true, null);
+        }
+        catch (StripeException ex)
+        {
+            logger.LogError(ex, "Nie udało się założyć cen planu {Plan} w Stripe.", planId);
+            return (false, ex.StripeError?.Message ?? ex.Message);
+        }
+    }
+
+    private static async Task<string> EnsurePriceAsync(string productId, string? priceId, decimal amount, string interval, string currency)
+    {
+        var prices = new PriceService();
+        var cents = (long)Math.Round(amount * 100);
+        if (!string.IsNullOrWhiteSpace(priceId))
+        {
+            try
+            {
+                var existing = await prices.GetAsync(priceId);
+                if (existing.Active && existing.UnitAmount == cents && existing.Recurring?.Interval == interval
+                    && string.Equals(existing.Currency, currency, StringComparison.OrdinalIgnoreCase))
+                    return priceId;
+            }
+            catch (StripeException) { /* ceny nie ma (np. inne konto Stripe) — zakładamy nową */ }
+        }
+        var created = await prices.CreateAsync(new PriceCreateOptions
+        {
+            Product = productId,
+            UnitAmount = cents,
+            Currency = currency.ToLowerInvariant(),
+            Recurring = new PriceRecurringOptions { Interval = interval }
+        });
+        return created.Id;
+    }
+
+    /// <summary>
+    /// Karta przy publikacji z kreatora — wymagana przy każdym planie. Płatny plan: subskrypcja z okresem
+    /// próbnym (pierwsza opłata po jego końcu, miesięcznie albo rocznie), anulowanie w każdej chwili w portalu
+    /// klienta. Darmowy plan: tylko zapisanie karty (nic nie pobieramy).
+    /// </summary>
+    public async Task<(bool Success, string? CheckoutUrl, string? Error)> StartCardCheckoutAsync(
+        int tenantId, string successUrl, string cancelUrl, int extraTrialDays = 0)
+    {
+        if (await ConfigureAsync() is null) return (false, null, "Stripe nie jest skonfigurowany.");
+
+        await using var db = dbFactory.CreateDbContext();
+        var tenant = await db.Tenants.Include(t => t.Plan).FirstOrDefaultAsync(t => t.Id == tenantId);
+        if (tenant?.Plan is null) return (false, null, "Brak zgłoszenia albo planu.");
+        var plan = tenant.Plan;
+        var meta = new Dictionary<string, string> { ["tenantId"] = tenant.Id.ToString(), ["slug"] = tenant.Slug };
+
+        try
+        {
+            if (string.IsNullOrWhiteSpace(tenant.StripeCustomerId))
+            {
+                var customer = await new CustomerService().CreateAsync(new CustomerCreateOptions
+                {
+                    Email = tenant.OwnerEmail,
+                    Name = string.IsNullOrWhiteSpace(tenant.CompanyName) ? tenant.OwnerName : tenant.CompanyName,
+                    Phone = tenant.Phone,
+                    Metadata = meta
+                });
+                tenant.StripeCustomerId = customer.Id;
+            }
+
+            SessionCreateOptions options;
+            if (plan.MonthlyPrice <= 0)
+            {
+                options = new SessionCreateOptions
+                {
+                    Mode = "setup",
+                    Customer = tenant.StripeCustomerId,
+                    Currency = plan.Currency.ToLowerInvariant(),
+                    PaymentMethodTypes = ["card"],
+                    SetupIntentData = new SessionSetupIntentDataOptions { Metadata = meta }
+                };
+            }
+            else
+            {
+                var (pricesOk, pricesError) = await EnsurePricesAsync(plan.Id);
+                if (!pricesOk) return (false, null, pricesError);
+                await db.Entry(plan).ReloadAsync();
+                var priceId = tenant.BillingInterval == "yearly" && !string.IsNullOrWhiteSpace(plan.StripeYearlyPriceId)
+                    ? plan.StripeYearlyPriceId : plan.StripeMonthlyPriceId;
+                var trialDays = Math.Max(0, plan.TrialDays) + Math.Max(0, extraTrialDays);
+                options = new SessionCreateOptions
+                {
+                    Mode = "subscription",
+                    Customer = tenant.StripeCustomerId,
+                    PaymentMethodCollection = "always",
+                    LineItems = [new() { Price = priceId, Quantity = 1 }],
+                    SubscriptionData = new SessionSubscriptionDataOptions
+                    {
+                        TrialPeriodDays = trialDays > 0 ? trialDays : null,
+                        Metadata = meta
+                    }
+                };
+            }
+            options.SuccessUrl = successUrl;
+            options.CancelUrl = cancelUrl;
+            options.Locale = "pl";
+            options.Metadata = meta;
+
+            var session = await new SessionService().CreateAsync(options);
+            tenant.StripeCheckoutSessionId = session.Id;
+            await db.SaveChangesAsync();
+            return (true, session.Url, null);
+        }
+        catch (StripeException ex)
+        {
+            logger.LogError(ex, "Nie udało się otworzyć płatności kartą dla tenanta {Id}.", tenantId);
+            return (false, null, ex.StripeError?.Message ?? ex.Message);
+        }
+    }
+
+    /// <summary>Powrót z płatności: czy karta naprawdę została podpięta (nie ufamy samemu adresowi powrotu).</summary>
+    public async Task<(bool Ok, int? TenantId, string? Error)> VerifyCardCheckoutAsync(string sessionId)
+    {
+        if (await ConfigureAsync() is null) return (false, null, "Stripe nie jest skonfigurowany.");
+        try
+        {
+            var session = await new SessionService().GetAsync(sessionId);
+            await using var db = dbFactory.CreateDbContext();
+            var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.StripeCheckoutSessionId == session.Id);
+            if (tenant is null) return (false, null, "Nie znaleziono zgłoszenia dla tej płatności.");
+            if (session.Status != "complete") return (false, tenant.Id, "Karta nie została jeszcze dodana.");
+
+            if (session.Mode == "subscription")
+            {
+                tenant.StripeSubscriptionId = session.SubscriptionId;
+                if (tenant.BillingStatus is not ("active" or "past_due")) tenant.BillingStatus = "trialing";
+            }
+            else if (tenant.BillingStatus is "none" or "")
+                tenant.BillingStatus = "card";
+            await db.SaveChangesAsync();
+            return (true, tenant.Id, null);
+        }
+        catch (StripeException ex)
+        {
+            logger.LogWarning(ex, "Weryfikacja płatności {Session} nie powiodła się.", sessionId);
+            return (false, null, ex.StripeError?.Message ?? ex.Message);
+        }
+    }
+
+    /// <summary>
+    /// Okres próbny liczymy od uruchomienia aplikacji, nie od podpięcia karty — jeśli zgłoszenie czekało
+    /// w kolejce, przesuwamy koniec okresu próbnego subskrypcji (plan + dodatkowe dni z kodu zaproszenia).
+    /// </summary>
+    public async Task RestartTrialAsync(int tenantId)
+    {
+        if (await ConfigureAsync() is null) return;
+        await using var db = dbFactory.CreateDbContext();
+        var tenant = await db.Tenants.Include(t => t.Plan).FirstOrDefaultAsync(t => t.Id == tenantId);
+        if (tenant?.Plan is null || string.IsNullOrWhiteSpace(tenant.StripeSubscriptionId)) return;
+        var extra = 0;
+        if (!string.IsNullOrWhiteSpace(tenant.InviteCode))
+            extra = await db.InviteCodes.Where(c => c.Code == tenant.InviteCode).Select(c => c.ExtraTrialDays).FirstOrDefaultAsync();
+        var days = Math.Max(0, tenant.Plan.TrialDays) + Math.Max(0, extra);
+        if (days == 0) return;
+        try
+        {
+            var subs = new Stripe.SubscriptionService();
+            var sub = await subs.GetAsync(tenant.StripeSubscriptionId);
+            if (sub.Status != "trialing") return;
+            var end = DateTime.UtcNow.AddDays(days);
+            if (sub.TrialEnd is { } current && current >= end.AddHours(-1)) return;
+            await subs.UpdateAsync(sub.Id, new Stripe.SubscriptionUpdateOptions { TrialEnd = end, ProrationBehavior = "none" });
+            tenant.TrialEndsAt = end;
+            await db.SaveChangesAsync();
+        }
+        catch (StripeException ex) { logger.LogWarning(ex, "Nie przesunięto okresu próbnego tenanta {Slug}.", tenant.Slug); }
     }
 }

@@ -7,6 +7,7 @@
 @inject IDbContextFactory<PortalDbContext> DbFactory
 @inject NpmService NpmSvc
 @inject NpmHealthService NpmHealth
+@inject CustomDomainService CustomDomains
 @inject NavigationManager Nav
 @inject IConfiguration Config
 @inject EmailService EmailSvc
@@ -58,6 +59,17 @@ else
                 <h5 class="fw-bold mb-0">Akceptacja trenera</h5>
             </div>
             <div class="card-body">
+                @if (!string.IsNullOrWhiteSpace(_tenant.QueuedReason))
+                {
+                    <div class="alert alert-warning small py-2"><i class="bi bi-hourglass-split me-1"></i><b>Czeka w kolejce:</b> @_tenant.QueuedReason</div>
+                }
+                <div class="d-flex flex-wrap gap-2 mb-3 small">
+                    <span class="pp-chip @(string.IsNullOrEmpty(_tenant.StripeCustomerId) ? "pp-tone-danger" : "pp-tone-ok")"><i class="bi bi-credit-card"></i>@(string.IsNullOrEmpty(_tenant.StripeCustomerId) ? "bez karty" : "karta podpięta")</span>
+                    <span class="pp-chip pp-tone-info"><i class="bi bi-calendar3"></i>@(_tenant.BillingInterval == "yearly" ? "rozliczenie roczne" : "rozliczenie miesięczne")</span>
+                    @if (!string.IsNullOrWhiteSpace(_tenant.InviteCode)) { <span class="pp-chip pp-tone-info"><i class="bi bi-ticket-perforated"></i>kod @_tenant.InviteCode</span> }
+                    @if (!string.IsNullOrWhiteSpace(_tenant.CustomDomain)) { <span class="pp-chip pp-tone-info"><i class="bi bi-globe"></i>@_tenant.CustomDomain</span> }
+                    @if (!string.IsNullOrWhiteSpace(_tenant.SetupPayload)) { <span class="pp-chip pp-tone-ok"><i class="bi bi-magic"></i>ustawienia z kreatora wgrają się same</span> }
+                </div>
                 <div class="row g-3 mb-3">
                     <div class="col-md-6">
                         <dl class="row mb-0 small">
@@ -72,7 +84,7 @@ else
                             <dt class="col-5 text-muted">Plan</dt>
                             <dd class="col-7"><span class="badge bg-primary-subtle text-primary-emphasis">@(_tenant.Plan?.Name ?? _tenant.PlanId)</span></dd>
                             <dt class="col-5 text-muted">Setup</dt>
-                            <dd class="col-7">@(_tenant.SetupMode == "admin" ? "Przez nasz zespol" : "Samodzielna konfiguracja")</dd>
+                            <dd class="col-7">@(_tenant.SetupMode == "admin" ? "Przez nasz zespół" : "Samodzielna konfiguracja")</dd>
                             <dt class="col-5 text-muted">Rejestracja</dt>
                             <dd class="col-7">@_tenant.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</dd>
                         </dl>
@@ -136,7 +148,7 @@ else
                 <div class="d-flex gap-2">
                     <button class="btn btn-success" @onclick="ApproveAndProvision" disabled="@_approving">
                         @if (_approving) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                        <i class="bi bi-check-circle me-1"></i>Zaakceptuj i uruchom instancje
+                        <i class="bi bi-check-circle me-1"></i>Zaakceptuj i uruchom aplikację
                     </button>
                     <button class="btn btn-outline-danger" @onclick="RejectRegistration" disabled="@_rejecting">
                         @if (_rejecting) { <span class="spinner-border spinner-border-sm me-1"></span> }
@@ -783,6 +795,23 @@ else
                             </dd>
                         }
                     </dl>
+                    @if (!string.IsNullOrWhiteSpace(_tenant.CustomDomain))
+                    {
+                        <div class="d-flex flex-wrap align-items-center gap-2 mb-3 small">
+                            <span class="text-muted">Własna domena z kreatora:</span>
+                            <b>@_tenant.CustomDomain</b>
+                            <span class="pp-chip pp-tone-@(_tenant.CustomDomainStatus == "active" ? "ok" : _tenant.CustomDomainStatus == "failed" ? "danger" : "warn")">
+                                @(_tenant.CustomDomainStatus == "active" ? "działa" : _tenant.CustomDomainStatus == "failed" ? "DNS nie ustawiony (7 dni)" : "czeka na DNS")
+                            </span>
+                            @if (_tenant.CustomDomainStatus != "active")
+                            {
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="CheckCustomDomain" disabled="@_checkingDomain">
+                                    @if (_checkingDomain) { <span class="spinner-border spinner-border-sm me-1"></span> }Sprawdź teraz
+                                </button>
+                            }
+                        </div>
+                        @if (_customDomainMsg is not null) { <div class="small text-muted mb-2">@_customDomainMsg</div> }
+                    }
                     @if (_https is { } h2)
                     {
                         <button class="btn btn-sm @(h2.State == NpmHealthService.DomainState.Ok ? "btn-outline-secondary" : "btn-danger") mb-3" @onclick="RenewHttps" disabled="@_renewingHttps">
@@ -1658,6 +1687,27 @@ else
     private List<PaymentRecord>? _paymentRecords;
     private bool _loadingPayments;
 
+    private bool _checkingDomain;
+    private string? _customDomainMsg;
+
+    private async Task CheckCustomDomain()
+    {
+        if (_tenant is null) return;
+        _checkingDomain = true;
+        try
+        {
+            await using (var db = DbFactory.CreateDbContext())
+            {
+                var t = await db.Tenants.FindAsync(_tenant.Id);
+                // Po 7 dniach „failed” — ręczne sprawdzenie zaczyna czekanie od nowa.
+                if (t is not null && t.CustomDomainStatus == "failed") { t.CustomDomainStatus = "waiting"; t.CustomDomainSince = DateTime.UtcNow; await db.SaveChangesAsync(); }
+            }
+            _customDomainMsg = await CustomDomains.CheckTenantAsync(_tenant.Id);
+            _tenant = await TenantSvc.GetAsync(Id);
+        }
+        finally { _checkingDomain = false; }
+    }
+
     private NpmHealthService.TenantDomain? _https;
     private bool _renewingHttps;
 
@@ -2001,6 +2051,13 @@ else
 
             if (ok)
             {
+                // Zgłoszenie z kolejki: okres próbny od dziś, nie od dnia podpięcia karty.
+                await StripeSvc.RestartTrialAsync(_tenant.Id);
+                await using (var qdb = DbFactory.CreateDbContext())
+                {
+                    var qt = await qdb.Tenants.FindAsync(_tenant.Id);
+                    if (qt is not null) { qt.QueuedReason = null; await qdb.SaveChangesAsync(); }
+                }
                 _tenant = await TenantSvc.GetAsync(Id);
                 var planName = _availablePlans.FirstOrDefault(p => p.Id == _selectedPlanId)?.Name ?? _selectedPlanId;
                 var body = EmailSvc.TenantApprovedEmailBody(

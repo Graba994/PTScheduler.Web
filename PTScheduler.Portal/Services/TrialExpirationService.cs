@@ -72,12 +72,25 @@ public class TrialExpirationService(
             });
             await db.SaveChangesAsync(ct);
 
+            if (!string.IsNullOrEmpty(t.StripeSubscriptionId))
+            {
+                // Karta jest podpięta — przypominamy o pierwszej opłacie i o tym, że można zrezygnować.
+                var plan = await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == t.PlanId, ct);
+                var yearly = t.BillingInterval == "yearly" && plan?.YearlyPrice is > 0;
+                var amount = yearly ? plan!.YearlyPrice!.Value : plan?.MonthlyPrice ?? 0;
+                _ = emailSvc.SendAsync(t.OwnerEmail, $"Za {daysLeft} dni koniec okresu próbnego — PTScheduler",
+                    emailSvc.TrialEndingWithCardEmailBody(t.OwnerName, daysLeft, amount, yearly, plan?.Name ?? t.PlanId, t.Domain));
+                continue;
+            }
             var body = emailSvc.TrialWarningEmailBody(t.OwnerName, daysLeft);
             _ = emailSvc.SendAsync(t.OwnerEmail, $"Trial konczy sie za {daysLeft} dni — PTScheduler", body);
         }
 
+        // Subskrypcje Stripe (karta podpięta w kreatorze) rozlicza Stripe: po okresie próbnym pobiera opłatę,
+        // a nieudana płatność / anulowanie przychodzą webhookiem — tu ich nie zawieszamy.
         var expired = await db.Tenants
             .Where(t => t.Status == TenantStatus.Active
+                && t.StripeSubscriptionId == null
                 && t.TrialEndsAt != null
                 && t.TrialEndsAt < now
                 && t.BillingStatus != "active"
