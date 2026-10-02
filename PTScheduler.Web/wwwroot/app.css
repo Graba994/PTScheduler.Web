@@ -1750,12 +1750,16 @@ a.nav-link.active { /* kept for compat */ }
         padding: .25rem .6rem !important;
     }
 
-    /* Widok listy: tabela o stałym układzie, zawijana godzina i skracane nazwy —
-       inaczej długie imię klienta wypychało kafelek poza ekran. */
-    .fc .fc-list-table { table-layout: fixed; width: 100%; }
-    .fc .fc-list-event-time { width: 64px; white-space: normal !important; font-size: .78rem; line-height: 1.2; }
-    .fc .fc-list-event-graphic { width: 14px; padding-left: .25rem !important; padding-right: .25rem !important; }
-    .fc .fc-list-event-title { width: auto; min-width: 0; overflow: hidden; }
+    /* Widok listy jako wiersze flex: wąska godzina po lewej, kafelek na całą resztę szerokości.
+       (Tabela z table-layout: fixed brała szerokości z nagłówka dnia — wszystkie kolumny wychodziły równe
+       i kafelek był wąski, przyklejony do prawej.) Skracane nazwy — długie imię nie wypycha kafelka. */
+    .fc .fc-list-table, .fc .fc-list-table tbody { display: block; width: 100%; }
+    .fc .fc-list-table tr { display: flex; align-items: center; width: 100%; }
+    .fc .fc-list-day > th { display: block; flex: 1 1 auto; }
+    .fc .fc-list-event-time { flex: 0 0 52px; white-space: nowrap !important; font-size: .82rem; font-weight: 600; }
+    .fc .fc-list-event-graphic { display: none; } /* kafelek ma własną kropkę stanu */
+    .fc .fc-list-event-title { flex: 1 1 auto; min-width: 0; overflow: hidden; padding-left: 0 !important; }
+    .fc .fc-list-event-title .fc-event-card { width: 100%; }
     .fc .fc-list-event .fc-event-card { min-width: 0; max-width: 100%; }
     .fc .fc-event-info { min-width: 0; overflow: hidden; }
     .fc .fc-event-client, .fc .fc-event-type { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
@@ -4540,3 +4544,43 @@ a.acct-row:hover * { text-decoration: none; }
     display: flex; align-items: center; gap: .35rem;
 }
 .capslock-warn[hidden] { display: none; }
+
+
+/* ============================================================
+   TABELE NA TELEFONIE (.table-stack + js/table-stack.js)
+   Wiersz = karta, komórka = „etykieta z nagłówka: wartość”.
+   Bez przewijania tabeli w bok.
+   ============================================================ */
+@media (max-width: 767.98px) {
+    .table-responsive:has(> .table-stack) { overflow-x: visible; }
+    .table-stack { display: block; width: 100%; }
+    .table-stack > thead { display: none; }
+    .table-stack > tbody { display: grid; gap: .5rem; }
+    .table-stack > tbody > tr {
+        display: block; border: 1px solid var(--bs-border-color); border-radius: .85rem;
+        padding: .45rem .75rem; background: var(--bs-body-bg);
+    }
+    .table-stack > tbody > tr > td {
+        display: flex; flex-wrap: wrap; justify-content: flex-end; align-items: center; column-gap: .5rem; row-gap: .15rem;
+        border: 0 !important; padding: .16rem 0 !important; text-align: right !important; font-size: .86rem;
+        white-space: normal !important; min-width: 0; background: transparent !important; box-shadow: none !important;
+    }
+    .table-stack > tbody > tr > td::before {
+        content: attr(data-label); flex: 0 0 auto; max-width: 45%; margin-right: auto; /* etykieta z lewej, cała wartość razem z prawej */
+        font-size: .74rem; font-weight: 600; color: var(--bs-secondary-color); text-align: left;
+    }
+    /* Pierwsza kolumna (zwykle klient / nazwa) jako tytuł karty, bez etykiety. */
+    .table-stack > tbody > tr > td:first-child { justify-content: flex-start; text-align: left !important; font-weight: 600; font-size: .95rem; }
+    .table-stack > tbody > tr > td:first-child::before { display: none; }
+    /* Komórki bez nagłówka (przyciski akcji) — na całą szerokość, przyciski do prawej. */
+    .table-stack > tbody > tr > td[data-label=""]::before { display: none; }
+    .table-stack > tbody > tr > td[data-label=""] { justify-content: flex-end; padding-top: .45rem !important; }
+    .table-stack > tbody > tr > td[data-label=""]:not(:first-child) { border-top: 1px solid var(--bs-border-color) !important; margin-top: .25rem; }
+    .table-stack > tbody > tr > td > * { min-width: 0; }
+    .table-stack > tbody > tr > td.stack-long:not(:first-child) { flex-direction: column; align-items: flex-start; text-align: left !important; }
+    .table-stack > tbody > tr > td.stack-long::before { max-width: none; margin-right: 0; }
+    .table-stack > tbody > tr > td:empty { display: none; }
+    .table-stack > tfoot { display: block; margin-top: .5rem; }
+    .table-stack > tfoot > tr { display: flex; flex-wrap: wrap; justify-content: space-between; gap: .5rem; width: 100%; }
+    .table-stack > tfoot > tr > td, .table-stack > tfoot > tr > th { border: 0 !important; padding: .25rem 0 !important; }
+}

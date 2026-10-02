@@ -43,8 +43,10 @@ export function initCalendar(dotnetRef, el, canEdit) {
             listWeek: 'Tydzień'
         },
         views: {
-            listDay: { buttonText: 'Dzień' },
-            listWeek: { buttonText: 'Tydzień' }
+            // Na liście tylko godzina początku — długość wizyty jest w kafelku, a „10:00 - 10:30”
+            // łamało się w wąskiej kolumnie na trzy linijki.
+            listDay: { buttonText: 'Dzień', displayEventEnd: false },
+            listWeek: { buttonText: 'Tydzień', displayEventEnd: false }
         },
         events: async (info, success, failure) => {
             try {
