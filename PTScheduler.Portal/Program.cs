@@ -81,6 +81,10 @@ builder.Services.AddHostedService<BillingBackgroundService>();
 builder.Services.AddScoped<ErrorAlertService>();
 builder.Services.AddHostedService<ErrorAlertBackgroundService>();
 builder.Services.AddScoped<BackupService>();
+builder.Services.AddScoped<OffsiteBackupService>();
+builder.Services.AddScoped<BackupMaintenanceService>();
+// Wysyłka kopii poza serwer może trwać długo — limit daje CancellationToken, nie HttpClient.
+builder.Services.AddHttpClient("backup-offsite", c => c.Timeout = Timeout.InfiniteTimeSpan);
 builder.Services.AddHostedService<BackupScheduler>();
 builder.Services.AddSingleton<UpdateNotifier>();
 builder.Services.AddSingleton<PanelStatusService>();
@@ -989,8 +993,11 @@ app.MapPost("/api/internal/tenants/{slug}/google/disconnect", async (
     return Results.Ok();
 });
 
-app.MapGet(GoogleOAuthBroker.CallbackPath, async (string? code, string? state, string? error, GoogleOAuthBroker google) =>
+app.MapGet(GoogleOAuthBroker.CallbackPath, async (string? code, string? state, string? error, GoogleOAuthBroker google, OffsiteBackupService offsite) =>
 {
+    // Ten sam adres powrotu obsługuje połączenie Dysku Google dla kopii zapasowych Portalu.
+    if (state?.StartsWith(OffsiteBackupService.GdriveStatePrefix, StringComparison.Ordinal) == true)
+        return Results.Redirect(await offsite.HandleDriveCallbackAsync(code, state, error));
     var (redirectTo, _) = await google.HandleCallbackAsync(code, state, error);
     return Results.Redirect(redirectTo);
 });

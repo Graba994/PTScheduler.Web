@@ -72,6 +72,8 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
         {
             e.HasIndex(x => x.Slug);
             e.HasIndex(x => x.CreatedAt);
+            e.Property(x => x.VerifyInfo).HasMaxLength(1000);
+            e.Property(x => x.OffsiteInfo).HasMaxLength(1000);
         });
 
         b.Entity<PaymentRecord>(e =>

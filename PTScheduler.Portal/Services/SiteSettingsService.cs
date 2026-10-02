@@ -77,6 +77,25 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string ErrorAlertCooldownMinutes = "error_alert_cooldown_minutes";
         public const string ErrorAlertEmail = "error_alert_email";
         public const string ErrorAlertSms = "error_alert_sms";
+        // Kopie zapasowe: test odtworzenia i kopia poza serwerem
+        /// <summary>„weekly” — co niedzielę Portal odtwarza najnowsze kopie do tymczasowej bazy; „off” — bez testu.</summary>
+        public const string BackupVerify = "backup_verify";
+        /// <summary>„off” | „sftp” | „gdrive” — dokąd wysyłać kopie poza serwer.</summary>
+        public const string BackupOffsiteTarget = "backup_offsite_target";
+        public const string BackupOffsiteRetentionDays = "backup_offsite_retention_days";
+        /// <summary>Hasło szyfrowania kopii wysyłanych poza serwer (zaszyfrowane Data Protection).</summary>
+        public const string BackupOffsitePassword = "backup_offsite_password";
+        public const string BackupSftpHost = "backup_sftp_host";
+        public const string BackupSftpPort = "backup_sftp_port";
+        public const string BackupSftpUser = "backup_sftp_user";
+        public const string BackupSftpPassword = "backup_sftp_password";
+        public const string BackupSftpPrivateKey = "backup_sftp_private_key";
+        public const string BackupSftpDir = "backup_sftp_dir";
+        /// <summary>Odcisk klucza serwera SFTP zapamiętany przy pierwszym połączeniu — inny odcisk = odmowa.</summary>
+        public const string BackupSftpFingerprint = "backup_sftp_fingerprint";
+        public const string BackupGdriveRefreshToken = "backup_gdrive_refresh_token";
+        public const string BackupGdriveEmail = "backup_gdrive_email";
+        public const string BackupGdriveFolderId = "backup_gdrive_folder_id";
 
         // Automatyczne rachunki trenerów
         /// <summary>„true” — Portal sam wystawia miesięczne rachunki i przypomina o płatności.</summary>
@@ -128,6 +147,11 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         [Keys.BackupDir] = "/opt/ptscheduler/backups",
         [Keys.BackupSchedule] = "daily",
         [Keys.BackupRetentionDays] = "14",
+        [Keys.BackupVerify] = "weekly",
+        [Keys.BackupOffsiteTarget] = "off",
+        [Keys.BackupOffsiteRetentionDays] = "30",
+        [Keys.BackupSftpPort] = "22",
+        [Keys.BackupSftpDir] = "ptscheduler-backups",
         [Keys.HeroBadge] = "Dla trenerów personalnych i małych studiów",
         [Keys.HeroTitle] = DefaultHeroTitle,
         [Keys.HeroSubtitle] = "Grafik i rezerwacje online, karnety, płatności, czat z klientem i plany treningowe — w jednej aplikacji pod Twoją marką. Klienci instalują ją na telefonie jak zwykłą apkę.",
