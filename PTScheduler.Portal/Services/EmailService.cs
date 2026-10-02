@@ -240,7 +240,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             <p>Wszystkie dane zostaly skasowane. Jesli chcesz wrocic do PTScheduler, mozesz zalozyc nowe konto w kazdej chwili.</p>
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
             <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
-                PTScheduler — Platforma dla trenerow personalnych
+                PTScheduler — platforma dla trenerów personalnych
             </p>
         </body>
         </html>
@@ -323,34 +323,95 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         </html>
         """;
 
+    /// <summary>Po publikacji z kreatora: aplikacja trenera działa (bez akceptacji admina).</summary>
+    public string AppReadyEmailBody(string trainerName, string companyName, string appUrl, string loginEmail, string planName) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <div style="text-align: center; padding: 20px 0;">
+                <h1 style="color: #7c3aed; margin-bottom: 4px;">Twoja aplikacja działa!</h1>
+                <p style="color: #6b7280; margin-top: 0;">{WebUtility.HtmlEncode(companyName)}</p>
+            </div>
+            <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>aplikacja jest gotowa — z kolorem, stroną główną i ofertą, które ustawiono w kreatorze. Klienci mogą się już zapisywać.</p>
+
+            <div style="background: #f5f3ff; border-radius: 12px; padding: 20px; margin: 20px 0;">
+                <div style="margin-bottom: 10px;"><strong>Adres aplikacji:</strong> <a href="{appUrl}" style="color: #7c3aed;">{WebUtility.HtmlEncode(appUrl)}</a></div>
+                <div style="margin-bottom: 10px;"><strong>Login:</strong> {WebUtility.HtmlEncode(loginEmail)} (hasło ustawione w kreatorze)</div>
+                <div><strong>Plan:</strong> {WebUtility.HtmlEncode(planName)}</div>
+            </div>
+
+            <h2 style="color: #374151; font-size: 1.1rem;">Trzy rzeczy na dobry start</h2>
+            <ol style="line-height: 1.8;">
+                <li>Utwórz profil trenera (Zarządzanie → Konta) i ustaw na nim godziny pracy — klienci zobaczą wolne terminy.</li>
+                <li>Dodaj pierwszego klienta albo wyślij mu link do swojej strony.</li>
+                <li>Zainstaluj aplikację na telefonie (w przeglądarce: „Dodaj do ekranu głównego”).</li>
+            </ol>
+
+            <p style="text-align: center; margin: 30px 0;">
+                <a href="{appUrl}/Account/Login" style="background: #7c3aed; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">
+                    Otwórz moją aplikację
+                </a>
+            </p>
+
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
+                Masz pytania? Odpisz na tego maila.<br>
+                PTScheduler — platforma dla trenerów personalnych
+            </p>
+        </body>
+        </html>
+        """;
+
+    /// <summary>Dla admina platformy: nowy trener sam uruchomił aplikację z kreatora.</summary>
+    public string AdminAppLaunchedEmailBody(string trainerName, string email, string companyName, string planName, string? phone, string appUrl, bool ok, string details) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <h1 style="color: {(ok ? "#10b981" : "#dc2626")}; font-size: 1.4rem;">{(ok ? "Nowy trener uruchomił aplikację" : "Rejestracja z kreatora — uruchomienie się nie udało")}</h1>
+            <div style="background: #f9fafb; border-radius: 12px; padding: 20px; margin: 20px 0;">
+                <div style="margin-bottom: 8px;"><strong>Trener:</strong> {WebUtility.HtmlEncode(trainerName)}</div>
+                <div style="margin-bottom: 8px;"><strong>E-mail:</strong> {WebUtility.HtmlEncode(email)}</div>
+                <div style="margin-bottom: 8px;"><strong>Studio:</strong> {WebUtility.HtmlEncode(companyName)}</div>
+                <div style="margin-bottom: 8px;"><strong>Telefon:</strong> {WebUtility.HtmlEncode(phone ?? "—")}</div>
+                <div style="margin-bottom: 8px;"><strong>Plan:</strong> {WebUtility.HtmlEncode(planName)}</div>
+                <div><strong>Adres:</strong> {WebUtility.HtmlEncode(appUrl)}</div>
+            </div>
+            <pre style="white-space: pre-wrap; background: #f3f4f6; padding: 12px; border-radius: 8px; font-size: 12px;">{WebUtility.HtmlEncode(details)}</pre>
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">PTScheduler Portal</p>
+        </body>
+        </html>
+        """;
+
     public string TenantApprovedEmailBody(string trainerName, string domain, string port, string planName) =>
         $"""
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
             <div style="text-align: center; padding: 20px 0;">
-                <h1 style="color: #10b981;">Twoje konto zostalo zaakceptowane!</h1>
+                <h1 style="color: #10b981;">Twoja aplikacja działa!</h1>
             </div>
-            <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
-            <p>Twoja rejestracja w PTScheduler zostala zaakceptowana. Twoja instancja jest gotowa do uzytku!</p>
+            <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>rejestracja w PTScheduler została zaakceptowana — aplikacja jest gotowa, z ustawieniami z kreatora.</p>
 
             <div style="background: #f0fdf4; border-radius: 12px; padding: 20px; margin: 20px 0;">
                 <div style="margin-bottom: 12px;"><strong>Plan:</strong> {WebUtility.HtmlEncode(planName)}</div>
                 <div style="margin-bottom: 12px;"><strong>Twoja domena:</strong> <a href="https://{domain}" style="color: #6366f1;">{domain}</a></div>
-                <div><strong>Dostep lokalny:</strong> <code>http://192.168.0.220:{port}</code></div>
+                <div><strong>Login:</strong> e-mail podany przy rejestracji</div>
             </div>
 
             <h2 style="color: #374151;">Co dalej?</h2>
             <ol style="line-height: 1.8;">
-                <li>Otworz swoja instancje pod powyzszym linkiem</li>
-                <li>Przejdz przez kreator konfiguracji (Setup)</li>
-                <li>Utworz konto administratora</li>
-                <li>Dodaj klientow, ustaw grafik, skonfiguruj branding</li>
+                <li>Otwórz aplikację i zaloguj się e-mailem i hasłem z rejestracji (jeśli aplikacja poprosi o hasło — ustaw je; reszta danych jest już wpisana).</li>
+                <li>Utwórz profil trenera (Zarządzanie → Konta) i ustaw na nim godziny pracy.</li>
+                <li>Dodaj pierwszego klienta albo wyślij mu link do swojej strony.</li>
             </ol>
 
             <p style="text-align: center; margin: 30px 0;">
                 <a href="https://{domain}" style="background: #10b981; color: white; padding: 12px 30px; border-radius: 8px; text-decoration: none; font-weight: 600;">
-                    Otworz moja instancje
+                    Otwórz moją aplikację
                 </a>
             </p>
 

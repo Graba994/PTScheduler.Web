@@ -33,7 +33,7 @@ else if (_step == 0)
                 </div>
                 <div class="flex-grow-1">
                     <h6 class="fw-bold mb-1">Samodzielna konfiguracja</h6>
-                    <p class="text-muted small mb-1">Skonfiguruj wszystko sam — nazwa studia, hasło admina, branding.</p>
+                    <p class="text-muted small mb-1">Wszystko ustawisz samodzielnie — nazwa studia, hasło admina, branding.</p>
                     <span class="badge bg-success-subtle text-success-emphasis">Bezpłatnie</span>
                 </div>
                 <i class="bi bi-chevron-right text-muted mt-2"></i>
@@ -108,10 +108,18 @@ else if (_step == 2 || (_step == 1 && _mode == "self"))
     <!-- Step 2: Basic config form -->
     <div class="text-center mb-4">
         <div class="setup-icon-lg bg-primary-subtle text-primary mx-auto mb-3">
-            <i class="bi bi-gear"></i>
+            <i class="bi @(_prefill is null ? "bi-gear" : "bi-key")"></i>
         </div>
-        <h5 class="fw-bold">Podstawowa konfiguracja</h5>
-        <p class="text-muted small">Ustaw nazwę i dane logowania administratora</p>
+        @if (_prefill is null)
+        {
+            <h5 class="fw-bold">Podstawowa konfiguracja</h5>
+            <p class="text-muted small">Ustaw nazwę i dane logowania administratora</p>
+        }
+        else
+        {
+            <h5 class="fw-bold">@(string.IsNullOrWhiteSpace(_prefill.FirstName) ? "Ostatni krok" : $"Cześć, {_prefill.FirstName}!")</h5>
+            <p class="text-muted small">Dane z rejestracji są już wpisane — ustaw tylko hasło do swojej aplikacji.</p>
+        }
     </div>
 
     <EditForm Model="_form" OnValidSubmit="FinishSetup" FormName="setup">
@@ -148,9 +156,12 @@ else if (_step == 2 || (_step == 1 && _mode == "self"))
         }
 
         <div class="d-flex gap-2">
-            <button type="button" class="btn btn-outline-secondary flex-fill" @onclick="() => _step = 0">
-                <i class="bi bi-arrow-left me-1"></i>Wróć
-            </button>
+            @if (_prefill is null)
+            {
+                <button type="button" class="btn btn-outline-secondary flex-fill" @onclick="() => _step = 0">
+                    <i class="bi bi-arrow-left me-1"></i>Wróć
+                </button>
+            }
             <button type="submit" class="btn btn-primary flex-fill" disabled="@_saving">
                 @if (_saving)
                 {
@@ -185,7 +196,7 @@ else if (_step == 99)
                 <i class="bi bi-box-arrow-in-right me-1"></i>Zaloguj się
             </a>
             <p class="text-muted small mt-2 mb-0">
-                Użyj nowego emaila i hasła, które właśnie ustawiłeś.
+                Zaloguj się adresem e-mail i hasłem, które właśnie ustawiono.
             </p>
         </div>
     </div>
@@ -245,9 +256,22 @@ else if (_step == 99)
 
     private SetupFormModel _form = new();
 
+    private PTScheduler.Application.DTOs.SetupPrefillDto? _prefill;
+
     protected override async Task OnInitializedAsync()
     {
         _alreadyDone = await SetupService.IsSetupCompletedAsync();
+        if (_alreadyDone) return;
+
+        // Dane z rejestracji w Portalu: nie pytamy drugi raz o sposób konfiguracji, nazwę ani e-mail.
+        _prefill = await SetupService.GetPrefillAsync();
+        if (_prefill is not null)
+        {
+            _mode = string.IsNullOrWhiteSpace(_prefill.SetupMode) ? "self" : _prefill.SetupMode;
+            _form.CompanyName = _prefill.CompanyName ?? "";
+            _form.AdminEmail = _prefill.Email ?? "";
+            _step = 2;
+        }
     }
 
     private void SelectMode(string mode)

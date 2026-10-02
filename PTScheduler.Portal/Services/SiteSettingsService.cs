@@ -59,6 +59,8 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string AutopaySandbox = "autopay_sandbox";
         public const string StorePaymentGateway = "store_payment_gateway";
         public const string AdminNotificationEmail = "admin_notification_email";
+        /// <summary>„auto” (domyślnie) — aplikacja trenera startuje od razu po rejestracji; „review” — czeka na akceptację.</summary>
+        public const string RegistrationMode = "registration_mode";
         /// <summary>Numer administratora na SMS-y o nowych zgłoszeniach ze sklepu.</summary>
         public const string AdminNotificationPhone = "admin_notification_phone";
         /// <summary>"false" wyłącza e-maile o nowych zgłoszeniach (domyślnie włączone, gdy jest adres).</summary>

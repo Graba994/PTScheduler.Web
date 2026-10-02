@@ -44,7 +44,9 @@ public class AccountSwitchTests
         await DbInitializer.SeedRolesAsync(sp.GetRequiredService<RoleManager<IdentityRole>>());
         var users = sp.GetRequiredService<UserManager<ApplicationUser>>();
         await DbInitializer.SeedAdminAsync(users);
-        return (sp, users, new SetupService(sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>(), users));
+        return (sp, users, new SetupService(sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>(), users,
+            new Moq.Mock<PTScheduler.Application.Interfaces.ISiteContentService>().Object,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<SetupService>.Instance));
     }
 
     [Fact]

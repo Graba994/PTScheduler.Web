@@ -18,6 +18,12 @@ public class Tenant
     public TenantStatus Status { get; set; } = TenantStatus.Pending;
     public string PlanId { get; set; } = "start";
     public string? SetupMode { get; set; }
+    /// <summary>
+    /// Dane z kreatora rejestracji (JSON: kolor, szablon strony, oferta, skrót hasła) — czekają na
+    /// uruchomienie instancji, trafiają do niej przez /internal/setup/bootstrap i są wtedy czyszczone.
+    /// </summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? SetupPayload { get; set; }
     public string? Notes { get; set; }
     public string? WebContainerName { get; set; }
     public string? DbContainerName { get; set; }

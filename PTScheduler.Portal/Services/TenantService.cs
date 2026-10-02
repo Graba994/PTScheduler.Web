@@ -48,7 +48,7 @@ public class TenantService(
     }
 
     public async Task<Tenant> CreateAsync(string slug, string domain, string companyName,
-        string ownerName, string ownerEmail, string? phone, string planId, string? setupMode)
+        string ownerName, string ownerEmail, string? phone, string planId, string? setupMode, string? setupPayload = null)
     {
         await using var db = dbFactory.CreateDbContext();
 
@@ -77,6 +77,7 @@ public class TenantService(
             DbPassword = dbPassword,
             PlanId = planId,
             SetupMode = setupMode,
+            SetupPayload = setupPayload,
             Status = TenantStatus.Pending,
             WebContainerName = $"pt-{slug}-web",
             DbContainerName = $"pt-{slug}-db"
@@ -96,7 +97,21 @@ public class TenantService(
         return tenant;
     }
 
-    public async Task<(bool Success, string Output)> ProvisionAsync(int tenantId)
+    /// <summary>Etapy uruchamiania instancji — kreator rejestracji pokazuje je na żywo.</summary>
+    public static class ProvisionSteps
+    {
+        public const string Database = "db";
+        public const string App = "web";
+        public const string Health = "health";
+        public const string Setup = "setup";
+        public const string Domain = "domain";
+        /// <summary>Instancja działa, ale danych z kreatora nie udało się przekazać (trener dokończy w /setup).</summary>
+        public const string SetupFailed = "setup-failed";
+    }
+
+    private static readonly HttpClient BootstrapClient = new() { Timeout = TimeSpan.FromSeconds(30) };
+
+    public async Task<(bool Success, string Output)> ProvisionAsync(int tenantId, Action<string>? onStep = null)
     {
         await using var db = dbFactory.CreateDbContext();
         var tenant = await db.Tenants.FindAsync(tenantId)
@@ -130,7 +145,8 @@ public class TenantService(
                 tenant.Domain,
                 entitlementsJson,
                 PortalUrl,
-                tenant.InternalSecret);
+                tenant.InternalSecret,
+                onStep);
 
             tenant.Status = TenantStatus.Active;
             tenant.ProvisionedAt = DateTime.UtcNow;
@@ -146,9 +162,22 @@ public class TenantService(
 
             var output = $"Tenant '{tenant.Slug}' provisioned on port {tenant.Port}";
 
-            var autoReg = await settings.GetAsync(SiteSettingsService.Keys.NpmAutoRegister);
-            if (autoReg != "false" && !string.IsNullOrWhiteSpace(tenant.Domain))
+            // Dane z rejestracji (kreator albo formularz admina) od razu do aplikacji — bez drugiego /setup.
+            onStep?.Invoke(ProvisionSteps.Health);
+            var (setupOk, setupMsg) = await BootstrapAsync(tenant, onStep);
+            output += "\nKonfiguracja: " + setupMsg;
+            if (!setupOk) onStep?.Invoke(ProvisionSteps.SetupFailed);
+            if (setupOk && tenant.SetupPayload is not null)
             {
+                tenant.SetupPayload = null; // skrót hasła nie jest już potrzebny
+                await db.SaveChangesAsync();
+            }
+
+            var autoReg = await settings.GetAsync(SiteSettingsService.Keys.NpmAutoRegister);
+            if (autoReg != "false" && !string.IsNullOrWhiteSpace(tenant.Domain)
+                && !string.IsNullOrWhiteSpace(await settings.GetAsync(SiteSettingsService.Keys.NpmUrl)))
+            {
+                onStep?.Invoke(ProvisionSteps.Domain);
                 var (npmOk, npmMsg) = await npm.RegisterProxyHostAsync(tenant.Domain, ForwardHost, tenant.Port);
                 output += "\nNPM: " + (npmOk ? npmMsg : $"nie udało się zarejestrować ({npmMsg}) — dodaj ręcznie");
             }
@@ -162,6 +191,66 @@ public class TenantService(
             await db.SaveChangesAsync();
             return (false, ex.Message);
         }
+    }
+
+    /// <summary>
+    /// Czeka, aż świeża instancja odpowie na /health, i przekazuje jej dane z rejestracji.
+    /// Aplikacja przy pierwszym starcie robi migracje bazy, więc kilka prób to norma.
+    /// </summary>
+    private async Task<(bool Ok, string Message)> BootstrapAsync(Tenant tenant, Action<string>? onStep)
+    {
+        var payload = TenantSetupPayload.FromJson(tenant.SetupPayload) ?? TenantSetupPayload.PrefillFrom(tenant);
+        var secret = TenantSecrets.For(tenant, config);
+        if (string.IsNullOrEmpty(secret)) return (false, "brak sekretu instancji — dane wpisze trener w /setup");
+
+        await docker.EnsureAttachedToTenantNetworkAsync(tenant.WebContainerName ?? $"pt-{tenant.Slug}-web");
+        var deadline = DateTime.UtcNow.AddMinutes(3);
+        string? baseUrl = null;
+        while (DateTime.UtcNow < deadline)
+        {
+            var probe = await TenantEndpoint.ProbeAsync(config, tenant);
+            if (probe.Ok) { baseUrl = probe.Base; break; }
+            await Task.Delay(2000);
+        }
+        if (baseUrl is null) return (false, "instancja nie odpowiedziała w 3 minuty — dane wpisze trener w /setup");
+
+        onStep?.Invoke(ProvisionSteps.Setup);
+        string last = "";
+        for (var attempt = 0; attempt < 10; attempt++)
+        {
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Post, $"{baseUrl}/internal/setup/bootstrap")
+                {
+                    Content = new StringContent(payload.ToJson(), System.Text.Encoding.UTF8, "application/json")
+                };
+                req.Headers.Add("X-Internal-Secret", secret);
+                using var resp = await BootstrapClient.SendAsync(req);
+                var body = await resp.Content.ReadAsStringAsync();
+                if (resp.IsSuccessStatusCode)
+                {
+                    using var doc = JsonDocument.Parse(body);
+                    var completed = doc.RootElement.TryGetProperty("completed", out var c) && c.GetBoolean();
+                    return (true, completed ? "konto właściciela i ustawienia z kreatora wgrane" : "dane wpisane do /setup");
+                }
+                // 409 = błąd danych (np. adres konta technicznego) — powtarzanie nic nie da.
+                if ((int)resp.StatusCode == 409) return (false, body);
+                last = $"HTTP {(int)resp.StatusCode}";
+            }
+            catch (Exception ex) { last = ex.Message; }
+            await Task.Delay(3000);
+        }
+        logger.LogWarning("Bootstrap instancji {Slug} nie powiódł się: {Error}", tenant.Slug, last);
+        return (false, $"nie udało się przekazać danych ({last}) — trener wpisze je w /setup");
+    }
+
+    /// <summary>Adres, pod którym trener otworzy swoją aplikację (domena, a bez NPM — host i port).</summary>
+    public async Task<string> PublicUrlAsync(Tenant tenant)
+    {
+        var host = tenant.Domain?.Trim().TrimEnd('/');
+        if (!string.IsNullOrWhiteSpace(host) && !string.IsNullOrWhiteSpace(await settings.GetAsync(SiteSettingsService.Keys.NpmUrl)))
+            return (await settings.GetAsync(SiteSettingsService.Keys.NpmAutoSsl) == "false" ? "http://" : "https://") + host;
+        return $"http://{ForwardHost}:{tenant.Port}";
     }
 
     public async Task SuspendAsync(int tenantId)

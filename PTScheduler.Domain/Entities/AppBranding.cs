@@ -25,4 +25,10 @@ public class AppBranding
     public bool SetupCompleted { get; set; }
     public string? SetupMode { get; set; }
     public DateTime? SetupCompletedAt { get; set; }
+
+    /// <summary>
+    /// Stan wdrożenia z rejestracji w Portalu (JSON): dane do wypełnienia /setup i skrót
+    /// jednorazowego tokenu „wejdź do aplikacji”. Nie trafia do DTO ani na strony.
+    /// </summary>
+    public string? OnboardingJson { get; set; }
 }

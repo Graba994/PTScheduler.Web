@@ -347,8 +347,9 @@ public class DockerService : IDisposable
 
     public async Task ProvisionTenantAsync(string slug, string dbPassword, int appPort,
         string webImage, string tenantDomain, string? entitlementsJson = null,
-        string? portalUrl = null, string? internalSecret = null)
+        string? portalUrl = null, string? internalSecret = null, Action<string>? onStep = null)
     {
+        onStep?.Invoke("db");
         var webName = $"pt-{slug}-web";
         var dbName = $"pt-{slug}-db";
         var networkName = $"pt-{slug}-net";
@@ -415,6 +416,7 @@ public class DockerService : IDisposable
         if (!syncOk)
             throw new InvalidOperationException($"Nie udało się zsynchronizować hasła bazy danych: {syncError}");
 
+        onStep?.Invoke("web");
         var webExisting = await GetContainerInfoAsync(webName);
         if (webExisting is null)
         {

@@ -697,6 +697,18 @@ app.MapGet("/health", (StartupHealth h) => Results.Json(new
     timestamp = DateTime.Now.ToString("o")
 }));
 
+// Wejście prosto po publikacji aplikacji w Portalu: jednorazowy token (ważny 30 minut) loguje
+// właściciela bez wpisywania hasła, które przed chwilą ustawił w kreatorze.
+app.MapGet("/account/welcome",
+    async (string? token, ISetupService setup, UserManager<ApplicationUser> users, SignInManager<ApplicationUser> signIn) =>
+{
+    var ownerId = await setup.RedeemWelcomeTokenAsync(token);
+    var owner = ownerId is null ? null : await users.FindByIdAsync(ownerId);
+    if (owner is null) return Results.Redirect("/Account/Login?witaj=1");
+    await signIn.SignInAsync(owner, isPersistent: true);
+    return Results.Redirect("/app?witaj=1");
+});
+
 // Internal endpoint for the portal to push a new entitlements JSON without
 // restarting the container. Protected by a shared secret env var
 // TENANT_INTERNAL_SECRET — the portal sends it in the X-Internal-Secret header.
@@ -709,6 +721,25 @@ app.MapPost("/internal/entitlements/reload",
     var json = await reader.ReadToEndAsync();
     svc.ReplaceFromJson(json);
     return Results.Ok(new { plan = svc.Current.Name });
+});
+
+// Dane z kreatora rejestracji w Portalu: konto właściciela (gotowy skrót hasła), kolor,
+// strona główna z szablonu i oferta. Trener nie przechodzi już /setup drugi raz.
+app.MapPost("/internal/setup/bootstrap",
+    async (HttpContext ctx, ISetupService setup) =>
+{
+    if (!InternalSecretMatches(ctx)) return Results.NotFound();
+    var dto = await ctx.Request.ReadFromJsonAsync<SetupBootstrapDto>();
+    if (dto is null) return Results.BadRequest();
+    try
+    {
+        var result = await setup.BootstrapAsync(dto);
+        return Results.Json(new { completed = result.Completed, message = result.Message });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Json(new { completed = false, message = ex.Message }, statusCode: 409);
+    }
 });
 
 app.MapGet("/internal/metrics",

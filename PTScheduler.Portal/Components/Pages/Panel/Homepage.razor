@@ -22,6 +22,23 @@
 
 <EditForm Model="_form" OnValidSubmit="Save" FormName="homepage">
     <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-rocket-takeoff"></i></span>Rejestracja trenerów</div>
+        <div class="card-body">
+            <p class="text-muted small mb-3">Trener buduje aplikację w kreatorze na <a href="/register" target="_blank">/register</a> (nazwa, specjalizacja, wygląd, oferta, konto) i klika „Opublikuj”.</p>
+            <div class="d-flex flex-column gap-2">
+                <label class="d-flex gap-2 align-items-start">
+                    <input type="radio" class="form-check-input mt-1" name="regmode" checked="@(_form.RegistrationMode != "review")" @onchange='() => _form.RegistrationMode = "auto"' />
+                    <span><b>Uruchamiaj od razu</b> <span class="badge text-bg-success ms-1">zalecane</span><br /><span class="text-muted small">Aplikacja powstaje w około minutę, trener wchodzi do niej prosto z kreatora. Limit: 3 publikacje na godzinę z jednego adresu IP.</span></span>
+                </label>
+                <label class="d-flex gap-2 align-items-start">
+                    <input type="radio" class="form-check-input mt-1" name="regmode" checked="@(_form.RegistrationMode == "review")" @onchange='() => _form.RegistrationMode = "review"' />
+                    <span><b>Czekaj na moją akceptację</b><br /><span class="text-muted small">Zgłoszenie trafia do Trenerów jako „Oczekuje”. Po akceptacji ustawienia z kreatora wgrają się same.</span></span>
+                </label>
+            </div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4">
         <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-stars"></i></span>Sekcja Hero</div>
         <div class="card-body">
             <div class="mb-3">
@@ -203,6 +220,7 @@
         public string CtaTitle { get; set; } = "";
         public string CtaSubtitle { get; set; } = "";
         public string CtaButton { get; set; } = "";
+        public string RegistrationMode { get; set; } = "auto";
     }
 
     private static readonly string[] _defaultColors = ["#7C3AED", "#06D6A0", "#FF6B35", "#3B82F6", "#EC4899", "#F59E0B", "#EF4444", "#0EA5E9"];
@@ -218,7 +236,8 @@
             SiteSettingsService.Keys.SectionTitle,
             SiteSettingsService.Keys.CtaTitle,
             SiteSettingsService.Keys.CtaSubtitle,
-            SiteSettingsService.Keys.CtaButton);
+            SiteSettingsService.Keys.CtaButton,
+            SiteSettingsService.Keys.RegistrationMode);
 
         _form.HeroBadge = s[SiteSettingsService.Keys.HeroBadge];
         _form.HeroTitle = s[SiteSettingsService.Keys.HeroTitle];
@@ -229,6 +248,7 @@
         _form.CtaTitle = s[SiteSettingsService.Keys.CtaTitle];
         _form.CtaSubtitle = s[SiteSettingsService.Keys.CtaSubtitle];
         _form.CtaButton = s[SiteSettingsService.Keys.CtaButton];
+        _form.RegistrationMode = s[SiteSettingsService.Keys.RegistrationMode] == "review" ? "review" : "auto";
 
         _trainers = await FeaturedTrainers.LoadAsync(Settings);
     }
@@ -249,6 +269,7 @@
             [SiteSettingsService.Keys.CtaTitle] = _form.CtaTitle,
             [SiteSettingsService.Keys.CtaSubtitle] = _form.CtaSubtitle,
             [SiteSettingsService.Keys.CtaButton] = _form.CtaButton,
+            [SiteSettingsService.Keys.RegistrationMode] = _form.RegistrationMode,
         });
 
         _saving = false;
