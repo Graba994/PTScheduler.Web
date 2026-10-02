@@ -5,7 +5,8 @@ using PTScheduler.Portal.Entities;
 namespace PTScheduler.Portal.Services;
 
 /// <summary>
-/// Pod jakim adresem Portal widzi instancję trenera. Kolejno: Portal:ForwardHost i port instancji,
+/// Pod jakim adresem Portal widzi instancję trenera. Kolejno: nazwa kontenera w sieci instancji,
+/// Portal:ForwardHost i port instancji,
 /// host Dockera (host.docker.internal, brama 172.17.0.1), a na końcu publiczna domena przez proxy.
 /// Pierwszy adres, który odpowiada na /health, zapamiętujemy na 10 minut — dzięki temu zła
 /// albo nierozwiązywalna nazwa hosta nie robi z działającej instancji „nieodpowiadającej”.
@@ -21,6 +22,8 @@ public static class TenantEndpoint
     public static IReadOnlyList<string> Candidates(IConfiguration config, Tenant t)
     {
         var list = new List<string>();
+        // Najpierw bezpośrednio w sieci instancji (Portal dołącza do niej sam — DockerService.EnsureAttachedToTenantNetworkAsync).
+        if (DockerService.InContainer) list.Add($"http://{t.WebContainerName ?? $"pt-{t.Slug}-web"}:8080");
         if (t.Port > 0)
         {
             var configured = config.GetValue<string>("Portal:ForwardHost");

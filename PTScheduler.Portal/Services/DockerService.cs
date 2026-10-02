@@ -17,6 +17,41 @@ public class DockerService : IDisposable
         _config = config;
     }
 
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, DateTime> AttachedNetworks = new();
+
+    public static bool InContainer => Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") == "true";
+
+    /// <summary>
+    /// Dołącza kontener Portalu do sieci instancji trenera, żeby Portal widział ją bezpośrednio
+    /// (http://pt-slug-web:8080) — bez portów hosta, bramy Dockera i zapory, które na Unraid potrafią
+    /// odrzucać połączenia z kontenera do hosta. Zwraca false, gdy Portal nie działa w Dockerze albo sieci nie ma.
+    /// </summary>
+    public async Task<bool> EnsureAttachedToTenantNetworkAsync(string webContainer)
+    {
+        if (!InContainer) return false;
+        if (AttachedNetworks.TryGetValue(webContainer, out var at) && DateTime.UtcNow - at < TimeSpan.FromMinutes(30)) return true;
+        var portal = _config["Portal:ContainerName"] ?? "ptportal";
+        try
+        {
+            var web = await _client.Containers.InspectContainerAsync(webContainer);
+            var self = await _client.Containers.InspectContainerAsync(portal);
+            var joined = self.NetworkSettings?.Networks?.Keys.ToHashSet() ?? [];
+            foreach (var net in web.NetworkSettings?.Networks?.Keys ?? [])
+            {
+                if (net is "bridge" or "host" or "none" || joined.Contains(net)) continue;
+                await _client.Networks.ConnectNetworkAsync(net, new NetworkConnectParameters { Container = portal });
+                _logger.LogInformation("Portal dołączył do sieci {Network} instancji {Web}.", net, webContainer);
+            }
+            AttachedNetworks[webContainer] = DateTime.UtcNow;
+            return true;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogDebug(ex, "Nie udało się dołączyć Portalu do sieci {Web}.", webContainer);
+            return false;
+        }
+    }
+
     /// <summary>
     /// Limity zasobów kontenerów trenera — jeden obciążony trener nie zabiera pamięci
     /// i procesora pozostałym. Wartości z konfiguracji Portalu (Portal:TenantWebMemoryMb itd.).

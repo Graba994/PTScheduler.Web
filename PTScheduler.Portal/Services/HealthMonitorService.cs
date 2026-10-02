@@ -35,6 +35,7 @@ public class HealthMonitorService(
         var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<PortalDbContext>>();
         var email = scope.ServiceProvider.GetRequiredService<EmailService>();
         var config = scope.ServiceProvider.GetRequiredService<IConfiguration>();
+        var docker = scope.ServiceProvider.GetRequiredService<DockerService>();
 
         var adminEmail = config.GetValue<string>("Portal:AdminEmail") ?? "admin@ptscheduler.pl";
 
@@ -45,8 +46,20 @@ public class HealthMonitorService(
 
         foreach (var t in tenants)
         {
+            var webName = t.WebContainerName ?? $"pt-{t.Slug}-web";
+            await docker.EnsureAttachedToTenantNetworkAsync(webName);
             var probe = await TenantEndpoint.ProbeAsync(config, t, ct);
             var (ok, ms, error) = (probe.Ok, probe.Ms, probe.Error);
+            var restarting = false;
+            if (!ok)
+            {
+                // Stan kontenera mówi więcej niż „connection refused”: czy aplikacja w ogóle działa i czy się restartuje.
+                var info = await docker.GetContainerInfoAsync(webName);
+                var state = ContainerState(info);
+                error = $"{state} · {error}";
+                restarting = info is { Running: true } && DateTime.TryParse(info.StartedAt, null, System.Globalization.DateTimeStyles.RoundtripKind, out var started)
+                    && DateTime.UtcNow - started.ToUniversalTime() < DownAfter;
+            }
             var wasHealthy = t.IsHealthy;
 
             t.LastHealthCheckAt = DateTime.UtcNow;
@@ -62,7 +75,7 @@ public class HealthMonitorService(
             {
                 // Pojedyncza nieudana próba (restart kontenera, chwilowe obciążenie) jeszcze nie jest awarią.
                 t.UnhealthySinceUtc ??= DateTime.UtcNow;
-                if (DateTime.UtcNow - t.UnhealthySinceUtc.Value >= DownAfter) t.IsHealthy = false;
+                if (!restarting && DateTime.UtcNow - t.UnhealthySinceUtc.Value >= DownAfter) t.IsHealthy = false;
             }
 
             if (ok)
@@ -123,6 +136,17 @@ public class HealthMonitorService(
         }
 
         await db.SaveChangesAsync(ct);
+    }
+
+    public static string ContainerState(ContainerInfo? info)
+    {
+        if (info is null) return "Kontener aplikacji nie istnieje";
+        var started = DateTime.TryParse(info.StartedAt, null, System.Globalization.DateTimeStyles.RoundtripKind, out var s)
+            ? s.ToLocalTime().ToString("dd.MM HH:mm") : "?";
+        var restarts = info.RestartCount > 0 ? $", restartów: {info.RestartCount}" : "";
+        return info.Running
+            ? $"Kontener działa (start {started}{restarts}), ale aplikacja nie odpowiada"
+            : $"Kontener zatrzymany ({info.Status}, kod wyjścia {info.ExitCode}{restarts})";
     }
 
     private static async Task<DateTime?> FetchLastActivityAsync(

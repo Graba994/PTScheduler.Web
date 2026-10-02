@@ -1053,7 +1053,8 @@ else
             {
                 t.LastHealthCheckAt = DateTime.UtcNow;
                 t.LastHealthResponseMs = _healthProbe.Ms;
-                t.LastHealthError = _healthProbe.Ok ? null : _healthProbe.Error;
+                t.LastHealthError = _healthProbe.Ok ? null
+                    : $"{HealthMonitorService.ContainerState(await DockerSvc.GetContainerInfoAsync(_tenant.WebContainerName ?? $"pt-{_tenant.Slug}-web"))} · {_healthProbe.Error}";
                 if (_healthProbe.Ok) { t.IsHealthy = true; t.UnhealthySinceUtc = null; t.DownAlertSent = false; }
                 await db.SaveChangesAsync();
                 _tenant.IsHealthy = t.IsHealthy;
@@ -1166,6 +1167,12 @@ else
             if (_tenant.Status == TenantStatus.Pending)
                 await LoadApprovalPricing();
             _addons = await AddonSvc.GetActiveAsync(_tenant.Id);
+            // Zapisany stan „nie odpowiada” może być sprzed kilku minut — sprawdzamy na żywo, zanim pokażemy alarm.
+            if (_tenant.Status == TenantStatus.Active && _tenant.IsHealthy == false)
+            {
+                await DockerSvc.EnsureAttachedToTenantNetworkAsync(_tenant.WebContainerName ?? $"pt-{_tenant.Slug}-web");
+                await CheckHealthNow();
+            }
         }
     }
 
