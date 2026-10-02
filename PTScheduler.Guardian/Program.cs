@@ -20,6 +20,8 @@ builder.Services.AddSingleton<Janitor>();
 builder.Services.AddSingleton<UpgradeOrchestrator>();
 builder.Services.AddSingleton<DoctorService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<DoctorService>());
+builder.Services.AddSingleton<BackupKeeper>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<BackupKeeper>());
 
 var app = builder.Build();
 
@@ -199,6 +201,53 @@ app.MapPost("/api/rollback/portal", async (HttpContext ctx) =>
     return StartResult(started, jobId, error);
 });
 
+// ── Kopie Portalu ──────────────────────────────────────────────────
+
+app.MapGet("/api/backups", async (BackupKeeper keeper) =>
+{
+    var db = await orchestrator.PortalDbCredsAsync();
+    return Results.Ok(new
+    {
+        dir = orchestrator.BackupDir,
+        files = orchestrator.ListPortalBackups().Take(30),
+        portalDbContainer = orchestrator.PortalDbContainer,
+        portalDbRunning = db is not null,
+        maxAgeHours = keeper.MaxAgeHours,
+        lastAttemptAt = keeper.LastAttemptAt,
+        lastResult = keeper.LastResult,
+        lastOk = keeper.LastOk,
+        downAlertSentAt = keeper.DownAlertSentAt,
+        lastAlertError = keeper.LastAlertError
+    });
+});
+
+app.MapPost("/api/backups/create", async () =>
+{
+    var (ok, message, _) = await orchestrator.CreatePortalBackupAsync("guardian", "ręcznie z panelu Guardiana");
+    return Results.Ok(new { ok, message });
+});
+
+app.MapPost("/api/backups/upload", async (HttpContext ctx) =>
+{
+    // Kopia bazy Portalu bywa duża — limit podniesiony tylko dla tego wywołania.
+    if (ctx.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>() is { IsReadOnly: false } limit)
+        limit.MaxRequestBodySize = 4L * 1024 * 1024 * 1024;
+    var name = ctx.Request.Query["name"].FirstOrDefault() ?? "";
+    var (ok, message) = await orchestrator.SaveUploadAsync(ctx.Request.Body, name, ctx.RequestAborted);
+    return ok ? Results.Ok(new { ok, message }) : Results.BadRequest(new { ok, message });
+});
+
+app.MapPost("/api/backups/restore", async (HttpContext ctx) =>
+{
+    PortalRestoreRequest? req;
+    try { req = await ctx.Request.ReadFromJsonAsync<PortalRestoreRequest>(jsonOptions); }
+    catch { return Results.BadRequest(new { started = false, error = "Nieprawidłowy JSON." }); }
+    if (req is null || string.IsNullOrWhiteSpace(req.File)) return Results.BadRequest(new { started = false, error = "Wybierz plik kopii." });
+    var (started, jobId, error) = await orchestrator.StartPortalRestoreAsync(req.File, req.Password, req.SkipSafetyBackup, Caller(ctx));
+    return StartResult(started, jobId, error);
+});
+
 app.Run();
 
 internal sealed record DoctorFixRequest(string? Id);
+internal sealed record PortalRestoreRequest(string? File, string? Password, bool SkipSafetyBackup);

@@ -818,7 +818,7 @@ public sealed partial class UpgradeOrchestrator : IDisposable
     /// </summary>
     private async Task CleanupAfterAsync(UpgradeJob job)
     {
-        if (!_janitor.Enabled || job.Status != UpgradeStatus.Success || job.Target == UpgradeTarget.Maintenance) return;
+        if (!_janitor.Enabled || job.Status != UpgradeStatus.Success || job.Target is UpgradeTarget.Maintenance or UpgradeTarget.PortalRestore) return;
         try
         {
             Log(job, "info", "Done", "Sprzątam po aktualizacji...");

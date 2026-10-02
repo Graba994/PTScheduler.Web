@@ -458,3 +458,26 @@ docker images | grep ptportal
 | RAM (podczas buildu) | +1-2 GB (docker build) |
 | Dysk | ~500 MB na logi i obrazy tymczasowe |
 | Siec | Doker bridge `ptscheduler` |
+
+---
+
+## Kopie Portalu
+
+Guardian ma podpięty wolumen kopii (`portal-backups` → `/opt/ptscheduler/backups`) i:
+
+- **robi zapasową kopię bazy Portalu**, gdy najnowsza jest starsza niż `GUARDIAN_BACKUP_MAX_AGE_HOURS` (domyślnie 26 h) —
+  ten sam format co Portal: `portal_…_guardian.tar` z `database.sql.gz`, `manifest.json` i `env/` (konfiguracja platformy),
+- **wysyła e-mail**, gdy Portal nie odpowiada dłużej niż `GUARDIAN_ALERT_AFTER_MINUTES` (domyślnie 10 min), i drugi po powrocie
+  (SMTP i adres administratora z bazy Portalu, zapasowo z konfiguracji kontenera Portalu),
+- **przywraca bazę Portalu z kopii** (`POST /api/backups/restore`, w panelu „Kopie Portalu” → Przywróć): zapis obecnej bazy,
+  zatrzymanie Portalu, wgranie kopii, start i sprawdzenie `/health`. Obsługuje kopie zaszyfrowane hasłem z Portalu.
+- przyjmuje wgrany plik kopii (`POST /api/backups/upload?name=…`), np. pobrany z Dysku Google.
+
+| Zmienna | Domyślnie |
+|---|---|
+| `GUARDIAN_BACKUP_DIR` | `/opt/ptscheduler/backups` |
+| `GUARDIAN_PORTAL_DB_CONTAINER` | `ptportal-db` |
+| `GUARDIAN_BACKUP_MAX_AGE_HOURS` | `26` |
+| `GUARDIAN_ALERT_AFTER_MINUTES` | `10` |
+
+Trenerów odtwarza Portal (Kopie zapasowe), a cały serwer — `deploy/restore.sh` (opis w `DEPLOYMENT.md`).

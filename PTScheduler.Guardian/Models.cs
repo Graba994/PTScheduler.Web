@@ -13,7 +13,9 @@ public enum UpgradeTarget
     /// <summary>Obraz + wdrożenie w jednym zadaniu — Portal nie musi niczego łączyć.</summary>
     TenantRelease,
     /// <summary>Naprawa wykonana przez diagnostykę Guardiana (ręcznie albo automatycznie).</summary>
-    Maintenance
+    Maintenance,
+    /// <summary>Przywrócenie bazy Portalu z kopii.</summary>
+    PortalRestore
 }
 
 [JsonConverter(typeof(JsonStringEnumConverter))]

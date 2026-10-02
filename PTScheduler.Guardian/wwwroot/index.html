@@ -124,6 +124,23 @@ details li + li { margin-top: .3rem; }
             <div id="doctor-list">Sprawdzam…</div>
         </section>
 
+        <section class="card" id="backup-card">
+            <h2>Kopie Portalu <span id="backup-chip"></span>
+                <button class="btn secondary" type="button" id="backup-create" style="margin-left:auto;padding:.3rem .7rem;font-size:.8rem">Zrób kopię teraz</button>
+            </h2>
+            <p class="sub" style="margin:-.3rem 0 .8rem">Kopie bazy Portalu (lista trenerów, ich domeny, plany, rachunki, ustawienia) i konfiguracji platformy. Robi je Portal, a Guardian dorabia własną, gdy Portal przestaje. Tu przywrócisz bazę Portalu, gdy Portal nie wstaje albo jego dane są zepsute — trenerów odtwarza potem Portal (Kopie zapasowe).</p>
+            <div id="backup-status"></div>
+            <div id="backup-list">Wczytywanie…</div>
+            <div class="action" style="margin-top:.8rem">
+                <strong>Wgraj plik kopii</strong>
+                <p>Kopia z innego serwera albo pobrana z Dysku Google (<code>portal_….tar</code> lub <code>.tar.enc</code>). Po wgraniu pojawi się na liście.</p>
+                <div style="display:flex;gap:.5rem;flex-wrap:wrap;align-items:center">
+                    <input type="file" id="backup-file" accept=".tar,.enc,.gz" aria-label="Plik kopii Portalu">
+                    <button class="btn secondary" type="button" id="backup-upload">Wgraj</button>
+                </div>
+            </div>
+        </section>
+
         <section class="card">
             <h2>Akcje awaryjne</h2>
             <div class="actions">
@@ -153,6 +170,15 @@ details li + li { margin-top: .3rem; }
             <section class="card">
                 <h2>Co nowego</h2>
                 <details open>
+                    <summary>Kopie Portalu</summary>
+                    <ul>
+                        <li>Guardian widzi kopie bazy Portalu i <b>przywraca Portal z kopii</b> — z zapisem obecnej bazy przed nadpisaniem.</li>
+                        <li>Gdy Portal nie zrobił kopii przez ponad dobę, Guardian robi własną (baza + konfiguracja platformy).</li>
+                        <li>E-mail do administratora, gdy Portal nie odpowiada dłużej niż 10 minut, i drugi, gdy wróci.</li>
+                        <li>Wgranie pliku kopii z innego serwera albo z Dysku Google — także zaszyfrowanej.</li>
+                    </ul>
+                </details>
+                <details>
                     <summary>Wdrażanie u trenerów i zabezpieczenia</summary>
                     <ul>
                         <li>Nowa wersja dla trenerów w <b>jednym zadaniu</b>: budowa obrazu i od razu wdrożenie — koniec z „Guardian nie odpowiedział przy starcie wdrażania”.</li>
@@ -181,10 +207,10 @@ let secret = '';
 let pollId = null;
 let shownJobId = null;
 
-const TARGET = { Portal: 'Aktualizacja Portalu', Tenant: 'Obraz aplikacji trenerów', TenantRolling: 'Wdrażanie u trenerów', TenantRelease: 'Nowa wersja dla trenerów', Maintenance: 'Naprawa (diagnostyka)' };
+const TARGET = { PortalRestore: 'Przywracanie bazy Portalu', Portal: 'Aktualizacja Portalu', Tenant: 'Obraz aplikacji trenerów', TenantRolling: 'Wdrażanie u trenerów', TenantRelease: 'Nowa wersja dla trenerów', Maintenance: 'Naprawa (diagnostyka)' };
 const STATUS = { Running: ['W toku', 'info'], Success: ['Zakończone', 'ok'], Failed: ['Nieudane', 'danger'], RolledBack: ['Wycofane', 'warn'], PartialSuccess: ['Częściowo', 'warn'] };
 const TSTATUS = { Pending: ['czeka', 'muted'], Updating: ['podmiana…', 'info'], HealthCheck: ['sprawdzanie…', 'info'], Success: ['nowa wersja', 'ok'], Failed: ['błąd', 'danger'], RolledBack: ['przywrócona', 'warn'], Skipped: ['pominięta', 'muted'] };
-const STAGES = { Portal: ['Pulling', 'Building', 'Testing', 'Swapping', 'Verifying'], Tenant: ['Pulling', 'Building'], TenantRolling: ['Swapping', 'Done'], TenantRelease: ['Pulling', 'Building', 'Swapping', 'Done'] };
+const STAGES = { PortalRestore: ['Testing', 'Swapping', 'Verifying'], Portal: ['Pulling', 'Building', 'Testing', 'Swapping', 'Verifying'], Tenant: ['Pulling', 'Building'], TenantRolling: ['Swapping', 'Done'], TenantRelease: ['Pulling', 'Building', 'Swapping', 'Done'] };
 const STAGE_PL = { Queued: 'Kolejka', Pulling: 'Pobranie kodu', Building: 'Budowanie', Testing: 'Próba', Swapping: 'Podmiana', Verifying: 'Sprawdzenie', Done: 'Koniec' };
 
 // Wszystko, co przychodzi z serwera (w tym logi aplikacji), wstawiamy jako tekst — nigdy jako HTML.
@@ -252,7 +278,7 @@ async function refresh() {
         if (s.activeJob) { shownJobId = s.activeJob.id; renderJob(s.activeJob); }
         else if (shownJobId) { const j = await api('/api/upgrade/jobs/' + encodeURIComponent(shownJobId)); if (j) renderJob(j); }
         renderHistory(await api('/api/upgrade/history?limit=15'));
-        if (Date.now() - (refresh.lastDoctor || 0) > 30000) { refresh.lastDoctor = Date.now(); loadDoctor(); }
+        if (Date.now() - (refresh.lastDoctor || 0) > 30000) { refresh.lastDoctor = Date.now(); loadDoctor(); loadBackups(); }
     } catch (err) {
         if (err.auth) document.getElementById('logout').click();
     }
@@ -276,7 +302,7 @@ function renderHero(s) {
         text = 'Etap: ' + (STAGE_PL[s.activeJob.stage] || s.activeJob.stage) + '. Możesz zamknąć stronę — Guardian dokończy sam.';
     } else if (!s.portalHealthy) {
         tone = 'danger'; icon = '!'; title = 'Portal nie odpowiada';
-        text = 'Jeśli to po aktualizacji — użyj „Przywróć poprzedni Portal” poniżej.';
+        text = 'Jeśli to po aktualizacji — użyj „Przywróć poprzedni Portal” poniżej. Gdy to nie pomaga, a problem jest w bazie — przywróć ją z „Kopie Portalu”.';
     } else {
         tone = 'ok'; icon = '✓'; title = 'Wszystko w porządku';
         text = 'Portal odpowiada, żadne zadanie nie trwa.';
@@ -372,6 +398,79 @@ async function loadDoctor() {
     } catch (err) { box.textContent = 'Nie udało się sprawdzić: ' + err.message; }
 }
 document.getElementById('doctor-refresh').addEventListener('click', () => { document.getElementById('doctor-list').textContent = 'Sprawdzam…'; loadDoctor(); });
+
+const fmtSize = n => n > 1048576 ? (n / 1048576).toFixed(1) + ' MB' : Math.max(1, Math.round(n / 1024)) + ' KB';
+const SOURCE = { portal: ['od Portalu', 'info'], guardian: ['od Guardiana', 'muted'], 'przed-przywróceniem': ['przed przywróceniem', 'warn'], 'wgrana': ['wgrana', 'muted'] };
+let openRestore = null;
+
+async function loadBackups() {
+    const list = document.getElementById('backup-list');
+    try {
+        const r = await api('/api/backups');
+        const newest = r.files[0];
+        const ageH = newest ? (Date.now() - new Date(newest.createdAt)) / 3600000 : null;
+        document.getElementById('backup-chip').replaceChildren(
+            newest ? chip('najnowsza ' + time(newest.createdAt), ageH > r.maxAgeHours ? 'warn' : 'ok') : chip('brak kopii', 'danger'));
+        const notes = [];
+        if (!r.portalDbRunning) notes.push(el('div', { class: 'finding danger' }, el('div', { class: 'fbody' },
+            el('div', { class: 'ftitle' }, 'Baza Portalu (' + r.portalDbContainer + ') nie działa'),
+            el('div', { class: 'fdetail' }, 'Przywracanie sam ją uruchomi. Gdy kontenera w ogóle nie ma: docker compose -f docker-compose.prod.yml --env-file .env.prod up -d portal-db'))));
+        if (r.lastResult) notes.push(el('div', { class: 'fix', style: 'margin-bottom:.5rem' }, 'Ostatnia kopia Guardiana (' + time(r.lastAttemptAt) + '): ' + r.lastResult));
+        if (r.lastAlertError) notes.push(el('div', { class: 'fix', style: 'margin-bottom:.5rem;color:var(--warn)' }, 'Alarmy e-mail: ' + r.lastAlertError));
+        document.getElementById('backup-status').replaceChildren(...notes);
+        if (!r.files.length) { list.textContent = 'Nie ma jeszcze kopii w ' + r.dir + '/portal. Kliknij „Zrób kopię teraz” albo wgraj plik.'; return; }
+        list.replaceChildren(...r.files.map(f => {
+            const [sl, st] = SOURCE[f.source] || [f.source, 'muted'];
+            const row = el('div', { class: 'hist', style: 'cursor:default;flex-wrap:wrap' },
+                chip(sl, st),
+                el('span', { class: 'w' }, el('b', {}, time(f.createdAt)),
+                    el('span', {}, f.name + ' · ' + fmtSize(f.size) + (f.encrypted ? ' · zaszyfrowana' : '') + (f.hasEnv ? ' · z konfiguracją' : ''))),
+                el('button', { class: 'btn warn-btn', type: 'button', style: 'padding:.35rem .7rem;font-size:.8rem', onclick: () => { openRestore = openRestore === f.name ? null : f.name; loadBackups(); } }, 'Przywróć'));
+            if (openRestore !== f.name) return row;
+            const pass = el('input', { type: 'password', placeholder: 'Hasło szyfrowania kopii', autocomplete: 'off', style: 'padding:.45rem .6rem;border:1px solid #dfe3ea;border-radius:.5rem;font:inherit;min-width:220px' });
+            const skip = el('input', { type: 'checkbox', id: 'skip-safety' });
+            const go = el('button', { class: 'btn', type: 'button', onclick: async () => {
+                const word = prompt('Baza Portalu zostanie zastąpiona kopią z ' + time(f.createdAt) + '. Portal będzie niedostępny przez kilka minut.\n\nWpisz PRZYWRÓĆ, żeby potwierdzić.');
+                if ((word || '').trim().toUpperCase() !== 'PRZYWRÓĆ') return;
+                go.disabled = true;
+                try {
+                    const res = await api('/api/backups/restore', 'POST', { file: f.name, password: pass.value || null, skipSafetyBackup: skip.checked });
+                    if (res.started) { shownJobId = res.jobId; openRestore = null; toast('Przywracanie uruchomione — postęp widać wyżej.', 'ok'); refresh(); }
+                    else toast(res.error || 'Guardian nie przyjął zadania.', 'warn');
+                } catch (err) { toast(err.message, 'danger'); }
+                go.disabled = false;
+            } }, 'Przywróć bazę Portalu');
+            return el('div', {}, row, el('div', { class: 'finding warn', style: 'margin:.2rem 0 .6rem' }, el('div', { class: 'fbody' },
+                el('div', { class: 'ftitle' }, 'Przywrócenie bazy Portalu'),
+                el('div', { class: 'fdetail' }, 'Guardian zapisze kopię obecnej bazy, zatrzyma Portal, wgra wybraną kopię i uruchomi Portal. Trenerzy nie są ruszani — ich aplikacje działają dalej.'),
+                el('div', { style: 'display:flex;gap:.6rem;flex-wrap:wrap;align-items:center;margin-top:.6rem' },
+                    f.encrypted ? pass : null,
+                    el('label', { for: 'skip-safety', style: 'font-size:.82rem;display:flex;gap:.3rem;align-items:center' }, skip, 'Pomiń kopię obecnej bazy (gdy baza jest uszkodzona)'),
+                    go))));
+        }));
+    } catch (err) { list.textContent = 'Nie udało się wczytać kopii: ' + err.message; }
+}
+
+document.getElementById('backup-create').addEventListener('click', async e => {
+    e.target.disabled = true;
+    try { const r = await api('/api/backups/create', 'POST'); toast(r.message, r.ok ? 'ok' : 'warn'); }
+    catch (err) { toast(err.message, 'danger'); }
+    e.target.disabled = false;
+    loadBackups();
+});
+
+document.getElementById('backup-upload').addEventListener('click', async e => {
+    const file = document.getElementById('backup-file').files[0];
+    if (!file) { toast('Wybierz plik kopii.', 'warn'); return; }
+    e.target.disabled = true;
+    try {
+        const r = await fetch('/api/backups/upload?name=' + encodeURIComponent(file.name), { method: 'POST', headers: { 'X-Guardian-Secret': secret, 'Content-Type': 'application/octet-stream' }, body: file });
+        const data = await r.json().catch(() => ({}));
+        toast(data.message || ('HTTP ' + r.status), r.ok ? 'ok' : 'warn');
+    } catch (err) { toast(err.message, 'danger'); }
+    e.target.disabled = false;
+    loadBackups();
+});
 
 const ACTIONS = {
     portal: ['Zaktualizować Portal? Panel Portalu zniknie na chwilę podczas podmiany.', '/api/upgrade/portal'],

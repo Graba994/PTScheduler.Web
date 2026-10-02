@@ -62,10 +62,9 @@ public class HealthWatcher : BackgroundService
         ConsecutiveFailures++;
         LastError = error;
         if (PortalHealthy)
-        {
             _logger.LogWarning("Portal became unhealthy: {Error}", error);
-            DownSinceUtc = DateTime.UtcNow;
-        }
+        // Także gdy Guardian wystartował przy leżącym Portalu — inaczej alarm o awarii nigdy by nie poszedł.
+        DownSinceUtc ??= DateTime.UtcNow;
         PortalHealthy = false;
     }
 
