@@ -111,6 +111,24 @@ builder.Services.AddRateLimiter(o =>
 
 var app = builder.Build();
 
+// Nagłówki bezpieczeństwa: Portalu nie da się osadzić w ramce na cudzej stronie (clickjacking),
+// przeglądarka nie zgaduje typów plików, a adres nie wycieka do obcych stron.
+app.Use(async (ctx, next) =>
+{
+    ctx.Response.OnStarting(() =>
+    {
+        var h = ctx.Response.Headers;
+        h["X-Content-Type-Options"] = "nosniff";
+        h["X-Frame-Options"] = "DENY";
+        h["Referrer-Policy"] = "strict-origin-when-cross-origin";
+        h["Permissions-Policy"] = "camera=(), microphone=(), geolocation=(), interest-cohort=()";
+        if (!h.ContainsKey("Content-Security-Policy"))
+            h["Content-Security-Policy"] = "frame-ancestors 'none'; base-uri 'self'; object-src 'none'";
+        return Task.CompletedTask;
+    });
+    await next();
+});
+
 // Auto-migrate + seed admin
 using (var scope = app.Services.CreateScope())
 {

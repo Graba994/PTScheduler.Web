@@ -48,6 +48,11 @@ internal static class LoginSupport
                 Success = success
             });
             await db.SaveChangesAsync();
+
+            // Logowanie z nowego urządzenia → e-mail bezpieczeństwa (w tle).
+            if (success)
+                http.RequestServices.GetService<PTScheduler.Web.Security.NewDeviceLoginNotifier>()?
+                    .NotifyInBackground(userId, ua, http.Connection.RemoteIpAddress?.ToString(), $"{http.Request.Scheme}://{http.Request.Host}");
         }
         catch (Exception ex)
         {

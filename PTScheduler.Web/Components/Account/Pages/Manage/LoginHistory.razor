@@ -53,7 +53,7 @@ else
     <div class="acct-list">
         @foreach (var log in _showAll ? _logs : _logs.Take(10))
         {
-            var (icon, device) = Device(log.UserAgent);
+            var (icon, device) = PTScheduler.Web.Security.DeviceNames.Describe(log.UserAgent);
             <div class="acct-row">
                 <span class="acct-row-icon @(log.Success ? "slate" : "red")"><i class="bi @icon"></i></span>
                 <span class="acct-row-main">
@@ -102,23 +102,4 @@ else
         StateHasChanged();
     }
 
-    /// <summary>Czytelna nazwa urządzenia z nagłówka przeglądarki, np. „iPhone · Safari”.</summary>
-    private static (string Icon, string Label) Device(string? ua)
-    {
-        if (string.IsNullOrEmpty(ua)) return ("bi-question-circle", "Nieznane urządzenie");
-        var browser = ua.Contains("Edg/") ? "Edge"
-            : ua.Contains("OPR/") ? "Opera"
-            : ua.Contains("Firefox/") ? "Firefox"
-            : ua.Contains("Chrome/") ? "Chrome"
-            : ua.Contains("Safari/") ? "Safari"
-            : "przeglądarka";
-        var (icon, os) = ua.Contains("iPhone") ? ("bi-phone", "iPhone")
-            : ua.Contains("iPad") ? ("bi-tablet", "iPad")
-            : ua.Contains("Android") ? (ua.Contains("Mobile") ? ("bi-phone", "Telefon z Androidem") : ("bi-tablet", "Tablet z Androidem"))
-            : ua.Contains("Mac OS X") ? ("bi-laptop", "Mac")
-            : ua.Contains("Windows") ? ("bi-pc-display", "Komputer z Windows")
-            : ua.Contains("Linux") ? ("bi-pc-display", "Komputer z Linuksem")
-            : ("bi-globe", "Urządzenie");
-        return (icon, $"{os} · {browser}");
-    }
 }

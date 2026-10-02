@@ -153,11 +153,18 @@ builder.Services.AddIdentityCore<ApplicationUser>(options =>
     .AddSignInManager()
     .AddClaimsPrincipalFactory<PTScheduler.Web.Services.AppClaimsPrincipalFactory>()
     .AddErrorDescriber<PolishIdentityErrorDescriber>()
+    .AddPasswordValidator<PTScheduler.Web.Security.WeakPasswordValidator>()
     .AddDefaultTokenProviders()
     .AddTokenProvider<PTScheduler.Web.Components.Account.ClientInviteTokenProvider<ApplicationUser>>(
         PTScheduler.Application.Interfaces.ClientInvite.TokenProvider);
 
 builder.Services.AddScoped<IEmailSender<ApplicationUser>, PTScheduler.Web.Components.Account.IdentityEmailSender>();
+builder.Services.AddSingleton<PTScheduler.Web.Security.NewDeviceLoginNotifier>();
+builder.Services.AddHttpClient(PTScheduler.Web.Security.WeakPasswordValidator.HttpClientName, c =>
+{
+    c.DefaultRequestHeaders.Add("Add-Padding", "true"); // odpowiedź tej samej długości — nie zdradza, czy było trafienie
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("PTScheduler-password-check");
+});
 builder.Services.AddSingleton<IWebRootPathProvider, WebRootPathProvider>();
 builder.Services.AddScoped<PTScheduler.Web.Services.HintStateService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.ToastService>();
@@ -198,21 +205,38 @@ builder.Services.AddRateLimiter(options =>
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
     {
+        if (ctx.Request.Method != "POST") return RateLimitPartition.GetNoLimiter("unlimited");
         var path = ctx.Request.Path.Value ?? "";
-        if (ctx.Request.Method == "POST" &&
-            (path.StartsWith("/Account/Login", StringComparison.OrdinalIgnoreCase) ||
-             path.StartsWith("/Account/Register", StringComparison.OrdinalIgnoreCase) ||
-             path.StartsWith("/Account/Invite", StringComparison.OrdinalIgnoreCase)))
-        {
-            var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-            return RateLimitPartition.GetFixedWindowLimiter(ip, _ => new FixedWindowRateLimiterOptions
+        var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+        // E-maile na żądanie (reset hasła, ponowne potwierdzenie): mało prób, długie okno —
+        // nikt nie zasypie cudzej skrzynki ani nie wyśle nam rachunku za SMTP.
+        if (AuthRateLimits.IsEmailTrigger(path))
+            return RateLimitPartition.GetFixedWindowLimiter($"mail:{ip}", _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = 10,
-                Window = TimeSpan.FromMinutes(1)
+                PermitLimit = AuthRateLimits.EmailPermit,
+                Window = AuthRateLimits.EmailWindow
             });
-        }
+
+        // Logowanie, kod weryfikacji dwuetapowej, kod zapasowy, rejestracja, zaproszenie, nowe hasło:
+        // zgadywanie 6-cyfrowego kodu czy hasła z jednego adresu kończy się po kilku próbach na minutę.
+        if (AuthRateLimits.IsCredentialAttempt(path))
+            return RateLimitPartition.GetFixedWindowLimiter($"auth:{ip}", _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = AuthRateLimits.AuthPermit,
+                Window = AuthRateLimits.AuthWindow
+            });
+
         return RateLimitPartition.GetNoLimiter("unlimited");
     });
+    options.OnRejected = async (ctx, token) =>
+    {
+        ctx.HttpContext.Response.ContentType = "text/html; charset=utf-8";
+        await ctx.HttpContext.Response.WriteAsync(
+            "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>" +
+            "<div style='font-family:system-ui;max-width:420px;margin:15vh auto;padding:0 16px;text-align:center'>" +
+            "<h2>Za dużo prób</h2><p>Odczekaj chwilę i spróbuj ponownie.</p><p><a href='javascript:history.back()'>Wróć</a></p></div>", token);
+    };
 });
 
 var app = builder.Build();
@@ -220,6 +244,25 @@ var app = builder.Build();
 StudioClock.Use(app.Services.GetRequiredService<IAppClock>());
 
 app.UseForwardedHeaders();
+
+// Nagłówki bezpieczeństwa: strona nie da się osadzić w ramce na cudzej domenie (clickjacking),
+// przeglądarka nie zgaduje typów plików, adres nie wycieka do obcych stron, a funkcje urządzenia
+// są ograniczone do tego, czego aplikacja używa (aparat do zdjęć, mikrofon tylko dla nas).
+app.Use(async (ctx, next) =>
+{
+    ctx.Response.OnStarting(() =>
+    {
+        var h = ctx.Response.Headers;
+        h["X-Content-Type-Options"] = "nosniff";
+        h["X-Frame-Options"] = "SAMEORIGIN";
+        h["Referrer-Policy"] = "strict-origin-when-cross-origin";
+        h["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=(), payment=(), usb=(), interest-cohort=()";
+        if (!h.ContainsKey("Content-Security-Policy"))
+            h["Content-Security-Policy"] = "frame-ancestors 'self'; base-uri 'self'; object-src 'none'";
+        return Task.CompletedTask;
+    });
+    await next();
+});
 
 // Run migrations + seed. On failure: log and flag the app as DB-degraded — DO NOT crash.
 var startupHealth = app.Services.GetRequiredService<StartupHealth>();

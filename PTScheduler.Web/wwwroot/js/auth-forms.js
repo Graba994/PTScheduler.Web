@@ -17,6 +17,34 @@
         input.focus();
     });
 
+    // Ostrzeżenie „Włączony Caps Lock” pod każdym polem hasła (najczęstsza przyczyna „złego hasła”).
+    function isPasswordField(el) {
+        if (!(el instanceof HTMLInputElement)) return false;
+        return el.type === 'password' || (el.autocomplete || '').indexOf('password') >= 0;
+    }
+    function capsWarning(input, show) {
+        var anchor = input.closest('.input-group') || input;
+        var warn = anchor.nextElementSibling;
+        if (!warn || !warn.classList || !warn.classList.contains('capslock-warn')) {
+            if (!show) return;
+            warn = document.createElement('div');
+            warn.className = 'capslock-warn';
+            warn.setAttribute('role', 'status');
+            warn.innerHTML = '<i class="bi bi-capslock-fill"></i> Włączony Caps Lock — hasło wpisuje się wielkimi literami';
+            anchor.insertAdjacentElement('afterend', warn);
+        }
+        warn.hidden = !show;
+    }
+    ['keydown', 'keyup'].forEach(function (type) {
+        document.addEventListener(type, function (e) {
+            if (!isPasswordField(e.target) || typeof e.getModifierState !== 'function') return;
+            capsWarning(e.target, e.getModifierState('CapsLock'));
+        });
+    });
+    document.addEventListener('focusout', function (e) {
+        if (isPasswordField(e.target)) capsWarning(e.target, false);
+    });
+
     // Blokada podwójnego wysłania: <form data-busy-on-submit> + <button type=submit data-busy-text="…">
     document.addEventListener('submit', function (e) {
         var form = e.target;

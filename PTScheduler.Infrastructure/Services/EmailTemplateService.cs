@@ -167,6 +167,28 @@ public class EmailTemplateService(
             "Te wiadomości wyłączysz w ustawieniach konta → Powiadomienia → „Wiadomości od trenera”.",
             ["Subject", "ClientName", "Body", "ButtonText", "Link", "CompanyName", "AccentColor"]),
 
+        ["new-device-login"] = new(
+            "new-device-login", "Nowe logowanie na koncie (bezpieczeństwo)", "bi-shield-exclamation",
+            "Nowe logowanie na Twoim koncie",
+            "Nowe logowanie na Twoim koncie 🔐",
+            """
+            <p style="color:#374151;font-size:15px">Cześć <strong>{{Name}}</strong>!</p>
+            <p style="color:#374151;font-size:15px">Właśnie nastąpiło logowanie na Twoje konto z urządzenia, z którego wcześniej nikt się na nie nie logował:</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0">
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;width:40%">Urządzenie</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{Device}}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Kiedy</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{When}}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Adres IP</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{Ip}}</td></tr>
+            </table>
+            <p style="color:#374151;font-size:15px">Jeśli to Ty — wszystko w porządku, nic nie musisz robić.</p>
+            <div style="text-align:center;margin:24px 0">
+              <a href="{{SecureLink}}" style="background:#DC2626;color:white;text-decoration:none;padding:12px 28px;border-radius:6px;font-weight:600;font-size:15px;display:inline-block">To nie ja — zabezpiecz konto</a>
+            </div>
+            <p style="color:#6b7280;font-size:13px">Po kliknięciu zmienisz hasło i wylogujesz wszystkie inne urządzenia.</p>
+            """,
+            "#DC2626",
+            "Wiadomość bezpieczeństwa — wysyłamy ją zawsze przy logowaniu z nowego urządzenia.",
+            ["Name", "Device", "When", "Ip", "SecureLink", "CompanyName"]),
+
         ["session-booked"] = new(
             "session-booked", "Potwierdzenie rezerwacji", "bi-calendar-check",
             "Potwierdzenie rezerwacji wizyty",
