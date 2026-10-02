@@ -51,6 +51,13 @@ else
                     Automatycznie rejestruj domeny w NPM przy provisioningu nowego trenera
                 </label>
             </div>
+            <div class="form-check mt-2">
+                <input class="form-check-input" type="checkbox" @bind="_form.AutoSsl" id="autoSsl" />
+                <label class="form-check-label small" for="autoSsl">
+                    Automatycznie zakładaj certyfikat Let's Encrypt i wymuszaj HTTPS
+                    <span class="text-muted d-block">Wymaga, żeby domena wskazywała na ten serwer (rekord A) i żeby port 80 był otwarty. Wildcard (*.twojadomena.pl) wgrany w NPM zostanie użyty automatycznie.</span>
+                </label>
+            </div>
         </div>
     </div>
 
@@ -82,7 +89,19 @@ else
 <div class="card border-0 shadow-sm">
     <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">
         <span class="pp-card-header-title"><span class="pp-icon pp-icon-sm"><i class="bi bi-list-ul"></i></span>Proxy hosty w NPM</span>
-        <span class="badge bg-secondary">@_hosts.Count</span>
+        <div class="d-flex align-items-center gap-2">
+            @if (_hosts.Any(h => !h.SslForced))
+            {
+                <button class="btn btn-sm btn-primary" @onclick="EnableHttpsAll" disabled="@_fixing">
+                    @if (_fixing)
+                    {
+                        <span class="spinner-border spinner-border-sm me-1"></span>
+                    }
+                    <i class="bi bi-lock-fill me-1"></i>Włącz HTTPS dla @_hosts.Count(h => !h.SslForced)
+                </button>
+            }
+            <span class="badge bg-secondary">@_hosts.Count</span>
+        </div>
     </div>
     <div class="card-body p-0">
         @if (_hosts.Count == 0)
@@ -145,7 +164,7 @@ else
 
 @code {
     private NpmForm _form = new();
-    private bool _saving, _testing, _loadingHosts;
+    private bool _saving, _testing, _loadingHosts, _fixing;
     private string? _message;
     private bool _isError;
     private List<NpmProxyHost> _hosts = new();
@@ -156,6 +175,7 @@ else
         public string Email { get; set; } = "";
         public string Password { get; set; } = "";
         public bool AutoRegister { get; set; } = true;
+        public bool AutoSsl { get; set; } = true;
     }
 
     protected override async Task OnInitializedAsync()
@@ -164,12 +184,14 @@ else
             SiteSettingsService.Keys.NpmUrl,
             SiteSettingsService.Keys.NpmEmail,
             SiteSettingsService.Keys.NpmPassword,
-            SiteSettingsService.Keys.NpmAutoRegister);
+            SiteSettingsService.Keys.NpmAutoRegister,
+            SiteSettingsService.Keys.NpmAutoSsl);
 
         _form.Url = s[SiteSettingsService.Keys.NpmUrl];
         _form.Email = s[SiteSettingsService.Keys.NpmEmail];
         _form.Password = s[SiteSettingsService.Keys.NpmPassword];
         _form.AutoRegister = s[SiteSettingsService.Keys.NpmAutoRegister] != "false";
+        _form.AutoSsl = s[SiteSettingsService.Keys.NpmAutoSsl] != "false";
 
         if (!string.IsNullOrEmpty(_form.Url) && !string.IsNullOrEmpty(_form.Email))
             _hosts = await NpmSvc.ListProxyHostsAsync();
@@ -184,7 +206,8 @@ else
             [SiteSettingsService.Keys.NpmUrl] = _form.Url.Trim(),
             [SiteSettingsService.Keys.NpmEmail] = _form.Email.Trim(),
             [SiteSettingsService.Keys.NpmPassword] = _form.Password,
-            [SiteSettingsService.Keys.NpmAutoRegister] = _form.AutoRegister ? "true" : "false"
+            [SiteSettingsService.Keys.NpmAutoRegister] = _form.AutoRegister ? "true" : "false",
+            [SiteSettingsService.Keys.NpmAutoSsl] = _form.AutoSsl ? "true" : "false"
         });
         _saving = false;
         _message = "Zapisano ustawienia NPM.";
@@ -201,6 +224,19 @@ else
         _isError = !result.Success;
         if (result.Success)
             _hosts = await NpmSvc.ListProxyHostsAsync();
+    }
+
+    private async Task EnableHttpsAll()
+    {
+        _fixing = true;
+        _message = null;
+        var results = await NpmSvc.EnableHttpsForAllAsync();
+        _fixing = false;
+        var ok = results.Count(r => r.Ok);
+        var failed = results.Where(r => !r.Ok).ToList();
+        _message = $"HTTPS włączone: {ok} z {results.Count}." + (failed.Count > 0 ? " Nie udało się: " + string.Join("; ", failed.Select(f => $"{f.Domain} — {f.Message}")) : "");
+        _isError = failed.Count > 0;
+        _hosts = await NpmSvc.ListProxyHostsAsync();
     }
 
     private async Task LoadHosts()

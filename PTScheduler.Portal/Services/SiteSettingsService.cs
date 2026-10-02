@@ -30,6 +30,8 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string NpmPassword = "npm_password";
         public const string NpmToken = "npm_token";
         public const string NpmAutoRegister = "npm_auto_register";
+        /// <summary>„false” — nowe hosty bez certyfikatu (domyślnie Portal zakłada Let's Encrypt i wymusza HTTPS).</summary>
+        public const string NpmAutoSsl = "npm_auto_ssl";
         public const string StripeSecretKey = "stripe_secret_key";
         public const string StripePublishableKey = "stripe_publishable_key";
         public const string StripeWebhookSecret = "stripe_webhook_secret";

@@ -7,6 +7,8 @@ namespace PTScheduler.Portal.Services;
 public class NpmService(SiteSettingsService settings, ILogger<NpmService> logger)
 {
     private static readonly HttpClient _http = new() { Timeout = TimeSpan.FromSeconds(15) };
+    // Wydanie certyfikatu trwa dłużej — limit czasu ustawiamy osobno dla każdego zapytania.
+    private static readonly HttpClient _slowHttp = new() { Timeout = TimeSpan.FromMinutes(3) };
     private static readonly JsonSerializerOptions _json = new(JsonSerializerDefaults.Web);
 
     public async Task<NpmTestResult> TestConnectionAsync(string url, string email, string password)
@@ -53,51 +55,48 @@ public class NpmService(SiteSettingsService settings, ILogger<NpmService> logger
         return ok ? token : null;
     }
 
+    /// <summary>
+    /// Zakłada (albo aktualizuje) proxy host dla domeny. Gdy włączone jest automatyczne HTTPS
+    /// (domyślnie tak), Portal używa istniejącego certyfikatu obejmującego domenę (także wildcard
+    /// *.domena) albo prosi Let's Encrypt o nowy, a potem wymusza HTTPS i HSTS.
+    /// Bez certyfikatu host i tak działa po http — komunikat mówi, co poprawić (DNS, port 80).
+    /// </summary>
     public async Task<(bool Success, string Message)> RegisterProxyHostAsync(
-        string domain, string forwardHost, int forwardPort, bool ssl = false)
+        string domain, string forwardHost, int forwardPort, bool? ssl = null)
     {
-        var s = await settings.GetAllAsync(SiteSettingsService.Keys.NpmUrl);
-        var url = s[SiteSettingsService.Keys.NpmUrl];
+        var s = await settings.GetAllAsync(SiteSettingsService.Keys.NpmUrl, SiteSettingsService.Keys.NpmAutoSsl);
+        var url = s[SiteSettingsService.Keys.NpmUrl]?.TrimEnd('/');
         if (string.IsNullOrWhiteSpace(url))
             return (false, "NPM nie skonfigurowany.");
+        var wantSsl = ssl ?? s[SiteSettingsService.Keys.NpmAutoSsl] != "false";
 
         var token = await GetTokenAsync();
         if (token is null) return (false, "Nie udało się zalogować do NPM.");
 
-        var payload = new
-        {
-            domain_names = new[] { domain },
-            forward_scheme = "http",
-            forward_host = forwardHost,
-            forward_port = forwardPort,
-            block_exploits = true,
-            allow_websocket_upgrade = true,
-            ssl_forced = ssl,
-            http2_support = true,
-            hsts_enabled = false,
-            hsts_subdomains = false,
-            enabled = true,
-            meta = new { letsencrypt_agree = ssl, dns_challenge = false },
-            advanced_config = "",
-            locations = Array.Empty<object>(),
-            certificate_id = ssl ? (object)"new" : 0
-        };
-
-        var json = JsonSerializer.Serialize(payload, _json);
-        using var req = new HttpRequestMessage(HttpMethod.Post, $"{url.TrimEnd('/')}/api/nginx/proxy-hosts")
-        {
-            Content = new StringContent(json, Encoding.UTF8, "application/json")
-        };
-        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
-
         try
         {
-            using var resp = await _http.SendAsync(req);
-            var body = await resp.Content.ReadAsStringAsync();
-            if (!resp.IsSuccessStatusCode)
-                return (false, $"NPM {(int)resp.StatusCode}: {body}");
+            // 1) Host po http (potrzebny też do weryfikacji domeny przez Let's Encrypt).
+            var existing = await FindHostAsync(url, token, domain);
+            var hostId = existing?.GetProperty("id").GetInt32();
+            if (hostId is null)
+            {
+                var (ok, body) = await SendAsync(url, token, HttpMethod.Post, "/api/nginx/proxy-hosts", HostPayload(domain, forwardHost, forwardPort, 0, false));
+                if (!ok) return (false, $"NPM: {body}");
+                hostId = JsonDocument.Parse(body).RootElement.GetProperty("id").GetInt32();
+            }
+            if (!wantSsl) return (true, $"Zarejestrowano proxy host dla {domain} (bez HTTPS)");
 
-            return (true, $"Zarejestrowano proxy host dla {domain}");
+            // 2) Certyfikat: istniejący albo nowy z Let's Encrypt.
+            var (certId, certMsg) = await EnsureCertificateAsync(url, token, domain);
+            if (certId is null)
+                return (true, $"Proxy host dla {domain} działa po http, ale certyfikat nie powstał: {certMsg}");
+
+            // 3) Host z certyfikatem, wymuszonym HTTPS i HSTS.
+            var (updated, updBody) = await SendAsync(url, token, HttpMethod.Put, $"/api/nginx/proxy-hosts/{hostId}",
+                HostPayload(domain, forwardHost, forwardPort, certId.Value, true));
+            return updated
+                ? (true, $"Zarejestrowano {domain} z HTTPS ({certMsg})")
+                : (true, $"Proxy host dla {domain} działa, ale nie udało się włączyć HTTPS: {updBody}");
         }
         catch (Exception ex)
         {
@@ -105,6 +104,103 @@ public class NpmService(SiteSettingsService settings, ILogger<NpmService> logger
             return (false, ex.Message);
         }
     }
+
+    /// <summary>Włącza HTTPS dla wszystkich hostów, które go jeszcze nie mają (przycisk w Portalu).</summary>
+    public async Task<List<(string Domain, bool Ok, string Message)>> EnableHttpsForAllAsync()
+    {
+        var results = new List<(string, bool, string)>();
+        foreach (var h in (await ListProxyHostsAsync()).Where(h => !h.SslForced && !string.IsNullOrWhiteSpace(h.Domain)))
+        {
+            var (ok, msg) = await RegisterProxyHostAsync(h.Domain, h.ForwardHost, h.ForwardPort, ssl: true);
+            results.Add((h.Domain, ok && msg.Contains("z HTTPS"), msg));
+        }
+        return results;
+    }
+
+    private static object HostPayload(string domain, string forwardHost, int forwardPort, int certificateId, bool ssl) => new
+    {
+        domain_names = new[] { domain },
+        forward_scheme = "http",
+        forward_host = forwardHost,
+        forward_port = forwardPort,
+        block_exploits = true,
+        allow_websocket_upgrade = true, // Blazor (SignalR) potrzebuje WebSocketów
+        caching_enabled = false,
+        access_list_id = 0,
+        certificate_id = certificateId,
+        ssl_forced = ssl,
+        http2_support = ssl,
+        hsts_enabled = ssl,
+        hsts_subdomains = false,
+        enabled = true,
+        meta = new { letsencrypt_agree = false, dns_challenge = false },
+        advanced_config = "",
+        locations = Array.Empty<object>()
+    };
+
+    /// <summary>Id certyfikatu obejmującego domenę: istniejący (dokładny albo wildcard) albo nowy z Let's Encrypt.</summary>
+    private async Task<(int? Id, string Message)> EnsureCertificateAsync(string url, string token, string domain)
+    {
+        var (ok, body) = await SendAsync(url, token, HttpMethod.Get, "/api/nginx/certificates", null);
+        if (ok)
+        {
+            var parent = domain.Contains('.') ? domain[(domain.IndexOf('.') + 1)..] : "";
+            foreach (var c in JsonSerializer.Deserialize<List<JsonElement>>(body, _json) ?? [])
+            {
+                if (!c.TryGetProperty("domain_names", out var names)) continue;
+                var list = names.EnumerateArray().Select(n => n.GetString() ?? "").ToList();
+                if (list.Any(n => n.Equals(domain, StringComparison.OrdinalIgnoreCase)
+                                  || (parent.Length > 0 && n.Equals("*." + parent, StringComparison.OrdinalIgnoreCase))))
+                {
+                    var expired = c.TryGetProperty("expires_on", out var exp) && DateTime.TryParse(exp.GetString(), out var e) && e < DateTime.UtcNow;
+                    if (!expired) return (c.GetProperty("id").GetInt32(), "istniejący certyfikat");
+                }
+            }
+        }
+
+        var s = await settings.GetAllAsync(SiteSettingsService.Keys.AdminNotificationEmail, SiteSettingsService.Keys.NpmEmail);
+        var email = s[SiteSettingsService.Keys.AdminNotificationEmail] is { Length: > 0 } a ? a : s[SiteSettingsService.Keys.NpmEmail];
+        var payload = new
+        {
+            provider = "letsencrypt",
+            nice_name = domain,
+            domain_names = new[] { domain },
+            meta = new { letsencrypt_email = email, letsencrypt_agree = true, dns_challenge = false }
+        };
+        // Let's Encrypt weryfikuje domenę przez http — to trwa do minuty.
+        var (created, certBody) = await SendAsync(url, token, HttpMethod.Post, "/api/nginx/certificates", payload, TimeSpan.FromSeconds(120));
+        if (!created)
+        {
+            logger.LogWarning("Let's Encrypt dla {Domain} nie powiódł się: {Body}", domain, certBody);
+            return (null, "Let's Encrypt odmówił — sprawdź, czy domena wskazuje na ten serwer (rekord A) i czy port 80 jest otwarty. " + Short(certBody));
+        }
+        return (JsonDocument.Parse(certBody).RootElement.GetProperty("id").GetInt32(), "nowy certyfikat Let's Encrypt");
+    }
+
+    private async Task<JsonElement?> FindHostAsync(string url, string token, string domain)
+    {
+        var (ok, body) = await SendAsync(url, token, HttpMethod.Get, "/api/nginx/proxy-hosts", null);
+        if (!ok) return null;
+        foreach (var h in JsonSerializer.Deserialize<List<JsonElement>>(body, _json) ?? [])
+            if (h.TryGetProperty("domain_names", out var names)
+                && names.EnumerateArray().Any(n => string.Equals(n.GetString(), domain, StringComparison.OrdinalIgnoreCase)))
+                return h;
+        return null;
+    }
+
+    private static async Task<(bool Ok, string Body)> SendAsync(string url, string token, HttpMethod method, string path, object? payload, TimeSpan? timeout = null)
+    {
+        using var req = new HttpRequestMessage(method, url + path);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        if (payload is not null)
+            req.Content = new StringContent(JsonSerializer.Serialize(payload, _json), Encoding.UTF8, "application/json");
+        using var cts = new CancellationTokenSource(timeout ?? TimeSpan.FromSeconds(15));
+        using var resp = await _slowHttp.SendAsync(req, cts.Token);
+        var body = await resp.Content.ReadAsStringAsync(cts.Token);
+        return (resp.IsSuccessStatusCode, resp.IsSuccessStatusCode ? body : $"{(int)resp.StatusCode}: {Short(body)}");
+    }
+
+    private static string Short(string s) => s.Length > 300 ? s[..300] + "…" : s;
 
     public async Task<(bool Success, string Message)> DeleteProxyHostByDomainAsync(string domain)
     {
