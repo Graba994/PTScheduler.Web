@@ -31,6 +31,12 @@ public class Tenant
     public string? QueuedReason { get; set; }
     /// <summary>Losowy klucz kreatora: powrót z płatności kartą wraca do właściwego zgłoszenia (w adresie, nie Id).</summary>
     public string? RegistrationKey { get; set; }
+    /// <summary>Płatność weryfikacyjna przy rejestracji przez Autopay / PayU / Przelewy24 (bez Stripe).</summary>
+    public string? RegistrationPaymentId { get; set; }
+    public string? RegistrationPaymentGateway { get; set; }
+    public DateTime? RegistrationPaidAt { get; set; }
+    /// <summary>Trener zrezygnował z subskrypcji (rozliczanej rachunkami) — przy następnym rozliczeniu zawieszamy zamiast wystawiać rachunek.</summary>
+    public DateTime? CancelRequestedAt { get; set; }
     /// <summary>Kod zaproszenia użyty przy rejestracji.</summary>
     public string? InviteCode { get; set; }
     /// <summary>Własna domena trenera (np. annafit.pl) — działa obok adresu w domenie platformy.</summary>

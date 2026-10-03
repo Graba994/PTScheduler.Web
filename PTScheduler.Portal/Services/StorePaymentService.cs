@@ -63,6 +63,7 @@ public class StorePaymentService(
 
     public async Task<bool> HandlePaymentConfirmationAsync(string gateway, string externalId)
     {
+        if (await TryConfirmRegistrationAsync(gateway, externalId)) return true;
         if (await Billing.TryConfirmAsync(gateway, externalId, externalId)) return true;
 
         await using var db = dbFactory.CreateDbContext();
@@ -126,6 +127,43 @@ public class StorePaymentService(
             .Where(o => serviceItems.TryGetValue(o.ServiceItemId, out var si) && StoreTicketService.IsTicket(si))
             .Select(o => o.Id).ToList());
 
+        return true;
+    }
+
+    /// <summary>Zgłoszenie z kreatora, którego dotyczy płatność weryfikacyjna (po numerze zamówienia albo id z bramki).</summary>
+    public async Task<Tenant?> FindRegistrationAsync(string gateway, string? externalId)
+    {
+        if (string.IsNullOrWhiteSpace(externalId)) return null;
+        await using var db = dbFactory.CreateDbContext();
+        var candidates = await db.Tenants.AsNoTracking()
+            .Where(t => t.RegistrationPaymentId != null && t.RegistrationPaymentGateway == gateway && t.RegistrationPaymentId.Contains(externalId))
+            .ToListAsync();
+        return candidates.FirstOrDefault(t => t.RegistrationPaymentId!.Split(' ').Contains(externalId));
+    }
+
+    private async Task<bool> TryConfirmRegistrationAsync(string gateway, string externalId)
+    {
+        var found = await FindRegistrationAsync(gateway, externalId);
+        if (found is null) return false;
+        await using var db = dbFactory.CreateDbContext();
+        var t = await db.Tenants.FindAsync(found.Id);
+        if (t is null || t.RegistrationPaidAt is not null) return true; // już potwierdzone — powtórzone powiadomienie
+        t.RegistrationPaidAt = DateTime.UtcNow;
+        if (t.BillingStatus is "none" or "") t.BillingStatus = "verified";
+        var amount = decimal.TryParse((await settings.GetAsync(SiteSettingsService.Keys.RegistrationVerifyAmount))?.Replace(',', '.'),
+            System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var a) && a >= 1 ? a : 1m;
+        db.PaymentRecords.Add(new PaymentRecord
+        {
+            TenantId = t.Id,
+            ExternalPaymentId = externalId,
+            Amount = amount,
+            Currency = "PLN",
+            Status = PaymentRecordStatus.Paid,
+            Source = gateway,
+            Description = "Weryfikacja przy rejestracji (kreator)"
+        });
+        await db.SaveChangesAsync();
+        logger.LogInformation("Płatność weryfikacyjna {Gateway} {Id} potwierdzona dla {Slug}.", gateway, externalId, t.Slug);
         return true;
     }
 
@@ -382,6 +420,14 @@ public class StorePaymentService(
                 .Select(o => o.Status).ToListAsync();
             if (orders.Count == 0)
             {
+                // Płatność weryfikacyjna z kreatora rejestracji.
+                if (await FindRegistrationAsync("autopay", tx.OrderId) is not null)
+                {
+                    if (tx.PaymentStatus.Equals("SUCCESS", StringComparison.OrdinalIgnoreCase))
+                        await TryConfirmRegistrationAsync("autopay", tx.OrderId);
+                    results.Add((tx.OrderId, true));
+                    continue;
+                }
                 // Rachunek trenera (nie zamówienie ze sklepu).
                 var isBill = await Billing.IsBillPaymentAsync("autopay", tx.OrderId);
                 if (isBill && tx.PaymentStatus.Equals("SUCCESS", StringComparison.OrdinalIgnoreCase))

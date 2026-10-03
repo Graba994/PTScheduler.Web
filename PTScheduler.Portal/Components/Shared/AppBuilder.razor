@@ -274,7 +274,7 @@
                 }
                 else
                 {
-                    <p class="bd-foot"><i class="bi bi-shield-check"></i>Na razie nic nie tworzymy — aplikacja powstanie dopiero po „Opublikuj”, potwierdzeniu e-maila i podpięciu karty.</p>
+                    <p class="bd-foot"><i class="bi bi-shield-check"></i>Na razie nic nie tworzymy — aplikacja powstanie dopiero po „Opublikuj”, potwierdzeniu e-maila i @(IsStripe || _gateway is null ? "podpięciu karty" : "płatności weryfikacyjnej").</p>
                     <p class="bd-foot bd-foot-login">Masz już aplikację? <a href="/panel">Zaloguj się</a></p>
                 }
             }
@@ -308,16 +308,25 @@
             {
                 <div class="bd-done">
                     <div class="bd-done-badge"><i class="bi bi-credit-card-2-front"></i></div>
-                    <h1 class="bd-title">@(_cardCancelled ? "Karta nie została dodana" : "Jeszcze tylko karta")</h1>
-                    <p class="bd-sub">@CardNote Bez karty nie uruchomimy aplikacji — tak chronimy serwer przed zakładaniem aplikacji „na próbę”.</p>
-                    @if (_error is not null)
+                    @if (_waitingPayment)
                     {
-                        <div class="bd-error" role="alert"><i class="bi bi-exclamation-circle"></i>@_error</div>
+                        <h1 class="bd-title">Czekamy na potwierdzenie płatności</h1>
+                        <p class="bd-sub">@RegistrationGateService.GatewayName(_gateway) zwykle potwierdza w kilka sekund. Nie zamykaj tej karty — zaraz ruszamy.</p>
+                        <div class="bd-wait"><span class="bd-spin dark"></span>sprawdzam…</div>
                     }
-                    <button type="button" class="bd-publish bd-enter" disabled="@_publishing" @onclick="StartCardAsync">
-                        @if (_publishing) { <span class="bd-spin"></span> } else { <i class="bi bi-lock-fill"></i> }
-                        Dodaj kartę — bezpiecznie przez Stripe
-                    </button>
+                    else
+                    {
+                        <h1 class="bd-title">@(IsStripe ? (_cardCancelled ? "Karta nie została dodana" : "Jeszcze tylko karta") : "Jeszcze tylko płatność weryfikacyjna")</h1>
+                        <p class="bd-sub">@CardNote To chroni serwer przed zakładaniem aplikacji „na próbę”.</p>
+                        @if (_error is not null)
+                        {
+                            <div class="bd-error" role="alert"><i class="bi bi-exclamation-circle"></i>@_error</div>
+                        }
+                        <button type="button" class="bd-publish bd-enter" disabled="@_publishing" @onclick="StartCardAsync">
+                            @if (_publishing) { <span class="bd-spin"></span> } else { <i class="bi bi-lock-fill"></i> }
+                            @(IsStripe ? "Dodaj kartę — bezpiecznie przez Stripe" : $"Zapłać {_verifyAmount.ToString("0.##", Pl)} zł przez {RegistrationGateService.GatewayName(_gateway)}")
+                        </button>
+                    }
                 </div>
             }
             else if (_phase == Phase.Deploying && _launch is not null)
@@ -425,7 +434,7 @@
                 <div class="bd-browser @(SiteBuilt ? "" : "wire")">
                     <div class="bd-browser-bar">
                         <span class="bd-browser-dots"><i></i><i></i><i></i></span>
-                        <span class="bd-url"><i class="bi bi-lock-fill"></i>@AddressText</span>
+                        <span class="bd-url @(_phase == Phase.Build && _step == 1 ? "typing" : "") @(_slugState == "free" ? "free" : "")"><i class="bi bi-lock-fill"></i><span @key="_slug">@AddressText</span></span>
                     </div>
                     <div class="bd-site @(Theme.Dark ? "dark" : "") @(Theme.Serif ? "serif" : "")" @key="@($"s{_siteVersion}")">
                         <div class="bd-site-nav">
@@ -448,11 +457,11 @@
                     </div>
                 </div>
 
-                <div class="bd-phone">
+                <div class="bd-phone @Hl("color")">
                     <div class="bd-phone-screen" @key="@($"p{_colorVersion}")">
                         <div class="bd-phone-notch"></div>
                         <div class="bd-phone-status"><span>9:41</span><span><i class="bi bi-reception-4"></i><i class="bi bi-wifi"></i><i class="bi bi-battery-full"></i></span></div>
-                        <div class="bd-app-head @(BrandBuilt ? "" : "wire")">
+                        <div class="bd-app-head @(BrandBuilt ? "" : "wire") @Hl("brand")">
                             <span class="bd-mono">@Mono</span>
                             <div class="bd-app-id">
                                 <div class="bd-app-name">@CompanyOr</div>
@@ -467,22 +476,35 @@
                             <span class="bd-app-chip"><i class="bi bi-check2"></i>potwierdzony</span>
                         </div>
                         <div class="bd-app-book">Umów trening</div>
-                        <div class="bd-app-list @(OffersBuilt ? "" : "wire")">
+                        <div class="bd-app-list @(OffersBuilt ? "" : "wire") @Hl("offers")">
                             @foreach (var o in VisibleOffers)
                             {
                                 <div class="bd-app-offer">
                                     <span class="bd-app-ic"><i class="bi @(o.IsGroup ? "bi-people-fill" : o.IsPair ? "bi-people" : "bi-lightning-charge-fill")"></i></span>
                                     <div class="bd-app-offer-t"><b>@o.Name</b><small>@o.Minutes min</small></div>
-                                    <span class="bd-app-price">@PriceText(o.Price)</span>
+                                    <span class="bd-app-price" @key="@($"{o.Name}|{o.Price}")">@PriceText(o.Price)</span>
                                 </div>
                             }
                             @if (_withPackage && _offers.Count > 0 && _pkgCount > 1 && _pkgPrice > 0)
                             {
-                                <div class="bd-app-pkg"><i class="bi bi-box-seam"></i><span>Pakiet @_pkgCount treningów</span><b>@PriceText(_pkgPrice)</b></div>
+                                <div class="bd-app-pkg"><i class="bi bi-box-seam"></i><span>Pakiet @_pkgCount treningów</span><b @key="@($"pkg{_pkgCount}|{_pkgPrice}")">@PriceText(_pkgPrice)</b></div>
                             }
                         </div>
                         <div class="bd-app-nav"><i class="bi bi-house-fill on"></i><i class="bi bi-calendar3"></i><i class="bi bi-chat-dots"></i><i class="bi bi-person"></i></div>
-                        @if (_phase == Phase.Deploying) { <div class="bd-scan" aria-hidden="true"></div> }
+                        @if (_phase == Phase.Deploying && _launch is not null)
+                        {
+                            @* „Instalacja” aplikacji: ikona z pierścieniem postępu — po starcie znika i odsłania gotowy ekran. *@
+                            <div class="bd-install" aria-hidden="true" style="@($"--p:{DeployPercent}")">
+                                <div class="bd-install-ring"><span class="bd-mono bd-install-icon">@Mono</span></div>
+                                <div class="bd-install-name">@CompanyOr</div>
+                                <div class="bd-install-step" @key="CurrentStepLabel">@CurrentStepLabel</div>
+                                <div class="bd-install-pct">@DeployPercent%</div>
+                            </div>
+                        }
+                        else if (_phase == Phase.Done)
+                        {
+                            <div class="bd-install bd-install-out" aria-hidden="true" style="--p:100"><div class="bd-install-ring"><span class="bd-mono bd-install-icon">@Mono</span></div></div>
+                        }
                     </div>
                 </div>
             </div>
@@ -590,6 +612,10 @@
     private int? _pendingTenantId;
     private string? _serverIp;
     private string? _alreadyActiveUrl;
+    private string? _gateway;
+    private decimal _verifyAmount = 1m;
+    private bool _waitingPayment;
+    private bool IsStripe => _gateway == "stripe";
 
     // Kod z e-maila: trzymamy tylko skrót, ważny 10 minut, 5 prób, ponowna wysyłka po 60 s.
     private string _codeInput = "";
@@ -681,10 +707,18 @@
         {
             var p = SelectedPlan;
             if (p is null) return "";
-            if (p.MonthlyPrice <= 0) return "Karta jest wymagana przy każdym planie. Przy planie darmowym tylko ją zapisujemy — nic nie pobieramy.";
             var extra = _invite?.ExtraTrialDays ?? 0;
             var days = p.TrialDays + extra;
             var amount = Yearly(p) ? $"{p.YearlyPrice!.Value.ToString("N0", Pl)} zł za rok" : $"{p.MonthlyPrice.ToString("N0", Pl)} zł miesięcznie";
+            if (_gateway is not null && !IsStripe)
+            {
+                // Polskie bramki: jednorazowa płatność weryfikacyjna, potem rachunki z linkiem do płatności.
+                var verify = $"Płatność weryfikacyjna {_verifyAmount.ToString("0.##", Pl)} zł przez {RegistrationGateService.GatewayName(_gateway)} (BLIK, karta albo przelew).";
+                if (p.MonthlyPrice <= 0) return verify + " Przy planie darmowym potem nic nie płacisz.";
+                return verify + (days > 0 ? $" Pierwsze {days} dni za darmo, potem {amount}" : $" Potem {amount}")
+                       + " — rachunek przyjdzie e-mailem z linkiem do płatności. Zrezygnujesz w każdej chwili jednym kliknięciem.";
+            }
+            if (p.MonthlyPrice <= 0) return "Karta jest wymagana przy każdym planie. Przy planie darmowym tylko ją zapisujemy — nic nie pobieramy.";
             return days > 0
                 ? $"Karta jest wymagana przy każdym planie. Pierwsze {days} dni za darmo, potem {amount}. Zrezygnujesz w każdej chwili jednym kliknięciem."
                 : $"Karta jest wymagana przy każdym planie: {amount}. Zrezygnujesz w każdej chwili jednym kliknięciem.";
@@ -709,6 +743,34 @@
         System.Text.RegularExpressions.Regex.IsMatch(d, @"^(?=.{4,100}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$");
 
     private string? DomainToConnect => _phase == Phase.Done ? NormalizedDomain : null;
+
+    private string? _highlight;
+    private int _flashId;
+
+    /// <summary>Krótkie podświetlenie fragmentu podglądu (np. po zmianie koloru albo po kroku z ofertą).</summary>
+    private void Flash(string area)
+    {
+        _highlight = area;
+        var id = ++_flashId;
+        _ = Task.Delay(1300).ContinueWith(_ => InvokeAsync(() => { if (_flashId == id) { _highlight = null; StateHasChanged(); } }));
+    }
+
+    private string Hl(string area) => _highlight == area ? "bd-hl" : "";
+
+    private int DeployPercent
+    {
+        get
+        {
+            if (_launch is null) return 0;
+            var steps = _launch.Steps;
+            var done = steps.Count(st => st.State is AppLaunchService.StepState.Done or AppLaunchService.StepState.Skipped);
+            var running = steps.Any(st => st.State == AppLaunchService.StepState.Running) ? 0.5 : 0;
+            return (int)Math.Round((done + running) * 100 / Math.Max(1, steps.Count + 0.0) * 0.92) + 5;
+        }
+    }
+
+    private string CurrentStepLabel =>
+        _launch?.Steps.FirstOrDefault(st => st.State == AppLaunchService.StepState.Running)?.Label ?? "Przygotowuję…";
 
     private bool CanResend => DateTime.UtcNow - _codeSentAt > TimeSpan.FromSeconds(60) && _codeSends < 5;
     private int ResendIn => Math.Max(0, 60 - (int)(DateTime.UtcNow - _codeSentAt).TotalSeconds);
@@ -754,6 +816,8 @@
         _planId = _plans.FirstOrDefault(p => p.Id == Plan)?.Id ?? _plans.FirstOrDefault()?.Id ?? "start";
         var md = await Settings.GetAsync(SiteSettingsService.Keys.MainDomain);
         if (!string.IsNullOrWhiteSpace(md)) _mainDomain = md.Trim();
+        _gateway = await Gates.RegistrationGatewayAsync();
+        _verifyAmount = await Gates.VerifyAmountAsync();
         Launcher.Changed += OnLaunchChanged;
 
         if (!AdminMode && Wznow is not null)
@@ -805,6 +869,21 @@
         if (!string.IsNullOrWhiteSpace(tenant.QueuedReason))
         {
             _phase = Phase.Queued;
+            return;
+        }
+
+        if (tenant.RegistrationPaidAt is not null)
+        {
+            await GoLiveAsync(tenant.Id);
+            return;
+        }
+        if (!string.IsNullOrEmpty(tenant.RegistrationPaymentId))
+        {
+            // Wróciliśmy z Autopay / PayU / Przelewy24 — potwierdzenie przychodzi z bramki, chwilę czekamy.
+            _gateway = tenant.RegistrationPaymentGateway ?? _gateway;
+            _waitingPayment = true;
+            _phase = Phase.Card;
+            _ = WaitForPaymentAsync(tenant.Id);
             return;
         }
 
@@ -968,8 +1047,8 @@
         Touch();
         if (_color == c.Key) return;
         _color = c.Key;
-        _colorVersion++;
-        if (string.IsNullOrEmpty(Theme.Accent)) _siteVersion++;
+        // Bez przebudowy ekranu: kolor przechodzi płynnie (zmienne --app/--app2 są animowane w CSS).
+        Flash("color");
         AddLog("bi-palette-fill", $"Kolor „{c.Name}” w całej aplikacji — przyciski, ikony, powiadomienia");
     }
 
@@ -1016,6 +1095,7 @@
         switch (_step)
         {
             case 1:
+                Flash("brand");
                 AddLog("bi-badge-ad", $"Logo „{Mono}” wygenerowane z nazwy");
                 AddLog("bi-globe2", $"Adres {AddressText} — wolny");
                 break;
@@ -1023,6 +1103,7 @@
                 AddLog("bi-phone", "Aplikacja na telefon gotowa do instalacji z Twoją ikoną");
                 break;
             case 4:
+                Flash("offers");
                 var named = _offers.Count(o => !string.IsNullOrWhiteSpace(o.Name));
                 _offers.RemoveAll(o => string.IsNullOrWhiteSpace(o.Name));
                 AddLog("bi-cash-coin", $"Cennik: {named} {(named == 1 ? "pozycja" : "pozycje")}{(_withPackage ? " i pakiet" : "")} — klienci zapłacą online albo u Ciebie");
@@ -1252,14 +1333,28 @@
     {
         if (_pendingTenantId is not { } tenantId) return;
         _error = null;
-        if (!await StripeSvc.IsConfiguredAsync())
+        _gateway = await Gates.RegistrationGatewayAsync();
+        if (_gateway is null)
         {
-            await QueueAsync(tenantId, "Płatności kartą (Stripe) nie są skonfigurowane — zgłoszenie bez karty.");
+            await QueueAsync(tenantId, "Żadna bramka płatności nie jest skonfigurowana (Stripe, Autopay, PayU, Przelewy24) — zgłoszenie bez weryfikacji.");
             return;
         }
         await using var db = await DbFactory.CreateDbContextAsync();
         var key = await db.Tenants.Where(t => t.Id == tenantId).Select(t => t.RegistrationKey).FirstOrDefaultAsync();
         var back = $"{Nav.BaseUri}register?wznow={Uri.EscapeDataString(key ?? "")}";
+        if (!IsStripe)
+        {
+            var (payUrl, payError) = await Gates.StartVerificationPaymentAsync(tenantId, _gateway, back + "&platnosc=1", Nav.BaseUri);
+            if (payUrl is null)
+            {
+                Log.LogWarning("Płatność weryfikacyjna {Gateway} nie wystartowała dla {TenantId}: {Error}", _gateway, tenantId, payError);
+                await QueueAsync(tenantId, $"Nie udało się otworzyć płatności {RegistrationGateService.GatewayName(_gateway)}: {payError}");
+                return;
+            }
+            try { await JS.InvokeVoidAsync("ptBuilder.clear"); } catch (JSException) { }
+            Nav.NavigateTo(payUrl, forceLoad: true);
+            return;
+        }
         var (ok, url, error) = await StripeSvc.StartCardCheckoutAsync(tenantId, back + "&session_id={CHECKOUT_SESSION_ID}", back + "&karta=anulowana",
             _invite?.ExtraTrialDays ?? 0);
         if (!ok || url is null)
@@ -1270,6 +1365,34 @@
         }
         try { await JS.InvokeVoidAsync("ptBuilder.clear"); } catch (JSException) { }
         Nav.NavigateTo(url, forceLoad: true);
+    }
+
+    /// <summary>Po powrocie z polskiej bramki: czekamy do minuty na potwierdzenie (ITN / webhook).</summary>
+    private async Task WaitForPaymentAsync(int tenantId)
+    {
+        for (var i = 0; i < 30; i++)
+        {
+            await Task.Delay(2000);
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var paid = await db.Tenants.AsNoTracking().Where(t => t.Id == tenantId).Select(t => t.RegistrationPaidAt).FirstOrDefaultAsync();
+            if (paid is not null)
+            {
+                await InvokeAsync(async () =>
+                {
+                    _waitingPayment = false;
+                    AddLog("bi-patch-check", "Płatność potwierdzona");
+                    await GoLiveAsync(tenantId);
+                    StateHasChanged();
+                });
+                return;
+            }
+        }
+        await InvokeAsync(() =>
+        {
+            _waitingPayment = false;
+            _error = "Nie dostaliśmy jeszcze potwierdzenia płatności. Jeśli płatność się udała, odświeżymy wszystko sami i damy znać e-mailem — możesz też spróbować ponownie.";
+            StateHasChanged();
+        });
     }
 
     /// <summary>Karta jest — bramki decydują: start od razu albo kolejka (z powodem dla admina).</summary>
@@ -1346,7 +1469,7 @@
                     AddLog("bi-stars", AdminMode ? "Aplikacja trenera działa" : "Aplikacja działa — witaj na pokładzie!");
                     if (NormalizedDomain is { } dom) _serverIp = await ResolveServerIpAsync();
                     StateHasChanged();
-                    try { await JS.InvokeVoidAsync("ptBuilder.confetti", new[] { Color.Hex, Color.Hex2, "#06D6A0", "#FFD166", "#7C3AED" }); }
+                    try { await JS.InvokeVoidAsync("ptBuilder.confetti", new[] { Color.Hex, Color.Hex2, "#06D6A0", "#FFD166", "#FF6B9D", "#7C3AED" }, ".bd-phone"); }
                     catch (JSException) { }
                 }
             }

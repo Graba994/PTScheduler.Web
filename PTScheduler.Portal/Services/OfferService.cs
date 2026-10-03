@@ -88,7 +88,10 @@ public class OfferService(
         var subscription = await db.Subscriptions.AsNoTracking()
             .Where(s => s.TenantId == tenantId && s.Status != SubscriptionStatus.Cancelled && s.Status != SubscriptionStatus.Expired)
             .OrderByDescending(s => s.CreatedAt).FirstOrDefaultAsync();
-        var cycle = subscription?.BillingCycle is "yearly" or "annual" or "year" ? OfferBilling.Yearly : OfferBilling.Monthly;
+        // Bez umowy w Subscriptions — rozliczenie wybrane w kreatorze rejestracji (miesięcznie / rocznie).
+        var cycle = subscription?.BillingCycle is "yearly" or "annual" or "year"
+                    || (subscription is null && tenant.BillingInterval == "yearly")
+            ? OfferBilling.Yearly : OfferBilling.Monthly;
         var planAmount = subscription?.Amount
                          ?? (cycle == OfferBilling.Yearly ? tenant.Plan?.YearlyPrice ?? (tenant.Plan?.MonthlyPrice ?? 0) * 12 : tenant.Plan?.MonthlyPrice ?? 0);
 

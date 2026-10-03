@@ -408,10 +408,13 @@ app.MapPost("/api/webhooks/autopay", async (HttpContext ctx, StorePaymentService
 });
 
 // Autopay: powrót trenera z bramki — wraca do swojego sklepu (status przychodzi osobno w ITN).
-app.MapGet("/api/webhooks/autopay/return", async (HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory, BillingService billing) =>
+app.MapGet("/api/webhooks/autopay/return", async (HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory, BillingService billing, StorePaymentService store) =>
 {
     var orderId = AutopayProtocol.SafeOrderId(ctx.Request.Query["OrderID"].ToString());
     if (orderId is null) return Results.Redirect("/");
+    // Płatność weryfikacyjna z kreatora rejestracji — wracamy do kreatora (potwierdzenie przyjdzie ITN-em).
+    if (await store.FindRegistrationAsync("autopay", orderId) is { RegistrationKey: { Length: > 0 } regKey })
+        return Results.Redirect($"/register?wznow={Uri.EscapeDataString(regKey)}&platnosc=1");
     if (await billing.PayUrlBySessionAsync(orderId) is { } billUrl) return Results.Redirect(billUrl);
     await using var db = dbFactory.CreateDbContext();
     var domain = await db.ServiceOrders.AsNoTracking()
@@ -569,9 +572,16 @@ app.MapPost("/api/internal/tenants/{slug}/billing/portal", async (
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
     if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
-    if (string.IsNullOrWhiteSpace(tenant.StripeCustomerId))
-        return Results.Json(new { error = "Brak podpiętej karty — napisz do nas." }, statusCode: 404);
     var body = await ctx.Request.ReadFromJsonAsync<Dictionary<string, string?>>();
+    if (string.IsNullOrWhiteSpace(tenant.StripeCustomerId))
+    {
+        // Rozliczenie rachunkami (Autopay / PayU / Przelewy24): strona subskrypcji w Portalu z linkiem ważnym 30 minut.
+        var protector = ctx.RequestServices.GetRequiredService<Microsoft.AspNetCore.DataProtection.IDataProtectionProvider>()
+            .CreateProtector(SubscriptionLinks.Purpose).ToTimeLimitedDataProtector();
+        var token = protector.Protect(tenant.Id.ToString(), TimeSpan.FromMinutes(30));
+        var portalBase = config.GetValue<string>("Portal:PublicUrl")?.TrimEnd('/') is { Length: > 0 } pub ? pub : $"{ctx.Request.Scheme}://{ctx.Request.Host}";
+        return Results.Json(new { url = $"{portalBase}/subskrypcja/{Uri.EscapeDataString(token)}" });
+    }
     var returnUrl = body?.GetValueOrDefault("returnUrl");
     if (string.IsNullOrWhiteSpace(returnUrl) || !returnUrl.StartsWith("http", StringComparison.OrdinalIgnoreCase))
         returnUrl = $"https://{tenant.Domain}/admin/upgrade";

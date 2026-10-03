@@ -50,7 +50,8 @@ public class TrialExpirationService(
                 && t.TrialEndsAt > now
                 && t.TrialEndsAt <= warningThreshold
                 && t.BillingStatus != "active"
-                && t.BillingStatus != "past_due")
+                && t.BillingStatus != "past_due"
+                && t.BillingStatus != "verified")
             .ToListAsync(ct);
 
         var alreadyWarned = await db.TenantEvents
@@ -91,6 +92,7 @@ public class TrialExpirationService(
         var expired = await db.Tenants
             .Where(t => t.Status == TenantStatus.Active
                 && t.StripeSubscriptionId == null
+                && t.BillingStatus != "verified" // po weryfikacji z kreatora abonament rozliczają rachunki (BillingService)
                 && t.TrialEndsAt != null
                 && t.TrialEndsAt < now
                 && t.BillingStatus != "active"

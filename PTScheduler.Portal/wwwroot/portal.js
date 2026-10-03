@@ -91,31 +91,41 @@ window.ptLogs = {
                 var el = document.querySelector(sel); if (el) { el.focus({ preventScroll: true }); }
             }, 60);
         },
-        confetti: function (colors) {
+        confetti: function (colors, originSel) {
             if (window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches) return;
             var c = document.createElement('canvas');
             c.className = 'bd-confetti';
-            c.width = window.innerWidth; c.height = window.innerHeight;
+            var dpr = window.devicePixelRatio || 1;
+            c.width = window.innerWidth * dpr; c.height = window.innerHeight * dpr;
             document.body.appendChild(c);
             var ctx = c.getContext('2d');
+            ctx.scale(dpr, dpr);
+            // Wybuch z miejsca, gdzie „powstała” aplikacja (telefon w podglądzie), a nie ze środka ekranu.
+            var ox = window.innerWidth / 2, oy = window.innerHeight * .45;
+            var origin = originSel ? document.querySelector(originSel) : null;
+            if (origin) { var r = origin.getBoundingClientRect(); ox = r.left + r.width / 2; oy = r.top + r.height * .35; }
             var parts = [];
-            for (var i = 0; i < 170; i++) {
+            for (var i = 0; i < 180; i++) {
+                var angle = -Math.PI / 2 + (Math.random() - .5) * Math.PI * 1.1;
+                var speed = 7 + Math.random() * 11;
                 parts.push({
-                    x: c.width / 2 + (Math.random() - .5) * 240, y: c.height * .45,
-                    vx: (Math.random() - .5) * 16, vy: -Math.random() * 17 - 5,
-                    w: 6 + Math.random() * 7, h: 9 + Math.random() * 8, r: Math.random() * 6.28,
-                    vr: (Math.random() - .5) * .35, color: colors[i % colors.length]
+                    x: ox, y: oy, vx: Math.cos(angle) * speed, vy: Math.sin(angle) * speed,
+                    w: 6 + Math.random() * 6, h: 8 + Math.random() * 8, r: Math.random() * 6.28,
+                    vr: (Math.random() - .5) * .3, color: colors[i % colors.length], round: i % 5 === 0
                 });
             }
             var start = performance.now();
             (function frame(t) {
                 var age = t - start;
-                ctx.clearRect(0, 0, c.width, c.height);
+                ctx.clearRect(0, 0, window.innerWidth, window.innerHeight);
                 parts.forEach(function (p) {
-                    p.vy += .42; p.vx *= .99; p.x += p.vx; p.y += p.vy; p.r += p.vr;
+                    p.vy += .32; p.vx *= .985; p.vy *= .995; p.x += p.vx; p.y += p.vy; p.r += p.vr;
                     ctx.save(); ctx.translate(p.x, p.y); ctx.rotate(p.r);
-                    ctx.globalAlpha = Math.max(0, 1 - age / 3200);
-                    ctx.fillStyle = p.color; ctx.fillRect(-p.w / 2, -p.h / 2, p.w, p.h * Math.cos(p.r * 2));
+                    // Pełne kolory przez pierwsze 1,6 s, potem łagodne wygaszanie.
+                    ctx.globalAlpha = age < 1600 ? 1 : Math.max(0, 1 - (age - 1600) / 1600);
+                    ctx.fillStyle = p.color;
+                    if (p.round) { ctx.beginPath(); ctx.arc(0, 0, p.w / 2, 0, 6.28); ctx.fill(); }
+                    else ctx.fillRect(-p.w / 2, -p.h / 2, p.w, Math.max(1.5, Math.abs(p.h * Math.cos(p.r * 2))));
                     ctx.restore();
                 });
                 if (age < 3300) requestAnimationFrame(frame); else c.remove();

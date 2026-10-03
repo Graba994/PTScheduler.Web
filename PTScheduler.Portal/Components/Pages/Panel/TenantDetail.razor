@@ -64,7 +64,19 @@ else
                     <div class="alert alert-warning small py-2"><i class="bi bi-hourglass-split me-1"></i><b>Czeka w kolejce:</b> @_tenant.QueuedReason</div>
                 }
                 <div class="d-flex flex-wrap gap-2 mb-3 small">
-                    <span class="pp-chip @(string.IsNullOrEmpty(_tenant.StripeCustomerId) ? "pp-tone-danger" : "pp-tone-ok")"><i class="bi bi-credit-card"></i>@(string.IsNullOrEmpty(_tenant.StripeCustomerId) ? "bez karty" : "karta podpięta")</span>
+                    @if (!string.IsNullOrEmpty(_tenant.StripeCustomerId))
+                    {
+                        <span class="pp-chip pp-tone-ok"><i class="bi bi-credit-card"></i>karta podpięta (Stripe)</span>
+                    }
+                    else if (_tenant.RegistrationPaidAt is not null)
+                    {
+                        <span class="pp-chip pp-tone-ok"><i class="bi bi-patch-check"></i>weryfikacja opłacona (@RegistrationGateService.GatewayName(_tenant.RegistrationPaymentGateway)) — abonament rachunkami</span>
+                    }
+                    else
+                    {
+                        <span class="pp-chip pp-tone-danger"><i class="bi bi-credit-card"></i>bez karty i weryfikacji</span>
+                    }
+                    @if (_tenant.CancelRequestedAt is not null) { <span class="pp-chip pp-tone-warn"><i class="bi bi-calendar-x"></i>zrezygnował(a) @_tenant.CancelRequestedAt.Value.ToLocalTime().ToString("dd.MM")</span> }
                     <span class="pp-chip pp-tone-info"><i class="bi bi-calendar3"></i>@(_tenant.BillingInterval == "yearly" ? "rozliczenie roczne" : "rozliczenie miesięczne")</span>
                     @if (!string.IsNullOrWhiteSpace(_tenant.InviteCode)) { <span class="pp-chip pp-tone-info"><i class="bi bi-ticket-perforated"></i>kod @_tenant.InviteCode</span> }
                     @if (!string.IsNullOrWhiteSpace(_tenant.CustomDomain)) { <span class="pp-chip pp-tone-info"><i class="bi bi-globe"></i>@_tenant.CustomDomain</span> }

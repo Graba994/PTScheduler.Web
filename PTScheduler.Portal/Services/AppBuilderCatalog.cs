@@ -40,6 +40,12 @@ public static class AppBuilderCatalog
         ["minimal"] = new("minimal", "#ffffff", "#f4f4f2", "#111111", "#111111", false, true),
         ["ring"] = new("ring", "#101010", "#1b1b1b", "#f4f4f4", "#e5202e", true),
         ["noc"] = new("noc", "#0d1024", "#161a38", "#eef0ff", "#8b7bff", true),
+        ["trasa"] = new("trasa", "#f1f8f6", "#ffffff", "#0b2a26", "#009e8f", false),
+        ["stal"] = new("stal", "#0e1114", "#171b20", "#e8edf2", "#3ea6ff", true),
+        ["brzoskwinia"] = new("brzoskwinia", "#fff6ef", "#ffffff", "#3a2418", "#e2774a", false),
+        ["boisko"] = new("boisko", "#f4f8ff", "#ffffff", "#122139", "#2f6bff", false),
+        ["beton"] = new("beton", "#e9e9e6", "#f6f6f3", "#161616", "#f2c200", false),
+        ["oliwka"] = new("oliwka", "#f6f5ec", "#ffffff", "#262f1f", "#6a8a2a", false, true),
     };
 
     public static SiteTheme ThemeOf(string key) => Themes.GetValueOrDefault(key) ?? Themes["studio"];
@@ -49,18 +55,24 @@ public static class AppBuilderCatalog
 
     public static readonly IReadOnlyList<SiteTemplate> Templates =
     [
-        new("personal", "Trener personalny", "studio", "Trener personalny", "Silniejsze ciało. Lepsze samopoczucie. Bez zgadywania.", "Umów pierwszy trening", 12),
-        new("transform", "Metamorfozy", "energia", "Metamorfozy z trenerem", "Twoja najlepsza forma zaczyna się dziś", "Umów pierwszy trening", 8),
-        new("premium", "Premium 1:1", "premium", "Trening personalny 1:1", "Indywidualnie. Dyskretnie. Skutecznie.", "Zarezerwuj konsultację", 7),
-        new("health", "Zdrowie i ruch", "natura", "Zdrowy ruch w każdym wieku", "Ruszaj się bez bólu i z przyjemnością", "Umów pierwszy trening", 8),
-        new("online", "Trening online", "ocean", "Trening i prowadzenie online", "Trener w Twoim telefonie — gdziekolwiek jesteś", "Zacznij współpracę", 7),
-        new("sport", "Siła i motoryka", "sport", "Przygotowanie motoryczne", "Szybciej. Mocniej. Dalej.", "Umów test sprawności", 8),
-        new("women", "Trening dla kobiet", "roz", "Trening dla kobiet", "Silna, pewna siebie, w swoim tempie", "Umów pierwszy trening", 8),
-        new("mindful", "Pilates i mobilność", "minimal", "Pilates · mobilność · zdrowy kręgosłup", "Mniej napięcia. Więcej ruchu.", "Zarezerwuj zajęcia", 8),
-        new("combat", "Sporty walki", "ring", "Boks · kickboxing · MMA", "Wejdź na matę. Wyjdź silniejszy.", "Pierwszy trening za darmo", 8),
-        new("bootcamp", "Treningi grupowe", "noc", "Treningi w małych grupach", "Razem trenuje się łatwiej", "Zarezerwuj miejsce", 8),
-        new("senior", "Aktywny senior", "natura", "Aktywny senior 60+", "Sprawność na co dzień. Bezpiecznie i spokojnie.", "Zadzwoń i umów się", 7),
-        new("duo", "Treningi w parze", "ocean", "Treningi w parze", "We dwoje raźniej — i taniej", "Umów trening dla dwojga", 7),
+        new("personal", "Klasyka", "studio", "Trener personalny", "Silniejsze ciało. Lepsze samopoczucie. Bez zgadywania.", "Umów pierwszy trening", 12),
+        new("transform", "Przemiana", "energia", "Metamorfozy z trenerem", "Twoja najlepsza forma zaczyna się dziś", "Umów pierwszy trening", 8),
+        new("premium", "Elegancja", "premium", "Trening personalny 1:1", "Indywidualnie. Dyskretnie. Skutecznie.", "Zarezerwuj konsultację", 7),
+        new("health", "Równowaga", "natura", "Zdrowy ruch w każdym wieku", "Ruszaj się bez bólu i z przyjemnością", "Umów pierwszy trening", 8),
+        new("online", "Zasięg", "ocean", "Trening i prowadzenie online", "Trener w Twoim telefonie — gdziekolwiek jesteś", "Zacznij współpracę", 7),
+        new("sport", "Rekord", "sport", "Przygotowanie motoryczne", "Szybciej. Mocniej. Dalej.", "Umów test sprawności", 8),
+        new("women", "Ona", "roz", "Trening dla kobiet", "Silna, pewna siebie, w swoim tempie", "Umów pierwszy trening", 8),
+        new("mindful", "Spokój", "minimal", "Pilates · mobilność · zdrowy kręgosłup", "Mniej napięcia. Więcej ruchu.", "Zarezerwuj zajęcia", 8),
+        new("combat", "Ring", "ring", "Boks · kickboxing · MMA", "Wejdź na matę. Wyjdź silniejszy.", "Pierwszy trening za darmo", 8),
+        new("bootcamp", "Ekipa", "noc", "Treningi w małych grupach", "Razem trenuje się łatwiej", "Zarezerwuj miejsce", 8),
+        new("senior", "Wigor", "natura", "Aktywny senior 60+", "Sprawność na co dzień. Bezpiecznie i spokojnie.", "Zadzwoń i umów się", 7),
+        new("duo", "Duet", "ocean", "Treningi w parze", "We dwoje raźniej — i taniej", "Umów trening dla dwojga", 7),
+        new("run", "Dystans", "trasa", "Bieganie · triathlon", "Twój najlepszy czas jest jeszcze przed Tobą", "Umów test biegowy", 9),
+        new("physique", "Forma", "stal", "Sylwetka · kulturystyka", "Zbuduj formę, którą widać", "Umów konsultację", 7),
+        new("mama", "Mama", "brzoskwinia", "Trening w ciąży i po porodzie", "Silna mama — bezpiecznie i w swoim tempie", "Umów pierwsze spotkanie", 8),
+        new("kids", "Junior", "boisko", "Dzieci i młodzież · 6–17 lat", "Ruch, który dzieci lubią", "Zapisz dziecko", 8),
+        new("street", "Grawitacja", "beton", "Kalistenika · street workout", "Twoje ciało to cała siłownia", "Umów pierwszy trening", 7),
+        new("nutrition", "Talerz", "oliwka", "Trening i dieta w jednym planie", "Jedz normalnie, trenuj mądrze, zobacz efekt", "Umów konsultację", 7),
     ];
 
     public static SiteTemplate TemplateOf(string? key) => Templates.FirstOrDefault(t => t.Key == key) ?? Templates[0];
@@ -97,6 +109,18 @@ public static class AppBuilderCatalog
             [new("Trening 60+", 45, 110), new("Spacer z kijami (grupa)", 60, 40, IsGroup: true)], 8, 800),
         new("premium", "Premium 1:1", "bi-gem", "premium", "amber", ["personal", "transform"],
             [new("Trening premium 1:1", 60, 250), new("Konsultacja", 45, 0)], 10, 2300),
+        new("run", "Bieganie i triathlon", "bi-stopwatch", "run", "teal", ["sport", "online"],
+            [new("Trening biegowy 1:1", 60, 150), new("Test progów i plan startowy", 75, 250)], 8, 1080),
+        new("physique", "Sylwetka i kulturystyka", "bi-trophy", "physique", "slate", ["transform", "sport"],
+            [new("Trening sylwetkowy", 60, 160), new("Konsultacja i plan diety", 60, 200)], 12, 1800),
+        new("mama", "Mama w formie", "bi-balloon-heart", "mama", "sunset", ["women", "health"],
+            [new("Trening w ciąży / po porodzie", 50, 140), new("Pierwsze spotkanie i wywiad", 45, 0)], 8, 1000),
+        new("kids", "Dzieci i młodzież", "bi-emoji-laughing", "kids", "ocean", ["bootcamp", "sport"],
+            [new("Zajęcia ogólnorozwojowe (grupa)", 60, 45, IsGroup: true), new("Trening indywidualny junior", 45, 110)], 8, 320),
+        new("street", "Kalistenika", "bi-arrow-up-circle", "street", "amber", ["sport", "bootcamp"],
+            [new("Trening kalisteniczny 1:1", 60, 140), new("Trening w plenerze (grupa)", 75, 50, IsGroup: true)], 8, 1000),
+        new("nutrition", "Trening z dietą", "bi-egg-fried", "nutrition", "forest", ["transform", "online"],
+            [new("Trening personalny", 60, 150), new("Konsultacja dietetyczna", 60, 180)], 8, 1080),
     ];
 
     public static Specialization SpecOf(string? key) => Specializations.FirstOrDefault(s => s.Key == key) ?? Specializations[0];

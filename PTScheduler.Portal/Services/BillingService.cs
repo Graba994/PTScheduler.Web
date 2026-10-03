@@ -35,6 +35,7 @@ public class BillingService(
     EmailService email,
     CreditService credits,
     IConfiguration config,
+    IServiceProvider services,
     ILogger<BillingService> logger)
 {
     private static readonly CultureInfo Pl = new("pl-PL");
@@ -106,7 +107,9 @@ public class BillingService(
             var planName = offer.Plan?.Name ?? tenant.PlanId;
             if (offer.PlanCycle == OfferBilling.Monthly)
                 lines.Add(new BillLineDraft($"Abonament {planName}", month, 1, offer.PlanAmount));
-            else if (Anniversary(subscriptionStart))
+            else if (!await YearlyPlanBilledRecentlyAsync(db, tenantId, period))
+                // Rocznie: raz na 12 miesięcy od pierwszego rachunku po okresie próbnym (nie „w rocznicę” —
+                // okres próbny przesuwa start, a rachunek nie może przepaść na cały rok).
                 lines.Add(new BillLineDraft($"Abonament {planName} (roczny)", $"{period:MM.yyyy} – {period.AddYears(1).AddDays(-1):MM.yyyy}", 1, offer.PlanAmount));
         }
 
@@ -124,6 +127,39 @@ public class BillingService(
             lines.Add(new BillLineDraft(c.Name, $"Jednorazowo · {c.CreatedAt:dd.MM.yyyy}", c.Quantity, c.UnitPrice, c.Id));
 
         return lines;
+    }
+
+    /// <summary>
+    /// Rezygnacja z subskrypcji rozliczanej rachunkami: zamiast kolejnego rachunku zawieszamy aplikację
+    /// (dane zostają, trener może wrócić). Zapłacony okres trwa do dnia rozliczenia.
+    /// </summary>
+    private async Task EndCancelledSubscriptionsAsync()
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var ids = await db.Tenants.AsNoTracking()
+            .Where(t => t.Status == TenantStatus.Active && t.CancelRequestedAt != null && t.StripeSubscriptionId == null)
+            .Select(t => t.Id).ToListAsync();
+        if (ids.Count == 0) return;
+        var tenants = services.GetRequiredService<TenantService>();
+        foreach (var id in ids)
+        {
+            try
+            {
+                await tenants.SuspendAsync(id);
+                db.TenantEvents.Add(new TenantEvent { TenantId = id, EventType = TenantEventTypes.Suspended, Detail = "Koniec subskrypcji po rezygnacji trenera" });
+                await db.SaveChangesAsync();
+            }
+            catch (Exception ex) { logger.LogError(ex, "Nie zawieszono trenera #{Id} po rezygnacji.", id); }
+        }
+    }
+
+    private static async Task<bool> YearlyPlanBilledRecentlyAsync(PortalDbContext db, int tenantId, DateOnly period)
+    {
+        var since = period.AddMonths(-11);
+        return await db.TenantBillLines.AsNoTracking().AnyAsync(l =>
+            l.Bill!.TenantId == tenantId && l.Bill.Status != TenantBillStatus.Cancelled
+            && l.Bill.PeriodStart >= since && l.Bill.PeriodStart < period
+            && l.Name.StartsWith("Abonament") && l.Name.EndsWith("(roczny)"));
     }
 
     // ── Wystawianie ──
@@ -188,6 +224,7 @@ public class BillingService(
         if (cfg.AutoEnabled && Today.Day >= cfg.BillingDay)
         {
             var period = CurrentPeriod;
+            await EndCancelledSubscriptionsAsync();
             foreach (var tenantId in await EligibleTenantIdsAsync(period))
             {
                 try
@@ -209,7 +246,7 @@ public class BillingService(
         var now = DateTime.UtcNow;
         var billed = db.TenantBills.Where(b => b.PeriodStart == period && b.Status != TenantBillStatus.Cancelled).Select(b => b.TenantId);
         return await db.Tenants.AsNoTracking()
-            .Where(t => t.Status == TenantStatus.Active && (t.TrialEndsAt == null || t.TrialEndsAt <= now) && !billed.Contains(t.Id))
+            .Where(t => t.Status == TenantStatus.Active && t.CancelRequestedAt == null && (t.TrialEndsAt == null || t.TrialEndsAt <= now) && !billed.Contains(t.Id))
             .Select(t => t.Id).ToListAsync();
     }
 

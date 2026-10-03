@@ -174,6 +174,15 @@ public class AppLaunchService(IServiceScopeFactory scopes, ILogger<AppLaunchServ
         {
             try { await scope.ServiceProvider.GetRequiredService<StripeService>().RestartTrialAsync(tenant.Id); }
             catch (Exception ex) { logger.LogWarning(ex, "Okres próbny {Slug} nie przesunięty.", tenant.Slug); }
+            // Rozliczenie rachunkami (płatność weryfikacyjna przez polską bramkę): okres próbny od dziś, potem rachunki.
+            if (tenant.StripeSubscriptionId is null && tenant.RegistrationPaidAt is not null && tenant.Plan is { MonthlyPrice: > 0 } plan)
+            {
+                var extra = string.IsNullOrWhiteSpace(tenant.InviteCode) ? 0
+                    : await db.InviteCodes.Where(c => c.Code == tenant.InviteCode).Select(c => c.ExtraTrialDays).FirstOrDefaultAsync();
+                var days = Math.Max(0, plan.TrialDays) + Math.Max(0, extra);
+                tenant.TrialEndsAt = days > 0 ? DateTime.UtcNow.AddDays(days) : null;
+                await db.SaveChangesAsync();
+            }
         }
 
         if (!ok && tenant is not null)

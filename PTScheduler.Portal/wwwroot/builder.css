@@ -4,7 +4,14 @@
    składają się na żywo — z konturów (blueprint) w gotowe elementy w kolorze trenera.
    --app / --app2: kolor aplikacji; --site-*: motyw strony głównej (ustawiane w style=).
    ───────────────────────────────────────────────────────────── */
+/* Kolory i postęp jako typowane właściwości — dzięki temu przechodzą płynnie zamiast „przeskakiwać”. */
+@property --app { syntax: '<color>'; inherits: true; initial-value: #0284C7; }
+@property --app2 { syntax: '<color>'; inherits: true; initial-value: #06B6D4; }
+@property --site-accent { syntax: '<color>'; inherits: true; initial-value: #0284C7; }
+@property --bdp { syntax: '<number>'; inherits: true; initial-value: 0; }
+
 .bd {
+    transition: --app .7s ease, --app2 .7s ease, --site-accent .7s ease;
     --bd-stage: #120f1d;
     --bd-stage-2: #1b1630;
     --bd-line: rgba(255, 255, 255, .08);
@@ -194,6 +201,7 @@
 .bd-foot .bd-link { margin: 0; font-size: inherit; }
 .bd-mono-input { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; text-transform: uppercase; letter-spacing: .04em; }
 .bd-code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 2rem; font-weight: 800; letter-spacing: .5em; text-align: center; padding: 14px 10px 14px 24px; margin-top: 8px; }
+.bd-wait { display: flex; gap: 10px; align-items: center; justify-content: center; margin-top: 14px; font-size: .9rem; color: var(--pts-text-secondary); }
 .bd-retry { margin-top: 12px; padding: 10px 12px; border-radius: 12px; background: rgba(245, 158, 11, .1); color: #92400e; font-size: .84rem; display: flex; gap: 8px; align-items: center; }
 .bd-dns { margin-top: 18px; width: 100%; max-width: 420px; text-align: left; padding: 14px 16px; border-radius: 14px; background: var(--pts-surface-alt); font-size: .84rem; }
 .bd-dns-title { font-weight: 800; display: flex; gap: 8px; align-items: center; margin-bottom: 4px; }
@@ -419,17 +427,55 @@
 .bd-log li i { color: #34d399; }
 @keyframes bd-log-in { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
 
-/* Publikacja: skan po ekranie telefonu, a po wszystkim poświata */
-.bd-scan {
-    position: absolute; inset: 0; pointer-events: none; animation: none !important;
-    background: linear-gradient(180deg, transparent 0%, color-mix(in srgb, var(--app) 30%, transparent) 48%, color-mix(in srgb, var(--app2) 55%, transparent) 50%, transparent 52%) 0 0 / 100% 220%;
-    animation: bd-scan 1.8s linear infinite !important;
-}
-@keyframes bd-scan { from { background-position: 0 100%; } to { background-position: 0 -120%; } }
+/* Publikacja: „instalacja” na ekranie telefonu, a po wszystkim poświata */
 .bd-launch .bd-browser { transform: rotate(-1.5deg) translateY(10px) scale(.97); }
-.bd-is-done .bd-phone { box-shadow: 0 40px 90px rgba(0, 0, 0, .55), inset 0 0 0 2px #2b2536, 0 0 60px color-mix(in srgb, var(--app) 55%, transparent); animation: bd-float 4s ease-in-out infinite; }
-@keyframes bd-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-8px); } }
+.bd-is-done .bd-phone { box-shadow: 0 40px 90px rgba(0, 0, 0, .55), inset 0 0 0 2px #2b2536, 0 0 60px color-mix(in srgb, var(--app) 55%, transparent); animation: bd-float 4s ease-in-out 1s infinite; }
+/* `translate` zamiast `transform` — nie kasuje skali telefonu na mniejszych ekranach. */
+@keyframes bd-float { 0%, 100% { translate: 0 0; } 50% { translate: 0 -8px; } }
 .bd-confetti { position: fixed; inset: 0; pointer-events: none; z-index: 1000; }
+
+/* Kursor w pasku adresu, gdy trener wpisuje nazwę studia; zielona kłódka, gdy adres jest wolny */
+.bd-url.typing > span::after { content: ""; display: inline-block; width: 1px; height: 1em; margin-left: 2px; vertical-align: -2px; background: currentColor; animation: bd-caret 1s steps(1) infinite; }
+@keyframes bd-caret { 50% { opacity: 0; } }
+.bd-url > span { animation: bd-url-in .35s ease both; }
+@keyframes bd-url-in { from { opacity: .4; } to { opacity: 1; } }
+.bd-url.free i { animation: bd-lock .6s ease both; }
+@keyframes bd-lock { 0% { transform: scale(.6); } 60% { transform: scale(1.25); } 100% { transform: none; } }
+
+/* Podświetlenie fragmentu, który właśnie się zmienił */
+.bd-hl:not(.bd-phone) { animation: bd-hl 1.2s ease both; border-radius: 14px; }
+@keyframes bd-hl {
+    0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--app) 60%, transparent); }
+    40% { box-shadow: 0 0 0 6px color-mix(in srgb, var(--app) 30%, transparent); }
+    100% { box-shadow: 0 0 0 12px transparent; }
+}
+.bd-phone.bd-hl { box-shadow: 0 40px 90px rgba(0, 0, 0, .55), inset 0 0 0 2px #2b2536, 0 0 70px color-mix(in srgb, var(--app) 65%, transparent); }
+
+/* Zmiana ceny: krótki „tick” zamiast cichej podmiany */
+.bd-app-price, .bd-app-pkg b { animation: bd-tick .45s cubic-bezier(.2, .8, .2, 1.4) both; display: inline-block; }
+@keyframes bd-tick { 0% { transform: translateY(4px) scale(.9); opacity: .3; } 100% { transform: none; opacity: 1; } }
+
+/* Publikacja: ikona aplikacji z pierścieniem postępu na ekranie telefonu */
+.bd-phone-screen > .bd-install {
+    position: absolute; inset: 0; z-index: 5; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
+    background: radial-gradient(circle at 50% 38%, color-mix(in srgb, var(--app) 40%, #0d0a14) 0%, #0d0a14 72%);
+    color: #fff; text-align: center; padding: 24px; animation: bd-install-in .5s ease both;
+    transition: --bdp .8s cubic-bezier(.2, .8, .2, 1);
+    --bdp: var(--p, 0);
+}
+@keyframes bd-install-in { from { opacity: 0; backdrop-filter: blur(0); } to { opacity: 1; } }
+.bd-install-ring {
+    width: 108px; height: 108px; border-radius: 34px; padding: 6px; display: grid; place-items: center;
+    background: conic-gradient(var(--app2) calc(var(--bdp) * 1%), rgba(255, 255, 255, .12) 0);
+}
+.bd-install-icon { width: 96px; height: 96px; border-radius: 28px; font-size: 1.9rem; box-shadow: 0 10px 30px color-mix(in srgb, var(--app) 50%, transparent); animation: bd-breathe 1.6s ease-in-out infinite; }
+@keyframes bd-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(.94); } }
+.bd-install-name { font-family: var(--pts-font-display); font-weight: 800; font-size: 1rem; margin-top: 6px; }
+.bd-install-step { font-size: .74rem; color: rgba(255, 255, 255, .72); min-height: 1.2em; animation: bd-log-in .35s ease both; }
+.bd-install-pct { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .8rem; color: rgba(255, 255, 255, .55); font-variant-numeric: tabular-nums; }
+.bd-phone-screen > .bd-install-out { animation: bd-install-out .9s cubic-bezier(.6, 0, .2, 1) .15s both; pointer-events: none; }
+.bd-phone-screen > .bd-install-out .bd-install-icon { animation: none; }
+@keyframes bd-install-out { 0% { opacity: 1; transform: scale(1); } 100% { opacity: 0; transform: scale(1.35); filter: blur(6px); } }
 
 /* ── Mniejsze ekrany ── */
 @media (max-width: 1100px) {

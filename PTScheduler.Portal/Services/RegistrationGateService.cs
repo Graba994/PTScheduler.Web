@@ -15,6 +15,7 @@ public class RegistrationGateService(
     SiteSettingsService settings,
     DockerService docker,
     ResourceReportService resources,
+    StorePaymentService storePayments,
     IConfiguration config,
     ILogger<RegistrationGateService> logger)
 {
@@ -134,5 +135,53 @@ public class RegistrationGateService(
         t.QueuedReason = null;
         await db.SaveChangesAsync();
         return token;
+    }
+
+    /// <summary>
+    /// Którą bramką przyjmujemy płatność przy publikacji. „auto”: Stripe (karta z płatnością cykliczną),
+    /// a bez niego bramka sklepu (Autopay / PayU / Przelewy24). Null = żadna bramka nie jest skonfigurowana.
+    /// </summary>
+    public async Task<string?> RegistrationGatewayAsync()
+    {
+        var choice = (await settings.GetAsync(SiteSettingsService.Keys.RegistrationGateway))?.Trim();
+        var available = await storePayments.GetAvailableGatewaysAsync();
+        if (!string.IsNullOrEmpty(choice) && choice != "auto") return available.Contains(choice) ? choice : null;
+        if (available.Contains("stripe")) return "stripe";
+        var store = await settings.GetAsync(SiteSettingsService.Keys.StorePaymentGateway);
+        if (!string.IsNullOrEmpty(store) && store != "stripe" && available.Contains(store)) return store;
+        return available.FirstOrDefault(g => g != "stripe");
+    }
+
+    public async Task<decimal> VerifyAmountAsync() =>
+        decimal.TryParse((await settings.GetAsync(SiteSettingsService.Keys.RegistrationVerifyAmount))?.Replace(',', '.'),
+            System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var a) && a >= 1 ? a : 1m;
+
+    public static string GatewayName(string? gateway) => gateway switch
+    {
+        "stripe" => "Stripe",
+        "autopay" => "Autopay",
+        "payu" => "PayU",
+        "przelewy24" => "Przelewy24",
+        _ => gateway ?? "—"
+    };
+
+    /// <summary>
+    /// Płatność weryfikacyjna przez polską bramkę (BLIK, karta, przelew). Nie pobiera nic cyklicznie —
+    /// po okresie próbnym abonament rozliczają automatyczne rachunki z linkiem do płatności.
+    /// </summary>
+    public async Task<(string? Url, string? Error)> StartVerificationPaymentAsync(int tenantId, string gateway, string returnUrl, string notifyBaseUrl)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var t = await db.Tenants.FindAsync(tenantId);
+        if (t is null) return (null, "Nie ma takiego zgłoszenia.");
+        var orderId = $"reg{t.Id}x{Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(4)).ToLowerInvariant()}";
+        var amount = await VerifyAmountAsync();
+        var (url, externalId, error) = await storePayments.CreatePaymentAsync(gateway, amount,
+            $"Weryfikacja konta trenera — {t.CompanyName}", orderId, returnUrl, notifyBaseUrl, t.OwnerEmail);
+        if (url is null) return (null, error ?? "Bramka nie zwróciła adresu płatności.");
+        t.RegistrationPaymentId = string.IsNullOrEmpty(externalId) || externalId == orderId ? orderId : $"{orderId} {externalId}";
+        t.RegistrationPaymentGateway = gateway;
+        await db.SaveChangesAsync();
+        return (url, null);
     }
 }
