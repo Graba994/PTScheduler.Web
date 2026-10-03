@@ -36,11 +36,19 @@ public static class PlatformEnv
         ("guardian", "GUARDIAN_TENANT_HOST", "GUARDIAN_TENANT_HOST"),
     ];
 
+    private static async Task<string?> PortalDbContainerAsync(DockerService docker, IConfiguration config)
+    {
+        var conn = config.GetConnectionString("DefaultConnection") ?? "";
+        string Get(string key) => conn.Split(';', StringSplitOptions.RemoveEmptyEntries)
+            .Select(p => p.Split('=', 2)).FirstOrDefault(p => p.Length == 2 && p[0].Trim().Equals(key, StringComparison.OrdinalIgnoreCase))?[1].Trim() ?? "";
+        return await docker.FindPostgresContainerAsync(config["Portal:DbContainerName"], Get("Host"), Get("Port") is { Length: > 0 } p ? p : "5432", Get("Database"));
+    }
+
     public static async Task<string> BuildAsync(DockerService docker, IConfiguration config)
     {
         var names = new Dictionary<string, string>
         {
-            ["db"] = config["Portal:DbContainerName"] ?? "ptportal-db",
+            ["db"] = await PortalDbContainerAsync(docker, config) ?? "ptportal-db",
             ["portal"] = config["Portal:ContainerName"] ?? "ptportal",
             ["guardian"] = config["Portal:GuardianContainerName"] ?? "ptguardian",
         };

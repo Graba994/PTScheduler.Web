@@ -635,6 +635,55 @@ public class DockerService : IDisposable
         catch { return null; }
     }
 
+    /// <summary>
+    /// Kontener z bazą PostgreSQL Portalu. Nazwa bywa różna (docker compose, Portainer, Unraid), więc po kolei:
+    /// ustawiona w konfiguracji, kontener o nazwie hosta z connection stringa, usługa compose albo alias sieci
+    /// o tej nazwie, kontener postgres z tą bazą (POSTGRES_DB) albo z opublikowanym portem, na końcu „ptportal-db”.
+    /// </summary>
+    public async Task<string?> FindPostgresContainerAsync(string? configured, string host, string port, string database)
+    {
+        static bool Running(ContainerInspectResponse? i) => i?.State?.Running == true;
+        if (!string.IsNullOrWhiteSpace(configured) && Running(await InspectAsync(configured))) return configured;
+        if (!string.IsNullOrWhiteSpace(host) && Running(await InspectAsync(host))) return host;
+
+        IList<ContainerListResponse> list;
+        try { list = await _client.Containers.ListContainersAsync(new ContainersListParameters { All = false }); }
+        catch (Exception ex) { _logger.LogDebug(ex, "Lista kontenerów niedostępna."); list = []; }
+
+        string NameOf(ContainerListResponse c) => c.Names?.FirstOrDefault()?.TrimStart('/') ?? c.ID;
+        var postgres = list.Where(c => (c.Image ?? "").Contains("postgres", StringComparison.OrdinalIgnoreCase)
+                                    || (c.Image ?? "").Contains("postgis", StringComparison.OrdinalIgnoreCase)).ToList();
+
+        var byService = list.FirstOrDefault(c => c.Labels is { } l && l.TryGetValue("com.docker.compose.service", out var svc) && svc == host);
+        if (byService is not null) return NameOf(byService);
+
+        var inspected = new List<(ContainerListResponse C, ContainerInspectResponse I)>();
+        foreach (var c in postgres)
+            if (await InspectAsync(c.ID) is { } info) inspected.Add((c, info));
+
+        var byAlias = inspected.FirstOrDefault(x => x.I.NetworkSettings?.Networks?.Values
+            .Any(n => (n.Aliases ?? []).Contains(host)) == true);
+        if (byAlias.C is not null) return NameOf(byAlias.C);
+
+        var byDb = inspected.FirstOrDefault(x => (x.I.Config?.Env ?? []).Contains($"POSTGRES_DB={database}"));
+        if (byDb.C is not null) return NameOf(byDb.C);
+
+        if (ushort.TryParse(port, out var p))
+        {
+            var byPort = postgres.FirstOrDefault(c => c.Ports?.Any(x => x.PublicPort == p) == true);
+            if (byPort is not null) return NameOf(byPort);
+        }
+        return Running(await InspectAsync("ptportal-db")) ? "ptportal-db" : null;
+    }
+
+    /// <summary>Sieć, w której działa kontener Portalu — do jednorazowych kontenerów, które mają widzieć te same hosty.</summary>
+    public async Task<string?> OwnNetworkAsync()
+    {
+        var self = await InspectAsync(Environment.MachineName);
+        var networks = self?.NetworkSettings?.Networks?.Keys.ToList();
+        return networks is { Count: > 0 } ? networks.FirstOrDefault(n => n != "bridge") ?? networks[0] : null;
+    }
+
     public async Task<string?> StartDetachedAsync(CreateContainerParameters spec)
     {
         var created = await _client.Containers.CreateContainerAsync(spec);

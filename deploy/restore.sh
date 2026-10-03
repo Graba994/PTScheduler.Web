@@ -21,7 +21,7 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 COMPOSE_FILE=docker-compose.prod.yml
 ENV_FILE=.env.prod
-DB_CONTAINER=ptportal-db
+DB_CONTAINER="${DB_CONTAINER:-ptportal-db}"   # inna nazwa kontenera bazy Portalu: DB_CONTAINER=nazwa ./deploy/restore.sh
 
 say()  { printf '\n\033[1;34m▶ %s\033[0m\n' "$*"; }
 ok()   { printf '  \033[32m✓ %s\033[0m\n' "$*"; }

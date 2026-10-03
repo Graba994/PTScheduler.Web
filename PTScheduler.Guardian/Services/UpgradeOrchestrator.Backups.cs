@@ -18,7 +18,9 @@ public sealed partial class UpgradeOrchestrator
     private readonly SemaphoreSlim _backupLock = new(1, 1);
 
     public string BackupDir => Cfg("GUARDIAN_BACKUP_DIR", null, "/opt/ptscheduler/backups");
-    public string PortalDbContainer => Cfg("GUARDIAN_PORTAL_DB_CONTAINER", null, "ptportal-db");
+    /// <summary>Kontener bazy Portalu: z GUARDIAN_PORTAL_DB_CONTAINER, a bez tego znaleziony (zob. <see cref="ResolvePortalDbContainerAsync"/>).</summary>
+    public string PortalDbContainer => _portalDbResolved ?? Cfg("GUARDIAN_PORTAL_DB_CONTAINER", null, "ptportal-db");
+    private string? _portalDbResolved;
     private string PortalBackupDir => Path.Combine(BackupDir, "portal");
 
     public sealed record PortalBackupFile(string Name, long Size, DateTime CreatedAt, string Source, bool Encrypted, bool HasEnv);
@@ -254,9 +256,42 @@ public sealed partial class UpgradeOrchestrator
         catch { return null; }
     }
 
+    /// <summary>
+    /// Nazwa kontenera bazy Portalu bywa różna (compose, Portainer, Unraid). Bez GUARDIAN_PORTAL_DB_CONTAINER szukamy:
+    /// „ptportal-db”, potem host z connection stringa Portalu jako nazwa kontenera albo usługa compose,
+    /// na końcu kontener postgres z bazą o tej nazwie (POSTGRES_DB).
+    /// </summary>
+    private async Task ResolvePortalDbContainerAsync()
+    {
+        if (!string.IsNullOrWhiteSpace(Environment.GetEnvironmentVariable("GUARDIAN_PORTAL_DB_CONTAINER"))) return;
+        if (_portalDbResolved is not null && await InspectOrNull(_portalDbResolved) is not null) return;
+        if (await InspectOrNull("ptportal-db") is not null) { _portalDbResolved = "ptportal-db"; return; }
+
+        var conn = (await PortalContainerEnvAsync()).GetValueOrDefault("ConnectionStrings__DefaultConnection") ?? "";
+        string Part(string key) => conn.Split(';', StringSplitOptions.RemoveEmptyEntries).Select(p => p.Split('=', 2))
+            .FirstOrDefault(p => p.Length == 2 && p[0].Trim().Equals(key, StringComparison.OrdinalIgnoreCase))?[1].Trim() ?? "";
+        var host = Part("Host");
+        var database = Part("Database");
+        if (host.Length > 0 && await InspectOrNull(host) is not null) { _portalDbResolved = host; return; }
+        try
+        {
+            var all = await _docker.Containers.ListContainersAsync(new ContainersListParameters { All = true });
+            string Name(ContainerListResponse c) => c.Names?.FirstOrDefault()?.TrimStart('/') ?? c.ID;
+            var bySvc = all.FirstOrDefault(c => host.Length > 0 && c.Labels is { } l && l.TryGetValue("com.docker.compose.service", out var svc) && svc == host);
+            if (bySvc is not null) { _portalDbResolved = Name(bySvc); return; }
+            foreach (var c in all.Where(c => (c.Image ?? "").Contains("postgres", StringComparison.OrdinalIgnoreCase)))
+            {
+                var info = await InspectOrNull(c.ID);
+                if (database.Length > 0 && (info?.Config?.Env ?? []).Contains($"POSTGRES_DB={database}")) { _portalDbResolved = Name(c); return; }
+            }
+        }
+        catch (Exception ex) { _logger.LogDebug(ex, "Nie udało się wyszukać kontenera bazy Portalu."); }
+    }
+
     /// <summary>Użytkownik i nazwa bazy Portalu z konfiguracji kontenera bazy (POSTGRES_USER / POSTGRES_DB).</summary>
     public async Task<(string User, string Db)?> PortalDbCredsAsync(bool startIfStopped = false)
     {
+        await ResolvePortalDbContainerAsync();
         var info = await InspectOrNull(PortalDbContainer);
         if (info is null) return null;
         if (!info.State.Running)

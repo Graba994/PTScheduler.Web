@@ -75,9 +75,21 @@ public partial class BackupService(
             var target = $"-h {Shell.Quote(host)} -p {Shell.Quote(port)} -U {Shell.Quote(user)}";
             return new PgAccess($"psql {target}", $"pg_dump {target}", database, new() { ["PGPASSWORD"] = password });
         }
-        var container = Shell.Quote(config["Portal:DbContainerName"] ?? "ptportal-db");
-        return new PgAccess($"docker exec -i {container} psql -U {Shell.Quote(user)}",
-            $"docker exec {container} pg_dump -U {Shell.Quote(user)}", database, []);
+        var found = await docker.FindPostgresContainerAsync(config["Portal:DbContainerName"], host, port, database);
+        if (found is not null)
+        {
+            var container = Shell.Quote(found);
+            return new PgAccess($"docker exec -i {container} psql -U {Shell.Quote(user)}",
+                $"docker exec {container} pg_dump -U {Shell.Quote(user)}", database, []);
+        }
+
+        // Baza poza Dockerem tego serwera (np. osobny serwer PostgreSQL): klient w jednorazowym kontenerze
+        // w sieci Portalu, z tym samym hostem i hasłem co Portal. pg_dump 17 zrzuca też starsze serwery.
+        var network = await docker.OwnNetworkAsync() ?? "host";
+        logger.LogInformation("Kopia Portalu: brak kontenera bazy na tym serwerze — zrzut przez jednorazowy kontener ({Network}).", network);
+        var run = $"docker run --rm -i --network {Shell.Quote(network)} -e PGPASSWORD {Shell.Quote(config["Portal:PgClientImage"] ?? "postgres:17-alpine")}";
+        var remote = $"-h {Shell.Quote(host)} -p {Shell.Quote(port)} -U {Shell.Quote(user)}";
+        return new PgAccess($"{run} psql {remote}", $"{run} pg_dump {remote}", database, new() { ["PGPASSWORD"] = password });
     }
 
     /// <summary>Skąd brać pliki trenera: wolumen (albo katalog) podpięty pod branding w kontenerze aplikacji.</summary>
