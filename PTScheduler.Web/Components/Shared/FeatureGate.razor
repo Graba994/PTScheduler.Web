@@ -1,0 +1,65 @@
+@inject EntitlementService Entitlements
+
+@if (_allowed)
+{
+    @ChildContent
+}
+else if (ShowLock)
+{
+    <div class="feature-gate-lock">
+        <div class="feature-gate-badge">
+            <i class="bi bi-lock-fill"></i>
+            <span>@RequiredPlan</span>
+        </div>
+        <div class="feature-gate-body">
+            <div class="feature-gate-title">@(Title ?? "Ta funkcja jest niedostępna")</div>
+            <div class="feature-gate-desc">
+                @if (Description is not null) { @Description }
+                else
+                {
+                    <text>Dostępne w planie <strong>@RequiredPlan</strong> i wyższym.</text>
+                }
+            </div>
+            @if (ShowUpgrade)
+            {
+                <a href="/upgrade" class="btn btn-sm btn-primary mt-2">
+                    <i class="bi bi-arrow-up-circle me-1"></i>Zobacz pakiety
+                </a>
+            }
+        </div>
+    </div>
+}
+
+<style>
+    .feature-gate-lock {
+        border: 1px dashed #d1d5db;
+        border-radius: .75rem;
+        padding: 1.25rem;
+        background: linear-gradient(180deg, #f9fafb, #fff);
+        text-align: center;
+    }
+    .feature-gate-badge {
+        display: inline-flex; align-items: center; gap: .35rem;
+        background: #6366f1; color: #fff;
+        padding: .2rem .65rem; border-radius: 2rem;
+        font-size: .75rem; font-weight: 600;
+        margin-bottom: .75rem;
+    }
+    .feature-gate-title { font-weight: 600; color: #374151; margin-bottom: .35rem; }
+    .feature-gate-desc { color: #6b7280; font-size: .875rem; }
+</style>
+
+@code {
+    [Parameter, EditorRequired] public string Flag { get; set; } = "";
+    [Parameter] public string RequiredPlan { get; set; } = "Pro";
+    [Parameter] public string? Title { get; set; }
+    [Parameter] public RenderFragment? Description { get; set; }
+    [Parameter] public RenderFragment? ChildContent { get; set; }
+    [Parameter] public bool ShowLock { get; set; } = true;
+    [Parameter] public bool ShowUpgrade { get; set; } = true;
+
+    private bool _allowed;
+
+    protected override void OnParametersSet() =>
+        _allowed = Entitlements.IsAllowed(Flag);
+}

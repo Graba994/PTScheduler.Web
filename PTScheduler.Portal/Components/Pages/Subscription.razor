@@ -1,0 +1,129 @@
+@page "/subskrypcja/{Token}"
+@layout PublicLayout
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject Microsoft.AspNetCore.DataProtection.IDataProtectionProvider Protection
+@inject EmailService EmailSvc
+@inject SiteSettingsService Settings
+@rendermode InteractiveServer
+
+@* Subskrypcja trenera rozliczanego rachunkami (Autopay / PayU / Przelewy24): plan, rozliczenie i rezygnacja
+   jednym kliknięciem. Wejście z aplikacji trenera: Zarządzanie → Plan → „Zarządzaj subskrypcją”. *@
+
+<PageTitle>Subskrypcja — PTScheduler</PageTitle>
+
+<section class="reg-page sub-page">
+    <div class="sub-card">
+        @if (_tenant is null)
+        {
+            <h1>Link wygasł</h1>
+            <p class="sub-muted">Ze względów bezpieczeństwa link działa 30 minut. Wróć do aplikacji i kliknij jeszcze raz „Zarządzaj subskrypcją”.</p>
+        }
+        else
+        {
+            <div class="sub-eyebrow"><i class="bi bi-credit-card-2-front"></i>Subskrypcja</div>
+            <h1>@_tenant.CompanyName</h1>
+            <dl class="sub-dl">
+                <dt>Plan</dt><dd>@(_tenant.Plan?.Name ?? _tenant.PlanId)</dd>
+                <dt>Rozliczenie</dt><dd>@(_tenant.BillingInterval == "yearly" ? "rocznie" : "miesięcznie") · rachunek e-mailem z linkiem do płatności</dd>
+                @if (_tenant.TrialEndsAt is { } trial && trial > DateTime.UtcNow)
+                {
+                    <dt>Okres próbny</dt><dd>do @trial.ToLocalTime().ToString("dd.MM.yyyy")</dd>
+                }
+            </dl>
+
+            @if (_tenant.CancelRequestedAt is { } cancelled)
+            {
+                <div class="sub-alert"><i class="bi bi-calendar-x"></i>
+                    <span>Zrezygnowano @cancelled.ToLocalTime().ToString("dd.MM.yyyy"). Nie wystawimy kolejnego rachunku — aplikacja działa do najbliższego dnia rozliczenia, potem ją uśpimy (dane zostają).</span>
+                </div>
+                <button class="sub-btn" @onclick="UndoAsync" disabled="@_busy">Cofnij rezygnację</button>
+            }
+            else if (_confirm)
+            {
+                <p class="sub-muted">Na pewno? Nie wystawimy kolejnego rachunku, a aplikacja zostanie uśpiona w najbliższym dniu rozliczenia. Dane klientów zostają — możesz wrócić w każdej chwili.</p>
+                <div class="sub-actions">
+                    <button class="sub-btn sub-danger" @onclick="CancelAsync" disabled="@_busy">Tak, rezygnuję</button>
+                    <button class="sub-btn sub-ghost" @onclick="() => _confirm = false">Zostaję</button>
+                </div>
+            }
+            else
+            {
+                <p class="sub-muted">Chcesz zmienić plan albo przejść na rozliczenie roczne (taniej)? Odpisz na dowolny rachunek albo napisz do nas — zmienimy od kolejnego okresu.</p>
+                <button class="sub-btn sub-ghost" @onclick="() => _confirm = true">Zrezygnuj z subskrypcji</button>
+            }
+            @if (_message is not null) { <p class="sub-ok"><i class="bi bi-check2-circle"></i>@_message</p> }
+        }
+    </div>
+</section>
+
+<style>
+    .sub-page { min-height: 70vh; display: flex; align-items: center; justify-content: center; padding: 110px 20px 60px; background: var(--pts-bg); }
+    .sub-card { width: 100%; max-width: 520px; background: var(--pts-surface); border: 1px solid var(--pts-border); border-radius: 22px; padding: 32px; box-shadow: var(--pts-shadow-lg); font-family: var(--pts-font-body); color: var(--pts-text); }
+    .sub-card h1 { font-family: var(--pts-font-display); font-weight: 800; font-size: 1.5rem; margin: 4px 0 16px; }
+    .sub-eyebrow { font-size: .74rem; font-weight: 700; letter-spacing: .08em; text-transform: uppercase; color: var(--pts-primary); display: flex; gap: 8px; align-items: center; }
+    .sub-dl { display: grid; grid-template-columns: 120px 1fr; gap: 8px 12px; font-size: .9rem; margin-bottom: 18px; }
+    .sub-dl dt { color: var(--pts-text-secondary); font-weight: 600; }
+    .sub-dl dd { margin: 0; }
+    .sub-muted { color: var(--pts-text-secondary); font-size: .9rem; line-height: 1.55; }
+    .sub-alert { display: flex; gap: 10px; padding: 12px 14px; border-radius: 12px; background: rgba(245, 158, 11, .1); color: #92400e; font-size: .88rem; margin-bottom: 14px; }
+    .sub-actions { display: flex; gap: 10px; flex-wrap: wrap; }
+    .sub-btn { border: 0; border-radius: 12px; padding: 12px 18px; font: inherit; font-weight: 700; cursor: pointer; background: var(--pts-primary); color: #fff; }
+    .sub-ghost { background: var(--pts-surface-alt); color: var(--pts-text); }
+    .sub-danger { background: #dc2626; }
+    .sub-btn:disabled { opacity: .5; }
+    .sub-ok { color: #047857; font-weight: 600; display: flex; gap: 8px; align-items: center; margin-top: 14px; }
+</style>
+
+@code {
+    [Parameter] public string Token { get; set; } = "";
+
+    private Tenant? _tenant;
+    private bool _confirm;
+    private bool _busy;
+    private string? _message;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        var id = SubscriptionLinks.TenantIdFrom(Protection, Token);
+        if (id is null) { _tenant = null; return; }
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _tenant = await db.Tenants.AsNoTracking().Include(t => t.Plan).FirstOrDefaultAsync(t => t.Id == id);
+    }
+
+    private async Task CancelAsync() => await SetCancelledAsync(true);
+    private async Task UndoAsync() => await SetCancelledAsync(false);
+
+    private async Task SetCancelledAsync(bool cancel)
+    {
+        if (_tenant is null || SubscriptionLinks.TenantIdFrom(Protection, Token) != _tenant.Id) { _tenant = null; return; }
+        _busy = true;
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var t = await db.Tenants.FindAsync(_tenant.Id);
+            if (t is null) return;
+            t.CancelRequestedAt = cancel ? DateTime.UtcNow : null;
+            db.TenantEvents.Add(new TenantEvent
+            {
+                TenantId = t.Id,
+                EventType = TenantEventTypes.PlanChanged,
+                Detail = cancel ? "Trener zrezygnował z subskrypcji (rachunki)" : "Trener cofnął rezygnację z subskrypcji"
+            });
+            await db.SaveChangesAsync();
+            _message = cancel ? "Rezygnacja zapisana. Potwierdzenie wysłaliśmy e-mailem." : "Rezygnacja cofnięta — wszystko działa jak dotąd.";
+            _confirm = false;
+
+            var admin = await Settings.GetAsync(SiteSettingsService.Keys.AdminNotificationEmail);
+            if (!string.IsNullOrWhiteSpace(admin))
+                _ = EmailSvc.SendAsync(admin, $"{(cancel ? "Rezygnacja" : "Cofnięta rezygnacja")}: {t.CompanyName}",
+                    $"<p>{System.Net.WebUtility.HtmlEncode(t.CompanyName)} ({System.Net.WebUtility.HtmlEncode(t.OwnerEmail)}) {(cancel ? "zrezygnował(a) z subskrypcji — przy najbliższym rozliczeniu aplikacja zostanie uśpiona." : "cofnął(-ęła) rezygnację.")}</p>");
+            if (cancel)
+                _ = EmailSvc.SendAsync(t.OwnerEmail, "Rezygnacja z subskrypcji — PTScheduler",
+                    $"<p>Cześć,</p><p>zapisaliśmy rezygnację z subskrypcji {System.Net.WebUtility.HtmlEncode(t.CompanyName)}. Nie wystawimy kolejnego rachunku, a aplikacja zostanie uśpiona w najbliższym dniu rozliczenia. Dane zostają — jeśli zmienisz zdanie, cofniesz rezygnację w aplikacji (Zarządzanie → Plan → Zarządzaj subskrypcją).</p><p>PTScheduler</p>");
+            await LoadAsync();
+        }
+        finally { _busy = false; }
+    }
+}

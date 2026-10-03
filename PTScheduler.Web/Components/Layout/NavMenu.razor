@@ -1,8 +1,12 @@
+@inject PTScheduler.Web.Services.EntitlementService Entitlements
 @inject PTScheduler.Application.Interfaces.IBrandingService BrandingService
 @using PTScheduler.Domain.Constants
+@inject PTScheduler.Web.Services.ClientNav ClientNavigation
+@inject NavigationManager Navigation
+@inject PTScheduler.Web.Services.UpsellService Upsell
 
 <!-- Sidebar brand -->
-<a href="/" class="sidebar-brand">
+<a href="/app" class="sidebar-brand">
     @if (!string.IsNullOrEmpty(_logoPath))
     {
         <img src="@_logoPath" alt="@_companyName" />
@@ -10,7 +14,7 @@
     }
     else
     {
-        <i class="bi bi-calendar-heart"></i>
+        <i class="bi pt-ico-dumbbell"></i>
         <span>@_companyName</span>
     }
 </a>
@@ -18,7 +22,7 @@
 <!-- Navigation -->
 <div class="sidebar-nav">
     <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer},{Roles.Subordinate}")">
-        <NavLink class="sidebar-link" href="" Match="NavLinkMatch.All">
+        <NavLink class="sidebar-link" href="app" Match="NavLinkMatch.All">
             <i class="bi bi-house-fill"></i><span>Dashboard</span>
         </NavLink>
         <NavLink class="sidebar-link" href="calendar">
@@ -30,64 +34,99 @@
         <NavLink class="sidebar-link" href="clients">
             <i class="bi bi-people-fill"></i><span>Klienci</span>
         </NavLink>
-        <NavLink class="sidebar-link" href="stats">
-            <i class="bi bi-bar-chart-line-fill"></i><span>Statystyki</span>
+        <NavLink class="sidebar-link" href="chat">
+            <i class="bi bi-chat-dots-fill"></i><span>Wiadomości</span>
+            <ChatUnreadBadge @rendermode="PTScheduler.Web.RenderModes.Server" />
         </NavLink>
-        <NavLink class="sidebar-link" href="finance">
-            <i class="bi bi-currency-dollar"></i><span>Finanse</span>
-        </NavLink>
-        <NavLink class="sidebar-link" href="finance/hidden">
-            <i class="bi bi-eye-slash"></i><span>Ukryte finanse</span>
-        </NavLink>
+        @* Moduły spoza planu nie pojawiają się w menu (nikomu) — dostępne plany pokazuje „Ulepsz plan”. *@
+        @if (Entitlements.IsAllowed("AdvancedAnalytics"))
+        {
+            <NavLink class="sidebar-link" href="stats">
+                <i class="bi bi-bar-chart-line-fill"></i><span>Statystyki</span>
+            </NavLink>
+        }
+        @if (Entitlements.IsAllowed("FinancialReports"))
+        {
+            <NavLink class="sidebar-link" href="finance">
+                <i class="bi bi-currency-dollar"></i><span>Finanse</span>
+            </NavLink>
+        }
     </AuthorizeView>
 
     <AuthorizeView Roles="@Roles.Client">
-        <NavLink class="sidebar-link" href="" Match="NavLinkMatch.All">
-            <i class="bi bi-house-fill"></i><span>Dashboard</span>
+        @* Kilka sekcji zamiast kilkunastu pozycji — reszta w zakładkach nad stroną. *@
+        @foreach (var sec in _clientSections)
+        {
+            <a class="sidebar-link @(_clientSection?.Key == sec.Key ? "active" : "")" href="@sec.Href">
+                <i class="bi @sec.Icon"></i><span>@sec.Label</span>
+                @if (sec.Key == "chat") { <ChatUnreadBadge @rendermode="PTScheduler.Web.RenderModes.Server" /> }
+            </a>
+        }
+        <div class="sidebar-divider"></div>
+        <NavLink class="sidebar-link" href="Account/Manage">
+            <i class="bi bi-person-circle"></i><span>Moje konto</span>
         </NavLink>
-        <NavLink class="sidebar-link" href="my">
-            <i class="bi bi-calendar-week-fill"></i><span>Mój grafik</span>
-        </NavLink>
-        <NavLink class="sidebar-link" href="sessions">
-            <i class="bi bi-calendar-check"></i><span>Wizyty</span>
-        </NavLink>
-        <NavLink class="sidebar-link" href="my/profile">
-            <i class="bi bi-person-circle"></i><span>Mój profil</span>
-        </NavLink>
-        <NavLink class="sidebar-link" href="my/measurements">
-            <i class="bi bi-rulers"></i><span>Moje pomiary</span>
-        </NavLink>
-        <NavLink class="sidebar-link" href="my/packages">
-            <i class="bi bi-box-seam"></i><span>Moje pakiety</span>
-        </NavLink>
-        <NavLink class="sidebar-link" href="my/stats">
-            <i class="bi bi-graph-up"></i><span>Moje statystyki</span>
-        </NavLink>
+        @if (ClientNavigation.ReferralsEnabled)
+        {
+            <NavLink class="sidebar-link" href="my/referrals">
+                <i class="bi bi-gift"></i><span>Poleć znajomym</span>
+            </NavLink>
+        }
     </AuthorizeView>
 
     <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer},{Roles.Subordinate}")">
         <div class="sidebar-divider"></div>
         <NavLink class="sidebar-link" href="trainer/availability">
-            <i class="bi bi-clock-fill"></i><span>Dostępność</span>
+            <i class="bi bi-clock-fill"></i><span>Godziny pracy</span>
         </NavLink>
-        <NavLink class="sidebar-link" href="trainer/series">
-            <i class="bi bi-repeat"></i><span>Serie wizyt</span>
+        @if (Entitlements.IsAllowed("RecurringSessions"))
+        {
+            <NavLink class="sidebar-link" href="trainer/series">
+                <i class="bi bi-repeat"></i><span>Serie wizyt</span>
+            </NavLink>
+        }
+        <NavLink class="sidebar-link" href="trainer/pairs">
+            <i class="bi bi-people-fill"></i><span>Treningi w parach</span>
         </NavLink>
-        <NavLink class="sidebar-link" href="trainer/contacts">
-            <i class="bi bi-people-fill"></i><span>Pary klientów</span>
-        </NavLink>
-        <NavLink class="sidebar-link" href="trainer/intro-config">
-            <i class="bi bi-person-lines-fill"></i><span>Pierwsza wizyta</span>
-        </NavLink>
+        @if (Entitlements.IsAllowed("TrainingPlansEnabled"))
+        {
+            <NavLink class="sidebar-link" href="exercises">
+                <i class="bi pt-ico-dumbbell"></i><span>Ćwiczenia</span>
+            </NavLink>
+            <NavLink class="sidebar-link" href="plans">
+                <i class="bi bi-list-check"></i><span>Plany</span>
+            </NavLink>
+            <NavLink class="sidebar-link" href="trainer/activity">
+                <i class="bi bi-people"></i><span>Aktywność</span>
+            </NavLink>
+        }
     </AuthorizeView>
 
-    <AuthorizeView Roles="@Roles.Admin">
+    <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer},{Roles.Subordinate}")">
         <div class="sidebar-divider"></div>
-        <NavLink class="sidebar-link" href="admin/users">
-            <i class="bi bi-shield-fill-check"></i><span>Administracja</span>
+        <NavLink class="sidebar-link" href="admin" Match="NavLinkMatch.All">
+            <i class="bi bi-shield-fill-check"></i><span>Zarządzanie</span>
+        </NavLink>
+    </AuthorizeView>
+    @* Sklep usług — zawsze pod ręką dla właściciela; kropka, gdy coś się kończy. *@
+    <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer}")">
+        <NavLink class="sidebar-link" href="admin/sklep">
+            <i class="bi bi-bag-heart-fill"></i><span>Sklep</span>
+            @if (_urgent) { <span class="nav-dot" title="Coś się kończy — zajrzyj"></span> }
         </NavLink>
     </AuthorizeView>
 </div>
+
+@if (_showPlan)
+{
+    <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer}")">
+        <a href="/admin/upgrade" class="plan-pill" title="Zobacz, co daje wyższy plan">
+            <i class="bi bi-rocket-takeoff"></i>
+            <span>Plan <b>@Entitlements.Current.Name</b></span>
+            <span class="plan-pill-cta">Ulepsz</span>
+        </a>
+    </AuthorizeView>
+}
 
 <!-- Dev credit -->
 <div style="padding:0 1rem .25rem;text-align:center">
@@ -116,6 +155,19 @@
     private string? _logoPath;
     private string _companyName = "PTScheduler";
 
+    private IReadOnlyList<PTScheduler.Web.Services.ClientNav.Section> _clientSections = [];
+    private PTScheduler.Web.Services.ClientNav.Section? _clientSection;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _clientSections = await ClientNavigation.GetSectionsAsync();
+        _clientSection = PTScheduler.Web.Services.ClientNav.Match(_clientSections, Navigation.ToBaseRelativePath(Navigation.Uri)).Section;
+    }
+
+    private bool _urgent;
+    // „Ulepsz” pokazujemy tylko, gdy instancja ma plan z Portalu (samodzielna instalacja jest bez ograniczeń).
+    private bool _showPlan => PlanCatalog.HasUpgrade(Entitlements.Current);
+
     protected override async Task OnInitializedAsync()
     {
         try
@@ -125,6 +177,8 @@
             _companyName = branding.CompanyName ?? "PTScheduler";
         }
         catch { } // Best-effort: fall back to defaults if branding unavailable
+
+        try { _urgent = (await Upsell.GetAsync()).Any(n => n.IsUrgent); } catch { }
     }
 
 }

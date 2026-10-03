@@ -21,4 +21,12 @@ public class PushMessageDto
     public string Body { get; set; } = "";
     public string? Url { get; set; }
     public string? Icon { get; set; }
+    /// <summary>
+    /// Rodzaj powiadomienia (<c>NotificationTypes.Push…</c>). Gdy odbiorca wyłączył ten rodzaj push
+    /// w ustawieniach konta, wiadomość nie jest wysyłana. Null — zawsze wysyłamy.
+    /// </summary>
+    public string? Category { get; set; }
 }
+
+/// <summary>Wynik wysyłki do wszystkich urządzeń użytkownika.</summary>
+public sealed record PushSendReport(int Sent, int Failed, string? LastError);

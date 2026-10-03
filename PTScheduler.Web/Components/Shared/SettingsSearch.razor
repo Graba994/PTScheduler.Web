@@ -1,0 +1,38 @@
+@* Wyszukiwarka ustawień: wyniki pojawiają się przy pisaniu (filtr w przeglądarce, js/settings-search.js).
+   Szuka w nazwach, opisach i wyjaśnieniach — bez polskich znaków też znajdzie („wyglad” → Wygląd). *@
+@using PTScheduler.Web.Components.Layout
+@inject EntitlementService Entitlements
+
+<div class="ss @Class" data-ss>
+    <div class="ss-box">
+        <i class="bi bi-search"></i>
+        <input type="search" placeholder="@Placeholder" aria-label="Szukaj w ustawieniach" autocomplete="off"
+               oninput="PTSettingsSearch.filter(this)" onkeydown="PTSettingsSearch.key(event, this)" />
+        <kbd class="ss-kbd" title="Naciśnij /, żeby szukać">/</kbd>
+    </div>
+    <div class="ss-results" hidden>
+        @foreach (var (group, item) in Entries)
+        {
+            <a class="ss-item" href="/@item.Href" hidden
+               data-text="@AdminMenu.Normalize($"{item.Title} {item.Description} {item.Info} {group} {AdminMenu.SearchWords.GetValueOrDefault(item.Href)}")">
+                <span class="ss-ic"><i class="bi @item.Icon"></i></span>
+                <span class="ss-txt"><b>@item.Title</b><small>@group · @item.Description</small></span>
+                <i class="bi bi-chevron-right ss-go"></i>
+            </a>
+        }
+        <div class="ss-empty" hidden>Nic nie znaleziono. Spróbuj innego słowa — np. „płatności”, „logo”, „SMS”.</div>
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public AdminAccess Access { get; set; } = new();
+    [Parameter] public string Placeholder { get; set; } = "Szukaj w ustawieniach, np. logo, SMS, hasło…";
+    [Parameter] public string? Class { get; set; }
+
+    // Tylko to, co ta osoba może otworzyć i co jest w jej planie.
+    private IEnumerable<(string Group, AdminMenuItem Item)> Entries =>
+        AdminMenu.Groups.SelectMany(g => g.Items.Select(i => (Group: g.Title, Item: i)))
+            .Concat(AdminMenu.Extra.Select(i => (Group: "Skróty", Item: i)))
+            .Where(x => Access.Sees(x.Item) && (x.Item.PlanFlag is null || Entitlements.IsAllowed(x.Item.PlanFlag)))
+            .Where(x => x.Item.Href != "admin/upgrade" || PlanCatalog.HasUpgrade(Entitlements.Current));
+}

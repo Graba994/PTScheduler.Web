@@ -1,47 +1,57 @@
-﻿@page "/Account/LoginWith2fa"
+@page "/Account/LoginWith2fa"
+@layout PTScheduler.Web.Components.Layout.AuthLayout
 
 @using System.ComponentModel.DataAnnotations
 @using Microsoft.AspNetCore.Identity
+@using PTScheduler.Web.Components.Account
 
 @inject SignInManager<ApplicationUser> SignInManager
 @inject UserManager<ApplicationUser> UserManager
 @inject IdentityRedirectManager RedirectManager
+@inject NavigationManager NavigationManager
 @inject ILogger<LoginWith2fa> Logger
+@inject PTScheduler.Infrastructure.Data.ApplicationDbContext DbContext
+@inject PTScheduler.Application.Interfaces.IAppClock Clock
 
-<PageTitle>Two-factor authentication</PageTitle>
+<PageTitle>Weryfikacja dwuetapowa</PageTitle>
 
-<h1>Two-factor authentication</h1>
-<hr />
-<StatusMessage Message="@message" />
-<p>Your login is protected with an authenticator app. Enter your authenticator code below.</p>
-<div class="row">
-    <div class="col-md-4">
-        <EditForm Model="Input" FormName="login-with-2fa" OnValidSubmit="OnValidSubmitAsync" method="post">
+<div class="card" style="border-radius:16px;box-shadow:0 8px 32px rgba(0,0,0,0.10)">
+    <div class="card-body p-4">
+        <h5 class="fw-bold mb-1 text-center">Weryfikacja dwuetapowa</h5>
+        <p class="text-muted small text-center mb-4">Wpisz 6-cyfrowy kod z aplikacji uwierzytelniającej.</p>
+
+        <StatusMessage Message="@message" />
+
+        <EditForm Model="Input" FormName="login-with-2fa" OnValidSubmit="OnValidSubmitAsync" method="post" data-busy-on-submit>
             <input type="hidden" name="ReturnUrl" value="@ReturnUrl" />
             <input type="hidden" name="RememberMe" value="@RememberMe" />
             <DataAnnotationsValidator />
-            <ValidationSummary class="text-danger" role="alert" />
-            <div class="form-floating mb-3">
-                <InputText @bind-Value="Input.TwoFactorCode" id="Input.TwoFactorCode" class="form-control" autocomplete="off" />
-                <label for="Input.TwoFactorCode" class="form-label">Authenticator code</label>
-                <ValidationMessage For="() => Input.TwoFactorCode" class="text-danger" />
+            <ValidationSummary class="text-danger small mb-3" role="alert" />
+
+            <div class="mb-3">
+                <label class="form-label" for="Input.TwoFactorCode">Kod weryfikacyjny</label>
+                <InputText @bind-Value="Input.TwoFactorCode" id="Input.TwoFactorCode"
+                           class="form-control form-control-lg text-center" style="letter-spacing:.3em"
+                           inputmode="numeric" autocomplete="one-time-code" maxlength="7" placeholder="000000" autofocus />
+                <ValidationMessage For="() => Input.TwoFactorCode" class="text-danger small" />
             </div>
-            <div class="checkbox mb-3">
-                <label for="remember-machine" class="form-label">
-                    <InputCheckbox @bind-Value="Input.RememberMachine" />
-                    Remember this machine
-                </label>
+
+            <div class="form-check mb-4">
+                <InputCheckbox @bind-Value="Input.RememberMachine" class="form-check-input" id="remember-machine" />
+                <label class="form-check-label small text-muted" for="remember-machine">Nie pytaj o kod na tym urządzeniu</label>
             </div>
-            <div>
-                <button type="submit" class="w-100 btn btn-lg btn-primary">Log in</button>
-            </div>
+
+            <button type="submit" class="btn btn-primary w-100 py-2 fw-semibold" data-busy-text="Sprawdzanie…">
+                <i class="bi bi-shield-check me-1"></i>Zaloguj się
+            </button>
         </EditForm>
     </div>
 </div>
-<p>
-    Don't have access to your authenticator device? You can
-    <a href="Account/LoginWithRecoveryCode?ReturnUrl=@ReturnUrl">log in with a recovery code</a>.
-</p>
+
+<div class="text-center mt-3 small auth-below-card">
+    Nie masz dostępu do aplikacji?
+    <a href="@(NavigationManager.GetUriWithQueryParameters("Account/LoginWithRecoveryCode", new Dictionary<string, object?> { ["ReturnUrl"] = ReturnUrl }))">Użyj kodu odzyskiwania</a>
+</div>
 
 @code {
     private string? message;
@@ -73,30 +83,36 @@
 
         if (result.Succeeded)
         {
+            await LoginSupport.RecordAsync(DbContext, Clock, Logger, HttpContext, userId, true);
             Logger.LogInformation("User with ID '{UserId}' logged in with 2fa.", userId);
-            RedirectManager.RedirectTo(ReturnUrl);
+            RedirectManager.RedirectTo(LoginSupport.SafeReturnUrl(ReturnUrl, NavigationManager.BaseUri));
         }
         else if (result.IsLockedOut)
         {
+            await LoginSupport.RecordAsync(DbContext, Clock, Logger, HttpContext, userId, false);
             Logger.LogWarning("User with ID '{UserId}' account locked out.", userId);
             RedirectManager.RedirectTo("Account/Lockout");
         }
         else
         {
+            await LoginSupport.RecordAsync(DbContext, Clock, Logger, HttpContext, userId, false);
             Logger.LogWarning("Invalid authenticator code entered for user with ID '{UserId}'.", userId);
-            message = "Error: Invalid authenticator code.";
+            message = "Błąd: Nieprawidłowy kod. Sprawdź, czy zegar w telefonie jest ustawiony automatycznie.";
         }
     }
 
+    [CascadingParameter]
+    private HttpContext HttpContext { get; set; } = default!;
+
     private sealed class InputModel
     {
-        [Required]
-        [StringLength(7, ErrorMessage = "The {0} must be at least {2} and at max {1} characters long.", MinimumLength = 6)]
+        [Required(ErrorMessage = "Wpisz kod z aplikacji.")]
+        [StringLength(7, ErrorMessage = "Kod ma 6 cyfr.", MinimumLength = 6)]
         [DataType(DataType.Text)]
-        [Display(Name = "Authenticator code")]
+        [Display(Name = "Kod weryfikacyjny")]
         public string? TwoFactorCode { get; set; }
 
-        [Display(Name = "Remember this machine")]
+        [Display(Name = "Zapamiętaj to urządzenie")]
         public bool RememberMachine { get; set; }
     }
 }

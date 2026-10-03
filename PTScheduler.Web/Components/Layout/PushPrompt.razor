@@ -1,0 +1,100 @@
+@inject IJSRuntime JS
+@inject AuthenticationStateProvider AuthState
+@inject PTScheduler.Application.Interfaces.IWebPushService PushService
+@inject EntitlementService Entitlements
+@implements IDisposable
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Po zalogowaniu: (1) po cichu odnawia subskrypcję push, gdy zgoda już jest — leczy subskrypcje
+   zgubione po stronie serwera albo po zmianie kluczy VAPID; (2) gdy zgody jeszcze nie było,
+   proponuje włączenie powiadomień. *@
+@if (_show)
+{
+    <div class="pwa-banner" role="dialog" aria-label="Włącz powiadomienia">
+        <div class="pwa-banner-icon d-flex align-items-center justify-content-center"
+             style="background:var(--c-primary-light);color:var(--c-primary);border-radius:12px;font-size:1.5rem">
+            <i class="bi bi-bell-fill"></i>
+        </div>
+        <div class="pwa-banner-text">
+            <div class="pwa-banner-title">Włącz powiadomienia</div>
+            <div class="pwa-banner-body">Przypomnienia o treningach, komentarze i informacje o pakietach — prosto na telefon.</div>
+        </div>
+        <div class="pwa-banner-actions">
+            <button class="btn btn-primary btn-sm" @ref="_enableButton">Włącz</button>
+            <button class="btn btn-link btn-sm pwa-banner-close" @onclick="Dismiss" aria-label="Nie teraz">
+                <i class="bi bi-x-lg"></i>
+            </button>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _show;
+    private string _userId = string.Empty;
+    private string _publicKey = string.Empty;
+    private ElementReference _enableButton;
+    private DotNetObjectReference<PushPrompt>? _ref;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_show && _ref is not null)
+        {
+            // Natywny listener kliknięcia (zgoda musi paść w obsłudze gestu — wymóg Safari/iOS).
+            try { await JS.InvokeVoidAsync("PTPush.bindEnable", _enableButton, _ref, _publicKey); } catch { }
+        }
+        if (!firstRender) return;
+
+        try
+        {
+            var user = (await AuthState.GetAuthenticationStateAsync()).User;
+            if (user.Identity?.IsAuthenticated != true) return;
+            _userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+            if (string.IsNullOrEmpty(_userId) || !Entitlements.IsAllowed("PushNotifications")) return;
+
+            _publicKey = await PushService.GetPublicKeyAsync();
+            if (string.IsNullOrEmpty(_publicKey)) return;
+            if (!await JS.InvokeAsync<bool>("PTPush.isSupported")) return;
+
+            var permission = await JS.InvokeAsync<string>("PTPush.getPermission");
+            if (permission == "granted")
+            {
+                var sub = await JS.InvokeAsync<PTScheduler.Application.DTOs.PushSubscriptionDto?>("PTPush.ensureSubscribed", _publicKey);
+                if (sub is not null) await PushService.SubscribeAsync(_userId, sub);
+                return;
+            }
+
+            // Chwila na baner instalacji PWA i propozycję odcisku palca — nie pokazujemy wszystkiego naraz.
+            await Task.Delay(TimeSpan.FromSeconds(6));
+            if (await JS.InvokeAsync<bool>("PTPush.shouldOffer"))
+            {
+                _ref = DotNetObjectReference.Create(this);
+                _show = true;
+                StateHasChanged();
+            }
+        }
+        catch { } // Powiadomienia są opcjonalne — błąd JS / rozłączenie nie może psuć strony.
+    }
+
+    [JSInvokable]
+    public async Task OnPushResult(PTScheduler.Application.DTOs.PushSubscriptionDto? sub, string status)
+    {
+        if (sub is not null)
+        {
+            try { await PushService.SubscribeAsync(_userId, sub); } catch { }
+        }
+        else if (status == "denied")
+        {
+            try { await JS.InvokeVoidAsync("PTPush.dismiss"); } catch { }
+        }
+        _show = false;
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private async Task Dismiss()
+    {
+        _show = false;
+        try { await JS.InvokeVoidAsync("PTPush.dismiss"); } catch { }
+    }
+
+    public void Dispose() => _ref?.Dispose();
+}

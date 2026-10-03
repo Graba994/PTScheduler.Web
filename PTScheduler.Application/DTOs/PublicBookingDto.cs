@@ -19,8 +19,14 @@ public class PublicIntroOfferDto
     public DateTime? PromoValidUntil { get; set; }
     public string? Description { get; set; }
 
-    public bool HasActivePromo =>
-        PromoPrice.HasValue && PromoValidUntil.HasValue && PromoValidUntil.Value > DateTime.Now;
+    /// <summary>
+    /// Ustawiane przez serwis budujący DTO, na podstawie
+    /// <see cref="PTScheduler.Domain.Rules.PromoRules"/> i zegara aplikacji.
+    /// Świadomie nie jest liczone tutaj — DTO nie ma dostępu do strefy czasowej,
+    /// a poprzednia wersja porównywała z <c>DateTime.Now</c>, czyli z czasem
+    /// maszyny zamiast z zegarem ściennym studia.
+    /// </summary>
+    public bool HasActivePromo { get; set; }
 
     public decimal EffectivePrice => HasActivePromo ? PromoPrice!.Value : Price;
 }
@@ -48,6 +54,12 @@ public class CreatePublicBookingDto
     public DateTime SlotStart { get; set; }
     public string TrainerUserId { get; set; } = string.Empty;
     public bool AcceptedTerms { get; set; }
+
+    // Ochrona przed botami: pole-pułapka (ukryte, człowiek go nie wypełnia),
+    // moment pokazania formularza i adres IP do limitu rezerwacji.
+    public string? Website { get; set; }
+    public DateTime? FormShownAtUtc { get; set; }
+    public string? ClientIp { get; set; }
 }
 
 public class BookingResultDto
@@ -59,4 +71,6 @@ public class BookingResultDto
     public string? TrainerName { get; set; }
     public int DurationMinutes { get; set; }
     public bool EmailSent { get; set; }
+    /// <summary>Nowo utworzony klient (np. do zapisania polecenia).</summary>
+    public int? ClientId { get; set; }
 }

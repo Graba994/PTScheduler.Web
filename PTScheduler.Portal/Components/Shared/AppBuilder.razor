@@ -1,0 +1,1635 @@
+@implements IDisposable
+@inject TenantService TenantSvc
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject EmailService EmailSvc
+@inject SiteSettingsService Settings
+@inject AppLaunchService Launcher
+@inject RegistrationGateService Gates
+@inject ReferralService Referrals
+@inject FunnelService Funnel
+@inject StripeService StripeSvc
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject IHttpContextAccessor HttpAccessor
+@inject ILogger<AppBuilder> Log
+
+@* Kreator „Zbuduj swoją aplikację w 60 sekund”. Wszystko dzieje się wirtualnie (podgląd na żywo
+   po prawej) — instancja trenera powstaje dopiero po „Opublikuj”, a dane z kreatora trafiają
+   prosto do aplikacji (konto, kolor, strona, oferta), więc /setup nie pyta o nie drugi raz. *@
+
+<PageTitle>@(AdminMode ? "Zbuduj dla trenera — PTScheduler Portal" : "Zbuduj swoją aplikację — PTScheduler")</PageTitle>
+<HeadContent><link rel="stylesheet" href="builder.css" /></HeadContent>
+
+<section class="bd @(_phase == Phase.Build ? "" : "bd-launch") @(_phase == Phase.Done ? "bd-is-done" : "")" style="@StyleVars">
+    <div class="bd-shell">
+
+        <div class="bd-panel" @onkeydown="HandleKey">
+            @if (_phase == Phase.Build)
+            {
+                <div class="bd-head">
+                    <div class="bd-eyebrow"><i class="bi bi-magic"></i>@(AdminMode ? "Zbuduj aplikację dla trenera" : "Zbuduj swoją aplikację w 60 sekund")</div>
+                    @if (_referrer is not null)
+                    {
+                        <div class="bd-ref"><i class="bi bi-gift"></i><span>Polecenie od <b>@_referrer.CompanyName</b> — masz @ReferralService.ReferredBonusDays dni dłużej za darmo</span></div>
+                    }
+                    <div class="bd-progress" role="progressbar" aria-label="Postęp budowy" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@Percent">
+                        <span style="width:@(Percent)%"></span>
+                    </div>
+                    <div class="bd-progress-meta">
+                        <span>Krok @_step z 5 · @StepName(_step)</span>
+                        <span class="bd-pct">@Percent% gotowe</span>
+                    </div>
+                    <div class="bd-dots" role="tablist" aria-label="Kroki">
+                        @for (var i = 1; i <= 5; i++)
+                        {
+                            var n = i;
+                            <button type="button" role="tab" aria-selected="@(n == _step ? "true" : "false")" title="@StepName(n)"
+                                    class="bd-dot @(n == _step ? "on" : n < _step || n <= _maxStep ? "done" : "")"
+                                    disabled="@(n > _maxStep)" @onclick="() => GoTo(n)">
+                                @if (n < _step || (n <= _maxStep && n != _step)) { <i class="bi bi-check-lg"></i> } else { @n }
+                            </button>
+                        }
+                    </div>
+                </div>
+
+                <div class="bd-step" @key="_step">
+                    @if (_step == 1)
+                    {
+                        <h1 class="bd-title">Jak nazywa się Twoje studio?</h1>
+                        <p class="bd-sub">Tak zobaczą Cię klienci — w aplikacji, na stronie i w powiadomieniach.</p>
+
+                        <label class="bd-label" for="bd-company">Nazwa studia albo Twoja marka</label>
+                        <input id="bd-company" class="bd-input bd-input-lg" @bind="_company" @bind:event="oninput" @bind:after="CompanyChanged"
+                               placeholder="np. Anna Fit Studio" maxlength="60" autocomplete="organization" />
+                        <div class="bd-address @(_slugState)">
+                            <i class="bi bi-globe2"></i>
+                            <span class="bd-address-url">@AddressText</span>
+                            @if (_slugState == "free") { <span class="bd-address-ok"><i class="bi bi-check-circle-fill"></i>wolny</span> }
+                            else if (_slugState == "taken") { <span class="bd-address-alt">zajęty — dostaniesz ten obok</span> }
+                        </div>
+
+                        <label class="bd-check bd-own-domain">
+                            <input type="checkbox" @bind="_wantDomain" @bind:after="Touch" />
+                            <span>Mam własną domenę <span class="bd-opt">(np. annafit.pl — od planu @(CustomDomainPlanName ?? "Starter"))</span></span>
+                        </label>
+                        @if (_wantDomain)
+                        {
+                            <input class="bd-input" @bind="_customDomain" @bind:event="oninput" @bind:after="Touch" placeholder="annafit.pl" maxlength="100"
+                                   autocomplete="off" spellcheck="false" aria-label="Własna domena" />
+                            <div class="bd-hint">Aplikacja ruszy od razu pod adresem powyżej, a Twoja domena dołączy sama, gdy ustawisz u jej dostawcy jeden rekord DNS — pokażemy jaki.</div>
+                        }
+
+                        <label class="bd-label" for="bd-name">@(AdminMode ? "Imię i nazwisko trenera" : "Twoje imię i nazwisko")</label>
+                        <input id="bd-name" class="bd-input" @bind="_fullName" @bind:event="oninput" @bind:after="Touch"
+                               placeholder="np. Anna Nowak" maxlength="80" autocomplete="name" />
+                    }
+                    else if (_step == 2)
+                    {
+                        <h1 class="bd-title">Czym się zajmujesz?</h1>
+                        <p class="bd-sub">Dobierzemy stronę, kolor i gotową ofertę. Każdą rzecz zmienisz jednym kliknięciem.</p>
+                        <div class="bd-label">@(ShowAllSpecs ? "Wszystkie specjalizacje" : "Najczęściej wybierane")</div>
+                        <div class="bd-specs">
+                            @foreach (var (sp, i) in AppBuilderCatalog.Specializations.Select((sp, i) => (sp, i)).Take(ShowAllSpecs ? int.MaxValue : PopularSpecs))
+                            {
+                                <button type="button" class="bd-spec @(_spec == sp.Key ? "on" : "") @(i >= PopularSpecs ? "extra" : "")" style="@(i >= PopularSpecs ? $"--i:{i - PopularSpecs}" : null)"
+                                        aria-pressed="@(_spec == sp.Key ? "true" : "false")" @onclick="() => PickSpec(sp)">
+                                    <i class="bi @sp.Icon"></i><span>@sp.Name</span>
+                                </button>
+                            }
+                        </div>
+                        @if (!ShowAllSpecs)
+                        {
+                            <button type="button" class="bd-more" aria-expanded="false" @onclick="() => _allSpecs = true">
+                                Pokaż więcej specjalizacji <span>+@(AppBuilderCatalog.Specializations.Count - PopularSpecs)</span><i class="bi bi-chevron-down"></i>
+                            </button>
+                        }
+                        else if (!SpecIsHidden)
+                        {
+                            <button type="button" class="bd-more" aria-expanded="true" @onclick="() => _allSpecs = false">Pokaż mniej<i class="bi bi-chevron-up"></i></button>
+                        }
+                    }
+                    else if (_step == 3)
+                    {
+                        <h1 class="bd-title">Wybierz wygląd</h1>
+                        <p class="bd-sub">Kolor aplikacji i styl strony głównej — podgląd zmienia się od razu.</p>
+
+                        <div class="bd-label">Kolor aplikacji</div>
+                        <div class="bd-swatches" role="radiogroup" aria-label="Kolor aplikacji">
+                            @foreach (var c in AppBuilderCatalog.Colors)
+                            {
+                                <button type="button" role="radio" aria-checked="@(_color == c.Key ? "true" : "false")" class="bd-swatch @(_color == c.Key ? "on" : "")"
+                                        style="@($"--sw:{c.Hex};--sw2:{c.Hex2}")" title="@c.Name" @onclick="() => PickColor(c)">
+                                    <span class="bd-swatch-dot"></span><span class="bd-swatch-name">@c.Name</span>
+                                </button>
+                            }
+                        </div>
+
+                        <div class="bd-label">Styl strony głównej</div>
+                        <div class="bd-templates" role="radiogroup" aria-label="Styl strony">
+                            @foreach (var t in _allTemplates ? AllTemplateChoices : TemplateChoices)
+                            {
+                                var th = AppBuilderCatalog.ThemeOf(t.Theme);
+                                var acc = string.IsNullOrEmpty(th.Accent) ? Color.Hex : th.Accent;
+                                <button type="button" role="radio" aria-checked="@(_template == t.Key ? "true" : "false")" class="bd-tpl @(_template == t.Key ? "on" : "")" @onclick="() => PickTemplate(t)">
+                                    <span class="bd-tpl-thumb" style="@($"--tb:{th.Bg};--ta:{acc};--ti:{th.Ink}")"><i></i><b></b><b class="short"></b><em></em></span>
+                                    <span class="bd-tpl-name">@t.Name</span>
+                                    <span class="bd-tpl-meta">@t.Sections sekcji@(t.Key == Spec.Template ? " · polecany" : "")</span>
+                                </button>
+                            }
+                        </div>
+                        <button type="button" class="bd-more" aria-expanded="@(_allTemplates ? "true" : "false")" @onclick="() => _allTemplates = !_allTemplates">
+                            @if (_allTemplates) { <text>Tylko polecane</text><i class="bi bi-chevron-up"></i> }
+                            else { <text>Wszystkie style</text><span>@AppBuilderCatalog.Templates.Count</span><i class="bi bi-chevron-down"></i> }
+                        </button>
+                    }
+                    else if (_step == 4)
+                    {
+                        <h1 class="bd-title">Twoja oferta</h1>
+                        <p class="bd-sub">Gotowa propozycja dla „@Spec.Name” — popraw nazwy i ceny. Resztę dodasz w aplikacji.</p>
+
+                        <div class="bd-offers">
+                            @for (var i = 0; i < _offers.Count; i++)
+                            {
+                                var o = _offers[i];
+                                var idx = i;
+                                <div class="bd-offer">
+                                    <input class="bd-input bd-offer-name" @bind="o.Name" @bind:event="oninput" @bind:after="Touch" maxlength="60" aria-label="Nazwa treningu" placeholder="Nazwa treningu" />
+                                    <select class="bd-input bd-offer-min" @bind="o.Minutes" @bind:after="Touch" aria-label="Czas trwania">
+                                        @foreach (var m in Minutes)
+                                        {
+                                            <option value="@m">@m min</option>
+                                        }
+                                    </select>
+                                    <div class="bd-price">
+                                        <input type="number" class="bd-input" min="0" max="5000" step="10" @bind="o.Price" @bind:event="oninput" @bind:after="Touch" aria-label="Cena w złotych" />
+                                        <span>zł</span>
+                                    </div>
+                                    @if (_offers.Count > 1)
+                                    {
+                                        <button type="button" class="bd-x" title="Usuń" aria-label="Usuń trening" @onclick="() => RemoveOffer(idx)"><i class="bi bi-x-lg"></i></button>
+                                    }
+                                    @if (o.IsGroup) { <span class="bd-offer-tag"><i class="bi bi-people-fill"></i>grupa</span> }
+                                    else if (o.IsPair) { <span class="bd-offer-tag"><i class="bi bi-people"></i>w parze</span> }
+                                </div>
+                            }
+                            @if (_offers.Count < 3)
+                            {
+                                <button type="button" class="bd-add" @onclick="AddOffer"><i class="bi bi-plus-lg"></i>Dodaj rodzaj treningu</button>
+                            }
+                        </div>
+
+                        <div class="bd-package">
+                            <label class="bd-check">
+                                <input type="checkbox" @bind="_withPackage" @bind:after="Touch" />
+                                <span>Pakiet treningów — klienci płacą z góry, Ty nie gonisz przelewów</span>
+                            </label>
+                            @if (_withPackage && _offers.Count > 0)
+                            {
+                                <div class="bd-package-row">
+                                    <input type="number" class="bd-input bd-num" min="2" max="50" @bind="_pkgCount" @bind:event="oninput" @bind:after="Touch" aria-label="Liczba treningów w pakiecie" />
+                                    <span>treningów za</span>
+                                    <div class="bd-price">
+                                        <input type="number" class="bd-input" min="0" max="50000" step="10" @bind="_pkgPrice" @bind:event="oninput" @bind:after="Touch" aria-label="Cena pakietu" />
+                                        <span>zł</span>
+                                    </div>
+                                </div>
+                                <div class="bd-hint">Pakiet dotyczy treningu „@_offers[0].Name”.</div>
+                                @if (PackageHint is { } hint) { <div class="bd-package-hint"><i class="bi bi-piggy-bank"></i>@hint</div> }
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <h1 class="bd-title">@(AdminMode ? "Konto i plan trenera" : "Ostatni krok — konto i plan")</h1>
+                        <p class="bd-sub">@(AdminMode ? "Trener dostanie e-mail z linkiem do ustawienia hasła — reszta jest już wpisana." : "Tym e-mailem i hasłem zalogujesz się do aplikacji. Nie wpiszesz ich już drugi raz.")</p>
+
+                        <label class="bd-label" for="bd-email">@(AdminMode ? "E-mail trenera" : "E-mail")</label>
+                        <input id="bd-email" class="bd-input" type="email" @bind="_email" @bind:event="oninput" @bind:after="Touch"
+                               placeholder="ty@twojadomena.pl" maxlength="120" autocomplete="email" />
+
+                        @if (!AdminMode)
+                        {
+                            <label class="bd-label" for="bd-pass">Hasło</label>
+                            <div class="bd-pass">
+                                <input id="bd-pass" class="bd-input" type="@(_showPass ? "text" : "password")" @bind="_password" @bind:event="oninput" @bind:after="Touch"
+                                       maxlength="128" autocomplete="new-password" aria-describedby="bd-pass-hint" />
+                                <button type="button" class="bd-pass-eye" aria-label="@(_showPass ? "Ukryj hasło" : "Pokaż hasło")" @onclick="() => _showPass = !_showPass">
+                                    <i class="bi @(_showPass ? "bi-eye-slash" : "bi-eye")"></i>
+                                </button>
+                            </div>
+                            <div class="bd-strength s@(PasswordScore)" aria-hidden="true"><i></i><i></i><i></i><i></i></div>
+                            <div id="bd-pass-hint" class="bd-hint">@PasswordHint</div>
+                        }
+
+                        <label class="bd-label" for="bd-phone">Telefon <span class="bd-opt">(opcjonalnie — do szybkiej pomocy)</span></label>
+                        <input id="bd-phone" class="bd-input" type="tel" @bind="_phone" maxlength="30" placeholder="+48 600 123 456" autocomplete="tel" />
+
+                        <div class="bd-label bd-plan-head">
+                            <span>Plan <span class="bd-opt">— zmienisz go w każdej chwili</span></span>
+                            @if (_plans.Any(p => p.YearlyPrice is > 0))
+                            {
+                                <span class="bd-interval" role="radiogroup" aria-label="Rozliczenie">
+                                    <button type="button" role="radio" aria-checked="@(_interval == "monthly" ? "true" : "false")" class="@(_interval == "monthly" ? "on" : "")" @onclick='() => _interval = "monthly"'>Miesięcznie</button>
+                                    <button type="button" role="radio" aria-checked="@(_interval == "yearly" ? "true" : "false")" class="@(_interval == "yearly" ? "on" : "")" @onclick='() => _interval = "yearly"'>Rocznie <em>taniej</em></button>
+                                </span>
+                            }
+                        </div>
+                        <div class="bd-plans" role="radiogroup" aria-label="Plan">
+                            @foreach (var p in _plans)
+                            {
+                                <button type="button" role="radio" aria-checked="@(_planId == p.Id ? "true" : "false")" class="bd-plan @(_planId == p.Id ? "on" : "")" @onclick="() => _planId = p.Id">
+                                    <b>@p.Name</b>
+                                    <span>@PlanPrice(p)</span>
+                                    <small>@PlanNote(p)</small>
+                                </button>
+                            }
+                        </div>
+                        @if (!AdminMode)
+                        {
+                            <div class="bd-card-note"><i class="bi bi-credit-card-2-front"></i><span>@CardNote</span></div>
+
+                            @if (!_showInvite && string.IsNullOrWhiteSpace(_inviteCode))
+                            {
+                                <button type="button" class="bd-link" @onclick="() => _showInvite = true">Mam kod zaproszenia</button>
+                            }
+                            else
+                            {
+                                <label class="bd-label" for="bd-invite">Kod zaproszenia <span class="bd-opt">(opcjonalnie)</span></label>
+                                <input id="bd-invite" class="bd-input bd-mono-input" @bind="_inviteCode" @bind:after="Touch" maxlength="40" placeholder="np. SZKOLA-XYZ" autocomplete="off" />
+                            }
+
+                            <label class="bd-check bd-consent">
+                                <input type="checkbox" @bind="_consent" @bind:after="Touch" />
+                                <span>Akceptuję <a href="/regulamin" target="_blank" rel="noopener">regulamin</a> PTScheduler.</span>
+                            </label>
+                            @* Pułapka na boty — prawdziwa osoba tego pola nie widzi. *@
+                            <input class="bd-hp" tabindex="-1" autocomplete="off" aria-hidden="true" @bind="_website" name="website" />
+                        }
+                    }
+
+                    @if (_error is not null)
+                    {
+                        <div class="bd-error" role="alert"><i class="bi bi-exclamation-circle"></i>@_error</div>
+                    }
+                </div>
+
+                <div class="bd-nav">
+                    @if (_step > 1)
+                    {
+                        <button type="button" class="bd-back" @onclick="Back"><i class="bi bi-arrow-left"></i>Wstecz</button>
+                    }
+                    @if (_step < 5)
+                    {
+                        <button type="button" class="bd-next" disabled="@(!CanNext)" @onclick="Next">Dalej<i class="bi bi-arrow-right"></i></button>
+                    }
+                    else
+                    {
+                        <button type="button" class="bd-publish" disabled="@(!CanPublish || _publishing)" @onclick="Publish">
+                            @if (_publishing) { <span class="bd-spin"></span> } else { <i class="bi bi-rocket-takeoff-fill"></i> }
+                            @(AdminMode ? "Zbuduj i uruchom" : "Opublikuj aplikację")
+                        </button>
+                    }
+                </div>
+                @if (AdminMode)
+                {
+                    <p class="bd-foot"><i class="bi bi-info-circle"></i>Bez kodu z e-maila i bez karty — rozliczasz tego trenera rachunkami (Panel → Rachunki) albo dopnie kartę później.</p>
+                }
+                else
+                {
+                    <p class="bd-foot"><i class="bi bi-shield-check"></i>Na razie nic nie tworzymy — aplikacja powstanie dopiero po „Opublikuj”, potwierdzeniu e-maila i @(IsStripe || _gateway is null ? "podpięciu karty" : "płatności weryfikacyjnej").</p>
+                    <p class="bd-foot bd-foot-login">Masz już aplikację? <a href="/panel">Zaloguj się</a></p>
+                }
+            }
+            else if (_phase == Phase.Verify)
+            {
+                <div class="bd-deploy">
+                    <div class="bd-eyebrow"><i class="bi bi-envelope-check"></i>Potwierdź e-mail</div>
+                    <h1 class="bd-title">Wpisz kod z e-maila</h1>
+                    <p class="bd-sub">Wysłaliśmy 6 cyfr na <b>@_email</b>. To chroni Twoją aplikację i nasz serwer przed automatami.</p>
+                    <input id="bd-code" class="bd-input bd-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="••••••"
+                           @bind="_codeInput" @bind:event="oninput" @bind:after="CodeTyped" aria-label="Kod z e-maila" />
+                    @if (_error is not null)
+                    {
+                        <div class="bd-error" role="alert"><i class="bi bi-exclamation-circle"></i>@_error</div>
+                    }
+                    <div class="bd-nav">
+                        <button type="button" class="bd-back" @onclick="BackToAccount"><i class="bi bi-arrow-left"></i>Zmień e-mail</button>
+                        <button type="button" class="bd-publish" disabled="@(_codeInput.Trim().Length != 6 || _publishing)" @onclick="ConfirmCode">
+                            @if (_publishing) { <span class="bd-spin"></span> } else { <i class="bi bi-check2-circle"></i> }
+                            Potwierdź
+                        </button>
+                    </div>
+                    <p class="bd-foot">
+                        Nie doszło? Sprawdź spam albo
+                        @if (CanResend) { <button type="button" class="bd-link" @onclick="SendCodeAsync">wyślij kod ponownie</button> }
+                        else { <span>wyślij ponownie za @ResendIn s</span> }
+                    </p>
+                </div>
+            }
+            else if (_phase == Phase.Card)
+            {
+                <div class="bd-done">
+                    <div class="bd-done-badge"><i class="bi bi-credit-card-2-front"></i></div>
+                    @if (_waitingPayment)
+                    {
+                        <h1 class="bd-title">Czekamy na potwierdzenie płatności</h1>
+                        <p class="bd-sub">@RegistrationGateService.GatewayName(_gateway) zwykle potwierdza w kilka sekund. Nie zamykaj tej karty — zaraz ruszamy.</p>
+                        <div class="bd-wait"><span class="bd-spin dark"></span>sprawdzam…</div>
+                    }
+                    else
+                    {
+                        <h1 class="bd-title">@(IsStripe ? (_cardCancelled ? "Karta nie została dodana" : "Jeszcze tylko karta") : "Jeszcze tylko płatność weryfikacyjna")</h1>
+                        <p class="bd-sub">@CardNote To chroni serwer przed zakładaniem aplikacji „na próbę”.</p>
+                        @if (_error is not null)
+                        {
+                            <div class="bd-error" role="alert"><i class="bi bi-exclamation-circle"></i>@_error</div>
+                        }
+                        <button type="button" class="bd-publish bd-enter" disabled="@_publishing" @onclick="StartCardAsync">
+                            @if (_publishing) { <span class="bd-spin"></span> } else { <i class="bi bi-lock-fill"></i> }
+                            @(IsStripe ? "Dodaj kartę — bezpiecznie przez Stripe" : $"Zapłać {_verifyAmount.ToString("0.##", Pl)} zł przez {RegistrationGateService.GatewayName(_gateway)}")
+                        </button>
+                    }
+                </div>
+            }
+            else if (_phase == Phase.Deploying && _launch is not null)
+            {
+                <div class="bd-deploy">
+                    <div class="bd-eyebrow"><i class="bi bi-rocket-takeoff"></i>Publikacja</div>
+                    <h1 class="bd-title">Stawiamy <span class="bd-accent">@CompanyOr</span></h1>
+                    <p class="bd-sub">Zbudowane w @_builtSeconds s. Teraz serwer uruchamia Twoją aplikację — zwykle zajmuje to około minuty. Możesz zamknąć kartę, dostaniesz e-mail.</p>
+                    <ol class="bd-checklist">
+                        <li class="done"><span class="bd-ck"><i class="bi bi-check-lg"></i></span>Zapisuję Twoje ustawienia</li>
+                        @foreach (var st in _launch.Steps)
+                        {
+                            <li class="@StepCss(st.State)">
+                                <span class="bd-ck">
+                                    @if (st.State == AppLaunchService.StepState.Running) { <span class="bd-spin dark"></span> }
+                                    else if (st.State == AppLaunchService.StepState.Done) { <i class="bi bi-check-lg"></i> }
+                                    else if (st.State == AppLaunchService.StepState.Skipped) { <i class="bi bi-dash"></i> }
+                                    else if (st.State == AppLaunchService.StepState.Failed) { <i class="bi bi-x-lg"></i> }
+                                </span>
+                                @st.Label
+                            </li>
+                        }
+                    </ol>
+                    @if (_launch.Attempt > 1)
+                    {
+                        <div class="bd-retry"><i class="bi bi-arrow-repeat"></i>Serwer odpowiedział z opóźnieniem — próbuję jeszcze raz (@_launch.Attempt/3).</div>
+                    }
+                    <div class="bd-elapsed"><i class="bi bi-stopwatch"></i>trwa @Clock(DateTime.UtcNow - _launch.StartedAt)</div>
+                </div>
+            }
+            else if (_phase == Phase.Done && _launch is not null)
+            {
+                <div class="bd-done">
+                    <div class="bd-done-badge"><i class="bi bi-check-lg"></i></div>
+                    <h1 class="bd-title">Gotowe! Twoja aplikacja działa.</h1>
+                    @if (_launch.SetupFailed)
+                    {
+                        <p class="bd-sub">Aplikacja działa, ale ustawień z kreatora nie udało się wgrać automatycznie. Wejdź i dokończ krótką konfigurację — damy też znać zespołowi.</p>
+                    }
+                    else
+                    {
+                        <p class="bd-sub">Zbudowana w <b>@_builtSeconds s</b>, opublikowana w <b>@((int)((_launch.FinishedAt ?? DateTime.UtcNow) - _launch.StartedAt).TotalSeconds) s</b>. Kolor, strona i oferta są już na miejscu.</p>
+                    }
+                    @if (AdminMode)
+                    {
+                        <a class="bd-publish bd-enter" href="/panel/tenants/@_launch.TenantId">Otwórz kartę trenera<i class="bi bi-arrow-right"></i></a>
+                        <a class="bd-back bd-site-link" href="@_launch.AppUrl" target="_blank" rel="noopener"><i class="bi bi-globe2"></i>@_appHost</a>
+                        <p class="bd-foot">Trener dostał e-mail na <b>@_email</b> z linkiem do ustawienia hasła.</p>
+                    }
+                    else
+                    {
+                        <a class="bd-publish bd-enter" href="@_launch.EnterUrl">Wejdź do swojej aplikacji<i class="bi bi-arrow-right"></i></a>
+                        <a class="bd-back bd-site-link" href="@_launch.AppUrl" target="_blank" rel="noopener"><i class="bi bi-globe2"></i>@_appHost</a>
+                        <p class="bd-foot">Wysłaliśmy e-mail z adresem aplikacji i trzema krokami na dobry start na <b>@_email</b>.</p>
+                    }
+                    @if (DomainToConnect is { } dom)
+                    {
+                        <div class="bd-dns">
+                            <div class="bd-dns-title"><i class="bi bi-globe"></i>Podłącz @dom</div>
+                            <p>U dostawcy domeny (np. OVH, home.pl, nazwa.pl) dodaj rekord:</p>
+                            <table>
+                                <tr><th>Typ</th><th>Nazwa</th><th>Wartość</th></tr>
+                                @if (_serverIp is not null) { <tr><td>A</td><td>@dom</td><td>@_serverIp</td></tr> }
+                                <tr><td>CNAME</td><td>www.@dom</td><td>@_appHost</td></tr>
+                            </table>
+                            <p class="bd-opt">Sprawdzamy DNS co 10 minut przez 7 dni — gdy domena wskaże nasz serwer, sami ustawimy certyfikat i damy znać e-mailem.</p>
+                        </div>
+                    }
+                </div>
+            }
+            else
+            {
+                @if (_alreadyActiveUrl is not null)
+                {
+                    <div class="bd-done">
+                        <div class="bd-done-badge"><i class="bi bi-check-lg"></i></div>
+                        <h1 class="bd-title">Ta aplikacja już działa</h1>
+                        <p class="bd-sub">Zaloguj się e-mailem <b>@_email</b> i hasłem ustawionym w kreatorze.</p>
+                        <a class="bd-publish bd-enter" href="@($"{_alreadyActiveUrl}/Account/Login")">Przejdź do logowania<i class="bi bi-arrow-right"></i></a>
+                    </div>
+                }
+                else
+                {
+                <div class="bd-done">
+                    <div class="bd-done-badge"><i class="bi bi-hourglass-split"></i></div>
+                    <h1 class="bd-title">Twoja aplikacja czeka w kolejce</h1>
+                    <p class="bd-sub">Aplikacja <b>@CompanyOr</b> jest zbudowana, a wszystkie ustawienia są zapisane. Uruchomimy ją i damy znać e-mailem na <b>@_email</b> — zwykle w ciągu kilku godzin.</p>
+                    <p class="bd-foot"><i class="bi bi-calendar-heart"></i>Okres próbny liczymy od dnia uruchomienia, nie od dziś.</p>
+                    @if (!AdminMode)
+                    {
+                        <p class="bd-foot">Masz kod zaproszenia? Napisz do nas — uruchomimy od razu.</p>
+                    }
+                </div>
+                }
+            }
+        </div>
+
+        <div class="bd-stage @(Demo ? "bd-stage-s5" : "")" aria-label="Podgląd Twojej aplikacji na żywo">
+            <div class="bd-stage-top">
+                <span class="bd-live"><span class="bd-live-dot"></span>@(_phase is Phase.Build or Phase.Verify or Phase.Card ? "Podgląd na żywo" : _phase == Phase.Done ? "Opublikowano" : _phase == Phase.Queued ? "W kolejce" : "Publikowanie")</span>
+                <span class="bd-timer" title="Czas budowania"><i class="bi bi-stopwatch"></i>@TimerText</span>
+            </div>
+
+            <div class="bd-scene @(Demo ? "bd-demo" : "")">
+                <div class="bd-browser @(SiteBuilt ? "" : "wire")">
+                    <div class="bd-browser-bar">
+                        <span class="bd-browser-dots"><i></i><i></i><i></i></span>
+                        <span class="bd-url @(_phase == Phase.Build && _step == 1 ? "typing" : "") @(_slugState == "free" ? "free" : "")"><i class="bi bi-lock-fill"></i><span @key="_slug">@AddressText</span></span>
+                    </div>
+                    <div class="bd-site @(Theme.Dark ? "dark" : "") @(Theme.Serif ? "serif" : "")" @key="@($"s{_siteVersion}")">
+                        <div class="bd-site-nav">
+                            <span class="bd-mono sm">@Mono</span>
+                            <b class="@(BrandBuilt ? "" : "bar")">@CompanyOr</b>
+                            <span class="bd-site-links"><i></i><i></i><i></i></span>
+                            <span class="bd-site-btn">Zaloguj</span>
+                        </div>
+                        <div class="bd-site-hero">
+                            <div class="bd-site-eyebrow">@Template.Eyebrow</div>
+                            <div class="bd-site-title">@Template.Title</div>
+                            <div class="bd-site-ctas"><span class="bd-site-cta">@Template.Cta<i class="bd-cursor bi bi-cursor-fill" aria-hidden="true"></i></span><span class="bd-site-cta2">Zobacz cennik</span></div>
+                        </div>
+                        <div class="bd-site-prices @(OffersBuilt ? "" : "wire")">
+                            @foreach (var o in VisibleOffers)
+                            {
+                                <div class="bd-site-price"><span>@o.Name</span><b>@PriceText(o.Price)</b></div>
+                            }
+                        </div>
+                    </div>
+                </div>
+
+                <div class="bd-phone @Hl("color")">
+                    <div class="bd-phone-screen" @key="@($"p{_colorVersion}")">
+                        <div class="bd-phone-notch"></div>
+                        <div class="bd-phone-status"><span>9:41</span><span><i class="bi bi-reception-4"></i><i class="bi bi-wifi"></i><i class="bi bi-battery-full"></i></span></div>
+                        <div class="bd-app-head @(BrandBuilt ? "" : "wire") @Hl("brand")">
+                            <span class="bd-mono">@Mono</span>
+                            <div class="bd-app-id">
+                                <div class="bd-app-name">@CompanyOr</div>
+                                <div class="bd-app-sub">@(FirstName is null ? "Twoja aplikacja" : $"trener: {FirstName}")</div>
+                            </div>
+                            <i class="bi bi-bell"></i>
+                        </div>
+                        <div class="bd-app-hello">Cześć, Marta!</div>
+                        <div class="bd-app-next @(OffersBuilt ? "" : "wire")">
+                            <div class="bd-app-next-k">Najbliższy trening</div>
+                            <div class="bd-app-next-v">czw. 18:00 · @(VisibleOffers.FirstOrDefault()?.Name ?? "Trening personalny")</div>
+                            <span class="bd-app-chip"><i class="bi bi-check2"></i>potwierdzony</span>
+                        </div>
+                        <div class="bd-app-book">Umów trening<span class="bd-finger f1" aria-hidden="true"></span></div>
+                        <div class="bd-app-list @(OffersBuilt ? "" : "wire") @Hl("offers")">
+                            @foreach (var o in VisibleOffers)
+                            {
+                                <div class="bd-app-offer">
+                                    <span class="bd-app-ic"><i class="bi @(o.IsGroup ? "bi-people-fill" : o.IsPair ? "bi-people" : "bi-lightning-charge-fill")"></i></span>
+                                    <div class="bd-app-offer-t"><b>@o.Name</b><small>@o.Minutes min</small></div>
+                                    <span class="bd-app-price" @key="@($"{o.Name}|{o.Price}")">@PriceText(o.Price)</span>
+                                </div>
+                            }
+                            @if (_withPackage && _offers.Count > 0 && _pkgCount > 1 && _pkgPrice > 0)
+                            {
+                                <div class="bd-app-pkg"><i class="bi bi-box-seam"></i><span>Pakiet @_pkgCount treningów</span><b @key="@($"pkg{_pkgCount}|{_pkgPrice}")">@PriceText(_pkgPrice)</b></div>
+                            }
+                        </div>
+                        <div class="bd-app-nav"><i class="bi bi-house-fill on"></i><i class="bi bi-calendar3"></i><i class="bi bi-chat-dots"></i><i class="bi bi-person"></i></div>
+                        @if (Demo)
+                        {
+                            @* Ostatni krok: symulacja klienta — klik na stronie, rezerwacja w aplikacji, płatność BLIK, potwierdzenie. Pętla w CSS. *@
+                            var first = VisibleOffers.FirstOrDefault(o => o.Price > 0) ?? VisibleOffers[0];
+                            <div class="bd-scrim" aria-hidden="true"></div>
+                            <div class="bd-sheet" aria-hidden="true">
+                                <span class="bd-sheet-grab"></span>
+                                <div class="bd-sheet-t"><b>@first.Name</b><small>@first.Minutes min · @PriceText(first.Price)</small></div>
+                                <div class="bd-sheet-days"><span>pn<b>6</b></span><span>wt<b>7</b></span><span>śr<b>8</b></span><span class="on">czw<b>9</b></span></div>
+                                <div class="bd-sheet-hours"><span>17:00</span><span class="pick">18:00<span class="bd-finger f2"></span></span><span>19:30</span></div>
+                                <div class="bd-sheet-pay">@(first.Price > 0 ? $"Zapłać BLIK · {PriceText(first.Price)}" : "Zarezerwuj")<span class="bd-finger f3"></span></div>
+                                <div class="bd-sheet-ok">
+                                    <span class="bd-sheet-check"><i class="bi bi-check-lg"></i></span>
+                                    <b>Zarezerwowane!</b>
+                                    <small>czw. 18:00 · @first.Name</small>
+                                    <em><i class="bi bi-bell"></i>Przypomnimy dzień wcześniej</em>
+                                </div>
+                            </div>
+                        }
+                        @if (_phase == Phase.Deploying && _launch is not null)
+                        {
+                            @* „Instalacja” aplikacji: ikona z pierścieniem postępu — po starcie znika i odsłania gotowy ekran. *@
+                            <div class="bd-install" aria-hidden="true" style="@($"--p:{DeployPercent}")">
+                                <div class="bd-install-ring"><span class="bd-mono bd-install-icon">@Mono</span></div>
+                                <div class="bd-install-name">@CompanyOr</div>
+                                <div class="bd-install-step" @key="CurrentStepLabel">@CurrentStepLabel</div>
+                                <div class="bd-install-pct">@DeployPercent%</div>
+                            </div>
+                        }
+                        else if (_phase == Phase.Done)
+                        {
+                            <div class="bd-install bd-install-out" aria-hidden="true" style="--p:100"><div class="bd-install-ring"><span class="bd-mono bd-install-icon">@Mono</span></div></div>
+                        }
+                    </div>
+                </div>
+            </div>
+
+            @if (Demo && SelectedPlan is { } plan)
+            {
+                @* Ostatni krok: co trener dostaje w wybranym planie — zmienia się razem z wyborem po lewej. *@
+                <div class="bd-perks">
+                    <div class="bd-perks-head">
+                        <span>W planie <b>@plan.Name</b></span>
+                        <span class="bd-perks-price" @key="@($"{plan.Id}{_interval}")">@PlanPrice(plan)</span>
+                    </div>
+                    <ul class="bd-perks-list" @key="plan.Id">
+                        @foreach (var (perk, i) in PlanPerks(plan).Select((perk, i) => (perk, i)))
+                        {
+                            <li class="@(perk.Included ? "" : "off")" style="--i:@i">
+                                <i class="bi @(perk.Included ? perk.Icon : "bi-lock")"></i>
+                                <span>@perk.Text@if (!perk.Included && perk.From is not null) { <small>od planu @perk.From</small> }</span>
+                            </li>
+                        }
+                    </ul>
+                    <div class="bd-perks-trust">
+                        @if (plan.MonthlyPrice > 0 && plan.TrialDays > 0) { <span><i class="bi bi-gift"></i>@(plan.TrialDays + ExtraDays) dni za darmo</span> }
+                        <span><i class="bi bi-x-circle"></i>Rezygnujesz w każdej chwili</span>
+                        <span><i class="bi bi-shield-check"></i>Dane klientów należą do Ciebie</span>
+                        <span><i class="bi bi-chat-heart"></i>Pomoc po polsku</span>
+                    </div>
+                </div>
+                <ol class="bd-after" aria-label="Co dalej po publikacji">
+                    <li><i class="bi bi-envelope-check"></i><b>@(AdminMode ? "Trener dostaje e-mail" : "Potwierdzasz e-mail")</b><small>@AfterFirstNote</small></li>
+                    <li><i class="bi bi-rocket-takeoff"></i><b>Aplikacja startuje</b><small>zwykle w około minutę</small></li>
+                    <li><i class="bi bi-send"></i><b>@(AdminMode ? "Trener wysyła link klientom" : "Wysyłasz link klientom")</b><small>zapisują się i płacą sami</small></li>
+                </ol>
+            }
+
+            <ol class="bd-log" aria-live="polite" aria-label="Dziennik budowy">
+                @foreach (var l in _log.TakeLast(4))
+                {
+                    <li @key="l.Id"><i class="bi @l.Icon"></i><span>@l.Text</span></li>
+                }
+            </ol>
+        </div>
+    </div>
+</section>
+
+@code {
+    /// <summary>„Zbuduj dla trenera” w Panelu: bez kodu z e-maila i karty, trener dostaje link do ustawienia hasła.</summary>
+    [Parameter] public bool AdminMode { get; set; }
+
+    private enum Phase { Build, Verify, Card, Deploying, Done, Queued }
+
+    // Z adresu: ?plan=, ?nazwa= (z sekcji „Zbuduj” na stronie głównej), ?kod= (zaproszenie),
+    // ?wznow=&session_id= (powrót z płatności kartą), ?karta=anulowana.
+    private string? Plan, Nazwa, KodQuery, Wznow, SessionId, RefQuery;
+    /// <summary>Polecający trener (z ?ref= albo ze szkicu) — polecony ma dłuższy okres próbny.</summary>
+    private Tenant? _referrer;
+    private int ExtraDays => (_invite?.ExtraTrialDays ?? 0) + (_referrer is not null ? ReferralService.ReferredBonusDays : 0);
+    private bool _cardCancelled;
+
+    private sealed class OfferRow
+    {
+        public string Name { get; set; } = "";
+        public int Minutes { get; set; } = 60;
+        public decimal Price { get; set; }
+        public bool IsPair { get; set; }
+        public bool IsGroup { get; set; }
+    }
+
+    private sealed record LogLine(int Id, string Icon, string Text);
+
+    /// <summary>Szkic w przeglądarce (bez hasła) — po powrocie na stronę wszystko jest na miejscu.</summary>
+    private sealed class Draft
+    {
+        public int Step { get; set; }
+        public string? Company { get; set; }
+        public string? FullName { get; set; }
+        public string? Spec { get; set; }
+        public string? Color { get; set; }
+        public string? Template { get; set; }
+        public List<OfferRow>? Offers { get; set; }
+        public bool WithPackage { get; set; }
+        public int PkgCount { get; set; }
+        public decimal PkgPrice { get; set; }
+        public string? Email { get; set; }
+        public string? Phone { get; set; }
+        public string? PlanId { get; set; }
+        public string? Interval { get; set; }
+        public string? CustomDomain { get; set; }
+        public string? Ref { get; set; }
+    }
+
+    private static readonly int[] Minutes = [30, 45, 50, 55, 60, 75, 90, 120];
+    private static readonly System.Globalization.CultureInfo Pl = new("pl-PL");
+
+    private Phase _phase = Phase.Build;
+    private int _step = 1;
+    private int _maxStep = 1;
+    private string _company = "";
+    private string _fullName = "";
+    private string? _spec;
+    private string _color = "ocean";
+    private string _template = "personal";
+    private List<OfferRow> _offers = [];
+    private bool _withPackage = true;
+    private int _pkgCount = 8;
+    private decimal _pkgPrice = 1040;
+    private string _email = "";
+    private string _password = "";
+    private string? _phone;
+    private string _planId = "start";
+    private bool _consent;
+    private string? _website;
+    private bool _showPass;
+    private bool _publishing;
+    private string? _error;
+
+    private List<Plan> _plans = [];
+    private string _mainDomain = "ptscheduler.pl";
+    private string _slug = "";
+    private string _slugState = "";
+    private int _slugCheck;
+
+    private readonly List<LogLine> _log = [];
+    private int _logId;
+    private int _colorVersion;
+    private int _siteVersion;
+    private DateTime? _startedAt;
+    private int _builtSeconds;
+    private System.Threading.Timer? _timer;
+    private AppLaunchService.Launch? _launch;
+    private bool _celebrated;
+    private string _appHost = "";
+
+    private string _interval = "monthly";
+    private bool _wantDomain;
+    private string _customDomain = "";
+    private string? _inviteCode;
+    private bool _showInvite;
+    private InviteCode? _invite;
+    private int? _pendingTenantId;
+    private string? _serverIp;
+    private string? _alreadyActiveUrl;
+    private string? _gateway;
+    private decimal _verifyAmount = 1m;
+    private bool _waitingPayment;
+    private bool IsStripe => _gateway == "stripe";
+
+    // Kod z e-maila: trzymamy tylko skrót, ważny 10 minut, 5 prób, ponowna wysyłka po 60 s.
+    private string _codeInput = "";
+    private string? _codeHash;
+    private DateTime _codeExpires;
+    private DateTime _codeSentAt;
+    private int _codeAttempts;
+    private int _codeSends;
+    private bool _emailVerified;
+
+    private AppBuilderCatalog.Specialization Spec => AppBuilderCatalog.SpecOf(_spec);
+    private AppBuilderCatalog.AppColor Color => AppBuilderCatalog.ColorOf(_color);
+    private AppBuilderCatalog.SiteTemplate Template => AppBuilderCatalog.TemplateOf(_template);
+    private AppBuilderCatalog.SiteTheme Theme => AppBuilderCatalog.ThemeOf(Template.Theme);
+
+    /// <summary>Ostatni krok kreatora — podgląd „klika się” sam, a pod nim widać, co daje wybrany plan.</summary>
+    private bool Demo => _phase == Phase.Build && _step == 5;
+    private Plan? SelectedPlan => _plans.FirstOrDefault(p => p.Id == _planId);
+
+    private string AfterFirstNote =>
+        AdminMode ? "z linkiem do ustawienia hasła"
+        : _gateway is null ? "kodem z wiadomości"
+        : IsStripe ? "i podpinasz kartę"
+        : $"i płacisz {_verifyAmount.ToString("0.##", Pl)} zł weryfikacji";
+
+    private sealed record Perk(string Icon, string Text, bool Included, string? From);
+
+    private IEnumerable<Perk> PlanPerks(Plan p)
+    {
+        Perk Of(string icon, string text, Func<Plan, bool> has) =>
+            new(icon, text, has(p), has(p) ? null : _plans.Where(has).OrderBy(x => x.MonthlyPrice).FirstOrDefault()?.Name);
+
+        yield return new("bi-people", p.MaxClients >= 100000 ? "Bez limitu klientów" : $"Do {p.MaxClients} klientów", true, null);
+        yield return new("bi-phone", p.PushNotifications ? "Aplikacja z Twoją ikoną i powiadomieniami" : "Aplikacja na telefon z Twoją ikoną", true, null);
+        yield return Of("bi-credit-card", "Płatności online: BLIK, karta, przelew", x => x.PaymentsEnabled);
+        yield return Of("bi-chat-dots", p.MaxSmsPerMonth > 0 ? $"Przypomnienia SMS ({p.MaxSmsPerMonth}/mies.)" : "Przypomnienia SMS", x => x.SmsReminders && x.MaxSmsPerMonth > 0);
+        yield return Of("bi-clipboard2-pulse", "Plany treningowe i postępy klientów", x => x.TrainingPlansEnabled);
+        yield return Of("bi-globe2", "Własna domena, np. twojestudio.pl", x => x.CustomDomain);
+        yield return Of("bi-graph-up-arrow", "Raporty finansowe", x => x.FinancialReports);
+        if (p.MaxTrainers > 1) yield return new("bi-person-plus", $"Do {p.MaxTrainers} trenerów w zespole", true, null);
+    }
+
+    /// <summary>Krok 2 pokazuje najpierw najpopularniejsze specjalizacje — reszta po „Pokaż więcej”.</summary>
+    private const int PopularSpecs = 6;
+    private bool _allSpecs;
+    private bool _allTemplates;
+    private bool SpecIsHidden => AppBuilderCatalog.Specializations.Select(sp => sp.Key).ToList().IndexOf(_spec ?? "") >= PopularSpecs;
+    private bool ShowAllSpecs => _allSpecs || SpecIsHidden;
+
+    /// <summary>Polecane style na początku, potem wszystkie pozostałe.</summary>
+    private IEnumerable<AppBuilderCatalog.SiteTemplate> AllTemplateChoices =>
+        TemplateChoices.Concat(AppBuilderCatalog.Templates).DistinctBy(t => t.Key);
+
+    private IEnumerable<AppBuilderCatalog.SiteTemplate> TemplateChoices =>
+        new[] { Spec.Template }.Concat(Spec.AltTemplates).Distinct().Select(AppBuilderCatalog.TemplateOf);
+
+    private bool BrandBuilt => !string.IsNullOrWhiteSpace(_company);
+    private bool SiteBuilt => _spec is not null;
+    private bool OffersBuilt => _spec is not null && _offers.Count > 0;
+    private List<OfferRow> VisibleOffers => _offers.Count > 0 ? _offers : [new() { Name = "Trening personalny", Price = 150 }, new() { Name = "Konsultacja", Minutes = 30 }];
+
+    private string CompanyOr => string.IsNullOrWhiteSpace(_company) ? "Twoje studio" : _company.Trim();
+    private string Mono => AppBuilderCatalog.Monogram(string.IsNullOrWhiteSpace(_company) ? null : _company);
+    private string? FirstName => TenantSetupPayload.SplitName(_fullName).First;
+    private string BaseSlug => AppBuilderCatalog.Slugify(_company) is { Length: >= 3 } s ? s : (AppBuilderCatalog.Slugify(_company) + "-pt").Trim('-');
+    private string AddressText => $"{(string.IsNullOrEmpty(_slug) ? "twoje-studio" : _slug)}.{_mainDomain}";
+
+    private string StyleVars
+    {
+        get
+        {
+            var acc = string.IsNullOrEmpty(Theme.Accent) ? Color.Hex : Theme.Accent;
+            return $"--app:{Color.Hex};--app2:{Color.Hex2};--site-bg:{Theme.Bg};--site-surface:{Theme.Surface};--site-ink:{Theme.Ink};--site-accent:{acc}";
+        }
+    }
+
+    private bool ValidEmail => System.Text.RegularExpressions.Regex.IsMatch(_email.Trim(), @"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$");
+    private bool PasswordOk => _password.Length >= 8 && _password.Any(char.IsDigit) && _password.Any(char.IsLetter);
+    private int PasswordScore => _password.Length == 0 ? 0
+        : !PasswordOk ? 1
+        : (_password.Length >= 12 ? 1 : 0) + (_password.Any(c => !char.IsLetterOrDigit(c)) ? 1 : 0) + (_password.Any(char.IsUpper) ? 1 : 0) >= 2 ? 4
+        : _password.Length >= 10 ? 3 : 2;
+    private string PasswordHint => _password.Length == 0 ? "Co najmniej 8 znaków, w tym litera i cyfra."
+        : !PasswordOk ? "Jeszcze trochę: co najmniej 8 znaków, litera i cyfra."
+        : PasswordScore == 4 ? "Mocne hasło." : "Dobre hasło. Dłuższe albo ze znakiem specjalnym będzie jeszcze lepsze.";
+
+    private int Percent =>
+        Math.Min(100,
+            (BrandBuilt ? 18 : 0) + (_fullName.Trim().Length >= 2 ? 10 : 0) + (_spec is not null ? 20 : 0)
+            + (_maxStep > 3 ? 12 : 0) + (_maxStep > 4 ? 12 : 0)
+            + (ValidEmail ? 10 : 0) + (PasswordOk || AdminMode ? 10 : 0) + (_consent || AdminMode ? 8 : 0));
+
+    private bool CanNext => _step switch
+    {
+        1 => _company.Trim().Length >= 2 && _fullName.Trim().Length >= 2,
+        2 => _spec is not null,
+        4 => _offers.Any(o => !string.IsNullOrWhiteSpace(o.Name)),
+        _ => true
+    };
+
+    private bool CanPublish => ValidEmail && (AdminMode || (PasswordOk && _consent)) && _company.Trim().Length >= 2 && _spec is not null;
+
+    private bool Yearly(Plan p) => _interval == "yearly" && p.YearlyPrice is > 0 && p.MonthlyPrice > 0;
+    private string? CustomDomainPlanName => _plans.Where(p => p.CustomDomain).OrderBy(p => p.MonthlyPrice).FirstOrDefault()?.Name;
+
+    private string PlanPrice(Plan p) =>
+        p.MonthlyPrice <= 0 ? "0 zł"
+        : Yearly(p) ? $"{p.YearlyPrice!.Value.ToString("N0", Pl)} zł/rok"
+        : $"{p.MonthlyPrice.ToString("N0", Pl)} zł/mies.";
+
+    private string PlanNote(Plan p)
+    {
+        if (p.MonthlyPrice <= 0) return $"{(p.MaxClients >= 100000 ? "bez limitu" : $"do {p.MaxClients}")} klientów";
+        if (Yearly(p))
+        {
+            var months = (p.MonthlyPrice * 12 - p.YearlyPrice!.Value) / p.MonthlyPrice;
+            return months >= 1 ? $"{months:0.#} mies. gratis" : $"{p.TrialDays} dni za darmo";
+        }
+        return p.TrialDays > 0 ? $"{p.TrialDays} dni za darmo" : $"{(p.MaxClients >= 100000 ? "bez limitu" : $"do {p.MaxClients}")} klientów";
+    }
+
+    /// <summary>Uczciwie przed kartą: ile, od kiedy i że można zrezygnować w każdej chwili.</summary>
+    private string CardNote
+    {
+        get
+        {
+            var p = SelectedPlan;
+            if (p is null) return "";
+            var days = p.TrialDays + ExtraDays;
+            var amount = Yearly(p) ? $"{p.YearlyPrice!.Value.ToString("N0", Pl)} zł za rok" : $"{p.MonthlyPrice.ToString("N0", Pl)} zł miesięcznie";
+            if (_gateway is not null && !IsStripe)
+            {
+                // Polskie bramki: jednorazowa płatność weryfikacyjna, potem rachunki z linkiem do płatności.
+                var verify = $"Płatność weryfikacyjna {_verifyAmount.ToString("0.##", Pl)} zł przez {RegistrationGateService.GatewayName(_gateway)} (BLIK, karta albo przelew).";
+                if (p.MonthlyPrice <= 0) return verify + " Przy planie darmowym potem nic nie płacisz.";
+                return verify + (days > 0 ? $" Pierwsze {days} dni za darmo, potem {amount}" : $" Potem {amount}")
+                       + " — rachunek przyjdzie e-mailem z linkiem do płatności. Zrezygnujesz w każdej chwili jednym kliknięciem.";
+            }
+            if (p.MonthlyPrice <= 0) return "Karta jest wymagana przy każdym planie. Przy planie darmowym tylko ją zapisujemy — nic nie pobieramy.";
+            return days > 0
+                ? $"Karta jest wymagana przy każdym planie. Pierwsze {days} dni za darmo, potem {amount}. Zrezygnujesz w każdej chwili jednym kliknięciem."
+                : $"Karta jest wymagana przy każdym planie: {amount}. Zrezygnujesz w każdej chwili jednym kliknięciem.";
+        }
+    }
+
+    private string? NormalizedDomain
+    {
+        get
+        {
+            if (!_wantDomain || string.IsNullOrWhiteSpace(_customDomain)) return null;
+            var d = _customDomain.Trim().ToLowerInvariant();
+            if (d.StartsWith("http://")) d = d[7..];
+            if (d.StartsWith("https://")) d = d[8..];
+            d = d.Split('/')[0].TrimEnd('.');
+            if (d.StartsWith("www.")) d = d[4..];
+            return d;
+        }
+    }
+
+    private static bool ValidDomain(string d) =>
+        System.Text.RegularExpressions.Regex.IsMatch(d, @"^(?=.{4,100}$)([a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.)+[a-z]{2,24}$");
+
+    private string? DomainToConnect => _phase == Phase.Done ? NormalizedDomain : null;
+
+    private string? _highlight;
+    private int _flashId;
+
+    /// <summary>Krótkie podświetlenie fragmentu podglądu (np. po zmianie koloru albo po kroku z ofertą).</summary>
+    private void Flash(string area)
+    {
+        _highlight = area;
+        var id = ++_flashId;
+        _ = Task.Delay(1300).ContinueWith(_ => InvokeAsync(() => { if (_flashId == id) { _highlight = null; StateHasChanged(); } }));
+    }
+
+    private string Hl(string area) => _highlight == area ? "bd-hl" : "";
+
+    private int DeployPercent
+    {
+        get
+        {
+            if (_launch is null) return 0;
+            var steps = _launch.Steps;
+            var done = steps.Count(st => st.State is AppLaunchService.StepState.Done or AppLaunchService.StepState.Skipped);
+            var running = steps.Any(st => st.State == AppLaunchService.StepState.Running) ? 0.5 : 0;
+            return (int)Math.Round((done + running) * 100 / Math.Max(1, steps.Count + 0.0) * 0.92) + 5;
+        }
+    }
+
+    private string CurrentStepLabel =>
+        _launch?.Steps.FirstOrDefault(st => st.State == AppLaunchService.StepState.Running)?.Label ?? "Przygotowuję…";
+
+    private bool CanResend => DateTime.UtcNow - _codeSentAt > TimeSpan.FromSeconds(60) && _codeSends < 5;
+    private int ResendIn => Math.Max(0, 60 - (int)(DateTime.UtcNow - _codeSentAt).TotalSeconds);
+
+    private string? PackageHint
+    {
+        get
+        {
+            if (_offers.Count == 0 || _pkgCount < 2 || _pkgPrice <= 0) return null;
+            var per = _pkgPrice / _pkgCount;
+            var single = _offers[0].Price;
+            var text = $"{per.ToString("N0", Pl)} zł za trening";
+            if (single > per) text += $" · oszczędność {(int)Math.Round((1 - per / single) * 100)}% dla klienta";
+            return text;
+        }
+    }
+
+    private string TimerText => _phase == Phase.Build
+        ? Clock(_startedAt is { } s ? DateTime.UtcNow - s : TimeSpan.Zero)
+        : $"{_builtSeconds} s";
+
+    private static string Clock(TimeSpan t) => $"{(int)t.TotalMinutes:00}:{t.Seconds:00}";
+    private static string PriceText(decimal p) => p <= 0 ? "za darmo" : $"{p.ToString("N0", Pl)} zł";
+    private static string StepName(int n) => n switch { 1 => "Nazwa", 2 => "Specjalizacja", 3 => "Wygląd", 4 => "Oferta", _ => "Konto" };
+    private static string StepCss(AppLaunchService.StepState s) => s switch
+    {
+        AppLaunchService.StepState.Running => "run",
+        AppLaunchService.StepState.Done => "done",
+        AppLaunchService.StepState.Skipped => "skip",
+        AppLaunchService.StepState.Failed => "fail",
+        _ => ""
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
+        string? Q(string key) => query.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v) ? v.ToString() : null;
+        Plan = Q("plan"); Nazwa = Q("nazwa"); KodQuery = Q("kod"); Wznow = Q("wznow"); SessionId = Q("session_id"); RefQuery = Q("ref");
+        _cardCancelled = Q("karta") == "anulowana";
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _plans = await db.Plans.AsNoTracking().Where(p => p.IsActive).OrderBy(p => p.SortOrder).ToListAsync();
+        _planId = _plans.FirstOrDefault(p => p.Id == Plan)?.Id ?? _plans.FirstOrDefault()?.Id ?? "start";
+        var md = await Settings.GetAsync(SiteSettingsService.Keys.MainDomain);
+        if (!string.IsNullOrWhiteSpace(md)) _mainDomain = md.Trim();
+        _gateway = await Gates.RegistrationGatewayAsync();
+        _verifyAmount = await Gates.VerifyAmountAsync();
+        Launcher.Changed += OnLaunchChanged;
+
+        if (!AdminMode && Wznow is not null)
+        {
+            await ResumeAsync(Wznow);
+            return;
+        }
+
+        if (!AdminMode && RefQuery is not null) _referrer = await Referrals.FindReferrerAsync(RefQuery);
+        if (!string.IsNullOrWhiteSpace(KodQuery))
+        {
+            _inviteCode = KodQuery.Trim().ToUpperInvariant();
+            _showInvite = true;
+        }
+        if (!string.IsNullOrWhiteSpace(Nazwa))
+        {
+            _company = Nazwa.Trim()[..Math.Min(60, Nazwa.Trim().Length)];
+            _startedAt = DateTime.UtcNow;
+            await CompanyChanged();
+        }
+        AddLog("bi-cpu", AdminMode ? "Kreator dla trenera — uzupełnij dane, a podgląd składa się na żywo" : "Kreator gotowy — buduj, a podgląd składa się na żywo");
+    }
+
+    /// <summary>Powrót z płatności kartą (albo odświeżenie strony po publikacji): wracamy do tego samego zgłoszenia.</summary>
+    private async Task ResumeAsync(string key)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.RegistrationKey == key);
+        if (tenant is null)
+        {
+            _error = "Nie znaleźliśmy tego zgłoszenia — zacznij od nowa albo napisz do nas.";
+            return;
+        }
+        _pendingTenantId = tenant.Id;
+        RestoreFromTenant(tenant);
+
+        // Już uruchomiona / w trakcie: pokazujemy stan zamiast zaczynać od nowa.
+        if (Launcher.FindByTenant(tenant.Id) is { } running)
+        {
+            _launch = running;
+            _phase = running.Done ? (running.Failed ? Phase.Queued : Phase.Done) : Phase.Deploying;
+            return;
+        }
+        if (tenant.Status is TenantStatus.Active or TenantStatus.Provisioning)
+        {
+            _phase = Phase.Queued;
+            _alreadyActiveUrl = await TenantSvc.PublicUrlAsync(tenant);
+            return;
+        }
+        if (!string.IsNullOrWhiteSpace(tenant.QueuedReason))
+        {
+            _phase = Phase.Queued;
+            return;
+        }
+
+        if (tenant.RegistrationPaidAt is not null)
+        {
+            await GoLiveAsync(tenant.Id);
+            return;
+        }
+        if (!string.IsNullOrEmpty(tenant.RegistrationPaymentId))
+        {
+            // Wróciliśmy z Autopay / PayU / Przelewy24 — potwierdzenie przychodzi z bramki, chwilę czekamy.
+            _gateway = tenant.RegistrationPaymentGateway ?? _gateway;
+            _waitingPayment = true;
+            _phase = Phase.Card;
+            _ = WaitForPaymentAsync(tenant.Id);
+            return;
+        }
+
+        if (SessionId is not null)
+        {
+            var (ok, tenantId, error) = await StripeSvc.VerifyCardCheckoutAsync(SessionId);
+            if (ok && tenantId == tenant.Id)
+            {
+                AddLog("bi-credit-card-2-front", "Karta podpięta — pierwsza opłata dopiero po okresie próbnym");
+                await GoLiveAsync(tenant.Id);
+                return;
+            }
+            _error = error;
+        }
+        _phase = Phase.Card;
+    }
+
+    private void RestoreFromTenant(Tenant tenant)
+    {
+        var payload = TenantSetupPayload.FromJson(tenant.SetupPayload);
+        _company = tenant.CompanyName;
+        _fullName = tenant.OwnerName;
+        _email = tenant.OwnerEmail;
+        _phone = tenant.Phone;
+        _planId = tenant.PlanId;
+        _interval = tenant.BillingInterval;
+        _slug = tenant.Slug;
+        _appHost = tenant.Domain;
+        _inviteCode = tenant.InviteCode;
+        if (!string.IsNullOrWhiteSpace(tenant.CustomDomain)) { _wantDomain = true; _customDomain = tenant.CustomDomain; }
+        if (payload is not null)
+        {
+            _color = AppBuilderCatalog.ColorOf(payload.AppTheme).Key;
+            _template = AppBuilderCatalog.TemplateOf(payload.SiteTemplate).Key;
+            _spec = AppBuilderCatalog.Specializations.FirstOrDefault(sp => sp.Template == _template)?.Key ?? AppBuilderCatalog.Specializations[0].Key;
+            _offers = payload.Offers.Select(o => new OfferRow { Name = o.Name, Minutes = o.DurationMinutes, Price = o.Price ?? 0, IsPair = o.IsPair, IsGroup = o.IsGroup }).ToList();
+            if (payload.Package is { } pk) { _withPackage = true; _pkgCount = pk.SessionsCount; _pkgPrice = pk.Price; } else _withPackage = false;
+        }
+        else _spec ??= AppBuilderCatalog.Specializations[0].Key;
+        _step = _maxStep = 5;
+        _emailVerified = true;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        _timer = new System.Threading.Timer(_ =>
+        {
+            if ((_startedAt is not null && _phase == Phase.Build) || _phase is Phase.Deploying or Phase.Verify)
+                _ = InvokeAsync(StateHasChanged);
+        }, null, 1000, 1000);
+
+        if (!AdminMode && Wznow is null) await Funnel.TrackAsync(FunnelKinds.View);
+        if (!AdminMode && Wznow is null && _referrer is null)
+        {
+            try
+            {
+                if (await JS.InvokeAsync<string?>("ptBuilder.refCookie") is { } refCode && await Referrals.FindReferrerAsync(refCode) is { } r)
+                {
+                    _referrer = r;
+                    StateHasChanged();
+                }
+            }
+            catch (JSException) { }
+        }
+        if (string.IsNullOrWhiteSpace(Nazwa) && !AdminMode && Wznow is null)
+        {
+            try
+            {
+                var json = await JS.InvokeAsync<string?>("ptBuilder.load");
+                if (!string.IsNullOrWhiteSpace(json) && System.Text.Json.JsonSerializer.Deserialize<Draft>(json) is { } d && !string.IsNullOrWhiteSpace(d.Company))
+                {
+                    RestoreDraft(d);
+                    if (_referrer is null && d.Ref is not null) _referrer = await Referrals.FindReferrerAsync(d.Ref);
+                    await CompanyChanged();
+                    AddLog("bi-arrow-counterclockwise", "Przywrócono Twój szkic — możesz budować dalej");
+                    StateHasChanged();
+                }
+            }
+            catch (Exception ex) when (ex is JSException or System.Text.Json.JsonException) { }
+        }
+        if (_phase == Phase.Build) await JS.InvokeVoidAsync("ptBuilder.focus", _step == 1 ? "#bd-company" : ".bd-step input");
+    }
+
+    private void RestoreDraft(Draft d)
+    {
+        _company = d.Company ?? "";
+        _fullName = d.FullName ?? "";
+        if (d.Spec is not null && AppBuilderCatalog.Specializations.Any(s => s.Key == d.Spec)) _spec = d.Spec;
+        if (d.Color is not null) _color = AppBuilderCatalog.ColorOf(d.Color).Key;
+        if (d.Template is not null) _template = AppBuilderCatalog.TemplateOf(d.Template).Key;
+        if (d.Offers is { Count: > 0 }) _offers = d.Offers.Take(3).ToList();
+        _withPackage = d.WithPackage;
+        if (d.PkgCount > 1) _pkgCount = d.PkgCount;
+        if (d.PkgPrice > 0) _pkgPrice = d.PkgPrice;
+        _email = d.Email ?? "";
+        _phone = d.Phone;
+        if (d.PlanId is not null && _plans.Any(p => p.Id == d.PlanId)) _planId = d.PlanId;
+        if (d.Interval is "monthly" or "yearly") _interval = d.Interval;
+        if (!string.IsNullOrWhiteSpace(d.CustomDomain)) { _wantDomain = true; _customDomain = d.CustomDomain; }
+        _step = Math.Clamp(d.Step, 1, 5);
+        _maxStep = _step;
+        _startedAt = DateTime.UtcNow;
+    }
+
+    private async Task SaveDraftAsync()
+    {
+        var d = new Draft
+        {
+            Step = _step, Company = _company, FullName = _fullName, Spec = _spec, Color = _color, Template = _template,
+            Offers = _offers, WithPackage = _withPackage, PkgCount = _pkgCount, PkgPrice = _pkgPrice,
+            Email = _email, Phone = _phone, PlanId = _planId, Interval = _interval, CustomDomain = _wantDomain ? _customDomain : null,
+            Ref = _referrer?.Slug
+        };
+        if (AdminMode) return;
+        try { await JS.InvokeVoidAsync("ptBuilder.save", System.Text.Json.JsonSerializer.Serialize(d)); } catch (JSException) { }
+    }
+
+    private void Touch()
+    {
+        _startedAt ??= DateTime.UtcNow;
+        _error = null;
+    }
+
+    private void AddLog(string icon, string text)
+    {
+        _log.Add(new LogLine(++_logId, icon, text));
+        if (_log.Count > 12) _log.RemoveAt(0);
+    }
+
+    private async Task CompanyChanged()
+    {
+        Touch();
+        var check = ++_slugCheck;
+        var baseSlug = BaseSlug;
+        if (string.IsNullOrWhiteSpace(_company)) { _slug = ""; _slugState = ""; return; }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var free = await FreeSlugAsync(db, baseSlug);
+        if (check != _slugCheck) return; // w międzyczasie wpisano kolejną literę
+        _slug = free;
+        _slugState = free == baseSlug ? "free" : "taken";
+    }
+
+    private static async Task<string> FreeSlugAsync(PortalDbContext db, string baseSlug)
+    {
+        var taken = await db.Tenants.AsNoTracking()
+            .Where(t => t.Slug == baseSlug || t.Slug.StartsWith(baseSlug + "-"))
+            .Select(t => t.Slug).ToListAsync();
+        if (!taken.Contains(baseSlug) && !AppBuilderCatalog.ReservedSlugs.Contains(baseSlug)) return baseSlug;
+        for (var i = 2; ; i++)
+            if (!taken.Contains($"{baseSlug}-{i}")) return $"{baseSlug}-{i}";
+    }
+
+    private void PickSpec(AppBuilderCatalog.Specialization sp)
+    {
+        Touch();
+        var changed = _spec != sp.Key;
+        _spec = sp.Key;
+        if (!changed) return;
+        _template = sp.Template;
+        _color = sp.Color;
+        _offers = sp.Offers.Select(o => new OfferRow { Name = o.Name, Minutes = o.Minutes, Price = o.Price, IsPair = o.IsPair, IsGroup = o.IsGroup }).ToList();
+        _pkgCount = sp.PackageCount;
+        _pkgPrice = sp.PackagePrice;
+        _withPackage = true;
+        _colorVersion++;
+        _siteVersion++;
+        AddLog("bi-window-stack", $"Strona „{Template.Name}” złożona z {Template.Sections} sekcji");
+        AddLog("bi-tags", $"Oferta: {_offers.Count} rodzaje treningów i pakiet {_pkgCount} treningów");
+        AddLog("bi-palette", $"Kolor „{Color.Name}” dobrany do specjalizacji");
+    }
+
+    private void PickColor(AppBuilderCatalog.AppColor c)
+    {
+        Touch();
+        if (_color == c.Key) return;
+        _color = c.Key;
+        // Bez przebudowy ekranu: kolor przechodzi płynnie (zmienne --app/--app2 są animowane w CSS).
+        Flash("color");
+        AddLog("bi-palette-fill", $"Kolor „{c.Name}” w całej aplikacji — przyciski, ikony, powiadomienia");
+    }
+
+    private void PickTemplate(AppBuilderCatalog.SiteTemplate t)
+    {
+        Touch();
+        if (_template == t.Key) return;
+        _template = t.Key;
+        _siteVersion++;
+        AddLog("bi-layout-text-window-reverse", $"Strona przebudowana: „{t.Name}”, {t.Sections} sekcji");
+    }
+
+    private void AddOffer()
+    {
+        Touch();
+        _offers.Add(new OfferRow { Name = "", Minutes = 60, Price = _offers.FirstOrDefault()?.Price ?? 150 });
+    }
+
+    private void RemoveOffer(int idx)
+    {
+        Touch();
+        if (idx >= 0 && idx < _offers.Count && _offers.Count > 1) _offers.RemoveAt(idx);
+    }
+
+    private async Task GoTo(int n)
+    {
+        if (n > _maxStep || n == _step) return;
+        _step = n;
+        _error = null;
+        await FocusStepAsync();
+    }
+
+    private async Task Back()
+    {
+        if (_step <= 1) return;
+        _step--;
+        _error = null;
+        await FocusStepAsync();
+    }
+
+    private async Task Next()
+    {
+        if (!CanNext) return;
+        switch (_step)
+        {
+            case 1:
+                if (!AdminMode && _maxStep == 1) await Funnel.TrackAsync(FunnelKinds.Start);
+                Flash("brand");
+                AddLog("bi-badge-ad", $"Logo „{Mono}” wygenerowane z nazwy");
+                AddLog("bi-globe2", $"Adres {AddressText} — wolny");
+                break;
+            case 3:
+                AddLog("bi-phone", "Aplikacja na telefon gotowa do instalacji z Twoją ikoną");
+                break;
+            case 4:
+                if (!AdminMode && _maxStep == 4) await Funnel.TrackAsync(FunnelKinds.Account);
+                Flash("offers");
+                var named = _offers.Count(o => !string.IsNullOrWhiteSpace(o.Name));
+                _offers.RemoveAll(o => string.IsNullOrWhiteSpace(o.Name));
+                AddLog("bi-cash-coin", $"Cennik: {named} {(named == 1 ? "pozycja" : "pozycje")}{(_withPackage ? " i pakiet" : "")} — klienci zapłacą online albo u Ciebie");
+                AddLog("bi-hand-index", "Symulacja: klient klika na stronie, rezerwuje i płaci BLIK-iem");
+                break;
+        }
+        _step++;
+        _maxStep = Math.Max(_maxStep, _step);
+        await SaveDraftAsync();
+        await FocusStepAsync();
+    }
+
+    private async Task FocusStepAsync()
+    {
+        try { await JS.InvokeVoidAsync("ptBuilder.focus", _step == 1 ? "#bd-company" : _step == 5 ? "#bd-email" : ".bd-step button, .bd-step input"); }
+        catch (JSException) { }
+    }
+
+    private async Task HandleKey(KeyboardEventArgs e)
+    {
+        if (e.Key != "Enter" || _phase != Phase.Build) return;
+        if (_step < 5 && CanNext) await Next();
+    }
+
+    private string? ClientIp()
+    {
+        var ctx = HttpAccessor.HttpContext;
+        var forwarded = ctx?.Request.Headers["X-Forwarded-For"].ToString();
+        if (!string.IsNullOrWhiteSpace(forwarded)) return forwarded.Split(',')[0].Trim();
+        return ctx?.Connection.RemoteIpAddress?.ToString();
+    }
+
+    /// <summary>„Opublikuj”: sprawdzenie danych, potem kod z e-maila → karta → start albo kolejka. Admin: od razu start.</summary>
+    private async Task Publish()
+    {
+        _error = null;
+        if (!CanPublish || _publishing) return;
+        _builtSeconds = _startedAt is { } s ? Math.Max(1, (int)(DateTime.UtcNow - s).TotalSeconds) : 0;
+
+        // Bot wypełnił ukryte pole — udajemy, że wszystko gra, i nic nie zakładamy.
+        if (!AdminMode && !string.IsNullOrEmpty(_website)) { _phase = Phase.Queued; return; }
+
+        var email = _email.Trim().ToLowerInvariant();
+        if (RegistrationGateService.IsDisposableEmail(email))
+        {
+            _error = "Ten adres wygląda na skrzynkę jednorazową. Podaj adres, z którego korzystasz na co dzień — przyjdą na niego ważne wiadomości o aplikacji.";
+            return;
+        }
+        var domain = NormalizedDomain;
+        if (domain is not null)
+        {
+            if (!ValidDomain(domain)) { _error = "Własna domena wygląda na niepoprawną — wpisz ją jak annafit.pl (bez https://)."; return; }
+            if (domain.EndsWith("." + _mainDomain, StringComparison.OrdinalIgnoreCase) || domain == _mainDomain)
+            { _error = $"Adres w {_mainDomain} dostajesz automatycznie — tu wpisz swoją domenę, np. annafit.pl."; return; }
+            if (SelectedPlan is { CustomDomain: false })
+            { _error = $"Własna domena jest dostępna od planu {CustomDomainPlanName ?? "Starter"}. Wybierz go albo odznacz własną domenę — dodasz ją później."; return; }
+        }
+        if (!AdminMode && !string.IsNullOrWhiteSpace(_inviteCode))
+        {
+            _invite = await Gates.FindInviteAsync(_inviteCode);
+            if (_invite is null) { _error = "Ten kod zaproszenia jest nieważny albo został już wykorzystany. Usuń go, żeby kontynuować."; return; }
+        }
+
+        await using (var db = await DbFactory.CreateDbContextAsync())
+        {
+            if (await db.Tenants.AnyAsync(t => t.OwnerEmail == email && t.Status != TenantStatus.Destroyed))
+            {
+                _error = AdminMode ? "Na ten adres jest już aplikacja (Panel → Trenerzy)." : "Na ten adres e-mail jest już aplikacja. Zaloguj się w niej albo użyj innego adresu.";
+                return;
+            }
+        }
+
+        if (AdminMode) { await PublishAsAdminAsync(); return; }
+
+        if (!Launcher.TryRegisterAttempt(ClientIp()))
+        {
+            _error = "Za dużo prób z tego adresu. Spróbuj ponownie za godzinę albo napisz do nas.";
+            return;
+        }
+
+        if (_emailVerified) { await CreateTenantAndCardAsync(); return; }
+        await SendCodeAsync();
+    }
+
+    private async Task SendCodeAsync()
+    {
+        _error = null;
+        if (_codeSends >= 5) { _error = "Wysłaliśmy już kilka kodów. Odczekaj chwilę albo napisz do nas."; return; }
+        _publishing = true;
+        try
+        {
+            var code = System.Security.Cryptography.RandomNumberGenerator.GetInt32(0, 1_000_000).ToString("000000");
+            var (sent, error) = await EmailSvc.SendAsync(_email.Trim(), $"{code} — kod do publikacji aplikacji", EmailSvc.VerificationCodeEmailBody(code));
+            if (!sent)
+            {
+                // Bez skonfigurowanej poczty (instalacja testowa) nie da się wysłać kodu — przepuszczamy, żeby nie blokować.
+                if (error?.Contains("SMTP nie skonfigurowany") == true)
+                {
+                    Log.LogWarning("SMTP nie jest skonfigurowany — publikacja z kreatora bez kodu e-mail.");
+                    _emailVerified = true;
+                    await CreateTenantAndCardAsync();
+                    return;
+                }
+                _error = "Nie udało się wysłać kodu. Sprawdź adres e-mail i spróbuj ponownie.";
+                return;
+            }
+            _codeHash = HashCode(code);
+            _codeExpires = DateTime.UtcNow.AddMinutes(10);
+            _codeSentAt = DateTime.UtcNow;
+            _codeAttempts = 0;
+            _codeSends++;
+            _codeInput = "";
+            _phase = Phase.Verify;
+            AddLog("bi-envelope-check", $"Kod wysłany na {_email.Trim()}");
+            try { await JS.InvokeVoidAsync("window.scrollTo", 0, 0); await JS.InvokeVoidAsync("ptBuilder.focus", "#bd-code"); } catch (JSException) { }
+        }
+        finally { _publishing = false; }
+    }
+
+    private string HashCode(string code) =>
+        Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes($"{_email.Trim().ToLowerInvariant()}|{code}")));
+
+    private async Task CodeTyped()
+    {
+        _error = null;
+        _codeInput = new string(_codeInput.Where(char.IsDigit).ToArray());
+        if (_codeInput.Length == 6) await ConfirmCode();
+    }
+
+    private async Task ConfirmCode()
+    {
+        if (_publishing || _codeHash is null) return;
+        if (DateTime.UtcNow > _codeExpires) { _error = "Kod wygasł — wyślij nowy."; return; }
+        if (++_codeAttempts > 5) { _error = "Za dużo błędnych prób — wyślij nowy kod."; _codeHash = null; return; }
+        if (!System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+                System.Text.Encoding.ASCII.GetBytes(HashCode(_codeInput.Trim())), System.Text.Encoding.ASCII.GetBytes(_codeHash)))
+        {
+            _error = "To nie ten kod. Sprawdź jeszcze raz.";
+            return;
+        }
+        _emailVerified = true;
+        AddLog("bi-patch-check", "E-mail potwierdzony");
+        await CreateTenantAndCardAsync();
+    }
+
+    private void BackToAccount()
+    {
+        _phase = Phase.Build;
+        _step = 5;
+        _error = null;
+        _codeHash = null;
+    }
+
+    private TenantSetupPayload BuildPayload(string email, string? passwordHash)
+    {
+        var (first, last) = TenantSetupPayload.SplitName(_fullName.Trim());
+        return new TenantSetupPayload
+        {
+            CompanyName = _company.Trim(),
+            OwnerEmail = email,
+            OwnerFirstName = first,
+            OwnerLastName = last,
+            OwnerPhone = string.IsNullOrWhiteSpace(_phone) ? null : _phone.Trim(),
+            PasswordHash = passwordHash,
+            SetupMode = "self",
+            AppTheme = _color,
+            SiteTemplate = _template,
+            Offers = _offers.Where(o => !string.IsNullOrWhiteSpace(o.Name)).Select(o => new TenantSetupPayload.OfferItem
+            {
+                Name = o.Name.Trim(), DurationMinutes = o.Minutes, Price = o.Price > 0 ? o.Price : null, IsPair = o.IsPair, IsGroup = o.IsGroup
+            }).ToList(),
+            Package = _withPackage && _pkgCount > 1 && _pkgPrice > 0
+                ? new TenantSetupPayload.PackageItem { Name = $"Pakiet {_pkgCount} treningów", SessionsCount = _pkgCount, Price = _pkgPrice, OfferIndex = 0 }
+                : null
+        };
+    }
+
+    /// <summary>Zapisuje zgłoszenie (bez instancji!) z danymi kreatora i zwraca je.</summary>
+    private async Task<Tenant> CreateTenantAsync(string? passwordHash)
+    {
+        var email = _email.Trim().ToLowerInvariant();
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var slug = await FreeSlugAsync(db, BaseSlug);
+        var payload = BuildPayload(email, passwordHash);
+        var tenant = await TenantSvc.CreateAsync(slug, $"{slug}.{_mainDomain}", _company.Trim(), _fullName.Trim(), email,
+            payload.OwnerPhone, _planId, "self", payload.ToJson());
+
+        var t = await db.Tenants.FindAsync(tenant.Id);
+        if (t is not null)
+        {
+            t.BillingInterval = SelectedPlan is { } p && Yearly(p) ? "yearly" : "monthly";
+            t.RegistrationKey = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(18)).Replace('+', '-').Replace('/', '_').TrimEnd('=');
+            t.InviteCode = _invite?.Code;
+            if (_referrer is not null && !string.Equals(_referrer.OwnerEmail, email, StringComparison.OrdinalIgnoreCase))
+                t.ReferredByTenantId = _referrer.Id;
+            if (NormalizedDomain is { } dom) { t.CustomDomain = dom; t.CustomDomainStatus = "waiting"; t.CustomDomainSince = DateTime.UtcNow; }
+            await db.SaveChangesAsync();
+            tenant = t;
+        }
+        _appHost = tenant.Domain;
+        _slug = tenant.Slug;
+        _pendingTenantId = tenant.Id;
+        AddLog("bi-person-check", $"Zgłoszenie zapisane: {tenant.Domain}");
+        return tenant;
+    }
+
+    private async Task CreateTenantAndCardAsync()
+    {
+        _publishing = true;
+        try
+        {
+            if (_pendingTenantId is null)
+            {
+                await CreateTenantAsync(TenantSetupPayload.HashPassword(_password));
+                _password = "";
+            }
+            await StartCardAsync();
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "Publikacja z kreatora nie powiodła się.");
+            _error = "Nie udało się zapisać zgłoszenia. Spróbuj jeszcze raz za chwilę.";
+            _phase = Phase.Build;
+        }
+        finally { _publishing = false; }
+    }
+
+    /// <summary>Karta przez Stripe Checkout. Bez skonfigurowanego Stripe zgłoszenie czeka w kolejce.</summary>
+    private async Task StartCardAsync()
+    {
+        if (_pendingTenantId is not { } tenantId) return;
+        _error = null;
+        _gateway = await Gates.RegistrationGatewayAsync();
+        if (_gateway is null)
+        {
+            await QueueAsync(tenantId, "Żadna bramka płatności nie jest skonfigurowana (Stripe, Autopay, PayU, Przelewy24) — zgłoszenie bez weryfikacji.");
+            return;
+        }
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var key = await db.Tenants.Where(t => t.Id == tenantId).Select(t => t.RegistrationKey).FirstOrDefaultAsync();
+        var back = $"{Nav.BaseUri}register?wznow={Uri.EscapeDataString(key ?? "")}";
+        if (!IsStripe)
+        {
+            var (payUrl, payError) = await Gates.StartVerificationPaymentAsync(tenantId, _gateway, back + "&platnosc=1", Nav.BaseUri);
+            if (payUrl is null)
+            {
+                Log.LogWarning("Płatność weryfikacyjna {Gateway} nie wystartowała dla {TenantId}: {Error}", _gateway, tenantId, payError);
+                await QueueAsync(tenantId, $"Nie udało się otworzyć płatności {RegistrationGateService.GatewayName(_gateway)}: {payError}");
+                return;
+            }
+            try { await JS.InvokeVoidAsync("ptBuilder.clear"); } catch (JSException) { }
+            Nav.NavigateTo(payUrl, forceLoad: true);
+            return;
+        }
+        var (ok, url, error) = await StripeSvc.StartCardCheckoutAsync(tenantId, back + "&session_id={CHECKOUT_SESSION_ID}", back + "&karta=anulowana",
+            ExtraDays);
+        if (!ok || url is null)
+        {
+            Log.LogWarning("Stripe Checkout nie wystartował dla {TenantId}: {Error}", tenantId, error);
+            await QueueAsync(tenantId, $"Nie udało się otworzyć płatności kartą: {error}");
+            return;
+        }
+        try { await JS.InvokeVoidAsync("ptBuilder.clear"); } catch (JSException) { }
+        Nav.NavigateTo(url, forceLoad: true);
+    }
+
+    /// <summary>Po powrocie z polskiej bramki: czekamy do minuty na potwierdzenie (ITN / webhook).</summary>
+    private async Task WaitForPaymentAsync(int tenantId)
+    {
+        for (var i = 0; i < 30; i++)
+        {
+            await Task.Delay(2000);
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var paid = await db.Tenants.AsNoTracking().Where(t => t.Id == tenantId).Select(t => t.RegistrationPaidAt).FirstOrDefaultAsync();
+            if (paid is not null)
+            {
+                await InvokeAsync(async () =>
+                {
+                    _waitingPayment = false;
+                    AddLog("bi-patch-check", "Płatność potwierdzona");
+                    await GoLiveAsync(tenantId);
+                    StateHasChanged();
+                });
+                return;
+            }
+        }
+        await InvokeAsync(() =>
+        {
+            _waitingPayment = false;
+            _error = "Nie dostaliśmy jeszcze potwierdzenia płatności. Jeśli płatność się udała, odświeżymy wszystko sami i damy znać e-mailem — możesz też spróbować ponownie.";
+            StateHasChanged();
+        });
+    }
+
+    /// <summary>Karta jest — bramki decydują: start od razu albo kolejka (z powodem dla admina).</summary>
+    private async Task GoLiveAsync(int tenantId)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var tenant = await db.Tenants.AsNoTracking().FirstAsync(t => t.Id == tenantId);
+        var decision = await Gates.DecideAsync(tenant);
+        if (!decision.Launch)
+        {
+            await QueueAsync(tenantId, decision.QueueReason ?? "Czeka na akceptację.");
+            return;
+        }
+        var invite = await Gates.FindInviteAsync(tenant.InviteCode);
+        if (invite is not null) await Gates.ConsumeInviteAsync(invite.Code);
+        var token = await Gates.PrepareWelcomeTokenAsync(tenantId);
+        _launch = Launcher.Start(tenantId, token, invite is not null ? "invite" : "limit");
+        _phase = Phase.Deploying;
+        AddLog("bi-rocket-takeoff", "Publikacja rozpoczęta");
+        try { await JS.InvokeVoidAsync("ptBuilder.clear"); await JS.InvokeVoidAsync("window.scrollTo", 0, 0); } catch (Exception) { }
+    }
+
+    private async Task QueueAsync(int tenantId, string reason)
+    {
+        await Gates.QueueAsync(tenantId, reason);
+        _phase = Phase.Queued;
+        AddLog("bi-hourglass-split", "Zgłoszenie w kolejce do uruchomienia");
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var t = await db.Tenants.AsNoTracking().Include(x => x.Plan).FirstAsync(x => x.Id == tenantId);
+            var (first, _) = TenantSetupPayload.SplitName(t.OwnerName);
+            _ = EmailSvc.SendAsync(t.OwnerEmail, $"{t.CompanyName} — aplikacja w kolejce do uruchomienia", EmailSvc.AppQueuedEmailBody(first ?? t.OwnerName, t.CompanyName));
+            var adminEmail = await Settings.GetAsync(SiteSettingsService.Keys.AdminNotificationEmail);
+            if (!string.IsNullOrWhiteSpace(adminEmail))
+                _ = EmailSvc.SendAsync(adminEmail, $"W kolejce: {t.CompanyName} — {reason}",
+                    EmailSvc.AdminNewRegistrationEmailBody(t.OwnerName, t.OwnerEmail, t.CompanyName, t.Plan?.Name ?? t.PlanId, t.Phone ?? "", t.Id));
+            await JS.InvokeVoidAsync("ptBuilder.clear");
+            await JS.InvokeVoidAsync("window.scrollTo", 0, 0);
+        }
+        catch (Exception ex) { Log.LogWarning(ex, "Powiadomienia o kolejce nie zostały wysłane."); }
+    }
+
+    /// <summary>„Zbuduj dla trenera”: zgłoszenie bez hasła i od razu start; trener ustawi hasło z linku w e-mailu.</summary>
+    private async Task PublishAsAdminAsync()
+    {
+        _publishing = true;
+        try
+        {
+            var tenant = await CreateTenantAsync(passwordHash: null);
+            _launch = Launcher.Start(tenant.Id, null, null, builtByAdmin: true);
+            _phase = Phase.Deploying;
+            AddLog("bi-rocket-takeoff", "Uruchamiam aplikację trenera");
+        }
+        catch (Exception ex)
+        {
+            Log.LogError(ex, "Budowanie aplikacji dla trenera nie powiodło się.");
+            _error = $"Nie udało się zapisać: {ex.Message}";
+        }
+        finally { _publishing = false; }
+    }
+
+    private void OnLaunchChanged(Guid id)
+    {
+        if (_launch is null || id != _launch.Id) return;
+        _ = InvokeAsync(async () =>
+        {
+            if (_launch.Done && !_celebrated)
+            {
+                _celebrated = true;
+                _phase = _launch.Failed ? Phase.Queued : Phase.Done;
+                if (!_launch.Failed)
+                {
+                    AddLog("bi-stars", AdminMode ? "Aplikacja trenera działa" : "Aplikacja działa — witaj na pokładzie!");
+                    if (NormalizedDomain is { } dom) _serverIp = await ResolveServerIpAsync();
+                    StateHasChanged();
+                    try { await JS.InvokeVoidAsync("ptBuilder.confetti", new[] { Color.Hex, Color.Hex2, "#06D6A0", "#FFD166", "#FF6B9D", "#7C3AED" }, ".bd-phone"); }
+                    catch (JSException) { }
+                }
+            }
+            StateHasChanged();
+        });
+    }
+
+    /// <summary>Publiczny adres serwera do rekordu A: z adresu trenera w domenie platformy albo z głównej domeny.</summary>
+    private async Task<string?> ResolveServerIpAsync()
+    {
+        foreach (var host in new[] { _appHost, _mainDomain })
+        {
+            if (string.IsNullOrWhiteSpace(host)) continue;
+            try
+            {
+                var ips = await System.Net.Dns.GetHostAddressesAsync(host).WaitAsync(TimeSpan.FromSeconds(4));
+                var v4 = ips.FirstOrDefault(i => i.AddressFamily == System.Net.Sockets.AddressFamily.InterNetwork);
+                if (v4 is not null) return v4.ToString();
+            }
+            catch (Exception) { }
+        }
+        return null;
+    }
+
+    public void Dispose()
+    {
+        Launcher.Changed -= OnLaunchChanged;
+        _timer?.Dispose();
+    }
+}

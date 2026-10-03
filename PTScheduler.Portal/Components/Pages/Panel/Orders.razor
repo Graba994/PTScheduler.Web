@@ -1,0 +1,380 @@
+@page "/panel/orders"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject EmailService EmailService
+@inject SiteSettingsService SiteSettings
+@inject CreditService Credits
+@rendermode InteractiveServer
+
+<PageTitle>Zgłoszenia — PTScheduler Portal</PageTitle>
+
+<PanelHeader Title="Zgłoszenia i zamówienia" Icon="bi-bag-check" Subtitle="Dodatki (SMS-y, wideo) i doładowania włączają się same. Tu trafiają usługi do zrobienia — szkolenia, konfiguracje, pakiety wsparcia.">
+    <Actions>
+    <div class="d-flex gap-2">
+        <select class="form-select form-select-sm" style="width:auto" @bind="_statusFilter" @bind:after="Load">
+            <option value="todo">Do zrobienia</option>
+            <option value="">Wszystkie</option>
+            <option value="AwaitingPayment">Oczekuje na płatność</option>
+            <option value="Pending">Oczekujące</option>
+            <option value="Accepted">Zaakceptowane</option>
+            <option value="InProgress">W realizacji</option>
+            <option value="Completed">Zrealizowane</option>
+            <option value="Cancelled">Anulowane</option>
+        </select>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="Load">
+            <i class="bi bi-arrow-clockwise"></i>
+        </button>
+    </div>
+    </Actions>
+</PanelHeader>
+
+<details class="card border-0 shadow-sm mb-3" open="@_notifyOpen">
+    <summary class="card-body py-2 d-flex align-items-center gap-2" style="cursor:pointer">
+        <i class="bi bi-bell text-primary"></i><span class="fw-semibold">Powiadomienia o nowych zgłoszeniach</span>
+        <span class="small text-muted ms-auto">@NotifySummary</span>
+    </summary>
+    <div class="card-body pt-0">
+        <div class="row g-3">
+            <div class="col-md-6">
+                <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" id="nEmail" @bind="_nEmailOn" />
+                    <label class="form-check-label" for="nEmail">E-mail</label>
+                </div>
+                <input class="form-control form-control-sm" type="email" placeholder="adres administratora" @bind="_nEmail" disabled="@(!_nEmailOn)" />
+            </div>
+            <div class="col-md-6">
+                <div class="form-check form-switch mb-2">
+                    <input class="form-check-input" type="checkbox" id="nSms" @bind="_nSmsOn" />
+                    <label class="form-check-label" for="nSms">SMS (z konta SMS platformy)</label>
+                </div>
+                <input class="form-control form-control-sm" type="tel" placeholder="np. 600 100 200" @bind="_nPhone" disabled="@(!_nSmsOn)" />
+            </div>
+        </div>
+        <div class="d-flex gap-2 mt-3">
+            <button class="btn btn-sm btn-primary" @onclick="SaveNotify"><i class="bi bi-floppy me-1"></i>Zapisz</button>
+            <button class="btn btn-sm btn-outline-secondary" @onclick="TestNotify" disabled="@(!_nEmailOn && !_nSmsOn)"><i class="bi bi-send me-1"></i>Wyślij test</button>
+        </div>
+    </div>
+</details>
+
+@if (_message is not null)
+{
+    <div class="alert @(_msgError ? "alert-danger" : "alert-success") alert-dismissible py-2 small">
+        @_message
+        <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button>
+    </div>
+}
+
+@{
+    var pendingCount = _orders.Count(o => o.Status == ServiceOrderStatus.Pending);
+    var activeCount = _orders.Count(o => o.Status is ServiceOrderStatus.Accepted or ServiceOrderStatus.InProgress);
+}
+@if (pendingCount > 0)
+{
+    <StatusBanner Tone="warn" Icon="bi-bell-fill" Title="@($"{pendingCount} {PanelUi.Plural(pendingCount, "nowe zgłoszenie czeka", "nowe zgłoszenia czekają", "nowych zgłoszeń czeka")} na Ciebie")">
+        Zaakceptuj, żeby trener wiedział, że zajmiesz się usługą — albo odrzuć z krótką notatką. Po zakończeniu kwota trafi na rachunek trenera (jeśli nie zapłacił online).
+    </StatusBanner>
+}
+else if (activeCount > 0)
+{
+    <StatusBanner Tone="info" Icon="bi-hourglass-split" Title="@($"W realizacji: {activeCount}")">Po zakończeniu pracy oznacz zamówienie jako zrealizowane — trener dostanie powiadomienie.</StatusBanner>
+}
+
+@if (_orders.Count == 0)
+{
+    <div class="card border-0 shadow-sm">
+        <div class="card-body text-center text-muted py-5">
+            <i class="bi bi-inbox fs-1 d-block mb-2"></i>
+            <p class="mb-0">@(_statusFilter == "todo" ? "Nic do zrobienia — wszystkie zgłoszenia są obsłużone." : Enum.TryParse<ServiceOrderStatus>(_statusFilter, out var st) ? $"Brak zamówień o statusie „{StatusLabel(st)}”." : "Brak zamówień.")</p>
+        </div>
+    </div>
+}
+else
+{
+    <div class="row g-3">
+        @foreach (var order in _orders)
+        {
+            <div class="col-12">
+                <div class="card border-0 shadow-sm @(order.Status == ServiceOrderStatus.Pending ? "border-start border-warning border-3" : "")">
+                    <div class="card-body">
+                        <div class="d-flex justify-content-between align-items-start">
+                            <div>
+                                <div class="d-flex align-items-center gap-2 mb-1">
+                                    <i class="bi @(order.ServiceItem?.Icon ?? "bi-box") text-primary"></i>
+                                    <h6 class="fw-bold mb-0">@(order.ServiceItem?.Name ?? "—")</h6>
+                                    <span class="badge @StatusBadge(order.Status)">@StatusLabel(order.Status)</span>
+                                </div>
+                                <div class="small text-muted">
+                                    <i class="bi bi-building me-1"></i>@(order.Tenant?.CompanyName ?? "—")
+                                    <span class="mx-2">|</span>
+                                    <i class="bi bi-person me-1"></i>@(order.Tenant?.OwnerName ?? "—")
+                                    <span class="mx-2">|</span>
+                                    <i class="bi bi-envelope me-1"></i>@(order.Tenant?.OwnerEmail ?? "—")
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(order.Notes))
+                                {
+                                    <div class="small mt-1"><i class="bi bi-chat-left-text me-1"></i>@order.Notes</div>
+                                }
+                            </div>
+                            <div class="text-end">
+                                <div class="fw-bold text-primary">@order.Price.ToString("0") PLN</div>
+                                <div class="text-muted small">@order.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</div>
+                                @if (order.ChargedToBillAt.HasValue)
+                                {
+                                    <div class="small mt-1"><span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-receipt me-1"></i>doliczone do rachunku</span></div>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(order.PaymentGateway))
+                                {
+                                    <div class="small mt-1">
+                                        <span class="badge @(order.PaidAt.HasValue ? "bg-success-subtle text-success-emphasis" : "bg-warning-subtle text-warning-emphasis")">
+                                            <i class="bi @(order.PaidAt.HasValue ? "bi-check-circle" : "bi-hourglass-split") me-1"></i>
+                                            @GatewayLabel(order.PaymentGateway) @(order.PaidAt.HasValue ? "— opłacone" : "— nieopłacone")
+                                        </span>
+                                    </div>
+                                }
+                            </div>
+                        </div>
+
+                        @if (order.Status == ServiceOrderStatus.Pending)
+                        {
+                            <hr class="my-2" />
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-success" @onclick="() => UpdateStatus(order.Id, ServiceOrderStatus.Accepted)">
+                                    <i class="bi bi-check-lg me-1"></i>Akceptuj
+                                </button>
+                                <button class="btn btn-sm btn-outline-danger" @onclick="() => UpdateStatus(order.Id, ServiceOrderStatus.Cancelled)">
+                                    <i class="bi bi-x-lg me-1"></i>Odrzuć
+                                </button>
+                            </div>
+                        }
+                        else if (order.Status == ServiceOrderStatus.Accepted)
+                        {
+                            <hr class="my-2" />
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-primary" @onclick="() => UpdateStatus(order.Id, ServiceOrderStatus.InProgress)">
+                                    <i class="bi bi-play me-1"></i>Rozpocznij realizację
+                                </button>
+                            </div>
+                        }
+                        else if (order.Status == ServiceOrderStatus.InProgress)
+                        {
+                            <hr class="my-2" />
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-success" @onclick="() => UpdateStatus(order.Id, ServiceOrderStatus.Completed)">
+                                    <i class="bi bi-check-circle me-1"></i>Zakończ
+                                </button>
+                            </div>
+                        }
+
+                        <div class="mt-2">
+                            @if (_editingNotesId == order.Id)
+                            {
+                                <div class="d-flex gap-2 align-items-center">
+                                    <input class="form-control form-control-sm" style="max-width:400px"
+                                           @bind="_editingNotesValue" placeholder="Notatka admina..." />
+                                    <button class="btn btn-sm btn-primary" @onclick="() => SaveAdminNotes(order.Id)">
+                                        <i class="bi bi-check-lg"></i>
+                                    </button>
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => _editingNotesId = 0">
+                                        <i class="bi bi-x-lg"></i>
+                                    </button>
+                                </div>
+                            }
+                            else
+                            {
+                                @if (!string.IsNullOrWhiteSpace(order.AdminNotes))
+                                {
+                                    <div class="small text-muted fst-italic d-inline">
+                                        <i class="bi bi-sticky me-1"></i>@order.AdminNotes
+                                    </div>
+                                }
+                                <button class="btn btn-sm btn-link text-muted p-0 ms-2" @onclick='() => { _editingNotesId = order.Id; _editingNotesValue = order.AdminNotes ?? ""; }'>
+                                    <i class="bi bi-pencil small"></i>
+                                </button>
+                            }
+                        </div>
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private List<ServiceOrder> _orders = new();
+    private string _statusFilter = "todo";
+    private bool _notifyOpen;
+    private bool _nEmailOn = true, _nSmsOn;
+    private string _nEmail = "", _nPhone = "";
+
+    private string NotifySummary =>
+        string.Join(" · ", new[] { _nEmailOn && _nEmail.Length > 0 ? "e-mail" : null, _nSmsOn && _nPhone.Length > 0 ? "SMS" : null }.Where(x => x is not null)) is { Length: > 0 } s
+            ? s : "wyłączone";
+
+    private async Task LoadNotify()
+    {
+        var s = await SiteSettings.GetAllAsync(SiteSettingsService.Keys.AdminNotificationEmail, SiteSettingsService.Keys.NotifyTicketsEmail,
+            SiteSettingsService.Keys.AdminNotificationPhone, SiteSettingsService.Keys.NotifyTicketsSms);
+        _nEmail = s[SiteSettingsService.Keys.AdminNotificationEmail];
+        _nEmailOn = s[SiteSettingsService.Keys.NotifyTicketsEmail] != "false";
+        _nPhone = s[SiteSettingsService.Keys.AdminNotificationPhone];
+        _nSmsOn = s[SiteSettingsService.Keys.NotifyTicketsSms] == "true";
+        _notifyOpen = _nEmail.Length == 0 && _nPhone.Length == 0;
+    }
+
+    private async Task SaveNotify()
+    {
+        await SiteSettings.SetManyAsync(new Dictionary<string, string>
+        {
+            [SiteSettingsService.Keys.AdminNotificationEmail] = _nEmail.Trim(),
+            [SiteSettingsService.Keys.NotifyTicketsEmail] = _nEmailOn ? "true" : "false",
+            [SiteSettingsService.Keys.AdminNotificationPhone] = _nPhone.Trim(),
+            [SiteSettingsService.Keys.NotifyTicketsSms] = _nSmsOn ? "true" : "false"
+        });
+        _message = "Zapisano ustawienia powiadomień."; _msgError = false;
+    }
+
+    private async Task TestNotify()
+    {
+        var results = new List<string>();
+        if (_nEmailOn && _nEmail.Trim().Length > 0)
+        {
+            try { await EmailService.SendAsync(_nEmail.Trim(), "Test powiadomień o zgłoszeniach", "<p>Tak będą przychodzić powiadomienia o nowych zgłoszeniach ze sklepu usług.</p>"); results.Add("e-mail wysłany"); }
+            catch (Exception ex) { results.Add($"e-mail: {ex.Message}"); }
+        }
+        if (_nSmsOn && _nPhone.Trim().Length > 0)
+        {
+            var (ok, error) = await Credits.SendPlatformSmsAsync(_nPhone.Trim(), "PTScheduler: test powiadomien o zgloszeniach.");
+            results.Add(ok ? "SMS wysłany" : $"SMS: {error}");
+        }
+        _message = results.Count == 0 ? "Uzupełnij adres albo numer." : string.Join(" · ", results);
+        _msgError = results.Any(r => r.Contains(':'));
+    }
+    private string? _message;
+    private bool _msgError;
+    private int _editingNotesId;
+    private string _editingNotesValue = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadNotify();
+        await Load();
+    }
+
+    private async Task Load()
+    {
+        await using var db = DbFactory.CreateDbContext();
+        var query = db.ServiceOrders
+            .AsNoTracking()
+            .Include(o => o.Tenant)
+            .Include(o => o.ServiceItem)
+            .OrderByDescending(o => o.CreatedAt)
+            .AsQueryable();
+
+        if (_statusFilter == "todo")
+            query = query.Where(o => o.Status == ServiceOrderStatus.Pending || o.Status == ServiceOrderStatus.Accepted || o.Status == ServiceOrderStatus.InProgress);
+        else if (!string.IsNullOrEmpty(_statusFilter) && Enum.TryParse<ServiceOrderStatus>(_statusFilter, out var status))
+            query = query.Where(o => o.Status == status);
+
+        _orders = await query.Take(100).ToListAsync();
+    }
+
+    private async Task UpdateStatus(int orderId, ServiceOrderStatus newStatus)
+    {
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            var order = await db.ServiceOrders
+                .Include(o => o.Tenant)
+                .Include(o => o.ServiceItem)
+                .FirstOrDefaultAsync(o => o.Id == orderId);
+            if (order is null) return;
+
+            order.Status = newStatus;
+            if (newStatus == ServiceOrderStatus.Accepted) order.AcceptedAt = DateTime.UtcNow;
+            if (newStatus == ServiceOrderStatus.Completed)
+            {
+                order.CompletedAt = DateTime.UtcNow;
+                // Zrobione, a nieopłacone online — kwota trafia na najbliższy rachunek trenera.
+                StoreTicketService.ChargeToBill(db, order, order.ServiceItem);
+            }
+
+            await db.SaveChangesAsync();
+
+            if (order.Tenant?.OwnerEmail is { Length: > 0 } email)
+            {
+                _ = Task.Run(async () =>
+                {
+                    try
+                    {
+                        var html = EmailService.OrderStatusChangedEmailBody(
+                            order.Tenant.OwnerName ?? "Trenerze",
+                            order.ServiceItem?.Name ?? "usługa",
+                            StatusLabel(newStatus),
+                            order.AdminNotes);
+                        await EmailService.SendAsync(email, $"Zamówienie #{order.Id} — {StatusLabel(newStatus)}", html);
+                    }
+                    catch { }
+                });
+            }
+
+            await Load();
+            _message = $"Status zmieniony na \"{StatusLabel(newStatus)}\"."; _msgError = false;
+        }
+        catch (Exception ex)
+        {
+            _message = ex.Message; _msgError = true;
+        }
+    }
+
+    private async Task SaveAdminNotes(int orderId)
+    {
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            var order = await db.ServiceOrders.FindAsync(orderId);
+            if (order is null) return;
+            order.AdminNotes = string.IsNullOrWhiteSpace(_editingNotesValue) ? null : _editingNotesValue.Trim();
+            await db.SaveChangesAsync();
+            _editingNotesId = 0;
+            await Load();
+            _message = "Notatka zapisana."; _msgError = false;
+        }
+        catch (Exception ex)
+        {
+            _message = ex.Message; _msgError = true;
+        }
+    }
+
+    private static string StatusLabel(ServiceOrderStatus s) => s switch
+    {
+        ServiceOrderStatus.AwaitingPayment => "Oczekuje na płatność",
+        ServiceOrderStatus.Pending => "Oczekuje",
+        ServiceOrderStatus.Accepted => "Zaakceptowane",
+        ServiceOrderStatus.InProgress => "W realizacji",
+        ServiceOrderStatus.Completed => "Zrealizowane",
+        ServiceOrderStatus.Cancelled => "Anulowane",
+        _ => s.ToString()
+    };
+
+    private static string StatusBadge(ServiceOrderStatus s) => s switch
+    {
+        ServiceOrderStatus.AwaitingPayment => "bg-danger-subtle text-danger-emphasis",
+        ServiceOrderStatus.Pending => "bg-warning text-dark",
+        ServiceOrderStatus.Accepted => "bg-info text-dark",
+        ServiceOrderStatus.InProgress => "bg-primary",
+        ServiceOrderStatus.Completed => "bg-success",
+        ServiceOrderStatus.Cancelled => "bg-secondary",
+        _ => "bg-light text-dark"
+    };
+
+    private static string GatewayLabel(string gw) => gw switch
+    {
+        "stripe" => "Stripe",
+        "payu" => "PayU",
+        "przelewy24" => "Przelewy24",
+        "autopay" => "Autopay",
+        _ => gw
+    };
+}

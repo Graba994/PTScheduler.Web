@@ -1,0 +1,408 @@
+@page "/panel/homepage"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject SiteSettingsService Settings
+@inject StorePaymentService StorePayments
+@rendermode InteractiveServer
+
+<PageTitle>Edycja strony — PTScheduler</PageTitle>
+
+<PanelHeader Title="Strona publiczna" Icon="bi-pencil-square" IconClass="pp-icon-pink" Subtitle="Teksty strony, na której trenerzy poznają ofertę i zakładają konto. Zmiany widać od razu po zapisaniu.">
+    <Actions>
+        <a href="/" target="_blank" rel="noopener" class="btn btn-outline-secondary btn-sm"><i class="bi bi-eye me-1"></i>Podgląd</a>
+    </Actions>
+</PanelHeader>
+
+@if (_saved)
+{
+    <div class="alert alert-success alert-dismissible fade show">
+        <i class="bi bi-check-circle me-1"></i>Zapisano zmiany.
+        <button type="button" class="btn-close" @onclick="() => _saved = false"></button>
+    </div>
+}
+
+<EditForm Model="_form" OnValidSubmit="Save" FormName="homepage">
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-rocket-takeoff"></i></span>Rejestracja trenerów</div>
+        <div class="card-body">
+            <p class="text-muted small mb-3">Trener buduje aplikację w kreatorze na <a href="/register" target="_blank">/register</a> (nazwa, specjalizacja, wygląd, oferta, konto) i klika „Opublikuj”.</p>
+            <div class="d-flex flex-column gap-2">
+                <label class="d-flex gap-2 align-items-start">
+                    <input type="radio" class="form-check-input mt-1" name="regmode" checked="@(_form.RegistrationMode != "review")" @onchange='() => _form.RegistrationMode = "auto"' />
+                    <span><b>Uruchamiaj od razu</b> <span class="badge text-bg-success ms-1">zalecane</span><br /><span class="text-muted small">Aplikacja powstaje w około minutę, trener wchodzi do niej prosto z kreatora. Najpierw kod z e-maila i karta, limit 3 publikacji na godzinę z jednego adresu IP.</span></span>
+                </label>
+                <label class="d-flex gap-2 align-items-start">
+                    <input type="radio" class="form-check-input mt-1" name="regmode" checked="@(_form.RegistrationMode == "review")" @onchange='() => _form.RegistrationMode = "review"' />
+                    <span><b>Czekaj na moją akceptację</b><br /><span class="text-muted small">Zgłoszenie trafia do Trenerów jako „Oczekuje”. Po akceptacji ustawienia z kreatora wgrają się same.</span></span>
+                </label>
+            </div>
+            <div class="row g-2 mt-2 align-items-end">
+                <div class="col-sm-6 col-md-4">
+                    <label class="form-label small fw-semibold">Płatność przy publikacji</label>
+                    <select class="form-select form-select-sm" @bind="_form.Gateway">
+                        <option value="auto">Automatycznie (Stripe, a bez niego bramka sklepu)</option>
+                        <option value="stripe" disabled="@(!_gateways.Contains("stripe"))">Stripe — karta, opłata cykliczna po okresie próbnym</option>
+                        <option value="autopay" disabled="@(!_gateways.Contains("autopay"))">Autopay — płatność weryfikacyjna, potem rachunki</option>
+                        <option value="payu" disabled="@(!_gateways.Contains("payu"))">PayU — płatność weryfikacyjna, potem rachunki</option>
+                        <option value="przelewy24" disabled="@(!_gateways.Contains("przelewy24"))">Przelewy24 — płatność weryfikacyjna, potem rachunki</option>
+                    </select>
+                    <div class="form-text small">Skonfigurowane: @(_gateways.Count == 0 ? "żadna — zgłoszenia trafią do kolejki" : string.Join(", ", _gateways.Select(RegistrationGateService.GatewayName)))</div>
+                </div>
+                <div class="col-sm-6 col-md-3">
+                    <label class="form-label small fw-semibold">Kwota weryfikacji (bez Stripe)</label>
+                    <div class="input-group input-group-sm">
+                        <input type="number" min="1" step="1" class="form-control" @bind="_form.VerifyAmount" />
+                        <span class="input-group-text">zł</span>
+                    </div>
+                </div>
+                <div class="col-12 col-md-5">
+                    <label class="form-check form-switch mb-0">
+                        <input class="form-check-input" type="checkbox" @bind="_form.OnboardingEmails" />
+                        <span class="form-check-label small fw-semibold">E-maile powitalne do trenerów</span>
+                    </label>
+                    <div class="form-text small">Dzień 1, 3 i 7 po uruchomieniu: pierwsze kroki, zaproszenie klientów, podsumowanie i link polecający.</div>
+                </div>
+            </div>
+            <div class="row g-2 mt-2 align-items-end">
+                <div class="col-sm-4 col-md-3">
+                    <label class="form-label small fw-semibold">Dzienny limit automatycznych uruchomień</label>
+                    <input type="number" min="0" max="500" class="form-control form-control-sm" @bind="_form.DailyLimit" />
+                </div>
+                <div class="col">
+                    <div class="text-muted small">Ponad limit zgłoszenia czekają w kolejce na Ciebie. Zawsze wymagamy potwierdzenia e-maila kodem i podpięcia karty;
+                        z <a href="/panel/invites">kodem zaproszenia</a> aplikacja startuje od razu niezależnie od trybu i limitu.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-stars"></i></span>Sekcja Hero</div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Badge (mała etykieta)</label>
+                <input class="form-control" @bind="_form.HeroBadge" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Tytuł</label>
+                <input class="form-control" @bind="_form.HeroTitle" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Podtytuł</label>
+                <textarea class="form-control" rows="2" @bind="_form.HeroSubtitle"></textarea>
+            </div>
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">Tekst przycisku CTA</label>
+                    <input class="form-control" @bind="_form.HeroCta" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold">URL przycisku CTA</label>
+                    <input class="form-control" @bind="_form.HeroCtaUrl" />
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-layout-text-window"></i></span>Sekcja funkcji</div>
+        <div class="card-body">
+            <div class="mb-0">
+                <label class="form-label small fw-semibold">Tytuł sekcji</label>
+                <input class="form-control" @bind="_form.SectionTitle" />
+            </div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-megaphone"></i></span>Sekcja CTA (dolna)</div>
+        <div class="card-body">
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Tytuł</label>
+                <input class="form-control" @bind="_form.CtaTitle" />
+            </div>
+            <div class="mb-3">
+                <label class="form-label small fw-semibold">Podtytuł</label>
+                <input class="form-control" @bind="_form.CtaSubtitle" />
+            </div>
+            <div class="mb-0">
+                <label class="form-label small fw-semibold">Tekst przycisku</label>
+                <input class="form-control" @bind="_form.CtaButton" />
+            </div>
+        </div>
+    </div>
+
+    <button type="submit" class="btn btn-primary" disabled="@_saving">
+        @if (_saving)
+        {
+            <span class="spinner-border spinner-border-sm me-1"></span>
+        }
+        <i class="bi bi-floppy me-1"></i>Zapisz zmiany
+    </button>
+</EditForm>
+
+<div class="card border-0 shadow-sm mb-4 mt-4">
+    <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">
+        <span class="pp-card-header-title"><span class="pp-icon pp-icon-sm"><i class="bi bi-people"></i></span>Trenerzy na stronie głównej</span>
+        <button class="btn btn-outline-primary btn-sm" @onclick="AddTrainer">
+            <i class="bi bi-plus-lg me-1"></i>Dodaj trenera
+        </button>
+    </div>
+    <div class="card-body">
+        <p class="text-muted small mb-3">Sylwetki trenerów w sekcji „Z nami trenują” na stronie głównej — zdjęcie, imię, specjalizacja i miasto. Kliknięcie prowadzi na stronę trenera albo jego Instagram. Zdjęcie zmniejszamy automatycznie.</p>
+
+        @if (_trainers.Count == 0)
+        {
+            <div class="text-muted text-center py-4">
+                <i class="bi bi-person-plus" style="font-size:2rem;opacity:0.3"></i>
+                <p class="mt-2 mb-0 small">Brak trenerów. Kliknij „Dodaj trenera”, aby dodać pierwszego.</p>
+            </div>
+        }
+
+        @for (int i = 0; i < _trainers.Count; i++)
+        {
+            var idx = i;
+            var t = _trainers[idx];
+            <div class="d-flex align-items-start gap-3 mb-3 p-3 border rounded-3 flex-wrap flex-md-nowrap">
+                <div class="d-flex flex-column align-items-center gap-1" style="width:96px;flex-shrink:0">
+                    @if (t.HasPhoto)
+                    {
+                        <img src="@t.PhotoUrl" alt="@t.Name" style="width:84px;height:84px;border-radius:50%;object-fit:cover" />
+                    }
+                    else
+                    {
+                        <div style="width:84px;height:84px;border-radius:50%;background:@t.Color;display:flex;align-items:center;justify-content:center;color:#fff;font-weight:700;font-size:1.3rem">@t.Initials</div>
+                    }
+                    <label class="btn btn-link btn-sm p-0" style="font-size:.78rem">
+                        @(_uploading == t.Id ? "Wgrywam…" : t.HasPhoto ? "Zmień zdjęcie" : "Dodaj zdjęcie")
+                        <InputFile OnChange="e => UploadPhotoAsync(idx, e)" accept="image/*" class="d-none" />
+                    </label>
+                    @if (t.HasPhoto)
+                    {
+                        <button class="btn btn-link btn-sm p-0 text-muted" style="font-size:.72rem" @onclick="() => RemovePhotoAsync(idx)">Usuń zdjęcie</button>
+                    }
+                </div>
+                <div class="flex-grow-1">
+                    <div class="row g-2">
+                        <div class="col-md-6">
+                            <label class="form-label small mb-0">Imię i nazwisko</label>
+                            <input class="form-control form-control-sm" @bind="t.Name" @bind:after="() => UpdateInitials(idx)" />
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label small mb-0">Specjalizacja</label>
+                            <input class="form-control form-control-sm" placeholder="np. Trening siłowy i sylwetka" maxlength="80" @bind="t.Role" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small mb-0">Miasto</label>
+                            <input class="form-control form-control-sm" placeholder="np. Warszawa" maxlength="60" @bind="t.City" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small mb-0">Strona trenera</label>
+                            <input class="form-control form-control-sm" placeholder="np. studio-kasi.pl" @bind="t.Link" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small mb-0">Instagram</label>
+                            <input class="form-control form-control-sm" placeholder="@@nazwa" @bind="t.Instagram" />
+                        </div>
+                        <div class="col-6 col-md-2">
+                            <label class="form-label small mb-0">Inicjały</label>
+                            <input class="form-control form-control-sm" @bind="t.Initials" maxlength="3" />
+                        </div>
+                        <div class="col-6 col-md-2">
+                            <label class="form-label small mb-0">Kolor</label>
+                            <input type="color" class="form-control form-control-sm form-control-color w-100" @bind="t.Color" style="height:31px" />
+                        </div>
+                    </div>
+                </div>
+                <button class="btn btn-outline-danger btn-sm" @onclick="() => RemoveTrainer(idx)" title="Usuń" aria-label="@($"Usuń {t.Name}")">
+                    <i class="bi bi-trash"></i>
+                </button>
+            </div>
+        }
+        @if (_photoError is not null) { <div class="alert alert-danger py-2 small">@_photoError</div> }
+
+        @if (_trainers.Count > 0)
+        {
+            <button class="btn btn-primary btn-sm mt-2" @onclick="SaveTrainers" disabled="@_savingTrainers">
+                @if (_savingTrainers)
+                {
+                    <span class="spinner-border spinner-border-sm me-1"></span>
+                }
+                <i class="bi bi-floppy me-1"></i>Zapisz trenerów
+            </button>
+        }
+
+        @if (_trainersSaved)
+        {
+            <span class="text-success small ms-2"><i class="bi bi-check-circle me-1"></i>Zapisano!</span>
+        }
+    </div>
+</div>
+
+@code {
+    private HomepageForm _form = new();
+    private bool _saving, _saved;
+    private List<FeaturedTrainer> _trainers = [];
+    private bool _savingTrainers, _trainersSaved;
+    private string? _uploading;
+    private string? _photoError;
+
+    private class HomepageForm
+    {
+        public string HeroBadge { get; set; } = "";
+        public string HeroTitle { get; set; } = "";
+        public string HeroSubtitle { get; set; } = "";
+        public string HeroCta { get; set; } = "";
+        public string HeroCtaUrl { get; set; } = "";
+        public string SectionTitle { get; set; } = "";
+        public string CtaTitle { get; set; } = "";
+        public string CtaSubtitle { get; set; } = "";
+        public string CtaButton { get; set; } = "";
+        public string RegistrationMode { get; set; } = "auto";
+        public int DailyLimit { get; set; } = RegistrationGateService.DefaultDailyLimit;
+        public string Gateway { get; set; } = "auto";
+        public decimal VerifyAmount { get; set; } = 1;
+        public bool OnboardingEmails { get; set; } = true;
+    }
+
+    private List<string> _gateways = [];
+
+    private static readonly string[] _defaultColors = ["#7C3AED", "#06D6A0", "#FF6B35", "#3B82F6", "#EC4899", "#F59E0B", "#EF4444", "#0EA5E9"];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var s = await Settings.GetAllAsync(
+            SiteSettingsService.Keys.HeroBadge,
+            SiteSettingsService.Keys.HeroTitle,
+            SiteSettingsService.Keys.HeroSubtitle,
+            SiteSettingsService.Keys.HeroCta,
+            SiteSettingsService.Keys.HeroCtaUrl,
+            SiteSettingsService.Keys.SectionTitle,
+            SiteSettingsService.Keys.CtaTitle,
+            SiteSettingsService.Keys.CtaSubtitle,
+            SiteSettingsService.Keys.CtaButton,
+            SiteSettingsService.Keys.RegistrationMode,
+            SiteSettingsService.Keys.RegistrationDailyLimit,
+            SiteSettingsService.Keys.RegistrationGateway,
+            SiteSettingsService.Keys.RegistrationVerifyAmount,
+            SiteSettingsService.Keys.OnboardingEmails);
+
+        _form.HeroBadge = s[SiteSettingsService.Keys.HeroBadge];
+        _form.HeroTitle = s[SiteSettingsService.Keys.HeroTitle];
+        _form.HeroSubtitle = s[SiteSettingsService.Keys.HeroSubtitle];
+        _form.HeroCta = s[SiteSettingsService.Keys.HeroCta];
+        _form.HeroCtaUrl = s[SiteSettingsService.Keys.HeroCtaUrl];
+        _form.SectionTitle = s[SiteSettingsService.Keys.SectionTitle];
+        _form.CtaTitle = s[SiteSettingsService.Keys.CtaTitle];
+        _form.CtaSubtitle = s[SiteSettingsService.Keys.CtaSubtitle];
+        _form.CtaButton = s[SiteSettingsService.Keys.CtaButton];
+        _form.RegistrationMode = s[SiteSettingsService.Keys.RegistrationMode] == "review" ? "review" : "auto";
+        _form.DailyLimit = int.TryParse(s[SiteSettingsService.Keys.RegistrationDailyLimit], out var lim) ? lim : RegistrationGateService.DefaultDailyLimit;
+        _form.Gateway = string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.RegistrationGateway]) ? "auto" : s[SiteSettingsService.Keys.RegistrationGateway];
+        _form.VerifyAmount = decimal.TryParse(s[SiteSettingsService.Keys.RegistrationVerifyAmount], System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var va) && va >= 1 ? va : 1;
+        _form.OnboardingEmails = s[SiteSettingsService.Keys.OnboardingEmails] != "false";
+        _gateways = await StorePayments.GetAvailableGatewaysAsync();
+
+        _trainers = await FeaturedTrainers.LoadAsync(Settings);
+    }
+
+    private async Task Save()
+    {
+        _saving = true;
+        _saved = false;
+
+        await Settings.SetManyAsync(new Dictionary<string, string>
+        {
+            [SiteSettingsService.Keys.HeroBadge] = _form.HeroBadge,
+            [SiteSettingsService.Keys.HeroTitle] = _form.HeroTitle,
+            [SiteSettingsService.Keys.HeroSubtitle] = _form.HeroSubtitle,
+            [SiteSettingsService.Keys.HeroCta] = _form.HeroCta,
+            [SiteSettingsService.Keys.HeroCtaUrl] = _form.HeroCtaUrl,
+            [SiteSettingsService.Keys.SectionTitle] = _form.SectionTitle,
+            [SiteSettingsService.Keys.CtaTitle] = _form.CtaTitle,
+            [SiteSettingsService.Keys.CtaSubtitle] = _form.CtaSubtitle,
+            [SiteSettingsService.Keys.CtaButton] = _form.CtaButton,
+            [SiteSettingsService.Keys.RegistrationMode] = _form.RegistrationMode,
+            [SiteSettingsService.Keys.RegistrationDailyLimit] = Math.Clamp(_form.DailyLimit, 0, 500).ToString(),
+            [SiteSettingsService.Keys.RegistrationGateway] = _form.Gateway,
+            [SiteSettingsService.Keys.RegistrationVerifyAmount] = Math.Max(1, _form.VerifyAmount).ToString(System.Globalization.CultureInfo.InvariantCulture),
+            [SiteSettingsService.Keys.OnboardingEmails] = _form.OnboardingEmails ? "true" : "false",
+        });
+
+        _saving = false;
+        _saved = true;
+    }
+
+    private void AddTrainer()
+    {
+        var color = _defaultColors[_trainers.Count % _defaultColors.Length];
+        _trainers.Add(new FeaturedTrainer { Color = color });
+        _trainersSaved = false;
+    }
+
+    private async Task RemoveTrainer(int index)
+    {
+        var t = _trainers[index];
+        if (t.HasPhoto) await FeaturedTrainers.SetPhotoAsync(Settings, t.Id, null);
+        _trainers.RemoveAt(index);
+        await FeaturedTrainers.SaveAsync(Settings, _trainers);
+        _trainersSaved = false;
+    }
+
+    // Przeglądarka sama zmniejsza zdjęcie do 480 px (JPEG), więc na serwer idzie kilkadziesiąt KB.
+    private async Task UploadPhotoAsync(int index, InputFileChangeEventArgs e)
+    {
+        _photoError = null;
+        var t = _trainers[index];
+        _uploading = t.Id;
+        try
+        {
+            if (!e.File.ContentType.StartsWith("image/", StringComparison.OrdinalIgnoreCase))
+            {
+                _photoError = "To nie jest obraz — wybierz zdjęcie JPG, PNG albo WebP.";
+                return;
+            }
+            var resized = await e.File.RequestImageFileAsync("image/jpeg", 480, 480);
+            using var stream = resized.OpenReadStream(3 * 1024 * 1024);
+            using var ms = new MemoryStream();
+            await stream.CopyToAsync(ms);
+            await FeaturedTrainers.SetPhotoAsync(Settings, t.Id, ms.ToArray());
+            t.PhotoVersion = DateTime.UtcNow.Ticks.ToString("x");
+            await FeaturedTrainers.SaveAsync(Settings, _trainers);
+        }
+        catch (IOException)
+        {
+            _photoError = "Zdjęcie jest za duże nawet po zmniejszeniu — wybierz mniejsze.";
+        }
+        finally { _uploading = null; }
+    }
+
+    private async Task RemovePhotoAsync(int index)
+    {
+        var t = _trainers[index];
+        await FeaturedTrainers.SetPhotoAsync(Settings, t.Id, null);
+        t.PhotoVersion = null;
+        await FeaturedTrainers.SaveAsync(Settings, _trainers);
+    }
+
+    private void UpdateInitials(int index)
+    {
+        var name = _trainers[index].Name?.Trim() ?? "";
+        if (string.IsNullOrEmpty(name)) return;
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        _trainers[index].Initials = parts.Length >= 2
+            ? $"{parts[0][0]}{parts[^1][0]}".ToUpper()
+            : (parts.Length == 1 ? parts[0][..Math.Min(2, parts[0].Length)].ToUpper() : "");
+    }
+
+    private async Task SaveTrainers()
+    {
+        _savingTrainers = true;
+        _trainersSaved = false;
+
+        await FeaturedTrainers.SaveAsync(Settings, _trainers);
+
+        _savingTrainers = false;
+        _trainersSaved = true;
+    }
+}

@@ -1,0 +1,433 @@
+@page "/admin/site"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Web.Components.Site
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Admin)]
+@implements IDisposable
+@inject ISiteContentService SiteContentService
+@inject PlatformInfoService Platform
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Twoja strona" />
+
+@if (_content is null)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <div class="sb-top">
+        <div>
+            <h4 class="set-title mb-1"><i class="bi bi-globe2"></i>Twoja strona</h4>
+            <div class="sb-status">
+                @if (_saving) { <span><span class="spinner-border spinner-border-sm me-1"></span>Zapisuję szkic…</span> }
+                else if (_hasDraft) { <span class="text-warning-emphasis"><i class="bi bi-pencil-square me-1"></i>Masz nieopublikowane zmiany — widzisz je tylko Ty</span> }
+                else { <span class="text-success"><i class="bi bi-check-circle-fill me-1"></i>Strona jest aktualna</span> }
+            </div>
+        </div>
+        <div class="sb-top-actions">
+            <a class="btn btn-sm btn-outline-secondary" href="/" target="_blank"><i class="bi bi-box-arrow-up-right me-1"></i>Zobacz stronę</a>
+            @if (_hasDraft)
+            {
+                @if (_confirmDiscard)
+                {
+                    <button class="btn btn-sm btn-outline-danger" @onclick="DiscardAsync">Tak, odrzuć</button>
+                    <button class="btn btn-sm btn-link" @onclick="() => _confirmDiscard = false">Nie</button>
+                }
+                else
+                {
+                    <button class="btn btn-sm btn-link text-muted" @onclick="() => _confirmDiscard = true">Odrzuć zmiany</button>
+                }
+                <button class="btn btn-sm btn-primary sb-publish" @onclick="PublishAsync" disabled="@_saving"><i class="bi bi-rocket-takeoff me-1"></i>Opublikuj</button>
+            }
+        </div>
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="alert alert-success py-2 small d-flex align-items-center gap-2"><i class="bi bi-check-circle-fill"></i>@_message</div>
+    }
+
+    @if (_content.LayoutVersion < 2)
+    {
+        <div class="sb-upgrade">
+            <div>
+                <b>Nowy kreator strony</b>
+                <div class="small">Widgety z animacjami, zdjęcia, metamorfozy, wolne terminy na żywo. Twoje obecne teksty możemy przenieść.</div>
+            </div>
+            <div class="d-flex gap-2 flex-wrap">
+                <button class="btn btn-sm btn-primary" @onclick="ConvertLegacy">Przenieś moje teksty</button>
+                <button class="btn btn-sm btn-outline-primary" @onclick='() => _tab = "look"'>Wybierz szablon</button>
+            </div>
+        </div>
+    }
+
+    <div class="sb-mobile-switch">
+        <button class="@(!_showPreviewMobile ? "active" : "")" @onclick="() => _showPreviewMobile = false"><i class="bi bi-sliders"></i>Edycja</button>
+        <button class="@(_showPreviewMobile ? "active" : "")" @onclick="() => _showPreviewMobile = true"><i class="bi bi-eye"></i>Podgląd</button>
+    </div>
+
+    <div class="sb-main @(_showPreviewMobile ? "show-preview" : "")">
+        <aside class="sb-panel">
+            <div class="sb-tabs">
+                <button class="@(_tab == "blocks" ? "active" : "")" @onclick='() => _tab = "blocks"'><i class="bi bi-grid-1x2"></i>Widgety</button>
+                <button class="@(_tab == "look" ? "active" : "")" @onclick='() => _tab = "look"'><i class="bi bi-palette"></i>Wygląd</button>
+                <button class="@(_tab == "settings" ? "active" : "")" @onclick='() => _tab = "settings"'><i class="bi bi-gear"></i>Ustawienia</button>
+            </div>
+
+            @if (_tab == "blocks")
+            {
+                @if (_content.LayoutVersion < 2)
+                {
+                    <div class="sb-empty">Najpierw przenieś teksty albo wybierz szablon — potem ułożysz stronę z widgetów.</div>
+                }
+                else
+                {
+                    <div class="sb-hint mb-2">Kliknij widget, żeby go edytować. Strzałki zmieniają kolejność, oko ukrywa sekcję.</div>
+                    <ul class="sb-blocks">
+                        @for (var i = 0; i < _content.Blocks.Count; i++)
+                        {
+                            var b = _content.Blocks[i];
+                            var idx = i;
+                            var w = SiteWidgets.Find(b.Type);
+                            var open = _selectedId == b.Id;
+                            <li class="sb-block @(open ? "open" : "") @(b.Visible ? "" : "hidden-block")" @key="b.Id">
+                                <div class="sb-block-head">
+                                    <button type="button" class="sb-block-title" @onclick="() => Select(b.Id)">
+                                        <span class="sb-block-ic"><i class="bi @(w?.Icon ?? "bi-square")"></i></span>
+                                        <span class="sb-block-name"><b>@(w?.Name ?? b.Type)</b><small>@Summary(b)</small></span>
+                                    </button>
+                                    <span class="sb-block-tools">
+                                        <button type="button" title="Wyżej" disabled="@(idx == 0)" @onclick="() => MoveBlock(idx, -1)"><i class="bi bi-arrow-up"></i></button>
+                                        <button type="button" title="Niżej" disabled="@(idx == _content.Blocks.Count - 1)" @onclick="() => MoveBlock(idx, 1)"><i class="bi bi-arrow-down"></i></button>
+                                        <button type="button" title="@(b.Visible ? "Ukryj" : "Pokaż")" @onclick="() => ToggleVisible(b)"><i class="bi @(b.Visible ? "bi-eye" : "bi-eye-slash")"></i></button>
+                                    </span>
+                                </div>
+                                @if (open)
+                                {
+                                    <div class="sb-block-body">
+                                        <SiteBlockEditor Block="b" OnChange="Changed" />
+                                        <div class="sb-block-foot">
+                                            <button type="button" class="btn btn-sm btn-link text-muted p-0" @onclick="() => Duplicate(idx)"><i class="bi bi-copy me-1"></i>Duplikuj</button>
+                                            @if (_confirmDelete == b.Id)
+                                            {
+                                                <span class="small">Usunąć ten widget?</span>
+                                                <button type="button" class="btn btn-sm btn-danger" @onclick="() => Remove(idx)">Usuń</button>
+                                                <button type="button" class="btn btn-sm btn-link p-0" @onclick="() => _confirmDelete = null">Nie</button>
+                                            }
+                                            else
+                                            {
+                                                <button type="button" class="btn btn-sm btn-link text-danger p-0" @onclick="() => _confirmDelete = b.Id"><i class="bi bi-trash me-1"></i>Usuń widget</button>
+                                            }
+                                        </div>
+                                    </div>
+                                }
+                            </li>
+                        }
+                    </ul>
+                    <button type="button" class="sb-add" @onclick="() => _gallery = true"><i class="bi bi-plus-circle-fill"></i>Dodaj widget</button>
+                }
+            }
+            else if (_tab == "look")
+            {
+                <div class="sb-section-title">Gotowe szablony</div>
+                <div class="sb-hint mb-2">Szablon to cała strona z przykładową treścią — potem podmieniasz teksty i zdjęcia.</div>
+                <div class="sb-templates">
+                    @foreach (var t in SiteWidgets.Templates)
+                    {
+                        var th = SiteWidgets.ThemeOf(t.Theme);
+                        <div class="sb-template @(_content.Template == t.Key && _content.LayoutVersion >= 2 ? "current" : "")">
+                            <div class="sb-template-art" style="--bg:@th.Bg;--sf:@th.Surface;--ink:@th.Ink;--ac:@(string.IsNullOrEmpty(th.Accent) ? "var(--c-primary)" : th.Accent)">
+                                <span class="a"></span><span class="b"></span><span class="c"></span><i class="bi @t.Icon"></i>
+                            </div>
+                            <div class="sb-template-body">
+                                <b>@t.Name</b>
+                                <small>@t.Description</small>
+                                @if (_confirmTemplate == t.Key)
+                                {
+                                    <div class="sb-template-confirm">
+                                        <span>Zastąpi obecne widgety. Na pewno?</span>
+                                        <button class="btn btn-sm btn-primary" @onclick="() => ApplyTemplate(t.Key)">Tak, użyj</button>
+                                        <button class="btn btn-sm btn-link p-0" @onclick="() => _confirmTemplate = null">Nie</button>
+                                    </div>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-sm btn-outline-primary mt-1" @onclick="() => AskTemplate(t.Key)">Użyj szablonu</button>
+                                }
+                            </div>
+                        </div>
+                    }
+                </div>
+
+                <div class="sb-section-title mt-3">Motyw kolorów</div>
+                <div class="sb-themes">
+                    @foreach (var th in SiteWidgets.Themes)
+                    {
+                        <button type="button" class="sb-theme @(_content.Theme == th.Key ? "active" : "")" @onclick="() => SetTheme(th.Key)" title="@th.Description">
+                            <span class="sb-theme-sw" style="background:@th.Bg"><i style="background:@(string.IsNullOrEmpty(th.Accent) ? "var(--c-primary)" : th.Accent)"></i><i style="background:@th.Surface"></i><i style="background:@th.Ink"></i></span>
+                            <span>@th.Name</span>
+                        </button>
+                    }
+                </div>
+                <div class="sb-row mt-3">
+                    <label class="sb-label">Własny kolor akcentu (przyciski, wyróżnienia)</label>
+                    <ColorField Value="@_content.AccentOverride" ValueChanged="v => { _content.AccentOverride = v; return Changed(); }" />
+                    <div class="sb-hint">Puste = kolor z motywu (w motywie „Studio” — kolor Twojej marki).</div>
+                </div>
+                <div class="sb-row">
+                    <label class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" checked="@_content.Animations" @onchange="e => { _content.Animations = (bool)(e.Value ?? false); return Changed(); }" />
+                        <span class="form-check-label">Animacje (pojawianie się sekcji, liczniki, przewijane paski)</span>
+                    </label>
+                </div>
+            }
+            else
+            {
+                <div class="sb-section-title">Przycisk na telefonie</div>
+                <div class="sb-row">
+                    <label class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" checked="@_content.StickyCta" @onchange="e => { _content.StickyCta = (bool)(e.Value ?? false); return Changed(); }" />
+                        <span class="form-check-label">Przyklejony przycisk na dole ekranu (więcej rezerwacji z telefonu)</span>
+                    </label>
+                </div>
+                @if (_content.StickyCta)
+                {
+                    <div class="sb-row">
+                        <label class="sb-label">Napis i cel przycisku</label>
+                        <div class="sb-two">
+                            <input class="form-control form-control-sm" value="@_content.StickyCtaLabel" @onchange='e => { _content.StickyCtaLabel = e.Value?.ToString() ?? "Umów trening"; return Changed(); }' />
+                            <SiteLinkField Value="@_content.StickyCtaUrl" ValueChanged='v => { _content.StickyCtaUrl = v ?? "/book"; return Changed(); }' />
+                        </div>
+                    </div>
+                }
+                <div class="sb-section-title mt-3">Google i udostępnianie</div>
+                <div class="sb-row">
+                    <label class="sb-label">Opis strony (widoczny w Google i w podglądzie linku)</label>
+                    <textarea class="form-control form-control-sm" rows="3" maxlength="300" placeholder="np. Trener personalny w Warszawie — treningi 1:1, w parach i online. Umów pierwszy trening." @onchange="e => { _content.SeoDescription = e.Value?.ToString(); return Changed(); }">@_content.SeoDescription</textarea>
+                </div>
+                <div class="sb-row">
+                    <label class="sb-label">Tekst w stopce</label>
+                    <input class="form-control form-control-sm" placeholder="© 2026 Twoja nazwa" value="@_content.FooterText" @onchange="e => { _content.FooterText = string.IsNullOrWhiteSpace(e.Value?.ToString()) ? null : e.Value!.ToString(); return Changed(); }" />
+                </div>
+                @if (_platform is { } made)
+                {
+                    <div class="sb-row">
+                        <label class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" checked="@(made.BadgeRequired || _content.ShowPoweredBy)" disabled="@made.BadgeRequired"
+                                   @onchange="e => { _content.ShowPoweredBy = (bool)(e.Value ?? false); return Changed(); }" />
+                            <span class="form-check-label">„Zrobione w @made.PlatformName” w stopce</span>
+                        </label>
+                        <div class="form-text">
+                            @if (made.BadgeRequired) { <text>W Twoim planie ta stopka jest zawsze widoczna — wyłączysz ją w wyższym planie. </text> }
+                            Trener, który przyjdzie z Twojej strony, dostanie @made.BonusDays dni dłużej za darmo, a Ty miesiąc gratis po pierwszej płatności poleconej osoby. <a href="/admin/polec">Więcej o poleceniach</a>
+                        </div>
+                    </div>
+                }
+            }
+        </aside>
+
+        <section class="sb-preview">
+            <div class="sb-preview-bar">
+                <span class="sb-dot"></span><span class="sb-dot"></span><span class="sb-dot"></span>
+                <span class="sb-preview-url">Podgląd szkicu</span>
+                <div class="sb-seg sb-seg-sm">
+                    <button type="button" class="@(_device == "desktop" ? "active" : "")" @onclick='() => _device = "desktop"' title="Komputer"><i class="bi bi-display"></i></button>
+                    <button type="button" class="@(_device == "phone" ? "active" : "")" @onclick='() => _device = "phone"' title="Telefon"><i class="bi bi-phone"></i></button>
+                </div>
+            </div>
+            <div class="sb-frame-wrap @_device">
+                <iframe class="sb-frame" src="@PreviewSrc" title="Podgląd strony"></iframe>
+            </div>
+        </section>
+    </div>
+
+    @if (_gallery)
+    {
+        <div class="sb-modal-backdrop" @onclick="() => _gallery = false">
+            <div class="sb-modal" @onclick:stopPropagation="true">
+                <div class="sb-modal-head">
+                    <b>Dodaj widget</b>
+                    <button type="button" class="btn-close" @onclick="() => _gallery = false"></button>
+                </div>
+                <div class="sb-modal-body">
+                    @foreach (var group in SiteWidgets.Catalog.GroupBy(w => w.Group))
+                    {
+                        <div class="sb-section-title">@group.Key</div>
+                        <div class="sb-widget-grid">
+                            @foreach (var w in group)
+                            {
+                                <button type="button" class="sb-widget" @onclick="() => AddBlock(w.Type)">
+                                    <span class="sb-widget-ic"><i class="bi @w.Icon"></i></span>
+                                    <span><b>@w.Name @if (w.Live) { <em>na żywo</em> }</b><small>@w.Description</small></span>
+                                </button>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private SiteContentDto? _content;
+    private string _tab = "blocks";
+    private string? _selectedId;
+    private string? _confirmDelete;
+    private string? _confirmTemplate;
+    private bool _confirmDiscard;
+    private bool _gallery;
+    private bool _saving;
+    private bool _hasDraft;
+    private bool _showPreviewMobile;
+    private string _device = "desktop";
+    private string? _message;
+    private int _version;
+    private CancellationTokenSource? _debounce;
+
+    private string PreviewSrc => $"/?draft=1&v={_version}" + (_selectedId is null ? "" : $"#b-{_selectedId}");
+
+    protected override async Task OnInitializedAsync()
+    {
+        _content = await SiteContentService.GetDraftAsync();
+        _hasDraft = await SiteContentService.HasUnpublishedDraftAsync();
+        _platform = await Platform.GetAsync();
+    }
+
+    private PlatformInfoService.Info? _platform;
+
+    private static string Summary(SiteBlock b) =>
+        !string.IsNullOrWhiteSpace(b.Title) ? b.Title!
+        : b.Items.Count > 0 ? string.Join(" · ", b.Items.Select(i => i.Title ?? i.Value).Where(x => !string.IsNullOrWhiteSpace(x)).Take(3))
+        : "";
+
+    // Każda zmiana: szkic zapisuje się po chwili bezczynności, a podgląd się odświeża.
+    private Task Changed()
+    {
+        _message = null;
+        _debounce?.Cancel();
+        _debounce = new CancellationTokenSource();
+        var token = _debounce.Token;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await Task.Delay(700, token);
+                await InvokeAsync(async () =>
+                {
+                    _saving = true;
+                    StateHasChanged();
+                    await SiteContentService.SaveDraftAsync(_content!);
+                    _hasDraft = true;
+                    _saving = false;
+                    _version++;
+                    StateHasChanged();
+                });
+            }
+            catch (TaskCanceledException) { }
+        });
+        return Task.CompletedTask;
+    }
+
+    private void Select(string id) => _selectedId = _selectedId == id ? null : id;
+
+    private async Task MoveBlock(int idx, int dir)
+    {
+        var j = idx + dir;
+        if (_content is null || j < 0 || j >= _content.Blocks.Count) return;
+        (_content.Blocks[idx], _content.Blocks[j]) = (_content.Blocks[j], _content.Blocks[idx]);
+        await Changed();
+    }
+
+    private async Task ToggleVisible(SiteBlock b)
+    {
+        b.Visible = !b.Visible;
+        await Changed();
+    }
+
+    private async Task Duplicate(int idx)
+    {
+        var json = System.Text.Json.JsonSerializer.Serialize(_content!.Blocks[idx]);
+        var copy = System.Text.Json.JsonSerializer.Deserialize<SiteBlock>(json)!;
+        copy.Id = Guid.NewGuid().ToString("N")[..8];
+        _content.Blocks.Insert(idx + 1, copy);
+        _selectedId = copy.Id;
+        await Changed();
+    }
+
+    private async Task Remove(int idx)
+    {
+        _content!.Blocks.RemoveAt(idx);
+        _selectedId = null;
+        _confirmDelete = null;
+        await Changed();
+    }
+
+    // Nowy widget trafia za zaznaczony (albo przed stopkowe „Kontakt”, gdy nic nie jest zaznaczone).
+    private async Task AddBlock(string type)
+    {
+        var block = SiteWidgets.Create(type);
+        var blocks = _content!.Blocks;
+        var at = _selectedId is not null ? blocks.FindIndex(b => b.Id == _selectedId) + 1
+               : blocks.FindLastIndex(b => b.Type != "contact") + 1;
+        blocks.Insert(Math.Clamp(at, 0, blocks.Count), block);
+        _selectedId = block.Id;
+        _gallery = false;
+        _tab = "blocks";
+        await Changed();
+    }
+
+    private void AskTemplate(string key)
+    {
+        if (_content!.LayoutVersion < 2 || _content.Blocks.Count == 0) { _ = ApplyTemplate(key); return; }
+        _confirmTemplate = key;
+    }
+
+    private async Task ApplyTemplate(string key)
+    {
+        _content = SiteWidgets.BuildTemplate(key, _content);
+        _confirmTemplate = null;
+        _selectedId = null;
+        _tab = "blocks";
+        await Changed();
+    }
+
+    private async Task ConvertLegacy()
+    {
+        _content = SiteWidgets.FromLegacy(_content!);
+        _tab = "blocks";
+        await Changed();
+    }
+
+    private async Task SetTheme(string key)
+    {
+        _content!.Theme = key;
+        await Changed();
+    }
+
+    private async Task PublishAsync()
+    {
+        _debounce?.Cancel();
+        _saving = true;
+        await SiteContentService.SaveDraftAsync(_content!);
+        await SiteContentService.PublishDraftAsync();
+        _saving = false;
+        _hasDraft = false;
+        _message = "Opublikowano — strona główna jest już zaktualizowana.";
+    }
+
+    private async Task DiscardAsync()
+    {
+        _debounce?.Cancel();
+        await SiteContentService.DiscardDraftAsync();
+        _content = await SiteContentService.GetAsync();
+        _hasDraft = false;
+        _confirmDiscard = false;
+        _selectedId = null;
+        _version++;
+    }
+
+    public void Dispose() => _debounce?.Cancel();
+}

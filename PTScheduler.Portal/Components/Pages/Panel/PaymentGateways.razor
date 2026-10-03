@@ -1,0 +1,308 @@
+@page "/panel/payment-gateways"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject SiteSettingsService Settings
+@inject NavigationManager Nav
+@rendermode InteractiveServer
+
+<PageTitle>Bramki płatności — PTScheduler Portal</PageTitle>
+
+<PanelHeader Title="Bramki płatności" Icon="bi-credit-card-2-front" IconClass="pp-tone-ok" BackHref="/panel/setup" BackLabel="Konfiguracja platformy" Subtitle="Bramki, przez które trenerzy płacą za zamówienia w sklepie usług (SMS, wideo, wdrożenie)." />
+
+@if (_saved)
+{
+    <div class="alert alert-success alert-dismissible fade show">
+        <i class="bi bi-check-circle me-1"></i>Zapisano.
+        <button type="button" class="btn-close" @onclick="() => _saved = false"></button>
+    </div>
+}
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <!-- Active gateways summary -->
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm pp-tone-ok"><i class="bi bi-check2-circle"></i></span>Aktywne bramki</h2>
+            <div class="d-flex flex-wrap gap-2">
+                @if (!string.IsNullOrWhiteSpace(_form.StripeSecretKey))
+                {
+                    <span class="badge bg-success-subtle text-success-emphasis px-3 py-2">
+                        <i class="bi bi-credit-card me-1"></i>Stripe
+                    </span>
+                }
+                @if (!string.IsNullOrWhiteSpace(_form.PayuPosId) && !string.IsNullOrWhiteSpace(_form.PayuClientSecret))
+                {
+                    <span class="badge bg-success-subtle text-success-emphasis px-3 py-2">
+                        <i class="bi bi-wallet2 me-1"></i>PayU
+                    </span>
+                }
+                @if (!string.IsNullOrWhiteSpace(_form.P24MerchantId) && !string.IsNullOrWhiteSpace(_form.P24ApiKey))
+                {
+                    <span class="badge bg-success-subtle text-success-emphasis px-3 py-2">
+                        <i class="bi bi-bank me-1"></i>Przelewy24
+                    </span>
+                }
+                @if (AutopayReady)
+                {
+                    <span class="badge bg-success-subtle text-success-emphasis px-3 py-2">
+                        <i class="bi bi-cash-coin me-1"></i>Autopay
+                    </span>
+                }
+                @if (string.IsNullOrWhiteSpace(_form.StripeSecretKey) &&
+                     (string.IsNullOrWhiteSpace(_form.PayuPosId) || string.IsNullOrWhiteSpace(_form.PayuClientSecret)) &&
+                     (string.IsNullOrWhiteSpace(_form.P24MerchantId) || string.IsNullOrWhiteSpace(_form.P24ApiKey)) &&
+                     !AutopayReady)
+                {
+                    <span class="text-muted small">Brak skonfigurowanych bramek. Zamówienia będą przyjmowane bez płatności online.</span>
+                }
+            </div>
+        </div>
+    </div>
+
+    <!-- Stripe -->
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white fw-semibold d-flex align-items-center gap-2" style="cursor:pointer" @onclick="() => _showStripe = !_showStripe">
+            <i class="bi bi-credit-card text-primary"></i>
+            <span>Stripe</span>
+            @if (!string.IsNullOrWhiteSpace(_form.StripeSecretKey))
+            {
+                <span class="badge bg-success ms-auto me-2">Aktywny</span>
+            }
+            <i class="bi @(_showStripe ? "bi-chevron-up" : "bi-chevron-down") ms-auto"></i>
+        </div>
+        @if (_showStripe)
+        {
+            <div class="card-body">
+                <p class="text-muted small mb-3">Konfiguracja Stripe jest wspólna z subskrypcjami trenerów. Zmień klucze w <a href="/panel/stripe">ustawieniach Stripe</a>.</p>
+                @if (!string.IsNullOrWhiteSpace(_form.StripeSecretKey))
+                {
+                    <div class="alert alert-success py-2 small mb-0">
+                        <i class="bi bi-check-circle me-1"></i>Stripe jest skonfigurowany. Klucze znajdują się w <a href="/panel/stripe">sekcji Stripe</a>.
+                    </div>
+                }
+                else
+                {
+                    <div class="alert alert-info py-2 small mb-0">
+                        <i class="bi bi-info-circle me-1"></i>Skonfiguruj klucze API Stripe w <a href="/panel/stripe">ustawieniach Stripe</a>, aby aktywować tę bramkę.
+                    </div>
+                }
+            </div>
+        }
+    </div>
+
+    <!-- PayU -->
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white fw-semibold d-flex align-items-center gap-2" style="cursor:pointer" @onclick="() => _showPayu = !_showPayu">
+            <i class="bi bi-wallet2 text-success"></i>
+            <span>PayU</span>
+            @if (!string.IsNullOrWhiteSpace(_form.PayuPosId) && !string.IsNullOrWhiteSpace(_form.PayuClientSecret))
+            {
+                <span class="badge bg-success ms-auto me-2">Aktywny</span>
+            }
+            <i class="bi @(_showPayu ? "bi-chevron-up" : "bi-chevron-down") ms-auto"></i>
+        </div>
+        @if (_showPayu)
+        {
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">POS ID (client_id)</label>
+                    <input class="form-control font-monospace" @bind="_form.PayuPosId" placeholder="np. 300746" />
+                    <div class="form-text">Identyfikator punktu płatności z panelu PayU</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Client Secret</label>
+                    <input type="password" class="form-control font-monospace" @bind="_form.PayuClientSecret" placeholder="np. 2ee86a66..." />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Drugi klucz (MD5)</label>
+                    <input type="password" class="form-control font-monospace" @bind="_form.PayuSecondKey" placeholder="np. b6ca15b0..." />
+                    <div class="form-text">Służy do weryfikacji podpisu notyfikacji</div>
+                </div>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" @bind="_form.PayuSandbox" id="payuSandbox" />
+                    <label class="form-check-label small" for="payuSandbox">Tryb sandbox (testowy)</label>
+                </div>
+                <div class="alert alert-info py-2 small mt-3 mb-0">
+                    <i class="bi bi-info-circle me-1"></i>
+                    <strong>URL notyfikacji:</strong> <code>https://TWÓJ_PORTAL/api/webhooks/payu</code><br />
+                    Ustaw go w panelu PayU → Punkty płatności → Konfiguracja.
+                </div>
+            </div>
+        }
+    </div>
+
+    <!-- Przelewy24 -->
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white fw-semibold d-flex align-items-center gap-2" style="cursor:pointer" @onclick="() => _showP24 = !_showP24">
+            <i class="bi bi-bank text-info"></i>
+            <span>Przelewy24</span>
+            @if (!string.IsNullOrWhiteSpace(_form.P24MerchantId) && !string.IsNullOrWhiteSpace(_form.P24ApiKey))
+            {
+                <span class="badge bg-success ms-auto me-2">Aktywny</span>
+            }
+            <i class="bi @(_showP24 ? "bi-chevron-up" : "bi-chevron-down") ms-auto"></i>
+        </div>
+        @if (_showP24)
+        {
+            <div class="card-body">
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Merchant ID</label>
+                    <input class="form-control font-monospace" @bind="_form.P24MerchantId" placeholder="np. 12345" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">POS ID</label>
+                    <input class="form-control font-monospace" @bind="_form.P24PosId" placeholder="np. 12345 (domyślnie = Merchant ID)" />
+                    <div class="form-text">Pozostaw puste, jeśli POS ID = Merchant ID</div>
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Klucz API (REST)</label>
+                    <input type="password" class="form-control font-monospace" @bind="_form.P24ApiKey" placeholder="np. a1b2c3d4..." />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Klucz CRC</label>
+                    <input type="password" class="form-control font-monospace" @bind="_form.P24Crc" placeholder="np. e5f6g7h8..." />
+                    <div class="form-text">Służy do generowania podpisu transakcji</div>
+                </div>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" @bind="_form.P24Sandbox" id="p24Sandbox" />
+                    <label class="form-check-label small" for="p24Sandbox">Tryb sandbox (testowy)</label>
+                </div>
+                <div class="alert alert-info py-2 small mt-3 mb-0">
+                    <i class="bi bi-info-circle me-1"></i>
+                    <strong>URL statusu:</strong> <code>https://TWÓJ_PORTAL/api/webhooks/przelewy24</code><br />
+                    Przelewy24 wysyła powiadomienie automatycznie na podany URL.
+                </div>
+            </div>
+        }
+    </div>
+
+    <!-- Autopay -->
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header bg-white fw-semibold d-flex align-items-center gap-2" style="cursor:pointer" @onclick="() => _showAutopay = !_showAutopay">
+            <i class="bi bi-cash-coin text-primary"></i>
+            <span>Autopay</span>
+            @if (AutopayReady)
+            {
+                <span class="badge bg-success ms-auto me-2">Aktywny</span>
+            }
+            <i class="bi @(_showAutopay ? "bi-chevron-up" : "bi-chevron-down") ms-auto"></i>
+        </div>
+        @if (_showAutopay)
+        {
+            <div class="card-body">
+                <p class="small text-muted">Autopay (dawniej Blue Media): BLIK, szybkie przelewy, karty, Google Pay i Apple Pay. Dane z panelu Autopay → Konfiguracja serwisu.</p>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Identyfikator serwisu (ServiceID)</label>
+                    <input class="form-control font-monospace" @bind="_form.AutopayServiceId" placeholder="np. 902123" />
+                </div>
+                <div class="mb-3">
+                    <label class="form-label small fw-semibold">Klucz współdzielony</label>
+                    <input type="password" class="form-control font-monospace" @bind="_form.AutopaySharedKey" autocomplete="off" />
+                    <div class="form-text">Algorytm hasha w panelu Autopay: SHA256, separator |</div>
+                </div>
+                <div class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" @bind="_form.AutopaySandbox" id="autopaySandbox" />
+                    <label class="form-check-label small" for="autopaySandbox">Tryb testowy (testpay.autopay.eu)</label>
+                </div>
+                <div class="alert alert-info py-2 small mt-3 mb-0">
+                    <i class="bi bi-info-circle me-1"></i>
+                    Wpisz w panelu Autopay:<br />
+                    <strong>Adres ITN:</strong> <code>@PortalBase/api/webhooks/autopay</code><br />
+                    <strong>Adres powrotu:</strong> <code>@PortalBase/api/webhooks/autopay/return</code>
+                </div>
+            </div>
+        }
+    </div>
+
+    <button class="btn btn-primary" @onclick="Save" disabled="@_saving">
+        @if (_saving)
+        {
+            <span class="spinner-border spinner-border-sm me-1"></span>
+        }
+        <i class="bi bi-floppy me-1"></i>Zapisz konfigurację
+    </button>
+}
+
+@code {
+    private GatewayForm _form = new();
+    private bool _loading = true;
+    private bool _saving, _saved;
+    private bool _showStripe, _showPayu = true, _showP24 = true, _showAutopay = true;
+    private bool AutopayReady => !string.IsNullOrWhiteSpace(_form.AutopayServiceId) && !string.IsNullOrWhiteSpace(_form.AutopaySharedKey);
+    private string PortalBase => Nav.BaseUri.TrimEnd('/');
+
+    protected override async Task OnInitializedAsync()
+    {
+        var keys = await Settings.GetAllAsync(
+            SiteSettingsService.Keys.StripeSecretKey,
+            SiteSettingsService.Keys.PayuPosId,
+            SiteSettingsService.Keys.PayuClientSecret,
+            SiteSettingsService.Keys.PayuSecondKey,
+            SiteSettingsService.Keys.PayuSandbox,
+            SiteSettingsService.Keys.P24MerchantId,
+            SiteSettingsService.Keys.P24PosId,
+            SiteSettingsService.Keys.P24ApiKey,
+            SiteSettingsService.Keys.P24Crc,
+            SiteSettingsService.Keys.P24Sandbox,
+            SiteSettingsService.Keys.AutopayServiceId,
+            SiteSettingsService.Keys.AutopaySharedKey,
+            SiteSettingsService.Keys.AutopaySandbox);
+
+        _form.StripeSecretKey = keys[SiteSettingsService.Keys.StripeSecretKey];
+        _form.PayuPosId = keys[SiteSettingsService.Keys.PayuPosId];
+        _form.PayuClientSecret = keys[SiteSettingsService.Keys.PayuClientSecret];
+        _form.PayuSecondKey = keys[SiteSettingsService.Keys.PayuSecondKey];
+        _form.PayuSandbox = keys[SiteSettingsService.Keys.PayuSandbox] == "true";
+        _form.P24MerchantId = keys[SiteSettingsService.Keys.P24MerchantId];
+        _form.P24PosId = keys[SiteSettingsService.Keys.P24PosId];
+        _form.P24ApiKey = keys[SiteSettingsService.Keys.P24ApiKey];
+        _form.P24Crc = keys[SiteSettingsService.Keys.P24Crc];
+        _form.P24Sandbox = keys[SiteSettingsService.Keys.P24Sandbox] == "true";
+        _form.AutopayServiceId = keys[SiteSettingsService.Keys.AutopayServiceId];
+        _form.AutopaySharedKey = keys[SiteSettingsService.Keys.AutopaySharedKey];
+        _form.AutopaySandbox = keys[SiteSettingsService.Keys.AutopaySandbox] == "true";
+        _loading = false;
+    }
+
+    private async Task Save()
+    {
+        _saving = true; _saved = false;
+        await Settings.SetManyAsync(new Dictionary<string, string>
+        {
+            [SiteSettingsService.Keys.PayuPosId] = _form.PayuPosId.Trim(),
+            [SiteSettingsService.Keys.PayuClientSecret] = _form.PayuClientSecret.Trim(),
+            [SiteSettingsService.Keys.PayuSecondKey] = _form.PayuSecondKey.Trim(),
+            [SiteSettingsService.Keys.PayuSandbox] = _form.PayuSandbox ? "true" : "false",
+            [SiteSettingsService.Keys.P24MerchantId] = _form.P24MerchantId.Trim(),
+            [SiteSettingsService.Keys.P24PosId] = _form.P24PosId.Trim(),
+            [SiteSettingsService.Keys.P24ApiKey] = _form.P24ApiKey.Trim(),
+            [SiteSettingsService.Keys.P24Crc] = _form.P24Crc.Trim(),
+            [SiteSettingsService.Keys.P24Sandbox] = _form.P24Sandbox ? "true" : "false",
+            [SiteSettingsService.Keys.AutopayServiceId] = _form.AutopayServiceId.Trim(),
+            [SiteSettingsService.Keys.AutopaySharedKey] = _form.AutopaySharedKey.Trim(),
+            [SiteSettingsService.Keys.AutopaySandbox] = _form.AutopaySandbox ? "true" : "false"
+        });
+        _saving = false; _saved = true;
+    }
+
+    private class GatewayForm
+    {
+        public string StripeSecretKey { get; set; } = "";
+        public string PayuPosId { get; set; } = "";
+        public string PayuClientSecret { get; set; } = "";
+        public string PayuSecondKey { get; set; } = "";
+        public bool PayuSandbox { get; set; }
+        public string P24MerchantId { get; set; } = "";
+        public string P24PosId { get; set; } = "";
+        public string P24ApiKey { get; set; } = "";
+        public string P24Crc { get; set; } = "";
+        public bool P24Sandbox { get; set; }
+        public string AutopayServiceId { get; set; } = "";
+        public string AutopaySharedKey { get; set; } = "";
+        public bool AutopaySandbox { get; set; }
+    }
+}

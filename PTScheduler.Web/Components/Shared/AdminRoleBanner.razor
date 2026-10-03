@@ -1,0 +1,71 @@
+@* Wyraźna informacja na koncie Administratora: to konto służy do ustawień aplikacji.
+   Treningi prowadzi się na profilu trenera — tylko jego widzą klienci i zapisy online. *@
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Web.Services
+@inject AccountSwitchService Switcher
+@inject PTScheduler.Application.Interfaces.IUserManagementService Users
+
+<div class="admin-role-banner" role="note">
+    <div class="arb-ic"><i class="bi @(_isRoot ? "bi-tools" : "bi-shield-lock-fill")"></i></div>
+    <div class="arb-txt">
+        <b>@(_isRoot ? "Jesteś na koncie technicznym (root)" : "Jesteś na koncie Administratora")</b>
+        @if (_trainers.Count > 0)
+        {
+            <span>Tu ustawiasz aplikację: ceny, płatności, wygląd i konta. Treningi prowadzisz na profilu trenera — tylko on jest widoczny dla klientów w zapisach.</span>
+        }
+        else
+        {
+            <span>To konto służy do ustawień i nie przyjmuje zapisów klientów. Utwórz swój profil trenera (z innym adresem e-mail) i na nim prowadź treningi.</span>
+        }
+    </div>
+    <div class="arb-act">
+        @if (_trainers.Count == 1 && _canSwitch)
+        {
+            <form action="Account/SwitchTo" method="post">
+                <AntiforgeryToken />
+                <input type="hidden" name="userId" value="@_trainers[0].Id" />
+                <button type="submit" class="btn btn-sm arb-btn"><i class="bi bi-person-badge me-1"></i>Przełącz na profil trenera</button>
+            </form>
+        }
+        else if (_trainers.Count > 1 && _canSwitch)
+        {
+            <a href="/switch-account" class="btn btn-sm arb-btn"><i class="bi bi-people me-1"></i>Przełącz na profil trenera</a>
+        }
+        else if (_trainers.Count > 0)
+        {
+            <form action="Account/Logout" method="post">
+                <AntiforgeryToken />
+                <input type="hidden" name="ReturnUrl" value="/Account/Login" />
+                <button type="submit" class="btn btn-sm arb-btn"><i class="bi bi-person-badge me-1"></i>Zaloguj się jako trener</button>
+            </form>
+        }
+        else
+        {
+            <a href="/admin/users" class="btn btn-sm arb-btn"><i class="bi bi-person-plus me-1"></i>Utwórz profil trenera</a>
+        }
+    </div>
+</div>
+
+@code {
+    [CascadingParameter] private HttpContext? HttpContext { get; set; }
+
+    private List<SwitchCandidate> _trainers = [];
+    private bool _canSwitch;
+    private bool _isRoot;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = HttpContext?.User;
+        if (user is null) return;
+        try
+        {
+            _isRoot = user.IsInRole(Roles.Root);
+            _canSwitch = await Switcher.CanUseAsync(user);
+            // Przy wyłączonym przełączaniu liczy się tylko, czy profil trenera w ogóle istnieje.
+            _trainers = _canSwitch
+                ? (await Switcher.GetCandidatesAsync(user)).Where(c => c.Role == Roles.Trainer).ToList()
+                : (await Users.GetTrainersAsync()).Select(t => new SwitchCandidate(t.Id, t.Email, t.Email, Roles.Trainer)).ToList();
+        }
+        catch { _trainers = []; }
+    }
+}

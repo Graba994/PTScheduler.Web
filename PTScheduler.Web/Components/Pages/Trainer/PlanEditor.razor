@@ -1,0 +1,505 @@
+@page "/plans/new"
+@page "/plans/edit/{Id:int}"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.AspNetCore.WebUtilities
+@using Microsoft.Extensions.Logging
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Rules
+@attribute [Authorize(Roles = Roles.Admin + "," + Roles.Trainer + "," + Roles.Subordinate)]
+@inject ITrainingPlanService Plans
+@inject IExerciseCatalogService Catalog
+@inject IClientService Clients
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject ILoggerFactory LoggerFactory
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Kreator planu" />
+
+<FeatureGate Flag="TrainingPlansEnabled" RequiredPlan="Pro" Title="Moduł treningowy">
+
+@if (_loading)
+{
+    <div class="text-center text-muted py-5"><div class="spinner-border"></div></div>
+}
+else if (_plan is null)
+{
+    <div class="alert alert-warning">Nie znaleziono planu.</div>
+    <a href="/plans" class="btn btn-sm btn-outline-secondary">Wróć do planów</a>
+}
+else
+{
+    <div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <h4 class="page-title mb-0">
+            <i class="bi bi-list-check me-2" style="color:var(--c-primary)"></i>
+            @(_plan.Id is null ? "Nowy plan" : "Edytuj plan")
+        </h4>
+        <div class="d-flex gap-2">
+            <a href="/plans" class="btn btn-sm btn-outline-secondary">Anuluj</a>
+            <button class="btn btn-sm btn-primary" @onclick="Save" disabled="@_saving">
+                @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                <i class="bi bi-check-lg me-1"></i>Zapisz
+            </button>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger py-2">@_error</div>
+    }
+
+    <!-- Metadane -->
+    <div class="card mb-3">
+        <div class="card-body py-3">
+            <div class="row g-3">
+                <div class="col-12 col-md-6">
+                    <label class="form-label">Nazwa planu <span class="text-danger">*</span></label>
+                    <input class="form-control" @bind="_plan.Name" maxlength="120" placeholder="np. Plan siłowy 3-dniowy" />
+                </div>
+                <div class="col-12 col-md-6">
+                    <label class="form-label">Notatki</label>
+                    <input class="form-control" @bind="_plan.Notes" maxlength="500" placeholder="opcjonalnie" />
+                </div>
+                <div class="col-12 col-md-4 d-flex align-items-center gap-2 pt-2">
+                    <input type="checkbox" class="form-check-input" id="isTpl" @bind="_plan.IsTemplate" />
+                    <label class="form-check-label" for="isTpl">Szablon (bez przypisania klienta)</label>
+                </div>
+                @if (!_plan.IsTemplate)
+                {
+                    <div class="col-12 col-md-4">
+                        <label class="form-label">Klient</label>
+                        <select class="form-select" @bind="_plan.ClientId">
+                            <option value="">— nieprzypisany —</option>
+                            @foreach (var c in _clients)
+                            {
+                                <option value="@c.Id">@c.FullName</option>
+                            }
+                        </select>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+
+    <!-- Dni -->
+    @for (var di = 0; di < _plan.Days.Count; di++)
+    {
+        var day = _plan.Days[di];
+        var dayIndex = di;
+        <div class="card mb-3">
+            <div class="card-header d-flex align-items-center gap-2 py-2">
+                <i class="bi bi-calendar3 text-primary"></i>
+                <input class="form-control form-control-sm" style="max-width:320px" @bind="day.Label" placeholder="np. Dzień A — push" />
+                <div class="ms-auto btn-group btn-group-sm">
+                    <button class="btn btn-outline-secondary" title="W górę" disabled="@(dayIndex == 0)" @onclick="() => MoveDay(dayIndex, -1)"><i class="bi bi-arrow-up"></i></button>
+                    <button class="btn btn-outline-secondary" title="W dół" disabled="@(dayIndex == _plan.Days.Count - 1)" @onclick="() => MoveDay(dayIndex, 1)"><i class="bi bi-arrow-down"></i></button>
+                    <button class="btn btn-outline-danger" title="Usuń dzień" @onclick="() => RemoveDay(dayIndex)"><i class="bi bi-trash"></i></button>
+                </div>
+            </div>
+            <div class="card-body py-2">
+                @if (day.Exercises.Count == 0)
+                {
+                    <div class="text-muted small py-2">Brak ćwiczeń. Dodaj pierwsze poniżej.</div>
+                }
+                else
+                {
+                    <div class="plan-ex-list">
+                        @for (var xi = 0; xi < day.Exercises.Count; xi++)
+                        {
+                            var ex = day.Exercises[xi];
+                            var exIndex = xi;
+                            var tr = ex.Tracking;
+                            <div class="plan-ex">
+                                <div class="plan-ex-head">
+                                    @if (!string.IsNullOrEmpty(ex.ThumbnailUrl))
+                                    {
+                                        <img src="@ex.ThumbnailUrl" alt="" class="plan-ex-thumb" />
+                                    }
+                                    else
+                                    {
+                                        <span class="plan-ex-thumb plan-ex-thumb-empty"><i class="bi pt-ico-dumbbell"></i></span>
+                                    }
+                                    <div class="flex-grow-1 min-w-0">
+                                        <div class="fw-semibold text-truncate">@ex.ExerciseNamePl</div>
+                                        <div class="small text-muted"><i class="bi bi-rulers me-1"></i>@ExerciseTrackingRules.Label(tr)</div>
+                                    </div>
+                                    <div class="btn-group btn-group-sm flex-shrink-0">
+                                        <button class="btn btn-outline-secondary" title="W górę" aria-label="W górę" disabled="@(exIndex == 0)" @onclick="() => MoveExercise(dayIndex, exIndex, -1)"><i class="bi bi-arrow-up"></i></button>
+                                        <button class="btn btn-outline-secondary" title="W dół" aria-label="W dół" disabled="@(exIndex == day.Exercises.Count - 1)" @onclick="() => MoveExercise(dayIndex, exIndex, 1)"><i class="bi bi-arrow-down"></i></button>
+                                        <button class="btn btn-outline-danger" title="Usuń" aria-label="Usuń ćwiczenie" @onclick="() => RemoveExercise(dayIndex, exIndex)"><i class="bi bi-x-lg"></i></button>
+                                    </div>
+                                </div>
+                                <div class="plan-ex-fields">
+                                    <label><span>Serie</span><input type="number" min="1" max="20" inputmode="numeric" class="form-control form-control-sm" @bind="ex.Sets" /></label>
+                                    @if (ExerciseTrackingRules.UsesReps(tr))
+                                    {
+                                        <label><span>Powtórzenia</span><input class="form-control form-control-sm" @bind="ex.Reps" placeholder="10 lub 8-12" /></label>
+                                    }
+                                    @if (ExerciseTrackingRules.UsesWeight(tr))
+                                    {
+                                        <label><span>Ciężar (kg)</span><input type="number" step="0.5" min="0" inputmode="decimal" class="form-control form-control-sm" @bind="ex.TargetWeightKg" placeholder="kg" /></label>
+                                    }
+                                    @if (ExerciseTrackingRules.UsesTime(tr))
+                                    {
+                                        <label><span>Czas</span><DurationInput @bind-Value="ex.TargetDurationSeconds" Placeholder="np. 0:45" AriaLabel="Czas serii" /></label>
+                                    }
+                                    @if (ExerciseTrackingRules.UsesDistance(tr))
+                                    {
+                                        var km = tr == PTScheduler.Domain.Enums.ExerciseTracking.DistanceTime;
+                                        <label>
+                                            <span>Dystans (@(km ? "km" : "m"))</span>
+                                            <input type="number" min="0" step="@(km ? "0.1" : "5")" inputmode="decimal" class="form-control form-control-sm"
+                                                   value="@DistanceValue(ex, km)" @onchange="e => SetDistance(ex, e.Value?.ToString(), km)" placeholder="@(km ? "5" : "40")" />
+                                        </label>
+                                    }
+                                    @if (tr == PTScheduler.Domain.Enums.ExerciseTracking.WeightReps)
+                                    {
+                                        <label><span>Tempo</span><input class="form-control form-control-sm" @bind="ex.Tempo" placeholder="3-1-1" /></label>
+                                    }
+                                    <label><span>Przerwa (s)</span><input type="number" min="0" max="600" step="5" inputmode="numeric" class="form-control form-control-sm" @bind="ex.RestSeconds" placeholder="90" /></label>
+                                    <label class="plan-ex-notes"><span>Uwagi dla klienta</span><input class="form-control form-control-sm" @bind="ex.Notes" placeholder="np. pełny zakres ruchu" /></label>
+                                </div>
+                            </div>
+                        }
+                    </div>
+                }
+                <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenPicker(dayIndex)"><i class="bi bi-plus-lg me-1"></i>Dodaj ćwiczenie</button>
+            </div>
+        </div>
+    }
+
+    <button class="btn btn-outline-primary" @onclick="AddDay"><i class="bi bi-calendar-plus me-1"></i>Dodaj dzień</button>
+}
+
+@* ---------- Wybór ćwiczenia z katalogu ---------- *@
+@if (_pickerOpen)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.5)" role="dialog" aria-modal="true" aria-label="Dodaj ćwiczenie">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable modal-fullscreen-md-down">
+            <div class="modal-content">
+                <div class="modal-header flex-column align-items-stretch gap-2 pb-2">
+                    <div class="d-flex align-items-center gap-2">
+                        <h5 class="modal-title me-auto">Dodaj ćwiczenie <small class="text-muted fw-normal">· @(_plan?.Days.ElementAtOrDefault(_pickerDayIndex)?.Label)</small></h5>
+                        @if (_pickerAdded.Count > 0)
+                        {
+                            <span class="badge bg-success-subtle text-success-emphasis">Dodano: @_pickerAdded.Count</span>
+                        }
+                        <button type="button" class="btn btn-sm btn-primary" @onclick="() => _pickerOpen = false">Gotowe</button>
+                    </div>
+                    <div class="input-group">
+                        <span class="input-group-text"><i class="bi bi-search"></i></span>
+                        <input class="form-control" placeholder="Szukaj po polsku lub angielsku…" value="@_pickerFilter.Search" @oninput="OnPickerSearch" aria-label="Szukaj ćwiczenia" />
+                    </div>
+                    <div class="picker-scopes" role="tablist">
+                        @foreach (var (scope, label, icon) in PickerScopes)
+                        {
+                            <button type="button" role="tab" aria-selected="@(_pickerFilter.Scope == scope ? "true" : "false")"
+                                    class="picker-chip @(_pickerFilter.Scope == scope ? "active" : "")" @onclick="() => SetScope(scope)">
+                                <i class="bi @icon"></i>@label
+                            </button>
+                        }
+                    </div>
+                    <div class="picker-muscles" aria-label="Partia mięśniowa">
+                        <button type="button" class="picker-chip picker-chip-sm @(_pickerFilter.Muscle is null ? "active" : "")" @onclick="() => SetMuscle(null)">Wszystkie partie</button>
+                        @foreach (var m in Enum.GetValues<PTScheduler.Domain.Enums.MuscleGroup>())
+                        {
+                            <button type="button" class="picker-chip picker-chip-sm @(_pickerFilter.Muscle == m ? "active" : "")" @onclick="() => SetMuscle(m)">@Muscles.Label(m)</button>
+                        }
+                    </div>
+                    <div class="d-flex flex-wrap gap-2">
+                        <select class="form-select form-select-sm" style="max-width:220px" value="@(_pickerFilter.Equipment ?? "")" @onchange="SetEquipment" aria-label="Sprzęt">
+                            <option value="">Każdy sprzęt</option>
+                            @foreach (var eq in _equipment)
+                            {
+                                <option value="@eq">@EquipmentPl(eq)</option>
+                            }
+                        </select>
+                        <select class="form-select form-select-sm" style="max-width:220px" @bind="_pickerSort" aria-label="Sortowanie">
+                            <option value="fav">Ulubione na górze</option>
+                            <option value="name">Nazwa A–Z</option>
+                            <option value="recent">Ostatnio używane</option>
+                        </select>
+                        <span class="small text-muted align-self-center ms-auto">@_pickerResults.Count wyników</span>
+                    </div>
+                </div>
+                <div class="modal-body">
+                    @if (_pickerLoading)
+                    {
+                        <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div></div>
+                    }
+                    else if (_pickerResults.Count == 0)
+                    {
+                        <div class="text-muted text-center py-5">
+                            <i class="bi bi-search fs-3 d-block mb-2"></i>
+                            @(_pickerFilter.Scope switch
+                            {
+                                ExerciseCatalogScope.Favorites => "Nie masz jeszcze ulubionych — oznacz gwiazdką ćwiczenia, których używasz najczęściej.",
+                                ExerciseCatalogScope.Mine => "Nie masz jeszcze własnych ćwiczeń. Dodasz je w katalogu ćwiczeń.",
+                                ExerciseCatalogScope.Recent => "Tu pojawią się ćwiczenia, których ostatnio używasz w planach.",
+                                _ => "Brak ćwiczeń dla tych filtrów."
+                            })
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="picker-grid">
+                            @foreach (var e in SortedPickerResults)
+                            {
+                                var added = _pickerAdded.Contains(e.Id);
+                                <div class="picker-card @(added ? "added" : "")">
+                                    <button type="button" class="picker-card-main" @onclick="() => AddExercise(e)" aria-label="@($"Dodaj {e.NamePl}")">
+                                        @if (!string.IsNullOrEmpty(e.ThumbnailUrl))
+                                        {
+                                            <img src="@e.ThumbnailUrl" alt="" loading="lazy" />
+                                        }
+                                        else
+                                        {
+                                            <span class="picker-card-noimg"><i class="bi pt-ico-dumbbell"></i></span>
+                                        }
+                                        <span class="picker-card-body">
+                                            <span class="picker-card-name">@e.NamePl</span>
+                                            <span class="picker-card-meta">@string.Join(", ", Muscles.Parse(e.PrimaryMuscles).Take(2).Select(Muscles.Label))</span>
+                                            <span class="picker-card-tags">
+                                                <span class="badge bg-light text-dark border"><i class="bi bi-rulers me-1"></i>@ShortTracking(e.Tracking)</span>
+                                                @if (e.IsMine) { <span class="badge bg-primary-subtle text-primary-emphasis">moje</span> }
+                                                @if (e.HasVideo) { <span class="badge bg-light text-dark border"><i class="bi bi-play-circle"></i></span> }
+                                            </span>
+                                        </span>
+                                        <span class="picker-card-add"><i class="bi @(added ? "bi-check-lg" : "bi-plus-lg")"></i></span>
+                                    </button>
+                                    <button type="button" class="picker-star @(e.IsFavorite ? "on" : "")" @onclick="() => ToggleFavorite(e)"
+                                            aria-label="@(e.IsFavorite ? "Usuń z ulubionych" : "Dodaj do ulubionych")" title="Ulubione">
+                                        <i class="bi @(e.IsFavorite ? "bi-star-fill" : "bi-star")"></i>
+                                    </button>
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+</FeatureGate>
+
+@code {
+    [Parameter] public int? Id { get; set; }
+
+    private string _userId = string.Empty;
+    private PlanEditDto? _plan;
+    private List<ClientDto> _clients = [];
+    private bool _loading = true;
+    private bool _saving;
+    private string? _error;
+
+    // Picker
+    private bool _pickerOpen;
+    private bool _pickerLoading;
+    private int _pickerDayIndex;
+    private readonly ExerciseFilterDto _pickerFilter = new() { Scope = ExerciseCatalogScope.All };
+    private List<ExerciseListItemDto> _pickerResults = [];
+    private List<string> _equipment = [];
+    private string _pickerSort = "fav";
+    private readonly HashSet<int> _pickerAdded = [];
+
+    private static readonly (ExerciseCatalogScope Scope, string Label, string Icon)[] PickerScopes =
+    [
+        (ExerciseCatalogScope.All, "Wszystkie", "bi-grid"),
+        (ExerciseCatalogScope.Favorites, "Ulubione", "bi-star"),
+        (ExerciseCatalogScope.Mine, "Moje", "bi-person"),
+        (ExerciseCatalogScope.Recent, "Ostatnie", "bi-clock-history")
+    ];
+
+    private IEnumerable<ExerciseListItemDto> SortedPickerResults => _pickerSort switch
+    {
+        "name" => _pickerResults.OrderBy(e => e.NamePl),
+        "recent" => _pickerResults.OrderByDescending(e => e.LastUsedAt ?? DateTime.MinValue).ThenBy(e => e.NamePl),
+        _ => _pickerResults.OrderByDescending(e => e.IsFavorite).ThenBy(e => e.NamePl)
+    };
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        _clients = await Clients.GetClientsAsync(_userId);
+
+        if (Id is { } id)
+        {
+            _plan = await Plans.GetForEditAsync(_userId, id);
+        }
+        else
+        {
+            var isTemplate = false;
+            var uri = Nav.ToAbsoluteUri(Nav.Uri);
+            if (QueryHelpers.ParseQuery(uri.Query).TryGetValue("template", out var t) && t == "1")
+                isTemplate = true;
+            _plan = new PlanEditDto { Name = "", IsTemplate = isTemplate, Days = [] };
+        }
+        _loading = false;
+    }
+
+    private void AddDay()
+    {
+        if (_plan is null) return;
+        var letter = (char)('A' + _plan.Days.Count);
+        _plan.Days.Add(new PlanDayEditDto { Label = $"Dzień {letter}", Exercises = [] });
+    }
+
+    private void RemoveDay(int index)
+    {
+        if (_plan is null) return;
+        _plan.Days.RemoveAt(index);
+    }
+
+    private void MoveDay(int index, int dir)
+    {
+        if (_plan is null) return;
+        var to = index + dir;
+        if (to < 0 || to >= _plan.Days.Count) return;
+        (_plan.Days[index], _plan.Days[to]) = (_plan.Days[to], _plan.Days[index]);
+    }
+
+    private void RemoveExercise(int dayIndex, int exIndex)
+    {
+        _plan?.Days[dayIndex].Exercises.RemoveAt(exIndex);
+    }
+
+    private void MoveExercise(int dayIndex, int exIndex, int dir)
+    {
+        if (_plan is null) return;
+        var list = _plan.Days[dayIndex].Exercises;
+        var to = exIndex + dir;
+        if (to < 0 || to >= list.Count) return;
+        (list[exIndex], list[to]) = (list[to], list[exIndex]);
+    }
+
+    private async Task OpenPicker(int dayIndex)
+    {
+        _pickerDayIndex = dayIndex;
+        _pickerFilter.Search = null;
+        _pickerAdded.Clear();
+        _pickerOpen = true;
+        if (_equipment.Count == 0)
+        {
+            try { _equipment = await Catalog.GetEquipmentOptionsAsync(_userId); } catch { /* filtr sprzętu opcjonalny */ }
+        }
+        await RunPickerSearch();
+    }
+
+    private async Task OnPickerSearch(ChangeEventArgs e)
+    {
+        _pickerFilter.Search = e.Value?.ToString();
+        await RunPickerSearch();
+    }
+
+    private async Task RunPickerSearch()
+    {
+        _pickerLoading = true;
+        try { _pickerResults = await Catalog.SearchAsync(_userId, _pickerFilter, take: 120); }
+        catch (Exception ex) { LoggerFactory.CreateLogger("PlanEditor").LogError(ex, "Błąd wyszukiwania w kreatorze."); _pickerResults = []; }
+        _pickerLoading = false;
+    }
+
+    // Okno zostaje otwarte — można dodać kilka ćwiczeń pod rząd, a „Gotowe” je zamyka.
+    private void AddExercise(ExerciseListItemDto e)
+    {
+        if (_plan is null) return;
+        _plan.Days[_pickerDayIndex].Exercises.Add(new PlanExerciseEditDto
+        {
+            ExerciseId = e.Id,
+            ExerciseNamePl = e.NamePl,
+            ThumbnailUrl = e.ThumbnailUrl,
+            Tracking = e.Tracking,
+            Sets = e.Tracking == PTScheduler.Domain.Enums.ExerciseTracking.DistanceTime ? 1 : 3,
+            Reps = ExerciseTrackingRules.UsesReps(e.Tracking) ? "10" : null,
+            TargetDurationSeconds = e.Tracking == PTScheduler.Domain.Enums.ExerciseTracking.Time ? 30 : null
+        });
+        _pickerAdded.Add(e.Id);
+    }
+
+    private async Task SetScope(ExerciseCatalogScope scope)
+    {
+        _pickerFilter.Scope = scope;
+        if (scope == ExerciseCatalogScope.Recent) _pickerSort = "recent";
+        await RunPickerSearch();
+    }
+
+    private async Task SetMuscle(PTScheduler.Domain.Enums.MuscleGroup? m)
+    {
+        _pickerFilter.Muscle = m;
+        await RunPickerSearch();
+    }
+
+    private async Task SetEquipment(ChangeEventArgs e)
+    {
+        var v = e.Value?.ToString();
+        _pickerFilter.Equipment = string.IsNullOrWhiteSpace(v) ? null : v;
+        await RunPickerSearch();
+    }
+
+    private async Task ToggleFavorite(ExerciseListItemDto e)
+    {
+        e.IsFavorite = await Catalog.ToggleFavoriteAsync(_userId, e.Id);
+        if (_pickerFilter.Scope == ExerciseCatalogScope.Favorites && !e.IsFavorite) _pickerResults.Remove(e);
+    }
+
+    private static string DistanceValue(PlanExerciseEditDto ex, bool km) =>
+        ex.TargetDistanceMeters is decimal m && m > 0
+            ? (km ? (m / 1000m).ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) : m.ToString("0", System.Globalization.CultureInfo.InvariantCulture))
+            : "";
+
+    private static void SetDistance(PlanExerciseEditDto ex, string? raw, bool km)
+    {
+        if (decimal.TryParse((raw ?? "").Replace(',', '.'), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var v) && v > 0)
+            ex.TargetDistanceMeters = km ? v * 1000m : v;
+        else ex.TargetDistanceMeters = null;
+    }
+
+    private static string ShortTracking(PTScheduler.Domain.Enums.ExerciseTracking t) => t switch
+    {
+        PTScheduler.Domain.Enums.ExerciseTracking.Reps => "powt.",
+        PTScheduler.Domain.Enums.ExerciseTracking.Time => "czas",
+        PTScheduler.Domain.Enums.ExerciseTracking.DistanceTime => "dystans",
+        PTScheduler.Domain.Enums.ExerciseTracking.WeightDistance => "kg · dystans",
+        _ => "kg · powt."
+    };
+
+    private static string EquipmentPl(string eq) => eq.ToLowerInvariant() switch
+    {
+        "barbell" => "Sztanga",
+        "dumbbell" => "Hantle",
+        "cable" => "Wyciąg",
+        "machine" => "Maszyna",
+        "body only" => "Masa ciała",
+        "kettlebells" => "Kettlebell",
+        "bands" => "Gumy",
+        "e-z curl bar" => "Gryf łamany",
+        "exercise ball" => "Piłka gimnastyczna",
+        "medicine ball" => "Piłka lekarska",
+        "foam roll" => "Roller",
+        "other" => "Inne",
+        _ => eq
+    };
+
+    private async Task Save()
+    {
+        if (_plan is null) return;
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_plan.Name)) { _error = "Podaj nazwę planu."; return; }
+        _saving = true;
+        try
+        {
+            await Plans.SavePlanAsync(_userId, _plan);
+            Nav.NavigateTo("/plans");
+        }
+        catch (Exception ex)
+        {
+            _error = ex.Message;
+            LoggerFactory.CreateLogger("PlanEditor").LogError(ex, "Błąd zapisu planu.");
+        }
+        finally { _saving = false; }
+    }
+}

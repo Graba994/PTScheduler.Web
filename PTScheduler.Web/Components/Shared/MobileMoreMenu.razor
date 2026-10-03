@@ -1,6 +1,11 @@
-@rendermode InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 @inject IJSRuntime JS
+@inject PTScheduler.Web.Services.EntitlementService Entitlements
 @inject AuthenticationStateProvider AuthState
+@inject PTScheduler.Application.Interfaces.IMarketingSettingsService MarketingSettings
+@inject PTScheduler.Web.Services.ClientNav ClientNavigation
+@inject PTScheduler.Web.Services.UpsellService Upsell
+@inject PTScheduler.Application.Interfaces.IAccountService AccountSvc
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Domain.Constants
 @using System.Security.Claims
@@ -9,7 +14,9 @@
 {
     <button class="mobile-nav-item @(_sheetOpen ? "active" : "")" @onclick="ToggleSheet">
         <span class="mobile-nav-indicator"></span>
-        <i class="bi bi-grid-fill"></i>
+        <i class="bi bi-grid-fill position-relative">
+            @if (_mustChangePassword) { <span class="position-absolute top-0 start-100 translate-middle p-1 bg-danger rounded-circle" style="font-size:0"><span class="visually-hidden">Ustaw własne hasło</span></span> }
+        </i>
         <span>Więcej</span>
     </button>
 
@@ -21,11 +28,17 @@
         <div class="mobile-sheet-handle" @onclick="CloseSheet"><span></span></div>
 
         <div class="mobile-sheet-user">
-            <div class="mobile-sheet-avatar">@_initials</div>
+            <div class="mobile-sheet-avatar">@if (_avatarUrl is not null) { <img src="@_avatarUrl" alt="" style="width:100%;height:100%;border-radius:50%;object-fit:cover" /> } else { @_initials }</div>
             <div style="min-width:0;flex:1">
                 <div class="fw-semibold text-truncate">@_name</div>
                 <div class="text-muted text-truncate" style="font-size:.75rem">@_email</div>
             </div>
+            @if (_canInstallPwa)
+            {
+                <button class="mobile-sheet-theme-btn" @onclick="InstallPwaAsync" title="Zainstaluj aplikację">
+                    <i class="bi bi-download"></i>
+                </button>
+            }
             <button class="mobile-sheet-theme-btn" @onclick="ToggleDarkAsync" title="@(_dark ? "Tryb jasny" : "Tryb ciemny")">
                 <i class="bi @(_dark ? "bi-sun-fill" : "bi-moon-stars-fill")"></i>
             </button>
@@ -36,18 +49,29 @@
                 <div class="mobile-sheet-section">
                     <div class="mobile-sheet-label">Nawigacja</div>
                     <div class="mobile-sheet-grid">
-                        <a href="/stats" class="mobile-sheet-tile" @onclick="CloseSheet">
-                            <i class="bi bi-bar-chart-line-fill"></i>
-                            <span>Statystyki</span>
+                        <a href="/chat" class="mobile-sheet-tile position-relative" @onclick="CloseSheet">
+                            <i class="bi bi-chat-dots-fill"></i>
+                            <span>Wiadomości</span>
+                            <ChatUnreadBadge />
                         </a>
-                        <a href="/finance" class="mobile-sheet-tile" @onclick="CloseSheet">
-                            <i class="bi bi-currency-dollar"></i>
-                            <span>Finanse</span>
-                        </a>
-                        <a href="/finance/hidden" class="mobile-sheet-tile" @onclick="CloseSheet">
-                            <i class="bi bi-eye-slash"></i>
-                            <span>Ukryte finanse</span>
-                        </a>
+                        @if (Entitlements.IsAllowed("AdvancedAnalytics"))
+                        {
+                            <a href="/stats" class="mobile-sheet-tile" @onclick="CloseSheet">
+                                <i class="bi bi-bar-chart-line-fill"></i>
+                                <span>Statystyki</span>
+                            </a>
+                        }
+                        @if (Entitlements.IsAllowed("FinancialReports"))
+                        {
+                            <a href="/finance" class="mobile-sheet-tile" @onclick="CloseSheet">
+                                <i class="bi bi-currency-dollar"></i>
+                                <span>Finanse</span>
+                            </a>
+                            <a href="/finance/hidden" class="mobile-sheet-tile" @onclick="CloseSheet">
+                                <i class="bi bi-eye-slash"></i>
+                                <span>Ukryte finanse</span>
+                            </a>
+                        }
                     </div>
                 </div>
                 <div class="mobile-sheet-section">
@@ -55,22 +79,41 @@
                     <div class="mobile-sheet-grid">
                         <a href="/trainer/availability" class="mobile-sheet-tile" @onclick="CloseSheet">
                             <i class="bi bi-clock-fill"></i>
-                            <span>Dostępność</span>
+                            <span>Godziny pracy</span>
                         </a>
-                        <a href="/trainer/series" class="mobile-sheet-tile" @onclick="CloseSheet">
-                            <i class="bi bi-repeat"></i>
-                            <span>Serie wizyt</span>
-                        </a>
-                        <a href="/trainer/contacts" class="mobile-sheet-tile" @onclick="CloseSheet">
+                        @if (Entitlements.IsAllowed("RecurringSessions"))
+                        {
+                            <a href="/trainer/series" class="mobile-sheet-tile" @onclick="CloseSheet">
+                                <i class="bi bi-repeat"></i>
+                                <span>Serie wizyt</span>
+                            </a>
+                        }
+                        <a href="/trainer/pairs" class="mobile-sheet-tile" @onclick="CloseSheet">
                             <i class="bi bi-people-fill"></i>
-                            <span>Pary klientów</span>
-                        </a>
-                        <a href="/trainer/intro-config" class="mobile-sheet-tile" @onclick="CloseSheet">
-                            <i class="bi bi-person-lines-fill"></i>
-                            <span>Pierwsza wizyta</span>
+                            <span>Treningi w parach</span>
                         </a>
                     </div>
                 </div>
+                @if (Entitlements.IsAllowed("TrainingPlansEnabled"))
+                {
+                <div class="mobile-sheet-section">
+                    <div class="mobile-sheet-label">Trening</div>
+                    <div class="mobile-sheet-grid">
+                        <a href="/exercises" class="mobile-sheet-tile" @onclick="CloseSheet">
+                            <i class="bi pt-ico-dumbbell"></i>
+                            <span>Ćwiczenia</span>
+                        </a>
+                        <a href="/plans" class="mobile-sheet-tile" @onclick="CloseSheet">
+                            <i class="bi bi-list-check"></i>
+                            <span>Plany</span>
+                        </a>
+                        <a href="/trainer/activity" class="mobile-sheet-tile" @onclick="CloseSheet">
+                            <i class="bi bi-people"></i>
+                            <span>Aktywność</span>
+                        </a>
+                    </div>
+                </div>
+                }
             </Authorized>
         </AuthorizeView>
 
@@ -79,10 +122,33 @@
                 <div class="mobile-sheet-section">
                     <div class="mobile-sheet-label">Administracja</div>
                     <div class="mobile-sheet-grid">
-                        <a href="/admin/users" class="mobile-sheet-tile" @onclick="CloseSheet">
+                        <a href="/admin" class="mobile-sheet-tile" @onclick="CloseSheet">
                             <i class="bi bi-shield-fill-check"></i>
-                            <span>Panel admina</span>
+                            <span>Zarządzanie</span>
                         </a>
+                    </div>
+                </div>
+            </Authorized>
+        </AuthorizeView>
+
+        @* Sklep i plan — zawsze pod ręką dla właściciela studia. *@
+        <AuthorizeView Roles="Admin,Trainer">
+            <Authorized>
+                <div class="mobile-sheet-section">
+                    <div class="mobile-sheet-label">Plan i dodatki</div>
+                    <div class="mobile-sheet-grid">
+                        <a href="/admin/sklep" class="mobile-sheet-tile position-relative" @onclick="CloseSheet">
+                            <i class="bi bi-bag-heart-fill"></i>
+                            <span>Sklep</span>
+                            @if (_urgent) { <span class="nav-dot"></span> }
+                        </a>
+                        @if (PlanCatalog.HasUpgrade(Entitlements.Current))
+                        {
+                            <a href="/admin/upgrade" class="mobile-sheet-tile" @onclick="CloseSheet">
+                                <i class="bi bi-rocket-takeoff-fill"></i>
+                                <span>Ulepsz plan</span>
+                            </a>
+                        }
                     </div>
                 </div>
             </Authorized>
@@ -90,21 +156,24 @@
 
         <AuthorizeView Roles="Client">
             <Authorized>
+                @* Sekcje, których nie ma na dolnym pasku (Pakiety, Kursy), i sprawy konta. *@
                 <div class="mobile-sheet-section">
-                    <div class="mobile-sheet-label">Moje</div>
+                    <div class="mobile-sheet-label">Więcej</div>
                     <div class="mobile-sheet-grid">
-                        <a href="/my/profile" class="mobile-sheet-tile" @onclick="CloseSheet">
-                            <i class="bi bi-person-circle"></i>
-                            <span>Profil</span>
-                        </a>
-                        <a href="/my/packages" class="mobile-sheet-tile" @onclick="CloseSheet">
-                            <i class="bi bi-box-seam"></i>
-                            <span>Pakiety</span>
-                        </a>
-                        <a href="/my/stats" class="mobile-sheet-tile" @onclick="CloseSheet">
-                            <i class="bi bi-graph-up"></i>
-                            <span>Statystyki</span>
-                        </a>
+                        @foreach (var sec in _clientSections.Where(s => s.Key is "shop" or "courses"))
+                        {
+                            <a href="@sec.Href" class="mobile-sheet-tile" @onclick="CloseSheet">
+                                <i class="bi @sec.Icon"></i>
+                                <span>@sec.Label</span>
+                            </a>
+                        }
+                        @if (_referralsEnabled)
+                        {
+                            <a href="/my/referrals" class="mobile-sheet-tile" @onclick="CloseSheet">
+                                <i class="bi bi-gift"></i>
+                                <span>Poleć znajomym</span>
+                            </a>
+                        }
                     </div>
                 </div>
             </Authorized>
@@ -112,11 +181,27 @@
 
         <div class="mobile-sheet-section">
             <div class="mobile-sheet-label">Konto</div>
+            @if (_mustChangePassword)
+            {
+                <a href="/Account/Manage/ChangePassword" class="mobile-sheet-link text-danger fw-semibold" @onclick="CloseSheet">
+                    <i class="bi bi-shield-lock-fill"></i>
+                    <span>Ustaw własne hasło</span>
+                    <i class="bi bi-chevron-right ms-auto" style="font-size:.7rem;opacity:.4"></i>
+                </a>
+            }
             <a href="/Account/Manage" class="mobile-sheet-link" @onclick="CloseSheet">
                 <i class="bi bi-gear-fill"></i>
-                <span>Ustawienia konta</span>
+                <span>Moje konto i ustawienia</span>
                 <i class="bi bi-chevron-right ms-auto" style="font-size:.7rem;opacity:.4"></i>
             </a>
+            @if (_canSwitch)
+            {
+                <a href="/switch-account" class="mobile-sheet-link" @onclick="CloseSheet">
+                    <i class="bi bi-people-fill"></i>
+                    <span>Przełącz konto</span>
+                    <i class="bi bi-chevron-right ms-auto" style="font-size:.7rem;opacity:.4"></i>
+                </a>
+            }
             <a href="/legal/terms" class="mobile-sheet-link" @onclick="CloseSheet">
                 <i class="bi bi-file-earmark-text"></i>
                 <span>Regulamin</span>
@@ -143,9 +228,16 @@
     private bool _ready;
     private bool _sheetOpen;
     private bool _dark;
+    private bool _canInstallPwa;
     private string _initials = "";
+    private string? _avatarUrl;
     private string _name = "";
     private string _email = "";
+    private bool _referralsEnabled;
+    private bool _mustChangePassword;
+    private bool _canSwitch;
+    private bool _urgent;
+    private IReadOnlyList<PTScheduler.Web.Services.ClientNav.Section> _clientSections = [];
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -155,11 +247,33 @@
             var user = auth.User;
             _name = user.Identity?.Name ?? "";
             _email = user.FindFirst(ClaimTypes.Email)?.Value ?? _name;
+            _mustChangePassword = user.HasClaim(PTScheduler.Web.Services.AppClaimsPrincipalFactory.MustChangePasswordClaim, "1");
+            _canSwitch = user.IsInRole(Roles.Admin) || PTScheduler.Web.Services.AccountSwitchService.IsSwitched(user);
+            try { if (user.FindFirst(ClaimTypes.NameIdentifier)?.Value is { } uid) _avatarUrl = await AccountSvc.GetAvatarUrlAsync(uid); } catch { }
+            if (user.IsInRole(Roles.Admin) || user.IsInRole(Roles.Trainer))
+                try { _urgent = (await Upsell.GetAsync()).Any(n => n.IsUrgent); } catch { }
             var parts = _name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
             _initials = parts.Length >= 2
                 ? $"{parts[0][0]}{parts[^1][0]}".ToUpper()
                 : _name.Length > 0 ? _name[0].ToString().ToUpper() : "?";
-            try { _dark = await JS.InvokeAsync<bool>("PTTheme.isDark"); } catch { } // JS interop may fail during prerender
+            try { _dark = await JS.InvokeAsync<bool>("PTTheme.isDark"); } catch { }
+            try { _referralsEnabled = Entitlements.IsAllowed("ReferralProgram") && (await MarketingSettings.GetAsync()).ReferralEnabled; } catch { }
+            try { _clientSections = await ClientNavigation.GetSectionsAsync(); } catch { }
+            try
+            {
+                var standalone = await JS.InvokeAsync<bool>("eval",
+                    "window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true");
+                if (!standalone)
+                {
+                    _canInstallPwa = await JS.InvokeAsync<bool>("eval", "!!window._installPrompt");
+                    if (!_canInstallPwa)
+                    {
+                        _canInstallPwa = await JS.InvokeAsync<bool>("eval",
+                            "/iphone|ipad|ipod/i.test(navigator.userAgent.toLowerCase())");
+                    }
+                }
+            }
+            catch { }
             _ready = true;
             StateHasChanged();
         }
@@ -170,6 +284,25 @@
 
     private async Task ToggleDarkAsync()
     {
-        try { _dark = await JS.InvokeAsync<bool>("PTTheme.toggle"); } catch { } // JS interop may fail during prerender
+        try { _dark = await JS.InvokeAsync<bool>("PTTheme.toggle"); } catch { }
+    }
+
+    private async Task InstallPwaAsync()
+    {
+        try
+        {
+            var hasPrompt = await JS.InvokeAsync<bool>("eval", "!!window._installPrompt");
+            if (hasPrompt)
+            {
+                var accepted = await JS.InvokeAsync<bool>("triggerPwaInstall");
+                if (accepted) _canInstallPwa = false;
+            }
+            else
+            {
+                await JS.InvokeVoidAsync("eval",
+                    "alert('Nacisnij przycisk Udostepnij w Safari, a nastepnie wybierz \\\"Dodaj do ekranu glownego\\\".')");
+            }
+        }
+        catch { }
     }
 }

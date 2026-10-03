@@ -1,0 +1,846 @@
+@page "/panel/backups"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject BackupService BackupSvc
+@inject SiteSettingsService Settings
+@inject OffsiteBackupService Offsite
+@inject GoogleOAuthBroker GoogleBroker
+@inject NavigationManager Nav
+@inject BackupMaintenanceService Maintenance
+@inject BackupJobs Jobs
+@rendermode InteractiveServer
+@implements IDisposable
+@using K = PTScheduler.Portal.Services.SiteSettingsService.Keys
+
+<PageTitle>Kopie zapasowe — PTScheduler Portal</PageTitle>
+
+<PanelHeader Title="Kopie zapasowe" Icon="bi-hdd-stack" Subtitle="Pełne kopie trenerów (baza, zdjęcia, dokumenty) i Portalu — z testem odtworzenia, kopią poza serwerem i odtwarzaniem jednym kliknięciem.">
+    <Actions>
+    <div class="d-flex gap-2">
+        <button class="btn btn-primary btn-sm" @onclick="BackupAllNow" disabled="@_busy">
+            @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+            <i class="bi bi-download me-1"></i>Backup wszystkich (teraz)
+        </button>
+        <button class="btn btn-outline-secondary btn-sm" @onclick="VerifyLatestNow" disabled="@_busy" title="Odtwarza najnowszą kopię każdej instancji do tymczasowej bazy i sprawdza, czy jest kompletna">
+            <i class="bi bi-clipboard-check me-1"></i>Sprawdź odtworzenie
+        </button>
+        <button class="btn btn-outline-danger btn-sm" @onclick="Cleanup" disabled="@_busy">
+            <i class="bi bi-trash3 me-1"></i>Wyczyść stare
+        </button>
+    </div>
+    </Actions>
+</PanelHeader>
+
+@if (_message is not null)
+{
+    <div class="alert @(_msgError ? "alert-danger" : "alert-success") alert-dismissible py-2 small">
+        @_message
+        <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button>
+    </div>
+}
+
+@{
+    var job = Jobs.Current ?? (Jobs.Last is { CompletedAt: { } done } lastJob && DateTime.UtcNow - done < TimeSpan.FromHours(2) && !_jobDismissed ? lastJob : null);
+}
+@if (job is not null)
+{
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-header pp-card-header d-flex align-items-center gap-2 flex-wrap">
+            <span class="pp-card-header-title">
+                <span class="pp-icon pp-icon-sm @(job.Ok is null ? "pp-tone-info" : job.Ok == true ? "pp-tone-ok" : "pp-tone-danger")">
+                    <i class="bi @(job.Ok is null ? "bi-arrow-repeat" : job.Ok == true ? "bi-check2-circle" : "bi-exclamation-triangle")"></i>
+                </span>@job.Title
+            </span>
+            <span class="pp-chip pp-tone-@(job.Ok is null ? "info" : job.Ok == true ? "ok" : "danger") ms-auto">@(job.Ok is null ? "w toku…" : job.Ok == true ? "gotowe" : "z problemami")</span>
+            @if (job.Ok is not null)
+            {
+                <button type="button" class="btn-close btn-close-sm" aria-label="Zamknij" @onclick="() => _jobDismissed = true"></button>
+            }
+        </div>
+        <div class="card-body">
+            @if (job.Result is not null)
+            {
+                <p class="small mb-2 @(job.Ok == true ? "" : "text-danger")">@job.Result</p>
+            }
+            <pre class="small mb-0 bg-light rounded p-2" style="max-height:260px;overflow:auto;white-space:pre-wrap">@string.Join("\n", job.Lines)</pre>
+            @if (job.Ok is null)
+            {
+                <div class="form-text small mt-2">Możesz zamknąć stronę — zadanie dokończy się samo, a dziennik zobaczysz tu po powrocie.</div>
+            }
+        </div>
+    </div>
+}
+
+@if (_restoreEntry is not null)
+{
+    <div class="card border-0 shadow-sm mb-3 border-start border-4 border-warning">
+        <div class="card-body">
+            <h2 class="pp-card-title pp-card-title-icon mb-2"><span class="pp-icon pp-icon-sm pp-tone-warn"><i class="bi bi-arrow-counterclockwise"></i></span>Odtwórz kopię @_restoreEntry.Slug z @_restoreEntry.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</h2>
+            <p class="small text-muted mb-3">
+                Dane w wybranej instancji zostaną zastąpione danymi z kopii@(BackupService.IsBundle(_restoreEntry.FilePath) ? " (baza i pliki)" : " (tylko baza — pliki zostają)").
+                Najpierw Portal zrobi kopię obecnego stanu, więc da się to cofnąć. Aplikacja trenera będzie niedostępna przez kilka minut.
+            </p>
+            <div class="row g-3 align-items-end">
+                <div class="col-md-5">
+                    <label class="form-label small fw-semibold" for="rsTarget">Odtwórz do instancji</label>
+                    <select id="rsTarget" class="form-select" @bind="_restoreTargetId">
+                        @foreach (var t in _tenants)
+                        {
+                            <option value="@t.Id">@t.Slug@(t.Slug == _restoreEntry.Slug ? " (ta sama — w miejsce obecnej)" : $" — {t.CompanyName}")</option>
+                        }
+                    </select>
+                    <div class="form-text small">Żeby najpierw obejrzeć kopię, załóż w Trenerach instancję testową i odtwórz do niej.</div>
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold" for="rsConfirm">Wpisz adres instancji, żeby potwierdzić</label>
+                    <input id="rsConfirm" class="form-control font-monospace" autocomplete="off" placeholder="@TargetSlug" @bind="_restoreConfirm" @bind:event="oninput" />
+                </div>
+                <div class="col-md-3 d-flex gap-2">
+                    <button class="btn btn-warning btn-sm" disabled="@(_restoreConfirm?.Trim() != TargetSlug || Jobs.Current is not null)" @onclick="StartRestore">
+                        <i class="bi bi-arrow-counterclockwise me-1"></i>Odtwórz
+                    </button>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => _restoreEntry = null">Anuluj</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@{
+    var last = _entries.Where(e => e.Status != BackupStatus.Running).OrderByDescending(e => e.CreatedAt).FirstOrDefault();
+    var running = _entries.Any(e => e.Status == BackupStatus.Running);
+}
+@if (running)
+{
+    <StatusBanner Tone="info" Icon="bi-arrow-repeat" Title="Trwa tworzenie kopii">Kopie baz trenerów zapisują się na dysk. Odśwież historię za chwilę.</StatusBanner>
+}
+else if (_schedule == "off")
+{
+    <StatusBanner Tone="warn" Icon="bi-pause-circle-fill" Title="Automatyczne kopie są wyłączone">Włącz harmonogram poniżej albo rób kopie ręcznie przyciskiem „Backup wszystkich (teraz)”.</StatusBanner>
+}
+else if (last is null)
+{
+    <StatusBanner Tone="muted" Icon="bi-hdd-stack" Title="Nie ma jeszcze żadnej kopii">Pierwsza kopia powstanie dziś o 3:00 UTC. Możesz też zrobić ją od razu przyciskiem u góry.</StatusBanner>
+}
+else if (last.Status == BackupStatus.Completed)
+{
+    <StatusBanner Tone="ok" Icon="bi-shield-check" Title="@($"Kopie robią się {ScheduleLabel(_schedule)}")">Ostatnia udana kopia: @last.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm"). Kopie starsze niż @_retentionDays dni usuwają się same.</StatusBanner>
+}
+else
+{
+    <StatusBanner Tone="danger" Icon="bi-exclamation-octagon-fill" Title="Ostatnia kopia się nie udała">@last.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm") · @last.Slug. Kliknij ikonę błędu w historii, żeby zobaczyć szczegóły.</StatusBanner>
+}
+
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-gear"></i></span>Ustawienia</div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-md-5">
+                <label class="form-label small fw-semibold">Katalog na kopie</label>
+                <input class="form-control font-monospace" @bind="_dir" />
+                <div class="form-text small">Musi być zamontowany w kontenerze portalu (np. -v /mnt/user/appdata/ptscheduler-backups:/opt/ptscheduler/backups)</div>
+            </div>
+            <div class="col-md-3 col-6">
+                <label class="form-label small fw-semibold">Harmonogram</label>
+                <select class="form-select" @bind="_schedule">
+                    <option value="daily">Codziennie 03:00 UTC</option>
+                    <option value="12h">Co 12 godzin (3:00 i 15:00 UTC)</option>
+                    <option value="6h">Co 6 godzin (3, 9, 15, 21 UTC)</option>
+                    <option value="off">Wyłączony</option>
+                </select>
+            </div>
+            <div class="col-md-2 col-6">
+                <label class="form-label small fw-semibold">Retencja (dni)</label>
+                <input type="number" class="form-control" @bind="_retentionDays" />
+            </div>
+            <div class="col-md-2 col-12">
+                <label class="form-label small fw-semibold">Test odtworzenia</label>
+                <select class="form-select" @bind="_verify">
+                    <option value="weekly">Co niedzielę</option>
+                    <option value="off">Wyłączony</option>
+                </select>
+            </div>
+        </div>
+        <div class="form-text small mt-2">Test odtworzenia wgrywa najnowszą kopię każdej instancji do osobnej, tymczasowej bazy, sprawdza tabele i migracje, po czym ją usuwa. Bazy trenerów nie są ruszane. Gdy coś się nie zgadza — e-mail do administratora.</div>
+        <button class="btn btn-primary btn-sm mt-3" @onclick="SaveSettings">Zapisz ustawienia</button>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm mb-3">
+    <div class="card-header pp-card-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+        <span class="pp-card-header-title"><span class="pp-icon pp-icon-sm"><i class="bi bi-cloud-arrow-up"></i></span>Kopia poza serwerem</span>
+        @if (_savedTarget != OffsiteBackupService.TargetOff)
+        {
+            <span class="pp-chip pp-tone-ok"><i class="bi bi-cloud-check"></i>@OffsiteBackupService.TargetLabel(_savedTarget)@(_hasEncPassword ? " · szyfrowana" : "")</span>
+        }
+        else
+        {
+            <span class="pp-chip pp-tone-warn"><i class="bi bi-cloud-slash"></i>tylko na tym serwerze</span>
+        }
+    </div>
+    <div class="card-body">
+        <p class="small text-muted mb-3">Gdy serwer padnie albo dysk się zepsuje, kopie na tym samym serwerze przepadną razem z nim. Po każdym nocnym backupie Portal wyśle pliki także tutaj:</p>
+        <div class="btn-group btn-group-sm mb-3 flex-wrap" role="group" aria-label="Dokąd wysyłać kopie">
+            <input type="radio" class="btn-check" name="offsite" id="offOff" checked="@(_target == OffsiteBackupService.TargetOff)" @onchange='() => _target = OffsiteBackupService.TargetOff' />
+            <label class="btn btn-outline-secondary" for="offOff"><i class="bi bi-slash-circle me-1"></i>Wyłączona</label>
+            <input type="radio" class="btn-check" name="offsite" id="offSftp" checked="@(_target == OffsiteBackupService.TargetSftp)" @onchange='() => _target = OffsiteBackupService.TargetSftp' />
+            <label class="btn btn-outline-secondary" for="offSftp"><i class="bi bi-hdd-network me-1"></i>Inny serwer (SFTP)</label>
+            <input type="radio" class="btn-check" name="offsite" id="offDrive" checked="@(_target == OffsiteBackupService.TargetGdrive)" @onchange='() => _target = OffsiteBackupService.TargetGdrive' />
+            <label class="btn btn-outline-secondary" for="offDrive"><i class="bi bi-google me-1"></i>Google Drive</label>
+        </div>
+
+        @if (_target == OffsiteBackupService.TargetSftp)
+        {
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold" for="sftpHost">Adres serwera</label>
+                    <input id="sftpHost" class="form-control font-monospace" placeholder="backup.example.pl" @bind="_sftpHost" />
+                </div>
+                <div class="col-md-2 col-4">
+                    <label class="form-label small fw-semibold" for="sftpPort">Port</label>
+                    <input id="sftpPort" type="number" class="form-control" @bind="_sftpPort" />
+                </div>
+                <div class="col-md-4 col-8">
+                    <label class="form-label small fw-semibold" for="sftpUser">Użytkownik</label>
+                    <input id="sftpUser" class="form-control font-monospace" autocomplete="off" @bind="_sftpUser" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold" for="sftpPass">Hasło</label>
+                    <input id="sftpPass" type="password" class="form-control" autocomplete="new-password"
+                           placeholder="@(_hasSftpPassword ? "Zapisane — zostaw puste, żeby nie zmieniać" : "")" @bind="_sftpPassword" />
+                </div>
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold" for="sftpDir">Katalog na serwerze</label>
+                    <input id="sftpDir" class="form-control font-monospace" @bind="_sftpDir" />
+                    <div class="form-text small">Względem katalogu domowego, chyba że zaczyna się od /. Każda instancja dostaje swój podkatalog.</div>
+                </div>
+                <div class="col-12">
+                    <label class="form-label small fw-semibold" for="sftpKey">Klucz prywatny (zamiast hasła albo razem z nim)</label>
+                    <textarea id="sftpKey" class="form-control font-monospace small" rows="3" spellcheck="false"
+                              placeholder="@(_hasSftpKey ? "Zapisany — wklej nowy, żeby zmienić" : "-----BEGIN OPENSSH PRIVATE KEY-----")" @bind="_sftpKey"></textarea>
+                    @if (_hasSftpKey)
+                    {
+                        <button class="btn btn-link btn-sm px-0" @onclick="RemoveSftpKey">Usuń zapisany klucz</button>
+                    }
+                </div>
+                @if (!string.IsNullOrEmpty(_sftpFingerprint))
+                {
+                    <div class="col-12 small d-flex align-items-center gap-2 flex-wrap">
+                        <span class="text-muted"><i class="bi bi-fingerprint me-1"></i>Zapamiętany klucz serwera:</span>
+                        <code class="small">@_sftpFingerprint</code>
+                        <button class="btn btn-link btn-sm p-0" @onclick="ForgetFingerprint">Zapomnij odcisk</button>
+                    </div>
+                }
+            </div>
+        }
+        else if (_target == OffsiteBackupService.TargetGdrive)
+        {
+            @if (!_googleConfigured)
+            {
+                <StatusBanner Tone="warn" Icon="bi-google" Title="Najpierw klient Google platformy">
+                    Kopie na Dysk korzystają z tego samego klienta Google co kalendarz trenerów. Ustaw go w <a href="/panel/setup/services">Konfiguracja platformy → Usługi</a>, a potem wróć tutaj.
+                </StatusBanner>
+            }
+            else if (!string.IsNullOrEmpty(_gdriveEmail) || _gdriveConnected)
+            {
+                <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+                    <span class="pp-chip pp-tone-ok"><i class="bi bi-check-circle"></i>Połączono@(string.IsNullOrEmpty(_gdriveEmail) ? "" : $": {_gdriveEmail}")</span>
+                    <button class="btn btn-sm btn-outline-danger" @onclick="DisconnectDrive">Odłącz</button>
+                </div>
+                <div class="form-text small">Pliki trafiają do folderu „PTScheduler — kopie zapasowe”. Portal widzi tylko pliki, które sam utworzył — nie resztę Dysku.</div>
+            }
+            else
+            {
+                <button class="btn btn-sm btn-outline-primary" @onclick="ConnectDrive"><i class="bi bi-google me-1"></i>Połącz z Google Drive</button>
+                <div class="form-text small mt-2">
+                    Zaloguj się kontem Google, na którego Dysku mają leżeć kopie (najlepiej osobnym, nie prywatnym). Jeśli aplikacja Google platformy jest w trybie testowym,
+                    dodaj to konto jako testera i przełącz aplikację na „W produkcji” — w trybie testowym Google odłącza dostęp po 7 dniach.
+                </div>
+            }
+        }
+
+        @if (_target != OffsiteBackupService.TargetOff)
+        {
+            <hr class="my-3" />
+            <div class="row g-3">
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold" for="encPass">Hasło szyfrowania kopii</label>
+                    <input id="encPass" type="password" class="form-control" autocomplete="new-password"
+                           placeholder="@(_hasEncPassword ? "Ustawione — zostaw puste, żeby nie zmieniać" : "Zalecane — min. 12 znaków")" @bind="_encPassword" />
+                    <div class="form-text small">
+                        Kopie zawierają dane klientów (RODO) — z hasłem poza serwer trafia zaszyfrowany plik <code>.enc</code>. Zapisz hasło w menedżerze haseł: bez niego kopii nie da się odczytać.
+                        @if (_hasEncPassword)
+                        {
+                            <button class="btn btn-link btn-sm p-0 align-baseline" @onclick="RemoveEncPassword">Wyłącz szyfrowanie</button>
+                        }
+                    </div>
+                </div>
+                @if (!_hasEncPassword)
+                {
+                    <div class="col-12 order-first">
+                        <div class="alert alert-warning small py-2 mb-0">
+                            <i class="bi bi-shield-exclamation me-1"></i>Bez hasła szyfrowania poza serwer trafią dane klientów i — w kopii Portalu — hasła platformy (.env). Ustaw hasło poniżej.
+                        </div>
+                    </div>
+                }
+                <div class="col-md-3 col-6">
+                    <label class="form-label small fw-semibold" for="offRet">Trzymaj (dni)</label>
+                    <input id="offRet" type="number" min="1" class="form-control" @bind="_offsiteRetention" />
+                </div>
+            </div>
+        }
+
+        <div class="d-flex gap-2 flex-wrap mt-3">
+            <button class="btn btn-primary btn-sm" @onclick="SaveOffsite" disabled="@_busy"><i class="bi bi-floppy me-1"></i>Zapisz</button>
+            @if (_savedTarget != OffsiteBackupService.TargetOff)
+            {
+                <button class="btn btn-outline-secondary btn-sm" @onclick="TestOffsite" disabled="@_busy"><i class="bi bi-plug me-1"></i>Sprawdź połączenie</button>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="UploadPendingNow" disabled="@_busy"><i class="bi bi-cloud-upload me-1"></i>Wyślij kopie z ostatnich 2 dni</button>
+            }
+        </div>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm">
+    <div class="card-header bg-white fw-semibold d-flex justify-content-between align-items-center">
+        <span class="pp-card-header-title"><span class="pp-icon pp-icon-sm"><i class="bi bi-list-ul"></i></span>Historia (@_entries.Count)</span>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="Load"><i class="bi bi-arrow-clockwise"></i></button>
+    </div>
+    <div class="card-body p-0">
+        @if (_entries.Count == 0)
+        {
+            <div class="pp-empty"><i class="bi bi-hdd-stack"></i>Tu pojawi się lista kopii — z datą, rozmiarem i przyciskiem pobierania.</div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover mb-0 small align-middle">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Data</th>
+                            <th>Slug</th>
+                            <th>Rozmiar</th>
+                            <th>Typ</th>
+                            <th>Status</th>
+                            <th>Test odtworzenia</th>
+                            <th>Poza serwerem</th>
+                            <th>Czas</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var e in _entries.Take(200))
+                        {
+                            <tr>
+                                <td>@e.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                <td class="font-monospace">
+                                    @if (e.Slug == "portal")
+                                    {
+                                        <span class="badge bg-dark">portal</span>
+                                    }
+                                    else
+                                    {
+                                        @e.Slug
+                                    }
+                                </td>
+                                <td>@Fmt(e.SizeBytes)</td>
+                                <td>
+                                    <small class="text-muted d-block">@KindLabel(e.Kind)</small>
+                                    @if (e.Status == BackupStatus.Completed)
+                                    {
+                                        <small class="text-muted" title="@(BackupService.IsBundle(e.FilePath) ? (e.Slug == "portal" ? "Baza Portalu i konfiguracja platformy (.env)" : "Baza, zdjęcia, logo i dokumenty trenera") : "Starsza kopia — sama baza")">
+                                            <i class="bi @(BackupService.IsBundle(e.FilePath) ? "bi-box-seam" : "bi-database")"></i> @(BackupService.IsBundle(e.FilePath) ? (e.Slug == "portal" ? "baza + .env" : "baza + pliki") : "baza")
+                                        </small>
+                                    }
+                                </td>
+                                <td>
+                                    <span class="pp-chip pp-tone-@(e.Status == BackupStatus.Completed ? "ok" : e.Status == BackupStatus.Running ? "info" : "danger")">@(e.Status == BackupStatus.Completed ? "gotowa" : e.Status == BackupStatus.Running ? "w toku" : "błąd")</span>
+                                </td>
+                                <td>
+                                    @if (e.VerifyOk is bool vok)
+                                    {
+                                        <span class="pp-chip pp-tone-@(vok ? "ok" : "danger")" title="@e.VerifyInfo · @e.VerifiedAt?.ToLocalTime().ToString("dd.MM.yyyy HH:mm")">
+                                            <i class="bi @(vok ? "bi-check2-circle" : "bi-x-octagon")"></i>@(vok ? "odtwarza się" : "nie odtwarza się")
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">—</span>
+                                    }
+                                </td>
+                                <td>
+                                    @if (e.OffsiteOk is bool ook)
+                                    {
+                                        <span class="pp-chip pp-tone-@(ook ? "ok" : "danger")" title="@e.OffsiteInfo">
+                                            <i class="bi @(ook ? "bi-cloud-check" : "bi-cloud-slash")"></i>@(ook ? "wysłana" : "błąd")
+                                        </span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">—</span>
+                                    }
+                                </td>
+                                <td class="text-muted small">@(e.Duration?.ToString("mm\\:ss") ?? "—")</td>
+                                <td class="text-end text-nowrap">
+                                    @if (e.Status == BackupStatus.Completed && !string.IsNullOrEmpty(e.FilePath))
+                                    {
+                                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => VerifyOne(e.Id)" disabled="@_busy" title="Sprawdź, czy kopia się odtwarza">
+                                            <i class="bi bi-clipboard-check"></i>
+                                        </button>
+                                        @if (_savedTarget != OffsiteBackupService.TargetOff)
+                                        {
+                                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => UploadOne(e.Id)" disabled="@_busy" title="Wyślij poza serwer">
+                                                <i class="bi bi-cloud-upload"></i>
+                                            </button>
+                                        }
+                                        @if (e.Slug != "portal")
+                                        {
+                                            <button class="btn btn-sm btn-outline-warning" @onclick="() => OpenRestore(e)" disabled="@(Jobs.Current is not null)" title="Odtwórz z tej kopii">
+                                                <i class="bi bi-arrow-counterclockwise"></i>
+                                            </button>
+                                        }
+                                        <a href="/api/backups/@e.Id/download" class="btn btn-sm btn-outline-primary" title="Pobierz">
+                                            <i class="bi bi-download"></i>
+                                        </a>
+                                    }
+                                    else if (!string.IsNullOrEmpty(e.Error))
+                                    {
+                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => _shownError = e.Error" title="Zobacz błąd">
+                                            <i class="bi bi-exclamation-triangle"></i>
+                                        </button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </div>
+</div>
+
+@if (_shownError is not null)
+{
+    <div class="alert alert-danger mt-3">
+        <div class="d-flex justify-content-between align-items-start">
+            <strong><i class="bi bi-exclamation-triangle me-1"></i>Błąd backupu</strong>
+            <button class="btn-close btn-close-sm" @onclick="() => _shownError = null"></button>
+        </div>
+        <pre class="mt-2 mb-0 small">@_shownError</pre>
+    </div>
+}
+
+<div class="card border-0 shadow-sm mt-3">
+    <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm pp-tone-danger"><i class="bi bi-life-preserver"></i></span>Gdy coś padnie — co robić</div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-lg-4">
+                <h3 class="h6 fw-bold mb-1"><i class="bi bi-person-exclamation me-1"></i>Problem u jednego trenera</h3>
+                <p class="small text-muted mb-0">
+                    Np. ktoś skasował dane albo instancja się zepsuła. W historii poniżej kliknij <i class="bi bi-arrow-counterclockwise"></i> przy wybranej kopii.
+                    Portal najpierw zapisze obecny stan, potem odtworzy bazę i pliki. Zwykle kilka minut.
+                </p>
+            </div>
+            <div class="col-lg-4">
+                <h3 class="h6 fw-bold mb-1"><i class="bi bi-window-x me-1"></i>Portal nie działa</h3>
+                <p class="small text-muted mb-0">
+                    Aplikacje trenerów działają dalej. Otwórz panel Guardiana (port 9090): najpierw „Przywróć poprzedni Portal”, a gdy zepsuta jest baza —
+                    „Kopie Portalu” → <b>Przywróć</b>. Guardian ma własne kopie bazy Portalu i robi je sam, gdy Portal przestaje.
+                </p>
+            </div>
+            <div class="col-lg-4">
+                <h3 class="h6 fw-bold mb-1"><i class="bi bi-hdd-rack me-1"></i>Padł cały serwer</h3>
+                <ol class="small text-muted mb-0 ps-3">
+                    <li>Na nowym serwerze: Docker, <code>git clone</code> repozytorium i Nginx Proxy Manager.</li>
+                    <li>Pobierz najnowszą kopię <code>portal_….tar(.enc)</code> z innego serwera albo Dysku Google.</li>
+                    <li><code>bash deploy/restore.sh portal_….tar.enc</code> — odszyfruje kopię, odtworzy konfigurację i bazę, zbuduje i uruchomi Portal z Guardianem.</li>
+                    <li>Tu kliknij „Odtwórz trenerów bez kontenerów” — Portal pobierze ich kopie spoza serwera i postawi instancje.</li>
+                    <li>Przestaw DNS domen na nowy serwer.</li>
+                </ol>
+            </div>
+        </div>
+        <hr />
+        <div class="d-flex align-items-center gap-3 flex-wrap">
+            <button class="btn btn-outline-danger btn-sm" @onclick="StartRestoreMissing" disabled="@(Jobs.Current is not null)">
+                <i class="bi bi-arrow-counterclockwise me-1"></i>Odtwórz trenerów bez kontenerów
+            </button>
+            <span class="small text-muted">Dotyczy tylko aktywnych trenerów, których instancji nie ma na tym serwerze. Działających instancji nie rusza.</span>
+        </div>
+    </div>
+</div>
+
+<PanelCard Title="Pytania i odpowiedzi" Icon="bi-question-circle" IconClass="pp-tone-muted" Class="mt-3">
+    <div class="pp-faq">
+        <details>
+            <summary>Jak przywrócić trenera ręcznie, bez Portalu?</summary>
+            <div>
+                <ol class="mb-0 ps-3">
+                    <li>Pobierz plik kopii z historii powyżej. Pakiet <code>.tar</code> rozpakujesz poleceniem <code>tar xf kopia.tar</code> — w środku są <code>database.sql.gz</code>, <code>files.tar.gz</code> (pliki trenera) i <code>manifest.json</code>.</li>
+                    <li>W bazie trenera usuń i utwórz od nowa schemat <code>public</code>.</li>
+                    <li>Wgraj bazę: <code>gunzip -c database.sql.gz | docker exec -i pt-slug-db psql -U ptscheduler -d ptscheduler</code> (zamień <code>slug</code> na adres trenera).</li>
+                    <li>Pliki: <code>docker run --rm -i -v pt-slug-branding:/data postgres:17-alpine sh -c 'tar xzf - -C /data' &lt; files.tar.gz</code>.</li>
+                </ol>
+            </div>
+        </details>
+        <details>
+            <summary>Jak odszyfrować kopię z innego serwera albo z Dysku Google?</summary>
+            <div>
+                Pliki <code>.enc</code> to zwykłe szyfrowanie OpenSSL (AES-256). Na dowolnym komputerze z OpenSSL:
+                <pre class="small mb-0 mt-1">openssl enc -d -aes-256-cbc -pbkdf2 -iter 200000 -in plik.sql.gz.enc -out plik.sql.gz</pre>
+                Program zapyta o hasło szyfrowania. Dalej przywracasz jak zwykłą kopię <code>.sql.gz</code>.
+            </div>
+        </details>
+        <details>
+            <summary>Co dokładnie sprawdza test odtworzenia?</summary>
+            <p>Czy plik nie jest uszkodzony, czy wgrywa się bez błędów do nowej bazy w tym samym kontenerze PostgreSQL, czy ma tabele aplikacji i historię migracji. Tymczasowa baza jest od razu usuwana. Wynik widać w kolumnie „Test odtworzenia” (najedź, żeby zobaczyć szczegóły) i w historii zdarzeń trenera.</p>
+        </details>
+        <details>
+            <summary>Gdzie fizycznie leżą kopie?</summary>
+            <p>W katalogu z ustawień powyżej — musi być zamontowany w kontenerze Portalu jako wolumen, inaczej kopie znikną przy aktualizacji Portalu.</p>
+        </details>
+        <details>
+            <summary>Co jest w kopii?</summary>
+            <p>U trenera: baza (klienci, wizyty, plany, płatności), logo, zdjęcia sylwetek i profilowe, dokumenty. W kopii Portalu: baza Portalu (lista trenerów, ich domeny, plany, rachunki, ustawienia) i konfiguracja platformy (.env). Filmy są w bibliotece wideo Bunny — tam mają własne kopie.</p>
+        </details>
+    </div>
+</PanelCard>
+
+@code {
+    private List<BackupEntry> _entries = new();
+    private List<Tenant> _tenants = [];
+    private BackupEntry? _restoreEntry;
+    private int _restoreTargetId;
+    private string? _restoreConfirm;
+    private bool _jobDismissed;
+    private Timer? _timer;
+    private string TargetSlug => _tenants.FirstOrDefault(t => t.Id == _restoreTargetId)?.Slug ?? "";
+    private bool _busy;
+    private string? _message;
+    private bool _msgError;
+    private string? _shownError;
+
+    private string _dir = "/opt/ptscheduler/backups";
+    private string _schedule = "daily";
+    private int _retentionDays = 14;
+    private string _verify = "weekly";
+
+    private string _target = OffsiteBackupService.TargetOff, _savedTarget = OffsiteBackupService.TargetOff;
+    private string _sftpHost = "", _sftpUser = "", _sftpDir = "", _sftpFingerprint = "";
+    private int _sftpPort = 22;
+    private string? _sftpPassword, _sftpKey, _encPassword;
+    private bool _hasSftpPassword, _hasSftpKey, _hasEncPassword, _googleConfigured, _gdriveConnected;
+    private string _gdriveEmail = "";
+    private int _offsiteRetention = 30;
+
+    [SupplyParameterFromQuery(Name = "gdrive")] public string? GdriveResult { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await Load();
+        var s = await Settings.GetAllAsync(
+            SiteSettingsService.Keys.BackupDir,
+            SiteSettingsService.Keys.BackupSchedule,
+            SiteSettingsService.Keys.BackupRetentionDays);
+        _dir = s[SiteSettingsService.Keys.BackupDir];
+        _schedule = s[SiteSettingsService.Keys.BackupSchedule];
+        _retentionDays = int.TryParse(s[SiteSettingsService.Keys.BackupRetentionDays], out var d) ? d : 14;
+        await LoadOffsite();
+        if (Jobs.Current is not null) StartPolling();
+
+        (_message, _msgError) = GdriveResult switch
+        {
+            "connected" => ("Połączono z Google Drive. Kliknij „Sprawdź połączenie”, żeby wysłać plik testowy.", false),
+            "denied" => ("Nie udzielono dostępu do Dysku Google.", true),
+            "scope" => ("Google nie dał dostępu do plików na Dysku — zaznacz zgodę przy łączeniu.", true),
+            "error" => ("Nie udało się połączyć z Google Drive. Spróbuj ponownie.", true),
+            _ => (_message, _msgError)
+        };
+    }
+
+    private async Task LoadOffsite()
+    {
+        var s = await Settings.GetAllAsync(K.BackupVerify, K.BackupOffsiteTarget, K.BackupOffsiteRetentionDays,
+            K.BackupSftpHost, K.BackupSftpPort, K.BackupSftpUser, K.BackupSftpDir, K.BackupSftpFingerprint, K.BackupGdriveEmail);
+        _verify = s[K.BackupVerify] == "off" ? "off" : "weekly";
+        _savedTarget = _target = await Offsite.GetTargetAsync();
+        _offsiteRetention = int.TryParse(s[K.BackupOffsiteRetentionDays], out var r) ? r : 30;
+        _sftpHost = s[K.BackupSftpHost];
+        _sftpPort = int.TryParse(s[K.BackupSftpPort], out var p) ? p : 22;
+        _sftpUser = s[K.BackupSftpUser];
+        _sftpDir = s[K.BackupSftpDir];
+        _sftpFingerprint = s[K.BackupSftpFingerprint];
+        _gdriveEmail = s[K.BackupGdriveEmail];
+        _hasSftpPassword = await Offsite.HasSecretAsync(K.BackupSftpPassword);
+        _hasSftpKey = await Offsite.HasSecretAsync(K.BackupSftpPrivateKey);
+        _hasEncPassword = await Offsite.HasSecretAsync(K.BackupOffsitePassword);
+        _gdriveConnected = await Offsite.HasSecretAsync(K.BackupGdriveRefreshToken);
+        _googleConfigured = await GoogleBroker.GetConfigAsync() is not null;
+    }
+
+    private async Task SaveOffsite()
+    {
+        _message = null;
+        if (_target == OffsiteBackupService.TargetSftp && (string.IsNullOrWhiteSpace(_sftpHost) || string.IsNullOrWhiteSpace(_sftpUser)))
+        {
+            Show("Uzupełnij adres serwera i użytkownika SFTP.", true);
+            return;
+        }
+        if (_encPassword is { Length: > 0 and < 12 })
+        {
+            Show("Hasło szyfrowania musi mieć co najmniej 12 znaków.", true);
+            return;
+        }
+        var oldHost = (await Settings.GetAsync(K.BackupSftpHost)).Trim();
+        var values = new Dictionary<string, string>
+        {
+            [K.BackupOffsiteTarget] = _target,
+            [K.BackupOffsiteRetentionDays] = Math.Max(1, _offsiteRetention).ToString(),
+            [K.BackupSftpHost] = _sftpHost.Trim(),
+            [K.BackupSftpPort] = (_sftpPort is > 0 and < 65536 ? _sftpPort : 22).ToString(),
+            [K.BackupSftpUser] = _sftpUser.Trim(),
+            [K.BackupSftpDir] = string.IsNullOrWhiteSpace(_sftpDir) ? "ptscheduler-backups" : _sftpDir.Trim()
+        };
+        // Inny serwer = inny klucz; stary odcisk zablokowałby połączenie.
+        if (!string.Equals(oldHost, _sftpHost.Trim(), StringComparison.OrdinalIgnoreCase)) values[K.BackupSftpFingerprint] = "";
+        await Settings.SetManyAsync(values);
+        if (!string.IsNullOrEmpty(_sftpPassword)) await Offsite.SetSecretAsync(K.BackupSftpPassword, _sftpPassword);
+        if (!string.IsNullOrWhiteSpace(_sftpKey)) await Offsite.SetSecretAsync(K.BackupSftpPrivateKey, _sftpKey.Trim());
+        if (!string.IsNullOrEmpty(_encPassword)) await Offsite.SetSecretAsync(K.BackupOffsitePassword, _encPassword);
+        _sftpPassword = _sftpKey = _encPassword = null;
+        await LoadOffsite();
+        Show(_target == OffsiteBackupService.TargetOff
+            ? "Zapisano. Kopie zostają tylko na tym serwerze."
+            : $"Zapisano. Kopie będą wysyłane: {OffsiteBackupService.TargetLabel(_target)}.", false);
+    }
+
+    private async Task TestOffsite()
+    {
+        _busy = true; _message = null;
+        StateHasChanged();
+        var (ok, msg) = await Offsite.TestAsync();
+        await LoadOffsite();
+        Show(msg, !ok);
+        _busy = false;
+    }
+
+    private async Task UploadPendingNow()
+    {
+        _busy = true; _message = null;
+        StateHasChanged();
+        try
+        {
+            var results = await Offsite.UploadPendingAsync();
+            var failed = results.Count(r => r.OffsiteOk == false);
+            Show(results.Count == 0 ? "Wszystkie kopie z ostatnich 2 dni są już poza serwerem."
+                : failed == 0 ? $"Wysłano {results.Count} kopii." : $"Wysłano {results.Count - failed} z {results.Count}. Błąd: {results.First(r => r.OffsiteOk == false).OffsiteInfo}", failed > 0);
+            await Load();
+        }
+        catch (Exception ex) { Show(ex.Message, true); }
+        _busy = false;
+    }
+
+    private async Task UploadOne(int id)
+    {
+        _busy = true; _message = null;
+        StateHasChanged();
+        var e = await Offsite.UploadAsync(id);
+        Show(e?.OffsiteInfo ?? "Ta kopia jest właśnie wysyłana.", e?.OffsiteOk != true);
+        await Load();
+        _busy = false;
+    }
+
+    private async Task VerifyOne(int id)
+    {
+        _busy = true; _message = null;
+        StateHasChanged();
+        var e = await BackupSvc.VerifyAsync(id);
+        Show(e?.VerifyOk == true ? $"Kopia {e.Slug} odtwarza się poprawnie ({e.VerifyInfo})." : $"Kopia {e?.Slug} nie odtwarza się: {e?.VerifyInfo}", e?.VerifyOk != true);
+        await Load();
+        _busy = false;
+    }
+
+    private async Task VerifyLatestNow()
+    {
+        _busy = true; _message = null;
+        StateHasChanged();
+        try
+        {
+            var results = await BackupSvc.VerifyLatestAsync();
+            var bad = results.Where(r => r.VerifyOk != true).ToList();
+            Show(results.Count == 0 ? "Nie ma jeszcze udanych kopii do sprawdzenia."
+                : bad.Count == 0 ? $"Sprawdzono {results.Count} kopii — wszystkie odtwarzają się poprawnie."
+                : $"{bad.Count} z {results.Count} kopii nie odtwarza się: " + string.Join("; ", bad.Select(b => $"{b.Slug}: {b.VerifyInfo}")), bad.Count > 0);
+            await Load();
+        }
+        catch (Exception ex) { Show(ex.Message, true); }
+        _busy = false;
+    }
+
+    private async Task ConnectDrive()
+    {
+        var (url, error) = await Offsite.BuildDriveAuthorizeUrlAsync();
+        if (url is null) { Show(error ?? "Nie da się połączyć z Google.", true); return; }
+        Nav.NavigateTo(url, forceLoad: true);
+    }
+
+    private async Task DisconnectDrive()
+    {
+        await Offsite.DisconnectDriveAsync();
+        await LoadOffsite();
+        Show("Odłączono Google Drive. Pliki już wysłane zostają na Dysku.", false);
+    }
+
+    private async Task ForgetFingerprint()
+    {
+        await Offsite.ForgetSftpFingerprintAsync();
+        _sftpFingerprint = "";
+        Show("Zapomniano klucz serwera — przy następnym połączeniu Portal zapamięta nowy.", false);
+    }
+
+    private async Task RemoveSftpKey()
+    {
+        await Offsite.SetSecretAsync(SiteSettingsService.Keys.BackupSftpPrivateKey, null);
+        _hasSftpKey = false;
+        Show("Usunięto klucz prywatny.", false);
+    }
+
+    private async Task RemoveEncPassword()
+    {
+        await Offsite.SetSecretAsync(SiteSettingsService.Keys.BackupOffsitePassword, null);
+        _hasEncPassword = false;
+        Show("Szyfrowanie wyłączone — kolejne kopie pójdą poza serwer bez szyfrowania.", false);
+    }
+
+    private void Show(string message, bool error)
+    {
+        _message = message;
+        _msgError = error;
+    }
+
+    private async Task Load()
+    {
+        try { await BackupSvc.SyncFilesAsync(); } catch { /* katalog kopii niedostępny — pokażemy to, co jest w bazie */ }
+        await using var db = DbFactory.CreateDbContext();
+        _tenants = await db.Tenants.AsNoTracking().Where(t => t.Status != TenantStatus.Destroyed).OrderBy(t => t.Slug).ToListAsync();
+        _entries = await db.BackupEntries
+            .AsNoTracking()
+            .OrderByDescending(e => e.CreatedAt)
+            .Take(500)
+            .ToListAsync();
+    }
+
+    private async Task BackupAllNow()
+    {
+        _busy = true; _message = null;
+        StateHasChanged();
+        try
+        {
+            var r = await Maintenance.RunCycleAsync(BackupKind.Manual, verify: false, housekeeping: false, notify: false, CancellationToken.None);
+            _message = $"Zakończono. Trenerzy: {r.TenantsOk} OK / {r.TenantsFailed} błąd. Portal: {(r.PortalOk ? "OK" : "błąd")}."
+                + (_savedTarget != OffsiteBackupService.TargetOff ? (r.OffsiteFailed == 0 ? " Wysłano poza serwer." : $" Poza serwer nie trafiło: {r.OffsiteFailed}.") : "");
+            _msgError = r.TenantsFailed > 0 || !r.PortalOk || r.OffsiteFailed > 0;
+            await Load();
+        }
+        catch (Exception ex) { _message = ex.Message; _msgError = true; }
+        _busy = false;
+    }
+
+    private void OpenRestore(BackupEntry e)
+    {
+        _restoreEntry = e;
+        _restoreTargetId = _tenants.FirstOrDefault(t => t.Slug == e.Slug)?.Id ?? _tenants.FirstOrDefault()?.Id ?? 0;
+        _restoreConfirm = "";
+    }
+
+    private void StartRestore()
+    {
+        if (_restoreEntry is not { } entry || _restoreConfirm?.Trim() != TargetSlug) return;
+        var backupId = entry.Id;
+        var targetId = _restoreTargetId;
+        var (started, error) = Jobs.Start($"Odtwarzanie {entry.Slug} → {TargetSlug}",
+            (sp, log, ct) => sp.GetRequiredService<RestoreService>().RestoreTenantAsync(backupId, targetId, log, ct));
+        if (!started) { Show(error!, true); return; }
+        _restoreEntry = null;
+        _jobDismissed = false;
+        StartPolling();
+    }
+
+    private void StartRestoreMissing()
+    {
+        var (started, error) = Jobs.Start("Odtwarzanie trenerów bez kontenerów",
+            (sp, log, ct) => sp.GetRequiredService<RestoreService>().RestoreMissingAsync(log, ct));
+        if (!started) { Show(error!, true); return; }
+        _jobDismissed = false;
+        StartPolling();
+    }
+
+    private void StartPolling()
+    {
+        _timer ??= new Timer(async _ =>
+        {
+            try
+            {
+                var finished = Jobs.Current is null;
+                if (finished) await InvokeAsync(Load);
+                await InvokeAsync(StateHasChanged);
+                if (finished) { _timer?.Dispose(); _timer = null; }
+            }
+            catch (ObjectDisposedException) { }
+        }, null, TimeSpan.FromSeconds(2), TimeSpan.FromSeconds(2));
+    }
+
+    public void Dispose() => _timer?.Dispose();
+
+    private static string KindLabel(BackupKind kind) => kind switch
+    {
+        BackupKind.Manual => "ręczna",
+        BackupKind.Scheduled => "automatyczna",
+        BackupKind.PreRestore => "przed odtworzeniem",
+        BackupKind.Guardian => "od Guardiana",
+        _ => "dodana z pliku"
+    };
+
+    private static string ScheduleLabel(string schedule) => schedule switch
+    {
+        "6h" => "co 6 godzin",
+        "12h" => "co 12 godzin",
+        _ => "codziennie"
+    };
+
+    private async Task Cleanup()
+    {
+        _busy = true; _message = null;
+        try
+        {
+            var removed = await BackupSvc.CleanupOldAsync();
+            _message = $"Usunięto {removed} starych plików kopii.";
+            _msgError = false;
+            await Load();
+        }
+        catch (Exception ex) { _message = ex.Message; _msgError = true; }
+        _busy = false;
+    }
+
+    private async Task SaveSettings()
+    {
+        await Settings.SetManyAsync(new Dictionary<string, string>
+        {
+            [SiteSettingsService.Keys.BackupDir] = _dir.Trim(),
+            [SiteSettingsService.Keys.BackupSchedule] = _schedule,
+            [SiteSettingsService.Keys.BackupRetentionDays] = _retentionDays.ToString(),
+            [SiteSettingsService.Keys.BackupVerify] = _verify
+        });
+        _message = "Zapisano.";
+        _msgError = false;
+    }
+
+    private static string Fmt(long bytes)
+    {
+        string[] suffix = { "B", "KB", "MB", "GB" };
+        var i = 0;
+        double n = bytes;
+        while (n >= 1024 && i < suffix.Length - 1) { n /= 1024; i++; }
+        return $"{n:0.#} {suffix[i]}";
+    }
+}

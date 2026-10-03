@@ -1,0 +1,209 @@
+# Moduł: Kreator planów treningowych
+
+> Dokument projektowy. Powstał w trakcie planowania modułu (rozmowa z właścicielem).
+> Służy jako źródło prawdy przy implementacji — kolejne sesje mają go wczytać
+> i kontynuować, zamiast odtwarzać decyzje od zera.
+>
+> **Status:** Faza 1 (fundament danych) zaimplementowana — patrz sekcja 7.
+> Pozostałe fazy zaprojektowane, nie zaimplementowane. Decyzje poniżej są
+> ustalone z właścicielem (Patryk), chyba że oznaczono jako „otwarte".
+
+## 1. Cel i pozycjonowanie
+
+Odpowiednik modułu „kreator planów treningowych" z aplikacji konkurencyjnych:
+katalog ćwiczeń, budowanie planów, śledzenie postępów klienta, wykresy objętości,
+dziennik aktywności. Ma być wygodny **na telefonie i na komputerze** (mobile-first
+dla logowania na siłowni, desktop dla budowania planów).
+
+Kluczowa zasada strategiczna: **właściciel produkuje ZERO treści wideo i ponosi
+koszt bazy tylko RAZ.** Cały custom-content to praca i koszt trenera.
+
+## 2. Decyzje ustalone
+
+### 2.1 Baza ćwiczeń
+- **Źródło startowe: Free Exercise DB** (~870 ćwiczeń ze zdjęciami).
+  - Licencja **Unlicense (public domain)** → redystrybucja komercyjna dozwolona.
+  - Repo: `yuhonas/free-exercise-db` (JSON + obrazy).
+- **Tłumaczenie na PL**: warstwa polskich nazw i opisów (do wygenerowania jednorazowo
+  jako dane seed). Oryginalny opis **EN zostaje** i rozwija się po kliknięciu flagi 🇬🇧.
+- **Trener tworzy własne ćwiczenia** — z własnymi zdjęciami, wideo, opisami.
+
+### 2.2 Wideo — strategia „zero produkcji"
+- **Baza: linki YouTube (embed)**. Tylko osadzanie (`youtube.com/embed/<id>`),
+  **nigdy pobieranie/re-hosting** (łamie ToS YouTube). Zero storage, zero kosztu.
+- **Custom trenera: YouTube (link) LUB własny plik na Bunny.**
+  - Bunny jest już zintegrowany (kursy) — reużywamy.
+  - Wgrywanie na Bunny **liczone do limitu GB w planie trenera** (patrz 4).
+- Właściciel nie kręci i nie hostuje żadnego wideo bazowego.
+
+### 2.3 Widoczność i personalizacja ćwiczeń
+- Flaga widoczności: **„moje"** (owner = trener) / **„publiczne"** (baza lub udostępnione).
+- Trener może oznaczać ćwiczenia jako **„interesujące mnie"** (ulubione / szybki wybór).
+- **„Ostatnio używane"** — automatycznie z użycia w planach.
+- Filtr katalogu: moje / publiczne / wszystkie.
+
+### 2.4 Zakres MVP
+Katalog + kreator planu (serie/powt./ciężar) + logowanie wykonania przez klienta
+na telefonie **+ wykresy objętości** (od razu, bo to mocny argument sprzedażowy).
+
+## 3. Strategia przechowywania danych (warstwowa)
+
+| Warstwa | Gdzie | Uzasadnienie |
+|---|---|---|
+| Zdjęcia bazy (Free Exercise DB) | **Współdzielone, raz** — w obrazie aplikacji lub własny CDN/hosting, read-only | ~kilkaset MB, identyczne dla wszystkich tenantów. NIE duplikować per-tenant. Koszt raz. |
+| Wideo bazy | **Nigdzie** — tylko URL YouTube w bazie | Zero storage |
+| Custom trenera (zdjęcia + wideo) | **Bunny, per-tenant, limit GB w planie** | Koszt przeniesiony na plan trenera. Bunny już zintegrowany. |
+| Custom linki YT trenera | tylko URL | Zero storage |
+
+**Sedno multi-tenant:** baza wspólna = koszt właściciela raz; custom = koszt trenera
+przez limit GB. Koszty właściciela nie rosną z liczbą trenerów.
+
+### Uwaga o katalogu bazowym w multi-tenant
+Baza ćwiczeń jest **globalna/współdzielona i read-only** — te same rekordy dla
+wszystkich tenantów. Rozważyć: czy trzymać jako dane seed w każdej bazie tenanta
+(prościej, ale duplikacja ~870 rekordów × N tenantów — akceptowalne, to małe wiersze;
+zdjęcia i tak współdzielone przez URL), czy w osobnym współdzielonym magazynie.
+**Rekomendacja na start: seed do bazy tenanta** (wiersze są tanie; obrazy serwowane
+z jednego współdzielonego miejsca po URL). Prościej niż osobna baza współdzielona.
+
+## 4. Wpływ na plany (Entitlements)
+
+- Dodać **limit GB na media ćwiczeń** per plan (np. `ExerciseMediaGb`) + **licznik
+  zużycia Bunny per-tenant**. Wpina się w istniejący system planów/limitów
+  (`EntitlementService`, `Limit(...)`).
+- Rozważyć feature-flag `TrainingPlansEnabled` per plan (moduł jako element wyższego
+  pakietu, jak inne funkcje w `AdminNavMenu` z `PlanBadge`).
+
+## 5. Szkic modelu danych
+
+> Wstępny — do doprecyzowania przy implementacji. Konwencja czasu wg
+> `PTScheduler.Application/Interfaces/IAppClock.cs`: znaczniki utworzenia =
+> instant (UTC); data treningu widziana przez człowieka = zegar ścienny / `DateOnly`.
+
+### Exercise (ćwiczenie)
+- `Id`
+- `OwnerTrainerUserId` (string?, null = ćwiczenie bazowe/systemowe)
+- `Visibility` (enum: Public | Mine)
+- `NamePl`, `NameEn`
+- `DescriptionPl`, `DescriptionEn` (EN pod flagą 🇬🇧)
+- `PrimaryMuscles`, `SecondaryMuscles` (do wykresów „per partia") — z tagów Free Exercise DB
+- `Equipment`, `Category`, `Level` (z Free Exercise DB)
+- `ImageUrls` (lista — bazowe wskazują na współdzielony magazyn; custom na Bunny/URL)
+- `VideoType` (enum: None | YouTube | Bunny), `VideoRef` (id/URL)
+- `SourceKey` (string?, klucz z Free Exercise DB — do dedup przy re-seedzie)
+- `CreatedAt` (instant)
+
+### TrainerExercisePref (nakładka per-trener — nie duplikuje ćwiczeń)
+- `TrainerUserId`, `ExerciseId`
+- `IsFavorite` (bool) — „interesujące mnie"
+- `LastUsedAt` (instant?, do „ostatnio używane")
+
+### TrainingPlan → PlanDay → PlanExercise
+- **TrainingPlan**: `Id`, `TrainerUserId`, `ClientId?`, `Name`, `Notes`, `CreatedAt`,
+  ewentualnie `IsTemplate` (szablon vs przypisany klientowi)
+- **PlanDay**: `Id`, `PlanId`, `Order`, `Label` (np. „Dzień A — push")
+- **PlanExercise**: `Id`, `PlanDayId`, `ExerciseId`, `Order`, `Sets`, `Reps`,
+  `TargetWeightKg?`, `Tempo?`, `RestSeconds?`, `Notes?`
+
+### WorkoutLog (wykonanie klienta) → WorkoutSetLog
+- **WorkoutLog**: `Id`, `ClientId`, `PlanExerciseId?` (lub luźne), `WorkoutDate`
+  (`DateOnly` — dzień treningu, zegar ścienny), `CreatedAt` (instant)
+- **WorkoutSetLog**: `Id`, `WorkoutLogId`, `SetNumber`, `Reps`, `WeightKg`
+- **Objętość** = Σ(`Reps` × `WeightKg`) — agregowana po czasie i po partii mięśniowej
+  (przez `Exercise.PrimaryMuscles`). Jednostki spójnie **kg / powtórzenia** od początku.
+
+## 6. Mobile / offline
+
+Klient loguje serie na siłowni, często przy słabym zasięgu. Aplikacja ma już **PWA** —
+warto, żeby log wykonania działał **offline i syncował później** (local queue → sync).
+To realny wyróżnik vs konkurencja. Do rozważenia w fazie 2/3, nie musi być w pierwszym MVP.
+
+## 7. Fazy implementacji
+
+1. **Fundament danych** ✅ (zrobione): encje (Exercise, TrainerExercisePref,
+   TrainingPlan/Day/Exercise, WorkoutLog/SetLog) + enumy (ExerciseVisibility,
+   ExerciseVideoType, ExerciseCategory, ExerciseLevel, MuscleGroup) + konfiguracja
+   EF i migracja `20260906120000_AddTrainingModule` + reguły domenowe
+   `Domain.Rules.Muscles` (parsowanie partii z CSV Free Exercise DB) i
+   `Domain.Rules.VolumeCalculator` (objętość serii/wykonania i „per partia")
+   z testami. **Seed bazy ćwiczeń zrobiony:** ~876 ćwiczeń z Free Exercise DB
+   (Unlicense) osadzone jako zasób (`Data/SeedData/free-exercise-db.json`),
+   ładowane idempotentnie przez `DbInitializer.SeedExerciseCatalogAsync` po
+   `MigrateAsync` (dokłada tylko brakujące po `SourceKey`). Warstwa nazw PL:
+   `Data/SeedData/exercise-names-pl.json` — kuratorowany zestaw najczęstszych
+   ćwiczeń (reszta na fallbacku do nazwy EN, opis EN zawsze dostępny), plik
+   rozszerzalny. Obrazy serwowane po URL (baza konfigurowalna zmienną
+   `EXERCISE_IMAGE_BASE_URL`, domyślnie repo Free Exercise DB).
+2. **Katalog ćwiczeń** ✅ (zrobione): strona `/exercises` (rola trenera) —
+   przeglądanie kart z miniaturami, wyszukiwanie PL/EN, zakładki zakresu
+   (wszystkie/baza/moje/ulubione/ostatnie), filtry partia/kategoria/poziom/sprzęt,
+   ulubione („interesujące mnie"), widok szczegółów (obrazy, partie, opis PL +
+   EN pod flagą 🇬🇧, embed YouTube), CRUD własnych ćwiczeń (nazwy PL/EN, partie,
+   kategoria/poziom/sprzęt, URL zdjęć, wideo YouTube/Bunny), ochrona przed
+   usunięciem ćwiczenia używanego w planie/dzienniku. Warstwa: DTO +
+   `IExerciseCatalogService`/`ExerciseCatalogService` + testy. **Do dołożenia
+   później:** pełny upload plików na Bunny z poziomu formularza (na razie
+   URL/ID), gating planem (`TrainingPlansEnabled`).
+3. **Kreator planu** ✅ (zrobione): strony `/plans` (lista: szablony + plany
+   klientów, duplikuj/usuń) i `/plans/new` + `/plans/edit/{id}` (kreator:
+   plan → dni → ćwiczenia z seriami/powt./ciężarem/tempem/przerwą/uwagami,
+   reorder dni i ćwiczeń, wybór ćwiczeń z katalogu przez modal wyszukiwarki,
+   przypisanie klientowi lub oznaczenie jako szablon). Warstwa: DTO +
+   `ITrainingPlanService`/`TrainingPlanService` (zapis grafu z dopasowaniem po
+   Id — dodanie/edycja/usunięcie, duplikacja, odświeżanie „ostatnio używane")
+   + testy.
+4. **Logowanie wykonania (mobile-first)** ✅ (zrobione): strona `/train` (rola
+   klienta) — wybór przypisanego planu → dnia → wpisywanie serii (powt. + ciężar
+   + odhaczanie), „Dodaj serię", „Zakończ trening". **Ochrona przed utratą
+   danych:** postęp treningu jest autozapisywany do `localStorage` przy każdej
+   zmianie (JS `PTWorkout` + `/js/workout-store.js`), więc przetrwa wyłączenie
+   telefonu, zamknięcie przeglądarki i zanik sieci; sesja trwa aż do jawnego
+   „Zakończ" (wtedy zapis do bazy przez `IWorkoutLogService` i wyczyszczenie
+   bufora). Po ponownym wejściu trening sam się wznawia. Krótkie zerwania sieci
+   w Blazor Server obsługuje wbudowany reconnect, a stan i tak jest w
+   localStorage. Warstwa: DTO + `IWorkoutLogService`/`WorkoutLogService`
+   (zapis + historia z objętością) + rozszerzenie `ITrainingPlanService` o widok
+   klienta (`GetClientPlansAsync`, `GetForWorkoutAsync`) + testy.
+   Do rozważenia dalej (Faza 6): przyrostowy sync serwerowy w tle i pełne PWA
+   offline (na razie bufor jest per-urządzenie, commit na „Zakończ").
+5. **Wykresy objętości + dziennik aktywności** ✅ (zrobione): strona
+   `/my/workouts` (klient) — wykres liniowy objętości w czasie (90 dni),
+   pierścieniowy „objętość na partie", kafle rekordów (max ciężar / najlepsza
+   seria) i rozwijany dziennik (dni → ćwiczenia → serie). Strona
+   `/trainer/activity` (trener) — tabela aktywności podopiecznych (ostatni
+   trening, liczba treningów i objętość w oknie 30 dni, link do profilu).
+   Wykresy przez istniejący `PTChart` (Chart.js). Warstwa: DTO + rozszerzenie
+   `IWorkoutLogService` (VolumeOverTime, VolumeByMuscle, PersonalRecords,
+   Journal, ClientsActivity) na bazie `VolumeCalculator` + testy.
+
+   **MVP modułu treningowego (fazy 1–5 + seed) kompletne.**
+
+6. **Sync serwerowy trwającego treningu** ✅ (zrobione): obok bufora
+   localStorage draft treningu jest zapisywany także na serwerze
+   (`WorkoutSession`, jeden otwarty na klienta, upsert przy każdej zmianie).
+   Daje to odporność na utratę urządzenia i **wznowienie na innym urządzeniu**;
+   przy wejściu na `/train` wygrywa nowsza wersja (po `SavedAt`). Zapis do bazy
+   i tak dopiero na „Zakończ" (WorkoutLog), draft usuwany po zakończeniu/
+   odrzuceniu. Warstwa: encja + migracja `20260907120000_AddWorkoutSession` +
+   `IWorkoutSessionService`/`WorkoutSessionService` + testy.
+
+   Dalej opcjonalnie: pełne **PWA offline** (service worker cache app-shell +
+   kolejka wysyłki, by UI działał bez sieci — w Blazor Server ograniczone),
+   pełny upload media na Bunny z formularza ćwiczenia, gating planem
+   `TrainingPlansEnabled`, marketplace szablonów, model 3D mięśni.
+6. **Limit GB Bunny + entitlement** + ewentualnie offline PWA sync.
+
+## 8. Licencje i zgodność — checklista
+
+- Free Exercise DB: **Unlicense (public domain)** — OK do redystrybucji komercyjnej.
+  Zachować atrybucję dobrym obyczajem (nie wymagana, ale warto w „O aplikacji").
+- YouTube: **wyłącznie embed** przez oficjalny player. Nie pobierać, nie re-hostować,
+  nie skrobać. Przechowywać tylko id/URL.
+- Custom media trenera na Bunny: własność/odpowiedzialność trenera (zapis w regulaminie).
+
+## 9. Pytania otwarte
+
+- Duplikacja bazy per-tenant vs magazyn współdzielony — patrz 3 (rekomendacja: seed per-tenant).
+- Czy plany mają być udostępnialne między trenerami (marketplace szablonów)? — poza MVP.
+- Czy klient widzi wideo bazowe (YT) czy tylko trener? — domyślnie klient też (to instruktaż).
+- Model rozliczenia limitu GB (twardy limit vs miękki z dopłatą) — do decyzji z cennikiem.

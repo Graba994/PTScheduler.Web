@@ -66,13 +66,15 @@ public class PublicBookingServiceTests
         await db.SaveChangesAsync();
 
         var um = MockUserManagerHelper.Create();
-        um.Setup(m => m.FindByIdAsync("trainer-real")).ReturnsAsync(new ApplicationUser
+        var trainerUser = new ApplicationUser
         {
             Id = "trainer-real",
             FirstName = "Anna",
             LastName = "Kowalska",
             Email = "anna@example.com"
-        });
+        };
+        um.Setup(m => m.FindByIdAsync("trainer-real")).ReturnsAsync(trainerUser);
+        um.Setup(m => m.IsInRoleAsync(trainerUser, PTScheduler.Domain.Constants.Roles.Trainer)).ReturnsAsync(true);
 
         var svc = MakeService(factory, um);
 
@@ -164,16 +166,21 @@ public class PublicBookingServiceTests
         Microsoft.EntityFrameworkCore.IDbContextFactory<ApplicationDbContext> factory,
         Mock<Microsoft.AspNetCore.Identity.UserManager<ApplicationUser>>? userManager = null,
         Mock<ITrainerAvailabilityService>? availabilityService = null,
-        Mock<IEmailService>? emailService = null)
+        Mock<IEmailService>? emailService = null,
+        IAppClock? clock = null)
     {
         userManager ??= MockUserManagerHelper.Create();
         availabilityService ??= new Mock<ITrainerAvailabilityService>();
         emailService ??= new Mock<IEmailService>();
+        clock ??= TestClock.AtWallClock(DateTime.Now);
+        var emailTemplateService = new Mock<IEmailTemplateService>();
         return new PublicBookingService(
             factory,
             userManager.Object,
             availabilityService.Object,
             emailService.Object,
+            emailTemplateService.Object,
+            clock,
             NullLogger<PublicBookingService>.Instance);
     }
 }

@@ -5,7 +5,7 @@
 @using PTScheduler.Domain.Constants
 @inject ISessionTypeService TypeService
 @inject PTScheduler.Web.Services.ToastService Toast
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Typy sesji" />
 
@@ -33,7 +33,7 @@ else
             else
             {
                 <div class="table-responsive">
-                    <table class="table table-sm table-hover align-middle mb-0">
+                    <table class="table table-stack table-sm table-hover align-middle mb-0">
                         <thead class="table-light">
                             <tr>
                                 <th>Nazwa</th>
@@ -49,7 +49,11 @@ else
                             @foreach (var t in _types)
                             {
                                 <tr class="@(!t.IsActive ? "opacity-50" : "")">
-                                    <td class="fw-semibold">@t.Name</td>
+                                    <td class="fw-semibold">
+                                        @t.Name @if (t.IsPair) { <span class="pair-chip ms-1"><i class="bi bi-people-fill"></i>W parze</span> }
+                                        @if (t.RequiresPackage) { <span class="badge bg-light text-body border ms-1">tylko z pakietem</span> }
+                                        else if (t.SinglePrice is { } sp) { <span class="badge bg-success-subtle text-success ms-1">pojedynczo @sp.ToString("0.##") zł</span> }
+                                    </td>
                                     <td class="text-center">@t.DurationMinutes</td>
                                     <td class="text-center">
                                         @if (t.IsGroup)
@@ -133,8 +137,13 @@ else
                             <input type="number" class="form-control" min="5" max="480" @bind="_form.DurationMinutes" />
                         </div>
                         <div class="col-6 d-flex align-items-center gap-2 pt-4">
-                            <input type="checkbox" class="form-check-input" id="isGroup" @bind="_form.IsGroup" />
+                            <input type="checkbox" class="form-check-input" id="isGroup" @bind="_form.IsGroup" @bind:after="() => { if (_form.IsGroup) _form.IsPair = false; }" />
                             <label class="form-check-label" for="isGroup">Sesja grupowa</label>
+                        </div>
+                        <div class="col-12 d-flex align-items-center gap-2">
+                            <input type="checkbox" class="form-check-input" id="isPair" @bind="_form.IsPair" @bind:after="() => { if (_form.IsPair) _form.IsGroup = false; }" />
+                            <label class="form-check-label" for="isPair">Trening w parze (2 osoby)</label>
+                            <InfoTip Title="Trening w parze" Text="Przy rezerwacji tego rodzaju treningu aplikacja od razu pyta o partnera. Każda osoba dostaje własną wizytę i przypomnienie. Dodaj też pakiet „dla pary” w Ofercie pakietów — wtedy za wspólny trening schodzi 1." />
                         </div>
                         @if (_form.IsGroup)
                         {
@@ -145,6 +154,22 @@ else
                                        @onchange="e => _form.MaxParticipants = string.IsNullOrEmpty(e.Value?.ToString()) ? null : int.Parse(e.Value!.ToString()!)" />
                             </div>
                         }
+                        <div class="col-12 col-sm-6">
+                            <label class="form-label">Cena pojedynczego treningu <span class="text-muted small">(opcjonalnie)</span>
+                                <InfoTip Title="Pojedynczy trening online" Text="Klient bez pakietu może zapłacić za ten jeden trening online przy rezerwacji (BLIK, karta). Zostaw puste, jeśli sprzedajesz ten trening tylko w pakietach albo rozliczasz się u siebie." />
+                            </label>
+                            <div class="input-group">
+                                <input type="number" class="form-control" min="0" step="1" placeholder="np. 150"
+                                       value="@(_form.SinglePrice?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) ?? "")"
+                                       @onchange="e => _form.SinglePrice = decimal.TryParse(e.Value?.ToString()?.Replace(',', '.'), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var v) && v > 0 ? v : null" />
+                                <span class="input-group-text">zł</span>
+                            </div>
+                        </div>
+                        <div class="col-12 col-sm-6 form-check form-switch d-flex align-items-center gap-2 ps-5 pt-sm-4">
+                            <input type="checkbox" class="form-check-input" id="reqPkg" @bind="_form.RequiresPackage" />
+                            <label class="form-check-label" for="reqPkg">Tylko z pakietem</label>
+                            <InfoTip Title="Tylko z pakietem" Text="Bez pakietu klient nie zarezerwuje tego treningu — zobaczy tylko „Kup pakiet”. Przydaje się np. przy zajęciach z karnetem." />
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -193,7 +218,10 @@ else
             Name = t.Name,
             DurationMinutes = t.DurationMinutes,
             IsGroup = t.IsGroup,
-            MaxParticipants = t.MaxParticipants
+            IsPair = t.IsPair,
+            MaxParticipants = t.MaxParticipants,
+            SinglePrice = t.SinglePrice,
+            RequiresPackage = t.RequiresPackage
         };
         _error = string.Empty;
         _modalOpen = true;

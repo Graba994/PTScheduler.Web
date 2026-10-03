@@ -1,9 +1,15 @@
 @page "/my"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Client")]
+@using PTScheduler.Application.Scheduling
 @inject IClientService ClientService
 @inject ISessionService SessionService
+@inject IPairService PairService
+@inject ISessionPackageService PackageService
+@inject IPackageOfferService OfferService
+@inject IOffPackageService OffPackage
 @inject ITrainerAvailabilityService AvailabilityService
 @inject ITrainerConfigService TrainerConfigService
+@inject IAppClock Clock
 @inject IAuditLogService AuditLogService
 @inject NavigationManager Nav
 @using PTScheduler.Application.DTOs
@@ -11,7 +17,7 @@
 @using PTScheduler.Domain.Enums
 @using Microsoft.AspNetCore.Components.Authorization
 @inject AuthenticationStateProvider AuthStateProvider
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Mój grafik" />
 
@@ -82,12 +88,14 @@ else
                 <div class="flex-grow-1">
                     <div class="fw-semibold small">@pkg.Name</div>
                     <div class="progress mt-1" style="height:5px">
-                        <div class="progress-bar bg-primary" style="width:@(pkg.TotalSessions > 0 ? pkg.UsedSessions * 100 / pkg.TotalSessions : 0)%"></div>
+                        @* Pasek i liczba pokazują to samo: ile sesji zostało (wcześniej pasek
+                           pokazywał zużyte, a liczba pozostałe — „4 / 4” z pustym paskiem). *@
+                        <div class="progress-bar bg-primary" style="width:@(pkg.TotalSessions > 0 ? pkg.RemainingCredits * 100 / pkg.TotalSessions : 0)%"></div>
                     </div>
                 </div>
                 <div class="text-end flex-shrink-0">
-                    <div class="fw-bold">@pkg.RemainingCredits</div>
-                    <div class="text-muted" style="font-size:.7rem">/ @pkg.TotalSessions sesji</div>
+                    <div class="fw-bold">@pkg.RemainingCredits <span class="text-muted fw-normal" style="font-size:.75rem">z @pkg.TotalSessions</span></div>
+                    <div class="text-muted" style="font-size:.7rem">sesji zostało</div>
                     @if (daysLeft.HasValue)
                     {
                         <div class="@(daysLeft < 14 ? "text-danger" : "text-muted")" style="font-size:.7rem">
@@ -128,8 +136,30 @@ else
                             <div class="fw-bold fs-5 lh-1">@s.StartTime.ToString("dd")</div>
                             <div class="text-muted small text-uppercase">@s.StartTime.ToString("MMM")</div>
                         </div>
-                        <div class="flex-grow-1">
-                            <div class="fw-semibold">@s.SessionTypeName</div>
+                        <div class="flex-grow-1 text-break" style="min-width:0">
+                            <div class="fw-semibold">
+                                @s.SessionTypeName
+                                @if (s.AwaitingApproval)
+                                {
+                                    <span class="badge bg-info-subtle text-info-emphasis ms-1">Czeka na potwierdzenie trenera</span>
+                                }
+                                else if (s.HoldUntil is not null && s.Status == SessionStatus.AwaitingPackage)
+                                {
+                                    <span class="badge bg-warning-subtle text-warning-emphasis ms-1">Czeka na płatność online</span>
+                                }
+                                else if (s.UnpaidAtTrainer)
+                                {
+                                    <span class="badge bg-light text-body border ms-1"><i class="bi bi-cash-coin me-1"></i>Płatność u trenera</span>
+                                }
+                                else if (s.Status == SessionStatus.AwaitingPackage)
+                                {
+                                    <span class="badge bg-warning-subtle text-warning-emphasis ms-1" title="Tego treningu nie było w Twoim pakiecie — trener odezwie się w sprawie płatności">Do opłacenia</span>
+                                }
+                                @if (s.IsPair)
+                                {
+                                    <span class="pair-chip ms-1"><i class="bi bi-people-fill"></i>@(s.PartnerActive ? $"z: {s.PartnerName}" : $"{s.PartnerName} nie przyjdzie")</span>
+                                }
+                            </div>
                             <div class="text-muted small">
                                 <i class="bi bi-clock me-1"></i>@s.StartTime.ToString("HH:mm") — @s.EndTime.ToString("HH:mm")
                                 &nbsp;·&nbsp;<i class="bi bi-person me-1"></i>@s.TrainerName
@@ -139,8 +169,11 @@ else
                                 <div class="text-muted small mt-1 text-truncate"><i class="bi bi-chat-left-text me-1"></i>@s.Notes</div>
                             }
                         </div>
-                        <div class="flex-shrink-0 text-end">
-                            @if (_cancellationWindowHours == 0 || s.StartTime > DateTime.Now.AddHours(_cancellationWindowHours))
+                        <div class="flex-shrink-0 text-end d-flex flex-column align-items-end gap-2">
+                            <AddToCalendarButton Title="@($"{s.SessionTypeName} — {s.TrainerName}")"
+                                                  StartTime="s.StartTime" DurationMinutes="s.DurationMinutes"
+                                                  Location="@(s.MeetingUrl ?? "")" Uid="@($"session-{s.Id}")" Compact="true" />
+                            @if (CancellationRules.ForClient(_trainerCfg, s.StartTime, Clock.LocalNow).Allowed)
                             {
                                 <button class="btn btn-outline-danger btn-sm" @onclick="() => ConfirmCancel(s)">
                                     <i class="bi bi-x-circle me-1"></i>Odwołaj
@@ -168,12 +201,12 @@ else
     else
     {
         <div class="table-responsive">
-            <table class="table table-sm table-hover align-middle">
+            <table class="table table-stack table-sm table-hover align-middle">
                 <thead class="table-light">
                     <tr>
                         <th>Data</th>
                         <th>Typ</th>
-                        <th>Trener</th>
+                        <th class="d-none d-md-table-cell">Trener</th>
                         <th>Status</th>
                     </tr>
                 </thead>
@@ -182,8 +215,8 @@ else
                     {
                         <tr>
                             <td class="text-nowrap small">@s.StartTime.ToString("dd.MM.yy HH:mm")</td>
-                            <td class="small">@s.SessionTypeName</td>
-                            <td class="small text-muted">@s.TrainerName</td>
+                            <td class="small">@s.SessionTypeName@(s.IsPair ? $" · z: {s.PartnerName}" : "")</td>
+                            <td class="small text-muted d-none d-md-table-cell">@s.TrainerName</td>
                             <td><span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span></td>
                         </tr>
                     }
@@ -204,6 +237,14 @@ else
                     <i class="bi bi-exclamation-triangle-fill text-warning fs-2 d-block mb-3"></i>
                     <p class="mb-1 fw-semibold">Odwołać trening?</p>
                     <p class="text-muted small mb-3">@cancelTarget.SessionTypeName — @cancelTarget.StartTime.ToString("dd.MM.yyyy HH:mm")</p>
+                    @if (cancelTarget.IsPair && cancelTarget.PartnerActive)
+                    {
+                        <div class="alert alert-light border py-2 small text-start"><i class="bi bi-people me-1"></i>Odwołujesz tylko siebie — @cancelTarget.PartnerName trenuje dalej i dostanie wiadomość.</div>
+                    }
+                    @{ var decision = CancellationRules.ForClient(_trainerCfg, cancelTarget.StartTime, Clock.LocalNow); }
+                    <div class="alert @(decision.RefundsSession ? "alert-light border" : "alert-warning") py-2 small text-start">
+                        <i class="bi @(decision.RefundsSession ? "bi-info-circle" : "bi-exclamation-triangle") me-1"></i>@decision.Message
+                    </div>
                     <div class="mb-2">
                         <input class="form-control form-control-sm" placeholder="Powód (opcjonalnie)" @bind="cancelReason" />
                     </div>
@@ -273,6 +314,29 @@ else
                     @if (bookingStep == 1)
                     {
                         <p class="text-muted small mb-3">Wybierz typ wizyty, który chcesz zarezerwować.</p>
+                        @if (myPackages.Count > 0)
+                        {
+                            <div class="bk-pkgs">
+                                <div class="bk-pkgs-title"><i class="bi bi-box-seam"></i>W Twoich pakietach — rezerwujesz bez dopłat:</div>
+                                @foreach (var g in myPackages.GroupBy(p => (p.SessionTypeId, p.IsForPair)))
+                                {
+                                    var first = g.First();
+                                    var left = g.Sum(p => p.RemainingCredits);
+                                    var soonest = g.Where(p => p.ExpiresAt.HasValue).Select(p => p.ExpiresAt!.Value).OrderBy(d => d).FirstOrDefault();
+                                    <div class="bk-pkg">
+                                        <span class="bk-pkg-name">@first.SessionTypeName@(first.IsForPair ? " (dla pary)" : "")</span>
+                                        <span class="bk-pkg-left">zostało <b>@left</b> @(left == 1 ? "trening" : left % 10 is >= 2 and <= 4 && left % 100 is < 12 or > 14 ? "treningi" : "treningów")@(g.Count() > 1 ? $" w {g.Count()} pakietach" : "")@(soonest != default ? $" · najbliższy ważny do {soonest.ToLocalTime():dd.MM}" : "")</span>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="bk-pkgs bk-pkgs-none">
+                                <i class="bi bi-info-circle"></i>
+                                <span>Nie masz aktywnego pakietu. Możesz zarezerwować termin — trener potwierdzi płatność — albo najpierw <a href="/packages">wybrać pakiet</a> w lepszej cenie.</span>
+                            </div>
+                        }
                         @if (!sessionTypes.Any())
                         {
                             <div class="text-center text-muted py-4">
@@ -283,30 +347,69 @@ else
                         else
                         {
                             <div class="row g-3">
-                                @foreach (var t in sessionTypes)
+                                @foreach (var t in sessionTypes.OrderBy(x => CoveringPackage(x) is null))
                                 {
                                     var isSelected = selectedType?.Id == t.Id;
+                                    var cover = CoveringPackage(t);
+                                    var offer = CheapestOffer(t);
                                     <div class="col-12 col-sm-6">
                                         <div class="border rounded-3 p-3 h-100 @(isSelected ? "border-primary bg-primary-subtle" : "border-2")"
                                              style="cursor:pointer;transition:all .15s"
-                                             @onclick="() => { selectedType = t; bookingError = string.Empty; }">
+                                             @onclick="() => { selectedType = t; bookingError = string.Empty; if (t.IsPair && partners.Count > 0) withPartner = true; }">
                                             <div class="d-flex align-items-start gap-2">
                                                 <div class="rounded-circle d-flex align-items-center justify-content-center flex-shrink-0"
                                                      style="width:36px;height:36px;background:@(isSelected ? "var(--c-primary)" : "var(--c-step-bg, #f3f4f6)")">
-                                                    <i class="bi @(t.IsGroup ? "bi-people-fill" : "bi-person-fill")"
+                                                    <i class="bi @(t.IsGroup || t.IsPair ? "bi-people-fill" : "bi-person-fill")"
                                                        style="color:@(isSelected ? "white" : "var(--c-muted, #6b7280)");font-size:.9rem"></i>
                                                 </div>
                                                 <div>
                                                     <div class="fw-semibold small">@t.Name</div>
-                                                    <div class="text-muted small">@t.DurationMinutes min · @(t.IsGroup ? "grupowa" : "indywidualna")</div>
+                                                    <div class="text-muted small">@t.DurationMinutes min · @(t.IsGroup ? "grupowa" : t.IsPair ? "w parze" : "indywidualna")</div>
+                                                    @if (cover is not null)
+                                                    {
+                                                        <span class="bk-cover ok"><i class="bi bi-check-circle-fill"></i>W pakiecie · zostało @LeftFor(t, cover)</span>
+                                                    }
+                                                    else
+                                                    {
+                                                        <span class="bk-cover"><i class="bi bi-wallet2"></i>Poza pakietem@(offer is not null ? $" · pakiety od {offer.Price / Math.Max(1, offer.SessionsCount):0} zł/trening" : "")</span>
+                                                    }
                                                 </div>
                                             </div>
                                         </div>
                                     </div>
                                 }
                             </div>
+                            @if (partners.Count > 0 || selectedType?.IsPair == true)
+                            {
+                                <div class="mt-4">
+                                    <div class="small fw-semibold mb-2">Z kim trenujesz?</div>
+                                    <div class="pair-toggle">
+                                        <button type="button" class="@(withPartner ? "" : "active")" disabled="@(selectedType?.IsPair == true)"
+                                                @onclick="() => withPartner = false"><i class="bi bi-person-fill"></i>Tylko ja</button>
+                                        <button type="button" class="@(withPartner ? "active" : "")" disabled="@(partners.Count == 0)"
+                                                @onclick="() => withPartner = true"><i class="bi bi-people-fill"></i>Z partnerem</button>
+                                    </div>
+                                    @if (withPartner && partners.Count > 1)
+                                    {
+                                        <select class="form-select form-select-sm mt-2" @bind="partnerId">
+                                            @foreach (var p in partners)
+                                            {
+                                                <option value="@p.ClientId">@p.Name</option>
+                                            }
+                                        </select>
+                                    }
+                                    @if (selectedType?.IsPair == true && partners.Count == 0)
+                                    {
+                                        <div class="alert alert-light border small mt-2 mb-0">Ten trening jest dla pary. Poproś trenera, żeby połączył Cię w parę z osobą, z którą trenujesz — albo kup pakiet dla pary w sklepie.</div>
+                                    }
+                                    else if (withPartner)
+                                    {
+                                        <PairHowItWorks Variant="book" Title="@($"Trening z: {PartnerName}")" Class="mt-2" />
+                                    }
+                                </div>
+                            }
                             <div class="text-end mt-4">
-                                <button class="btn btn-primary" @onclick="GoToStep2" disabled="@(selectedType is null)">
+                                <button class="btn btn-primary" @onclick="GoToStep2" disabled="@(selectedType is null || (selectedType.IsPair && !withPartner))">
                                     Dalej <i class="bi bi-arrow-right ms-1"></i>
                                 </button>
                             </div>
@@ -317,43 +420,45 @@ else
                     @if (bookingStep == 2)
                     {
                         <p class="text-muted small mb-3">
-                            Wybierz datę i dostępny termin dla wizyty <strong>@selectedType!.Name</strong> (@selectedType.DurationMinutes min).
+                            Wybierz termin dla wizyty <strong>@selectedType!.Name</strong> (@selectedType.DurationMinutes min).
                         </p>
 
-                        <div class="row g-3">
-                            <div class="col-12 col-sm-5">
-                                <label class="form-label form-label-sm fw-semibold">Data</label>
-                                <input type="date" class="form-control"
-                                       value="@selectedDate.ToString("yyyy-MM-dd")"
-                                       min="@DateTime.Today.ToString("yyyy-MM-dd")"
-                                       max="@DateTime.Today.AddDays(60).ToString("yyyy-MM-dd")"
-                                       @onchange="OnDateChanged" />
+                        <div class="slot-day-nav">
+                            <button class="slot-nav-btn" @onclick="SlotPrevDay"
+                                    disabled="@(selectedDate <= DateOnly.FromDateTime(StudioClock.Today))">
+                                <i class="bi bi-chevron-left"></i>
+                            </button>
+                            <div class="slot-nav-center">
+                                <div class="slot-nav-weekday">@selectedDate.ToString("dddd", new System.Globalization.CultureInfo("pl-PL"))</div>
+                                <div class="slot-nav-full">@selectedDate.ToString("d MMMM yyyy", new System.Globalization.CultureInfo("pl-PL"))</div>
                             </div>
+                            <button class="slot-nav-btn" @onclick="SlotNextDay">
+                                <i class="bi bi-chevron-right"></i>
+                            </button>
                         </div>
 
                         <div class="mt-3">
                             @if (loadingSlots)
                             {
-                                <div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></div>
+                                <div class="text-center py-3"><span class="spinner-border spinner-border-sm text-primary"></span></div>
                             }
                             else if (!availableSlots.Any())
                             {
-                                <div class="alert alert-warning py-2 small mt-2">
-                                    <i class="bi bi-calendar-x me-1"></i>
-                                    Brak wolnych terminów w wybranym dniu. Wybierz inną datę.
+                                <div class="slot-empty">
+                                    <i class="bi bi-calendar-x"></i>
+                                    Brak wolnych terminów w tym dniu
                                 </div>
                             }
                             else
                             {
-                                <label class="form-label form-label-sm fw-semibold mt-2">Dostępne terminy</label>
-                                <div class="d-flex flex-wrap gap-2">
+                                <div class="slot-tile-grid">
                                     @foreach (var slot in availableSlots)
                                     {
                                         var isSelected = selectedSlot?.Start == slot.Start;
-                                        <button class="btn btn-sm @(isSelected ? "btn-primary" : "btn-outline-primary")"
-                                                style="min-width:80px"
+                                        <button type="button" class="slot-tile @(isSelected ? "slot-tile-active" : "")"
                                                 @onclick="() => { selectedSlot = slot; bookingError = string.Empty; }">
-                                            @slot.Start.ToString("HH:mm")
+                                            <div class="slot-tile-time">@slot.Start.ToString("HH:mm")</div>
+                                            <div class="slot-tile-end">— @slot.End.ToString("HH:mm")</div>
                                         </button>
                                     }
                                 </div>
@@ -376,11 +481,18 @@ else
                         <p class="text-muted small mb-3">Sprawdź szczegóły i zatwierdź rezerwację.</p>
 
                         <div class="border rounded-3 p-4 bg-light mb-3">
-                            <table class="table table-sm table-borderless mb-0 align-middle">
+                            <table class="table table-sm table-borderless mb-0 align-middle" style="--bs-table-bg:transparent">
                                 <tr>
                                     <td class="text-muted small fw-semibold" style="width:40%">Typ wizyty</td>
                                     <td class="fw-semibold">@selectedType!.Name</td>
                                 </tr>
+                                @if (withPartner)
+                                {
+                                    <tr>
+                                        <td class="text-muted small fw-semibold">Trenujesz z</td>
+                                        <td class="fw-semibold"><i class="bi bi-people-fill me-1"></i>@PartnerName</td>
+                                    </tr>
+                                }
                                 <tr>
                                     <td class="text-muted small fw-semibold">Czas trwania</td>
                                     <td>@selectedType!.DurationMinutes minut</td>
@@ -393,21 +505,94 @@ else
                                     <td class="text-muted small fw-semibold">Godzina</td>
                                     <td class="fw-semibold">@selectedSlot!.Start.ToString("HH:mm") — @selectedSlot!.End.ToString("HH:mm")</td>
                                 </tr>
+                                @{ var payWith = CoveringPackage(selectedType!, selectedSlot!.Start); }
+                                <tr>
+                                    <td class="text-muted small fw-semibold">Płatność</td>
+                                    <td>
+                                        @if (payWith is not null)
+                                        {
+                                            <span class="text-success fw-semibold"><i class="bi bi-check-circle-fill me-1"></i>Z pakietu „@payWith.Name”</span>
+                                            <div class="small text-muted">po rezerwacji zostanie @(payWith.RemainingCredits - 1) z @payWith.TotalSessions</div>
+                                        }
+                                        else
+                                        {
+                                            <span class="fw-semibold text-warning-emphasis"><i class="bi bi-wallet2 me-1"></i>@(payChoice == "online" && offOpts?.SinglePrice is { } price ? $"Online — {price:0.##} zł" : payChoice == "trainer" ? "U trenera — gotówka albo przelew" : "Poza pakietem")</span>
+                                        }
+                                    </td>
+                                </tr>
                             </table>
                         </div>
+                        @if (payWith is null && offOpts is not null)
+                        {
+                            @if (offOpts.RequiresPackage || (!offOpts.CanPayOnline || withPartner) && offOpts.AtTrainer == PTScheduler.Domain.Rules.AtTrainerMode.Disabled)
+                            {
+                                <div class="bk-nopkg">
+                                    <i class="bi bi-box-seam"></i>
+                                    <div>
+                                        <b>@(offOpts.RequiresPackage ? "Ten trening jest dostępny tylko w pakiecie." : "Tego treningu nie masz w pakiecie.")</b>
+                                        <div>Wybierz pakiet — po zakupie wróć i zarezerwuj termin z pakietu.</div>
+                                        <a href="/packages" class="btn btn-sm btn-primary mt-2"><i class="bi bi-bag me-1"></i>Zobacz pakiety</a>
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="bk-pay">
+                                    <div class="bk-pay-title">Tego treningu nie masz w pakiecie — jak chcesz zapłacić?</div>
+                                    <a href="/packages" class="bk-pay-opt link">
+                                        <i class="bi bi-box-seam"></i>
+                                        <span><b>Kup pakiet</b><small>Najtaniej — kolejne treningi zarezerwujesz już z pakietu.</small></span>
+                                        <i class="bi bi-chevron-right ms-auto"></i>
+                                    </a>
+                                    @if (offOpts.CanPayOnline && !withPartner)
+                                    {
+                                        <label class="bk-pay-opt @(payChoice == "online" ? "active" : "")">
+                                            <input type="radio" name="bkpay" checked="@(payChoice == "online")" @onchange='() => payChoice = "online"' />
+                                            <i class="bi bi-credit-card"></i>
+                                            <span><b>Zapłać teraz online — @offOpts.SinglePrice!.Value.ToString("0.##") zł</b><small>BLIK, karta albo przelew. Termin od razu potwierdzony.</small></span>
+                                        </label>
+                                        @if (payChoice == "online" && offOpts.Providers.Count > 1)
+                                        {
+                                            <div class="bk-providers">
+                                                @foreach (var pr in offOpts.Providers)
+                                                {
+                                                    <button type="button" class="@(providerKey == pr.Key ? "active" : "")" @onclick="() => providerKey = pr.Key"><i class="bi @pr.Icon me-1"></i>@pr.Name</button>
+                                                }
+                                            </div>
+                                        }
+                                    }
+                                    @if (offOpts.AtTrainer != PTScheduler.Domain.Rules.AtTrainerMode.Disabled)
+                                    {
+                                        <label class="bk-pay-opt @(payChoice == "trainer" ? "active" : "")">
+                                            <input type="radio" name="bkpay" checked="@(payChoice == "trainer")" @onchange='() => payChoice = "trainer"' />
+                                            <i class="bi bi-cash-coin"></i>
+                                            <span>
+                                                <b>Zapłacę u trenera</b>
+                                                <small>@(offOpts.AtTrainer == PTScheduler.Domain.Rules.AtTrainerMode.Instant
+                                                    ? "Gotówką albo przelewem, przy treningu. Termin od razu potwierdzony."
+                                                    : "Gotówką albo przelewem. Wyślemy prośbę — trener potwierdzi termin, dostaniesz powiadomienie.")</small>
+                                            </span>
+                                        </label>
+                                    }
+                                </div>
+                            }
+                        }
 
                         <div class="mb-3">
                             <label class="form-label form-label-sm fw-semibold">Notatki (opcjonalnie)</label>
                             <textarea class="form-control form-control-sm" rows="2" placeholder="Dodaj notatkę do wizyty..." @bind="bookingNotes"></textarea>
+                            <div class="small text-muted mt-2">
+                                <i class="bi bi-shield-check me-1"></i>@CancellationRules.Describe(_trainerCfg)
+                            </div>
                         </div>
 
                         <div class="d-flex justify-content-between mt-2">
                             <button class="btn btn-outline-secondary" @onclick="() => { bookingStep = 2; }">
                                 <i class="bi bi-arrow-left me-1"></i>Wróć
                             </button>
-                            <button class="btn btn-primary" @onclick="ConfirmBooking" disabled="@isBusy">
+                            <button class="btn btn-primary" @onclick="ConfirmBooking" disabled="@(isBusy || !CanConfirm)">
                                 @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                                <i class="bi bi-check-lg me-1"></i>Zarezerwuj
+                                <i class="bi @(ConfirmIcon) me-1"></i>@ConfirmLabel
                             </button>
                         </div>
                     }
@@ -426,7 +611,7 @@ else
             <div class="d-flex">
                 <div class="toast-body">
                     <i class="bi bi-check-circle-fill me-2"></i>
-                    Wizyta zarezerwowana! Sprawdź email z potwierdzeniem.
+                    @successText
                 </div>
                 <button type="button" class="btn-close btn-close-white me-2 m-auto" @onclick="() => showSuccess = false"></button>
             </div>
@@ -443,7 +628,7 @@ else
     private List<SessionDto> past = [];
     private string _userId = string.Empty;
     private string _userEmail = string.Empty;
-    private int _cancellationWindowHours = 24;
+    private TrainerConfigDto _trainerCfg = new();
 
     private SessionDto? cancelTarget;
     private string cancelReason = string.Empty;
@@ -455,11 +640,25 @@ else
     private string bookingError = string.Empty;
     private string bookingNotes = string.Empty;
     private List<SessionTypeDto> sessionTypes = [];
+    // Aktywne pakiety klienta (także wspólne z parą) i oferta pakietów — do podpowiedzi przy rezerwacji.
+    private List<SessionPackageDto> myPackages = [];
+    private List<PackageOfferDto> offers = [];
+    private string successText = "Wizyta zarezerwowana! Sprawdź email z potwierdzeniem.";
+    // Poza pakietem: co może klient (online / u trenera) i co wybrał.
+    private OffPackageOptionsDto? offOpts;
+    private string? payChoice;
+    private string providerKey = "";
     private SessionTypeDto? selectedType;
-    private DateOnly selectedDate = DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+    private DateOnly selectedDate = DateOnly.FromDateTime(StudioClock.Today.AddDays(1));
     private List<AvailableSlotDto> availableSlots = [];
     private AvailableSlotDto? selectedSlot;
     private bool loadingSlots;
+
+    // Trening w parze
+    private List<PartnerDto> partners = [];
+    private bool withPartner;
+    private int partnerId;
+    private string PartnerName => partners.FirstOrDefault(p => p.ClientId == partnerId)?.Name ?? "partner";
 
     protected override async Task OnInitializedAsync()
     {
@@ -476,8 +675,7 @@ else
                 {
                     try
                     {
-                        var config = await TrainerConfigService.GetAsync(client.TrainerUserId);
-                        _cancellationWindowHours = config.CancellationWindowHours;
+                        _trainerCfg = await TrainerConfigService.GetAsync(client.TrainerUserId);
                     }
                     catch { /* best-effort — use default cancellation window */ }
                 }
@@ -489,10 +687,11 @@ else
     private async Task RefreshSessions()
     {
         var all = await SessionService.GetClientSessionsAsync(client!.Id, 500);
-        var now = DateTime.Now;
-        upcoming = all.Where(s => s.Status == SessionStatus.Scheduled && s.StartTime >= now)
+        var now = StudioClock.Now;
+        // Wizyta „do opłacenia” (poza pakietem) też jest nadchodząca — wcześniej znikała z listy.
+        upcoming = all.Where(s => (s.Status is SessionStatus.Scheduled or SessionStatus.AwaitingPackage) && s.StartTime >= now)
                       .OrderBy(s => s.StartTime).ToList();
-        past = all.Where(s => s.StartTime < now || s.Status != SessionStatus.Scheduled)
+        past = all.Where(s => s.StartTime < now || s.Status is not (SessionStatus.Scheduled or SessionStatus.AwaitingPackage))
                   .OrderByDescending(s => s.StartTime).ToList();
     }
 
@@ -504,10 +703,21 @@ else
         bookingNotes = string.Empty;
         bookingError = string.Empty;
         availableSlots = [];
-        selectedDate = DateOnly.FromDateTime(DateTime.Today.AddDays(1));
+        selectedDate = DateOnly.FromDateTime(StudioClock.Today.AddDays(1));
 
         if (!sessionTypes.Any())
             sessionTypes = await SessionService.GetSessionTypesAsync();
+        partners = await PairService.GetPartnersAsync(client!.Id);
+        try
+        {
+            myPackages = (await PackageService.GetPackagesAsync(client.Id))
+                .Where(p => p.Status == PackageStatus.Active && p.RemainingCredits > 0 && !p.IsExpiredByDate)
+                .OrderBy(p => p.ExpiresAt ?? DateTime.MaxValue).ToList();
+            offers = await OfferService.GetActiveOffersAsync();
+        }
+        catch { myPackages = []; offers = []; }
+        partnerId = partners.FirstOrDefault()?.ClientId ?? 0;
+        withPartner = false;
 
         bookingOpen = true;
     }
@@ -537,17 +747,47 @@ else
         }
 
         bookingError = string.Empty;
+        await LoadOffPackageOptions();
         bookingStep = 3;
     }
 
-    private async Task OnDateChanged(ChangeEventArgs e)
+    private async Task LoadOffPackageOptions()
     {
-        if (DateOnly.TryParse(e.Value?.ToString(), out var d))
+        offOpts = null;
+        payChoice = null;
+        if (selectedType is null || selectedSlot is null || CoveringPackage(selectedType, selectedSlot.Start) is not null) return;
+        try
         {
-            selectedDate = d;
-            selectedSlot = null;
-            await LoadSlots();
+            offOpts = await OffPackage.GetOptionsAsync(client!.Id, selectedType.Id);
+            providerKey = offOpts.Providers.FirstOrDefault()?.Key ?? "";
+            // Domyślny wybór: płatność online (termin od razu potwierdzony), inaczej „u trenera”.
+            payChoice = offOpts.CanPayOnline && !withPartner ? "online"
+                : offOpts.AtTrainer != PTScheduler.Domain.Rules.AtTrainerMode.Disabled ? "trainer" : null;
         }
+        catch { offOpts = null; }
+    }
+
+    private bool Covered => selectedType is not null && selectedSlot is not null && CoveringPackage(selectedType, selectedSlot.Start) is not null;
+    private bool CanConfirm => Covered || payChoice is not null;
+    private string ConfirmLabel => Covered ? "Zarezerwuj z pakietu"
+        : payChoice == "online" ? "Przejdź do płatności"
+        : payChoice == "trainer" && offOpts?.AtTrainer == PTScheduler.Domain.Rules.AtTrainerMode.NeedsApproval ? "Wyślij prośbę do trenera"
+        : payChoice == "trainer" ? "Zarezerwuj (płatność u trenera)"
+        : "Zarezerwuj";
+    private string ConfirmIcon => payChoice == "online" && !Covered ? "bi-credit-card" : payChoice == "trainer" && !Covered ? "bi-send" : "bi-check-lg";
+
+    private async Task SlotPrevDay()
+    {
+        selectedDate = selectedDate.AddDays(-1);
+        selectedSlot = null;
+        await LoadSlots();
+    }
+
+    private async Task SlotNextDay()
+    {
+        selectedDate = selectedDate.AddDays(1);
+        selectedSlot = null;
+        await LoadSlots();
     }
 
     private async Task LoadSlots()
@@ -558,7 +798,7 @@ else
         {
             var all = await AvailabilityService.GetAvailableSlotsAsync(
                 client.TrainerUserId, selectedDate, selectedType.DurationMinutes);
-            availableSlots = all.Where(s => s.IsAvailable && s.Start > DateTime.Now).ToList();
+            availableSlots = all.Where(s => s.IsAvailable && s.Start > StudioClock.Now).ToList();
         }
         finally { loadingSlots = false; }
     }
@@ -590,11 +830,27 @@ else
                 StartTime = selectedSlot.Start,
                 Notes = string.IsNullOrWhiteSpace(bookingNotes) ? null : bookingNotes.Trim()
             };
-            var created = await SessionService.CreateSessionAsync(dto);
+            if (!Covered && payChoice == "online")
+            {
+                var pay = await OffPackage.BookOnlineAsync(_userId, dto, providerKey, Nav.BaseUri, _userEmail, string.Empty);
+                if (pay.Ok && pay.RedirectUrl is not null) { Nav.NavigateTo(pay.RedirectUrl, forceLoad: true); return; }
+                bookingError = pay.Error ?? "Nie udało się rozpocząć płatności.";
+                return;
+            }
+
+            var created = !Covered && payChoice == "trainer"
+                ? await OffPackage.BookAtTrainerAsync(_userId, dto, withPartner && partnerId > 0 ? partnerId : null)
+                : withPartner && partnerId > 0
+                    ? await SessionService.CreatePairSessionAsync(dto, partnerId)
+                    : await SessionService.CreateSessionAsync(dto);
 
             await AuditLogService.LogAsync(_userId, _userEmail, "Client", "ClientSelfBooked", "Session",
-                created.Id.ToString(), $"Typ: {selectedType.Name}, termin: {selectedSlot.Start:dd.MM.yyyy HH:mm}");
+                created.Id.ToString(), $"Typ: {selectedType.Name}, termin: {selectedSlot.Start:dd.MM.yyyy HH:mm}{(withPartner ? $", z: {PartnerName}" : "")}");
 
+            successText = created.AwaitingApproval ? "Prośba wysłana — trener potwierdzi termin, dostaniesz powiadomienie."
+                : created.UnpaidAtTrainer ? "Termin zarezerwowany — zapłacisz u trenera przy treningu."
+                : created.Status == SessionStatus.AwaitingPackage ? "Termin zarezerwowany — trener odezwie się w sprawie płatności."
+                : "Wizyta zarezerwowana! Sprawdź email z potwierdzeniem.";
             bookingOpen = false;
             showSuccess = true;
             await RefreshSessions();
@@ -605,6 +861,36 @@ else
         }
         finally { isBusy = false; }
     }
+
+    // Pakiet, z którego zejdzie ten trening (jak w SessionService: ten sam rodzaj, ważny w dniu wizyty;
+    // przy treningu z partnerem najpierw wspólny pakiet pary, potem własny).
+    private SessionPackageDto? CoveringPackage(SessionTypeDto type, DateTime? at = null)
+    {
+        var day = (at ?? StudioClock.Now).Date;
+        bool Valid(SessionPackageDto p) => p.SessionTypeId == type.Id && p.RemainingCredits > 0
+            && (p.ExpiresAt is null || p.ExpiresAt.Value.ToLocalTime().Date >= day);
+        if (withPartner && partnerId > 0)
+        {
+            var pair = myPackages.FirstOrDefault(p => Valid(p) && p.IsForPair
+                && (p.PartnerClientId == partnerId || p.ClientId == partnerId));
+            if (pair is not null) return pair;
+        }
+        else if (type.IsPair)
+        {
+            // Trening dla pary, partner jeszcze niewybrany — wystarczy dowolny wspólny pakiet tego rodzaju.
+            var pair = myPackages.FirstOrDefault(p => Valid(p) && p.IsForPair);
+            if (pair is not null) return pair;
+        }
+        return myPackages.FirstOrDefault(p => Valid(p) && !p.IsForPair && p.ClientId == client!.Id);
+    }
+
+    // Ile treningów tego rodzaju zostało łącznie (we wszystkich pakietach tego samego typu — własnych albo pary).
+    private int LeftFor(SessionTypeDto type, SessionPackageDto cover) =>
+        myPackages.Where(p => p.SessionTypeId == type.Id && p.IsForPair == cover.IsForPair).Sum(p => p.RemainingCredits);
+
+    private PackageOfferDto? CheapestOffer(SessionTypeDto type) =>
+        offers.Where(o => o.SessionTypeId == type.Id && o.SessionsCount > 0)
+              .OrderBy(o => o.Price / o.SessionsCount).FirstOrDefault();
 
     private void ConfirmCancel(SessionDto s)
     {
@@ -625,9 +911,12 @@ else
             cancelTarget = null;
             await RefreshSessions();
         }
+        catch (InvalidOperationException ex)
+        {
+            cancelError = ex.Message;
+        }
         catch (Exception)
         {
-            cancelTarget = null;
             cancelError = "Nie udało się anulować sesji. Spróbuj ponownie.";
         }
         finally { isBusy = false; }
@@ -648,6 +937,7 @@ else
         SessionStatus.Completed => "Zakończona",
         SessionStatus.Cancelled => "Anulowana",
         SessionStatus.NoShow    => "Nieobecność",
+        SessionStatus.AwaitingPackage => "Do opłacenia",
         _ => s.ToString()
     };
 }

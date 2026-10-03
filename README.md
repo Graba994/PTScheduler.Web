@@ -29,11 +29,22 @@ docker compose up -d
 
 Aplikacja dostępna pod `http://localhost:8080`.
 
-Przy pierwszym uruchomieniu wykonaj reset bazy (`/admin/demo`), który utworzy konto administratora:
+Przy pierwszym uruchomieniu aplikacja otworzy kreator `/setup` — tam ustawiasz
+nazwę firmy oraz własny login i hasło administratora studia.
 
-| Login | Hasło |
-|-------|-------|
-| `root@admin.local` | `password` |
+Konta administracyjne:
+
+- **Administrator studia** — zakłada go kreator `/setup` (e-mail i hasło właściciela).
+  Ustawienia studia, zespół, oferta; może przełączać się jednym kliknięciem na profile
+  trenerów i asystentów.
+- **Konto techniczne `root@admin.local`** (rola `Root`) — dla operatora platformy. Ma
+  wszystko, co administrator studia, plus kopie zapasowe, bazę danych, dane demo i sekcję
+  „Technika” na dashboardzie; przełącza się na dowolne konto (także klienta) do testów.
+  Startuje z losowym hasłem — ustawiasz je w Portalu (Instancja → Konto administratora →
+  „Konto techniczne (root)”).
+
+Przełączanie kont (bez hasła, z zapisem w historii zmian) wyłączysz zmienną
+`ACCOUNT_SWITCHING_ENABLED=false`.
 
 ---
 
@@ -248,13 +259,9 @@ Seed tworzy też: dostępność trenera (pon–pt 8:00–18:00, sob 9:00–13:00
 
 ### Reset bazy danych
 
-Usuwa wszystkie dane i tworzy jedno konto administratora:
+Usuwa wszystkie dane poza kontami administratorów (Twoje konto i hasło zostają).
 
-| Login | Hasło |
-|-------|-------|
-| `root@admin.local` | `password` |
-
-> Wymaga podwójnego potwierdzenia. Po resecie bieżące konto zostaje usunięte — aplikacja wyloguje użytkownika.
+> Wymaga podwójnego potwierdzenia.
 
 ---
 
