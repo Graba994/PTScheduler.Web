@@ -1,13 +1,17 @@
 @page "/panel/resources"
+@page "/panel/system"
 @layout AdminLayout
 @attribute [Authorize(Roles = "Admin")]
 @inject ResourceReportService ReportSvc
 @inject ResourceMonitorService Monitor
+@inject DockerService DockerSvc
+@inject TenantService TenantSvc
 @rendermode InteractiveServer
 
-<PageTitle>Zasoby — PTScheduler Portal</PageTitle>
+@* Serwer i zasoby w jednym miejscu: maszyna i Docker, zużycie z trendem, kontenery i zużycie każdego trenera. *@
+<PageTitle>Serwer i zasoby — PTScheduler Portal</PageTitle>
 
-<PanelHeader Title="Zasoby" Icon="bi-speedometer2" Subtitle="Ile pamięci, procesora i dysku zużywa każdy trener i cały serwer — z trendem, prognozą zapełnienia dysku i zapasem na kolejnych trenerów.">
+<PanelHeader Title="Serwer i zasoby" Icon="bi-cpu" Subtitle="Maszyna z Portalem i instancjami trenerów: pamięć, procesor i dysk z trendem, kontenery Dockera i zużycie każdego trenera.">
     <Actions>
         <div class="btn-group btn-group-sm" role="group" aria-label="Okres">
             @foreach (var (p, label) in Periods)
@@ -17,7 +21,7 @@
         </div>
         <button class="btn btn-sm btn-outline-secondary" @onclick="MeasureNow" disabled="@_measuring" title="Zmierz zużycie teraz, bez czekania na kolejny pomiar">
             @if (_measuring) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-arrow-clockwise me-1"></i> }
-            Zmierz teraz
+            Odśwież i zmierz
         </button>
     </Actions>
 </PanelHeader>
@@ -26,11 +30,40 @@
 {
     <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
 }
-else if (_report.LastSampleAt is null)
+else
+{
+    var downCount = _statuses.Count(x => !x.IsHealthy);
+    @if (!_dockerOk)
+    {
+        <StatusBanner Tone="danger" Icon="bi-plug" Title="Brak połączenia z Dockerem">Portal nie widzi Dockera, więc nie pokaże kontenerów ani świeżych pomiarów. Sprawdź, czy gniazdo Dockera jest zamontowane w kontenerze Portalu.</StatusBanner>
+    }
+    else if (downCount > 0)
+    {
+        <StatusBanner Tone="danger" Icon="bi-exclamation-octagon-fill" Title="@($"{downCount} {PanelUi.Plural(downCount, "trener ma", "trenerów ma", "trenerów ma")} zatrzymane kontenery")">
+            @foreach (var s in _statuses.Where(x => !x.IsHealthy))
+            {
+                <span class="pp-chip pp-tone-danger me-1">@s.Slug</span>
+            }
+            <span>Uruchom je ponownie z karty trenera.</span>
+        </StatusBanner>
+    }
+
+    @if (_sys is not null)
+    {
+        <dl class="pp-machine">
+            <div><dt>Procesor</dt><dd>@_sys.CpuCount rdzeni</dd></div>
+            <div><dt>Pamięć</dt><dd>@(_sys.TotalMemoryMB / 1024) GB</dd></div>
+            <div><dt>Kontenery</dt><dd><span class="pp-chip pp-tone-@(_sys.RunningContainers < _sys.TotalContainers ? "warn" : "ok")">@_sys.RunningContainers z @_sys.TotalContainers działa</span></dd></div>
+            <div><dt>Docker</dt><dd>@(string.IsNullOrEmpty(_sys.DockerVersion) ? "—" : _sys.DockerVersion)</dd></div>
+        </dl>
+    }
+}
+
+@if (_report is not null && _report.LastSampleAt is null)
 {
     <StatusBanner Tone="muted" Icon="bi-hourglass-split" Title="Zbieram pierwsze pomiary">Portal mierzy zużycie co 5 minut. Pierwsze dane pojawią się za chwilę — możesz też kliknąć „Zmierz teraz”. Trend i prognozy dysku potrzebują kilku dni pomiarów.</StatusBanner>
 }
-else
+else if (_report is not null)
 {
     var h = _report.Host;
     var (range, bucket) = ResourceReportService.Span(_period);
@@ -156,6 +189,13 @@ else
                                     <td>
                                         <a href="/panel/tenants/@t.Id" class="fw-semibold font-monospace text-decoration-none">@t.Slug</a>
                                         <div class="text-muted text-truncate" style="max-width:180px">@t.Company</div>
+                                        @if (_statuses.FirstOrDefault(x => x.Slug == t.Slug) is { } st)
+                                        {
+                                            <div class="d-flex gap-1 mt-1">
+                                                <span class="pp-chip pp-tone-@(st.Web?.Running == true ? "ok" : "danger")" title="@st.Web?.Id">aplikacja @(st.Web?.Running == true ? "działa" : "stoi")</span>
+                                                <span class="pp-chip pp-tone-@(st.Db?.Running == true ? "ok" : "danger")" title="@st.Db?.Id">baza @(st.Db?.Running == true ? "działa" : "stoi")</span>
+                                            </div>
+                                        }
                                     </td>
                                     <td>
                                         @if (t.Mem is { } mem)
@@ -250,7 +290,30 @@ else
     private ResourceReportService.Period _period = ResourceReportService.Period.Week;
     private bool _measuring;
 
-    protected override async Task OnInitializedAsync() => _report = await ReportSvc.BuildAsync(_period);
+    private SystemInfo? _sys;
+    private bool _dockerOk = true;
+    private List<TenantContainerStatus> _statuses = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadDockerAsync();
+        _report = await ReportSvc.BuildAsync(_period);
+    }
+
+    /// <summary>Maszyna i stan kontenerów trenerów (aplikacja + baza) prosto z Dockera.</summary>
+    private async Task LoadDockerAsync()
+    {
+        try { _sys = await DockerSvc.GetSystemInfoAsync(); _dockerOk = true; }
+        catch { _sys = null; _dockerOk = false; }
+        if (!_dockerOk) { _statuses = []; return; }
+        var tenants = await TenantSvc.GetAllAsync();
+        try
+        {
+            _statuses = await DockerSvc.GetAllTenantsStatusAsync(
+                tenants.Where(t => t.Status == TenantStatus.Active).Select(t => (t.Slug, t.WebContainerName, t.DbContainerName)));
+        }
+        catch { _statuses = []; }
+    }
 
     private async Task SetPeriod(ResourceReportService.Period p)
     {
@@ -262,7 +325,11 @@ else
     {
         _measuring = true;
         StateHasChanged();
-        try { await Monitor.SampleAsync(CancellationToken.None); }
+        try
+        {
+            await LoadDockerAsync();
+            await Monitor.SampleAsync(CancellationToken.None);
+        }
         finally { _measuring = false; }
         _report = await ReportSvc.BuildAsync(_period);
     }

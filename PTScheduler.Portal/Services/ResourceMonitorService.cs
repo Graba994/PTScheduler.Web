@@ -157,6 +157,6 @@ public class ResourceMonitorService(IServiceScopeFactory scopes, ILogger<Resourc
         if (string.IsNullOrWhiteSpace(to)) return;
         var items = string.Join("", problems.Select(p => $"<li>{WebUtility.HtmlEncode(p)}</li>"));
         await sp.GetRequiredService<EmailService>().SendAsync(to, "Serwer: kończą się zasoby",
-            $"<div style=\"font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:600px\"><h2 style=\"color:#b91c1c\">Kończą się zasoby serwera</h2><ul>{items}</ul><p>Szczegóły: Portal → Zasoby.</p></div>");
+            $"<div style=\"font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:600px\"><h2 style=\"color:#b91c1c\">Kończą się zasoby serwera</h2><ul>{items}</ul><p>Szczegóły: Portal → Serwer i zasoby.</p></div>");
     }
 }

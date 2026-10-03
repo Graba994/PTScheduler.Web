@@ -105,7 +105,7 @@ public class RegistrationGateService(
         {
             var report = await resources.BuildAsync(ResourceReportService.Period.Day).WaitAsync(TimeSpan.FromSeconds(10));
             if (report.MoreTenants is 0)
-                return (false, "Na serwerze nie ma już miejsca na kolejnego trenera (Panel → Zasoby).");
+                return (false, "Na serwerze nie ma już miejsca na kolejnego trenera (Panel → Serwer i zasoby).");
         }
         catch (Exception ex) { logger.LogDebug(ex, "Raport zasobów niedostępny — pomijamy sprawdzenie miejsca."); }
         return (true, null);
