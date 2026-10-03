@@ -44,4 +44,7 @@ public static class TenantEventTypes
     public const string BackupVerified = "backup_verified";
     public const string BackupVerifyFailed = "backup_verify_failed";
     public const string BackupRestored = "backup_restored";
+    public const string Activated = "activated";
+    public const string ReferralReward = "referral_reward";
+    public const string OnboardingEmail = "onboarding_email";
 }

@@ -547,9 +547,30 @@ public class StripeService(
         }
     }
 
+    /// <summary>Kwota na saldzie klienta Stripe — odejmie się od kolejnej faktury (np. miesiąc gratis za polecenie).</summary>
+    public async Task<bool> AddBalanceCreditAsync(string? customerId, decimal amount, string description)
+    {
+        if (string.IsNullOrWhiteSpace(customerId) || amount <= 0 || await ConfigureAsync() is null) return false;
+        try
+        {
+            await new Stripe.CustomerBalanceTransactionService().CreateAsync(customerId, new Stripe.CustomerBalanceTransactionCreateOptions
+            {
+                Amount = -(long)Math.Round(amount * 100m),
+                Currency = "pln",
+                Description = description
+            });
+            return true;
+        }
+        catch (StripeException ex)
+        {
+            logger.LogWarning(ex, "Nie udało się dodać salda w Stripe dla {Customer}.", customerId);
+            return false;
+        }
+    }
+
     /// <summary>
     /// Okres próbny liczymy od uruchomienia aplikacji, nie od podpięcia karty — jeśli zgłoszenie czekało
-    /// w kolejce, przesuwamy koniec okresu próbnego subskrypcji (plan + dodatkowe dni z kodu zaproszenia).
+    /// w kolejce, przesuwamy koniec okresu próbnego subskrypcji (plan + dodatkowe dni z kodu zaproszenia i polecenia).
     /// </summary>
     public async Task RestartTrialAsync(int tenantId)
     {
@@ -557,10 +578,7 @@ public class StripeService(
         await using var db = dbFactory.CreateDbContext();
         var tenant = await db.Tenants.Include(t => t.Plan).FirstOrDefaultAsync(t => t.Id == tenantId);
         if (tenant?.Plan is null || string.IsNullOrWhiteSpace(tenant.StripeSubscriptionId)) return;
-        var extra = 0;
-        if (!string.IsNullOrWhiteSpace(tenant.InviteCode))
-            extra = await db.InviteCodes.Where(c => c.Code == tenant.InviteCode).Select(c => c.ExtraTrialDays).FirstOrDefaultAsync();
-        var days = Math.Max(0, tenant.Plan.TrialDays) + Math.Max(0, extra);
+        var days = Math.Max(0, tenant.Plan.TrialDays) + await ReferralService.ExtraTrialDaysAsync(db, tenant);
         if (days == 0) return;
         try
         {

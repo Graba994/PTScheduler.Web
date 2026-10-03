@@ -84,6 +84,8 @@ window.ptLogs = {
         save: function (json) { try { localStorage.setItem(KEY, json); } catch (e) { } },
         load: function () { try { return localStorage.getItem(KEY); } catch (e) { return null; } },
         clear: function () { try { localStorage.removeItem(KEY); } catch (e) { } },
+        /* Kod polecenia zapamiętany z wcześniejszej wizyty (?ref= na stronie głównej) */
+        refCookie: function () { var m = document.cookie.match(/(?:^|;\s*)pt_ref=([a-z0-9-]+)/); return m ? m[1] : null; },
         focus: function (sel) {
             setTimeout(function () {
                 // Na telefonie podgląd jest nad krokami — po zmianie kroku wracamy na górę, żeby było widać efekt.

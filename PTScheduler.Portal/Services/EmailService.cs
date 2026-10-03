@@ -424,6 +424,88 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         </html>
         """;
 
+    private static string Shell(string inner) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 560px; margin: 0 auto; padding: 20px; color: #1f2937; line-height: 1.55;">
+        {inner}
+            <p style="color: #6b7280; font-size: 0.875rem; margin-top: 28px;">Coś nie działa albo masz pytanie? Odpisz na tego maila — czytamy wszystko.<br>PTScheduler</p>
+        </body>
+        </html>
+        """;
+
+    private static string Plural(int n, string one, string few, string many) =>
+        n == 1 ? one : n % 10 is >= 2 and <= 4 && n % 100 is < 12 or > 14 ? few : many;
+
+    private static string Btn(string url, string text) =>
+        $"""<p><a href="{url}" style="display: inline-block; background: #7c3aed; color: #fff; padding: 11px 20px; border-radius: 10px; text-decoration: none; font-weight: 600;">{WebUtility.HtmlEncode(text)}</a></p>""";
+
+    /// <summary>E-maile powitalne po uruchomieniu aplikacji: dzień 1 (start), 3 (klienci), 7 (podsumowanie i polecenia).</summary>
+    public (string Subject, string Body) OnboardingEmail(int stage, string name, string company, string appUrl,
+        int? clients, int? sessions, string referralLink)
+    {
+        var n = WebUtility.HtmlEncode(name);
+        var app = WebUtility.HtmlEncode(appUrl);
+        var invite = WebUtility.HtmlEncode($"Cześć! Od teraz zapisujesz się na treningi u mnie przez aplikację: {appUrl} — wybierasz termin, płacisz online i dostajesz przypomnienie. Do zobaczenia!");
+        switch (stage)
+        {
+            case 1:
+                return ("Twoja aplikacja działa — 3 rzeczy na dziś", Shell($"""
+                    <h1 style="color: #7c3aed; font-size: 1.35rem;">{WebUtility.HtmlEncode(company)} jest online 🎉</h1>
+                    <p>Cześć {n},</p>
+                    <p>Twoja aplikacja działa pod <a href="{app}" style="color: #7c3aed;">{app}</a>. Żeby pierwsi klienci mogli się zapisać, zrób dziś trzy rzeczy — każda zajmuje kilka minut:</p>
+                    <ol>
+                        <li><b>Ustaw godziny pracy</b> — w menu „Godziny pracy”. Klienci widzą tylko wolne terminy.</li>
+                        <li><b>Sprawdź cennik</b> — oferta z kreatora już jest, popraw nazwy i ceny, jeśli trzeba.</li>
+                        <li><b>Zaproś 3 pierwszych klientów</b> — wyślij im link do aplikacji (gotowy tekst niżej).</li>
+                    </ol>
+                    {Btn(appUrl + "/Account/Login", "Otwórz aplikację")}
+                    <p style="background: #f5f3ff; border-radius: 10px; padding: 12px 14px; font-size: 0.92rem;">{invite}</p>
+                    """));
+            case 2 when (clients ?? 0) < 3:
+                return ("Jak zaprosić klientów w 2 minuty", Shell($"""
+                    <h1 style="color: #7c3aed; font-size: 1.35rem;">Zaproś pierwszych klientów</h1>
+                    <p>Cześć {n},</p>
+                    <p>{(clients is > 0 ? $"Masz już {clients} {Plural(clients.Value, "klienta", "klientów", "klientów")} w aplikacji — świetny start." : "W aplikacji nie ma jeszcze klientów.")}
+                       Najszybciej działa krótka wiadomość na WhatsAppie albo SMS-em do osób, z którymi już trenujesz. Skopiuj i wyślij:</p>
+                    <p style="background: #f5f3ff; border-radius: 10px; padding: 12px 14px; font-size: 0.92rem;">{invite}</p>
+                    <p>Klientów możesz też dodać ręcznie w aplikacji.</p>
+                    {Btn(appUrl + "/Account/Login", "Przejdź do aplikacji")}
+                    """));
+            case 2:
+                return ($"Masz już {clients} {Plural(clients ?? 0, "klienta", "klientów", "klientów")} — co dalej", Shell($"""
+                    <h1 style="color: #7c3aed; font-size: 1.35rem;">Dobra robota, {n}!</h1>
+                    <p>Masz już <b>{clients} {Plural(clients ?? 0, "klienta", "klientów", "klientów")}</b>{(sessions is > 0 ? $" i <b>{sessions} {Plural(sessions.Value, "trening", "treningi", "treningów")}</b>" : "")} w aplikacji. Dwie rzeczy, które oszczędzają najwięcej czasu:</p>
+                    <ul>
+                        <li><b>Płatności online</b> — klienci płacą BLIK-iem przy zapisie, nie musisz pilnować przelewów.</li>
+                        <li><b>Pakiety treningów</b> — klient płaci z góry za kilka treningów, a aplikacja sama odlicza wejścia.</li>
+                    </ul>
+                    {Btn(appUrl + "/Account/Login", "Ustaw płatności")}
+                    """));
+            default:
+                return ("Tydzień z aplikacją — podsumowanie", Shell($"""
+                    <h1 style="color: #7c3aed; font-size: 1.35rem;">Pierwszy tydzień za Tobą</h1>
+                    <p>Cześć {n},</p>
+                    <p>{(clients is null
+                        ? "Jak minął pierwszy tydzień z aplikacją?"
+                        : $"W aplikacji {WebUtility.HtmlEncode(company)} masz <b>{clients} {Plural(clients.Value, "klienta", "klientów", "klientów")}</b> i <b>{sessions ?? 0} {Plural(sessions ?? 0, "trening", "treningi", "treningów")}</b>.")}
+                       {((clients ?? 0) >= 3 ? "Tak trzymaj!" : "Jeśli coś Cię blokuje, odpisz — pomożemy ustawić wszystko razem.")}</p>
+                    <h2 style="font-size: 1.05rem; margin-top: 22px;">Znasz kogoś, kto też prowadzi treningi?</h2>
+                    <p>Wyślij swój link. Polecona osoba dostanie <b>30 dni dłużej za darmo</b>, a Ty <b>miesiąc gratis</b> po jej pierwszej płatności.</p>
+                    <p style="background: #f5f3ff; border-radius: 10px; padding: 12px 14px; font-size: 0.92rem; word-break: break-all;"><a href="{WebUtility.HtmlEncode(referralLink)}" style="color: #7c3aed;">{WebUtility.HtmlEncode(referralLink)}</a></p>
+                    """));
+        }
+    }
+
+    public string ReferralRewardEmailBody(string name, string referredCompany, string referralLink) => Shell($"""
+        <h1 style="color: #059669; font-size: 1.35rem;">Masz miesiąc gratis 🎁</h1>
+        <p>Cześć {WebUtility.HtmlEncode(name)},</p>
+        <p>Aplikacja {WebUtility.HtmlEncode(referredCompany)} z Twojego polecenia ma już opłacony abonament. Dziękujemy!
+           Miesiąc gratis odliczymy od Twojej najbliższej płatności.</p>
+        <p>Twój link do polecania: <a href="{WebUtility.HtmlEncode(referralLink)}" style="color: #7c3aed;">{WebUtility.HtmlEncode(referralLink)}</a></p>
+        """);
+
     public string CustomDomainActiveEmailBody(string trainerName, string domain) =>
         $"""
         <!DOCTYPE html>

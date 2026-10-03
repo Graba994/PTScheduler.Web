@@ -44,6 +44,24 @@ public class Tenant
     /// <summary>„waiting” (czekamy na DNS), „active”, „failed” (DNS nie wskazał serwera w 7 dni).</summary>
     public string? CustomDomainStatus { get; set; }
     public DateTime? CustomDomainSince { get; set; }
+    /// <summary>Kto polecił tego trenera (link ?ref= z aplikacji lub e-maila polecającego).</summary>
+    public int? ReferredByTenantId { get; set; }
+    /// <summary>Kiedy polecający dostał nagrodę za tego trenera (po pierwszej płatności poleconego).</summary>
+    public DateTime? ReferralRewardedAt { get; set; }
+    /// <summary>Darmowe miesiące z poleceń do wykorzystania na rachunkach (przy Stripe — od razu saldo w Stripe).</summary>
+    public int FreeMonths { get; set; }
+    /// <summary>Za który miesiąc ostatnio wykorzystano darmowy miesiąc — chroni przed podwójnym odjęciem.</summary>
+    public DateOnly? LastFreeMonthPeriod { get; set; }
+    /// <summary>Pierwsza prawdziwa płatność za abonament (bez płatności weryfikacyjnej) — lejek i nagroda za polecenie.</summary>
+    public DateTime? FirstPaidAt { get; set; }
+    /// <summary>Aktywacja: co najmniej 3 klientów i pierwszy trening w aplikacji.</summary>
+    public DateTime? ActivatedAt { get; set; }
+    /// <summary>Ile e-maili powitalnych już poszło (dzień 1, 3, 7 po uruchomieniu).</summary>
+    public int OnboardingStage { get; set; }
+    /// <summary>Ostatni odczyt z aplikacji trenera: liczba klientów i treningów.</summary>
+    public int? MetricsClients { get; set; }
+    public int? MetricsSessions { get; set; }
+    public DateTime? MetricsAt { get; set; }
     public string? WebContainerName { get; set; }
     public string? DbContainerName { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

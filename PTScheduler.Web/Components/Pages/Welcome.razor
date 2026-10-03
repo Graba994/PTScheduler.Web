@@ -13,6 +13,7 @@
 @inject NavigationManager Nav
 @inject IPackageOfferService OfferService
 @inject IPublicBookingService PublicBooking
+@inject PlatformInfoService Platform
 @using PTScheduler.Web.Components.Site
 
 <PageTitle>@_companyName — trening personalny i mentoring</PageTitle>
@@ -20,16 +21,16 @@
 @if (_content.LayoutVersion >= 2 && _preview)
 {
     @* Podgląd szkicu w kreatorze — tak, jak zobaczy go gość (bez „Moja aplikacja”). *@
-    <SitePage Content="_content" CompanyName="@_companyName" LogoPath="@_logoPath" IsAuthenticated="false" Reviews="_reviews" Offers="_offers" Slots="_slots" />
+    <SitePage Content="_content" CompanyName="@_companyName" LogoPath="@_logoPath" IsAuthenticated="false" Reviews="_reviews" Offers="_offers" Slots="_slots" PoweredBy="PoweredBy" />
 }
 else if (_content.LayoutVersion >= 2)
 {
     <AuthorizeView>
         <Authorized>
-            <SitePage Content="_content" CompanyName="@_companyName" LogoPath="@_logoPath" IsAuthenticated="true" Reviews="_reviews" Offers="_offers" Slots="_slots" />
+            <SitePage Content="_content" CompanyName="@_companyName" LogoPath="@_logoPath" IsAuthenticated="true" Reviews="_reviews" Offers="_offers" Slots="_slots" PoweredBy="PoweredBy" />
         </Authorized>
         <NotAuthorized>
-            <SitePage Content="_content" CompanyName="@_companyName" LogoPath="@_logoPath" IsAuthenticated="false" Reviews="_reviews" Offers="_offers" Slots="_slots" />
+            <SitePage Content="_content" CompanyName="@_companyName" LogoPath="@_logoPath" IsAuthenticated="false" Reviews="_reviews" Offers="_offers" Slots="_slots" PoweredBy="PoweredBy" />
         </NotAuthorized>
     </AuthorizeView>
 }
@@ -306,6 +307,10 @@ else
             <a href="/legal/privacy">Prywatność</a>
             <a href="/legal/cookies">Cookies</a>
         </span>
+        @if (PoweredBy is { } made)
+        {
+            <a class="wp-made" href="@made.BadgeUrl" target="_blank" rel="noopener">Zrobione w <b>@made.PlatformName</b></a>
+        }
     </footer>
 </div>
 }
@@ -452,6 +457,8 @@ else
     .wp-footer-links { display: flex; gap: 1.2rem; }
     .wp-footer-links a { color: var(--c-muted, #6b7280); text-decoration: none; }
     .wp-footer-links a:hover { color: var(--c-primary, #0284c7); }
+    .wp-made { flex-basis: 100%; text-align: center; font-size: .8rem; color: var(--c-muted, #6b7280); text-decoration: none; }
+    .wp-made:hover { color: var(--c-primary, #0284c7); }
 </style>
 
 @code {
@@ -459,6 +466,10 @@ else
     private string? _logoPath;
     private SiteContentDto _content = new();
     private bool _coursesEnabled = true;
+    private PlatformInfoService.Info? _platform;
+
+    /// <summary>„Zrobione w …”: w podstawowych planach zawsze, wyżej — jeśli trener jej nie wyłączył.</summary>
+    private PlatformInfoService.Info? PoweredBy => _platform is { } p && (p.BadgeRequired || _content.ShowPoweredBy) ? p : null;
 
     private bool HeroOnDark => _content.Template is "gradient" or "dark"
         || (_content.HeroBackground == "image" && !string.IsNullOrEmpty(_content.HeroImageUrl));
@@ -535,6 +546,8 @@ else
 
     protected override async Task OnInitializedAsync()
     {
+        try { _platform = await Platform.GetAsync().WaitAsync(TimeSpan.FromSeconds(2)); }
+        catch (TimeoutException) { _platform = Platform.Cached; }
         try
         {
             if (!await SetupService.IsSetupCompletedAsync())

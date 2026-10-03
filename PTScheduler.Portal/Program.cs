@@ -89,6 +89,9 @@ builder.Services.AddScoped<ResourceReportService>();
 builder.Services.AddSingleton<NpmHealthService>();
 builder.Services.AddSingleton<AppLaunchService>();
 builder.Services.AddScoped<RegistrationGateService>();
+builder.Services.AddScoped<ReferralService>();
+builder.Services.AddSingleton<FunnelService>();
+builder.Services.AddHostedService<GrowthService>();
 builder.Services.AddSingleton<CustomDomainService>();
 builder.Services.AddHostedService(sp => sp.GetRequiredService<CustomDomainService>());
 builder.Services.AddHttpContextAccessor();
@@ -226,6 +229,35 @@ app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
 app.UseAntiforgery();
+
+// ?ref= z linku polecającego albo stopki „Zrobione w …” — zapamiętujemy na 30 dni, żeby polecenie
+// zadziałało także wtedy, gdy trener najpierw obejrzy stronę główną, a zarejestruje się później.
+app.Use(async (ctx, next) =>
+{
+    if (HttpMethods.IsGet(ctx.Request.Method) && ctx.Request.Query["ref"].ToString() is { Length: > 0 and <= 63 } refCode
+        && System.Text.RegularExpressions.Regex.IsMatch(refCode, "^[a-z0-9-]+$"))
+        ctx.Response.Cookies.Append("pt_ref", refCode, new CookieOptions
+        {
+            MaxAge = TimeSpan.FromDays(30), SameSite = SameSiteMode.Lax, HttpOnly = false, Secure = ctx.Request.IsHttps, IsEssential = true
+        });
+    await next();
+});
+
+// Wyszukiwarki: mapa publicznych stron i robots.txt (Panel, API i linki prywatne poza indeksem).
+string PublicBase(HttpContext ctx) =>
+    app.Configuration.GetValue<string>("Portal:PublicUrl")?.TrimEnd('/') is { Length: > 0 } pub ? pub : $"{ctx.Request.Scheme}://{ctx.Request.Host}";
+
+app.MapGet("/sitemap.xml", (HttpContext ctx) =>
+{
+    var root = PublicBase(ctx);
+    var pages = new[] { "/", "/register", "/pricing", "/aplikacja-dla-trenera-personalnego", "/porownanie/excel-i-whatsapp", "/porownanie/systemy-rezerwacji", "/regulamin" };
+    var urls = string.Concat(pages.Select(p => $"<url><loc>{System.Security.SecurityElement.Escape(root + p)}</loc></url>"));
+    return Results.Content($"<?xml version=\"1.0\" encoding=\"UTF-8\"?><urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">{urls}</urlset>", "application/xml; charset=utf-8");
+});
+
+app.MapGet("/robots.txt", (HttpContext ctx) => Results.Text(
+    $"User-agent: *\nDisallow: /panel\nDisallow: /api/\nDisallow: /subskrypcja/\nDisallow: /rachunek/\nDisallow: /login\nAllow: /\n\nSitemap: {PublicBase(ctx)}/sitemap.xml\n",
+    "text/plain; charset=utf-8"));
 
 app.MapGet("/health", async (IDbContextFactory<PortalDbContext> dbFactory) =>
 {
@@ -587,6 +619,35 @@ app.MapPost("/api/internal/tenants/{slug}/billing/portal", async (
         returnUrl = $"https://{tenant.Domain}/admin/upgrade";
     var url = await stripe.CreateCustomerPortalLinkAsync(tenant.StripeCustomerId, returnUrl);
     return url is null ? Results.Json(new { error = "Stripe nie odpowiada." }, statusCode: 502) : Results.Json(new { url });
+});
+
+// Polecenia i stopka „Zrobione w …” w aplikacji trenera: link polecający, statystyki i czy stopka
+// jest obowiązkowa w planie (plany z podstawowym brandingiem — wyłączyć można od wyższego planu).
+app.MapGet("/api/internal/tenants/{slug}/growth", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    ReferralService referrals,
+    IConfiguration config) =>
+{
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().Include(t => t.Plan).FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    var portal = config.GetValue<string>("Portal:PublicUrl")?.TrimEnd('/') is { Length: > 0 } pub ? pub : $"{ctx.Request.Scheme}://{ctx.Request.Host}";
+    var stats = await referrals.StatsAsync(tenant, portal);
+    return Results.Json(new
+    {
+        platformName = ReferralService.PlatformName,
+        badgeUrl = $"{portal}/?ref={Uri.EscapeDataString(tenant.Slug)}",
+        badgeRequired = tenant.Plan?.BrandingTier is null or "preview" or "basic",
+        referralLink = stats.Link,
+        referred = stats.Referred,
+        paying = stats.Paying,
+        freeMonths = stats.FreeMonthsLeft,
+        bonusDays = ReferralService.ReferredBonusDays,
+        rewardsLeft = Math.Max(0, ReferralService.MaxRewardsPerYear - stats.RewardsThisYear),
+        viaStripe = !string.IsNullOrWhiteSpace(tenant.StripeSubscriptionId)
+    });
 });
 
 // Ocena aplikacji wysyłana przez trenera z instancji tenanta (Zarządzanie → „Oceń aplikację”).

@@ -35,6 +35,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<TenantBillLine> TenantBillLines => Set<TenantBillLine>();
     public DbSet<ResourceSample> ResourceSamples => Set<ResourceSample>();
     public DbSet<InviteCode> InviteCodes => Set<InviteCode>();
+    public DbSet<FunnelCounter> FunnelCounters => Set<FunnelCounter>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -46,9 +47,16 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.Property(c => c.Code).HasMaxLength(40);
         });
 
+        b.Entity<FunnelCounter>(e =>
+        {
+            e.HasIndex(c => new { c.Day, c.Kind }).IsUnique();
+            e.Property(c => c.Kind).HasMaxLength(32);
+        });
+
         b.Entity<Tenant>(e =>
         {
             e.HasIndex(t => t.Slug).IsUnique();
+            e.HasIndex(t => t.ReferredByTenantId);
             e.HasIndex(t => t.RegistrationKey);
             e.HasIndex(t => t.Domain).IsUnique();
             e.HasIndex(t => t.Port).IsUnique();

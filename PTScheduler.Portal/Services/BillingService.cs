@@ -111,6 +111,18 @@ public class BillingService(
                 // Rocznie: raz na 12 miesięcy od pierwszego rachunku po okresie próbnym (nie „w rocznicę” —
                 // okres próbny przesuwa start, a rachunek nie może przepaść na cały rok).
                 lines.Add(new BillLineDraft($"Abonament {planName} (roczny)", $"{period:MM.yyyy} – {period.AddYears(1).AddDays(-1):MM.yyyy}", 1, offer.PlanAmount));
+
+            // Darmowe miesiące z poleceń. Miesięcznie: jeden miesiąc na rachunek (także ponownie w tym samym
+            // miesiącu, jeśli już go wykorzystano). Rocznie: do 11 miesięcy, żeby rachunek roczny zawsze powstał.
+            var planLine = lines.LastOrDefault(l => l.Name.StartsWith("Abonament"));
+            var sameMonth = tenant.LastFreeMonthPeriod == period;
+            if (planLine is not null && (tenant.FreeMonths > 0 || sameMonth))
+            {
+                var yearly = offer.PlanCycle != OfferBilling.Monthly;
+                var months = yearly ? Math.Min(Math.Max(tenant.FreeMonths, 1), 11) : 1;
+                var perMonth = yearly ? Math.Round(offer.PlanAmount / 12m, 2) : offer.PlanAmount;
+                lines.Add(new BillLineDraft(FreeMonthLine, months == 1 ? month : $"{months} mies.", months, -perMonth));
+            }
         }
 
         foreach (var a in offer.Addons.Where(a => !a.ViaCard && a.Total > 0))
@@ -153,6 +165,16 @@ public class BillingService(
         }
     }
 
+    public const string FreeMonthLine = "Miesiąc gratis za polecenie";
+
+    /// <summary>Zapisuje wykorzystanie darmowych miesięcy (raz na okres rozliczenia).</summary>
+    private static void ConsumeFreeMonths(Tenant tenant, List<BillLineDraft> lines, DateOnly period)
+    {
+        if (lines.FirstOrDefault(l => l.Name == FreeMonthLine) is not { } free || tenant.LastFreeMonthPeriod == period) return;
+        tenant.FreeMonths = Math.Max(0, tenant.FreeMonths - free.Quantity);
+        tenant.LastFreeMonthPeriod = period;
+    }
+
     private static async Task<bool> YearlyPlanBilledRecentlyAsync(PortalDbContext db, int tenantId, DateOnly period)
     {
         var since = period.AddMonths(-11);
@@ -175,7 +197,20 @@ public class BillingService(
 
         var lines = await DraftAsync(tenantId, period);
         var amount = lines.Sum(l => l.Amount);
-        if (amount <= 0) return (false, "Nie ma nic do rozliczenia w tym miesiącu.", null);
+        if (amount <= 0)
+        {
+            if (lines.Any(l => l.Name == FreeMonthLine))
+            {
+                var firstUse = tenant.LastFreeMonthPeriod != period;
+                ConsumeFreeMonths(tenant, lines, period);
+                if (firstUse)
+                    db.TenantEvents.Add(new TenantEvent { TenantId = tenantId, EventType = TenantEventTypes.BillIssued, Detail = $"{PeriodLabel(period)}: abonament gratis (polecenie) — bez rachunku" });
+                await db.SaveChangesAsync();
+                return (false, $"Abonament za {PeriodLabel(period).ToLower(Pl)} jest gratis (miesiąc za polecenie).", null);
+            }
+            return (false, "Nie ma nic do rozliczenia w tym miesiącu.", null);
+        }
+        ConsumeFreeMonths(tenant, lines, period);
 
         var prefix = $"R/{period:yyyy}/{period:MM}/";
         var count = await db.TenantBills.CountAsync(b => b.Number.StartsWith(prefix));

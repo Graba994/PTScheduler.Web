@@ -58,6 +58,9 @@ public static class PanelUi
         TenantEventTypes.BackupVerified => "Kopia sprawdzona",
         TenantEventTypes.BackupVerifyFailed => "Kopia nie do odtworzenia",
         TenantEventTypes.BackupRestored => "Odtworzono z kopii",
+        TenantEventTypes.Activated => "Aktywny trener",
+        TenantEventTypes.ReferralReward => "Nagroda za polecenie",
+        TenantEventTypes.OnboardingEmail => "E-mail powitalny",
         _ => type
     };
 
@@ -88,13 +91,16 @@ public static class PanelUi
         TenantEventTypes.BackupVerified => "bi-shield-check",
         TenantEventTypes.BackupVerifyFailed => "bi-shield-x",
         TenantEventTypes.BackupRestored => "bi-arrow-counterclockwise",
+        TenantEventTypes.Activated => "bi-lightning-charge-fill",
+        TenantEventTypes.ReferralReward => "bi-gift",
+        TenantEventTypes.OnboardingEmail => "bi-envelope-heart",
         _ => "bi-circle"
     };
 
     public static string EventTone(string type) => type switch
     {
         TenantEventTypes.Created or TenantEventTypes.Provisioned or TenantEventTypes.Resumed
-            or TenantEventTypes.PaymentReceived or TenantEventTypes.HealthRecovered or TenantEventTypes.CreditAdded or TenantEventTypes.BillPaid or TenantEventTypes.BackupVerified or TenantEventTypes.BackupRestored => "ok",
+            or TenantEventTypes.PaymentReceived or TenantEventTypes.HealthRecovered or TenantEventTypes.CreditAdded or TenantEventTypes.BillPaid or TenantEventTypes.BackupVerified or TenantEventTypes.BackupRestored or TenantEventTypes.Activated or TenantEventTypes.ReferralReward => "ok",
         TenantEventTypes.Suspended or TenantEventTypes.Deleted or TenantEventTypes.PaymentFailed or TenantEventTypes.TrialExpired
             or TenantEventTypes.HealthDown or TenantEventTypes.InactivitySuspended or TenantEventTypes.CleanupDeleted
             or TenantEventTypes.ErrorSpike or TenantEventTypes.BackupVerifyFailed => "danger",

@@ -67,6 +67,8 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string RegistrationGateway = "registration_gateway";
         /// <summary>Kwota płatności weryfikacyjnej przez Autopay / PayU / Przelewy24 (domyślnie 1 zł).</summary>
         public const string RegistrationVerifyAmount = "registration_verify_amount";
+        /// <summary>E-maile powitalne w dniu 1, 3 i 7 po uruchomieniu aplikacji („false” wyłącza).</summary>
+        public const string OnboardingEmails = "onboarding_emails";
         /// <summary>Numer administratora na SMS-y o nowych zgłoszeniach ze sklepu.</summary>
         public const string AdminNotificationPhone = "admin_notification_phone";
         /// <summary>"false" wyłącza e-maile o nowych zgłoszeniach (domyślnie włączone, gdy jest adres).</summary>

@@ -6,6 +6,7 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = Roles.Admin)]
 @implements IDisposable
 @inject ISiteContentService SiteContentService
+@inject PlatformInfoService Platform
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Twoja strona" />
@@ -210,6 +211,20 @@ else
                     <label class="sb-label">Tekst w stopce</label>
                     <input class="form-control form-control-sm" placeholder="© 2026 Twoja nazwa" value="@_content.FooterText" @onchange="e => { _content.FooterText = string.IsNullOrWhiteSpace(e.Value?.ToString()) ? null : e.Value!.ToString(); return Changed(); }" />
                 </div>
+                @if (_platform is { } made)
+                {
+                    <div class="sb-row">
+                        <label class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" checked="@(made.BadgeRequired || _content.ShowPoweredBy)" disabled="@made.BadgeRequired"
+                                   @onchange="e => { _content.ShowPoweredBy = (bool)(e.Value ?? false); return Changed(); }" />
+                            <span class="form-check-label">„Zrobione w @made.PlatformName” w stopce</span>
+                        </label>
+                        <div class="form-text">
+                            @if (made.BadgeRequired) { <text>W Twoim planie ta stopka jest zawsze widoczna — wyłączysz ją w wyższym planie. </text> }
+                            Trener, który przyjdzie z Twojej strony, dostanie @made.BonusDays dni dłużej za darmo, a Ty miesiąc gratis po pierwszej płatności poleconej osoby. <a href="/admin/polec">Więcej o poleceniach</a>
+                        </div>
+                    </div>
+                }
             }
         </aside>
 
@@ -278,7 +293,10 @@ else
     {
         _content = await SiteContentService.GetDraftAsync();
         _hasDraft = await SiteContentService.HasUnpublishedDraftAsync();
+        _platform = await Platform.GetAsync();
     }
+
+    private PlatformInfoService.Info? _platform;
 
     private static string Summary(SiteBlock b) =>
         !string.IsNullOrWhiteSpace(b.Title) ? b.Title!

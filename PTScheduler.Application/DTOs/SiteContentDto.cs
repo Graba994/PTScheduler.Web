@@ -123,6 +123,8 @@ public class SiteContentDto
 
     // ---- Footer ----
     public string? FooterText { get; set; }
+    /// <summary>Stopka „Zrobione w …” z linkiem polecającym (w podstawowych planach zawsze widoczna).</summary>
+    public bool ShowPoweredBy { get; set; } = true;
 }
 
 public class SocialLink

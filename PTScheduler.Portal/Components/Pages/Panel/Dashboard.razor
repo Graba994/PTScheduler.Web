@@ -6,6 +6,7 @@
 @inject ResourceReportService ResourceReports
 @inject UpdateNotifier UpdateNotifier
 @inject NpmHealthService NpmHealth
+@inject FunnelService Funnel
 @rendermode InteractiveServer
 
 <PageTitle>Pulpit — PTScheduler Portal</PageTitle>
@@ -104,6 +105,48 @@ else
         <StatTile Label="Przychód miesięczny (MRR)" Value="@($"{_stats.TotalRevenue:0} zł")" Icon="bi-graph-up-arrow" Tone="info" Href="/panel/finances" />
         <StatTile Label="Wpłaty w tym miesiącu" Value="@($"{_stats.MonthlyPaymentsTotal:0} zł")" Icon="bi-cash-stack" Tone="ok" Meta="@GrowthText()" />
     </div>
+
+    <div class="pp-section-title">Lejek trenerów</div>
+    <PanelCard Title="Od wejścia do pierwszej płatności" Subtitle="Gdzie trenerzy odpadają — każdy pasek to część osób z kroku wyżej" Icon="bi-funnel" IconClass="pp-icon-cyan" Class="mb-3">
+        <Actions>
+            <div class="pp-seg" role="group" aria-label="Okres">
+                @foreach (var d in new[] { 7, 30, 90 })
+                {
+                    var days = d;
+                    <button type="button" class="@(_funnelDays == days ? "active" : "")" aria-pressed="@(_funnelDays == days ? "true" : "false")" @onclick="() => LoadFunnelAsync(days)">@days dni</button>
+                }
+            </div>
+        </Actions>
+        <ChildContent>
+            @if (_funnel.Count > 0)
+            {
+                var top = Math.Max(1, _funnel.Max(f => f.Count));
+                var drop = WorstDrop();
+                <ol class="pp-funnel">
+                    @for (var i = 0; i < _funnel.Count; i++)
+                    {
+                        var st = _funnel[i];
+                        var prev = i > 0 ? _funnel[i - 1].Count : 0;
+                        // Powyżej 100% wychodzi, gdy zgłoszenia są starsze niż liczniki kreatora — wtedy procentu nie pokazujemy.
+                        var rate = i > 0 && prev > 0 && st.Count <= prev ? (int)Math.Round(st.Count * 100.0 / prev) : (int?)null;
+                        <li class="@(drop?.Key == st.Key ? "drop" : "")">
+                            <div class="pp-funnel-label"><b>@st.Label</b><small>@st.Hint</small></div>
+                            <div class="pp-funnel-bar"><span style="width:@(Math.Max(2, st.Count * 100 / top))%"></span></div>
+                            <div class="pp-funnel-num"><b>@st.Count</b>@if (rate is { } r) { <small>@r%</small> }</div>
+                        </li>
+                    }
+                </ol>
+                @if (drop is { } worst)
+                {
+                    <p class="small text-muted mt-3 mb-0"><i class="bi bi-arrow-down-right-circle me-1 text-danger"></i>Najwięcej osób odpada przed krokiem <b>„@worst.Label”</b> — tam warto szukać poprawek.</p>
+                }
+                else if (_funnel[0].Count == 0)
+                {
+                    <p class="small text-muted mt-3 mb-0">Nikt jeszcze nie otworzył kreatora w tym okresie. Liczniki ruszą od pierwszych wejść na /register.</p>
+                }
+            }
+        </ChildContent>
+    </PanelCard>
 
     <div class="row g-3">
         @if (_system is not null)
@@ -267,6 +310,28 @@ else
     private List<Tenant> _tenants = [];
     private List<TenantEvent> _events = [];
     private List<PaymentRecord> _payments = [];
+    private List<FunnelService.Stage> _funnel = [];
+    private int _funnelDays = 30;
+
+    private async Task LoadFunnelAsync(int days)
+    {
+        _funnelDays = days;
+        _funnel = await Funnel.BuildAsync(days);
+    }
+
+    /// <summary>Krok z największym spadkiem względem poprzedniego (gdy jest z czego liczyć).</summary>
+    private FunnelService.Stage? WorstDrop()
+    {
+        FunnelService.Stage? worst = null;
+        var worstRate = 1.0;
+        for (var i = 1; i < _funnel.Count; i++)
+        {
+            if (_funnel[i - 1].Count < 3 || _funnel[i].Count > _funnel[i - 1].Count) continue;
+            var rate = (double)_funnel[i].Count / _funnel[i - 1].Count;
+            if (rate < worstRate) { worstRate = rate; worst = _funnel[i]; }
+        }
+        return worstRate < 0.9 ? worst : null;
+    }
 
     protected override async Task OnInitializedAsync()
     {
@@ -274,6 +339,7 @@ else
         _tenants = await TenantSvc.GetAllAsync();
         _events = await TenantSvc.GetRecentEventsAsync(15);
         _payments = await TenantSvc.GetRecentPaymentsAsync(10);
+        await LoadFunnelAsync(_funnelDays);
 
         try { _resources = await ResourceReports.BuildAsync(ResourceReportService.Period.Day); } catch { _resources = null; }
         try { _system = await DockerSvc.GetSystemInfoAsync(); }

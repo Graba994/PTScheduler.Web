@@ -5,6 +5,8 @@
 @inject SiteSettingsService Settings
 @inject AppLaunchService Launcher
 @inject RegistrationGateService Gates
+@inject ReferralService Referrals
+@inject FunnelService Funnel
 @inject StripeService StripeSvc
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -26,6 +28,10 @@
             {
                 <div class="bd-head">
                     <div class="bd-eyebrow"><i class="bi bi-magic"></i>@(AdminMode ? "Zbuduj aplikację dla trenera" : "Zbuduj swoją aplikację w 60 sekund")</div>
+                    @if (_referrer is not null)
+                    {
+                        <div class="bd-ref"><i class="bi bi-gift"></i><span>Polecenie od <b>@_referrer.CompanyName</b> — masz @ReferralService.ReferredBonusDays dni dłużej za darmo</span></div>
+                    }
                     <div class="bd-progress" role="progressbar" aria-label="Postęp budowy" aria-valuemin="0" aria-valuemax="100" aria-valuenow="@Percent">
                         <span style="width:@(Percent)%"></span>
                     </div>
@@ -562,9 +568,9 @@
                         }
                     </ul>
                     <div class="bd-perks-trust">
-                        @if (plan.MonthlyPrice > 0 && plan.TrialDays > 0) { <span><i class="bi bi-gift"></i>@(plan.TrialDays + (_invite?.ExtraTrialDays ?? 0)) dni za darmo</span> }
+                        @if (plan.MonthlyPrice > 0 && plan.TrialDays > 0) { <span><i class="bi bi-gift"></i>@(plan.TrialDays + ExtraDays) dni za darmo</span> }
                         <span><i class="bi bi-x-circle"></i>Rezygnujesz w każdej chwili</span>
-                        <span><i class="bi bi-box-arrow-up"></i>Twoje dane — eksport jednym kliknięciem</span>
+                        <span><i class="bi bi-shield-check"></i>Dane klientów należą do Ciebie</span>
                         <span><i class="bi bi-chat-heart"></i>Pomoc po polsku</span>
                     </div>
                 </div>
@@ -593,7 +599,10 @@
 
     // Z adresu: ?plan=, ?nazwa= (z sekcji „Zbuduj” na stronie głównej), ?kod= (zaproszenie),
     // ?wznow=&session_id= (powrót z płatności kartą), ?karta=anulowana.
-    private string? Plan, Nazwa, KodQuery, Wznow, SessionId;
+    private string? Plan, Nazwa, KodQuery, Wznow, SessionId, RefQuery;
+    /// <summary>Polecający trener (z ?ref= albo ze szkicu) — polecony ma dłuższy okres próbny.</summary>
+    private Tenant? _referrer;
+    private int ExtraDays => (_invite?.ExtraTrialDays ?? 0) + (_referrer is not null ? ReferralService.ReferredBonusDays : 0);
     private bool _cardCancelled;
 
     private sealed class OfferRow
@@ -625,6 +634,7 @@
         public string? PlanId { get; set; }
         public string? Interval { get; set; }
         public string? CustomDomain { get; set; }
+        public string? Ref { get; set; }
     }
 
     private static readonly int[] Minutes = [30, 45, 50, 55, 60, 75, 90, 120];
@@ -810,8 +820,7 @@
         {
             var p = SelectedPlan;
             if (p is null) return "";
-            var extra = _invite?.ExtraTrialDays ?? 0;
-            var days = p.TrialDays + extra;
+            var days = p.TrialDays + ExtraDays;
             var amount = Yearly(p) ? $"{p.YearlyPrice!.Value.ToString("N0", Pl)} zł za rok" : $"{p.MonthlyPrice.ToString("N0", Pl)} zł miesięcznie";
             if (_gateway is not null && !IsStripe)
             {
@@ -911,7 +920,7 @@
     {
         var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
         string? Q(string key) => query.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v) ? v.ToString() : null;
-        Plan = Q("plan"); Nazwa = Q("nazwa"); KodQuery = Q("kod"); Wznow = Q("wznow"); SessionId = Q("session_id");
+        Plan = Q("plan"); Nazwa = Q("nazwa"); KodQuery = Q("kod"); Wznow = Q("wznow"); SessionId = Q("session_id"); RefQuery = Q("ref");
         _cardCancelled = Q("karta") == "anulowana";
 
         await using var db = await DbFactory.CreateDbContextAsync();
@@ -929,6 +938,7 @@
             return;
         }
 
+        if (!AdminMode && RefQuery is not null) _referrer = await Referrals.FindReferrerAsync(RefQuery);
         if (!string.IsNullOrWhiteSpace(KodQuery))
         {
             _inviteCode = KodQuery.Trim().ToUpperInvariant();
@@ -1039,6 +1049,19 @@
                 _ = InvokeAsync(StateHasChanged);
         }, null, 1000, 1000);
 
+        if (!AdminMode && Wznow is null) await Funnel.TrackAsync(FunnelKinds.View);
+        if (!AdminMode && Wznow is null && _referrer is null)
+        {
+            try
+            {
+                if (await JS.InvokeAsync<string?>("ptBuilder.refCookie") is { } refCode && await Referrals.FindReferrerAsync(refCode) is { } r)
+                {
+                    _referrer = r;
+                    StateHasChanged();
+                }
+            }
+            catch (JSException) { }
+        }
         if (string.IsNullOrWhiteSpace(Nazwa) && !AdminMode && Wznow is null)
         {
             try
@@ -1047,6 +1070,7 @@
                 if (!string.IsNullOrWhiteSpace(json) && System.Text.Json.JsonSerializer.Deserialize<Draft>(json) is { } d && !string.IsNullOrWhiteSpace(d.Company))
                 {
                     RestoreDraft(d);
+                    if (_referrer is null && d.Ref is not null) _referrer = await Referrals.FindReferrerAsync(d.Ref);
                     await CompanyChanged();
                     AddLog("bi-arrow-counterclockwise", "Przywrócono Twój szkic — możesz budować dalej");
                     StateHasChanged();
@@ -1084,7 +1108,8 @@
         {
             Step = _step, Company = _company, FullName = _fullName, Spec = _spec, Color = _color, Template = _template,
             Offers = _offers, WithPackage = _withPackage, PkgCount = _pkgCount, PkgPrice = _pkgPrice,
-            Email = _email, Phone = _phone, PlanId = _planId, Interval = _interval, CustomDomain = _wantDomain ? _customDomain : null
+            Email = _email, Phone = _phone, PlanId = _planId, Interval = _interval, CustomDomain = _wantDomain ? _customDomain : null,
+            Ref = _referrer?.Slug
         };
         if (AdminMode) return;
         try { await JS.InvokeVoidAsync("ptBuilder.save", System.Text.Json.JsonSerializer.Serialize(d)); } catch (JSException) { }
@@ -1198,6 +1223,7 @@
         switch (_step)
         {
             case 1:
+                if (!AdminMode && _maxStep == 1) await Funnel.TrackAsync(FunnelKinds.Start);
                 Flash("brand");
                 AddLog("bi-badge-ad", $"Logo „{Mono}” wygenerowane z nazwy");
                 AddLog("bi-globe2", $"Adres {AddressText} — wolny");
@@ -1206,6 +1232,7 @@
                 AddLog("bi-phone", "Aplikacja na telefon gotowa do instalacji z Twoją ikoną");
                 break;
             case 4:
+                if (!AdminMode && _maxStep == 4) await Funnel.TrackAsync(FunnelKinds.Account);
                 Flash("offers");
                 var named = _offers.Count(o => !string.IsNullOrWhiteSpace(o.Name));
                 _offers.RemoveAll(o => string.IsNullOrWhiteSpace(o.Name));
@@ -1400,6 +1427,8 @@
             t.BillingInterval = SelectedPlan is { } p && Yearly(p) ? "yearly" : "monthly";
             t.RegistrationKey = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(18)).Replace('+', '-').Replace('/', '_').TrimEnd('=');
             t.InviteCode = _invite?.Code;
+            if (_referrer is not null && !string.Equals(_referrer.OwnerEmail, email, StringComparison.OrdinalIgnoreCase))
+                t.ReferredByTenantId = _referrer.Id;
             if (NormalizedDomain is { } dom) { t.CustomDomain = dom; t.CustomDomainStatus = "waiting"; t.CustomDomainSince = DateTime.UtcNow; }
             await db.SaveChangesAsync();
             tenant = t;
@@ -1460,7 +1489,7 @@
             return;
         }
         var (ok, url, error) = await StripeSvc.StartCardCheckoutAsync(tenantId, back + "&session_id={CHECKOUT_SESSION_ID}", back + "&karta=anulowana",
-            _invite?.ExtraTrialDays ?? 0);
+            ExtraDays);
         if (!ok || url is null)
         {
             Log.LogWarning("Stripe Checkout nie wystartował dla {TenantId}: {Error}", tenantId, error);
