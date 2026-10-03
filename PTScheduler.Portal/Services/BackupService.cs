@@ -471,13 +471,42 @@ public partial class BackupService(
             filesInfo = $" · pliki: {count ?? "0"}";
         }
 
+        var direct = await VerifyIntoAsync(pg, entry, src, filesInfo);
+        if (direct.Ok || !direct.CreateFailed || entry.Slug != "portal") return (direct.Ok, direct.Info);
+
+        // Użytkownik bazy Portalu bywa bez prawa CREATE DATABASE — wtedy sprawdzamy kopię w jednorazowym
+        // kontenerze postgres (nic nie dotyka bazy produkcyjnej), a potem go usuwamy.
+        var sandbox = $"pts-verify-{entry.Id}";
+        var image = Shell.Quote(config["Portal:PgClientImage"] ?? "postgres:17-alpine");
+        try
+        {
+            await Shell.RunAsync($"docker rm -f {sandbox} >/dev/null 2>&1; docker run -d --name {sandbox} -e POSTGRES_HOST_AUTH_METHOD=trust {image}", TimeSpan.FromMinutes(5));
+            var ready = false;
+            for (var i = 0; i < 30 && !ready; i++)
+            {
+                ready = (await Shell.RunAsync($"docker exec {sandbox} pg_isready -U postgres -q", TimeSpan.FromSeconds(10))).Success;
+                if (!ready) await Task.Delay(2000);
+            }
+            if (!ready) return (false, direct.Info + " · test w osobnym kontenerze też się nie udał (postgres nie wystartował).");
+            var isolated = await VerifyIntoAsync(new PgAccess($"docker exec -i {sandbox} psql -U postgres", "", "postgres", []), entry, src, filesInfo);
+            return (isolated.Ok, isolated.Info + " · sprawdzone w osobnym kontenerze");
+        }
+        finally
+        {
+            await Shell.RunAsync($"docker rm -f {sandbox}", TimeSpan.FromMinutes(2));
+        }
+    }
+
+    /// <summary>Odtwarza zrzut do tymczasowej bazy i sprawdza tabele oraz migracje. CreateFailed — nie dało się założyć bazy.</summary>
+    private async Task<(bool Ok, string Info, bool CreateFailed)> VerifyIntoAsync(PgAccess pg, BackupEntry entry, string src, string filesInfo)
+    {
         var tmp = $"pts_verify_{entry.Id}";
-        var drop = $"{pg.Psql} -d postgres -q -c 'DROP DATABASE IF EXISTS {tmp} WITH (FORCE)'";
+        var drop = $"{pg.Psql} -d postgres -q -c 'SET client_min_messages = warning' -c 'DROP DATABASE IF EXISTS {tmp} WITH (FORCE)'";
         try
         {
             var (created, createOut) = await Shell.RunAsync(
                 $"{drop} && {pg.Psql} -d postgres -q -v ON_ERROR_STOP=1 -c 'CREATE DATABASE {tmp}'", TimeSpan.FromMinutes(2), pg.Env);
-            if (!created) return (false, "Nie udało się utworzyć bazy testowej: " + FirstLine(createOut));
+            if (!created) return (false, "Nie udało się utworzyć bazy testowej: " + ErrorLine(createOut), true);
 
             var (_, restoreOut) = await Shell.RunAsync(
                 $"set -o pipefail; {src} | gunzip -c | {pg.Psql} -d {tmp} -q -o /dev/null", TimeSpan.FromMinutes(60), pg.Env);
@@ -488,14 +517,14 @@ public partial class BackupService(
             var (queried, queryOut) = await Shell.RunAsync($"{pg.Psql} -d {tmp} -At -c {sql} -c {sqlMig}", TimeSpan.FromMinutes(2), pg.Env);
             var lines = queryOut.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
             if (!queried || lines.Length < 2 || !int.TryParse(lines[0], out var tables))
-                return (false, "Kopia odtworzyła się bez tabel aplikacji. " + (errors.Count > 0 ? FirstLine(errors[0]) : FirstLine(queryOut)));
+                return (false, "Kopia odtworzyła się bez tabel aplikacji. " + (errors.Count > 0 ? FirstLine(errors[0]) : ErrorLine(queryOut)), false);
 
             var mig = lines[1].Split(' ', 2);
             var migrations = int.TryParse(mig[0], out var m) ? m : 0;
             var info = $"tabele: {tables} · migracje: {migrations} · ostatnia: {(mig.Length > 1 ? mig[1] : "-")}{filesInfo}";
-            if (errors.Count > 0) return (false, $"{errors.Count} błędów przy odtwarzaniu, np. {FirstLine(errors[0]).Trim()} ({info})");
-            if (tables < 5 || migrations == 0) return (false, "Kopia jest niekompletna — " + info);
-            return (true, info);
+            if (errors.Count > 0) return (false, $"{errors.Count} błędów przy odtwarzaniu, np. {FirstLine(errors[0]).Trim()} ({info})", false);
+            if (tables < 5 || migrations == 0) return (false, "Kopia jest niekompletna — " + info, false);
+            return (true, info, false);
         }
         finally
         {
@@ -506,6 +535,14 @@ public partial class BackupService(
     private static void TryDelete(string path)
     {
         try { if (!string.IsNullOrEmpty(path) && File.Exists(path)) File.Delete(path); } catch { }
+    }
+
+    /// <summary>Najważniejsza linia z wyjścia psql: błąd (ERROR / FATAL), a nie informacyjne NOTICE.</summary>
+    public static string ErrorLine(string? s)
+    {
+        var lines = (s ?? "").Replace("[stderr]", "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        return lines.FirstOrDefault(l => l.Contains("ERROR", StringComparison.Ordinal) || l.Contains("FATAL", StringComparison.Ordinal) || l.Contains("error:", StringComparison.OrdinalIgnoreCase))
+            ?? lines.FirstOrDefault(l => !l.StartsWith("NOTICE", StringComparison.Ordinal)) ?? lines.FirstOrDefault() ?? "";
     }
 
     public static string FirstLine(string? s) =>
