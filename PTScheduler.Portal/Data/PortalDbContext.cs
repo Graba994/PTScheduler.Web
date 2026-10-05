@@ -36,6 +36,9 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<ResourceSample> ResourceSamples => Set<ResourceSample>();
     public DbSet<InviteCode> InviteCodes => Set<InviteCode>();
     public DbSet<FunnelCounter> FunnelCounters => Set<FunnelCounter>();
+    public DbSet<TrainerMeeting> TrainerMeetings => Set<TrainerMeeting>();
+    public DbSet<TrainerSurveyResponse> TrainerSurveyResponses => Set<TrainerSurveyResponse>();
+    public DbSet<LegalAcceptance> LegalAcceptances => Set<LegalAcceptance>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -45,6 +48,13 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
         {
             e.HasIndex(c => c.Code).IsUnique();
             e.Property(c => c.Code).HasMaxLength(40);
+        });
+
+        b.Entity<LegalAcceptance>(e =>
+        {
+            e.HasIndex(a => new { a.TenantId, a.DocKey, a.Version });
+            e.Property(a => a.DocKey).HasMaxLength(40);
+            e.Property(a => a.Version).HasMaxLength(20);
         });
 
         b.Entity<FunnelCounter>(e =>

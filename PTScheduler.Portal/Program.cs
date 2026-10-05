@@ -90,6 +90,8 @@ builder.Services.AddSingleton<NpmHealthService>();
 builder.Services.AddSingleton<AppLaunchService>();
 builder.Services.AddScoped<RegistrationGateService>();
 builder.Services.AddScoped<ReferralService>();
+builder.Services.AddScoped<InviteService>();
+builder.Services.AddScoped<LegalService>();
 builder.Services.AddSingleton<FunnelService>();
 builder.Services.AddHostedService<GrowthService>();
 builder.Services.AddSingleton<CustomDomainService>();
@@ -255,7 +257,7 @@ string PublicBase(HttpContext ctx) =>
 app.MapGet("/sitemap.xml", (HttpContext ctx) =>
 {
     var root = PublicBase(ctx);
-    var pages = new[] { "/", "/register", "/pricing", "/aplikacja-dla-trenera-personalnego", "/porownanie/excel-i-whatsapp", "/porownanie/systemy-rezerwacji", "/regulamin" };
+    var pages = new[] { "/", "/register", "/pricing", "/aplikacja-dla-trenera-personalnego", "/porownanie/excel-i-whatsapp", "/porownanie/systemy-rezerwacji", "/regulamin", "/polityka-prywatnosci", "/umowa-powierzenia" };
     var urls = string.Concat(pages.Select(p => $"<url><loc>{System.Security.SecurityElement.Escape(root + p)}</loc></url>"));
     return Results.Content($"<?xml version=\"1.0\" encoding=\"UTF-8\"?><urlset xmlns=\"http://www.sitemaps.org/schemas/sitemap/0.9\">{urls}</urlset>", "application/xml; charset=utf-8");
 });
@@ -679,6 +681,45 @@ app.MapPost("/api/internal/tenants/{slug}/feedback", async (
         CreatedAt = DateTime.UtcNow
     });
     await db.SaveChangesAsync();
+    return Results.Ok();
+});
+
+// Dokumenty prawne w aplikacji trenera: które aktualne wersje czekają na akceptację właściciela
+// (np. po zmianie regulaminu albo gdy aplikację założył administrator) i zapis akceptacji.
+app.MapGet("/api/internal/tenants/{slug}/legal", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    LegalService legal,
+    IConfiguration config) =>
+{
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    var portal = PublicBase(ctx);
+    var pending = await legal.PendingForTenantAsync(tenant.Id);
+    return Results.Json(new
+    {
+        platformName = (await legal.CompanyAsync()).Brand,
+        pending = pending.Select(d => new { key = d.Key, title = d.Title, version = d.Version, url = portal + d.Path })
+    });
+});
+
+app.MapPost("/api/internal/tenants/{slug}/legal/accept", async (
+    string slug,
+    LegalAcceptRequest body,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    LegalService legal,
+    IConfiguration config) =>
+{
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    if (string.IsNullOrWhiteSpace(body.Email)) return Results.BadRequest();
+    var keys = (body.Keys ?? []).Where(k => LegalService.Docs.Any(d => d.Key == k)).ToList();
+    if (keys.Count == 0) keys = (await legal.PendingForTenantAsync(tenant.Id)).Select(d => d.Key).ToList();
+    if (keys.Count > 0) await legal.RecordAsync(tenant.Id, body.Email, keys, body.Ip, body.UserAgent, "aplikacja");
     return Results.Ok();
 });
 
@@ -1171,6 +1212,7 @@ app.Run();
 // Wspólna kontrola nagłówka X-Internal-Secret dla wywołań tenant → Portal.
 // Pusty sekret = odmowa (wcześniej oznaczał brak jakiejkolwiek kontroli).
 record AppFeedbackRequest(int Rating, string? Text, string? ContactEmail, string? AuthorEmail);
+record LegalAcceptRequest(string Email, string[]? Keys, string? Ip, string? UserAgent);
 
 record GoogleAuthorizeRequest(string UserKey, string ReturnUrl);
 

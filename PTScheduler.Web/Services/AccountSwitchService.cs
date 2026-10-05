@@ -68,6 +68,15 @@ public sealed class AccountSwitchService(
         return actor is not null && (await RolesOfAsync(actor.Id)).Contains(Roles.Root);
     }
 
+    /// <summary>Właściciel studia przy komputerze (administrator, nie konto techniczne) — także po przełączeniu na swój profil trenera.</summary>
+    public async Task<ApplicationUser?> GetOwnerActorAsync(ClaimsPrincipal principal)
+    {
+        var actor = await GetActorAsync(principal);
+        if (actor is null) return null;
+        var roles = await RolesOfAsync(actor.Id);
+        return roles.Contains(Roles.Admin) && !roles.Contains(Roles.Root) ? actor : null;
+    }
+
     public async Task<bool> CanUseAsync(ClaimsPrincipal principal)
     {
         if (!Enabled) return false;

@@ -498,6 +498,16 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         }
     }
 
+    /// <summary>Zaproszenie z Panelu (kod zaproszenia): link do kreatora z kodem i dłuższym okresem próbnym.</summary>
+    public string InviteEmailBody(string? name, string code, string link, int extraDays) => Shell($"""
+        <h1 style="color: #7c3aed; font-size: 1.35rem;">Zbuduj swoją aplikację w minutę</h1>
+        <p>{(string.IsNullOrWhiteSpace(name) ? "Cześć!" : $"Cześć {WebUtility.HtmlEncode(name.Trim())},")}</p>
+        <p>po naszej rozmowie przesyłam zaproszenie do aplikacji dla trenerów: zapisy klientów, płatności BLIK-iem,
+           przypomnienia i plany treningowe pod Twoją nazwą i logo.{(extraDays > 0 ? $" Z tym zaproszeniem masz <b>{extraDays} dni dłużej za darmo</b>." : "")}</p>
+        {Btn(link, "Zbuduj swoją aplikację")}
+        <p style="color: #6b7280; font-size: 0.9rem;">Twój kod zaproszenia: <b style="font-family: monospace; color: #1f2937;">{WebUtility.HtmlEncode(code)}</b> — jest już wpisany w linku.</p>
+        """);
+
     public string ReferralRewardEmailBody(string name, string referredCompany, string referralLink) => Shell($"""
         <h1 style="color: #059669; font-size: 1.35rem;">Masz miesiąc gratis 🎁</h1>
         <p>Cześć {WebUtility.HtmlEncode(name)},</p>

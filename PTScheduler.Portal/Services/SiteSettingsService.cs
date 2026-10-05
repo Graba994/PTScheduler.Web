@@ -78,6 +78,17 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         /// <summary>Dane sprzedawcy w nagłówku PDF oferty trenera (nazwa, adres, NIP, konto — wiele linii).</summary>
         public const string OfferSellerDetails = "offer_seller_details";
 
+        // Dane do dokumentów prawnych (regulamin, polityka prywatności, umowa powierzenia)
+        public const string BrandName = "brand_name";
+        public const string LegalCompany = "legal_company";
+        public const string LegalAddress = "legal_address";
+        public const string LegalNip = "legal_nip";
+        public const string LegalEmail = "legal_email";
+        /// <summary>Dostawca serwerów wpisywany do listy podmiotów przetwarzających.</summary>
+        public const string LegalHosting = "legal_hosting";
+        /// <summary>Dostawca wysyłki e-maili (SMTP) do listy podmiotów przetwarzających.</summary>
+        public const string LegalMail = "legal_mail";
+
         // Alarm przy fali błędów w aplikacjach trenerów
         public const string ErrorAlertEnabled = "error_alert_enabled";
         /// <summary>Ile błędów w oknie czasu uruchamia alarm.</summary>

@@ -1,0 +1,185 @@
+@page "/panel/ankieta"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject InviteService InviteSvc
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@rendermode InteractiveServer
+
+@* Ankieta dla trenerów: link dla każdej grupy (wiadomo, skąd odpowiedzi), wyniki i gotowe teksty postów. *@
+
+<PageTitle>Ankieta dla trenerów — PTScheduler Portal</PageTitle>
+
+<PanelHeader Title="Ankieta dla trenerów" Icon="bi-ui-checks" IconClass="pp-tone-info"
+             Subtitle="Publiczna ankieta (2 minuty) do rozesłania w grupach trenerów — z osobnym linkiem dla każdej grupy i wynikami na żywo." />
+
+<div class="pp-seg mb-3 mt-w-tabs" role="tablist" aria-label="Widok">
+    <button type="button" role="tab" class="@(_tab == "results" ? "active" : "")" @onclick='() => _tab = "results"'><i class="bi bi-bar-chart"></i>Wyniki <span class="mt-count">@Filtered.Count</span></button>
+    <button type="button" role="tab" class="@(_tab == "share" ? "active" : "")" @onclick='() => _tab = "share"'><i class="bi bi-link-45deg"></i>Linki</button>
+    <button type="button" role="tab" class="@(_tab == "guide" ? "active" : "")" @onclick='() => _tab = "guide"'><i class="bi bi-megaphone"></i>Jak rozesłać</button>
+</div>
+
+@if (_tab == "share")
+{
+    <div class="mt-form">
+        <section class="mt-card">
+            <h2>Link do grupy</h2>
+            <p class="mt-hint">Dla każdej grupy osobny link — w wynikach zobaczysz, która grupa odpowiada najchętniej.</p>
+            <input class="form-control mb-2" placeholder="np. trenerzy personalni Kraków" @bind="_groupName" @bind:event="oninput" maxlength="60" />
+            <div class="input-group input-group-sm mb-2">
+                <input class="form-control font-monospace" readonly value="@GroupLink" aria-label="Link do ankiety" />
+                <button class="btn btn-outline-secondary" @onclick="() => CopyAsync(GroupLink)"><i class="bi bi-clipboard"></i></button>
+            </div>
+            <div class="pp-qr">@((MarkupString)InviteService.QrSvg(GroupLink))</div>
+            <p class="mt-hint text-center mb-0">Kod QR — np. na ulotkę albo slajd na szkoleniu.</p>
+        </section>
+        <a class="btn btn-outline-primary" href="/ankieta" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right me-1"></i>Zobacz ankietę tak, jak trener</a>
+    </div>
+}
+else if (_tab == "guide")
+{
+    <div class="mt-script">
+        @foreach (var (g, i) in Guide.Select((g, i) => (g, i)))
+        {
+            <details class="mt-step" open="@(i == 0)">
+                <summary><span class="mt-step-no">@(i + 1)</span><span class="mt-step-title">@g.Title</span></summary>
+                <div class="mt-step-body"><ul class="mt-ask">@foreach (var line in g.Lines) { <li>@line</li> }</ul></div>
+            </details>
+        }
+        <h2 class="h6 fw-bold mt-2 mb-0">Gotowe teksty</h2>
+        <p class="mt-hint mb-0">Wstaw link do konkretnej grupy (zakładka „Linki”) w miejsce [link].</p>
+        @foreach (var t in Templates)
+        {
+            <section class="mt-card">
+                <div class="d-flex justify-content-between align-items-center gap-2 mb-2">
+                    <h2 class="mb-0">@t.Title</h2>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => CopyAsync(t.Text)"><i class="bi bi-clipboard me-1"></i>Kopiuj</button>
+                </div>
+                <p class="mt-template">@t.Text</p>
+            </section>
+        }
+    </div>
+}
+else
+{
+    @if (_all.Count == 0)
+    {
+        <div class="pp-empty"><i class="bi bi-ui-checks"></i>Jeszcze nikt nie odpowiedział. Zacznij od zakładki „Jak rozesłać”.</div>
+    }
+    else
+    {
+        <div class="mt-results">
+            @if (_sources.Count > 0)
+            {
+                <select class="form-select" @bind="_source" aria-label="Źródło odpowiedzi">
+                    <option value="">Wszystkie źródła (@_all.Count)</option>
+                    @foreach (var s in _sources) { <option value="@s.Key">@s.Key (@s.Count)</option> }
+                </select>
+            }
+            @foreach (var q in TrainerSurvey.Questions)
+            {
+                var total = Math.Max(1, Filtered.Count);
+                <section class="mt-card">
+                    <h2>@q.Text</h2>
+                    @foreach (var o in q.Options)
+                    {
+                        var count = Filtered.Count(r => (TrainerSurvey.Get(r, q.Key) ?? "").Split(TrainerSurvey.Separator).Contains(o));
+                        <div class="mt-bar-row"><span>@o</span><div class="mt-bar"><i style="width:@(count * 100 / total)%"></i></div><b>@(count * 100 / total)%</b></div>
+                    }
+                </section>
+            }
+            @{ var wishes = Filtered.Where(r => !string.IsNullOrWhiteSpace(r.Wish)).ToList(); }
+            @if (wishes.Count > 0)
+            {
+                <section class="mt-card">
+                    <h2>Czego brakuje <small>@wishes.Count odpowiedzi</small></h2>
+                    @foreach (var w in wishes) { <p class="mt-quote">„@w.Wish”</p> }
+                </section>
+            }
+            @{ var emails = Filtered.Where(r => r.ContactConsent && r.Email is not null).Select(r => r.Email!).Distinct().ToList(); }
+            <section class="mt-card">
+                <h2>Chętni do testów <small>@emails.Count ze zgodą na kontakt</small></h2>
+                @if (emails.Count > 0)
+                {
+                    <p class="mt-hint">Wyślij im wyniki i zaproszenie (Kody zaproszeń → Udostępnij → e-mail).</p>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => CopyAsync(string.Join(Environment.NewLine, emails))"><i class="bi bi-clipboard me-1"></i>Kopiuj adresy</button>
+                }
+            </section>
+        </div>
+    }
+}
+
+@code {
+    private sealed record GuideBlock(string Title, string[] Lines);
+    private sealed record TextTemplate(string Title, string Text);
+
+    private static readonly GuideBlock[] Guide =
+    [
+        new("Jak szukać grup",
+        [
+            "Facebook → wyszukiwarka → filtr „Grupy”.",
+            "Hasła: „trener personalny”, „trenerzy personalni”, „personal trainer Polska”, „trener personalny + Twoje miasto”, „instruktorzy fitness”, „instruktorki pilates”, „przygotowanie motoryczne”, „kurs trenera personalnego”, „absolwenci + nazwa szkoły trenerów”.",
+            "Wybieraj grupy dla trenerów (nie dla osób, które szukają trenera), aktywne — kilka postów dziennie — i z co najmniej 1 000 członków.",
+            "Na start 5–10 grup. Każdej daj osobny link z zakładki „Linki”."
+        ]),
+        new("Jako kto pisać",
+        [
+            "Jako Ty, ze swojego profilu. Grupy lubią ludzi, nie firmy — posty z fanpage’y często są blokowane albo wyglądają jak reklama.",
+            "Mów wprost, że tworzysz aplikację dla trenerów. Uczciwość buduje zaufanie, a ukrywanie się szybko wychodzi na jaw.",
+            "Nie udawaj trenera, który pyta „z ciekawości” — to nieuczciwe wobec grupy i łamie zasady Facebooka.",
+            "Gdy powstanie profil marki, dalej pisz jako Ty — możesz dodać, że tworzysz Trenzo."
+        ]),
+        new("Zasady, które działają",
+        [
+            "Przeczytaj regulamin grupy. Jeśli zabrania linków albo ankiet, najpierw napisz do administratora (szablon niżej).",
+            "2–3 grupy dziennie i lekko zmieniony tekst — ten sam post w 20 grupach naraz Facebook uzna za spam.",
+            "Odpowiadaj na każdy komentarz tego samego dnia.",
+            "Po 3–4 dniach dodaj komentarz z podziękowaniem i przypomnieniem.",
+            "Przy 50+ odpowiedziach opublikuj wyniki — to drugi post, który buduje zaufanie i ciekawość."
+        ])
+    ];
+
+    private static readonly TextTemplate[] Templates =
+    [
+        new("Post do grupy — krótki",
+            "Cześć! Tworzę aplikację dla trenerów personalnych i zanim pójdę dalej, chcę sprawdzić, jak naprawdę pracujecie. Mam krótką ankietę — 2 minuty, anonimowo: jak zapisujecie klientów, ile treningów przepada przez nieobecności i ile wydajecie na narzędzia. Wyniki wrzucę tutaj dla wszystkich.\n\n👉 [link]\n\nDzięki za każdą odpowiedź! 💪"),
+        new("Post do grupy — dłuższy",
+            "Hej, trenerki i trenerzy! 👋\n\nOd jakiegoś czasu buduję narzędzie dla trenerów personalnych: zapisy klientów, płatności, przypomnienia i plany treningowe. Nie chcę zgadywać, czego potrzebujecie — wolę zapytać.\n\nAnkieta zajmuje 2 minuty i jest anonimowa. Pytam m.in. o to, jak klienci się do Was zapisują, co zabiera najwięcej czasu i ile tracicie na nieodwołanych treningach.\n\n👉 [link]\n\nGdy zbiorę odpowiedzi, opublikuję tu pełne wyniki — będzie widać, jak pracują trenerzy w całej Polsce. Dzięki! 🙏"),
+        new("Wiadomość do administratora grupy",
+            "Dzień dobry! Tworzę aplikację dla trenerów personalnych i prowadzę krótką, anonimową ankietę o tym, jak trenerzy pracują (2 minuty, bez sprzedaży). Czy mogę wrzucić link w grupie? Wyniki opublikuję potem dla wszystkich członków. Jeśli wolisz, najpierw prześlę treść posta do akceptacji. Dziękuję!"),
+        new("Komentarz po 3–4 dniach",
+            "Dziękuję za [liczba] odpowiedzi! 🙌 Zostało jeszcze kilka dni — jeśli nie było okazji, ankieta jest tutaj: [link]. Wyniki wrzucę w przyszłym tygodniu."),
+        new("Post z wynikami",
+            "Obiecane wyniki ankiety 📊\n\nOdpowiedziało [liczba] trenerek i trenerów. Najciekawsze:\n• [X]% zapisuje klientów przez WhatsApp albo SMS\n• w miesiącu przepada średnio [Y] treningów przez nieodwołane nieobecności\n• największy problem: [Z]\n\nPełne wyniki: [link]\n\nDziękuję wszystkim, którzy poświęcili te 2 minuty! 💪")
+    ];
+
+    private List<TrainerSurveyResponse> _all = [];
+    private List<(string Key, int Count)> _sources = [];
+    private string _source = "";
+    private string _tab = "results";
+    private string? _groupName;
+
+    private List<TrainerSurveyResponse> Filtered => _source.Length == 0 ? _all : _all.Where(r => r.Source == _source).ToList();
+
+    private string GroupLink
+    {
+        get
+        {
+            var slug = string.IsNullOrWhiteSpace(_groupName) ? "" : "fb-" + AppBuilderCatalog.Slugify(_groupName);
+            return $"{InviteSvc.PortalBase(Nav.BaseUri)}/ankieta{(slug.Length > 3 ? $"?zrodlo={slug}" : "")}";
+        }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _all = await db.TrainerSurveyResponses.AsNoTracking().OrderByDescending(r => r.CreatedAt).ToListAsync();
+        _sources = _all.Where(r => r.Source is not null).GroupBy(r => r.Source!).Select(g => (g.Key, g.Count())).OrderByDescending(g => g.Item2).ToList();
+    }
+
+    private async Task CopyAsync(string text)
+    {
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", text); } catch (JSException) { }
+    }
+}

@@ -4,6 +4,7 @@
 @inject IDbContextFactory<PortalDbContext> DbFactory
 @inject RegistrationGateService Gates
 @inject NavigationManager Nav
+@inject InviteService InviteSvc
 @rendermode InteractiveServer
 
 <PageTitle>Kody zaproszeń — PTScheduler Portal</PageTitle>
@@ -45,8 +46,11 @@
                 <label class="form-label small fw-semibold">Ważny do</label>
                 <input type="date" class="form-control" @bind="_expires" />
             </div>
-            <div class="col-12">
+            <div class="col-12 d-flex flex-wrap gap-2">
                 <button class="btn btn-primary btn-sm" @onclick="CreateAsync"><i class="bi bi-plus-lg me-1"></i>Utwórz kod</button>
+                <button class="btn btn-outline-primary btn-sm" @onclick="QuickThreeMonthsAsync" title="Jednorazowy kod: okres próbny + @InviteService.ThreeMonthsExtraDays dni ≈ 3 miesiące za darmo">
+                    <i class="bi bi-qr-code me-1"></i>Szybki kod: 3 miesiące gratis
+                </button>
             </div>
         </div>
     </div>
@@ -77,7 +81,11 @@
                             <td data-label="+ dni">@(c.ExtraTrialDays > 0 ? $"+{c.ExtraTrialDays}" : "—")</td>
                             <td data-label="Ważny do">@(c.ExpiresAt?.ToLocalTime().ToString("dd.MM.yyyy") ?? "bezterminowo")</td>
                             <td data-label="Link"><code class="small">@LinkFor(c)</code></td>
-                            <td class="text-end">
+                            <td class="text-end text-nowrap">
+                                @if (usable)
+                                {
+                                    <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => _share = c" title="Kod QR, link i wysyłka e-mailem"><i class="bi bi-qr-code me-1"></i>Udostępnij</button>
+                                }
                                 @if (c.IsActive)
                                 {
                                     <button class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleAsync(c.Id, false)">Wyłącz</button>
@@ -95,8 +103,14 @@
     }
 </section>
 
+@if (_share is not null)
+{
+    <InviteShare Invite="_share" Link="@LinkFor(_share)" OnClose="() => _share = null" />
+}
+
 @code {
     private List<InviteCode> _codes = [];
+    private InviteCode? _share;
     private string? _code;
     private string? _note;
     private int _maxUses = 1;
@@ -117,7 +131,18 @@
         _limit = await Gates.DailyLimitAsync();
     }
 
-    private string LinkFor(InviteCode c) => $"{Nav.BaseUri}register?kod={Uri.EscapeDataString(c.Code)}";
+    private string LinkFor(InviteCode c) => InviteSvc.LinkFor(c.Code, Nav.BaseUri);
+
+    /// <summary>Na spotkanie: jednorazowy kod z ~3 miesiącami za darmo, od razu z kodem QR do zeskanowania.</summary>
+    private async Task QuickThreeMonthsAsync()
+    {
+        var (invite, error) = await InviteSvc.CreateAsync(null, string.IsNullOrWhiteSpace(_note) ? "Spotkanie — 3 miesiące gratis" : _note, 1,
+            InviteService.ThreeMonthsExtraDays, DateTime.UtcNow.AddDays(30));
+        if (invite is null) { _message = error; _msgError = true; return; }
+        _note = null;
+        await LoadAsync();
+        _share = invite;
+    }
 
     private async Task CreateAsync()
     {
@@ -137,7 +162,7 @@
             ExpiresAt = _expires is { } d ? DateTime.SpecifyKind(d.Date.AddDays(1), DateTimeKind.Utc) : null
         });
         await db.SaveChangesAsync();
-        _message = $"Utworzono kod {code}. Link: {Nav.BaseUri}register?kod={code}";
+        _message = $"Utworzono kod {code}. Link: {InviteSvc.LinkFor(code, Nav.BaseUri)}";
         _msgError = false;
         _code = null; _note = null; _maxUses = 1; _extraDays = 0; _expires = null;
         await LoadAsync();

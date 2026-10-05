@@ -1,0 +1,375 @@
+@page "/panel/spotkania"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject InviteService InviteSvc
+@inject NavigationManager Nav
+@rendermode InteractiveServer
+
+@* Spotkania z trenerami na żywo — z telefonu: scenariusz rozmowy, notatki, kod zaproszenia z QR i zebrane wyniki. *@
+
+<PageTitle>Spotkania z trenerami — PTScheduler Portal</PageTitle>
+
+<PanelHeader Title="Spotkania z trenerami" Icon="bi-cup-hot" IconClass="pp-tone-info"
+             Subtitle="Scenariusz rozmowy na telefon, notatki z każdego spotkania i kod zaproszenia od ręki." />
+
+<div class="pp-seg mb-3 mt-w-tabs" role="tablist" aria-label="Widok">
+    <button type="button" role="tab" class="@(_tab == "script" ? "active" : "")" aria-selected="@(_tab == "script" ? "true" : "false")" @onclick='() => _tab = "script"'><i class="bi bi-list-check"></i>Scenariusz</button>
+    <button type="button" role="tab" class="@(_tab == "new" ? "active" : "")" aria-selected="@(_tab == "new" ? "true" : "false")" @onclick='() => _tab = "new"'><i class="bi bi-pencil-square"></i>@(_m.Id == 0 ? "Notatki" : "Edycja")</button>
+    <button type="button" role="tab" class="@(_tab == "results" ? "active" : "")" aria-selected="@(_tab == "results" ? "true" : "false")" @onclick='() => _tab = "results"'><i class="bi bi-bar-chart"></i>Wyniki <span class="mt-count">@_meetings.Count</span></button>
+</div>
+
+@if (_message is not null)
+{
+    <div class="alert alert-success py-2 small d-flex justify-content-between align-items-center">@_message<button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button></div>
+}
+
+@if (_tab == "script")
+{
+    <div class="mt-script">
+        @foreach (var (step, i) in Script.Select((s, i) => (s, i)))
+        {
+            <details class="mt-step" open="@(i < 2)">
+                <summary>
+                    <span class="mt-step-no">@(i + 1)</span>
+                    <span class="mt-step-title">@step.Title</span>
+                    <span class="mt-step-time">@step.Time</span>
+                </summary>
+                <div class="mt-step-body">
+                    @if (step.Say.Length > 0)
+                    {
+                        <div class="mt-label">Powiedz</div>
+                        @foreach (var line in step.Say) { <p class="mt-say">„@line”</p> }
+                    }
+                    @if (step.Ask.Length > 0)
+                    {
+                        <div class="mt-label">Zapytaj</div>
+                        <ul class="mt-ask">@foreach (var q in step.Ask) { <li>@q</li> }</ul>
+                    }
+                    @if (step.Tips.Length > 0)
+                    {
+                        <div class="mt-label">Pamiętaj</div>
+                        <ul class="mt-tips">@foreach (var t in step.Tips) { <li>@t</li> }</ul>
+                    }
+                </div>
+            </details>
+        }
+        <button class="btn btn-primary w-100 mt-2" @onclick='() => _tab = "new"'><i class="bi bi-pencil-square me-1"></i>Zacznij notatki ze spotkania</button>
+    </div>
+}
+else if (_tab == "new")
+{
+    <div class="mt-form">
+        <section class="mt-card">
+            <h2>Trener</h2>
+            <input class="form-control mb-2" placeholder="Imię i nazwisko albo nazwa studia *" @bind="_m.TrainerName" maxlength="120" />
+            <div class="row g-2">
+                <div class="col-7"><input class="form-control" placeholder="Telefon albo e-mail" @bind="_m.Contact" maxlength="120" /></div>
+                <div class="col-5"><input class="form-control" placeholder="Miasto" @bind="_m.City" maxlength="60" /></div>
+            </div>
+        </section>
+
+        <section class="mt-card">
+            <h2>Test nazwy <small>zanim cokolwiek pokażesz</small></h2>
+            <p class="mt-hint">Powiedz na głos: <b>@string.Join(", ", ShuffledNames)</b>. Poproś o zapisanie.</p>
+            <input class="form-control mb-2" placeholder="Jak zapisali (dosłownie), np. „Trenco, Formój…”" @bind="_m.NameWritten" maxlength="200" />
+            <div class="mt-label">Która kojarzy się z aplikacją dla trenera?</div>
+            <div class="mt-chips">
+                @foreach (var n in Names.Append("żadna"))
+                {
+                    <button type="button" class="mt-chip @(_m.NamePick == n ? "on" : "")" @onclick="() => _m.NamePick = _m.NamePick == n ? null : n">@n</button>
+                }
+            </div>
+        </section>
+
+        <section class="mt-card">
+            <h2>Jak pracuje dziś</h2>
+            <div class="mt-label">Jak klienci się zapisują?</div>
+            <div class="mt-chips">
+                @foreach (var b in BookingOptions)
+                {
+                    <button type="button" class="mt-chip @(HasBooking(b) ? "on" : "")" @onclick="() => ToggleBooking(b)">@b</button>
+                }
+            </div>
+            <div class="row g-2 mt-2">
+                <div class="col-6"><label class="mt-label" for="mt-clients">Aktywnych klientów</label><input id="mt-clients" type="number" min="0" class="form-control" @bind="_m.Clients" /></div>
+                <div class="col-6"><label class="mt-label" for="mt-noshow">Nieobecności / mies.</label><input id="mt-noshow" type="number" min="0" class="form-control" @bind="_m.NoShowsPerMonth" /></div>
+            </div>
+            <label class="mt-label mt-2" for="mt-pains">Co najbardziej przeszkadza (cytaty)</label>
+            <textarea id="mt-pains" class="form-control" rows="3" @bind="_m.Pains" maxlength="2000"></textarea>
+        </section>
+
+        <section class="mt-card">
+            <h2>Demo <small>nie podpowiadaj</small></h2>
+            <textarea class="form-control" rows="3" placeholder="Gdzie się zatrzymali, co ich zaskoczyło, co się spodobało" @bind="_m.DemoNotes" maxlength="2000"></textarea>
+        </section>
+
+        <section class="mt-card">
+            <h2>Cena <small>zł miesięcznie</small></h2>
+            <div class="row g-2">
+                <div class="col-6"><label class="mt-label" for="mt-p1">Podejrzanie tanio</label><input id="mt-p1" type="number" min="0" class="form-control" @bind="_m.PriceTooCheap" /></div>
+                <div class="col-6"><label class="mt-label" for="mt-p2">Okazja</label><input id="mt-p2" type="number" min="0" class="form-control" @bind="_m.PriceBargain" /></div>
+                <div class="col-6"><label class="mt-label" for="mt-p3">Drogo, ale do rozważenia</label><input id="mt-p3" type="number" min="0" class="form-control" @bind="_m.PriceExpensive" /></div>
+                <div class="col-6"><label class="mt-label" for="mt-p4">Za drogo</label><input id="mt-p4" type="number" min="0" class="form-control" @bind="_m.PriceTooExpensive" /></div>
+            </div>
+        </section>
+
+        <section class="mt-card">
+            <h2>Propozycja</h2>
+            <label class="form-check mb-2">
+                <input class="form-check-input" type="checkbox" @bind="_m.Committed" />
+                <span class="form-check-label">Startuje z kodem (3 miesiące gratis za cotygodniowy feedback)</span>
+            </label>
+            @if (_m.InviteCode is not null)
+            {
+                <div class="small mb-2">Kod: <b class="font-monospace">@_m.InviteCode</b></div>
+            }
+            <button type="button" class="btn btn-outline-primary w-100 mb-2" @onclick="GiveCodeAsync"><i class="bi bi-qr-code me-1"></i>@(_m.InviteCode is null ? "Daj kod QR — 3 miesiące gratis" : "Pokaż kod QR")</button>
+            <textarea class="form-control" rows="2" placeholder="Inne notatki" @bind="_m.Notes" maxlength="2000"></textarea>
+        </section>
+
+        @if (_error is not null) { <div class="alert alert-danger py-2 small">@_error</div> }
+        <div class="mt-actions">
+            <button class="btn btn-primary flex-grow-1" @onclick="SaveAsync"><i class="bi bi-check2 me-1"></i>Zapisz spotkanie</button>
+            @if (_m.Id != 0) { <button class="btn btn-outline-secondary" @onclick="NewMeeting">Nowe</button> }
+        </div>
+    </div>
+}
+else
+{
+    @if (_meetings.Count == 0)
+    {
+        <div class="pp-empty"><i class="bi bi-cup-hot"></i>Jeszcze żadnego spotkania. Zacznij od scenariusza.</div>
+    }
+    else
+    {
+        <div class="mt-results">
+            <section class="mt-card">
+                <h2>Nazwa</h2>
+                @foreach (var n in Names.Append("żadna"))
+                {
+                    var count = _meetings.Count(x => x.NamePick == n);
+                    var picked = Math.Max(1, _meetings.Count(x => x.NamePick is not null));
+                    <div class="mt-bar-row"><span>@n</span><div class="mt-bar"><i style="width:@(count * 100 / picked)%"></i></div><b>@count</b></div>
+                }
+                @{ var checkedRecall = _meetings.Where(x => x.NameRecalled is not null).ToList(); }
+                <p class="mt-hint mb-0">Pamiętali nazwę następnego dnia: <b>@checkedRecall.Count(x => x.NameRecalled == true)</b> z @checkedRecall.Count sprawdzonych.</p>
+            </section>
+
+            <section class="mt-card">
+                <h2>Cena <small>mediana, zł / mies.</small></h2>
+                <div class="mt-price-grid">
+                    <div><span>Podejrzanie tanio</span><b>@Median(x => x.PriceTooCheap)</b></div>
+                    <div><span>Okazja</span><b>@Median(x => x.PriceBargain)</b></div>
+                    <div><span>Drogo, ale OK</span><b>@Median(x => x.PriceExpensive)</b></div>
+                    <div><span>Za drogo</span><b>@Median(x => x.PriceTooExpensive)</b></div>
+                </div>
+                <p class="mt-hint mb-0">Rozsądna cena leży zwykle między „okazją” a „drogo, ale OK”.</p>
+            </section>
+
+            <section class="mt-card">
+                <h2>Jak zapisują dziś</h2>
+                @foreach (var b in BookingOptions)
+                {
+                    var count = _meetings.Count(x => (x.BookingToday ?? "").Split(',').Contains(b));
+                    <div class="mt-bar-row"><span>@b</span><div class="mt-bar"><i style="width:@(count * 100 / _meetings.Count)%"></i></div><b>@count</b></div>
+                }
+                <p class="mt-hint mb-0">Startuje z kodem: <b>@_meetings.Count(x => x.Committed)</b> z @_meetings.Count.</p>
+            </section>
+
+            @foreach (var x in _meetings)
+            {
+                <article class="mt-card mt-item">
+                    <div class="d-flex justify-content-between align-items-start gap-2">
+                        <div>
+                            <b>@x.TrainerName</b>
+                            <div class="mt-hint mb-0">@x.CreatedAt.ToLocalTime().ToString("dd.MM HH:mm")@(x.City is null ? "" : $" · {x.City}")@(x.NamePick is null ? "" : $" · wybór: {x.NamePick}")</div>
+                        </div>
+                        @if (x.Committed) { <span class="pp-chip pp-tone-ok">startuje</span> }
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(x.Pains)) { <p class="mt-quote">„@x.Pains”</p> }
+                    <div class="d-flex flex-wrap gap-2 align-items-center">
+                        <span class="small text-muted">Pamięta nazwę?</span>
+                        <button class="btn btn-sm @(x.NameRecalled == true ? "btn-success" : "btn-outline-secondary")" @onclick="() => SetRecallAsync(x.Id, true)">Tak</button>
+                        <button class="btn btn-sm @(x.NameRecalled == false ? "btn-danger" : "btn-outline-secondary")" @onclick="() => SetRecallAsync(x.Id, false)">Nie</button>
+                        <button class="btn btn-sm btn-outline-primary ms-auto" @onclick="() => Edit(x)"><i class="bi bi-pencil"></i></button>
+                    </div>
+                </article>
+            }
+        </div>
+    }
+}
+
+@if (_share is not null)
+{
+    <InviteShare Invite="_share" Link="@InviteSvc.LinkFor(_share.Code, Nav.BaseUri)" DefaultName="@FirstName" DefaultEmail="@ContactEmail"
+                 OnClose="() => _share = null" OnSent="OnInviteSent" />
+}
+
+@code {
+    private sealed record Step(string Title, string Time, string[] Say, string[] Ask, string[] Tips);
+
+    /// <summary>Nazwy w teście (kolejność losowana na każdym spotkaniu).</summary>
+    private static readonly string[] Names = ["Trenzo", "Formuj", "Trenika"];
+    private static readonly string[] BookingOptions = ["WhatsApp / SMS", "Telefon", "Excel / kartka", "Kalendarz Google", "Booksy lub inny system", "Aplikacja trenerska", "Inaczej"];
+
+    private static readonly Step[] Script =
+    [
+        new("Przygotowanie", "przed",
+            [],
+            [],
+            ["Telefon naładowany, ta strona otwarta, zarezerwowane 30 minut.",
+             "Cel: zrozumieć, jak pracują — nie sprzedać. Słuchasz 80% czasu.",
+             "Notuj dosłowne cytaty — przydadzą się na stronę i do postów."]),
+        new("Otwarcie", "1 min",
+            ["Robię aplikację dla trenerów. Zanim pokażę ją komukolwiek, chcę zrozumieć, jak naprawdę pracujecie. To pół godziny i niczego nie sprzedaję."],
+            [],
+            ["Uprzedź, że zapisujesz notatki w telefonie."]),
+        new("Test nazwy", "2 min",
+            ["Powiem trzy nazwy. Zapisz je proszę tak, jak usłyszysz."],
+            ["Która najbardziej kojarzy się z aplikacją dla trenera?", "Którą łatwiej powiedzieć znajomemu?"],
+            ["Nazwy podaje się w losowej kolejności (masz ją w notatkach).",
+             "Następnego dnia napisz SMS: „Pamiętasz nazwę aplikacji z wczoraj?” — wynik zaznacz w Wynikach."]),
+        new("Jak pracujesz dziś", "10 min",
+            [],
+            ["Jak klienci zapisują się do Ciebie na trening?",
+             "Opowiedz o ostatnim razie, gdy ktoś nie przyszedł bez odwołania. Co było dalej?",
+             "Jak pilnujesz płatności i pakietów?",
+             "Ile czasu w tygodniu zajmują Ci wiadomości i rozliczenia?",
+             "Czego używasz dziś i ile za to płacisz?"],
+            ["Pytaj o fakty z przeszłości, nie o opinie.",
+             "Nie pytaj „czy kupisz?” — z grzeczności każdy powie „tak”.",
+             "Dopytuj: „Dlaczego?”, „Jak to wyglądało?”."]),
+        new("Demo na ich telefonie", "10 min",
+            ["Zbuduj proszę swoją aplikację — ja tylko popatrzę."],
+            [],
+            ["Daj im telefon z otwartym kreatorem (strona /register).",
+             "Milcz i nie podpowiadaj — każde zawahanie zapisz w notatkach.",
+             "Na koniec zapytaj: „Co Cię zaskoczyło?”."]),
+        new("Cena", "3 min",
+            [],
+            ["Przy jakiej cenie miesięcznie uznasz, że to podejrzanie tanie?",
+             "Przy jakiej to okazja?",
+             "Przy jakiej drogo, ale jeszcze rozważysz?",
+             "Przy jakiej za drogo?"],
+            ["Wpisz cztery liczby w notatkach — mediany zobaczysz w Wynikach."]),
+        new("Propozycja", "2 min",
+            ["Uruchomię Ci to dziś z 3 miesiącami gratis, jeśli raz w tygodniu powiesz mi, co działa, a co nie."],
+            [],
+            ["Zgoda na konkretny krok mówi więcej niż sto komplementów.",
+             "Przycisk „Daj kod QR” w notatkach — trener skanuje i od razu buduje aplikację.",
+             "Odmowa też jest wynikiem: zapytaj, czego brakuje."]),
+        new("Po spotkaniu", "5 min",
+            [],
+            [],
+            ["Uzupełnij notatki od razu, póki pamiętasz.",
+             "Jutro: SMS z testem pamięci nazwy.",
+             "Za tydzień: pierwsza rozmowa o tym, co działa."])
+    ];
+
+    private List<TrainerMeeting> _meetings = [];
+    private TrainerMeeting _m = new();
+    private string _tab = "script";
+    private string? _message;
+    private string? _error;
+    private InviteCode? _share;
+    private string[] ShuffledNames = Names;
+
+    protected override async Task OnInitializedAsync()
+    {
+        ShuffledNames = Names.OrderBy(_ => Random.Shared.Next()).ToArray();
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _meetings = await db.TrainerMeetings.AsNoTracking().OrderByDescending(m => m.CreatedAt).ToListAsync();
+    }
+
+    private bool HasBooking(string b) => (_m.BookingToday ?? "").Split(',').Contains(b);
+
+    private void ToggleBooking(string b)
+    {
+        var list = (_m.BookingToday ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).ToList();
+        if (!list.Remove(b)) list.Add(b);
+        _m.BookingToday = list.Count == 0 ? null : string.Join(",", list);
+    }
+
+    private string? FirstName => _m.TrainerName.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+    private string? ContactEmail => _m.Contact?.Contains('@') == true ? _m.Contact.Trim() : null;
+
+    private async Task GiveCodeAsync()
+    {
+        _error = null;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        if (_m.InviteCode is { } existing && await db.InviteCodes.AsNoTracking().FirstOrDefaultAsync(c => c.Code == existing) is { } found)
+        {
+            _share = found;
+            return;
+        }
+        var (invite, error) = await InviteSvc.CreateAsync(null, $"Spotkanie: {(_m.TrainerName.Length > 0 ? _m.TrainerName : "trener")}", 1,
+            InviteService.ThreeMonthsExtraDays, DateTime.UtcNow.AddDays(30));
+        if (invite is null) { _error = error; return; }
+        _m.InviteCode = invite.Code;
+        _m.Committed = true;
+        _share = invite;
+    }
+
+    private void OnInviteSent(string email)
+    {
+        var line = $"Zaproszenie wysłane na {email}.";
+        _m.Notes = string.IsNullOrWhiteSpace(_m.Notes) ? line : $"{_m.Notes}\n{line}";
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_m.TrainerName)) { _error = "Wpisz, z kim było spotkanie."; return; }
+        _m.TrainerName = _m.TrainerName.Trim();
+        await using var db = await DbFactory.CreateDbContextAsync();
+        if (_m.Id == 0) db.TrainerMeetings.Add(_m);
+        else db.TrainerMeetings.Update(_m);
+        await db.SaveChangesAsync();
+        _message = $"Zapisano spotkanie: {_m.TrainerName}.";
+        NewMeeting();
+        _tab = "results";
+        await LoadAsync();
+    }
+
+    private void NewMeeting()
+    {
+        _m = new TrainerMeeting();
+        ShuffledNames = Names.OrderBy(_ => Random.Shared.Next()).ToArray();
+    }
+
+    private void Edit(TrainerMeeting x)
+    {
+        _m = new TrainerMeeting
+        {
+            Id = x.Id, CreatedAt = x.CreatedAt, TrainerName = x.TrainerName, Contact = x.Contact, City = x.City, NameWritten = x.NameWritten,
+            NamePick = x.NamePick, NameRecalled = x.NameRecalled, BookingToday = x.BookingToday, Clients = x.Clients, NoShowsPerMonth = x.NoShowsPerMonth,
+            Pains = x.Pains, DemoNotes = x.DemoNotes, PriceTooCheap = x.PriceTooCheap, PriceBargain = x.PriceBargain, PriceExpensive = x.PriceExpensive,
+            PriceTooExpensive = x.PriceTooExpensive, Committed = x.Committed, InviteCode = x.InviteCode, Notes = x.Notes
+        };
+        _tab = "new";
+    }
+
+    private async Task SetRecallAsync(int id, bool recalled)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var m = await db.TrainerMeetings.FindAsync(id);
+        if (m is null) return;
+        m.NameRecalled = m.NameRecalled == recalled ? null : recalled;
+        await db.SaveChangesAsync();
+        await LoadAsync();
+    }
+
+    private string Median(Func<TrainerMeeting, int?> pick)
+    {
+        var values = _meetings.Select(pick).Where(v => v is > 0).Select(v => v!.Value).OrderBy(v => v).ToList();
+        if (values.Count == 0) return "—";
+        var mid = values.Count / 2;
+        return (values.Count % 2 == 1 ? values[mid] : (values[mid - 1] + values[mid]) / 2).ToString();
+    }
+}

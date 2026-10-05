@@ -7,6 +7,7 @@
 @inject RegistrationGateService Gates
 @inject ReferralService Referrals
 @inject FunnelService Funnel
+@inject LegalService Legal
 @inject StripeService StripeSvc
 @inject NavigationManager Nav
 @inject IJSRuntime JS
@@ -260,7 +261,7 @@
 
                             <label class="bd-check bd-consent">
                                 <input type="checkbox" @bind="_consent" @bind:after="Touch" />
-                                <span>Akceptuję <a href="/regulamin" target="_blank" rel="noopener">regulamin</a> PTScheduler.</span>
+                                <span>Akceptuję <a href="/regulamin" target="_blank" rel="noopener">Regulamin</a> wraz z <a href="/umowa-powierzenia" target="_blank" rel="noopener">Umową powierzenia przetwarzania danych</a> (załącznik nr 1) i potwierdzam zapoznanie się z <a href="/polityka-prywatnosci" target="_blank" rel="noopener">Polityką prywatności</a>.</span>
                             </label>
                             @* Pułapka na boty — prawdziwa osoba tego pola nie widzi. *@
                             <input class="bd-hp" tabindex="-1" autocomplete="off" aria-hidden="true" @bind="_website" name="website" />
@@ -1433,6 +1434,10 @@
             await db.SaveChangesAsync();
             tenant = t;
         }
+        // Dowód akceptacji dokumentów (wersje, IP, przeglądarka). Przy „Zbuduj dla trenera” trener zaakceptuje je przy pierwszym logowaniu.
+        if (!AdminMode && _consent)
+            await Legal.RecordAsync(tenant.Id, email, LegalService.Docs.Select(d => d.Key), ClientIp(),
+                HttpAccessor.HttpContext?.Request.Headers.UserAgent.ToString(), "kreator");
         _appHost = tenant.Domain;
         _slug = tenant.Slug;
         _pendingTenantId = tenant.Id;

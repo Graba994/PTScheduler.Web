@@ -1058,6 +1058,38 @@ else
             </div>
         </div>
 
+        <div class="col-12 @TabCls("history")">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm pp-icon-cyan"><i class="bi bi-file-earmark-check"></i></span>Akceptacja dokumentów</h2>
+                    @if (_legal is null)
+                    {
+                        <p class="text-muted small mb-0">Ładuję…</p>
+                    }
+                    else
+                    {
+                        <div class="d-flex flex-column gap-1 small">
+                            @foreach (var d in LegalService.Docs)
+                            {
+                                var last = _legal.Where(a => a.DocKey == d.Key).OrderByDescending(a => a.AcceptedAt).FirstOrDefault();
+                                <div class="d-flex justify-content-between gap-2 border-bottom pb-1">
+                                    <a href="@d.Path" target="_blank" rel="noopener">@d.Title</a>
+                                    @if (last is null)
+                                    {
+                                        <span class="badge text-bg-warning">nie zaakceptowano</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="text-muted">@(last.Version == d.Version ? "aktualna" : $"stara wersja {last.Version}") · @last.AcceptedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm") · @last.Source · @last.Email@(last.Ip is null ? "" : $" · IP {last.Ip}")</span>
+                                    }
+                                </div>
+                            }
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+
         <!-- Delete section -->
         <div class="col-12 @TabCls("infra")">
             <div class="card border-0 shadow-sm border-danger">
@@ -1207,6 +1239,7 @@ else
     {
         _tab = tab;
         if (tab == "overview") await LoadOverviewAsync();
+        if (tab == "history" && _tenantEvents is null) await LoadEvents();
     }
 
     // Konto admina i metryki wczytują się same przy wejściu na „Przegląd”.
@@ -1796,9 +1829,16 @@ else
         finally { _changingDomain = false; }
     }
 
+    private List<LegalAcceptance>? _legal;
+
     private async Task LoadEvents()
     {
         _loadingEvents = true;
+        if (_tenant is not null)
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            _legal = await db.LegalAcceptances.AsNoTracking().Where(a => a.TenantId == _tenant.Id).ToListAsync();
+        }
         _tenantEvents = await TenantSvc.GetRecentEventsAsync(30, _tenant?.Id);
         _loadingEvents = false;
     }
