@@ -75,8 +75,8 @@ builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions
     // Aplikacja działa głównie jako PWA: telefon usypia kartę/aplikację, a
     // przeglądarka zamraża schowane zakładki. Dłuższe podtrzymanie rozłączonego
     // obwodu pozwala po powrocie wznowić stan bez przeładowania strony
-    // (domyślnie 3 minuty).
-    options.DisconnectedCircuitRetentionPeriod = TimeSpan.FromMinutes(10);
+    // (domyślnie 3 minuty). Po tym czasie stan i tak da się wznowić (Blazor.resumeCircuit).
+    options.DisconnectedCircuitRetentionPeriod = TimeSpan.FromMinutes(30);
 });
 
 builder.Services.AddCascadingAuthenticationState();

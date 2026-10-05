@@ -111,6 +111,11 @@ builder.Services.AddHostedService<TenantCleanupService>();
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+// Panel w przeglądarce: po uśpieniu karty połączenie wznawia się po cichu (ReconnectModal.razor.js),
+// a serwer pamięta rozłączoną sesję 30 minut zamiast domyślnych 3.
+builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions>(options =>
+    options.DisconnectedCircuitRetentionPeriod = TimeSpan.FromMinutes(30));
+
 // Każda instancja ma własną pulę zapytań do API Portalu (SMS, poczta, wideo, Google, sklep):
 // zapętlona albo przejęta instancja jednego trenera nie spowolni Portalu pozostałym.
 builder.Services.AddRateLimiter(o =>
