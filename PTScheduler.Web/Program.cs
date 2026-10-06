@@ -409,6 +409,34 @@ app.MapGet("/reports/client/{clientId:int}/monthly", async (
     }
 }).RequireAuthorization();
 
+// Plan treningowy w PDF (logo i kolory studia) — trener swoich planów, klient swoich, admin wszystkich.
+app.MapGet("/plans/{planId:int}/pdf", async (
+    int planId,
+    PTScheduler.Application.Interfaces.ITrainingPlanPdfService planPdf,
+    PTScheduler.Web.Services.EntitlementService entitlements,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    HttpContext ctx) =>
+{
+    if (!entitlements.IsAllowed("TrainingPlansEnabled")) return Results.StatusCode(403);
+    var u = ctx.User;
+    if (!u.IsInRole(PTScheduler.Domain.Constants.Roles.Admin))
+    {
+        var userId = u.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var plan = await db.TrainingPlans.AsNoTracking()
+            .Where(p => p.Id == planId)
+            .Select(p => new { p.TrainerUserId, p.ClientId, ClientTrainer = p.Client != null ? p.Client.TrainerUserId : null, ClientUser = p.Client != null ? p.Client.ApplicationUserId : null })
+            .FirstOrDefaultAsync();
+        var allowed = plan is not null && (
+            ((u.IsInRole(PTScheduler.Domain.Constants.Roles.Trainer) || u.IsInRole(PTScheduler.Domain.Constants.Roles.Subordinate))
+                && (plan.TrainerUserId == userId || plan.ClientTrainer == userId))
+            || (u.IsInRole(PTScheduler.Domain.Constants.Roles.Client) && plan.ClientId is not null && plan.ClientUser == userId));
+        if (!allowed) return Results.NotFound();
+    }
+    var pdf = await planPdf.GenerateAsync(planId);
+    return pdf is { } f ? Results.File(f.Bytes, "application/pdf", f.FileName) : Results.NotFound();
+}).RequireAuthorization();
+
 // Link polecający: zapamiętuje kod w ciasteczku na 30 dni i prowadzi na stronę trenera.
 // Kod trafia do polecenia przy rejestracji albo rezerwacji pierwszej wizyty.
 app.MapGet("/r/{code}", async (

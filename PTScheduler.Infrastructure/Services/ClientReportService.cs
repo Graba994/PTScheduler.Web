@@ -69,18 +69,7 @@ public class ClientReportService(
             .OrderBy(n => n.CreatedAt)
             .ToListAsync();
 
-        // Resolve logo path on disk for embedding
-        byte[]? logoBytes = null;
-        try
-        {
-            if (!string.IsNullOrEmpty(branding.LogoPath))
-            {
-                var rel = branding.LogoPath.TrimStart('/');
-                var abs = Path.Combine(webRootPathProvider.WebRootPath, rel);
-                if (File.Exists(abs)) logoBytes = await File.ReadAllBytesAsync(abs);
-            }
-        }
-        catch { /* best-effort, ignore */ }
+        var logoBytes = await LoadLogoAsync(branding.LogoPath, webRootPathProvider.WebRootPath);
 
         var data = new ReportData(
             CompanyName: branding.CompanyName ?? "PTScheduler",
@@ -128,7 +117,7 @@ public class ClientReportService(
     /// Hex palette pulled from the active branding theme (mirrors --c-primary tokens
     /// from app.css). Only "light" variants are used since a PDF is always a light surface.
     /// </summary>
-    private record ThemePalette(string Primary, string PrimaryDark, string PrimaryLight)
+    internal record ThemePalette(string Primary, string PrimaryDark, string PrimaryLight)
     {
         public static ThemePalette For(string? themeName)
         {
@@ -498,13 +487,25 @@ public class ClientReportService(
         _                             => Colors.Blue.Lighten5
     };
 
-    private static string ResolveName(ApplicationUser u)
+    /// <summary>Logo z brandingu do osadzenia w PDF; brak pliku albo błąd odczytu = PDF bez logo.</summary>
+    internal static async Task<byte[]?> LoadLogoAsync(string? logoPath, string webRoot)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(logoPath)) return null;
+            var abs = Path.Combine(webRoot, logoPath.TrimStart('/'));
+            return File.Exists(abs) ? await File.ReadAllBytesAsync(abs) : null;
+        }
+        catch { return null; }
+    }
+
+    internal static string ResolveName(ApplicationUser u)
     {
         var n = $"{u.FirstName} {u.LastName}".Trim();
         return string.IsNullOrEmpty(n) ? (u.UserName ?? u.Email ?? "—") : n;
     }
 
-    private static string Slug(string s)
+    internal static string Slug(string s)
     {
         var clean = new string(s.Where(c => char.IsLetterOrDigit(c) || c == '-' || c == '_' || c == ' ').ToArray());
         return clean.Trim().Replace(' ', '_').ToLowerInvariant() is { Length: > 0 } x ? x : "klient";
