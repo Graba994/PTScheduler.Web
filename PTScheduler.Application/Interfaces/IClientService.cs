@@ -16,4 +16,12 @@ public interface IClientService
     Task ApproveClientAsync(int clientId);
     Task<List<ClientDto>> GetPendingClientsAsync(string? trainerUserId = null);
     Task SetAllowSelfBookingAsync(int clientId, bool allow);
+    Task<CsvImportResult> ImportClientsFromCsvAsync(Stream csvStream);
+}
+
+public class CsvImportResult
+{
+    public int Imported { get; set; }
+    public int Skipped { get; set; }
+    public List<string> Errors { get; set; } = [];
 }

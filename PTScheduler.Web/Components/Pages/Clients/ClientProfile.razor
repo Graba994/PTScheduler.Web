@@ -1,41 +1,49 @@
 @page "/clients/{Id:int}"
 @implements IAsyncDisposable
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@inject IOffPackageService OffPackage
 @inject IClientService ClientService
 @inject ISessionService SessionService
 @inject ISessionPackageService PackageService
+@inject IPairService PairService
 @inject IUserManagementService UserManagementService
 @inject IBodyMeasurementService MeasurementService
 @inject IAuditLogService AuditLogService
 @inject NavigationManager Nav
 @using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Exceptions
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
 @using PTScheduler.Domain.Enums
 @using Microsoft.AspNetCore.Components.Authorization
 @inject AuthenticationStateProvider AuthStateProvider
 @inject IJSRuntime JS
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@inject EntitlementService Entitlements
+@inject IClientInvitationService Invitations
+@inject IAppClock Clock
+@inject IWorkoutLogService WorkoutLog
+@inject ITrainingPlanService PlanService
+@inject IProgressionService Progression
+@inject ISurveyService Surveys
+@inject IChatService Chat
+@inject IClientDocumentService DocumentSvc
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <PageTitle>@(client?.FullName ?? "Profil klienta")</PageTitle>
 
 @if (client is null && !notFound)
 {
     <div class="d-flex align-items-center gap-3 mb-3">
-        <div class="skeleton skeleton-circle" style="width:56px;height:56px"></div>
+        <div class="skeleton skeleton-circle" style="width:64px;height:64px"></div>
         <div style="flex:1">
             <div class="skeleton skeleton-line w-50" style="height:18px"></div>
             <div class="skeleton skeleton-line w-40" style="height:12px;margin-bottom:0"></div>
         </div>
     </div>
-    <div class="row g-3">
-        <div class="col-12 col-md-8">
-            <div class="skeleton-card" style="height:200px"></div>
-        </div>
-        <div class="col-12 col-md-4">
-            <div class="skeleton-card" style="height:200px"></div>
-        </div>
+    <div class="ad-kpis">
+        @for (var i = 0; i < 4; i++) { <div class="skeleton-card" style="height:110px"></div> }
     </div>
+    <div class="skeleton-card" style="height:260px"></div>
 }
 else if (notFound)
 {
@@ -43,7 +51,7 @@ else if (notFound)
 }
 else if (client is not null)
 {
-    <div class="d-flex flex-column flex-sm-row align-items-sm-center justify-content-sm-between gap-2 mb-3">
+    <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
         <nav aria-label="breadcrumb" class="m-0 flex-grow-1 min-w-0">
             <ol class="breadcrumb m-0 flex-nowrap">
                 <li class="breadcrumb-item"><a href="/clients">Klienci</a></li>
@@ -52,7 +60,7 @@ else if (client is not null)
         </nav>
         @if (_clientIds.Count > 1)
         {
-            <div class="client-paginator d-inline-flex align-items-center align-self-end align-self-sm-center flex-shrink-0">
+            <div class="client-paginator d-inline-flex align-items-center flex-shrink-0">
                 <button type="button" class="client-paginator-btn" @onclick="GoPrev"
                         disabled="@(_prevId is null)"
                         title="@(_prevId is null ? "Brak poprzedniego klienta" : $"Poprzedni: {_prevName} (←)")">
@@ -85,117 +93,670 @@ else if (client is not null)
         </div>
     }
 
-    <!-- Stat summary -->
-    <div class="row g-2 mb-3">
-        <div class="col-6 col-xl-3">
-            <div class="card border-0 shadow-sm text-center py-2 px-3">
-                <div class="fw-bold" style="font-size:1.5rem;color:var(--c-primary)">@_activeCredits</div>
-                <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em">Kredyty</div>
+    <!-- Nagłówek: kto to jest i co możesz zrobić -->
+    <section class="cp-hero">
+        <div class="cp-avatar">
+            @if (!string.IsNullOrEmpty(client.ProfilePictureUrl))
+            {
+                <img src="@client.ProfilePictureUrl" alt="@client.FullName" />
+            }
+            else
+            {
+                <span>@(string.IsNullOrEmpty(client.Initials) ? "?" : client.Initials)</span>
+            }
+        </div>
+        <div class="cp-hero-main">
+            <h4 class="cp-name">@client.FullName</h4>
+            <div class="cp-chips">
+                @if (client.Status == ClientStatus.Pending)
+                {
+                    <span class="cp-chip warn"><i class="bi bi-hourglass-split"></i>Oczekuje</span>
+                }
+                else
+                {
+                    <span class="cp-chip ok"><i class="bi bi-circle-fill"></i>Aktywny</span>
+                }
+                <span class="cp-chip"><i class="bi bi-calendar-heart"></i>Klient od @client.CreatedAt.ToString("MM.yyyy")</span>
+                @if (_age is int age) { <span class="cp-chip"><i class="bi bi-person"></i>@age lat</span> }
+                @if (client.TrustedForDeferredPayment) { <span class="cp-chip"><i class="bi bi-shield-check"></i>Zaufany</span> }
+                @if (_account is { LastLoginUtc: null }) { <span class="cp-chip muted"><i class="bi bi-phone"></i>Nie korzysta z aplikacji</span> }
+            </div>
+            @if (!string.IsNullOrWhiteSpace(client.TrainingGoal))
+            {
+                <div class="cp-goal"><i class="bi bi-bullseye"></i><span>@client.TrainingGoal</span></div>
+            }
+            <div class="cp-contact">
+                @if (!string.IsNullOrEmpty(client.Phone))
+                {
+                    <a href="@($"tel:{client.Phone}")"><i class="bi bi-telephone"></i>@client.Phone</a>
+                }
+                <a href="@($"mailto:{client.Email}")"><i class="bi bi-envelope"></i>@client.Email</a>
             </div>
         </div>
-        <div class="col-6 col-xl-3">
-            <div class="card border-0 shadow-sm text-center py-2 px-3">
-                <div class="fw-bold" style="font-size:1.5rem">@_completedCount</div>
-                <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em">Ukończonych</div>
-            </div>
+        <div class="cp-actions">
+            <button class="btn btn-primary btn-sm" @onclick="OpenBooking"><i class="bi bi-calendar-plus me-1"></i>Zarezerwuj</button>
+            <a class="btn btn-outline-primary btn-sm position-relative" href="@($"/chat?client={Id}")">
+                <i class="bi bi-chat-dots me-1"></i>Wiadomość
+                @if (_unreadChat > 0) { <span class="cp-dot">@_unreadChat</span> }
+            </a>
+            <button class="btn btn-outline-secondary btn-sm" @onclick='() => { SelectTab("account"); StartEdit(); }'><i class="bi bi-pencil me-1"></i>Edytuj</button>
         </div>
-        <div class="col-6 col-xl-3">
-            <div class="card border-0 shadow-sm text-center py-2 px-3">
-                <div class="fw-bold" style="font-size:1.5rem;color:@(_unpaidBalance > 0 ? "#DC2626" : "#16A34A")">
-                    @(_unpaidBalance > 0 ? _unpaidBalance.ToString("N0") + " zł" : "✓")
-                </div>
-                <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em">Należność</div>
-            </div>
-        </div>
-        <div class="col-6 col-xl-3">
-            <div class="card border-0 shadow-sm text-center py-2 px-3">
-                <div class="fw-bold" style="font-size:1.5rem">
-                    @(_lastMeasDate.HasValue ? _lastMeasDate.Value.ToString("dd.MM.yy") : "—")
-                </div>
-                <div class="text-muted" style="font-size:.7rem;text-transform:uppercase;letter-spacing:.06em">Ostatni pomiar</div>
-            </div>
-        </div>
+    </section>
+
+    <!-- Najważniejsze liczby -->
+    <div class="ad-kpis cp-kpis">
+        <button type="button" class="ad-kpi" @onclick='() => SelectTab("sessions")'>
+            <span class="ad-kpi-ic"><i class="bi bi-calendar-event"></i></span>
+            @if (_nextSession is { } ns)
+            {
+                <span class="ad-kpi-val cp-kpi-date">@DayLabel(ns.StartTime) <small>@ns.StartTime.ToString("HH:mm")</small></span>
+                <span class="ad-kpi-lab">najbliższa wizyta</span>
+                <span class="ad-kpi-sub text-truncate">@ns.SessionTypeName</span>
+            }
+            else
+            {
+                <span class="ad-kpi-val">—</span>
+                <span class="ad-kpi-lab">najbliższa wizyta</span>
+                <span class="ad-kpi-sub">nic nie zaplanowano</span>
+            }
+        </button>
+        <button type="button" class="ad-kpi" @onclick='() => SelectTab("packages")'>
+            <span class="ad-kpi-ic green"><i class="bi bi-box-seam"></i></span>
+            <span class="ad-kpi-val">@_activeCredits</span>
+            <span class="ad-kpi-lab">treningów w pakiecie</span>
+            <span class="ad-kpi-sub text-truncate @(_activeCredits <= 1 ? "down" : "")">@(_activePackageName ?? "brak aktywnego pakietu")</span>
+        </button>
+        @if (_plansOn)
+        {
+            <button type="button" class="ad-kpi" @onclick='() => SelectTab("activity")'>
+                <span class="ad-kpi-ic violet"><i class="bi pt-ico-dumbbell"></i></span>
+                <span class="ad-kpi-val">@_workouts30</span>
+                <span class="ad-kpi-lab">treningów z planu (30 dni)</span>
+                <span class="ad-kpi-sub @(_daysSinceWorkout is > 7 ? "down" : "")">@(_lastWorkout is { } lw ? "ostatni " + Ago(lw) : "jeszcze żadnego")</span>
+            </button>
+        }
+        else
+        {
+            <button type="button" class="ad-kpi" @onclick='() => SelectTab("sessions")'>
+                <span class="ad-kpi-ic violet"><i class="bi bi-check2-circle"></i></span>
+                <span class="ad-kpi-val">@_completedCount</span>
+                <span class="ad-kpi-lab">odbytych wizyt</span>
+                <span class="ad-kpi-sub">@(client.LastSessionDate is { } ls ? "ostatnia " + ls.ToString("dd.MM") : "jeszcze żadnej")</span>
+            </button>
+        }
+        <button type="button" class="ad-kpi" @onclick='() => SelectTab("packages")'>
+            <span class="ad-kpi-ic amber"><i class="bi bi-wallet2"></i></span>
+            @if (_unpaidBalance > 0 || _unpaidOffPackage > 0)
+            {
+                <span class="ad-kpi-val text-danger">@(_unpaidBalance > 0 ? _unpaidBalance.ToString("N0") : "0") <small>zł</small></span>
+                <span class="ad-kpi-lab">do zapłaty</span>
+                <span class="ad-kpi-sub down">@(_unpaidOffPackage > 0 ? $"+ {_unpaidOffPackage} trening(i) poza pakietem" : "nieopłacony pakiet")</span>
+            }
+            else
+            {
+                <span class="ad-kpi-val text-success"><i class="bi bi-check2"></i></span>
+                <span class="ad-kpi-lab">rozliczenia</span>
+                <span class="ad-kpi-sub">wszystko opłacone</span>
+            }
+        </button>
     </div>
 
-    <div class="row g-4">
+    <!-- Zakładki -->
+    <nav class="cp-tabs" role="tablist">
+        @foreach (var (key, icon, label, count) in Tabs())
+        {
+            <button type="button" role="tab" class="cp-tab @(_tab == key ? "active" : "")" aria-selected="@(_tab == key)" @onclick="() => SelectTab(key)">
+                <i class="bi @icon"></i><span>@label</span>
+                @if (count > 0) { <span class="cp-tab-count">@count</span> }
+            </button>
+        }
+    </nav>
 
-        <!-- Left column: profile card + notes -->
-        <div class="col-12 col-lg-4">
-
-            <!-- Profile card -->
-            <div class="card shadow-sm mb-4">
-                <div class="card-body p-4">
-                    <div class="d-flex align-items-center gap-3 mb-4">
-                        <div class="avatar-circle-lg">
-                            @if (!string.IsNullOrEmpty(client.ProfilePictureUrl))
-                            {
-                                <img src="@client.ProfilePictureUrl" class="rounded-circle" width="96" height="96" style="object-fit:cover" alt="@client.FullName" />
-                            }
-                            else
-                            {
-                                <span>@(string.IsNullOrEmpty(client.Initials) ? "?" : client.Initials)</span>
-                            }
-                        </div>
-                        <div>
-                            <h5 class="mb-0">@client.FullName</h5>
-                            <div class="text-muted small">@client.Email</div>
-                            <div class="badge bg-primary-subtle text-primary mt-1">@client.TotalSessions sesji</div>
-                        </div>
-                    </div>
-
-                    @if (!editMode)
+    @if (_tab == "overview")
+    {
+        <div class="cp-grid cp-overview">
+            <div class="cp-col">
+                <section class="cp-card cp-o1">
+                    <h6 class="cp-card-title"><i class="bi bi-bell"></i>Co się dzieje</h6>
+                    @if (_attention.Count == 0)
                     {
-                        <dl class="row mb-0 small">
-                            @if (!string.IsNullOrEmpty(client.Phone))
+                        <div class="cp-allgood"><i class="bi bi-emoji-smile"></i><span><b>Wszystko w porządku.</b> Nic nie czeka na Twoją reakcję.</span></div>
+                    }
+                    else
+                    {
+                        <div class="cp-att-list">
+                            @foreach (var a in _attention)
                             {
-                                <dt class="col-5 text-muted">Telefon</dt>
-                                <dd class="col-7">@client.Phone</dd>
-                            }
-                            @if (client.DateOfBirth.HasValue)
-                            {
-                                <dt class="col-5 text-muted">Data ur.</dt>
-                                <dd class="col-7">@client.DateOfBirth.Value.ToString("dd.MM.yyyy")</dd>
-                            }
-                            @if (!string.IsNullOrEmpty(client.TrainingGoal))
-                            {
-                                <dt class="col-5 text-muted">Cel</dt>
-                                <dd class="col-7">@client.TrainingGoal</dd>
-                            }
-                            <dt class="col-5 text-muted">Klient od</dt>
-                            <dd class="col-7">@client.CreatedAt.ToString("dd.MM.yyyy")</dd>
-                        </dl>
-
-                        <div class="d-flex gap-2 mt-3">
-                            <button class="btn btn-primary btn-sm flex-grow-1" @onclick="OpenBooking">
-                                <i class="bi bi-calendar-plus me-1"></i>Zarezerwuj
-                            </button>
-                            <button class="btn btn-outline-secondary btn-sm flex-grow-1" @onclick="StartEdit">
-                                <i class="bi bi-pencil me-1"></i>Edytuj
-                            </button>
-                        </div>
-                        <div class="d-flex gap-1 mt-2 align-items-center">
-                            <select class="form-select form-select-sm" style="max-width:130px" @bind="_reportMonth">
-                                @for (var m = 0; m < 12; m++)
+                                @if (a.Href is not null)
                                 {
-                                    var d = DateTime.Now.AddMonths(-m);
-                                    var v = $"{d:yyyy-MM}";
-                                    <option value="@v">@d.ToString("LLLL yyyy", _plCulture)</option>
+                                    <a class="cp-att @a.Level" href="@a.Href"><i class="bi @a.Icon"></i><span>@a.Text</span><i class="bi bi-chevron-right cp-go"></i></a>
                                 }
-                            </select>
-                            <a class="btn btn-outline-primary btn-sm flex-grow-1"
-                               href="@ReportUrl()" target="_blank" rel="noopener"
-                               title="Pobierz raport PDF za wybrany miesiąc">
-                                <i class="bi bi-file-earmark-pdf me-1"></i>Raport PDF
-                            </a>
+                                else
+                                {
+                                    <button type="button" class="cp-att @a.Level" @onclick="() => SelectTab(a.Tab!)"><i class="bi @a.Icon"></i><span>@a.Text</span><i class="bi bi-chevron-right cp-go"></i></button>
+                                }
+                            }
                         </div>
-                        <div class="d-flex align-items-center justify-content-between mt-3 pt-2 border-top">
-                            <span class="small text-muted">Samodzielna rezerwacja</span>
-                            <div class="form-check form-switch mb-0">
-                                <input class="form-check-input" type="checkbox" role="switch"
-                                       checked="@client.AllowSelfBooking"
-                                       @onchange="ToggleSelfBooking" />
+                    }
+                </section>
+
+                <section class="cp-card cp-o3">
+                    <h6 class="cp-card-title"><i class="bi bi-activity"></i>Ostatnio u klienta</h6>
+                    @if (_feed.Count == 0)
+                    {
+                        <p class="text-muted small mb-0">Jeszcze nic się nie wydarzyło — zarezerwuj pierwszy trening albo przypisz plan.</p>
+                    }
+                    else
+                    {
+                        var hidden = _feed.Count - _feedShown;
+                        <ol class="cp-feed @(hidden > 0 ? "has-more" : "")">
+                            @foreach (var f in _feed.Take(_feedShown))
+                            {
+                                <li>
+                                    <span class="cp-feed-ic @f.Tone"><i class="bi @f.Icon"></i></span>
+                                    <div class="cp-feed-body">
+                                        @if (f.Tab is not null)
+                                        {
+                                            <button type="button" class="cp-feed-title" @onclick="() => SelectTab(f.Tab)">@f.Title</button>
+                                        }
+                                        else
+                                        {
+                                            <span class="cp-feed-title">@f.Title</span>
+                                        }
+                                        @if (!string.IsNullOrEmpty(f.Sub)) { <small>@f.Sub</small> }
+                                    </div>
+                                    <time>@Ago(f.When)</time>
+                                </li>
+                            }
+                        </ol>
+                        @if (hidden > 0)
+                        {
+                            <button type="button" class="cp-feed-more" @onclick="() => _feedShown += 10">
+                                <span class="cp-feed-more-ic"><i class="bi bi-chevron-double-down"></i></span>
+                                <span>Pokaż starsze <b>(@hidden)</b></span>
+                            </button>
+                        }
+                        else if (_feedShown > FeedStart)
+                        {
+                            <button type="button" class="cp-feed-more" @onclick="() => _feedShown = FeedStart">
+                                <span class="cp-feed-more-ic"><i class="bi bi-chevron-double-up"></i></span>
+                                <span>Zwiń</span>
+                            </button>
+                        }
+                    }
+                </section>
+            </div>
+
+            <div class="cp-col">
+                <section class="cp-card cp-o2">
+                    <div class="cp-card-head">
+                        <h6 class="cp-card-title mb-0"><i class="bi bi-calendar-week"></i>Najbliższe wizyty</h6>
+                        <button class="btn btn-link btn-sm p-0" @onclick="OpenBooking"><i class="bi bi-plus-lg me-1"></i>Dodaj</button>
+                    </div>
+                    @if (Upcoming.Count == 0)
+                    {
+                        <p class="text-muted small mb-0">Brak zaplanowanych wizyt.</p>
+                    }
+                    else
+                    {
+                        @foreach (var s in Upcoming.Take(3))
+                        {
+                            @SessionRow(s)
+                        }
+                        @if (Upcoming.Count > 3)
+                        {
+                            <button class="btn btn-link btn-sm p-0 mt-1" @onclick='() => SelectTab("sessions")'>Wszystkie (@Upcoming.Count)</button>
+                        }
+                    }
+                </section>
+
+                <section class="cp-card cp-o4">
+                    <h6 class="cp-card-title"><i class="bi bi-journal-text"></i>Notatki trenera</h6>
+                    <div class="cp-note-new">
+                        <textarea class="form-control form-control-sm" rows="2" placeholder="Np. boli kolano przy przysiadzie, cel na wakacje…" @bind="newNote"></textarea>
+                        <button class="btn btn-outline-primary btn-sm" @onclick="AddNote" disabled="@(string.IsNullOrWhiteSpace(newNote) || isBusy)">
+                            <i class="bi bi-plus-lg me-1"></i>Dodaj
+                        </button>
+                    </div>
+                    @if (notes is null)
+                    {
+                        <div class="text-center"><div class="spinner-border spinner-border-sm text-primary"></div></div>
+                    }
+                    else if (!notes.Any())
+                    {
+                        <p class="text-muted small mb-0">Brak notatek. Widzisz je tylko Ty i Twój zespół.</p>
+                    }
+                    else
+                    {
+                        @foreach (var note in notes)
+                        {
+                            <div class="cp-note">
+                                <div class="cp-note-meta">
+                                    <span>@note.TrainerName · @note.CreatedAt.ToString("dd.MM.yyyy HH:mm")</span>
+                                    <button class="btn btn-link btn-sm text-danger p-0" title="Usuń notatkę" @onclick="() => DeleteNote(note.Id)"><i class="bi bi-x-lg"></i></button>
+                                </div>
+                                <div class="cp-note-text">@note.Content</div>
+                            </div>
+                        }
+                    }
+                </section>
+            </div>
+        </div>
+    }
+
+    @if (_tab == "activity")
+    {
+        <FeatureGate Flag="TrainingPlansEnabled" RequiredPlan="Pro" Title="Treningi z planu">
+            <div class="cp-facts">
+                <div><small>Ostatni trening</small><b>@(_lastWorkout is { } lw2 ? Ago(lw2) : "—")</b><span>@(_lastWorkout?.ToString("dd.MM.yyyy") ?? "brak zapisanych")</span></div>
+                <div><small>7 dni</small><b>@_workouts7</b><span>@Plural(_workouts7, "trening", "treningi", "treningów")</span></div>
+                <div><small>30 dni</small><b>@_workouts30</b><span>@Plural(_workouts30, "trening", "treningi", "treningów")</span></div>
+                <div><small>Objętość 30 dni</small><b>@_volume30.ToString("N0") kg</b><span>suma ciężaru × powtórzeń</span></div>
+            </div>
+
+            <div class="cp-grid">
+                <div class="cp-col">
+                    <section class="cp-card">
+                        <h6 class="cp-card-title"><i class="bi bi-bar-chart"></i>Regularność — ostatnie 12 tygodni</h6>
+                        <div class="cp-weeks" role="img" aria-label="Liczba treningów w kolejnych tygodniach">
+                            @foreach (var w in _weeks)
+                            {
+                                <div class="cp-week" title="@($"Tydzień od {w.Start:dd.MM}: {w.Count} {Plural(w.Count, "trening", "treningi", "treningów")}")">
+                                    <span class="cp-week-n">@(w.Count > 0 ? w.Count : "")</span>
+                                    <span class="cp-week-bar @(w.Count == 0 ? "zero" : "")" style="height:@(Math.Max(6, w.Count * 100 / Math.Max(1, _weeksMax)))%"></span>
+                                    <span class="cp-week-lab">@w.Start.ToString("dd.MM")</span>
+                                </div>
+                            }
+                        </div>
+                    </section>
+
+                    <ProgressionSuggestions ClientId="Id" UserId="@currentUserId" IsAdmin="_isAdmin" />
+
+                    <section class="cp-card">
+                        <div class="cp-card-head">
+                            <h6 class="cp-card-title mb-0"><i class="bi bi-journal-check"></i>Dziennik treningów</h6>
+                            @if (_journal.Count > JournalShown)
+                            {
+                                <a class="btn btn-link btn-sm p-0" href="@($"/trainer/activity/{Id}")">Cały dziennik</a>
+                            }
+                        </div>
+                        @if (_journal.Count == 0)
+                        {
+                            <p class="text-muted small mb-0">Klient nie zapisał jeszcze treningu z planu. Treningi pojawią się tu, gdy klient zakończy je w aplikacji.</p>
+                        }
+                        else
+                        {
+                            <p class="text-muted small">Rozwiń dzień, żeby zobaczyć serie i dodać komentarz — klient dostanie powiadomienie.</p>
+                            <WorkoutJournal ClientId="Id" Days="_journal.Take(JournalShown).ToList()" AsTrainer="true" CurrentUserId="@currentUserId" Surveys="_postWorkout" />
+                        }
+                    </section>
+                </div>
+
+                <div class="cp-col">
+                    <section class="cp-card">
+                        <div class="cp-card-head">
+                            <h6 class="cp-card-title mb-0"><i class="bi bi-clipboard-check"></i>Plany klienta</h6>
+                            <a class="btn btn-link btn-sm p-0" href="/plans/new"><i class="bi bi-plus-lg me-1"></i>Nowy</a>
+                        </div>
+                        @if (_plans.Count == 0)
+                        {
+                            <p class="text-muted small mb-0">Brak przypisanego planu. Przypisz plan, a klient zobaczy go w aplikacji i zacznie zapisywać treningi.</p>
+                        }
+                        else
+                        {
+                            @foreach (var p in _plans)
+                            {
+                                <a class="cp-plan" href="@($"/plans/edit/{p.Id}")">
+                                    <span class="cp-plan-ic"><i class="bi bi-clipboard-pulse"></i></span>
+                                    <span class="min-w-0"><b class="text-truncate d-block">@p.Name</b><small>@p.DayCount @Plural(p.DayCount, "dzień", "dni", "dni") · @p.ExerciseCount @Plural(p.ExerciseCount, "ćwiczenie", "ćwiczenia", "ćwiczeń")</small></span>
+                                    <i class="bi bi-chevron-right cp-go"></i>
+                                </a>
+                            }
+                        }
+                    </section>
+
+                    <section class="cp-card">
+                        <h6 class="cp-card-title"><i class="bi bi-trophy"></i>Rekordy</h6>
+                        @if (_records.Count == 0)
+                        {
+                            <p class="text-muted small mb-0">Rekordy pojawią się po pierwszych treningach z ciężarem.</p>
+                        }
+                        else
+                        {
+                            @foreach (var r in _records)
+                            {
+                                <div class="cp-pr">
+                                    <span class="text-truncate">@r.ExerciseName</span>
+                                    <b>@r.MaxWeight.ToString("0.##") kg <small>× @r.RepsAtMax</small></b>
+                                </div>
+                            }
+                        }
+                    </section>
+
+                    @if (_insights.Count > 0)
+                    {
+                        <section class="cp-card">
+                            <h6 class="cp-card-title"><i class="bi bi-heart-pulse"></i>Z ankiet po treningu</h6>
+                            @foreach (var ins in _insights)
+                            {
+                                <div class="cp-insight @ins.Level.ToString().ToLowerInvariant()"><i class="bi @InsightIcon(ins.Level)"></i><span>@ins.Text</span></div>
+                            }
+                            <button class="btn btn-link btn-sm p-0 mt-1" @onclick='() => SelectTab("surveys")'>Wszystkie ankiety</button>
+                        </section>
+                    }
+                </div>
+            </div>
+        </FeatureGate>
+    }
+
+    @if (_tab == "sessions")
+    {
+        <section class="cp-card">
+            <div class="cp-card-head">
+                <h6 class="cp-card-title mb-0"><i class="bi bi-calendar-week"></i>Zaplanowane</h6>
+                <button class="btn btn-primary btn-sm" @onclick="OpenBooking"><i class="bi bi-calendar-plus me-1"></i>Zarezerwuj</button>
+            </div>
+            @if (sessions is null)
+            {
+                <div class="text-center py-3"><div class="spinner-border text-primary"></div></div>
+            }
+            else if (Upcoming.Count == 0)
+            {
+                <p class="text-muted small mb-0">Brak zaplanowanych wizyt.</p>
+            }
+            else
+            {
+                @foreach (var s in Upcoming) { @SessionRow(s) }
+            }
+        </section>
+        <section class="cp-card">
+            <h6 class="cp-card-title"><i class="bi bi-clock-history"></i>Historia wizyt <span class="text-muted fw-normal small">(@Past.Count)</span></h6>
+            @if (Past.Count == 0)
+            {
+                <p class="text-muted small mb-0">Brak minionych wizyt.</p>
+            }
+            else
+            {
+                @foreach (var s in Past.Take(_pastShown)) { @SessionRow(s) }
+                @if (Past.Count > _pastShown)
+                {
+                    <button class="btn btn-outline-secondary btn-sm w-100 mt-2" @onclick="() => _pastShown += 20">Pokaż więcej</button>
+                }
+            }
+        </section>
+    }
+
+    @if (_tab == "surveys")
+    {
+        <ClientSurveysPanel ClientId="Id" CurrentUserId="@currentUserId" />
+    }
+
+    @if (_tab == "photos" && Entitlements.IsAllowed("BodyMeasurements"))
+    {
+        <ProgressPhotos ClientId="Id" UserId="@currentUserId" IsStaff="true" />
+    }
+
+    @if (_tab == "packages")
+    {
+        <section class="cp-card">
+            <div class="cp-card-head">
+                <h6 class="cp-card-title mb-0"><i class="bi bi-box-seam"></i>Pakiety</h6>
+                <button class="btn btn-outline-primary btn-sm flex-shrink-0" @onclick="OpenAddPackage">
+                    <i class="bi bi-plus-lg me-1"></i>Dodaj pakiet
+                </button>
+            </div>
+
+            @if (packages is null)
+            {
+                <div class="text-center"><div class="spinner-border spinner-border-sm text-primary"></div></div>
+            }
+            else if (!packages.Any())
+            {
+                <div class="empty-state py-3">
+                    <div class="empty-state-icon"><i class="bi bi-box-seam"></i></div>
+                    <div class="empty-state-title">Brak pakietów</div>
+                    <div class="empty-state-desc">Ten klient nie ma jeszcze żadnych pakietów.</div>
+                </div>
+            }
+            else
+            {
+                @foreach (var pkg in packages)
+                {
+                    <div class="cp-pkg @(pkg.Status == PackageStatus.Active ? "" : "inactive")">
+                        <div class="d-flex justify-content-between align-items-start mb-1 flex-wrap gap-1">
+                            <div class="fw-semibold small">
+                                @pkg.Name
+                                @if (pkg.IsForPair)
+                                {
+                                    <span class="pair-chip ms-1"><i class="bi bi-people-fill"></i>Wspólny: @(pkg.ClientId == Id ? pkg.PartnerName : pkg.ClientName)</span>
+                                }
+                            </div>
+                            <div class="d-flex gap-1 align-items-center flex-wrap">
+                                <span class="badge @PackageBadge(pkg.Status)">@PackageLabel(pkg.Status)</span>
+                                @if (pkg.IsPaid)
+                                {
+                                    <span class="badge bg-success-subtle text-success">Opłacony</span>
+                                }
+                                else
+                                {
+                                    <button class="badge bg-warning-subtle text-warning border-0"
+                                            style="cursor:pointer" title="Oznacz jako opłacony" @onclick="() => MarkPaid(pkg.Id)">
+                                        Nieopłacony ✓
+                                    </button>
+                                }
+                                <button class="btn btn-sm btn-link text-muted p-0 ms-1" title="Edytuj pakiet"
+                                        @onclick="() => OpenEditPackage(pkg)">
+                                    <i class="bi bi-pencil" style="font-size:.75rem"></i>
+                                </button>
+                                @if (pkg.Status != PackageStatus.Cancelled)
+                                {
+                                    <button class="btn btn-sm btn-link text-danger p-0" title="Anuluj pakiet"
+                                            @onclick="() => CancelPkg(pkg.Id)">
+                                        <i class="bi bi-x-circle" style="font-size:.75rem"></i>
+                                    </button>
+                                }
                             </div>
                         </div>
+                        <div class="progress mb-1" style="height:6px">
+                            <div class="progress-bar @(pkg.Status == PackageStatus.Depleted ? "bg-secondary" : "bg-primary")"
+                                 style="width:@(pkg.TotalSessions > 0 ? pkg.UsedSessions * 100 / pkg.TotalSessions : 0)%"></div>
+                        </div>
+                        <div class="d-flex justify-content-between small text-muted">
+                            <span>@pkg.RemainingCredits / @pkg.TotalSessions treningów pozostało</span>
+                            <span>@pkg.TotalPrice.ToString("N2") zł</span>
+                        </div>
+                        @if (pkg.ExpiresAt.HasValue)
+                        {
+                            <div class="small @(pkg.Status == PackageStatus.Expired ? "text-danger" : "text-muted") mt-1">
+                                <i class="bi bi-calendar-x me-1"></i>
+                                @if (pkg.Status == PackageStatus.Expired)
+                                {
+                                    <span>Przepadł @pkg.ExpiresAt.Value.ToString("dd.MM.yyyy")</span>
+                                }
+                                else
+                                {
+                                    <span>Ważny do @pkg.ExpiresAt.Value.ToString("dd.MM.yyyy")</span>
+                                }
+                            </div>
+                        }
+                    </div>
+                }
+            }
+        </section>
+    }
+
+    @if (_tab == "measurements")
+    {
+    <section class="cp-card">
+        <div class="cp-card-head">
+            <h6 class="cp-card-title mb-0"><i class="bi bi-rulers"></i>Pomiary ciała</h6>
+            <button class="btn btn-outline-primary btn-sm" @onclick="() => { addMeasurementOpen = !addMeasurementOpen; measurementError = string.Empty; }">
+                <i class="bi @(addMeasurementOpen ? "bi-x-lg" : "bi-plus-lg") me-1"></i>@(addMeasurementOpen ? "Anuluj" : "Dodaj pomiar")
+            </button>
+        </div>
+        @if (addMeasurementOpen)
+        {
+            <div class="border rounded p-3 mb-3 bg-light">
+                @if (!string.IsNullOrEmpty(measurementError))
+                {
+                    <div class="alert alert-danger py-2 small mb-2">@measurementError</div>
+                }
+                <div class="row g-2">
+                    <div class="col-12 col-sm-6">
+                        <label class="form-label form-label-sm">Data <span class="text-danger">*</span></label>
+                        <input type="date" class="form-control form-control-sm"
+                               value="@newMeasurement.MeasurementDate.ToString("yyyy-MM-dd")"
+                               @onchange="e => newMeasurement.MeasurementDate = string.IsNullOrEmpty(e.Value?.ToString()) ? DateOnly.FromDateTime(StudioClock.Today) : DateOnly.Parse(e.Value!.ToString()!)" />
+                    </div>
+                    <div class="col-6 col-sm-3">
+                        <label class="form-label form-label-sm">Waga (kg)</label>
+                        <input type="number" step="0.1" class="form-control form-control-sm" placeholder="np. 75.5"
+                               @bind="newMeasurement.WeightKg" />
+                    </div>
+                    <div class="col-6 col-sm-3">
+                        <label class="form-label form-label-sm">Tk. tłuszczowa (%)</label>
+                        <input type="number" step="0.1" class="form-control form-control-sm" placeholder="np. 18.0"
+                               @bind="newMeasurement.BodyFatPercent" />
+                    </div>
+                    <div class="col-6 col-sm-4">
+                        <label class="form-label form-label-sm">Klatka (cm)</label>
+                        <input type="number" step="0.5" class="form-control form-control-sm"
+                               @bind="newMeasurement.ChestCm" />
+                    </div>
+                    <div class="col-6 col-sm-4">
+                        <label class="form-label form-label-sm">Talia (cm)</label>
+                        <input type="number" step="0.5" class="form-control form-control-sm"
+                               @bind="newMeasurement.WaistCm" />
+                    </div>
+                    <div class="col-6 col-sm-4">
+                        <label class="form-label form-label-sm">Biodra (cm)</label>
+                        <input type="number" step="0.5" class="form-control form-control-sm"
+                               @bind="newMeasurement.HipsCm" />
+                    </div>
+                    <div class="col-6 col-sm-4">
+                        <label class="form-label form-label-sm">Udo (cm)</label>
+                        <input type="number" step="0.5" class="form-control form-control-sm"
+                               @bind="newMeasurement.ThighCm" />
+                    </div>
+                    <div class="col-6 col-sm-4">
+                        <label class="form-label form-label-sm">Ramię (cm)</label>
+                        <input type="number" step="0.5" class="form-control form-control-sm"
+                               @bind="newMeasurement.ArmCm" />
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label form-label-sm">Notatki</label>
+                        <textarea class="form-control form-control-sm" rows="2" @bind="newMeasurement.Notes"></textarea>
+                    </div>
+                </div>
+                <button class="btn btn-primary btn-sm mt-3 w-100" @onclick="SaveMeasurement" disabled="@isBusy">
+                    @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                    <i class="bi bi-floppy me-1"></i>Zapisz pomiar
+                </button>
+            </div>
+        }
+
+        @if (measurements is null)
+        {
+            <div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></div>
+        }
+        else if (!measurements.Any())
+        {
+            <p class="text-muted small text-center mb-0">Brak pomiarów. Dodaj pierwszy pomiar klikając przycisk powyżej.</p>
+        }
+        else
+        {
+            @if (measurements!.Count >= 2)
+            {
+                <div class="mb-4">
+                    <div class="d-flex flex-wrap gap-1 mb-3">
+                        @foreach (var entry in _chartMetrics)
+                        {
+                            <button type="button"
+                                    class="btn btn-sm @(_chartMetric == entry.Key ? "btn-primary" : "btn-outline-secondary")"
+                                    @onclick="() => SelectMetric(entry.Key)">
+                                @entry.Value.Label
+                            </button>
+                        }
+                    </div>
+                    <div style="height:200px;position:relative">
+                        <canvas id="meas-chart-@Id"></canvas>
+                    </div>
+                </div>
+            }
+
+            <div class="table-responsive">
+                <table class="table table-sm align-middle" style="font-size:.85rem">
+                    <thead class="table-light">
+                        <tr>
+                            <th>Data</th>
+                            <th>Waga</th>
+                            <th>Tk. tłuszcz.</th>
+                            <th>Talia</th>
+                            <th>Klatka</th>
+                            <th>Biodra</th>
+                            <th>Udo</th>
+                            <th>Ramię</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @for (int i = 0; i < measurements.Count; i++)
+                        {
+                            var m = measurements[i];
+                            var prev = i + 1 < measurements.Count ? measurements[i + 1] : null;
+                            <tr>
+                                <td class="text-nowrap fw-semibold">@m.MeasurementDate.ToString("dd.MM.yyyy") @if (m.AddedByClient) { <span class="badge bg-info-subtle text-info-emphasis fw-normal ms-1" title="Wpisane przez klienta w aplikacji">od klienta</span> }</td>
+                                <td>@MeasCell(m.WeightKg, prev?.WeightKg, "kg", false)</td>
+                                <td>@MeasCell(m.BodyFatPercent, prev?.BodyFatPercent, "%", false)</td>
+                                <td>@MeasCell(m.WaistCm, prev?.WaistCm, "cm", false)</td>
+                                <td>@MeasCell(m.ChestCm, prev?.ChestCm, "cm", true)</td>
+                                <td>@MeasCell(m.HipsCm, prev?.HipsCm, "cm", true)</td>
+                                <td>@MeasCell(m.ThighCm, prev?.ThighCm, "cm", true)</td>
+                                <td>@MeasCell(m.ArmCm, prev?.ArmCm, "cm", true)</td>
+                                <td>
+                                    <button class="btn btn-link btn-sm text-danger p-0"
+                                            title="Usuń" @onclick="() => DeleteMeasurement(m.Id)">
+                                        <i class="bi bi-trash3"></i>
+                                    </button>
+                                </td>
+                            </tr>
+                            @if (!string.IsNullOrWhiteSpace(m.Notes))
+                            {
+                                <tr class="table-light">
+                                    <td colspan="9" class="py-1 px-3 text-muted small fst-italic">
+                                        <i class="bi bi-chat-left-text me-1"></i>@m.Notes
+                                    </td>
+                                </tr>
+                            }
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+    }
+
+    @if (_tab == "account")
+    {
+        <div class="cp-grid">
+            <div class="cp-col">
+                <section class="cp-card">
+                    <div class="cp-card-head">
+                        <h6 class="cp-card-title mb-0"><i class="bi bi-person-vcard"></i>Dane klienta</h6>
+                        @if (!editMode)
+                        {
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="StartEdit"><i class="bi bi-pencil me-1"></i>Edytuj</button>
+                        }
+                    </div>
+                    @if (!editMode)
+                    {
+                        <dl class="cp-dl">
+                            <dt>E-mail</dt><dd>@client.Email</dd>
+                            <dt>Telefon</dt><dd>@(string.IsNullOrEmpty(client.Phone) ? "—" : client.Phone)</dd>
+                            <dt>Data urodzenia</dt><dd>@(client.DateOfBirth?.ToString("dd.MM.yyyy") ?? "—")</dd>
+                            <dt>Cel treningowy</dt><dd>@(string.IsNullOrWhiteSpace(client.TrainingGoal) ? "—" : client.TrainingGoal)</dd>
+                            <dt>Klient od</dt><dd>@client.CreatedAt.ToString("dd.MM.yyyy")</dd>
+                        </dl>
                     }
                     else
                     {
@@ -203,7 +764,6 @@ else if (client is not null)
                         {
                             <div class="alert alert-danger py-2 small">@editError</div>
                         }
-
                         <div class="row g-2 mb-3">
                             <div class="col-6">
                                 <label class="form-label form-label-sm">Imię</label>
@@ -213,11 +773,11 @@ else if (client is not null)
                                 <label class="form-label form-label-sm">Nazwisko</label>
                                 <input class="form-control form-control-sm" @bind="editDto.LastName" />
                             </div>
-                            <div class="col-12">
+                            <div class="col-12 col-sm-6">
                                 <label class="form-label form-label-sm">Telefon</label>
                                 <input class="form-control form-control-sm" @bind="editDto.Phone" />
                             </div>
-                            <div class="col-12">
+                            <div class="col-12 col-sm-6">
                                 <label class="form-label form-label-sm">Data urodzenia</label>
                                 <input type="date" class="form-control form-control-sm"
                                        value="@(editDto.DateOfBirth?.ToString("yyyy-MM-dd") ?? "")"
@@ -228,7 +788,6 @@ else if (client is not null)
                                 <textarea class="form-control form-control-sm" rows="2" @bind="editDto.TrainingGoal"></textarea>
                             </div>
                         </div>
-
                         <div class="d-flex gap-2">
                             <button class="btn btn-primary btn-sm flex-grow-1" @onclick="SaveEdit" disabled="@isBusy">
                                 @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
@@ -237,388 +796,166 @@ else if (client is not null)
                             <button class="btn btn-outline-secondary btn-sm" @onclick="CancelEdit">Anuluj</button>
                         </div>
                     }
-                </div>
-            </div>
+                </section>
 
-            <!-- Trainer notes -->
-            <div class="card shadow-sm">
-                <div class="card-body p-4">
-                    <h6 class="card-title mb-3"><i class="bi bi-journal-text me-2 text-primary"></i>Notatki trenera</h6>
-
-                    <div class="mb-3">
-                        <textarea class="form-control form-control-sm" rows="2" placeholder="Dodaj notatkę..." @bind="newNote"></textarea>
-                        <button class="btn btn-outline-primary btn-sm mt-2 w-100" @onclick="AddNote" disabled="@(string.IsNullOrWhiteSpace(newNote) || isBusy)">
-                            <i class="bi bi-plus-lg me-1"></i>Dodaj notatkę
-                        </button>
+                <section class="cp-card">
+                    <h6 class="cp-card-title"><i class="bi bi-sliders"></i>Rezerwacje i płatności</h6>
+                    <div class="cp-switch">
+                        <span><b>Samodzielna rezerwacja</b><small>Klient sam umawia wolne terminy w aplikacji.</small></span>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" role="switch" aria-label="Samodzielna rezerwacja"
+                                   checked="@client.AllowSelfBooking" @onchange="ToggleSelfBooking" />
+                        </div>
                     </div>
+                    <div class="cp-switch">
+                        <span><b>Zaufany klient</b><small>„Zapłacę u trenera” bez Twojej akceptacji i bez limitu nieopłaconych treningów.</small></span>
+                        <div class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" role="switch" aria-label="Zaufany klient"
+                                   checked="@client.TrustedForDeferredPayment" @onchange="ToggleTrusted" />
+                        </div>
+                    </div>
+                </section>
 
-                    @if (notes is null)
+                <section class="cp-card">
+                    <h6 class="cp-card-title"><i class="bi bi-file-earmark-pdf"></i>Raport miesięczny</h6>
+                    @if (Entitlements.IsAllowed("ClientReports"))
                     {
-                        <div class="text-center"><div class="spinner-border spinner-border-sm text-primary"></div></div>
-                    }
-                    else if (!notes.Any())
-                    {
-                        <p class="text-muted small text-center mb-0">Brak notatek.</p>
+                        <div class="d-flex gap-2 align-items-center flex-wrap">
+                            <select class="form-select form-select-sm" style="max-width:200px" @bind="_reportMonth" aria-label="Miesiąc raportu">
+                                @for (var m = 0; m < 12; m++)
+                                {
+                                    var d = StudioClock.Now.AddMonths(-m);
+                                    var v = $"{d:yyyy-MM}";
+                                    <option value="@v">@d.ToString("MMMM yyyy", _plCulture)</option>
+                                }
+                            </select>
+                            <a class="btn btn-outline-primary btn-sm" href="@ReportUrl()" target="_blank" rel="noopener">
+                                <i class="bi bi-download me-1"></i>Pobierz PDF
+                            </a>
+                        </div>
+                        <div class="form-text">Podsumowanie treningów, pomiarów i postępów — do wysłania klientowi.</div>
                     }
                     else
                     {
-                        @foreach (var note in notes)
-                        {
-                            <div class="border rounded p-2 mb-2 position-relative">
-                                <div class="small text-muted mb-1">
-                                    <i class="bi bi-person me-1"></i>@note.TrainerName
-                                    <span class="ms-2">@note.CreatedAt.ToString("dd.MM.yyyy HH:mm")</span>
-                                </div>
-                                <div class="small" style="white-space:pre-wrap">@note.Content</div>
-                                <button class="btn btn-link btn-sm text-danger p-0 position-absolute top-0 end-0 me-1"
-                                        title="Usuń" @onclick="() => DeleteNote(note.Id)">
-                                    <i class="bi bi-x-lg"></i>
-                                </button>
-                            </div>
-                        }
+                        <div class="small text-muted">Podsumowanie postępów w PDF dla klienta <PlanBadge Flag="ClientReports" RequiredPlan="Business" /></div>
                     }
-                </div>
-            </div>
-
-            <!-- Password reset card -->
-            <div class="card shadow-sm mt-4">
-                <div class="card-body p-4">
-                    <h6 class="card-title mb-3">
-                        <i class="bi bi-lock me-2 text-warning"></i>Zmień hasło klienta
-                    </h6>
-
-                    @if (!string.IsNullOrEmpty(pwMsg))
+                </section>
+                <section class="cp-card">
+                    <div class="cp-card-head">
+                        <h6 class="cp-card-title mb-0"><i class="bi bi-file-earmark-check"></i>Dokumenty i zgody</h6>
+                        <a href="/admin/documents" class="btn btn-link btn-sm p-0">Zarządzaj</a>
+                    </div>
+                    @if (_documents.Count == 0)
                     {
-                        <div class="alert @(pwError ? "alert-danger" : "alert-success") py-2 small mb-2">@pwMsg</div>
+                        <div class="small text-muted">Nie masz jeszcze dokumentów do akceptacji. Dodaj regulamin albo zgodę na wizerunek — klient zaakceptuje je w aplikacji.</div>
                     }
-
-                    <div class="mb-2">
-                        <input class="form-control form-control-sm" type="password"
-                               @bind="newPw" placeholder="Nowe hasło (min. 6 znaków)" autocomplete="new-password" />
-                    </div>
-                    <button class="btn btn-warning btn-sm w-100" @onclick="ResetClientPassword" disabled="@isBusy">
-                        @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                        <i class="bi bi-arrow-clockwise me-1"></i>Ustaw nowe hasło
-                    </button>
-                </div>
+                    else
+                    {
+                        <ul class="list-unstyled mb-0 d-flex flex-column gap-2 small">
+                            @foreach (var d in _documents)
+                            {
+                                <li class="d-flex align-items-start gap-2">
+                                    @if (d.Pending)
+                                    {
+                                        <i class="bi bi-hourglass-split text-warning"></i>
+                                    }
+                                    else if (d.Accepted == true)
+                                    {
+                                        <i class="bi bi-check-circle-fill text-success"></i>
+                                    }
+                                    else
+                                    {
+                                        <i class="bi bi-x-circle-fill text-secondary"></i>
+                                    }
+                                    <div>
+                                        <div class="fw-semibold">@d.Title</div>
+                                        <div class="text-muted">
+                                            @if (d.Pending)
+                                            {
+                                                @(d.DecidedVersion is null ? "Czeka na decyzję klienta" : "Nowa wersja — czeka na decyzję")
+                                            }
+                                            else
+                                            {
+                                                @((d.Accepted == true ? (d.Kind == PTScheduler.Domain.Constants.DocumentKinds.Required ? "Zaakceptowano " : "Zgoda udzielona ") : "Brak zgody · ") + Clock.ToWallClock(d.DecidedAtUtc!.Value).ToString("dd.MM.yyyy HH:mm"))
+                                            }
+                                        </div>
+                                    </div>
+                                </li>
+                            }
+                        </ul>
+                    }
+                </section>
             </div>
 
-        </div>
+            <div class="cp-col">
+                <section class="cp-card">
+                    <h6 class="cp-card-title"><i class="bi bi-person-badge"></i>Konto w aplikacji</h6>
+                    @if (_account is not null)
+                    {
+                        <div class="small mb-3 d-flex flex-column gap-1">
+                            @if (_account.LastLoginUtc is { } lastLogin)
+                            {
+                                <span><i class="bi bi-check-circle-fill text-success me-1"></i>Ostatnie logowanie: @Clock.ToWallClock(lastLogin).ToString("dd.MM.yyyy HH:mm")</span>
+                            }
+                            else
+                            {
+                                <span><i class="bi bi-hourglass-split text-warning me-1"></i>Klient nie korzystał jeszcze z aplikacji</span>
+                            }
+                            @if (_account.PasskeyCount > 0)
+                            {
+                                <span><i class="bi bi-fingerprint text-success me-1"></i>Logowanie odciskiem palca / Face ID włączone</span>
+                            }
+                        </div>
+                    }
 
-        <!-- Right column: tabbed -->
-        <div class="col-12 col-lg-8">
+                    @if (!string.IsNullOrEmpty(_inviteMsg))
+                    {
+                        <div class="alert @(_inviteError ? "alert-warning" : "alert-success") py-2 small mb-2">@_inviteMsg</div>
+                    }
 
-            <!-- Tab nav -->
-            <ul class="nav nav-tabs mb-3">
-                <li class="nav-item">
-                    <button class="nav-link @(_tab == "sessions" ? "active" : "")" @onclick='() => SelectTab("sessions")'>
-                        <i class="bi bi-clock-history me-1"></i>Treningi
-                        @if (sessions?.Count > 0) { <span class="badge bg-secondary ms-1 rounded-pill" style="font-size:.65rem">@sessions.Count</span> }
+                    <button class="btn btn-primary btn-sm w-100" @onclick="() => SendInvite(true)" disabled="@_inviteBusy">
+                        @if (_inviteBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        <i class="bi bi-envelope-paper me-1"></i>@(_account?.LastLoginUtc is null ? "Wyślij zaproszenie e-mailem" : "Wyślij link do ustawienia hasła")
                     </button>
-                </li>
-                <li class="nav-item">
-                    <button class="nav-link @(_tab == "measurements" ? "active" : "")" @onclick='() => SelectTab("measurements")'>
-                        <i class="bi bi-rulers me-1"></i>Pomiary
-                        @if (measurements?.Count > 0) { <span class="badge bg-secondary ms-1 rounded-pill" style="font-size:.65rem">@measurements.Count</span> }
+                    <button class="btn btn-outline-secondary btn-sm w-100 mt-2" @onclick="() => SendInvite(false)" disabled="@_inviteBusy">
+                        <i class="bi bi-link-45deg me-1"></i>Przygotuj link (SMS, WhatsApp…)
                     </button>
-                </li>
-                <li class="nav-item">
-                    <button class="nav-link @(_tab == "packages" ? "active" : "")" @onclick='() => SelectTab("packages")'>
-                        <i class="bi bi-box-seam me-1"></i>Pakiety
-                        @if (packages?.Count > 0) { <span class="badge bg-secondary ms-1 rounded-pill" style="font-size:.65rem">@packages.Count</span> }
-                    </button>
-                </li>
-            </ul>
 
-            @if (_tab == "sessions")
-            {
-                <div class="card shadow-sm">
-                    <div class="card-body p-4">
-                        <h6 class="card-title mb-3"><i class="bi bi-clock-history me-2 text-primary"></i>Historia treningów</h6>
-
-                        @if (sessions is null)
-                        {
-                            <div class="text-center py-3"><div class="spinner-border text-primary"></div></div>
-                        }
-                        else if (!sessions.Any())
-                        {
-                            <p class="text-muted text-center py-3 mb-0">Brak treningów.</p>
-                        }
-                        else
-                        {
-                            <div class="table-responsive">
-                                <table class="table table-sm table-hover align-middle">
-                                    <thead class="table-light">
-                                        <tr>
-                                            <th>Data</th>
-                                            <th>Typ</th>
-                                            <th>Trener</th>
-                                            <th>Status</th>
-                                            <th>Notatki</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody>
-                                        @foreach (var s in sessions)
-                                        {
-                                            <tr>
-                                                <td class="text-nowrap">@s.StartTime.ToString("dd.MM.yy HH:mm")</td>
-                                                <td>@s.SessionTypeName <span class="text-muted small">(@s.DurationMinutes min)</span></td>
-                                                <td class="text-muted small">@s.TrainerName</td>
-                                                <td><span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span></td>
-                                                <td class="text-muted small text-truncate" style="max-width:180px" title="@s.Notes">@s.Notes</td>
-                                            </tr>
-                                        }
-                                    </tbody>
-                                </table>
-                            </div>
-                            <div class="text-muted small mt-1">Łącznie: @sessions.Count sesji</div>
-                        }
-                    </div>
-                </div>
-            }
-
-            @if (_tab == "packages")
-            {
-                <div class="card shadow-sm">
-                    <div class="card-body p-4">
-                        <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
-                            <h6 class="card-title mb-0"><i class="bi bi-box-seam me-2 text-primary"></i>Pakiety</h6>
-                            <button class="btn btn-outline-primary btn-sm flex-shrink-0" @onclick="OpenAddPackage">
-                                <i class="bi bi-plus-lg me-1"></i>Dodaj
+                    @if (!string.IsNullOrEmpty(_inviteLink))
+                    {
+                        <div class="input-group input-group-sm mt-2">
+                            <input class="form-control" value="@_inviteLink" readonly aria-label="Link zaproszenia" />
+                            <button class="btn btn-outline-secondary" @onclick="CopyInviteLink" title="Kopiuj">
+                                <i class="bi @(_inviteCopied ? "bi-clipboard-check" : "bi-clipboard")"></i>
+                            </button>
+                            <button class="btn btn-outline-secondary" @onclick="ShareInviteLink" title="Udostępnij">
+                                <i class="bi bi-share"></i>
                             </button>
                         </div>
+                        <div class="form-text">Link działa jednorazowo przez @ClientInvite.ValidDays dni.</div>
+                    }
 
-                        @if (packages is null)
-                        {
-                            <div class="text-center"><div class="spinner-border spinner-border-sm text-primary"></div></div>
-                        }
-                        else if (!packages.Any())
-                        {
-                            <div class="empty-state py-3">
-                                <div class="empty-state-icon">📦</div>
-                                <div class="empty-state-title">Brak pakietów</div>
-                                <div class="empty-state-desc">Ten klient nie ma jeszcze żadnych pakietów.</div>
-                            </div>
-                        }
-                        else
-                        {
-                            @foreach (var pkg in packages)
+                    <details class="mt-3">
+                        <summary class="small text-muted">Ustaw hasło ręcznie</summary>
+                        <div class="mt-2">
+                            @if (!string.IsNullOrEmpty(pwMsg))
                             {
-                                <div class="border rounded p-3 mb-2 @(pkg.Status == PackageStatus.Active ? "" : "opacity-75")">
-                                    <div class="d-flex justify-content-between align-items-start mb-1 flex-wrap gap-1">
-                                        <div class="fw-semibold small">@pkg.Name</div>
-                                        <div class="d-flex gap-1 align-items-center flex-wrap">
-                                            <span class="badge @PackageBadge(pkg.Status)">@PackageLabel(pkg.Status)</span>
-                                            @if (pkg.IsPaid)
-                                            {
-                                                <span class="badge bg-success-subtle text-success">Opłacony</span>
-                                            }
-                                            else
-                                            {
-                                                <button class="badge bg-warning-subtle text-warning border-0"
-                                                        style="cursor:pointer" @onclick="() => MarkPaid(pkg.Id)">
-                                                    Nieopłacony ✓
-                                                </button>
-                                            }
-                                            <button class="btn btn-sm btn-link text-muted p-0 ms-1" title="Edytuj pakiet"
-                                                    @onclick="() => OpenEditPackage(pkg)">
-                                                <i class="bi bi-pencil" style="font-size:.75rem"></i>
-                                            </button>
-                                            @if (pkg.Status != PackageStatus.Cancelled)
-                                            {
-                                                <button class="btn btn-sm btn-link text-danger p-0" title="Anuluj pakiet"
-                                                        @onclick="() => CancelPkg(pkg.Id)">
-                                                    <i class="bi bi-x-circle" style="font-size:.75rem"></i>
-                                                </button>
-                                            }
-                                        </div>
-                                    </div>
-                                    <div class="progress mb-1" style="height:6px">
-                                        <div class="progress-bar @(pkg.Status == PackageStatus.Depleted ? "bg-secondary" : "bg-primary")"
-                                             style="width:@(pkg.TotalSessions > 0 ? pkg.UsedSessions * 100 / pkg.TotalSessions : 0)%"></div>
-                                    </div>
-                                    <div class="d-flex justify-content-between small text-muted">
-                                        <span>@pkg.RemainingCredits / @pkg.TotalSessions sesji pozostało</span>
-                                        <span>@pkg.TotalPrice.ToString("N2") zł</span>
-                                    </div>
-                                    @if (pkg.ExpiresAt.HasValue)
-                                    {
-                                        <div class="small @(pkg.Status == PackageStatus.Expired ? "text-danger" : "text-muted") mt-1">
-                                            <i class="bi bi-calendar-x me-1"></i>
-                                            @if (pkg.Status == PackageStatus.Expired)
-                                            {
-                                                <span>Przepadł @pkg.ExpiresAt.Value.ToString("dd.MM.yyyy")</span>
-                                            }
-                                            else
-                                            {
-                                                <span>Ważny do @pkg.ExpiresAt.Value.ToString("dd.MM.yyyy")</span>
-                                            }
-                                        </div>
-                                    }
-                                </div>
+                                <div class="alert @(pwError ? "alert-danger" : "alert-success") py-2 small mb-2">@pwMsg</div>
                             }
-                        }
-                    </div>
-                </div>
-            }
-
-            @if (_tab == "measurements")
-            {
-            <!-- Body measurements -->
-            <div class="card shadow-sm mt-0">
-                <div class="card-body p-4">
-                    <div class="d-flex align-items-center justify-content-between mb-3 flex-wrap gap-2">
-                        <h6 class="card-title mb-0"><i class="bi bi-rulers me-2 text-primary"></i>Pomiary ciała</h6>
-                        <button class="btn btn-outline-primary btn-sm" @onclick="() => { addMeasurementOpen = !addMeasurementOpen; measurementError = string.Empty; }">
-                            <i class="bi @(addMeasurementOpen ? "bi-x-lg" : "bi-plus-lg") me-1"></i>@(addMeasurementOpen ? "Anuluj" : "Dodaj pomiar")
-                        </button>
-                    </div>
-
-                    @if (addMeasurementOpen)
-                    {
-                        <div class="border rounded p-3 mb-3 bg-light">
-                            @if (!string.IsNullOrEmpty(measurementError))
-                            {
-                                <div class="alert alert-danger py-2 small mb-2">@measurementError</div>
-                            }
-                            <div class="row g-2">
-                                <div class="col-12 col-sm-6">
-                                    <label class="form-label form-label-sm">Data <span class="text-danger">*</span></label>
-                                    <input type="date" class="form-control form-control-sm"
-                                           value="@newMeasurement.MeasurementDate.ToString("yyyy-MM-dd")"
-                                           @onchange="e => newMeasurement.MeasurementDate = string.IsNullOrEmpty(e.Value?.ToString()) ? DateOnly.FromDateTime(DateTime.Today) : DateOnly.Parse(e.Value!.ToString()!)" />
-                                </div>
-                                <div class="col-6 col-sm-3">
-                                    <label class="form-label form-label-sm">Waga (kg)</label>
-                                    <input type="number" step="0.1" class="form-control form-control-sm" placeholder="np. 75.5"
-                                           @bind="newMeasurement.WeightKg" />
-                                </div>
-                                <div class="col-6 col-sm-3">
-                                    <label class="form-label form-label-sm">Tk. tłuszczowa (%)</label>
-                                    <input type="number" step="0.1" class="form-control form-control-sm" placeholder="np. 18.0"
-                                           @bind="newMeasurement.BodyFatPercent" />
-                                </div>
-                                <div class="col-6 col-sm-4">
-                                    <label class="form-label form-label-sm">Klatka (cm)</label>
-                                    <input type="number" step="0.5" class="form-control form-control-sm"
-                                           @bind="newMeasurement.ChestCm" />
-                                </div>
-                                <div class="col-6 col-sm-4">
-                                    <label class="form-label form-label-sm">Talia (cm)</label>
-                                    <input type="number" step="0.5" class="form-control form-control-sm"
-                                           @bind="newMeasurement.WaistCm" />
-                                </div>
-                                <div class="col-6 col-sm-4">
-                                    <label class="form-label form-label-sm">Biodra (cm)</label>
-                                    <input type="number" step="0.5" class="form-control form-control-sm"
-                                           @bind="newMeasurement.HipsCm" />
-                                </div>
-                                <div class="col-6 col-sm-4">
-                                    <label class="form-label form-label-sm">Udo (cm)</label>
-                                    <input type="number" step="0.5" class="form-control form-control-sm"
-                                           @bind="newMeasurement.ThighCm" />
-                                </div>
-                                <div class="col-6 col-sm-4">
-                                    <label class="form-label form-label-sm">Ramię (cm)</label>
-                                    <input type="number" step="0.5" class="form-control form-control-sm"
-                                           @bind="newMeasurement.ArmCm" />
-                                </div>
-                                <div class="col-12">
-                                    <label class="form-label form-label-sm">Notatki</label>
-                                    <textarea class="form-control form-control-sm" rows="2" @bind="newMeasurement.Notes"></textarea>
-                                </div>
+                            <div class="mb-2">
+                                <input class="form-control form-control-sm" type="password"
+                                       @bind="newPw" placeholder="Nowe hasło (min. 8 znaków, w tym cyfra)" autocomplete="new-password" />
                             </div>
-                            <button class="btn btn-primary btn-sm mt-3 w-100" @onclick="SaveMeasurement" disabled="@isBusy">
+                            <button class="btn btn-warning btn-sm w-100" @onclick="ResetClientPassword" disabled="@isBusy">
                                 @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                                <i class="bi bi-floppy me-1"></i>Zapisz pomiar
+                                <i class="bi bi-arrow-clockwise me-1"></i>Ustaw nowe hasło
                             </button>
                         </div>
-                    }
-
-                    @if (measurements is null)
-                    {
-                        <div class="text-center py-3"><div class="spinner-border spinner-border-sm text-primary"></div></div>
-                    }
-                    else if (!measurements.Any())
-                    {
-                        <p class="text-muted small text-center mb-0">Brak pomiarów. Dodaj pierwszy pomiar klikając przycisk powyżej.</p>
-                    }
-                    else
-                    {
-                        @if (measurements!.Count >= 2)
-                        {
-                            <div class="mb-4">
-                                <div class="d-flex flex-wrap gap-1 mb-3">
-                                    @foreach (var entry in _chartMetrics)
-                                    {
-                                        <button type="button"
-                                                class="btn btn-sm @(_chartMetric == entry.Key ? "btn-primary" : "btn-outline-secondary")"
-                                                @onclick="() => SelectMetric(entry.Key)">
-                                            @entry.Value.Label
-                                        </button>
-                                    }
-                                </div>
-                                <div style="height:200px;position:relative">
-                                    <canvas id="meas-chart-@Id"></canvas>
-                                </div>
-                            </div>
-                        }
-
-                        <div class="table-responsive">
-                            <table class="table table-sm align-middle" style="font-size:.85rem">
-                                <thead class="table-light">
-                                    <tr>
-                                        <th>Data</th>
-                                        <th>Waga</th>
-                                        <th>Tk. tłuszcz.</th>
-                                        <th>Talia</th>
-                                        <th>Klatka</th>
-                                        <th>Biodra</th>
-                                        <th>Udo</th>
-                                        <th>Ramię</th>
-                                        <th></th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    @for (int i = 0; i < measurements.Count; i++)
-                                    {
-                                        var m = measurements[i];
-                                        var prev = i + 1 < measurements.Count ? measurements[i + 1] : null;
-                                        <tr>
-                                            <td class="text-nowrap fw-semibold">@m.MeasurementDate.ToString("dd.MM.yyyy")</td>
-                                            <td>@MeasCell(m.WeightKg, prev?.WeightKg, "kg", false)</td>
-                                            <td>@MeasCell(m.BodyFatPercent, prev?.BodyFatPercent, "%", false)</td>
-                                            <td>@MeasCell(m.WaistCm, prev?.WaistCm, "cm", false)</td>
-                                            <td>@MeasCell(m.ChestCm, prev?.ChestCm, "cm", true)</td>
-                                            <td>@MeasCell(m.HipsCm, prev?.HipsCm, "cm", true)</td>
-                                            <td>@MeasCell(m.ThighCm, prev?.ThighCm, "cm", true)</td>
-                                            <td>@MeasCell(m.ArmCm, prev?.ArmCm, "cm", true)</td>
-                                            <td>
-                                                <button class="btn btn-link btn-sm text-danger p-0"
-                                                        title="Usuń" @onclick="() => DeleteMeasurement(m.Id)">
-                                                    <i class="bi bi-trash3"></i>
-                                                </button>
-                                            </td>
-                                        </tr>
-                                        @if (!string.IsNullOrWhiteSpace(m.Notes))
-                                        {
-                                            <tr class="table-light">
-                                                <td colspan="9" class="py-1 px-3 text-muted small fst-italic">
-                                                    <i class="bi bi-chat-left-text me-1"></i>@m.Notes
-                                                </td>
-                                            </tr>
-                                        }
-                                    }
-                                </tbody>
-                            </table>
-                        </div>
-                    }
-                </div>
+                    </details>
+                </section>
             </div>
-            }
-
         </div>
-    </div>
+    }
 }
 
 <!-- Add package modal -->
@@ -637,6 +974,23 @@ else if (client is not null)
                         <div class="alert alert-danger py-2 small">@pkgError</div>
                     }
                     <div class="row g-3">
+                        <div class="col-12">
+                            <div class="pair-toggle">
+                                <button type="button" class="@(_pkgForPair ? "" : "active")" @onclick="() => { _pkgForPair = false; newPkg.PartnerClientId = null; UpdatePkgName(); }"><i class="bi bi-person-fill"></i>Tylko @client!.FirstName</button>
+                                <button type="button" class="@(_pkgForPair ? "active" : "")" @onclick="SetPkgForPair"><i class="bi bi-people-fill"></i>Dla pary</button>
+                            </div>
+                            @if (_pkgForPair)
+                            {
+                                <select class="form-select mt-2" @bind="_pkgPartnerId" @bind:after="UpdatePkgName">
+                                    <option value="0">— z kim trenuje? —</option>
+                                    @foreach (var c in PartnerChoices)
+                                    {
+                                        <option value="@c.Id">@c.Name</option>
+                                    }
+                                </select>
+                                <div class="form-text">Pakiet należy do obojga — oboje widzą go od razu. Za wspólny trening schodzi 1.</div>
+                            }
+                        </div>
                         <div class="col-12">
                             <label class="form-label">Typ sesji <span class="text-danger">*</span></label>
                             <select class="form-select" @bind="newPkg.SessionTypeId" @bind:after="UpdatePkgName">
@@ -672,6 +1026,19 @@ else if (client is not null)
                         <div class="col-12">
                             <label class="form-label">Notatki</label>
                             <textarea class="form-control" rows="2" @bind="newPkg.Notes"></textarea>
+                        </div>
+                        <div class="col-12">
+                            <div class="form-check mb-2">
+                                <input type="checkbox" class="form-check-input" id="newPkgPaid" @bind="newPkg.IsPaid" />
+                                <label class="form-check-label" for="newPkgPaid">Opłacony (np. gotówka lub przelew)</label>
+                            </div>
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="newPkgHidden" @bind="newPkg.IsHidden" />
+                                <label class="form-check-label" for="newPkgHidden">
+                                    <i class="bi bi-eye-slash me-1"></i>Ukryj w finansach
+                                </label>
+                                <div class="form-text">Kwota trafi do ukrytych finansów zamiast do głównych.</div>
+                            </div>
                         </div>
                     </div>
                 </div>
@@ -725,6 +1092,15 @@ else if (client is not null)
                             <label class="form-label">Notatki</label>
                             <textarea class="form-control" rows="2" @bind="editPkg.Notes"></textarea>
                         </div>
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input type="checkbox" class="form-check-input" id="editPkgHidden" @bind="editPkg.IsHidden" />
+                                <label class="form-check-label" for="editPkgHidden">
+                                    <i class="bi bi-eye-slash me-1"></i>Ukryj w finansach
+                                </label>
+                                <div class="form-text">Kwota trafi do ukrytych finansów zamiast do głównych.</div>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -757,25 +1133,40 @@ else if (client is not null)
                     <div class="row g-3">
                         <div class="col-12">
                             <label class="form-label">Typ sesji <span class="text-danger">*</span></label>
-                            <select class="form-select" @bind="bookingDto.SessionTypeId">
+                            <select class="form-select" @bind="bookingDto.SessionTypeId" @bind:after="OnBookingTypeChanged">
                                 <option value="0">— wybierz —</option>
                                 @foreach (var t in sessionTypes)
                                 {
-                                    <option value="@t.Id">@t.Name (@t.DurationMinutes min)</option>
+                                    <option value="@t.Id">@t.Name (@t.DurationMinutes min)@(t.IsPair ? " · w parze" : "")</option>
                                 }
                             </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-check">
+                                <input class="form-check-input" type="checkbox" @bind="_bookingWithPartner" @bind:after="EnsureAllClientsAsync" />
+                                <span class="form-check-label">Trening w parze</span>
+                            </label>
+                            @if (_bookingWithPartner)
+                            {
+                                <select class="form-select mt-1" @bind="_bookingPartnerId">
+                                    <option value="0">— z kim? —</option>
+                                    @foreach (var c in PartnerChoices)
+                                    {
+                                        <option value="@c.Id">@c.Name</option>
+                                    }
+                                </select>
+                                <div class="form-text">Obie osoby dostaną własną wizytę i przypomnienie. Wspólny pakiet — schodzi 1; bez niego po 1 z pakietu każdej osoby.</div>
+                            }
                         </div>
                         <div class="col-6">
                             <label class="form-label">Data <span class="text-danger">*</span></label>
                             <input type="date" class="form-control"
                                    value="@bookingDate"
-                                   @onchange="e => bookingDate = e.Value?.ToString() ?? bookingDate" />
+                                   @onchange="e => { bookingDate = e.Value?.ToString() ?? bookingDate; bookingOverlap = false; }" />
                         </div>
                         <div class="col-6">
                             <label class="form-label">Godzina <span class="text-danger">*</span></label>
-                            <input type="time" class="form-control"
-                                   value="@bookingTime"
-                                   @onchange="e => bookingTime = e.Value?.ToString() ?? bookingTime" />
+                            <TimePicker @bind-Value="bookingTime" />
                         </div>
                         <div class="col-12">
                             <label class="form-label">Notatki</label>
@@ -785,10 +1176,20 @@ else if (client is not null)
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-outline-secondary" @onclick="CloseBooking">Anuluj</button>
-                    <button class="btn btn-primary" @onclick="SubmitBooking" disabled="@isBusy">
-                        @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                        Zarezerwuj
-                    </button>
+                    @if (bookingOverlap)
+                    {
+                        <button class="btn btn-warning" @onclick="() => SubmitBooking(true)" disabled="@isBusy">
+                            @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            <i class="bi bi-exclamation-triangle me-1"></i>Nałóż mimo to
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-primary" @onclick="() => SubmitBooking(false)" disabled="@isBusy">
+                            @if (isBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            Zarezerwuj
+                        </button>
+                    }
                 </div>
             </div>
         </div>
@@ -797,6 +1198,305 @@ else if (client is not null)
 
 @code {
     [Parameter] public int Id { get; set; }
+
+    [SupplyParameterFromQuery(Name = "invite")] public string? InviteQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "tab")] public string? TabQuery { get; set; }
+
+    // ── Panel klienta: „Co się dzieje”, oś zdarzeń i treningi z planu ──
+
+    private sealed record AttentionItem(string Level, string Icon, string Text, string? Tab = null, string? Href = null);
+    private sealed record FeedItem(DateTime When, string Icon, string Tone, string Title, string? Sub, string? Tab);
+    private sealed record WeekBar(DateOnly Start, int Count);
+
+    private const int JournalShown = 8;
+    private bool _plansOn;
+    private int? _age;
+    private int _unreadChat;
+    private string? _lastClientMessage;
+    private DateTime? _lastClientMessageAt;
+    private string? _activePackageName;
+    private int _unpaidOffPackage;
+    private int _pastShown = 20;
+    private List<AttentionItem> _attention = [];
+    private List<FeedItem> _feed = [];
+    private const int FeedStart = 5;
+    private int _feedShown = FeedStart;
+
+    private List<WorkoutJournalDayDto> _journal = [];
+    private List<TrainingPlanListItemDto> _plans = [];
+    private List<PersonalRecordDto> _records = [];
+    private Dictionary<DateOnly, PTScheduler.Application.Surveys.SurveyResponseDto> _postWorkout = [];
+    private PTScheduler.Application.Surveys.SurveyResponseDto? _health;
+    private List<PTScheduler.Application.Surveys.SurveyInsight> _insights = [];
+    private int _progressionCount;
+    private DateOnly? _lastWorkout;
+    private int? _daysSinceWorkout;
+    private int _workouts7;
+    private int _workouts30;
+    private decimal _volume30;
+    private List<WeekBar> _weeks = [];
+    private int _weeksMax = 1;
+
+    private SessionDto? _nextSession => Upcoming.FirstOrDefault();
+
+    private List<SessionDto> Upcoming => sessions?
+        .Where(s => s.Status == SessionStatus.Scheduled && s.EndTime >= StudioClock.Now)
+        .OrderBy(s => s.StartTime).ToList() ?? [];
+
+    private List<SessionDto> Past => sessions?
+        .Where(s => !(s.Status == SessionStatus.Scheduled && s.EndTime >= StudioClock.Now))
+        .OrderByDescending(s => s.StartTime).ToList() ?? [];
+
+    private IEnumerable<(string Key, string Icon, string Label, int Count)> Tabs()
+    {
+        yield return ("overview", "bi-grid-1x2", "Przegląd", _attention.Count(a => a.Level != "info"));
+        if (_plansOn) yield return ("activity", "pt-ico-dumbbell", "Aktywność", 0);
+        yield return ("sessions", "bi-calendar-week", "Wizyty", Upcoming.Count);
+        yield return ("packages", "bi-box-seam", "Pakiety", 0);
+        yield return ("measurements", "bi-rulers", "Pomiary", 0);
+        if (Entitlements.IsAllowed("BodyMeasurements")) yield return ("photos", "bi-camera", "Zdjęcia", 0);
+        yield return ("surveys", "bi-clipboard2-pulse", "Ankiety", 0);
+        yield return ("account", "bi-person-gear", "Konto", 0);
+    }
+
+    /// <summary>Treningi z planu, ankiety, wiadomości — wszystko, co składa się na obraz klienta.</summary>
+    private async Task LoadInsightsAsync()
+    {
+        _plansOn = Entitlements.IsAllowed("TrainingPlansEnabled");
+        _journal = []; _plans = []; _records = []; _postWorkout = []; _health = null; _insights = [];
+        _progressionCount = 0; _unreadChat = 0; _lastClientMessage = null; _lastClientMessageAt = null;
+
+        // Każde źródło osobno: brak jednego (np. wyłączony moduł) nie psuje całego panelu.
+        if (_plansOn)
+        {
+            try { _journal = await WorkoutLog.GetJournalAsync(Id, 90); } catch { }
+            try { _plans = await PlanService.GetClientPlansAsync(Id); } catch { }
+            try { _records = await WorkoutLog.GetPersonalRecordsAsync(Id, 6); } catch { }
+            try { _progressionCount = (await Progression.GetSuggestionsAsync(currentUserId, _isAdmin, Id)).Count; } catch { }
+        }
+        try { _postWorkout = await Surveys.GetPostWorkoutByDateAsync(Id, 120); } catch { }
+        try { _health = await Surveys.GetLatestAsync(Id, SurveyKind.HealthIntake); } catch { }
+        try
+        {
+            var stats = await Surveys.GetPostWorkoutStatsAsync(Id);
+            _insights = stats.Insights.OrderByDescending(i => i.Level).Take(4).ToList();
+        }
+        catch { }
+        try
+        {
+            var conv = (await Chat.GetConversationsAsync(_isAdmin ? null : currentUserId)).FirstOrDefault(c => c.ClientId == Id);
+            if (conv is not null)
+            {
+                _unreadChat = conv.Unread;
+                if (!conv.LastFromStaff) { _lastClientMessage = conv.LastMessage; _lastClientMessageAt = conv.LastMessageAt; }
+            }
+        }
+        catch { }
+    }
+
+    private void ComputeActivity()
+    {
+        var today = DateOnly.FromDateTime(StudioClock.Today);
+        _lastWorkout = _journal.Count > 0 ? _journal.Max(d => d.Date) : null;
+        _daysSinceWorkout = _lastWorkout is { } lw ? today.DayNumber - lw.DayNumber : null;
+        _workouts7 = _journal.Count(d => today.DayNumber - d.Date.DayNumber < 7);
+        _workouts30 = _journal.Count(d => today.DayNumber - d.Date.DayNumber < 30);
+        _volume30 = _journal.Where(d => today.DayNumber - d.Date.DayNumber < 30).Sum(d => d.TotalVolume);
+
+        var monday = today.AddDays(-(((int)today.DayOfWeek + 6) % 7));
+        _weeks = Enumerable.Range(0, 12).Reverse()
+            .Select(i => monday.AddDays(-7 * i))
+            .Select(start => new WeekBar(start, _journal.Count(d => d.Date >= start && d.Date < start.AddDays(7))))
+            .ToList();
+        _weeksMax = Math.Max(1, _weeks.Max(w => w.Count));
+    }
+
+    private void ComputeAttention()
+    {
+        var list = new List<AttentionItem>();
+        var now = StudioClock.Now;
+
+        if (_unreadChat > 0)
+            list.Add(new("warn", "bi-chat-dots-fill", $"{_unreadChat} {Plural(_unreadChat, "nieprzeczytana wiadomość", "nieprzeczytane wiadomości", "nieprzeczytanych wiadomości")}", Href: $"/chat?client={Id}"));
+
+        var awaiting = sessions?.Count(s => s.AwaitingApproval && s.Status == SessionStatus.Scheduled) ?? 0;
+        if (awaiting > 0)
+            list.Add(new("warn", "bi-hourglass-split", $"{awaiting} {Plural(awaiting, "termin czeka", "terminy czekają", "terminów czeka")} na Twoją akceptację", Href: "/sessions"));
+
+        if (_health is { ReviewedAtUtc: null })
+            list.Add(new(_health.FlagCount > 0 ? "danger" : "info", "bi-heart-pulse", _health.FlagCount > 0
+                ? $"Ankieta zdrowotna: {_health.FlagCount} {Plural(_health.FlagCount, "odpowiedź wymaga", "odpowiedzi wymagają", "odpowiedzi wymaga")} uwagi"
+                : "Nowa ankieta zdrowotna do przejrzenia", "surveys"));
+
+        if (_health is null)
+            list.Add(new("info", "bi-clipboard2-pulse", "Brak ankiety zdrowotnej — wypełnijcie ją razem na najbliższym spotkaniu", Href: $"/clients/{Id}/ankieta/zdrowie"));
+
+        var flagged = _postWorkout.Values.Count(r => r.FlagCount > 0 && r.ReviewedAtUtc is null);
+        if (flagged > 0)
+            list.Add(new("danger", "bi-exclamation-octagon", $"{flagged} {Plural(flagged, "ankieta", "ankiety", "ankiet")} po treningu z sygnałem ostrzegawczym (ból, złe samopoczucie)", "surveys"));
+
+        foreach (var ins in _insights.Where(i => i.Level is PTScheduler.Application.Surveys.InsightLevel.Danger or PTScheduler.Application.Surveys.InsightLevel.Warning).Take(1))
+            list.Add(new(ins.Level == PTScheduler.Application.Surveys.InsightLevel.Danger ? "danger" : "warn", "bi-speedometer2", ins.Text, "activity"));
+
+        if (_unpaidOffPackage > 0)
+            list.Add(new("warn", "bi-cash-coin", $"{_unpaidOffPackage} {Plural(_unpaidOffPackage, "nieopłacony trening", "nieopłacone treningi", "nieopłaconych treningów")} poza pakietem", "sessions"));
+        if (_unpaidBalance > 0)
+            list.Add(new("warn", "bi-wallet2", $"Nieopłacony pakiet — {_unpaidBalance:N0} zł", "packages"));
+
+        var active = packages?.Where(p => p.Status == PackageStatus.Active).ToList() ?? [];
+        if (active.Count > 0 && _activeCredits <= 2)
+            list.Add(new("warn", "bi-box-seam", _activeCredits == 0
+                ? "Pakiet wykorzystany — zaproponuj kolejny"
+                : $"{(_activeCredits == 1 ? "Został 1 trening" : $"Zostały {_activeCredits} treningi")} w pakiecie — dobry moment, żeby zaproponować kolejny", "packages"));
+        else if (active.Count == 0 && Upcoming.Count > 0)
+            list.Add(new("info", "bi-box-seam", "Klient ma zaplanowane wizyty, ale nie ma aktywnego pakietu", "packages"));
+        foreach (var p in active.Where(p => p.ExpiresAt is { } e && e >= DateTime.UtcNow && e <= DateTime.UtcNow.AddDays(14) && p.RemainingCredits > 0))
+            list.Add(new("info", "bi-calendar-x", $"„{p.Name}” wygasa {p.ExpiresAt:dd.MM} — zostało {p.RemainingCredits} {Plural(p.RemainingCredits, "trening", "treningi", "treningów")}", "packages"));
+
+        if (_plansOn)
+        {
+            if (_plans.Count > 0 && _daysSinceWorkout is > 7)
+                list.Add(new("warn", "pt-ico-dumbbell", $"Nie ćwiczy z planu od {_daysSinceWorkout} dni — może warto zapytać, jak idzie?", "activity"));
+            else if (_plans.Count > 0 && _lastWorkout is null)
+                list.Add(new("info", "pt-ico-dumbbell", "Plan przypisany, ale klient nie zapisał jeszcze żadnego treningu", "activity"));
+            else if (_plans.Count == 0)
+                list.Add(new("info", "bi-clipboard-plus", "Brak planu treningowego — przypisz plan do ćwiczenia między wizytami", "activity"));
+            if (_progressionCount > 0)
+                list.Add(new("info", "bi-graph-up-arrow", $"{_progressionCount} {Plural(_progressionCount, "propozycja", "propozycje", "propozycji")} zwiększenia ciężaru na podstawie RPE", "activity"));
+        }
+
+        if (Upcoming.Count == 0 && client?.Status == ClientStatus.Active)
+        {
+            var last = Past.FirstOrDefault(s => s.Status == SessionStatus.Completed);
+            if (last is not null && (now - last.StartTime).TotalDays > 14)
+                list.Add(new("info", "bi-calendar-plus", $"Brak zaplanowanej wizyty — ostatnia była {Ago(last.StartTime)}", "sessions"));
+        }
+
+        if (_lastMeasDate is { } lm && DateOnly.FromDateTime(StudioClock.Today).DayNumber - lm.DayNumber > 45)
+            list.Add(new("info", "bi-rulers", $"Ostatni pomiar {lm:dd.MM.yyyy} — czas na nowy?", "measurements"));
+
+        if (_account is { LastLoginUtc: null })
+            list.Add(new("info", "bi-phone", "Klient nie zalogował się jeszcze do aplikacji — wyślij zaproszenie", "account"));
+
+        var order = new Dictionary<string, int> { ["danger"] = 0, ["warn"] = 1, ["info"] = 2 };
+        _attention = list.OrderBy(a => order[a.Level]).ToList();
+    }
+
+    private void ComputeFeed()
+    {
+        var feed = new List<FeedItem>();
+        foreach (var s in Past.Take(40))
+        {
+            feed.Add(s.Status switch
+            {
+                SessionStatus.Completed => new(s.StartTime, "bi-check2-circle", "ok", s.SessionTypeName, $"odbyta wizyta · {s.StartTime:dd.MM HH:mm} · {s.DurationMinutes} min", "sessions"),
+                SessionStatus.Cancelled => new(s.StartTime, "bi-x-circle", "danger", $"Odwołana: {s.SessionTypeName}", s.IsLateCancellation ? "późne odwołanie" + (string.IsNullOrWhiteSpace(s.CancellationReason) ? "" : $" · {s.CancellationReason}") : s.CancellationReason, "sessions"),
+                SessionStatus.NoShow => new(s.StartTime, "bi-person-x", "warn", "Nieobecność na wizycie", $"{s.SessionTypeName} · {s.StartTime:dd.MM HH:mm}", "sessions"),
+                _ => new(s.StartTime, "bi-calendar", "muted", s.SessionTypeName, null, "sessions")
+            });
+        }
+        foreach (var d in _journal.Take(40))
+        {
+            var sub = $"{d.Exercises.Count} {Plural(d.Exercises.Count, "ćwiczenie", "ćwiczenia", "ćwiczeń")} · {d.SetCount} serii"
+                      + (d.TotalVolume > 0 ? $" · {d.TotalVolume:N0} kg" : "");
+            if (_postWorkout.TryGetValue(d.Date, out var survey) && survey.FlagCount > 0) sub += " · ankieta: sygnał ostrzegawczy";
+            feed.Add(new(d.Date.ToDateTime(new TimeOnly(12, 0)), "pt-ico-dumbbell", "violet", "Trening z planu", sub, "activity"));
+        }
+        foreach (var m in measurements?.Take(5) ?? [])
+            feed.Add(new(m.MeasurementDate.ToDateTime(new TimeOnly(9, 0)), "bi-rulers", "info", m.AddedByClient ? "Klient wpisał pomiar" : "Nowy pomiar",
+                m.WeightKg is { } w ? $"waga {w:0.#} kg" + (m.BodyFatPercent is { } f ? $" · tłuszcz {f:0.#}%" : "") : null, "measurements"));
+        foreach (var p in packages?.Take(5) ?? [])
+            feed.Add(new(Clock.ToWallClock(p.PurchasedAt), "bi-bag-check", "ok", p.Name, p.IsPaid ? "nowy pakiet · opłacony" : "nowy pakiet · czeka na płatność", "packages"));
+        if (_lastClientMessageAt is { } lm && !string.IsNullOrWhiteSpace(_lastClientMessage))
+            feed.Add(new(Clock.ToWallClock(lm), "bi-chat-dots", "info", "Wiadomość od klienta", Truncate(_lastClientMessage, 90), null));
+
+        _feed = feed.Where(f => f.When <= StudioClock.Now.AddHours(1)).OrderByDescending(f => f.When).Take(40).ToList();
+    }
+
+    private void RefreshPanel()
+    {
+        ComputeStats();
+        ComputeActivity();
+        ComputeAttention();
+        ComputeFeed();
+    }
+
+    private RenderFragment SessionRow(SessionDto s) => __builder =>
+    {
+        <div class="cp-srow">
+            <div class="cp-sdate @(s.Status == SessionStatus.Scheduled ? "" : "past")">
+                <b>@s.StartTime.Day</b><small>@s.StartTime.ToString("MMM", _plCulture)</small>
+            </div>
+            <div class="cp-sbody">
+                <div class="cp-stitle">
+                    @s.SessionTypeName
+                    @if (s.IsPair) { <span class="pair-chip ms-1"><i class="bi bi-people-fill"></i>z: @s.PartnerName</span> }
+                </div>
+                <small>@DayLabel(s.StartTime), @s.StartTime.ToString("HH:mm") · @s.DurationMinutes min@(string.IsNullOrWhiteSpace(s.Notes) ? "" : " · " + s.Notes)</small>
+            </div>
+            <div class="cp-sstatus">
+                @if (s.AwaitingApproval) { <span class="badge bg-warning-subtle text-warning">Do akceptacji</span> }
+                else { <span class="badge @StatusBadge(s.Status)">@StatusLabel(s.Status)</span> }
+                @if (s.OffPackagePayment is not null && s.PaidAt is null && s.Status != SessionStatus.Cancelled)
+                {
+                    <span class="badge bg-danger-subtle text-danger">Nieopłacona</span>
+                }
+            </div>
+        </div>
+    };
+
+    private static string DayLabel(DateTime dt)
+    {
+        var diff = (dt.Date - StudioClock.Today.Date).Days;
+        return diff switch
+        {
+            0 => "dziś",
+            1 => "jutro",
+            -1 => "wczoraj",
+            > 1 and < 7 => dt.ToString("dddd", _plCulture),
+            _ => dt.ToString("d MMM", _plCulture)
+        };
+    }
+
+    private static string Ago(DateOnly d) => Ago(d.ToDateTime(new TimeOnly(12, 0)));
+
+    private static string Ago(DateTime dt)
+    {
+        var days = (StudioClock.Today.Date - dt.Date).Days;
+        return days switch
+        {
+            <= 0 => "dziś",
+            1 => "wczoraj",
+            < 7 => $"{days} dni temu",
+            < 30 => $"{days / 7} {Plural(days / 7, "tydzień", "tygodnie", "tygodni")} temu",
+            _ => dt.ToString("dd.MM.yyyy")
+        };
+    }
+
+    private static string Plural(int n, string one, string few, string many)
+    {
+        if (n == 1) return one;
+        var d = n % 10; var t = n % 100;
+        return d is >= 2 and <= 4 && t is < 12 or > 14 ? few : many;
+    }
+
+    private static string Truncate(string s, int max) => s.Length <= max ? s : s[..max].TrimEnd() + "…";
+
+    private static string InsightIcon(PTScheduler.Application.Surveys.InsightLevel l) => l switch
+    {
+        PTScheduler.Application.Surveys.InsightLevel.Danger => "bi-exclamation-octagon-fill",
+        PTScheduler.Application.Surveys.InsightLevel.Warning => "bi-exclamation-triangle-fill",
+        PTScheduler.Application.Surveys.InsightLevel.Positive => "bi-hand-thumbs-up-fill",
+        _ => "bi-info-circle-fill"
+    };
+
+    private ClientAccountStatus? _account;
+    private List<ClientDocumentStatusDto> _documents = [];
+    private string? _inviteLink;
+    private string _inviteMsg = string.Empty;
+    private bool _inviteError;
+    private bool _inviteBusy;
+    private bool _inviteCopied;
 
     private ClientDto? client;
     private List<TrainerNoteDto>? notes;
@@ -820,9 +1520,50 @@ else if (client is not null)
     private bool bookingOpen;
     private CreateSessionDto bookingDto = new();
     private string bookingDate = string.Empty;
-    private string bookingTime = string.Empty;
+    private TimeOnly bookingTime;
     private string bookingError = string.Empty;
+    private bool bookingOverlap;   // kolizja terminu wykryta — czeka na potwierdzenie nałożenia
     private List<SessionTypeDto> sessionTypes = [];
+
+    // Trening w parze
+    private List<PartnerDto> _partners = [];
+    private List<ClientSummaryDto> _allClients = [];
+    private bool _pkgForPair;
+    private int _pkgPartnerId;
+    private bool _bookingWithPartner;
+    private int _bookingPartnerId;
+
+    // Najpierw osoby z pary, potem pozostali podopieczni.
+    private IEnumerable<(int Id, string Name)> PartnerChoices =>
+        _partners.Select(p => (p.ClientId, p.Name + " (para)"))
+            .Concat(_allClients.Where(c => c.Id != Id && _partners.All(p => p.ClientId != c.Id)).Select(c => (c.Id, c.FullName)));
+
+    private async Task EnsureAllClientsAsync()
+    {
+        if (_partners.Count == 0) _partners = await PairService.GetPartnersAsync(Id);
+        if (_allClients.Count == 0) _allClients = await SessionService.GetClientsAsync(_isAdmin ? null : currentUserId);
+        if (_bookingPartnerId == 0 && _partners.Count > 0) _bookingPartnerId = _partners[0].ClientId;
+    }
+
+    private async Task OnBookingTypeChanged()
+    {
+        if (sessionTypes.FirstOrDefault(t => t.Id == bookingDto.SessionTypeId)?.IsPair == true && !_bookingWithPartner)
+        {
+            _bookingWithPartner = true;
+            await EnsureAllClientsAsync();
+        }
+    }
+
+    private async Task SetPkgForPair()
+    {
+        _pkgForPair = true;
+        await EnsureAllClientsAsync();
+        if (_pkgPartnerId == 0 && _partners.Count > 0) _pkgPartnerId = _partners[0].ClientId;
+        if (sessionTypes.FirstOrDefault(t => t.IsPair) is { } pairType
+            && sessionTypes.FirstOrDefault(t => t.Id == newPkg.SessionTypeId)?.IsPair != true)
+            newPkg.SessionTypeId = pairType.Id;
+        UpdatePkgName();
+    }
 
     private List<SessionPackageDto>? packages;
     private bool addPackageOpen;
@@ -839,7 +1580,7 @@ else if (client is not null)
     private CreateBodyMeasurementDto newMeasurement = new();
     private string measurementError = string.Empty;
 
-    private string _tab = "sessions";
+    private string _tab = "overview";
     private int _activeCredits;
     private int _completedCount;
     private decimal _unpaidBalance;
@@ -859,14 +1600,14 @@ else if (client is not null)
     private bool _chartNeedsRender;
 
     private static readonly System.Globalization.CultureInfo _plCulture = new("pl-PL");
-    private string _reportMonth = DateTime.Now.ToString("yyyy-MM");
+    private string _reportMonth = StudioClock.Now.ToString("yyyy-MM");
 
     private string ReportUrl()
     {
         if (!DateTime.TryParseExact($"{_reportMonth}-01", "yyyy-MM-dd",
                 System.Globalization.CultureInfo.InvariantCulture,
                 System.Globalization.DateTimeStyles.None, out var dt))
-            dt = DateTime.Now;
+            dt = StudioClock.Now;
         return $"/reports/client/{Id}/monthly?year={dt.Year}&month={dt.Month}";
     }
 
@@ -916,6 +1657,10 @@ else if (client is not null)
         addMeasurementOpen = false;
         pwMsg = string.Empty;
         editError = string.Empty;
+        _account = null;
+        _inviteLink = null;
+        _inviteMsg = string.Empty;
+        _inviteCopied = false;
 
         UpdateNavIds();
         _lastLoadedId = Id;
@@ -930,7 +1675,110 @@ else if (client is not null)
         if (sessionTypes.Count == 0) await LoadSessionTypes();
         await LoadPackages();
         await LoadMeasurements();
-        ComputeStats();
+        await LoadAccount();
+        await LoadInsightsAsync();
+        _age = client.DateOfBirth is { } dob ? AgeOn(dob) : null;
+        _tab = "overview";
+        _pastShown = 20;
+        _feedShown = FeedStart;
+        RefreshPanel();
+
+        // Wynik zaproszenia wysłanego przy zakładaniu klienta (ClientNew → ?invite=…), tylko raz.
+        if (InviteQuery is "sent")
+        {
+            _inviteMsg = $"Klient dodany. Zaproszenie wysłane na {client.Email}.";
+            _inviteError = false;
+        }
+        else if (InviteQuery is "failed")
+        {
+            _inviteMsg = "Klient dodany, ale e-mail z zaproszeniem nie wyszedł. Użyj „Przygotuj link” i wyślij go klientowi.";
+            _inviteError = true;
+        }
+        InviteQuery = null;
+
+        // Link z powiadomienia / „Wymaga uwagi” (np. ?tab=surveys).
+        if (TabQuery is "overview" or "activity" or "account" or "surveys" or "sessions" or "measurements" or "packages" or "photos")
+        {
+            SelectTab(TabQuery);
+            TabQuery = null;
+        }
+    }
+
+    private async Task LoadAccount()
+    {
+        try { _account = await Invitations.GetAccountStatusAsync(Id); }
+        catch { _account = null; } // Status konta jest pomocniczy — nie blokuje profilu.
+        try { _documents = await DocumentSvc.GetForClientAsync(Id); }
+        catch { _documents = []; }
+    }
+
+    private async Task SendInvite(bool email)
+    {
+        if (client is null) return;
+        _inviteBusy = true;
+        _inviteMsg = string.Empty;
+        _inviteCopied = false;
+        try
+        {
+            var r = await Invitations.SendInviteAsync(Id, Nav.BaseUri, sendEmail: email);
+            _inviteLink = r.Link;
+            if (!r.Success)
+            {
+                _inviteMsg = r.Error ?? "Nie udało się przygotować zaproszenia.";
+                _inviteError = true;
+            }
+            else if (email && r.EmailSent)
+            {
+                _inviteMsg = $"Zaproszenie wysłane na {client.Email}.";
+                _inviteError = false;
+                await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "ClientInviteSent", "Client",
+                    Id.ToString(), $"Klient: {client.FullName}");
+            }
+            else if (email)
+            {
+                _inviteMsg = r.Error ?? "Nie udało się wysłać e-maila — skopiuj link i wyślij go klientowi.";
+                _inviteError = true;
+            }
+            else
+            {
+                _inviteMsg = "Link gotowy — wyślij go klientowi SMS-em lub w komunikatorze.";
+                _inviteError = false;
+                await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "ClientInviteLink", "Client",
+                    Id.ToString(), $"Klient: {client.FullName}");
+            }
+        }
+        catch (Exception ex)
+        {
+            _inviteMsg = ex.Message;
+            _inviteError = true;
+        }
+        finally { _inviteBusy = false; }
+    }
+
+    private async Task CopyInviteLink()
+    {
+        if (string.IsNullOrEmpty(_inviteLink)) return;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", _inviteLink);
+            _inviteCopied = true;
+        }
+        catch { _inviteMsg = "Nie udało się skopiować — zaznacz link i skopiuj ręcznie."; _inviteError = true; }
+    }
+
+    private async Task ShareInviteLink()
+    {
+        if (string.IsNullOrEmpty(_inviteLink) || client is null) return;
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.share", new
+            {
+                title = "Zaproszenie do aplikacji",
+                text = $"Cześć {client.FirstName}! Tu ustawisz hasło do aplikacji treningowej:",
+                url = _inviteLink
+            });
+        }
+        catch { await CopyInviteLink(); } // Brak Web Share (np. desktop) — kopiujemy.
     }
 
     private void UpdateNavIds()
@@ -984,6 +1832,16 @@ else if (client is not null)
         _completedCount = sessions?.Count(s => s.Status == PTScheduler.Domain.Enums.SessionStatus.Completed) ?? 0;
         _unpaidBalance  = packages?.Where(p => !p.IsPaid && p.Status != PackageStatus.Cancelled).Sum(p => p.TotalPrice) ?? 0m;
         _lastMeasDate   = measurements?.OrderByDescending(m => m.MeasurementDate).FirstOrDefault()?.MeasurementDate;
+        _activePackageName = packages?.Where(p => p.Status == PackageStatus.Active).OrderBy(p => p.ExpiresAt ?? DateTime.MaxValue).FirstOrDefault()?.Name;
+        _unpaidOffPackage = sessions?.Count(s => s.OffPackagePayment is not null && s.PaidAt is null
+                                                && s.Status is SessionStatus.Completed or SessionStatus.Scheduled && !s.AwaitingApproval) ?? 0;
+    }
+
+    private static int AgeOn(DateOnly dob)
+    {
+        var today = DateOnly.FromDateTime(StudioClock.Today);
+        var age = today.Year - dob.Year;
+        return dob > today.AddYears(-age) ? age - 1 : age;
     }
 
     private void SelectTab(string tab)
@@ -1006,6 +1864,7 @@ else if (client is not null)
             newMeasurement = new CreateBodyMeasurementDto();
             addMeasurementOpen = false;
             measurements = await MeasurementService.GetAsync(Id);
+            RefreshPanel();
             _chartNeedsRender = true;
         }
         catch (Exception ex) { measurementError = ex.Message; }
@@ -1018,6 +1877,7 @@ else if (client is not null)
         await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "MeasurementDeleted", "BodyMeasurement",
             id.ToString(), $"Klient: {client?.FullName}");
         measurements = await MeasurementService.GetAsync(Id);
+        RefreshPanel();
         _chartNeedsRender = true;
     }
 
@@ -1143,6 +2003,7 @@ else if (client is not null)
         {
             await ClientService.ApproveClientAsync(Id);
             client = await ClientService.GetClientAsync(Id);
+            RefreshPanel();
             await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "ClientApproved", "Client",
                 Id.ToString(), $"Klient: {client?.FullName}");
         }
@@ -1158,6 +2019,15 @@ else if (client is not null)
             Id.ToString(), $"Klient: {client?.FullName}, samodzielna rezerwacja: {allow}");
     }
 
+    private async Task ToggleTrusted(ChangeEventArgs e)
+    {
+        var trusted = (bool)(e.Value ?? false);
+        await OffPackage.SetTrustedAsync(Id, trusted);
+        client = await ClientService.GetClientAsync(Id);
+        await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "ClientTrustedToggled", "Client",
+            Id.ToString(), $"Klient: {client?.FullName}, zaufany (płatność u trenera bez akceptacji): {trusted}");
+    }
+
     private void OpenAddPackage()
     {
         newPkg = new CreateSessionPackageDto
@@ -1167,6 +2037,8 @@ else if (client is not null)
             TotalSessions = 10,
             PricePerSession = 0
         };
+        _pkgForPair = false;
+        _pkgPartnerId = 0;
         pkgError = string.Empty;
         addPackageOpen = true;
     }
@@ -1175,23 +2047,26 @@ else if (client is not null)
     {
         var type = sessionTypes.FirstOrDefault(t => t.Id == newPkg.SessionTypeId);
         if (type is not null && newPkg.TotalSessions > 0)
-            newPkg.Name = $"Pakiet {newPkg.TotalSessions}×{type.Name}";
+            newPkg.Name = _pkgForPair ? $"Duet {newPkg.TotalSessions}×{type.Name}" : $"Pakiet {newPkg.TotalSessions}×{type.Name}";
     }
 
     private async Task SavePackage()
     {
         if (newPkg.SessionTypeId == 0) { pkgError = "Wybierz typ sesji."; return; }
         if (newPkg.TotalSessions < 1) { pkgError = "Podaj liczbę sesji."; return; }
+        if (_pkgForPair && _pkgPartnerId == 0) { pkgError = "Wybierz, z kim trenuje."; return; }
+        newPkg.PartnerClientId = _pkgForPair ? _pkgPartnerId : null;
         isBusy = true;
         pkgError = string.Empty;
         try
         {
             await PackageService.CreatePackageAsync(newPkg);
             await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "PackageCreated", "SessionPackage",
-                null, $"Klient: {client?.FullName}, pakiet: {newPkg.Name}, sesji: {newPkg.TotalSessions}");
+                null, $"Klient: {client?.FullName}, pakiet: {newPkg.Name}, sesji: {newPkg.TotalSessions}{(_pkgForPair ? " (dla pary)" : "")}");
             addPackageOpen = false;
             packages = await PackageService.GetPackagesAsync(Id);
             client = await ClientService.GetClientAsync(Id);
+            RefreshPanel();
         }
         catch (Exception ex) { pkgError = ex.Message; }
         finally { isBusy = false; }
@@ -1203,6 +2078,7 @@ else if (client is not null)
         await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "PackageMarkedPaid", "SessionPackage",
             packageId.ToString(), $"Klient: {client?.FullName}");
         packages = await PackageService.GetPackagesAsync(Id);
+        RefreshPanel();
     }
 
     private void OpenEditPackage(SessionPackageDto pkg)
@@ -1214,7 +2090,8 @@ else if (client is not null)
             TotalSessions = pkg.TotalSessions,
             PricePerSession = pkg.PricePerSession,
             ExpiresAt = pkg.ExpiresAt,
-            Notes = pkg.Notes
+            Notes = pkg.Notes,
+            IsHidden = pkg.IsHidden
         };
         editPkgError = string.Empty;
         editPackageOpen = true;
@@ -1233,6 +2110,7 @@ else if (client is not null)
             editPackageOpen = false;
             packages = await PackageService.GetPackagesAsync(Id);
             client = await ClientService.GetClientAsync(Id);
+            RefreshPanel();
         }
         catch (Exception ex) { editPkgError = ex.Message; }
         finally { isBusy = false; }
@@ -1245,6 +2123,7 @@ else if (client is not null)
             packageId.ToString(), $"Klient: {client?.FullName}");
         packages = await PackageService.GetPackagesAsync(Id);
         client = await ClientService.GetClientAsync(Id);
+        RefreshPanel();
     }
 
     private static string PackageBadge(PackageStatus s) => s switch
@@ -1272,19 +2151,23 @@ else if (client is not null)
             ClientId = Id,
             TrainerUserId = currentUserId
         };
-        var now = DateTime.Now.AddHours(1);
+        var now = StudioClock.Now.AddHours(1);
         bookingDate = now.ToString("yyyy-MM-dd");
-        bookingTime = now.ToString("HH:00");
+        bookingTime = new TimeOnly(now.Hour, 0);
         bookingError = string.Empty;
+        bookingOverlap = false;
+        _bookingWithPartner = false;
+        _bookingPartnerId = 0;
         bookingOpen = true;
     }
 
     private void CloseBooking() => bookingOpen = false;
 
-    private async Task SubmitBooking()
+    private async Task SubmitBooking(bool allowOverlap = false)
     {
         if (bookingDto.SessionTypeId == 0) { bookingError = "Wybierz typ sesji."; return; }
-        if (!DateTime.TryParse($"{bookingDate} {bookingTime}", out var startTime))
+        if (_bookingWithPartner && _bookingPartnerId == 0) { bookingError = "Wybierz, z kim trenuje."; return; }
+        if (!DateTime.TryParse($"{bookingDate} {bookingTime:HH:mm}", out var startTime))
         { bookingError = "Nieprawidłowa data lub godzina."; return; }
 
         bookingDto.StartTime = startTime;
@@ -1292,15 +2175,25 @@ else if (client is not null)
         bookingError = string.Empty;
         try
         {
-            var created = await SessionService.CreateSessionAsync(bookingDto);
+            var created = _bookingWithPartner
+                ? await SessionService.CreatePairSessionAsync(bookingDto, _bookingPartnerId, allowOverlap: allowOverlap)
+                : await SessionService.CreateSessionAsync(bookingDto, allowOverlap: allowOverlap);
             await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "SessionBooked", "Session",
-                created.Id.ToString(), $"Klient: {client?.FullName}, termin: {bookingDto.StartTime:dd.MM.yyyy HH:mm}");
+                created.Id.ToString(), $"Klient: {created.DisplayName}, termin: {bookingDto.StartTime:dd.MM.yyyy HH:mm}{(allowOverlap ? " (nałożono)" : "")}");
+            bookingOverlap = false;
             bookingOpen = false;
             sessions = await SessionService.GetClientSessionsAsync(Id, 200);
             client = await ClientService.GetClientAsync(Id);
+            RefreshPanel();
+        }
+        catch (SlotConflictException ex)
+        {
+            bookingOverlap = true;
+            bookingError = ex.Message;
         }
         catch (Exception ex)
         {
+            bookingOverlap = false;
             bookingError = ex.Message;
         }
         finally { isBusy = false; }

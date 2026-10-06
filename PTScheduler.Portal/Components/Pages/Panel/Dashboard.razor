@@ -1,0 +1,365 @@
+@page "/panel"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject TenantService TenantSvc
+@inject DockerService DockerSvc
+@inject ResourceReportService ResourceReports
+@inject UpdateNotifier UpdateNotifier
+@inject NpmHealthService NpmHealth
+@inject FunnelService Funnel
+@rendermode InteractiveServer
+
+<PageTitle>Pulpit — PTScheduler Portal</PageTitle>
+
+<PanelHeader Title="Pulpit" Icon="bi-speedometer2" Subtitle="Stan platformy w skrócie: trenerzy, przychody i zdrowie instancji.">
+    <Actions>
+        <a href="/panel/provision" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Nowa instancja</a>
+    </Actions>
+</PanelHeader>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    var unhealthy = _tenants.Where(t => t.Status == TenantStatus.Active && t.IsHealthy == false).ToList();
+    var healthyCount = _tenants.Count(t => t.Status == TenantStatus.Active && t.IsHealthy == true);
+
+    @if (unhealthy.Count > 0)
+    {
+        <StatusBanner Tone="danger" Icon="bi-heart-pulse-fill" Title="@($"{unhealthy.Count} {PanelUi.Plural(unhealthy.Count, "instancja nie odpowiada", "instancje nie odpowiadają", "instancji nie odpowiada")}")">
+            <span>Trenerzy z tych instancji mogą nie mieć dostępu do aplikacji. Otwórz trenera, żeby zobaczyć logi i zrestartować kontener.</span>
+            <div class="d-flex flex-wrap gap-2 mt-2">
+                @foreach (var t in unhealthy)
+                {
+                    <a href="/panel/tenants/@t.Id" class="pp-chip pp-tone-danger text-decoration-none" title="@t.LastHealthError">
+                        <i class="bi bi-x-circle"></i>@t.CompanyName
+                        @if (t.UnhealthySinceUtc is { } since) { <span class="opacity-75">· @((int)(DateTime.UtcNow - since).TotalMinutes) min</span> }
+                    </a>
+                }
+            </div>
+        </StatusBanner>
+    }
+    else if (healthyCount > 0)
+    {
+        <StatusBanner Tone="ok" Icon="bi-check-circle-fill" Title="Wszystko działa">
+            Wszystkie aktywne instancje (@healthyCount) odpowiadają. Portal sprawdza je co kilka minut i da znać, gdy któraś przestanie.
+        </StatusBanner>
+    }
+    else if (_tenants.Count == 0)
+    {
+        <StatusBanner Tone="info" Icon="bi-rocket-takeoff" Title="Czas na pierwszego trenera">
+            <ChildContent>Utwórz instancję ręcznie albo poczekaj na rejestrację ze strony publicznej — nowi trenerzy pojawią się tutaj.</ChildContent>
+            <Actions><a href="/panel/provision" class="btn btn-primary btn-sm">Utwórz instancję</a></Actions>
+        </StatusBanner>
+    }
+
+    @if (NpmHealth.Current is { } npmReport)
+    {
+        var httpsProblems = npmReport.Problems;
+        @if (httpsProblems.Count > 0)
+        {
+            <StatusBanner Tone="danger" Icon="bi-unlock-fill" Title="@($"{httpsProblems.Count} {PanelUi.Plural(httpsProblems.Count, "domena bez działającego HTTPS", "domeny bez działającego HTTPS", "domen bez działającego HTTPS")}")">
+                <ChildContent>
+                    <span>Klienci tych trenerów zobaczą ostrzeżenie przeglądarki albo nie wejdą na stronę. Odnów certyfikat jednym kliknięciem.</span>
+                    <div class="d-flex flex-wrap gap-2 mt-2">
+                        @foreach (var d in httpsProblems)
+                        {
+                            <a href="/panel/tenants/@d.TenantId" class="pp-chip pp-tone-@NpmHealthService.Tone(d.State) text-decoration-none" title="@NpmHealthService.Label(d.State, d.DaysLeft)">
+                                <i class="bi bi-unlock"></i>@d.Domain <span class="opacity-75">· @NpmHealthService.Label(d.State, d.DaysLeft)</span>
+                            </a>
+                        }
+                    </div>
+                </ChildContent>
+                <Actions><a href="/panel/npm" class="btn btn-danger btn-sm">Napraw w NPM</a></Actions>
+            </StatusBanner>
+        }
+        else if (npmReport.Error is not null)
+        {
+            <div class="pp-callout pp-tone-warn">
+                <i class="bi bi-shield-exclamation"></i>
+                <div class="flex-grow-1">Nie udało się sprawdzić certyfikatów w Nginx Proxy Manager: @npmReport.Error <a href="/panel/npm" class="fw-semibold">Otwórz NPM</a></div>
+            </div>
+        }
+    }
+
+    @if (UpdateNotifier.UpgradeAvailable)
+    {
+        <div class="pp-callout pp-tone-warn">
+            <i class="bi bi-cloud-arrow-down-fill"></i>
+            <div class="flex-grow-1">Jest nowa wersja (@UpdateNotifier.RemoteCommitShort). <a href="/panel/updates" class="fw-semibold">Przejdź do aktualizacji</a> — wszystko zrobisz jednym kliknięciem.</div>
+        </div>
+    }
+
+    <div class="pp-section-title">Trenerzy</div>
+    <div class="pp-stats">
+        <StatTile Label="Wszyscy" Value="@_stats.TotalTenants.ToString()" Icon="bi-building" Tone="info" Href="/panel/tenants" Meta="@($"{_stats.NewTenantsThisMonth} nowych w tym miesiącu")" />
+        <StatTile Label="Aktywni" Value="@_stats.ActiveTenants.ToString()" Icon="bi-check-circle" Tone="ok" Meta="@($"{_stats.ActiveSubscriptions} z opłaconą subskrypcją")" />
+        <StatTile Label="Na okresie próbnym" Value="@_stats.TrialingTenants.ToString()" Icon="bi-hourglass-split" Tone="warn" Meta="@($"{_stats.PendingTenants} czeka na uruchomienie")" />
+        <StatTile Label="Odeszli w tym mies." Value="@_stats.ChurnedThisMonth.ToString()" Icon="bi-person-dash" Tone="@(_stats.ChurnedThisMonth > 0 ? "danger" : "muted")" />
+    </div>
+
+    <div class="pp-section-title">Pieniądze</div>
+    <div class="pp-stats">
+        <StatTile Label="Przychód miesięczny (MRR)" Value="@($"{_stats.TotalRevenue:0} zł")" Icon="bi-graph-up-arrow" Tone="info" Href="/panel/finances" />
+        <StatTile Label="Wpłaty w tym miesiącu" Value="@($"{_stats.MonthlyPaymentsTotal:0} zł")" Icon="bi-cash-stack" Tone="ok" Meta="@GrowthText()" />
+    </div>
+
+    <div class="pp-section-title">Lejek trenerów</div>
+    <PanelCard Title="Od wejścia do pierwszej płatności" Subtitle="Gdzie trenerzy odpadają — każdy pasek to część osób z kroku wyżej" Icon="bi-funnel" IconClass="pp-icon-cyan" Class="mb-3">
+        <Actions>
+            <div class="pp-seg" role="group" aria-label="Okres">
+                @foreach (var d in new[] { 7, 30, 90 })
+                {
+                    var days = d;
+                    <button type="button" class="@(_funnelDays == days ? "active" : "")" aria-pressed="@(_funnelDays == days ? "true" : "false")" @onclick="() => LoadFunnelAsync(days)">@days dni</button>
+                }
+            </div>
+        </Actions>
+        <ChildContent>
+            @if (_funnel.Count > 0)
+            {
+                var top = Math.Max(1, _funnel.Max(f => f.Count));
+                var drop = WorstDrop();
+                <ol class="pp-funnel">
+                    @for (var i = 0; i < _funnel.Count; i++)
+                    {
+                        var st = _funnel[i];
+                        var prev = i > 0 ? _funnel[i - 1].Count : 0;
+                        // Powyżej 100% wychodzi, gdy zgłoszenia są starsze niż liczniki kreatora — wtedy procentu nie pokazujemy.
+                        var rate = i > 0 && prev > 0 && st.Count <= prev ? (int)Math.Round(st.Count * 100.0 / prev) : (int?)null;
+                        <li class="@(drop?.Key == st.Key ? "drop" : "")">
+                            <div class="pp-funnel-label"><b>@st.Label</b><small>@st.Hint</small></div>
+                            <div class="pp-funnel-bar"><span style="width:@(Math.Max(2, st.Count * 100 / top))%"></span></div>
+                            <div class="pp-funnel-num"><b>@st.Count</b>@if (rate is { } r) { <small>@r%</small> }</div>
+                        </li>
+                    }
+                </ol>
+                @if (drop is { } worst)
+                {
+                    <p class="small text-muted mt-3 mb-0"><i class="bi bi-arrow-down-right-circle me-1 text-danger"></i>Najwięcej osób odpada przed krokiem <b>„@worst.Label”</b> — tam warto szukać poprawek.</p>
+                }
+                else if (_funnel[0].Count == 0)
+                {
+                    <p class="small text-muted mt-3 mb-0">Nikt jeszcze nie otworzył kreatora w tym okresie. Liczniki ruszą od pierwszych wejść na /register.</p>
+                }
+            }
+        </ChildContent>
+    </PanelCard>
+
+    <div class="row g-3">
+        @if (_system is not null)
+        {
+            // Z pomiarów (Zasoby), a dopóki ich nie ma — szacunek 150 MB na instancję.
+            var measured = _resources?.Host?.MemTotal is > 0 && _resources.MoreTenants is not null;
+            var totalMB = measured ? _resources!.Host!.MemTotal!.Value / 1048576 : _system.TotalMemoryMB;
+            var usedMB = measured ? _resources!.Host!.MemUsed!.Value / 1048576 : _stats.ActiveTenants * 150;
+            var ramPct = totalMB > 0 ? (int)(usedMB * 100 / totalMB) : 0;
+            var maxTenants = measured ? _stats.ActiveTenants + _resources!.MoreTenants!.Value : (int)(_system.TotalMemoryMB / 150);
+            var capacityPct = maxTenants > 0 ? _stats.ActiveTenants * 100 / maxTenants : 0;
+            <div class="col-lg-6">
+                <PanelCard Title="Serwer" Subtitle="Zasoby maszyny z kontenerami" Icon="bi-cpu" Class="h-100">
+                    <Actions><a href="/panel/resources" class="btn btn-sm btn-outline-secondary">Szczegóły</a></Actions>
+                    <ChildContent>
+                        <dl class="pp-kv">
+                            <div><dt>Procesor</dt><dd>@_system.CpuCount rdzeni</dd></div>
+                            <div><dt>Pamięć</dt><dd>@(_system.TotalMemoryMB / 1024) GB</dd></div>
+                            <div><dt>Docker</dt><dd>@_system.DockerVersion</dd></div>
+                            <div><dt>Kontenery działające</dt><dd>@_system.RunningContainers z @_system.TotalContainers</dd></div>
+                        </dl>
+                        <div class="d-flex justify-content-between small mt-3 mb-1">
+                            <span class="text-muted">@(measured ? "Pamięć serwera zajęta (pomiar)" : "Pamięć zajęta przez instancje (szacunek)")</span>
+                            <span class="fw-semibold">@usedMB / @totalMB MB</span>
+                        </div>
+                        <div class="pp-meter @PanelUi.MeterTone(ramPct)"><div style="width:@(Math.Min(ramPct, 100))%"></div></div>
+                    </ChildContent>
+                </PanelCard>
+            </div>
+            <div class="col-lg-6">
+                <PanelCard Title="Ilu trenerów zmieścisz" Subtitle="@(measured ? "Z realnego zużycia trenerów i wolnej pamięci serwera" : "Szacunek: ok. 150 MB pamięci na instancję")" Icon="bi-speedometer" IconClass="pp-icon-cyan" Class="h-100">
+                    <Actions><a href="/panel/resources" class="btn btn-sm btn-outline-secondary">Szczegóły</a></Actions>
+                    <ChildContent>
+                    <div class="d-flex align-items-baseline gap-2 mb-2">
+                        <span class="pp-stat-value">@_stats.ActiveTenants</span>
+                        <span class="text-muted">z ok. @maxTenants miejsc</span>
+                        <span class="pp-chip @(capacityPct > 80 ? "pp-tone-danger" : capacityPct > 60 ? "pp-tone-warn" : "pp-tone-ok") ms-auto">@capacityPct% zajęte</span>
+                    </div>
+                    <div class="pp-meter @PanelUi.MeterTone(capacityPct)"><div style="width:@(Math.Min(capacityPct, 100))%"></div></div>
+                    <p class="small text-muted mt-3 mb-0">
+                        @(capacityPct > 80 ? "Serwer jest prawie pełny — przed kolejnymi trenerami dołóż pamięci albo drugi serwer."
+                          : capacityPct > 60 ? "Zostało jeszcze trochę miejsca. Warto zaplanować rozbudowę."
+                          : "Dużo wolnego miejsca na nowych trenerów.")
+                    </p>
+                    </ChildContent>
+                </PanelCard>
+            </div>
+        }
+
+        <div class="col-lg-6">
+            <PanelCard Title="Ostatnio dołączyli" Icon="bi-people" Flush="true" Class="h-100">
+                <Actions><a href="/panel/tenants" class="btn btn-sm btn-outline-secondary">Wszyscy</a></Actions>
+                <ChildContent>
+                    @if (_tenants.Count == 0)
+                    {
+                        <div class="pp-empty"><i class="bi bi-people"></i>Jeszcze nikogo. <a href="/panel/provision">Dodaj pierwszego trenera</a>.</div>
+                    }
+                    else
+                    {
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle">
+                                <thead><tr><th>Trener</th><th>Plan</th><th>Stan</th><th>Od</th></tr></thead>
+                                <tbody>
+                                    @foreach (var t in _tenants.Take(8))
+                                    {
+                                        <tr>
+                                            <td>
+                                                <a href="/panel/tenants/@t.Id" class="fw-semibold text-decoration-none">@t.CompanyName</a>
+                                                <div class="text-muted small">@t.OwnerEmail</div>
+                                            </td>
+                                            <td><span class="pp-chip pp-tone-info">@(t.Plan?.Name ?? t.PlanId)</span></td>
+                                            <td><span class="pp-chip pp-tone-@PanelUi.TenantStatusTone(t.Status)">@PanelUi.TenantStatusLabel(t.Status)</span></td>
+                                            <td class="text-muted text-nowrap small">@t.CreatedAt.ToString("dd.MM.yyyy")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    }
+                </ChildContent>
+            </PanelCard>
+        </div>
+
+        <div class="col-lg-6">
+            <PanelCard Title="Co się ostatnio działo" Icon="bi-activity" IconClass="pp-icon-pink" Class="h-100">
+                @if (_events.Count == 0)
+                {
+                    <div class="pp-empty"><i class="bi bi-activity"></i>Na razie cisza.</div>
+                }
+                else
+                {
+                    <ul class="pp-feed" style="max-height:420px;overflow-y:auto">
+                        @foreach (var ev in _events)
+                        {
+                            <li class="pp-feed-item">
+                                <span class="pp-icon pp-icon-sm pp-tone-@PanelUi.EventTone(ev.EventType)"><i class="bi @PanelUi.EventIcon(ev.EventType)"></i></span>
+                                <div class="pp-feed-body">
+                                    <div class="pp-feed-title">
+                                        @PanelUi.EventLabel(ev.EventType)
+                                        <span class="fw-normal text-muted">·</span>
+                                        @if (ev.Tenant is not null)
+                                        {
+                                            <a href="/panel/tenants/@ev.TenantId" class="text-decoration-none fw-normal">@ev.Tenant.CompanyName</a>
+                                        }
+                                        else
+                                        {
+                                            <span class="fw-normal">trener #@ev.TenantId</span>
+                                        }
+                                    </div>
+                                    @if (!string.IsNullOrWhiteSpace(ev.Detail))
+                                    {
+                                        <div class="pp-feed-meta text-truncate" title="@ev.Detail">@ev.Detail</div>
+                                    }
+                                </div>
+                                <span class="pp-feed-time">@ev.OccurredAt.ToLocalTime().ToString("dd.MM HH:mm")</span>
+                            </li>
+                        }
+                    </ul>
+                }
+            </PanelCard>
+        </div>
+
+        @if (_payments.Count > 0)
+        {
+            <div class="col-12">
+                <PanelCard Title="Ostatnie płatności" Icon="bi-credit-card" IconClass="pp-tone-ok" Flush="true">
+                    <Actions><a href="/panel/finances" class="btn btn-sm btn-outline-secondary">Finanse</a></Actions>
+                    <ChildContent>
+                        <div class="table-responsive">
+                            <table class="table align-middle">
+                                <thead><tr><th>Trener</th><th>Kwota</th><th>Stan</th><th>Źródło</th><th>Data</th></tr></thead>
+                                <tbody>
+                                    @foreach (var p in _payments.Take(10))
+                                    {
+                                        <tr>
+                                            <td>
+                                                @if (p.Tenant is not null) { <a href="/panel/tenants/@p.TenantId" class="text-decoration-none fw-semibold">@p.Tenant.CompanyName</a> }
+                                                else { <text>#@p.TenantId</text> }
+                                            </td>
+                                            <td class="fw-semibold text-nowrap">@p.Amount.ToString("0.00") @p.Currency</td>
+                                            <td><span class="pp-chip pp-tone-@PanelUi.PaymentTone(p.Status)">@PanelUi.PaymentLabel(p.Status)</span></td>
+                                            <td class="text-muted small">@p.Source</td>
+                                            <td class="text-muted text-nowrap small">@p.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </ChildContent>
+                </PanelCard>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private DashboardStats _stats = new();
+    private ResourceReportService.Report? _resources;
+    private SystemInfo? _system;
+    private List<Tenant> _tenants = [];
+    private List<TenantEvent> _events = [];
+    private List<PaymentRecord> _payments = [];
+    private List<FunnelService.Stage> _funnel = [];
+    private int _funnelDays = 30;
+
+    private async Task LoadFunnelAsync(int days)
+    {
+        _funnelDays = days;
+        _funnel = await Funnel.BuildAsync(days);
+    }
+
+    /// <summary>Krok z największym spadkiem względem poprzedniego (gdy jest z czego liczyć).</summary>
+    private FunnelService.Stage? WorstDrop()
+    {
+        FunnelService.Stage? worst = null;
+        var worstRate = 1.0;
+        for (var i = 1; i < _funnel.Count; i++)
+        {
+            if (_funnel[i - 1].Count < 3 || _funnel[i].Count > _funnel[i - 1].Count) continue;
+            var rate = (double)_funnel[i].Count / _funnel[i - 1].Count;
+            if (rate < worstRate) { worstRate = rate; worst = _funnel[i]; }
+        }
+        return worstRate < 0.9 ? worst : null;
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        _stats = await TenantSvc.GetExtendedStatsAsync();
+        _tenants = await TenantSvc.GetAllAsync();
+        _events = await TenantSvc.GetRecentEventsAsync(15);
+        _payments = await TenantSvc.GetRecentPaymentsAsync(10);
+        await LoadFunnelAsync(_funnelDays);
+
+        try { _resources = await ResourceReports.BuildAsync(ResourceReportService.Period.Day); } catch { _resources = null; }
+        try { _system = await DockerSvc.GetSystemInfoAsync(); }
+        catch { }
+
+        _loading = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        // Zaraz po starcie Portalu nie ma jeszcze wyniku sprawdzenia HTTPS — zrób je teraz, żeby pulpit od razu alarmował.
+        if (!firstRender || NpmHealth.Current is not null) return;
+        try { await NpmHealth.RefreshAsync(); await InvokeAsync(StateHasChanged); } catch { }
+    }
+
+    private string? GrowthText()
+    {
+        if (_stats.PrevMonthPaymentsTotal <= 0) return null;
+        var growth = (int)((_stats.MonthlyPaymentsTotal - _stats.PrevMonthPaymentsTotal) * 100 / _stats.PrevMonthPaymentsTotal);
+        return $"{(growth >= 0 ? "+" : "")}{growth}% względem poprzedniego miesiąca";
+    }
+
+}

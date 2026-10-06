@@ -15,4 +15,7 @@ public class BodyMeasurement
     public decimal? ThighCm { get; set; }
     public decimal? ArmCm { get; set; }
     public string? Notes { get; set; }
+
+    /// <summary>Wpisany przez klienta w aplikacji (a nie przez trenera) — klient może go też usunąć.</summary>
+    public bool AddedByClient { get; set; }
 }

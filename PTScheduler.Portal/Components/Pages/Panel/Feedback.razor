@@ -1,0 +1,159 @@
+@page "/panel/feedback"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@rendermode InteractiveServer
+
+<PageTitle>Oceny aplikacji — PTScheduler Portal</PageTitle>
+
+<PanelHeader Title="Oceny aplikacji" Icon="bi-star-half" IconClass="pp-tone-warn" Subtitle="Co trenerzy myślą o aplikacji. Prośba o ocenę pojawia się u nich raz na pół roku.">
+    <Actions>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="LoadAsync"><i class="bi bi-arrow-clockwise me-1"></i>Odśwież</button>
+    </Actions>
+</PanelHeader>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_items.Count == 0)
+{
+    <PanelCard>
+        <div class="pp-empty">
+            <i class="bi bi-star"></i>
+            <div class="pp-empty-title">Jeszcze nikt nie ocenił aplikacji</div>
+            <p>Trenerzy zobaczą prośbę o ocenę na swoim pulpicie (raz na pół roku) i w Zarządzanie → „Oceń aplikację”.</p>
+        </div>
+    </PanelCard>
+}
+else
+{
+    var avg = _items.Average(i => i.Rating);
+    <div class="pp-stats">
+        <StatTile Label="Średnia ocena" Value="@($"{avg:0.0} ★")" Meta="@($"z {_items.Count} {PanelUi.Plural(_items.Count, "oceny", "ocen", "ocen")}")" Icon="bi-star-fill" Tone="@(avg >= 4 ? "ok" : avg >= 3 ? "warn" : "danger")" />
+        <div class="pp-stat">
+            <div class="pp-stat-top"><span class="pp-stat-label">Rozkład ocen</span></div>
+            @for (var star = 5; star >= 1; star--)
+            {
+                var n = _items.Count(i => i.Rating == star);
+                var pct = _items.Count == 0 ? 0 : n * 100 / _items.Count;
+                <div class="d-flex align-items-center gap-2 small">
+                    <span class="text-nowrap" style="width:2.2rem">@star ★</span>
+                    <div class="pp-meter flex-grow-1 @(star >= 4 ? "pp-tone-ok" : star == 3 ? "pp-tone-warn" : "pp-tone-danger")"><div style="width:@(pct)%"></div></div>
+                    <span class="text-muted text-end" style="width:1.8rem">@n</span>
+                </div>
+            }
+        </div>
+    </div>
+
+    <div class="pp-callout">
+        <i class="bi bi-megaphone"></i>
+        <div>Wybrane opinie pokazujesz na <a href="/" target="_blank" rel="noopener">stronie głównej</a> w sekcji „Co mówią trenerzy” — przyciskiem <strong>Na stronę</strong>. Podpis ustawiasz sam (domyślnie imię, inicjał nazwiska i nazwa studia). Publikuj opinie, na które trener się zgodził.</div>
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead class="table-light">
+                    <tr><th>Data</th><th>Tenant</th><th>Ocena</th><th>Treść</th><th>Kontakt</th><th>Strona główna</th><th></th></tr>
+                </thead>
+                <tbody>
+                    @foreach (var f in _items)
+                    {
+                        <tr class="@(f.IsRead ? "" : "fw-semibold")">
+                            <td class="small text-nowrap">@f.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                            <td class="small">
+                                @if (f.Tenant is not null) { <a href="/panel/tenants/@f.Tenant.Id">@f.Tenant.CompanyName</a> }
+                                <div class="text-muted">@f.AuthorEmail</div>
+                            </td>
+                            <td class="text-warning text-nowrap">@(new string('★', f.Rating))<span class="text-muted">@(new string('☆', 5 - f.Rating))</span></td>
+                            <td class="small" style="max-width:420px;white-space:pre-wrap">@f.Text</td>
+                            <td class="small">
+                                @if (!string.IsNullOrEmpty(f.ContactEmail)) { <a href="mailto:@f.ContactEmail">@f.ContactEmail</a> }
+                                else { <span class="text-muted">—</span> }
+                            </td>
+                            <td style="min-width:220px">
+                                @if (f.ShowOnHomepage)
+                                {
+                                    <div class="d-flex flex-column gap-1">
+                                        <span class="pp-chip pp-tone-ok align-self-start"><i class="bi bi-globe"></i>Na stronie</span>
+                                        <input class="form-control form-control-sm" maxlength="120" value="@f.PublicAuthor" aria-label="Podpis pod opinią"
+                                               @onchange="e => SetAuthorAsync(f.Id, e.Value?.ToString())" />
+                                        <button class="btn btn-sm btn-link text-muted p-0 align-self-start" @onclick="() => SetPublicAsync(f.Id, false)">Ukryj ze strony</button>
+                                    </div>
+                                }
+                                else if (!string.IsNullOrWhiteSpace(f.Text))
+                                {
+                                    <button class="btn btn-sm btn-outline-primary" @onclick="() => SetPublicAsync(f.Id, true)"><i class="bi bi-globe me-1"></i>Na stronę</button>
+                                }
+                            </td>
+                            <td>
+                                @if (!f.IsRead)
+                                {
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => MarkReadAsync(f.Id)">Przeczytane</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private List<AppFeedback> _items = [];
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _items = await db.AppFeedbacks.AsNoTracking().Include(f => f.Tenant)
+            .OrderByDescending(f => f.CreatedAt).Take(500).ToListAsync();
+        _loading = false;
+    }
+
+    private async Task SetPublicAsync(int id, bool show)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var f = await db.AppFeedbacks.Include(x => x.Tenant).FirstOrDefaultAsync(x => x.Id == id);
+        if (f is null) return;
+        f.ShowOnHomepage = show;
+        f.IsRead = true;
+        if (show && string.IsNullOrWhiteSpace(f.PublicAuthor)) f.PublicAuthor = DefaultAuthor(f.Tenant);
+        await db.SaveChangesAsync();
+        await LoadAsync();
+    }
+
+    private async Task SetAuthorAsync(int id, string? author)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var f = await db.AppFeedbacks.FirstOrDefaultAsync(x => x.Id == id);
+        if (f is null) return;
+        f.PublicAuthor = string.IsNullOrWhiteSpace(author) ? null : author.Trim()[..Math.Min(120, author.Trim().Length)];
+        await db.SaveChangesAsync();
+    }
+
+    /// <summary>„Jan Kowalski” + „Studio Siła” → „Jan K. · Studio Siła”.</summary>
+    private static string? DefaultAuthor(Tenant? t)
+    {
+        if (t is null) return null;
+        var parts = (t.OwnerName ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var name = parts.Length switch { 0 => "", 1 => parts[0], _ => $"{parts[0]} {parts[^1][0]}." };
+        var studio = string.Equals(t.CompanyName, t.OwnerName, StringComparison.OrdinalIgnoreCase) ? "" : t.CompanyName;
+        return string.Join(" · ", new[] { name, studio }.Where(x => !string.IsNullOrWhiteSpace(x)));
+    }
+
+    private async Task MarkReadAsync(int id)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var f = await db.AppFeedbacks.FirstOrDefaultAsync(x => x.Id == id);
+        if (f is null) return;
+        f.IsRead = true;
+        await db.SaveChangesAsync();
+        await LoadAsync();
+    }
+}

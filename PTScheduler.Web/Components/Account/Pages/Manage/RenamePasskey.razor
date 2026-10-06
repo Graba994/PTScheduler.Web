@@ -11,21 +11,22 @@
     <DataAnnotationsValidator />
     @if (passkey?.Name is { } name)
     {
-        <h4>Enter a new name for your "@name" passkey</h4>
+        <h5 class="fw-bold">Nowa nazwa klucza „@name”</h5>
     }
     else
     {
-        <h4>Enter a name for your passkey</h4>
+        <h5 class="fw-bold">Nazwij klucz dostępu</h5>
+        <p class="text-muted small">Np. „iPhone Ani” albo „Laptop w pracy” — łatwiej rozpoznasz go na liście.</p>
     }
     <hr />
     <ValidationSummary class="text-danger" role="alert" />
     <div class="form-floating mb-3">
-        <InputText @bind-Value="Input.Name" id="Input.Name" class="form-control" aria-required="true" placeholder="My passkey" />
-        <label for="Input.Name" class="form-label">Passkey name</label>
+        <InputText @bind-Value="Input.Name" id="Input.Name" class="form-control" aria-required="true" placeholder="Mój telefon" />
+        <label for="Input.Name" class="form-label">Nazwa klucza</label>
         <ValidationMessage For="() => Input.Name" class="text-danger" />
     </div>
     <div>
-        <button type="submit" class="w-100 btn btn-lg btn-primary">Continue</button>
+        <button type="submit" class="w-100 btn btn-primary">Zapisz</button>
     </div>
 </EditForm>
 
@@ -60,14 +61,14 @@
         }
         catch (FormatException)
         {
-            RedirectManager.RedirectToWithStatus("Account/Manage/Passkeys", "Error: The specified passkey ID had an invalid format.", HttpContext);
+            RedirectManager.RedirectToWithStatus("Account/Manage/Passkeys", "Błąd: Nieprawidłowy identyfikator klucza.", HttpContext);
             return;
         }
 
         passkey = await UserManager.GetPasskeyAsync(user, credentialId);
         if (passkey is null)
         {
-            RedirectManager.RedirectToWithStatus("Account/Manage/Passkeys", "Error: The specified passkey could not be found.", HttpContext);
+            RedirectManager.RedirectToWithStatus("Account/Manage/Passkeys", "Błąd: Nie znaleziono klucza.", HttpContext);
             return;
         }
     }
@@ -78,17 +79,17 @@
         var result = await UserManager.AddOrUpdatePasskeyAsync(user!, passkey);
         if (!result.Succeeded)
         {
-            RedirectManager.RedirectToWithStatus("Account/Manage/Passkeys", "Error: The passkey could not be updated.", HttpContext);
+            RedirectManager.RedirectToWithStatus("Account/Manage/Passkeys", "Błąd: Nie udało się zmienić nazwy klucza.", HttpContext);
             return;
         }
 
-        RedirectManager.RedirectToWithStatus("Account/Manage/Passkeys", "Passkey updated successfully.", HttpContext);
+        RedirectManager.RedirectToWithStatus("Account/Manage/Passkeys", "Nazwa klucza zapisana.", HttpContext);
     }
 
     private sealed class InputModel
     {
-        [Required]
-        [StringLength(200, ErrorMessage = "Passkey names must be no longer than {1} characters.")]
+        [Required(ErrorMessage = "Podaj nazwę.")]
+        [StringLength(200, ErrorMessage = "Nazwa może mieć najwyżej {1} znaków.")]
         public string Name { get; set; } = "";
     }
 }

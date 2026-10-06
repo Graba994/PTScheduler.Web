@@ -2,140 +2,185 @@
 @inject INotificationPreferencesService NotifService
 @inject AuthenticationStateProvider AuthState
 @inject IAuditLogService AuditLogService
+@inject EntitlementService Entitlements
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 
-<AppTitle Page="Powiadomienia e-mail" />
+<AppTitle Page="Powiadomienia" />
 
-<div class="manage-card">
-    <h5 class="fw-bold mb-1">Powiadomienia e-mail</h5>
-    <p class="text-muted small mb-4">Wybierz, o czym chcesz być informowany drogą mailową.</p>
-
-    @if (_loading)
-    {
-        <div class="text-center py-4"><span class="spinner-border text-primary"></span></div>
-    }
-    else if (_isAdminRole)
-    {
-        <div class="alert alert-info mb-0">
-            <i class="bi bi-info-circle me-2"></i>
-            Administrator otrzymuje wyłącznie powiadomienia o błędach krytycznych systemu.
-        </div>
-    }
-    else
-    {
-        <div class="d-flex flex-column gap-3 mb-4">
-            @foreach (var item in _toggles)
-            {
-                <div class="d-flex justify-content-between align-items-center p-3 rounded border">
-                    <div>
-                        <div class="fw-semibold small">@item.Label</div>
-                        <div class="text-muted" style="font-size:.8rem">@item.Description</div>
-                    </div>
-                    <div class="form-check form-switch mb-0 ms-3">
-                        <input class="form-check-input" type="checkbox" role="switch"
-                               checked="@item.Value"
-                               @onchange="e => item.SetValue((bool)e.Value!)" />
-                    </div>
-                </div>
-            }
-        </div>
-
-        <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">
-            @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
-            <i class="bi bi-floppy-fill me-1"></i>Zapisz ustawienia
-        </button>
-        @if (_saved)
-        {
-            <span class="text-success ms-3"><i class="bi bi-check-circle-fill"></i> Zapisano</span>
-        }
-    }
+<div>
+    <h1 class="h4 fw-bold mb-1">Powiadomienia</h1>
+    <p class="text-muted small mb-0">Wybierz, o czym chcesz wiedzieć i jak: e-mailem, powiadomieniem na telefonie@(_showSms ? " albo SMS-em" : ""). Zmiany zapisują się od razu.</p>
 </div>
 
+<PushDeviceCard />
+
+@if (_loading)
+{
+    <div class="text-center py-4"><span class="spinner-border text-primary"></span></div>
+}
+else
+{
+    @if (_isAdminRole)
+    {
+        <div class="alert alert-info small mb-0">
+            <i class="bi bi-info-circle me-1"></i>Konto administratora dostaje e-mailem tylko informacje o poważnych błędach systemu.
+        </div>
+    }
+    <div class="acct-list" style="--cols:@_columns.Count">
+        <div class="acct-matrix-head">
+            <span>Rodzaj</span>
+            @foreach (var col in _columns)
+            {
+                <span>@ColumnLabel(col)</span>
+            }
+        </div>
+        @foreach (var row in _rows)
+        {
+            <div class="acct-matrix-row">
+                <div class="acct-row-main">
+                    <div class="acct-row-title">@row.Title</div>
+                    <div class="acct-row-sub">@row.Description</div>
+                </div>
+                @foreach (var col in _columns)
+                {
+                    var cell = row.Cell(col);
+                    <div class="acct-matrix-cell">
+                        @if (cell is null)
+                        {
+                            <span class="acct-matrix-na" title="Ten kanał nie dotyczy tego powiadomienia">—</span>
+                        }
+                        else
+                        {
+                            <input class="form-check-input" type="checkbox" role="switch"
+                                   aria-label="@($"{row.Title}: {ColumnLabel(col)}")"
+                                   checked="@cell.Get()"
+                                   @onchange="e => ToggleAsync(cell, e)" />
+                        }
+                        <span class="acct-matrix-cell-label">@ColumnLabel(col)</span>
+                    </div>
+                }
+            </div>
+        }
+    </div>
+    @if (_showSms)
+    {
+        <p class="small text-muted mb-0"><i class="bi bi-chat-dots me-1"></i>SMS-y wysyłamy tylko wtedy, gdy trener je włączył i masz podany numer telefonu w Moje konto → Profil.</p>
+    }
+}
+
+@if (_toast is not null)
+{
+    <div class="acct-toast" role="status"><i class="bi bi-check-circle-fill"></i>@_toast</div>
+}
+
 @code {
-    private string _userId = string.Empty;
-    private string _userEmail = string.Empty;
-    private string _userRole = string.Empty;
-    private bool _isAdminRole;
-    private bool _isClientRole;
-    private bool _loading = true;
-    private bool _saving;
-    private bool _saved;
+    private const string Email = "email", Push = "push", Sms = "sms";
+
+    private string _userId = "", _userEmail = "", _userRole = "";
+    private bool _isAdminRole, _loading = true, _showSms;
     private NotificationPreferencesDto _prefs = new();
-    private List<ToggleItem> _toggles = [];
+    private List<string> _columns = [];
+    private List<Row> _rows = [];
+    private string? _toast;
+    private CancellationTokenSource? _toastCts;
 
     protected override async Task OnInitializedAsync()
     {
-        var auth = await AuthState.GetAuthenticationStateAsync();
-        _userId    = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
-        _userEmail = auth.User.Identity?.Name ?? _userId;
-        _isAdminRole  = auth.User.IsInRole(Roles.Admin);
-        _isClientRole = auth.User.IsInRole(Roles.Client);
-        _userRole = _isAdminRole ? Roles.Admin
-                  : auth.User.IsInRole(Roles.Trainer) ? Roles.Trainer
-                  : auth.User.IsInRole(Roles.Subordinate) ? Roles.Subordinate
-                  : Roles.Client;
-
-        if (!_isAdminRole && !string.IsNullOrEmpty(_userId))
-        {
-            _prefs = await NotifService.GetAsync(_userId);
-            BuildToggles();
-        }
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        _userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _userEmail = user.Identity?.Name ?? "";
+        _isAdminRole = user.IsInRole(Roles.Admin);
+        var isClient = user.IsInRole(Roles.Client) && !user.IsInRole(Roles.Admin) && !user.IsInRole(Roles.Trainer);
+        _userRole = _isAdminRole ? Roles.Admin : user.IsInRole(Roles.Trainer) ? Roles.Trainer : isClient ? Roles.Client : Roles.Subordinate;
+        _prefs = await NotifService.GetAsync(_userId);
+        _showSms = isClient && Entitlements.IsAllowed("SmsReminders");
+        _columns = _showSms ? [Email, Push, Sms] : [Email, Push];
+        _rows = isClient ? ClientRows() : StaffRows();
         _loading = false;
     }
 
-    private void BuildToggles()
-    {
-        _toggles = [];
-        if (_isClientRole)
-        {
-            _toggles.Add(new("Przypomnienie 24h przed treningiem", "E-mail z przypomnieniem dzień przed wizytą — żebyś nie zapomniał!",
-                () => _prefs.SessionReminders, v => _prefs.SessionReminders = v));
-            _toggles.Add(new("Potwierdzenie rezerwacji", "E-mail po zarezerwowaniu wizyty przez trenera",
-                () => _prefs.SessionBooked, v => _prefs.SessionBooked = v));
-            _toggles.Add(new("Anulowanie przez trenera", "E-mail gdy trener anuluje Twoją wizytę",
-                () => _prefs.SessionCancelledByTrainer, v => _prefs.SessionCancelledByTrainer = v));
-            _toggles.Add(new("Zmiana terminu", "E-mail gdy trener przeplanuje Twoją wizytę",
-                () => _prefs.SessionRescheduled, v => _prefs.SessionRescheduled = v));
-            _toggles.Add(new("Nowy pakiet", "E-mail gdy trener przypisze Ci pakiet sesji",
-                () => _prefs.PackageAssigned, v => _prefs.PackageAssigned = v));
-        }
-        else
-        {
-            _toggles.Add(new("Klient anuluje wizytę", "E-mail gdy klient samodzielnie anuluje wizytę",
-                () => _prefs.ClientCancelledSession, v => _prefs.ClientCancelledSession = v));
-            _toggles.Add(new("Nowy klient", "E-mail gdy nowy klient oczekuje na akceptację",
-                () => _prefs.NewClientPending, v => _prefs.NewClientPending = v));
-            _toggles.Add(new("Wygasające pakiety", "E-mail o pakietach klientów zbliżających się do wygaśnięcia",
-                () => _prefs.ExpiringPackages, v => _prefs.ExpiringPackages = v));
-            _toggles.Add(new("Potwierdzenie rezerwacji", "E-mail gdy trener/asystent zarezerwuje wizytę",
-                () => _prefs.SessionBooked, v => _prefs.SessionBooked = v));
-        }
-    }
+    private List<Row> ClientRows() =>
+    [
+        new("Przypomnienie przed treningiem", "Dzień przed wizytą — godzina i rodzaj treningu",
+            email: new(() => _prefs.SessionReminders, v => _prefs.SessionReminders = v),
+            push: new(() => _prefs.PushReminders, v => _prefs.PushReminders = v),
+            sms: new(() => _prefs.SmsReminders, v => _prefs.SmsReminders = v)),
+        new("Rezerwacje i zmiany terminów", "Potwierdzenie wizyty, przesunięcie albo odwołanie przez trenera",
+            email: new(() => _prefs.SessionBooked || _prefs.SessionRescheduled || _prefs.SessionCancelledByTrainer,
+                       v => _prefs.SessionBooked = _prefs.SessionRescheduled = _prefs.SessionCancelledByTrainer = v),
+            push: new(() => _prefs.PushSessions, v => _prefs.PushSessions = v)),
+        new("Pakiety i karnety", "Nowy pakiet, kończące się treningi, odnowienie karnetu",
+            email: new(() => _prefs.PackageAssigned || _prefs.ExpiringPackages, v => _prefs.PackageAssigned = _prefs.ExpiringPackages = v),
+            push: new(() => _prefs.PushPackages, v => _prefs.PushPackages = v)),
+        new("Wiadomości i komentarze", "Nowa wiadomość na czacie, komentarz trenera do treningu",
+            push: new(() => _prefs.PushMessages, v => _prefs.PushMessages = v)),
+        new("Od trenera", "Powitanie, życzenia urodzinowe, zaproszenia do powrotu — czasem z kuponem",
+            email: new(() => _prefs.TrainerMessages, v => _prefs.TrainerMessages = v),
+            push: new(() => _prefs.PushTrainerMessages, v => _prefs.PushTrainerMessages = v),
+            sms: new(() => _prefs.SmsTrainerMessages, v => _prefs.SmsTrainerMessages = v)),
+    ];
 
-    private async Task SaveAsync()
+    private List<Row> StaffRows() =>
+    [
+        new("Wizyty klientów", "Klient odwołał wizytę albo prosi o termin",
+            email: new(() => _prefs.ClientCancelledSession, v => _prefs.ClientCancelledSession = v),
+            push: new(() => _prefs.PushSessions, v => _prefs.PushSessions = v)),
+        new("Nowy klient czeka", "Ktoś założył konto i czeka na Twoją akceptację",
+            email: new(() => _prefs.NewClientPending, v => _prefs.NewClientPending = v)),
+        new("Kończące się pakiety klientów", "Klientowi zostały 1–2 treningi albo pakiet wkrótce wygaśnie",
+            email: new(() => _prefs.ExpiringPackages, v => _prefs.ExpiringPackages = v),
+            push: new(() => _prefs.PushPackages, v => _prefs.PushPackages = v)),
+        new("Aktywność klientów", "Ankiety, nowe pomiary, opinie",
+            push: new(() => _prefs.PushClientActivity, v => _prefs.PushClientActivity = v)),
+        new("Wiadomości i komentarze", "Nowa wiadomość na czacie, komentarz klienta do treningu",
+            push: new(() => _prefs.PushMessages, v => _prefs.PushMessages = v)),
+    ];
+
+    private async Task ToggleAsync(Cell cell, ChangeEventArgs e)
     {
-        _saving = true;
+        cell.Set(e.Value is true || (e.Value is string s && s == "true"));
+        await NotifService.SaveAsync(_userId, _prefs);
         try
         {
-            await NotifService.SaveAsync(_userId, _prefs);
             await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "NotificationPreferencesSaved",
-                "NotificationPreferences", null, "Preferencje powiadomień e-mail zaktualizowane");
-            _saved = true;
-            await Task.Delay(2000);
-            _saved = false;
+                "NotificationPreferences", _userId, "Zmieniono ustawienia powiadomień");
         }
-        finally { _saving = false; }
+        catch { } // audyt to najlepszy wysiłek
+        _ = ToastAsync("Zapisano");
     }
 
-    private sealed class ToggleItem(string label, string description, Func<bool> get, Action<bool> set)
+    private async Task ToastAsync(string text)
     {
-        public string Label { get; } = label;
+        _toastCts?.Cancel();
+        _toastCts = new CancellationTokenSource();
+        var token = _toastCts.Token;
+        _toast = text;
+        StateHasChanged();
+        try
+        {
+            await Task.Delay(1800, token);
+            _toast = null;
+            await InvokeAsync(StateHasChanged);
+        }
+        catch (TaskCanceledException) { }
+    }
+
+    private static string ColumnLabel(string col) => col switch { Email => "E-mail", Push => "Push", _ => "SMS" };
+
+    private sealed class Cell(Func<bool> get, Action<bool> set)
+    {
+        public Func<bool> Get { get; } = get;
+        public Action<bool> Set { get; } = set;
+    }
+
+    private sealed class Row(string title, string description, Cell? email = null, Cell? push = null, Cell? sms = null)
+    {
+        public string Title { get; } = title;
         public string Description { get; } = description;
-        public bool Value => get();
-        public void SetValue(bool v) => set(v);
+        public Cell? Cell(string column) => column switch { Email => email, Push => push, _ => sms };
     }
 }

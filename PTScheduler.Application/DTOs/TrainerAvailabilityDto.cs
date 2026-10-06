@@ -1,3 +1,5 @@
+using PTScheduler.Domain.Enums;
+
 namespace PTScheduler.Application.DTOs;
 
 public class TrainerAvailabilityDto
@@ -33,6 +35,14 @@ public class TrainerConfigDto
     public int SlotGranularityMinutes { get; set; } = 30;
     public bool AllowClientsDiscoverPeers { get; set; }
     public int CancellationWindowHours { get; set; } = 24;
+    public LateCancellationPolicy LateCancellationPolicy { get; set; } = LateCancellationPolicy.Block;
+    public bool NoShowChargesSession { get; set; } = true;
+
+    // Rezerwacja bez pakietu
+    public bool OffPackageOnline { get; set; } = true;
+    public bool OffPackageAtTrainer { get; set; } = true;
+    public bool OffPackageNeedsApproval { get; set; } = true;
+    public int OffPackageUnpaidLimit { get; set; } = 1;
 }
 
 public class AvailableSlotDto

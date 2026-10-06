@@ -15,6 +15,7 @@ public class ClientReportService(
     IDbContextFactory<ApplicationDbContext> dbFactory,
     UserManager<ApplicationUser> userManager,
     IBrandingService brandingService,
+    IAppClock clock,
     IWebRootPathProvider webRootPathProvider) : IClientReportService
 {
     private static readonly CultureInfo Pl = CultureInfo.GetCultureInfo("pl-PL");
@@ -26,12 +27,14 @@ public class ClientReportService(
         var client = await db.Clients.AsNoTracking().FirstOrDefaultAsync(c => c.Id == clientId)
             ?? throw new InvalidOperationException($"Klient {clientId} nie istnieje.");
 
-        var user = await userManager.FindByIdAsync(client.ApplicationUserId);
+        var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == client.ApplicationUserId);
         var branding = await brandingService.GetAsync();
 
-        // Kind=Local matches the DateTime.Now convention used throughout the app —
-        // Npgsql refuses Kind=Unspecified for timestamptz columns.
-        var monthStart = new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Local);
+        // Granice miesiąca to zegar ścienny, tak samo jak Session.StartTime,
+        // z którym są porównywane. Kolumna jest typu timestamp without time zone,
+        // więc Kind=Unspecified jest tu właściwy — wcześniejszy Kind=Local
+        // oznaczał strefę maszyny, czyli UTC w kontenerze.
+        var monthStart = new DateTime(year, month, 1, 0, 0, 0, DateTimeKind.Unspecified);
         var monthEnd = monthStart.AddMonths(1);
 
         var sessions = await db.Sessions
@@ -43,7 +46,7 @@ public class ClientReportService(
 
         // Resolve trainer names for sessions
         var trainerIds = sessions.Select(s => s.TrainerUserId).Distinct().ToList();
-        var trainers = await userManager.Users
+        var trainers = await db.Users.AsNoTracking()
             .Where(u => trainerIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id, u => ResolveName(u));
 
@@ -66,18 +69,7 @@ public class ClientReportService(
             .OrderBy(n => n.CreatedAt)
             .ToListAsync();
 
-        // Resolve logo path on disk for embedding
-        byte[]? logoBytes = null;
-        try
-        {
-            if (!string.IsNullOrEmpty(branding.LogoPath))
-            {
-                var rel = branding.LogoPath.TrimStart('/');
-                var abs = Path.Combine(webRootPathProvider.WebRootPath, rel);
-                if (File.Exists(abs)) logoBytes = await File.ReadAllBytesAsync(abs);
-            }
-        }
-        catch { /* best-effort, ignore */ }
+        var logoBytes = await LoadLogoAsync(branding.LogoPath, webRootPathProvider.WebRootPath);
 
         var data = new ReportData(
             CompanyName: branding.CompanyName ?? "PTScheduler",
@@ -93,6 +85,7 @@ public class ClientReportService(
             Measurements: measurements,
             PreviousMeasurement: prevMeasurement,
             Notes: notes,
+            GeneratedAt: clock.LocalNow,   // zegar ścienny; statyczne Footer() nie ma dostępu do clock
             Theme: ThemePalette.For(branding.ThemeName)
         );
 
@@ -117,13 +110,14 @@ public class ClientReportService(
         List<BodyMeasurement> Measurements,
         BodyMeasurement? PreviousMeasurement,
         List<TrainerNote> Notes,
+        DateTime GeneratedAt,
         ThemePalette Theme);
 
     /// <summary>
     /// Hex palette pulled from the active branding theme (mirrors --c-primary tokens
     /// from app.css). Only "light" variants are used since a PDF is always a light surface.
     /// </summary>
-    private record ThemePalette(string Primary, string PrimaryDark, string PrimaryLight)
+    internal record ThemePalette(string Primary, string PrimaryDark, string PrimaryLight)
     {
         public static ThemePalette For(string? themeName)
         {
@@ -438,7 +432,7 @@ public class ClientReportService(
             row.RelativeItem().Text(t =>
             {
                 t.Span("Wygenerowano: ").FontSize(8.5f).FontColor(Colors.Grey.Darken1);
-                t.Span(Capitalize(DateTime.Now.ToString("d MMMM yyyy 'o' HH:mm", Pl)))
+                t.Span(Capitalize(d.GeneratedAt.ToString("d MMMM yyyy 'o' HH:mm", Pl)))
                     .FontSize(8.5f).SemiBold().FontColor(Colors.Grey.Darken3);
                 t.Span("   ·   ").FontSize(8.5f).FontColor(Colors.Grey.Lighten1);
                 t.Span(d.CompanyName).FontSize(8.5f).FontColor(Colors.Grey.Darken1);
@@ -493,13 +487,25 @@ public class ClientReportService(
         _                             => Colors.Blue.Lighten5
     };
 
-    private static string ResolveName(ApplicationUser u)
+    /// <summary>Logo z brandingu do osadzenia w PDF; brak pliku albo błąd odczytu = PDF bez logo.</summary>
+    internal static async Task<byte[]?> LoadLogoAsync(string? logoPath, string webRoot)
+    {
+        try
+        {
+            if (string.IsNullOrEmpty(logoPath)) return null;
+            var abs = Path.Combine(webRoot, logoPath.TrimStart('/'));
+            return File.Exists(abs) ? await File.ReadAllBytesAsync(abs) : null;
+        }
+        catch { return null; }
+    }
+
+    internal static string ResolveName(ApplicationUser u)
     {
         var n = $"{u.FirstName} {u.LastName}".Trim();
         return string.IsNullOrEmpty(n) ? (u.UserName ?? u.Email ?? "—") : n;
     }
 
-    private static string Slug(string s)
+    internal static string Slug(string s)
     {
         var clean = new string(s.Where(c => char.IsLetterOrDigit(c) || c == '-' || c == '_' || c == ' ').ToArray());
         return clean.Trim().Replace(' ', '_').ToLowerInvariant() is { Length: > 0 } x ? x : "klient";

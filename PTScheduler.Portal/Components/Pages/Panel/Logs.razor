@@ -1,0 +1,447 @@
+@page "/panel/logs"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject ContainerLogService LogSvc
+@inject DockerService DockerSvc
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@implements IDisposable
+@rendermode InteractiveServer
+
+<PageTitle>Logi — PTScheduler Portal</PageTitle>
+
+<PanelHeader Title="Logi" Icon="bi-journal-text" Subtitle="Co piszą kontenery Portalu, Guardiana, bazy i aplikacji trenerów — bez logowania się na serwer. Najnowsze wpisy są na dole.">
+    <Actions>
+        @if (_source is not null)
+        {
+            <a class="btn btn-sm btn-outline-secondary" href="@DownloadHref" download>
+                <i class="bi bi-download me-1"></i>Pobierz .txt
+            </a>
+        }
+        <button class="btn btn-sm btn-outline-secondary" @onclick="ReloadAll" disabled="@_busy">
+            @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-arrow-clockwise me-1"></i> }
+            Odśwież
+        </button>
+    </Actions>
+</PanelHeader>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_sourcesError is not null)
+{
+    <StatusBanner Tone="danger" Icon="bi-plug" Title="Brak połączenia z Dockerem">
+        <ChildContent>Portal nie widzi Dockera, więc nie pokaże logów. Sprawdź, czy gniazdo Dockera jest zamontowane w kontenerze Portalu. <span class="text-muted">(@_sourcesError)</span></ChildContent>
+    </StatusBanner>
+}
+else if (_sources.Count == 0)
+{
+    <PanelCard>
+        <div class="pp-empty"><i class="bi bi-box"></i><div class="pp-empty-title">Brak kontenerów</div><p>Nie znalazłem kontenerów Portalu ani trenerów.</p></div>
+    </PanelCard>
+}
+else
+{
+    <div class="lg-picker">
+        <label class="form-label small fw-semibold mb-1" for="lg-picker">Kontener</label>
+        <select id="lg-picker" class="form-select" value="@_source?.Container" @onchange="OnPickerChanged">
+            @foreach (var g in Groups())
+            {
+                <optgroup label="@g.Key">
+                    @foreach (var s in g)
+                    {
+                        <option value="@s.Container">@($"{s.Label} — {s.Hint}{(s.Running ? "" : " (zatrzymany)")}")</option>
+                    }
+                </optgroup>
+            }
+        </select>
+    </div>
+
+    <div class="lg-layout">
+        <nav class="pp-card lg-sources" aria-label="Kontenery">
+            @foreach (var g in Groups())
+            {
+                <div class="lg-group">
+                    <div class="pp-label">@g.Key</div>
+                    @foreach (var s in g)
+                    {
+                        var current = s.Container == _source?.Container;
+                        <button type="button" class="lg-source @(current ? "active" : "")" aria-current="@(current ? "true" : null)" title="@s.Container"
+                                @onclick="() => SelectAsync(s.Container)">
+                            <span class="lg-dot @(s.Running ? "on" : "off")"></span>
+                            <span class="min-w-0">
+                                <span class="lg-source-name">@s.Label</span>
+                                <span class="lg-source-hint">@s.Hint · @s.Container</span>
+                            </span>
+                        </button>
+                    }
+                </div>
+            }
+        </nav>
+
+        <div class="min-w-0">
+            @if (_source is not null)
+            {
+                <section class="pp-card">
+                    <div class="pp-card-head">
+                        <div class="pp-icon @(_source.Running ? "pp-tone-ok" : "pp-tone-danger")"><i class="bi @(_source.Group == ContainerLogService.GroupTenants ? "bi-person-badge" : "bi-box-seam")"></i></div>
+                        <div class="min-w-0">
+                            <h2 class="pp-card-title">@_source.Label <span class="text-muted fw-normal">· @_source.Hint</span></h2>
+                            <div class="pp-card-sub"><code>@_source.Container</code> · @_source.Image</div>
+                        </div>
+                        <div class="pp-card-actions">
+                            @if (_source.TenantSlug is not null && _tenantId is { } tid)
+                            {
+                                <a class="btn btn-sm btn-outline-secondary" href="@($"/panel/tenants/{tid}")"><i class="bi bi-person me-1"></i>Karta trenera</a>
+                            }
+                        </div>
+                    </div>
+
+                    <div class="d-flex flex-wrap gap-2 mb-3">
+                        @if (_info is null)
+                        {
+                            <span class="pp-chip pp-tone-muted">Brak danych o kontenerze</span>
+                        }
+                        else
+                        {
+                            <span class="pp-chip pp-tone-@(_info.Running ? "ok" : "danger")"><i class="bi @(_info.Running ? "bi-play-circle" : "bi-stop-circle")"></i>@StateLabel(_info)</span>
+                            @if (Uptime(_info) is { } up)
+                            {
+                                <span class="pp-chip pp-tone-muted"><i class="bi bi-clock-history"></i>@up</span>
+                            }
+                            <span class="pp-chip pp-tone-@(_info.RestartCount > 0 ? "warn" : "muted")" title="Ile razy Docker sam uruchomił kontener ponownie po awarii">
+                                <i class="bi bi-arrow-repeat"></i>Restarty: @_info.RestartCount
+                            </span>
+                        }
+                    </div>
+
+                    <div class="lg-toolbar">
+                        <select class="form-select form-select-sm" aria-label="Zakres czasu" value="@_minutes" @onchange="OnMinutesChanged">
+                            <option value="15">Ostatnie 15 min</option>
+                            <option value="60">Ostatnia godzina</option>
+                            <option value="360">Ostatnie 6 godz.</option>
+                            <option value="1440">Ostatnia doba</option>
+                            <option value="10080">Ostatni tydzień</option>
+                            <option value="0">Od uruchomienia</option>
+                        </select>
+                        <select class="form-select form-select-sm" aria-label="Liczba linii" value="@_tail" @onchange="OnTailChanged">
+                            <option value="200">200 linii</option>
+                            <option value="500">500 linii</option>
+                            <option value="1000">1000 linii</option>
+                            <option value="2000">2000 linii</option>
+                            <option value="5000">5000 linii</option>
+                        </select>
+                        <div class="lg-seg" role="group" aria-label="Poziom">
+                            @foreach (var (key, label) in LevelFilters)
+                            {
+                                <button type="button" class="@(_level == key ? "active" : "")" aria-pressed="@(_level == key ? "true" : "false")" @onclick="() => _level = key">@label</button>
+                            }
+                        </div>
+                        <div class="input-group input-group-sm lg-search">
+                            <span class="input-group-text"><i class="bi bi-search"></i></span>
+                            <input class="form-control" placeholder="Szukaj w logach…" @bind="_query" @bind:event="oninput" aria-label="Szukaj w logach" />
+                        </div>
+                        <div class="form-check form-switch mb-0 ms-auto">
+                            <input class="form-check-input" type="checkbox" role="switch" id="lg-live" checked="@_live" @onchange="OnLiveChanged" />
+                            <label class="form-check-label lg-live" for="lg-live">
+                                @if (_live) { <span class="lg-live-dot"></span> }
+                                Na żywo
+                            </label>
+                        </div>
+                    </div>
+
+                    @{
+                        var visible = Visible().ToList();
+                        var errors = _entries.Count(e => e.Level == LogLevelKind.Error);
+                        var warns = _entries.Count(e => e.Level == LogLevelKind.Warn);
+                    }
+                    <div class="lg-summary" aria-live="polite">
+                        <span>@visible.Count z @_entries.Count @PanelUi.Plural(_entries.Count, "wpisu", "wpisów", "wpisów")</span>
+                        @if (errors > 0)
+                        {
+                            <button type="button" class="pp-chip pp-tone-danger" @onclick='() => _level = "error"'><i class="bi bi-x-octagon"></i>@errors @PanelUi.Plural(errors, "błąd", "błędy", "błędów")</button>
+                        }
+                        @if (warns > 0)
+                        {
+                            <button type="button" class="pp-chip pp-tone-warn" @onclick='() => _level = "warn"'><i class="bi bi-exclamation-triangle"></i>@warns @PanelUi.Plural(warns, "ostrzeżenie", "ostrzeżenia", "ostrzeżeń")</button>
+                        }
+                        @if (errors == 0 && warns == 0 && _entries.Count > 0)
+                        {
+                            <span class="pp-chip pp-tone-ok"><i class="bi bi-check-circle"></i>Bez błędów w tym zakresie</span>
+                        }
+                        @if (_loadedAt is { } at)
+                        {
+                            <span class="ms-auto">Odczyt: @ContainerLogService.ToLocal(at).ToString("HH:mm:ss")</span>
+                        }
+                    </div>
+
+                    @if (_readError is not null)
+                    {
+                        <div class="pp-callout pp-tone-danger"><i class="bi bi-exclamation-octagon"></i><div><strong>Nie udało się odczytać logów.</strong> @_readError</div></div>
+                    }
+
+                    <div class="lg-view" @ref="_view" tabindex="0" aria-label="Logi kontenera">
+                        @if (_entries.Count == 0 && _readError is null)
+                        {
+                            <div class="lg-view-empty">@(_busy ? "Wczytuję…" : "Brak wpisów w wybranym zakresie. Wybierz dłuższy zakres czasu.")</div>
+                        }
+                        else if (visible.Count == 0)
+                        {
+                            <div class="lg-view-empty">Żaden wpis nie pasuje do filtrów.</div>
+                        }
+                        else
+                        {
+                            @foreach (var e in visible)
+                            {
+                                <div class="lg-e lg-@e.Level" @key="e">
+                                    <span class="lg-time" title="@(e.TimeUtc is { } t ? ContainerLogService.ToLocal(t).ToString("yyyy-MM-dd HH:mm:ss.fff") : "")">@(e.TimeUtc is { } t2 ? ContainerLogService.ToLocal(t2).ToString(ShowDates ? "dd.MM HH:mm" : "HH:mm:ss") : "")</span>
+                                    <span class="lg-lvl">@LevelTag(e.Level)</span>
+                                    <span class="lg-msg">@if (e.Category is not null) {<span class="lg-cat">@Highlight(e.Category)</span>@("\n")}@Highlight(string.Join("\n", e.Lines))</span>
+                                </div>
+                            }
+                        }
+                    </div>
+                </section>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "c")] public string? ContainerFromQuery { get; set; }
+
+    private static readonly (string Key, string Label)[] LevelFilters =
+        { ("all", "Wszystko"), ("warn", "Ostrzeżenia i błędy"), ("error", "Błędy") };
+
+    private List<LogSource> _sources = new();
+    private LogSource? _source;
+    private ContainerInfo? _info;
+    private int? _tenantId;
+    private List<LogEntry> _entries = new();
+    private string? _sourcesError;
+    private string? _readError;
+    private DateTime? _loadedAt;
+    private bool _loading = true;
+    private bool _busy;
+    private bool _live;
+    private bool _scrollToEnd;
+    private int _minutes = 60;
+    private int _tail = 500;
+    private string _level = "all";
+    private string _query = "";
+    private ElementReference _view;
+    private Timer? _timer;
+    private CancellationTokenSource? _readCts;
+
+    [Inject] private TenantService TenantSvc { get; set; } = default!;
+
+    private bool ShowDates => _minutes == 0 || _minutes > 1440;
+    private string DownloadHref => $"/api/panel/logs/download?c={Uri.EscapeDataString(_source?.Container ?? "")}&tail={Math.Max(_tail, 2000)}&minutes={_minutes}";
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadSourcesAsync();
+        _loading = false;
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loading || _sources.Count == 0) return;
+        var wanted = _sources.FirstOrDefault(s => string.Equals(s.Container, ContainerFromQuery, StringComparison.OrdinalIgnoreCase))
+                     ?? _source ?? _sources[0];
+        if (wanted.Container != _source?.Container)
+            await ShowAsync(wanted);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (firstRender && _source is null && _sources.Count > 0)
+        {
+            await OnParametersSetAsync();
+            StateHasChanged();
+            return;
+        }
+        if (_scrollToEnd)
+        {
+            _scrollToEnd = false;
+            try { await JS.InvokeVoidAsync("ptLogs.toBottom", _view); } catch (JSDisconnectedException) { }
+        }
+    }
+
+    private async Task LoadSourcesAsync()
+    {
+        try
+        {
+            _sources = await LogSvc.GetSourcesAsync();
+            _sourcesError = null;
+            if (_source is not null)
+                _source = _sources.FirstOrDefault(s => s.Container == _source.Container) ?? _source;
+        }
+        catch (Exception ex)
+        {
+            _sourcesError = ex.Message;
+            _sources = new();
+        }
+    }
+
+    private IEnumerable<IGrouping<string, LogSource>> Groups() => _sources.GroupBy(s => s.Group);
+
+    private Task SelectAsync(string container)
+    {
+        // Adres z ?c= — da się wysłać komuś link albo wrócić przyciskiem „wstecz”.
+        Nav.NavigateTo($"/panel/logs?c={Uri.EscapeDataString(container)}");
+        return Task.CompletedTask;
+    }
+
+    private Task OnPickerChanged(ChangeEventArgs e) => SelectAsync(e.Value?.ToString() ?? "");
+
+    private async Task ShowAsync(LogSource source)
+    {
+        _source = source;
+        _entries = new();
+        _readError = null;
+        _info = null;
+        _tenantId = null;
+        if (source.TenantSlug is not null)
+            _tenantId = (await TenantSvc.GetAllAsync()).FirstOrDefault(t => t.Slug == source.TenantSlug)?.Id;
+        await ReadAsync(forceScroll: true);
+    }
+
+    private async Task ReloadAll()
+    {
+        await LoadSourcesAsync();
+        await ReadAsync(forceScroll: true);
+    }
+
+    private async Task ReadAsync(bool forceScroll)
+    {
+        if (_source is null) return;
+        _readCts?.Cancel();
+        var cts = _readCts = new CancellationTokenSource(TimeSpan.FromSeconds(20));
+        _busy = true;
+        try
+        {
+            var atBottom = forceScroll;
+            if (!forceScroll)
+            {
+                try { atBottom = await JS.InvokeAsync<bool>("ptLogs.atBottom", _view); } catch (JSDisconnectedException) { return; }
+            }
+
+            DateTime? since = _minutes > 0 ? DateTime.UtcNow.AddMinutes(-_minutes) : null;
+            var lines = await LogSvc.ReadAsync(_source.Container, _tail, since, cts.Token);
+            if (cts.IsCancellationRequested) return;
+            _entries = ContainerLogService.Parse(lines);
+            _info = await DockerSvc.GetContainerInfoAsync(_source.Container);
+            _loadedAt = DateTime.UtcNow;
+            _readError = null;
+            _scrollToEnd = atBottom;
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested && _readCts != cts)
+        {
+            // Zastąpione nowszym odczytem.
+        }
+        catch (Exception ex)
+        {
+            _readError = ex is OperationCanceledException ? "Docker nie odpowiedział w 20 s." : ex.Message;
+        }
+        finally
+        {
+            if (_readCts == cts) _busy = false;
+        }
+    }
+
+    private async Task OnMinutesChanged(ChangeEventArgs e)
+    {
+        _minutes = int.TryParse(e.Value?.ToString(), out var m) ? m : 60;
+        await ReadAsync(forceScroll: true);
+    }
+
+    private async Task OnTailChanged(ChangeEventArgs e)
+    {
+        _tail = int.TryParse(e.Value?.ToString(), out var t) ? t : 500;
+        await ReadAsync(forceScroll: true);
+    }
+
+    private void OnLiveChanged(ChangeEventArgs e)
+    {
+        _live = e.Value is true || string.Equals(e.Value?.ToString(), "true", StringComparison.OrdinalIgnoreCase);
+        _timer?.Dispose();
+        _timer = _live ? new Timer(_ => _ = InvokeAsync(Tick), null, TimeSpan.FromSeconds(5), TimeSpan.FromSeconds(5)) : null;
+    }
+
+    private async Task Tick()
+    {
+        if (_busy || _source is null) return;
+        await ReadAsync(forceScroll: false);
+        StateHasChanged();
+    }
+
+    private IEnumerable<LogEntry> Visible()
+    {
+        IEnumerable<LogEntry> q = _entries;
+        if (_level == "warn") q = q.Where(e => e.Level >= LogLevelKind.Warn);
+        else if (_level == "error") q = q.Where(e => e.Level == LogLevelKind.Error);
+        var term = _query.Trim();
+        if (term.Length > 0) q = q.Where(e => e.Matches(term));
+        return q;
+    }
+
+    private RenderFragment Highlight(string text) => builder =>
+    {
+        var term = _query.Trim();
+        if (term.Length == 0) { builder.AddContent(0, text); return; }
+        var seq = 0;
+        var pos = 0;
+        while (pos < text.Length)
+        {
+            var i = text.IndexOf(term, pos, StringComparison.OrdinalIgnoreCase);
+            if (i < 0) { builder.AddContent(seq++, text[pos..]); break; }
+            if (i > pos) builder.AddContent(seq++, text[pos..i]);
+            builder.OpenElement(seq++, "mark");
+            builder.AddAttribute(seq++, "class", "lg-mark");
+            builder.AddContent(seq++, text.Substring(i, term.Length));
+            builder.CloseElement();
+            pos = i + term.Length;
+        }
+    };
+
+    private static string LevelTag(LogLevelKind l) => l switch
+    {
+        LogLevelKind.Error => "BŁĄD",
+        LogLevelKind.Warn => "UWAGA",
+        LogLevelKind.Debug => "DBG",
+        _ => "INFO"
+    };
+
+    private static string StateLabel(ContainerInfo i) => i.Status switch
+    {
+        "running" => "Działa",
+        "restarting" => "Restartuje się",
+        "paused" => "Wstrzymany",
+        "exited" => $"Zatrzymany (kod {i.ExitCode})",
+        "created" => "Utworzony, nie uruchomiony",
+        "dead" => "Martwy",
+        _ => i.Status
+    };
+
+    private static string? Uptime(ContainerInfo i)
+    {
+        if (!i.Running || !DateTime.TryParse(i.StartedAt, System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AdjustToUniversal | System.Globalization.DateTimeStyles.AssumeUniversal, out var started)
+            || started.Year < 2000)
+            return null;
+        var d = DateTime.UtcNow - started;
+        var text = d.TotalMinutes < 1 ? "przed chwilą"
+            : d.TotalHours < 1 ? $"{(int)d.TotalMinutes} min"
+            : d.TotalDays < 1 ? $"{(int)d.TotalHours} godz. {d.Minutes} min"
+            : $"{(int)d.TotalDays} {PanelUi.Plural((int)d.TotalDays, "dzień", "dni", "dni")}";
+        return $"Działa od: {text}";
+    }
+
+    public void Dispose()
+    {
+        _timer?.Dispose();
+        _readCts?.Cancel();
+    }
+}

@@ -1,0 +1,380 @@
+@* Pola jednego widgetu w kreatorze strony. Każda zmiana woła OnChange (szkic + odświeżenie podglądu). *@
+@using PTScheduler.Application.DTOs
+
+@{
+    var w = SiteWidgets.Find(Block.Type);
+}
+
+<div class="sb-fields">
+    @if (w is { Variants.Count: > 0 })
+    {
+        <div class="sb-row">
+            <label class="sb-label">Wygląd</label>
+            <div class="sb-seg">
+                @foreach (var v in w.Variants)
+                {
+                    <button type="button" class="@((Block.Variant ?? w.Variants[0].Key) == v.Key ? "active" : "")" @onclick="() => Set(() => Block.Variant = v.Key)">@v.Name</button>
+                }
+            </div>
+        </div>
+    }
+
+    @switch (Block.Type)
+    {
+        case "hero":
+            @Txt("Mała etykieta nad tytułem", () => Block.Eyebrow, v => Block.Eyebrow = v, "np. Trener personalny · Warszawa")
+            @Area("Tytuł", () => Block.Title, v => Block.Title = v, 2, "Najważniejsza obietnica — krótko")
+            @Area("Podtytuł", () => Block.Subtitle, v => Block.Subtitle = v, 3)
+            @if (Block.Variant != "center")
+            {
+                <div class="sb-row">
+                    <label class="sb-label">@(Block.Variant == "full" ? "Zdjęcie w tle" : "Twoje zdjęcie")</label>
+                    <SiteImageField Value="@Block.ImageUrl" ValueChanged="v => Set(() => Block.ImageUrl = v)" />
+                    @if (Block.Variant != "full") { <div class="sb-hint">Bez zdjęcia pokażemy animowany podgląd aplikacji.</div> }
+                </div>
+            }
+            @Button("Główny przycisk", () => Block.CtaLabel, v => Block.CtaLabel = v, () => Block.CtaUrl, v => Block.CtaUrl = v)
+            @Button("Drugi przycisk (opcjonalnie)", () => Block.Cta2Label, v => Block.Cta2Label = v, () => Block.Cta2Url, v => Block.Cta2Url = v)
+            @Items("Plakietki przy zdjęciu", "Plakietka", max: 3, fields: HeroBadge)
+            break;
+
+        case "marquee":
+            <div class="sb-row">
+                <label class="sb-label">Hasła (każde w osobnej linii)</label>
+                <textarea class="form-control form-control-sm" rows="5" @onchange="e => Set(() => Block.Items = Lines(e.Value).Select(x => new SiteBlockItem { Title = x }).ToList())">@string.Join("\n", Block.Items.Select(i => i.Title))</textarea>
+            </div>
+            @Bg()
+            break;
+
+        case "stats":
+            @Items("Liczby", "Liczba", max: 6, fields: StatItem)
+            <div class="sb-hint">Liczby same „odliczają” przy przewijaniu. Wpisz np. 150+, 8 lat, 98%.</div>
+            @Bg()
+            break;
+
+        case "benefits":
+        case "steps":
+            @Txt("Tytuł sekcji", () => Block.Title, v => Block.Title = v)
+            @Txt("Podtytuł (opcjonalnie)", () => Block.Subtitle, v => Block.Subtitle = v)
+            @Items(Block.Type == "steps" ? "Kroki" : "Korzyści", Block.Type == "steps" ? "Krok" : "Korzyść", max: 8, fields: BenefitItem)
+            @Bg()
+            break;
+
+        case "about":
+            @Txt("Tytuł", () => Block.Title, v => Block.Title = v)
+            <div class="sb-row">
+                <label class="sb-label">Twoje zdjęcie</label>
+                <SiteImageField Value="@Block.ImageUrl" ValueChanged="v => Set(() => Block.ImageUrl = v)" />
+            </div>
+            @Area("Tekst (akapity oddziel pustą linią)", () => Block.Text, v => Block.Text = v, 7)
+            <div class="sb-row">
+                <label class="sb-label">Certyfikaty i specjalizacje (każda w osobnej linii)</label>
+                <textarea class="form-control form-control-sm" rows="3" @onchange="e => Set(() => Block.Items = Lines(e.Value).Select(x => new SiteBlockItem { Title = x }).ToList())">@string.Join("\n", Block.Items.Select(i => i.Title))</textarea>
+            </div>
+            @Button("Przycisk (opcjonalnie)", () => Block.CtaLabel, v => Block.CtaLabel = v, () => Block.CtaUrl, v => Block.CtaUrl = v)
+            @Bg()
+            break;
+
+        case "transformations":
+            @Txt("Tytuł", () => Block.Title, v => Block.Title = v)
+            @Txt("Podtytuł", () => Block.Subtitle, v => Block.Subtitle = v)
+            @Items("Metamorfozy", "Metamorfoza", max: 6, fields: TransformItem)
+            <div class="sb-hint"><i class="bi bi-shield-check me-1"></i>Publikuj zdjęcia tylko za zgodą podopiecznego.</div>
+            @Bg()
+            break;
+
+        case "offer":
+            @Txt("Tytuł", () => Block.Title, v => Block.Title = v)
+            @Txt("Podtytuł", () => Block.Subtitle, v => Block.Subtitle = v)
+            <div class="sb-row">
+                <label class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" checked="@Block.UseLiveData" @onchange="e => Set(() => Block.UseLiveData = (bool)(e.Value ?? false))" />
+                    <span class="form-check-label"><b>Pakiety prosto z mojej oferty</b> — ceny zawsze aktualne, przycisk prowadzi do zakupu</span>
+                </label>
+            </div>
+            @if (!Block.UseLiveData)
+            {
+                @Items("Karty cennika", "Karta", max: 6, fields: OfferItem)
+            }
+            else
+            {
+                <div class="sb-hint">Pokazujemy aktywne pakiety z „Pakietów treningów”. Wyróżniony pakiet dostaje wstążkę „Najczęściej wybierany”.</div>
+            }
+            @Bg()
+            break;
+
+        case "slots":
+            @Txt("Tytuł", () => Block.Title, v => Block.Title = v)
+            @Txt("Podtytuł", () => Block.Subtitle, v => Block.Subtitle = v)
+            <div class="sb-hint"><i class="bi bi-lightning-charge me-1"></i>Godziny pobierają się same z Twojego grafiku (Godziny pracy i „Pierwsza wizyta”). Kliknięcie godziny otwiera rezerwację.</div>
+            @Bg()
+            break;
+
+        case "testimonials":
+            @Txt("Tytuł", () => Block.Title, v => Block.Title = v)
+            <div class="sb-row">
+                <label class="form-check form-switch">
+                    <input class="form-check-input" type="checkbox" checked="@Block.UseLiveData" @onchange="e => Set(() => Block.UseLiveData = (bool)(e.Value ?? false))" />
+                    <span class="form-check-label"><b>Opinie zebrane w aplikacji</b> — te, które zatwierdzisz w „Opiniach klientów”</span>
+                </label>
+            </div>
+            @Items("Opinie wpisane ręcznie", "Opinia", max: 12, fields: QuoteItem)
+            @Bg()
+            break;
+
+        case "gallery":
+            @Txt("Tytuł", () => Block.Title, v => Block.Title = v)
+            @Items("Zdjęcia", "Zdjęcie", max: 12, fields: GalleryItem)
+            @Bg()
+            break;
+
+        case "video":
+            @Txt("Tytuł", () => Block.Title, v => Block.Title = v)
+            @Txt("Podtytuł", () => Block.Subtitle, v => Block.Subtitle = v)
+            @Txt("Link do filmu (YouTube lub Vimeo)", () => Block.VideoUrl, v => Block.VideoUrl = v, "https://www.youtube.com/watch?v=…")
+            @if (string.IsNullOrWhiteSpace(Block.VideoUrl)) { <div class="sb-hint">Dopóki nie wkleisz linku, sekcja jest ukryta na stronie.</div> }
+            @Bg()
+            break;
+
+        case "faq":
+            @Txt("Tytuł", () => Block.Title, v => Block.Title = v)
+            @Items("Pytania", "Pytanie", max: 15, fields: FaqItem)
+            @Bg()
+            break;
+
+        case "cta":
+            @Txt("Pasek nad tytułem (pilność)", () => Block.Eyebrow, v => Block.Eyebrow = v, "np. Zostały 3 wolne miejsca w październiku")
+            @Area("Tytuł", () => Block.Title, v => Block.Title = v, 2)
+            @Area("Tekst", () => Block.Text, v => Block.Text = v, 2)
+            @Button("Przycisk", () => Block.CtaLabel, v => Block.CtaLabel = v, () => Block.CtaUrl, v => Block.CtaUrl = v)
+            <div class="sb-row">
+                <label class="sb-label">Kolor baneru</label>
+                <div class="sb-seg">
+                    <button type="button" class="@(Block.Background != "dark" ? "active" : "")" @onclick='() => Set(() => Block.Background = "accent")'>Kolor marki</button>
+                    <button type="button" class="@(Block.Background == "dark" ? "active" : "")" @onclick='() => Set(() => Block.Background = "dark")'>Ciemny</button>
+                </div>
+            </div>
+            break;
+
+        case "contact":
+            @Txt("Tytuł", () => Block.Title, v => Block.Title = v)
+            @Txt("Tekst", () => Block.Text, v => Block.Text = v)
+            @Items("Dane kontaktowe", "Pozycja", max: 8, fields: ContactItem)
+            @Bg()
+            break;
+
+        default:
+            @Txt("Tytuł", () => Block.Title, v => Block.Title = v)
+            @Area("Tekst (akapity oddziel pustą linią)", () => Block.Text, v => Block.Text = v, 6)
+            @Button("Przycisk (opcjonalnie)", () => Block.CtaLabel, v => Block.CtaLabel = v, () => Block.CtaUrl, v => Block.CtaUrl = v)
+            @Bg()
+            break;
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public SiteBlock Block { get; set; } = new();
+    [Parameter] public EventCallback OnChange { get; set; }
+
+    private RenderFragment<SiteBlockItem> HeroBadge => it => @<div class="sb-item-fields">
+
+                @IconPick(it)
+                <input class="form-control form-control-sm" placeholder="np. 4,9 / 5" value="@it.Title" @onchange="e => Set(() => it.Title = e.Value?.ToString())" />
+                <input class="form-control form-control-sm" placeholder="np. opinie klientów" value="@it.Text" @onchange="e => Set(() => it.Text = e.Value?.ToString())" />
+    </div>;
+
+    private RenderFragment<SiteBlockItem> StatItem => it => @<div class="sb-item-fields">
+
+                <input class="form-control form-control-sm sb-w-s" placeholder="150+" value="@it.Value" @onchange="e => Set(() => it.Value = e.Value?.ToString())" />
+                <input class="form-control form-control-sm" placeholder="zadowolonych klientów" value="@it.Title" @onchange="e => Set(() => it.Title = e.Value?.ToString())" />
+    </div>;
+
+    private RenderFragment<SiteBlockItem> BenefitItem => it => @<div class="sb-item-fields">
+
+                @if (Block.Type == "benefits") { @IconPick(it) }
+                <input class="form-control form-control-sm" placeholder="Nagłówek" value="@it.Title" @onchange="e => Set(() => it.Title = e.Value?.ToString())" />
+                <textarea class="form-control form-control-sm" rows="2" placeholder="Jedno, dwa zdania" @onchange="e => Set(() => it.Text = e.Value?.ToString())">@it.Text</textarea>
+    </div>;
+
+    private RenderFragment<SiteBlockItem> TransformItem => it => @<div class="sb-item-fields">
+
+                <div class="sb-two">
+                    <SiteImageField Label="Przed" Compact="true" Value="@it.ImageUrl" ValueChanged="v => Set(() => it.ImageUrl = v)" />
+                    <SiteImageField Label="Po" Compact="true" Value="@it.ImageUrl2" ValueChanged="v => Set(() => it.ImageUrl2 = v)" />
+                </div>
+                <input class="form-control form-control-sm" placeholder="Imię" value="@it.Title" @onchange="e => Set(() => it.Title = e.Value?.ToString())" />
+                <input class="form-control form-control-sm" placeholder="Efekt, np. −12 kg w 5 miesięcy" value="@it.Text" @onchange="e => Set(() => it.Text = e.Value?.ToString())" />
+    </div>;
+
+    private RenderFragment<SiteBlockItem> OfferItem => it => @<div class="sb-item-fields">
+
+                    <input class="form-control form-control-sm" placeholder="Nazwa, np. Pakiet 10 treningów" value="@it.Title" @onchange="e => Set(() => it.Title = e.Value?.ToString())" />
+                    <div class="sb-two">
+                        <input class="form-control form-control-sm" placeholder="Cena, np. 1 290 zł" value="@it.Value" @onchange="e => Set(() => it.Value = e.Value?.ToString())" />
+                        <input class="form-control form-control-sm" placeholder="np. 129 zł / trening" value="@it.Text" @onchange="e => Set(() => it.Text = e.Value?.ToString())" />
+                    </div>
+                    <textarea class="form-control form-control-sm" rows="3" placeholder="Co zawiera (każda pozycja w osobnej linii)" @onchange="e => Set(() => it.Bullets = Lines(e.Value))">@string.Join("\n", it.Bullets)</textarea>
+                    <div class="sb-two">
+                        <input class="form-control form-control-sm" placeholder="Wstążka, np. Najczęściej wybierany" value="@it.Badge" @onchange="e => Set(() => it.Badge = e.Value?.ToString())" />
+                        <label class="form-check small mb-0 align-self-center"><input class="form-check-input" type="checkbox" checked="@it.Highlight" @onchange="e => Set(() => it.Highlight = (bool)(e.Value ?? false))" /> <span class="form-check-label">Wyróżnij</span></label>
+                    </div>
+                    <SiteLinkField Value="@it.Url" ValueChanged="v => Set(() => it.Url = v)" />
+    </div>;
+
+    private RenderFragment<SiteBlockItem> QuoteItem => it => @<div class="sb-item-fields">
+
+                <div class="sb-two">
+                    <input class="form-control form-control-sm" placeholder="Imię" value="@it.Title" @onchange="e => Set(() => it.Title = e.Value?.ToString())" />
+                    <input class="form-control form-control-sm" placeholder="np. −9 kg / od roku" value="@it.Badge" @onchange="e => Set(() => it.Badge = e.Value?.ToString())" />
+                </div>
+                <textarea class="form-control form-control-sm" rows="3" placeholder="Treść opinii" @onchange="e => Set(() => it.Text = e.Value?.ToString())">@it.Text</textarea>
+    </div>;
+
+    private RenderFragment<SiteBlockItem> GalleryItem => it => @<div class="sb-item-fields">
+
+                <SiteImageField Compact="true" Value="@it.ImageUrl" ValueChanged="v => Set(() => it.ImageUrl = v)" />
+                <input class="form-control form-control-sm" placeholder="Podpis (opcjonalnie)" value="@it.Title" @onchange="e => Set(() => it.Title = e.Value?.ToString())" />
+    </div>;
+
+    private RenderFragment<SiteBlockItem> FaqItem => it => @<div class="sb-item-fields">
+
+                <input class="form-control form-control-sm" placeholder="Pytanie" value="@it.Title" @onchange="e => Set(() => it.Title = e.Value?.ToString())" />
+                <textarea class="form-control form-control-sm" rows="2" placeholder="Odpowiedź" @onchange="e => Set(() => it.Text = e.Value?.ToString())">@it.Text</textarea>
+    </div>;
+
+    private RenderFragment<SiteBlockItem> ContactItem => it => @<div class="sb-item-fields">
+
+                <div class="sb-two">
+                    @IconPick(it, ContactIcons)
+                    <input class="form-control form-control-sm" placeholder="Nazwa, np. Telefon" value="@it.Title" @onchange="e => Set(() => it.Title = e.Value?.ToString())" />
+                </div>
+                <input class="form-control form-control-sm" placeholder="Co pokazać, np. +48 600 000 000" value="@it.Value" @onchange="e => Set(() => it.Value = e.Value?.ToString())" />
+                <input class="form-control form-control-sm" placeholder="Link (opcjonalnie): tel:+48…, mailto:…, https://…" value="@it.Url" @onchange="e => Set(() => it.Url = e.Value?.ToString())" />
+    </div>;
+
+    private static readonly (string Icon, string Name)[] Icons =
+    [
+        ("bi-bullseye", "Cel"), ("bi-graph-up-arrow", "Postęp"), ("bi-calendar2-check", "Kalendarz"), ("bi-chat-heart", "Wsparcie"),
+        ("bi-heart-pulse", "Zdrowie"), ("bi-lightning-charge", "Energia"), ("bi-trophy", "Wynik"), ("bi-fire", "Spalanie"),
+        ("bi-stopwatch", "Czas"), ("bi-shield-check", "Bezpieczeństwo"), ("bi-person-walking", "Ruch"), ("bi-moon-stars", "Sen"),
+        ("bi-egg-fried", "Dieta"), ("bi-phone", "Aplikacja"), ("bi-people", "Razem"), ("bi-star-fill", "Gwiazda"),
+        ("bi-emoji-smile", "Uśmiech"), ("bi-award", "Certyfikat"), ("bi-geo-alt", "Miejsce"), ("bi-check2-circle", "Zaliczone"),
+    ];
+
+    private static readonly (string Icon, string Name)[] ContactIcons =
+    [
+        ("bi-telephone", "Telefon"), ("bi-envelope", "E-mail"), ("bi-geo-alt", "Adres"), ("bi-instagram", "Instagram"),
+        ("bi-facebook", "Facebook"), ("bi-tiktok", "TikTok"), ("bi-youtube", "YouTube"), ("bi-whatsapp", "WhatsApp"), ("bi-clock", "Godziny"), ("bi-globe", "Strona"),
+    ];
+
+    private static List<string> Lines(object? v) =>
+        (v?.ToString() ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
+
+    private async Task Set(Action change)
+    {
+        change();
+        await OnChange.InvokeAsync();
+    }
+
+    private RenderFragment Txt(string label, Func<string?> get, Action<string?> set, string? placeholder = null) => __builder =>
+    {
+        <div class="sb-row">
+            <label class="sb-label">@label</label>
+            <input class="form-control form-control-sm" value="@get()" placeholder="@placeholder" @onchange="e => Set(() => set(e.Value?.ToString()))" />
+        </div>
+    };
+
+    private RenderFragment Area(string label, Func<string?> get, Action<string?> set, int rows, string? placeholder = null) => __builder =>
+    {
+        <div class="sb-row">
+            <label class="sb-label">@label</label>
+            <textarea class="form-control form-control-sm" rows="@rows" placeholder="@placeholder" @onchange="e => Set(() => set(e.Value?.ToString()))">@get()</textarea>
+        </div>
+    };
+
+    private RenderFragment Button(string label, Func<string?> getLabel, Action<string?> setLabel, Func<string?> getUrl, Action<string?> setUrl) => __builder =>
+    {
+        <div class="sb-row">
+            <label class="sb-label">@label</label>
+            <div class="sb-two">
+                <input class="form-control form-control-sm" value="@getLabel()" placeholder="Napis na przycisku" @onchange="e => Set(() => setLabel(e.Value?.ToString()))" />
+                <SiteLinkField Value="@getUrl()" ValueChanged="v => Set(() => setUrl(v))" />
+            </div>
+        </div>
+    };
+
+    private RenderFragment IconPick(SiteBlockItem it, (string Icon, string Name)[]? set = null) => __builder =>
+    {
+        var list = set ?? Icons;
+        <div class="sb-icon-pick">
+            <span class="sb-icon-now"><i class="bi @(it.Icon ?? list[0].Icon)"></i></span>
+            <select class="form-select form-select-sm" value="@(it.Icon ?? list[0].Icon)" @onchange="e => Set(() => it.Icon = e.Value?.ToString())">
+                @foreach (var (icon, name) in list)
+                {
+                    <option value="@icon">@name</option>
+                }
+            </select>
+        </div>
+    };
+
+    private RenderFragment Bg() => __builder =>
+    {
+        <div class="sb-row">
+            <label class="sb-label">Tło sekcji</label>
+            <div class="sb-seg sb-seg-wrap">
+                @foreach (var (key, name) in new[] { ("default", "Zwykłe"), ("tint", "Delikatne"), ("dark", "Ciemne"), ("accent", "Kolor marki"), ("image", "Zdjęcie") })
+                {
+                    <button type="button" class="@(Block.Background == key ? "active" : "")" @onclick="() => Set(() => Block.Background = key)">@name</button>
+                }
+            </div>
+            @if (Block.Background == "image")
+            {
+                <div class="mt-2"><SiteImageField Value="@Block.BackgroundImageUrl" ValueChanged="v => Set(() => Block.BackgroundImageUrl = v)" /></div>
+            }
+        </div>
+    };
+
+    private RenderFragment Items(string label, string one, int max, RenderFragment<SiteBlockItem> fields) => __builder =>
+    {
+        <div class="sb-row">
+            <label class="sb-label">@label</label>
+            <div class="sb-items">
+                @for (var i = 0; i < Block.Items.Count; i++)
+                {
+                    var it = Block.Items[i];
+                    var idx = i;
+                    <div class="sb-item" @key="it">
+                        <div class="sb-item-head">
+                            <span>@one @(idx + 1)</span>
+                            <span class="sb-item-tools">
+                                <button type="button" title="Wyżej" disabled="@(idx == 0)" @onclick="() => Set(() => Move(idx, -1))"><i class="bi bi-arrow-up"></i></button>
+                                <button type="button" title="Niżej" disabled="@(idx == Block.Items.Count - 1)" @onclick="() => Set(() => Move(idx, 1))"><i class="bi bi-arrow-down"></i></button>
+                                <button type="button" title="Usuń" class="text-danger" @onclick="() => Set(() => Block.Items.RemoveAt(idx))"><i class="bi bi-trash"></i></button>
+                            </span>
+                        </div>
+                        <div class="sb-item-body">@fields(it)</div>
+                    </div>
+                }
+                @if (Block.Items.Count < max)
+                {
+                    <button type="button" class="sb-add-item" @onclick="() => Set(() => Block.Items.Add(NewItem()))"><i class="bi bi-plus-lg"></i>Dodaj: @one.ToLower()</button>
+                }
+            </div>
+        </div>
+    };
+
+    private SiteBlockItem NewItem() => Block.Type switch
+    {
+        "benefits" => new() { Icon = "bi-check2-circle", Title = "Nowa korzyść", Text = "Krótki opis" },
+        "contact" => new() { Icon = "bi-telephone" },
+        "hero" => new() { Icon = "bi-star-fill" },
+        _ => new()
+    };
+
+    private void Move(int idx, int dir)
+    {
+        var j = idx + dir;
+        if (j < 0 || j >= Block.Items.Count) return;
+        (Block.Items[idx], Block.Items[j]) = (Block.Items[j], Block.Items[idx]);
+    }
+}

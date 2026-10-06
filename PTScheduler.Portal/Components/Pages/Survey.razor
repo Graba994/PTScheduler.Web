@@ -1,0 +1,157 @@
+@page "/ankieta"
+@layout PublicLayout
+@rendermode InteractiveServer
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject NavigationManager Nav
+@inject IHttpContextAccessor HttpAccessor
+
+@* Publiczna ankieta dla trenerów (rozsyłana w grupach na Facebooku). Anonimowa — e-mail tylko za zgodą. *@
+
+<PageTitle>Ankieta dla trenerów personalnych — 2 minuty</PageTitle>
+<HeadContent>
+    <meta name="description" content="Krótka ankieta: jak pracują trenerzy personalni w Polsce — zapisy, płatności, nieobecności i narzędzia. Wyniki opublikujemy dla wszystkich." />
+    <meta property="og:title" content="Ankieta dla trenerów personalnych — 2 minuty" />
+    <meta property="og:description" content="Jak pracują trenerzy w Polsce? Wyniki opublikujemy dla wszystkich." />
+    <meta name="robots" content="noindex" />
+</HeadContent>
+
+<section class="sv">
+    <div class="sv-wrap">
+        @if (_done)
+        {
+            <div class="sv-done">
+                <div class="sv-done-icon"><i class="bi bi-check-lg"></i></div>
+                <h1>Dziękujemy!</h1>
+                <p>Twoja odpowiedź jest zapisana. Gdy zbierzemy wyniki, opublikujemy je w grupach, w których była ankieta@(_emailGiven ? " i wyślemy je na Twój e-mail" : "").</p>
+                <a class="pts-btn pts-btn-primary" href="/">Zobacz, nad czym pracujemy <i class="bi bi-arrow-right"></i></a>
+            </div>
+        }
+        else
+        {
+            <div class="sv-head">
+                <div class="sv-eyebrow">Ankieta dla trenerów · 2 minuty</div>
+                <h1>Jak pracują trenerzy personalni w Polsce?</h1>
+                <p>Sprawdzamy, jak trenerzy zapisują klientów, pilnują płatności i ile tracą na nieobecnościach. Ankieta jest anonimowa, a wyniki opublikujemy dla wszystkich.</p>
+                <div class="sv-progress" aria-hidden="true"><span style="width:@(Answered * 100 / TrainerSurvey.Questions.Length)%"></span></div>
+            </div>
+
+            @foreach (var (q, i) in TrainerSurvey.Questions.Select((q, i) => (q, i)))
+            {
+                <fieldset class="sv-q">
+                    <legend><span class="sv-no">@(i + 1)</span>@q.Text</legend>
+                    @if (q.Hint is not null) { <p class="sv-hint">@q.Hint</p> }
+                    <div class="sv-options">
+                        @foreach (var o in q.Options)
+                        {
+                            var on = IsOn(q, o);
+                            <button type="button" class="sv-opt @(on ? "on" : "")" role="@(q.Multi ? "checkbox" : "radio")" aria-checked="@(on ? "true" : "false")" @onclick="() => Pick(q, o)">
+                                <span class="sv-mark @(q.Multi ? "sq" : "")"></span>@o
+                            </button>
+                        }
+                    </div>
+                </fieldset>
+            }
+
+            <fieldset class="sv-q">
+                <legend><span class="sv-no">@(TrainerSurvey.Questions.Length + 1)</span>Czego najbardziej brakuje Ci w narzędziach, których używasz? <span class="sv-opt-label">(opcjonalnie)</span></legend>
+                <textarea class="sv-input" rows="3" maxlength="1000" @bind="_wish" placeholder="Np. „Żeby klienci sami przesuwali treningi” albo „Przypomnień o płatnościach”"></textarea>
+            </fieldset>
+
+            <fieldset class="sv-q">
+                <legend>Chcesz dostać wyniki? <span class="sv-opt-label">(opcjonalnie)</span></legend>
+                <input class="sv-input" type="email" maxlength="200" @bind="_email" placeholder="Twój e-mail" autocomplete="email" />
+                <label class="sv-check">
+                    <input type="checkbox" @bind="_consent" />
+                    <span>Wyślijcie mi wyniki ankiety i zaproszenie do testów aplikacji dla trenerów. E-mail użyjemy tylko w tym celu — <a href="/polityka-prywatnosci" target="_blank" rel="noopener">polityka prywatności</a>.</span>
+                </label>
+            </fieldset>
+
+            @* Pułapka na boty — prawdziwa osoba tego pola nie widzi. *@
+            <input class="sv-hp" tabindex="-1" autocomplete="off" aria-hidden="true" @bind="_website" />
+
+            @if (_error is not null) { <div class="sv-error" role="alert">@_error</div> }
+            <button class="pts-btn pts-btn-primary sv-submit" @onclick="SubmitAsync" disabled="@_saving">
+                @(_saving ? "Wysyłam…" : "Wyślij odpowiedzi")
+            </button>
+            <p class="sv-foot">Ankietę prowadzi zespół aplikacji dla trenerów PTScheduler. Odpowiedzi są anonimowe; e-mail podajesz tylko, jeśli chcesz.</p>
+        }
+    </div>
+</section>
+
+@code {
+    private readonly Dictionary<string, List<string>> _answers = new();
+    private string? _wish;
+    private string? _email;
+    private bool _consent;
+    private string? _website;
+    private string? _error;
+    private bool _saving;
+    private bool _done;
+    private bool _emailGiven;
+    private string? _source;
+    private readonly DateTime _openedAt = DateTime.UtcNow;
+
+    /// <summary>Prosty limit: najwyżej 5 odpowiedzi z jednego adresu IP na godzinę.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, List<DateTime>> Recent = new();
+
+    private int Answered => TrainerSurvey.Questions.Count(q => _answers.TryGetValue(q.Key, out var a) && a.Count > 0);
+
+    protected override void OnInitialized()
+    {
+        var query = Microsoft.AspNetCore.WebUtilities.QueryHelpers.ParseQuery(new Uri(Nav.Uri).Query);
+        if (query.TryGetValue("zrodlo", out var src) && !string.IsNullOrWhiteSpace(src))
+        {
+            var clean = System.Text.RegularExpressions.Regex.Replace(src.ToString().Trim().ToLowerInvariant(), "[^a-z0-9-]", "");
+            _source = clean.Length == 0 ? null : clean[..Math.Min(60, clean.Length)];
+        }
+    }
+
+    private bool IsOn(TrainerSurvey.Question q, string o) => _answers.TryGetValue(q.Key, out var a) && a.Contains(o);
+
+    private void Pick(TrainerSurvey.Question q, string o)
+    {
+        var list = _answers.TryGetValue(q.Key, out var a) ? a : _answers[q.Key] = [];
+        if (!q.Multi) { list.Clear(); list.Add(o); return; }
+        if (list.Remove(o)) return;
+        if (q.MaxPicks > 0 && list.Count >= q.MaxPicks) list.RemoveAt(0);
+        list.Add(o);
+    }
+
+    private async Task SubmitAsync()
+    {
+        _error = null;
+        var missing = TrainerSurvey.Questions.Length - Answered;
+        if (missing > 0) { _error = $"Odpowiedz jeszcze na {missing} {(missing == 1 ? "pytanie" : missing <= 4 ? "pytania" : "pytań")}."; return; }
+        var email = string.IsNullOrWhiteSpace(_email) ? null : _email.Trim();
+        if (email is not null && !System.Net.Mail.MailAddress.TryCreate(email, out _)) { _error = "Sprawdź adres e-mail."; return; }
+        if (email is not null && !_consent) { _error = "Zaznacz zgodę, jeśli chcesz dostać wyniki na e-mail — albo usuń adres."; return; }
+
+        // Boty: wypełnione ukryte pole albo odpowiedź szybsza niż 8 sekund — udajemy sukces, nic nie zapisujemy.
+        if (!string.IsNullOrEmpty(_website) || DateTime.UtcNow - _openedAt < TimeSpan.FromSeconds(8)) { _done = true; return; }
+        var ip = HttpAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString() ?? "?";
+        var times = Recent.GetOrAdd(ip, _ => []);
+        lock (times)
+        {
+            times.RemoveAll(t => t < DateTime.UtcNow.AddHours(-1));
+            if (times.Count >= 5) { _error = "Z tego adresu wysłano już kilka odpowiedzi. Dziękujemy!"; return; }
+            times.Add(DateTime.UtcNow);
+        }
+
+        _saving = true;
+        var response = new TrainerSurveyResponse
+        {
+            Source = _source,
+            Wish = string.IsNullOrWhiteSpace(_wish) ? null : _wish.Trim()[..Math.Min(1000, _wish.Trim().Length)],
+            Email = _consent ? email : null,
+            ContactConsent = _consent && email is not null
+        };
+        foreach (var q in TrainerSurvey.Questions)
+            TrainerSurvey.Set(response, q.Key, string.Join(TrainerSurvey.Separator, _answers[q.Key]));
+        await using var db = await DbFactory.CreateDbContextAsync();
+        db.TrainerSurveyResponses.Add(response);
+        await db.SaveChangesAsync();
+        _saving = false;
+        _emailGiven = response.ContactConsent;
+        _done = true;
+    }
+}

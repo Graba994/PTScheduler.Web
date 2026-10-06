@@ -1,0 +1,217 @@
+@page "/panel/tenants"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject TenantService TenantSvc
+@inject DockerService DockerSvc
+@inject IJSRuntime JS
+@rendermode InteractiveServer
+
+<PageTitle>Trenerzy — PTScheduler Portal</PageTitle>
+
+<PanelHeader Title="Trenerzy" Icon="bi-people" Subtitle="Każdy trener ma własną, oddzielną instancję aplikacji. Tu widzisz, czy działa, na jakim planie jest i od kiedy.">
+    <Actions>
+        <a href="/panel/import" class="btn btn-outline-secondary btn-sm"><i class="bi bi-box-arrow-in-down me-1"></i>Import z Dockera</a>
+        <a href="/panel/provision" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Nowa instancja</a>
+    </Actions>
+</PanelHeader>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_tenants.Count == 0)
+{
+    <PanelCard>
+        <div class="pp-empty">
+            <i class="bi bi-people"></i>
+            <div class="pp-empty-title">Nie ma jeszcze trenerów</div>
+            <p>Trenerzy pojawią się tu po rejestracji na stronie publicznej. Możesz też utworzyć instancję ręcznie albo zaimportować istniejący kontener.</p>
+            <a href="/panel/provision" class="btn btn-primary btn-sm"><i class="bi bi-plus-lg me-1"></i>Nowa instancja</a>
+        </div>
+    </PanelCard>
+}
+else
+{
+    var down = _tenants.Count(t => t.Status == TenantStatus.Active && t.IsHealthy == false);
+    <div class="d-flex flex-wrap gap-2 align-items-center mb-3">
+        @foreach (var (key, label, tone, count) in Filters(down))
+        {
+            <button type="button" class="pp-chip pp-tone-@(_filter == key ? tone : "muted") tenant-filter @(_filter == key ? "active" : "")" @onclick="() => _filter = key">
+                @label <strong class="ms-1">@count</strong>
+            </button>
+        }
+        <div class="input-group input-group-sm ms-auto tenant-search">
+            <span class="input-group-text"><i class="bi bi-search"></i></span>
+            <input class="form-control" placeholder="Szukaj trenera, e-maila, domeny…" @bind="_search" @bind:event="oninput" aria-label="Szukaj trenera" />
+        </div>
+    </div>
+
+    var rows = Visible().ToList();
+    <PanelCard Flush="true">
+        @if (rows.Count == 0)
+        {
+            <div class="pp-empty"><i class="bi bi-search"></i>Nikt nie pasuje do tych filtrów.</div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-hover align-middle">
+                    <thead>
+                        <tr>
+                            <th>Trener</th>
+                            <th class="d-none d-md-table-cell">Domena</th>
+                            <th class="d-none d-lg-table-cell">Port</th>
+                            <th class="d-none d-sm-table-cell">Plan</th>
+                            <th class="d-none d-md-table-cell">Kontenery</th>
+                            <th class="d-none d-sm-table-cell">Odpowiada</th>
+                            <th>Stan</th>
+                            <th class="d-none d-lg-table-cell">Od</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        @foreach (var t in rows)
+                        {
+                            var cs = _containerStatuses.GetValueOrDefault(t.Slug);
+                            <tr>
+                                <td>
+                                    <a href="/panel/tenants/@t.Id" class="fw-semibold text-decoration-none">@t.CompanyName</a>
+                                    <div class="text-muted small">@t.OwnerEmail</div>
+                                    <div class="small d-md-none"><a href="https://@t.Domain" target="_blank" rel="noopener" class="text-decoration-none">@t.Domain</a></div>
+                                    @if (t.IsHealthy == false)
+                                    {
+                                        <span class="pp-chip pp-tone-danger d-sm-none mt-1"><i class="bi bi-heart-pulse"></i>nie odpowiada</span>
+                                    }
+                                </td>
+                                <td class="small d-none d-md-table-cell"><a href="https://@t.Domain" target="_blank" rel="noopener" class="text-decoration-none">@t.Domain <i class="bi bi-box-arrow-up-right small"></i></a></td>
+                                <td class="text-muted font-monospace small d-none d-lg-table-cell">@t.Port</td>
+                                <td class="d-none d-sm-table-cell"><span class="pp-chip pp-tone-info">@(t.Plan?.Name ?? t.PlanId)</span></td>
+                                <td class="d-none d-md-table-cell">
+                                    @if (cs is not null)
+                                    {
+                                        <span class="pp-chip pp-tone-@(cs.IsHealthy ? "ok" : "danger")"><i class="bi @(cs.IsHealthy ? "bi-check-lg" : "bi-x-lg")"></i>@(cs.IsHealthy ? "działają" : "zatrzymane")</span>
+                                    }
+                                    else { <span class="text-muted small">—</span> }
+                                </td>
+                                <td class="d-none d-sm-table-cell">
+                                    @if (t.IsHealthy == true)
+                                    {
+                                        <span class="pp-chip pp-tone-ok" title="Sprawdzono @t.LastHealthCheckAt?.ToLocalTime().ToString("HH:mm")"><i class="bi bi-heart-fill"></i>@(t.LastHealthResponseMs?.ToString() ?? "—") ms</span>
+                                    }
+                                    else if (t.IsHealthy == false)
+                                    {
+                                        <span class="pp-chip pp-tone-danger" title="@t.LastHealthError"><i class="bi bi-heart-pulse"></i>nie odpowiada</span>
+                                    }
+                                    else { <span class="text-muted small">—</span> }
+                                </td>
+                                <td><span class="pp-chip pp-tone-@PanelUi.TenantStatusTone(t.Status)">@PanelUi.TenantStatusLabel(t.Status)</span></td>
+                                <td class="text-muted text-nowrap small d-none d-lg-table-cell">@t.CreatedAt.ToString("dd.MM.yyyy")</td>
+                                <td class="text-end">
+                                    <div class="dropdown">
+                                        <button class="btn btn-sm btn-outline-secondary" data-bs-toggle="dropdown" aria-label="Akcje: @t.CompanyName">
+                                            <i class="bi bi-three-dots"></i>
+                                        </button>
+                                        <ul class="dropdown-menu dropdown-menu-end">
+                                            <li><a class="dropdown-item" href="/panel/tenants/@t.Id"><i class="bi bi-eye me-2"></i>Szczegóły</a></li>
+                                            @if (t.Status == TenantStatus.Active)
+                                            {
+                                                <li><button class="dropdown-item text-warning" @onclick="() => Suspend(t)"><i class="bi bi-pause-circle me-2"></i>Zawieś</button></li>
+                                            }
+                                            @if (t.Status == TenantStatus.Suspended)
+                                            {
+                                                <li><button class="dropdown-item text-success" @onclick="() => Resume(t)"><i class="bi bi-play-circle me-2"></i>Wznów</button></li>
+                                            }
+                                        </ul>
+                                    </div>
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </PanelCard>
+}
+
+@code {
+    private bool _loading = true;
+    private List<Tenant> _tenants = [];
+    private Dictionary<string, TenantContainerStatus> _containerStatuses = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        _tenants = await TenantSvc.GetAllAsync();
+
+        try
+        {
+            var statuses = await DockerSvc.GetAllTenantsStatusAsync(
+                _tenants.Select(t => (t.Slug, t.WebContainerName, t.DbContainerName)));
+            _containerStatuses = statuses.ToDictionary(s => s.Slug);
+        }
+        catch { }
+
+        _loading = false;
+    }
+
+    private async Task Suspend(Tenant t)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Zawiesić {t.CompanyName}? Trener i jego klienci stracą dostęp do aplikacji, dopóki go nie wznowisz.")) return;
+        try
+        {
+            await TenantSvc.SuspendAsync(t.Id);
+            t.Status = TenantStatus.Suspended;
+        }
+        catch { }
+    }
+
+    private async Task Resume(Tenant t)
+    {
+        try
+        {
+            await TenantSvc.ResumeAsync(t.Id);
+            t.Status = TenantStatus.Active;
+        }
+        catch { }
+    }
+
+    private string _filter = "all";
+
+    /// <summary>Link z paska statusu, np. /panel/tenants?filtr=down.</summary>
+    [SupplyParameterFromQuery(Name = "filtr")] public string? FilterFromQuery { get; set; }
+
+    protected override void OnParametersSet()
+    {
+        if (FilterFromQuery is "active" or "pending" or "suspended" or "down") _filter = FilterFromQuery;
+    }
+    private string _search = "";
+
+    private IEnumerable<(string Key, string Label, string Tone, int Count)> Filters(int down)
+    {
+        yield return ("all", "Wszyscy", "info", _tenants.Count);
+        yield return ("active", "Aktywni", "ok", _tenants.Count(t => t.Status == TenantStatus.Active));
+        var pending = _tenants.Count(t => t.Status is TenantStatus.Pending or TenantStatus.Provisioning);
+        if (pending > 0) yield return ("pending", "Oczekujący", "warn", pending);
+        var suspended = _tenants.Count(t => t.Status == TenantStatus.Suspended);
+        if (suspended > 0) yield return ("suspended", "Zawieszeni", "danger", suspended);
+        if (down > 0) yield return ("down", "Nie odpowiadają", "danger", down);
+    }
+
+    private IEnumerable<Tenant> Visible()
+    {
+        var q = _filter switch
+        {
+            "active" => _tenants.Where(t => t.Status == TenantStatus.Active),
+            "pending" => _tenants.Where(t => t.Status is TenantStatus.Pending or TenantStatus.Provisioning),
+            "suspended" => _tenants.Where(t => t.Status == TenantStatus.Suspended),
+            "down" => _tenants.Where(t => t.Status == TenantStatus.Active && t.IsHealthy == false),
+            _ => _tenants.AsEnumerable()
+        };
+        var s = _search.Trim();
+        if (s.Length > 0)
+            q = q.Where(t => t.CompanyName.Contains(s, StringComparison.OrdinalIgnoreCase)
+                || (t.OwnerEmail ?? "").Contains(s, StringComparison.OrdinalIgnoreCase)
+                || (t.Domain ?? "").Contains(s, StringComparison.OrdinalIgnoreCase)
+                || t.Slug.Contains(s, StringComparison.OrdinalIgnoreCase));
+        return q;
+    }
+}

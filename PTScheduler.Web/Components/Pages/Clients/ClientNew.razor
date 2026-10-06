@@ -1,10 +1,12 @@
 ﻿@page "/clients/new"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
 @inject IClientService ClientService
+@inject IClientInvitationService Invitations
+@inject EntitlementService Entitlements
 @inject NavigationManager Nav
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Nowy klient" />
 
@@ -26,6 +28,21 @@
                 @if (!string.IsNullOrEmpty(error))
                 {
                     <div class="alert alert-danger py-2">@error</div>
+                }
+
+                @if (_limitReached)
+                {
+                    <div class="alert alert-warning py-3">
+                        <h6 class="fw-bold mb-2">
+                            <i class="bi bi-lock-fill me-1"></i>Osiągnięto limit klientów
+                        </h6>
+                        <p class="small mb-2">
+                            Twój plan <strong>@Entitlements.Current.Name</strong> pozwala na <strong>@_maxClients</strong> klientów, obecnie masz <strong>@_clientCount</strong>.
+                        </p>
+                        <a href="/upgrade" class="btn btn-sm btn-primary">
+                            <i class="bi bi-arrow-up-circle me-1"></i>Zwiększ plan
+                        </a>
+                    </div>
                 }
 
                 <div class="row g-3">
@@ -57,10 +74,17 @@
                         <textarea class="form-control" rows="2" @bind="dto.TrainingGoal"
                                   placeholder="np. Redukcja wagi, budowa masy, poprawa kondycji..."></textarea>
                     </div>
+                    <div class="col-12">
+                        <div class="form-check">
+                            <input class="form-check-input" type="checkbox" id="sendInvite" @bind="_sendInvite" />
+                            <label class="form-check-label" for="sendInvite">Wyślij klientowi zaproszenie e-mailem</label>
+                        </div>
+                        <div class="form-text">Klient dostanie link do ustawienia hasła (ważny @ClientInvite.ValidDays dni). Link możesz też skopiować później w profilu klienta.</div>
+                    </div>
                 </div>
 
                 <div class="d-flex gap-2 mt-4">
-                    <button class="btn btn-primary flex-grow-1" @onclick="Submit" disabled="@isBusy">
+                    <button class="btn btn-primary flex-grow-1" @onclick="Submit" disabled="@(isBusy || _limitReached)">
                         @if (isBusy)
                         {
                             <span class="spinner-border spinner-border-sm me-1"></span>
@@ -78,19 +102,43 @@
     private CreateClientDto dto = new();
     private bool isBusy;
     private string error = string.Empty;
+    private bool _limitReached;
+    private int _clientCount;
+    private int _maxClients;
+    private bool _sendInvite = true;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var (allowed, current, max) = await Entitlements.CheckClientLimitAsync();
+        _limitReached = !allowed;
+        _clientCount = current;
+        _maxClients = max;
+    }
 
     private async Task Submit()
     {
+        if (_limitReached) return;
+
         if (string.IsNullOrWhiteSpace(dto.Email)) { error = "Email jest wymagany."; return; }
         if (string.IsNullOrWhiteSpace(dto.FirstName) && string.IsNullOrWhiteSpace(dto.LastName))
         { error = "Podaj imię lub nazwisko."; return; }
+
+        // Re-check right before the mutation to close the race window between page load and submit
+        var (allowed, current, max) = await Entitlements.CheckClientLimitAsync();
+        if (!allowed) { _limitReached = true; _clientCount = current; _maxClients = max; return; }
 
         isBusy = true;
         error = string.Empty;
         try
         {
             var client = await ClientService.CreateClientAsync(dto);
-            Nav.NavigateTo($"/clients/{client.Id}");
+            var invite = "";
+            if (_sendInvite)
+            {
+                var r = await Invitations.SendInviteAsync(client.Id, Nav.BaseUri);
+                invite = r.EmailSent ? "?invite=sent" : "?invite=failed";
+            }
+            Nav.NavigateTo($"/clients/{client.Id}{invite}");
         }
         catch (Exception ex)
         {

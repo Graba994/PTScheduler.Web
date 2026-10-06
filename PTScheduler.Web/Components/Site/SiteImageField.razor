@@ -1,0 +1,53 @@
+@* Zdjęcie w kreatorze strony: podgląd, „Wgraj zdjęcie” i „Usuń”. Plik jest zmniejszany do WebP. *@
+@inject PTScheduler.Application.Interfaces.ISiteContentService SiteContent
+
+<div class="sb-img @(Compact ? "sb-img-compact" : "")">
+    <div class="sb-img-thumb" style="@(string.IsNullOrEmpty(Value) ? "" : $"background-image:url('{Value}')")">
+        @if (string.IsNullOrEmpty(Value)) { <i class="bi bi-image"></i> }
+        @if (_busy) { <span class="spinner-border spinner-border-sm"></span> }
+    </div>
+    <div class="sb-img-actions">
+        @if (!string.IsNullOrEmpty(Label)) { <span class="sb-img-label">@Label</span> }
+        <label class="btn btn-sm btn-outline-primary mb-0">
+            <i class="bi bi-upload me-1"></i>@(string.IsNullOrEmpty(Value) ? "Wgraj zdjęcie" : "Zmień")
+            <InputFile OnChange="UploadAsync" accept="image/*" class="d-none" />
+        </label>
+        @if (!string.IsNullOrEmpty(Value))
+        {
+            <button type="button" class="btn btn-sm btn-link text-danger p-0" @onclick="() => SetAsync(null)">Usuń</button>
+        }
+        @if (_error is not null) { <span class="text-danger small">@_error</span> }
+    </div>
+</div>
+
+@code {
+    [Parameter] public string? Value { get; set; }
+    [Parameter] public EventCallback<string?> ValueChanged { get; set; }
+    [Parameter] public string? Label { get; set; }
+    [Parameter] public bool Compact { get; set; }
+
+    private bool _busy;
+    private string? _error;
+
+    private async Task UploadAsync(InputFileChangeEventArgs e)
+    {
+        _error = null;
+        if (e.File.Size > 15 * 1024 * 1024) { _error = "Plik jest za duży (maks. 15 MB)."; return; }
+        _busy = true;
+        try
+        {
+            await using var stream = e.File.OpenReadStream(15 * 1024 * 1024);
+            var url = await SiteContent.UploadImageAsync(stream, e.File.Name);
+            await SetAsync(url);
+        }
+        catch (InvalidDataException) { _error = "To nie jest obsługiwany obraz (JPG, PNG, WebP)."; }
+        catch (Exception) { _error = "Nie udało się wgrać zdjęcia."; }
+        finally { _busy = false; }
+    }
+
+    private async Task SetAsync(string? url)
+    {
+        Value = url;
+        await ValueChanged.InvokeAsync(url);
+    }
+}

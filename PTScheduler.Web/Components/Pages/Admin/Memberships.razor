@@ -1,0 +1,411 @@
+@page "/admin/memberships"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Memberships
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@inject IMembershipService MembershipService
+@inject ISessionTypeService TypeService
+@inject IClientService ClientService
+@inject IPermissionService Permission
+@inject AuthenticationStateProvider AuthState
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Karnety cykliczne" />
+
+<div class="page-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <h4 class="page-title mb-0"><i class="bi bi-arrow-repeat me-2" style="color:var(--c-primary)"></i>Karnety cykliczne</h4>
+    @if (!_denied && !_loading)
+    {
+        <div class="d-flex gap-2">
+            <button class="btn btn-outline-primary btn-sm" @onclick="OpenSubscribe" disabled="@(!_plans.Any(p => p.IsActive))">
+                <i class="bi bi-person-plus me-1"></i>Zapisz klienta
+            </button>
+            <button class="btn btn-primary btn-sm" @onclick="() => EditPlan(null)">
+                <i class="bi bi-plus-lg me-1"></i>Nowy karnet
+            </button>
+        </div>
+    }
+</div>
+
+@if (_denied)
+{
+    <div class="alert alert-danger"><i class="bi bi-shield-lock me-2"></i>Brak uprawnień do zarządzania karnetami.</div>
+}
+else if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <p class="text-muted small">
+        Karnet to stała liczba sesji w każdym okresie (np. 8 treningów / miesiąc). Na początku okresu klient dostaje pakiet
+        sesji ważny do końca okresu oraz należność z terminem @MembershipBilling.GraceDays dni. Klient płaci online
+        w „Moje karnety” albo oznaczasz płatność ręcznie (gotówka, przelew).
+    </p>
+
+    @if (_message is not null)
+    {
+        <div class="alert @(_messageOk ? "alert-success" : "alert-danger") small py-2">@_message</div>
+    }
+
+    <h6 class="text-uppercase text-muted small fw-semibold mt-3">Karnety</h6>
+    @if (_plans.Count == 0)
+    {
+        <div class="empty-state mb-4">
+            <div class="empty-state-icon">🔁</div>
+            <div class="empty-state-title">Brak karnetów</div>
+            <div class="empty-state-desc">Utwórz pierwszy karnet, np. „8 treningów / miesiąc”.</div>
+        </div>
+    }
+    else
+    {
+        <div class="row g-3 mb-4">
+            @foreach (var p in _plans)
+            {
+                <div class="col-12 col-md-6 col-xl-4">
+                    <div class="card h-100 @(p.IsActive ? "" : "opacity-50")">
+                        <div class="card-body">
+                            <div class="d-flex justify-content-between align-items-start gap-2">
+                                <div>
+                                    <div class="fw-semibold">@p.Name</div>
+                                    <div class="small text-muted">@p.SessionsPerPeriod × @p.SessionTypeName / @p.PeriodLabel</div>
+                                </div>
+                                <div class="text-end">
+                                    <div class="fw-bold">@p.Price.ToString("0.00") @p.Currency</div>
+                                    <div class="small text-muted">za @p.PeriodLabel</div>
+                                </div>
+                            </div>
+                            <div class="d-flex flex-wrap gap-1 mt-2">
+                                @if (!p.IsActive) { <span class="badge bg-secondary">Nieaktywny</span> }
+                                @if (p.AvailableInShop) { <span class="badge bg-primary-subtle text-primary-emphasis">W sklepie</span> }
+                                @if (p.CarryOverUnused) { <span class="badge bg-info-subtle text-info-emphasis">Przenoszenie sesji</span> }
+                                <span class="badge bg-light text-dark border">Aktywnych: @p.ActiveMembers</span>
+                            </div>
+                            <button class="btn btn-sm btn-outline-secondary mt-3" @onclick="() => EditPlan(p)">
+                                <i class="bi bi-pencil me-1"></i>Edytuj
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    <h6 class="text-uppercase text-muted small fw-semibold">Klienci z karnetem</h6>
+    @if (_memberships.Count == 0)
+    {
+        <p class="text-muted small">Nikt jeszcze nie ma karnetu.</p>
+    }
+    else
+    {
+        <div class="d-flex flex-column gap-2">
+            @foreach (var m in _memberships)
+            {
+                var (css, label) = StatusBadge(m.Status);
+                <div class="card">
+                    <div class="card-body py-2 px-3">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <div style="min-width:0">
+                                <a href="/clients/@m.ClientId" class="fw-semibold text-decoration-none">@m.ClientName</a>
+                                <span class="text-muted small">· @m.PlanName · @m.Price.ToString("0.00") @m.Currency</span>
+                                <div class="small">
+                                    <span class="badge @css">@label</span>
+                                    @if (m.CancelAtPeriodEnd) { <span class="badge bg-warning-subtle text-warning-emphasis">Kończy się @m.NextBillingDate.AddDays(-1).ToString("dd.MM.yyyy")</span> }
+                                    else if (m.Status is MembershipStatus.Active or MembershipStatus.PastDue) { <span class="text-muted ms-1">Następny okres: @m.NextBillingDate.ToString("dd.MM.yyyy")</span> }
+                                    @if (m.UnpaidAmount > 0) { <span class="text-danger ms-2 fw-semibold">Do zapłaty: @m.UnpaidAmount.ToString("0.00") @m.Currency</span> }
+                                </div>
+                            </div>
+                            <div class="d-flex gap-1 flex-wrap">
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleDetails(m.Id)">
+                                    <i class="bi @(_expanded.Contains(m.Id) ? "bi-chevron-up" : "bi-chevron-down")"></i> Okresy
+                                </button>
+                                @if (m.Status == MembershipStatus.Paused)
+                                {
+                                    <button class="btn btn-sm btn-outline-success" @onclick='() => Run(() => MembershipService.ResumeAsync(m.Id), "Karnet wznowiony.")'>Wznów</button>
+                                }
+                                else if (m.Status != MembershipStatus.Cancelled)
+                                {
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick='() => Run(() => MembershipService.PauseAsync(m.Id), "Karnet wstrzymany — nie powstaną nowe okresy.")'>Wstrzymaj</button>
+                                    @if (m.CancelAtPeriodEnd)
+                                    {
+                                        <button class="btn btn-sm btn-outline-primary" @onclick='() => Run(() => MembershipService.ResumeCancelledAsync(m.Id), "Rezygnacja cofnięta.")'>Cofnij rezygnację</button>
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-sm btn-outline-warning" @onclick='() => Run(() => MembershipService.CancelAsync(m.Id, false), "Karnet zakończy się z końcem okresu.")'>Zakończ z końcem okresu</button>
+                                    }
+                                    <button class="btn btn-sm btn-outline-danger" @onclick='() => Run(() => MembershipService.CancelAsync(m.Id, true), "Karnet anulowany.")'>Anuluj teraz</button>
+                                }
+                            </div>
+                        </div>
+                        @if (_expanded.Contains(m.Id))
+                        {
+                            <div class="table-responsive mt-2">
+                                <table class="table table-sm align-middle mb-0 small">
+                                    <thead class="table-light"><tr><th>Okres</th><th>Sesje</th><th class="text-end">Kwota</th><th>Status</th><th></th></tr></thead>
+                                    <tbody>
+                                        @foreach (var p in m.Periods)
+                                        {
+                                            <tr>
+                                                <td class="text-nowrap">@p.PeriodStart.ToString("dd.MM") – @p.PeriodEnd.ToString("dd.MM.yyyy")</td>
+                                                <td>@p.SessionsUsed / @p.SessionsTotal</td>
+                                                <td class="text-end text-nowrap">@p.Amount.ToString("0.00")</td>
+                                                <td>
+                                                    @switch (p.Status)
+                                                    {
+                                                        case MembershipPeriodStatus.Paid:
+                                                            <span class="badge bg-success-subtle text-success-emphasis">Opłacony</span>
+                                                            break;
+                                                        case MembershipPeriodStatus.Waived:
+                                                            <span class="badge bg-light text-dark border">Umorzony</span>
+                                                            break;
+                                                        default:
+                                                            <span class="badge bg-warning-subtle text-warning-emphasis">Do zapłaty do @p.DueDate.ToString("dd.MM")</span>
+                                                            break;
+                                                    }
+                                                </td>
+                                                <td class="text-end text-nowrap">
+                                                    @if (p.Status == MembershipPeriodStatus.Due)
+                                                    {
+                                                        <button class="btn btn-sm btn-outline-success py-0" @onclick='() => Run(() => MembershipService.MarkPeriodPaidAsync(p.Id, "ręcznie"), "Oznaczono jako opłacony.")'>Opłacony</button>
+                                                        <button class="btn btn-sm btn-outline-secondary py-0" @onclick='() => Run(() => MembershipService.WaivePeriodAsync(p.Id), "Okres umorzony.")'>Umórz</button>
+                                                    }
+                                                </td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+
+@if (_editing is not null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.45)">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h6 class="modal-title">@(_editing.Id > 0 ? "Edytuj karnet" : "Nowy karnet")</h6>
+                    <button type="button" class="btn-close" @onclick="() => _editing = null"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-2">
+                        <div class="col-12">
+                            <label class="form-label small">Nazwa</label>
+                            <input class="form-control form-control-sm" @bind="_editing.Name" placeholder="np. Karnet 8 treningów" />
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small">Opis (opcjonalnie)</label>
+                            <textarea class="form-control form-control-sm" rows="2" @bind="_editing.Description"></textarea>
+                        </div>
+                        <div class="col-12 col-md-6">
+                            <label class="form-label small">Rodzaj sesji</label>
+                            <select class="form-select form-select-sm" @bind="_editing.SessionTypeId">
+                                @foreach (var t in _types) { <option value="@t.Id">@t.Name</option> }
+                            </select>
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label small">Sesji w okresie</label>
+                            <input type="number" min="1" class="form-control form-control-sm" @bind="_editing.SessionsPerPeriod" />
+                        </div>
+                        <div class="col-6 col-md-3">
+                            <label class="form-label small">Okres</label>
+                            <select class="form-select form-select-sm" @bind="_editing.PeriodMonths">
+                                <option value="1">Miesiąc</option>
+                                <option value="3">Kwartał</option>
+                                <option value="6">Pół roku</option>
+                                <option value="12">Rok</option>
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">Cena za okres (brutto)</label>
+                            <input type="number" min="0" step="0.01" class="form-control form-control-sm" @bind="_editing.Price" />
+                        </div>
+                        <div class="col-12">
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="carry" @bind="_editing.CarryOverUnused" />
+                                <label class="form-check-label small" for="carry">Niewykorzystane sesje przechodzą na kolejny okres</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="shop" @bind="_editing.AvailableInShop" />
+                                <label class="form-check-label small" for="shop">Dostępny w sklepie (klient może kupić sam)</label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="checkbox" id="active" @bind="_editing.IsActive" />
+                                <label class="form-check-label small" for="active">Aktywny</label>
+                            </div>
+                        </div>
+                    </div>
+                    @if (_formError is not null) { <div class="alert alert-danger small py-2 mt-2 mb-0">@_formError</div> }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => _editing = null">Anuluj</button>
+                    <button class="btn btn-primary btn-sm" @onclick="SavePlan">Zapisz</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@if (_subscribing)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.45)">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h6 class="modal-title">Zapisz klienta na karnet</h6>
+                    <button type="button" class="btn-close" @onclick="() => _subscribing = false"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-2">
+                        <div class="col-12">
+                            <label class="form-label small">Klient</label>
+                            <select class="form-select form-select-sm" @bind="_subClientId">
+                                <option value="0">— wybierz —</option>
+                                @foreach (var c in _clients) { <option value="@c.Id">@c.FirstName @c.LastName</option> }
+                            </select>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small">Karnet</label>
+                            <select class="form-select form-select-sm" @bind="_subPlanId">
+                                @foreach (var p in _plans.Where(p => p.IsActive)) { <option value="@p.Id">@p.Name — @p.Price.ToString("0.00") @p.Currency / @p.PeriodLabel</option> }
+                            </select>
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">Początek pierwszego okresu</label>
+                            <input type="date" class="form-control form-control-sm" @bind="_subStart" />
+                        </div>
+                        <div class="col-6">
+                            <label class="form-label small">Indywidualna cena (opcjonalnie)</label>
+                            <input type="number" min="0" step="0.01" class="form-control form-control-sm" @bind="_subPrice" />
+                        </div>
+                    </div>
+                    @if (_formError is not null) { <div class="alert alert-danger small py-2 mt-2 mb-0">@_formError</div> }
+                </div>
+                <div class="modal-footer">
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => _subscribing = false">Anuluj</button>
+                    <button class="btn btn-primary btn-sm" @onclick="Subscribe" disabled="@(_subClientId == 0)">Zapisz</button>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private bool _denied;
+    private string _userId = "";
+    private string? _trainerFilter;
+    private List<MembershipPlanDto> _plans = [];
+    private List<MembershipDto> _memberships = [];
+    private List<SessionTypeDto> _types = [];
+    private List<ClientDto> _clients = [];
+    private readonly HashSet<int> _expanded = [];
+    private MembershipPlanDto? _editing;
+    private string? _formError;
+    private string? _message;
+    private bool _messageOk;
+
+    private bool _subscribing;
+    private int _subClientId;
+    private int _subPlanId;
+    private DateOnly _subStart = DateOnly.FromDateTime(StudioClock.Today);
+    private decimal? _subPrice;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        var isAdmin = auth.User.IsInRole(Roles.Admin);
+        var role = isAdmin ? Roles.Admin
+                 : auth.User.IsInRole(Roles.Trainer) ? Roles.Trainer
+                 : auth.User.IsInRole(Roles.Subordinate) ? Roles.Subordinate : string.Empty;
+        if (!await Permission.HasPermissionAsync(role, PTScheduler.Domain.Constants.Permissions.ManagePackages))
+        {
+            _denied = true; _loading = false; return;
+        }
+        _trainerFilter = isAdmin ? null : _userId;
+        _types = await TypeService.GetAllAsync();
+        await LoadAsync();
+        _loading = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        _plans = await MembershipService.GetPlansAsync();
+        _memberships = await MembershipService.GetMembershipsAsync(_trainerFilter);
+    }
+
+    private void EditPlan(MembershipPlanDto? p)
+    {
+        _formError = null;
+        _editing = p is null
+            ? new MembershipPlanDto { SessionTypeId = _types.FirstOrDefault()?.Id ?? 0, SessionsPerPeriod = 8, PeriodMonths = 1 }
+            : new MembershipPlanDto
+            {
+                Id = p.Id, Name = p.Name, Description = p.Description, SessionTypeId = p.SessionTypeId,
+                SessionsPerPeriod = p.SessionsPerPeriod, PeriodMonths = p.PeriodMonths, Price = p.Price,
+                Currency = p.Currency, CarryOverUnused = p.CarryOverUnused, AvailableInShop = p.AvailableInShop, IsActive = p.IsActive
+            };
+    }
+
+    private async Task SavePlan()
+    {
+        if (_editing is null) return;
+        try
+        {
+            await MembershipService.SavePlanAsync(_editing, _userId);
+            _editing = null;
+            await LoadAsync();
+        }
+        catch (InvalidOperationException ex) { _formError = ex.Message; }
+    }
+
+    private async Task OpenSubscribe()
+    {
+        _formError = null;
+        _clients = await ClientService.GetClientsAsync(_trainerFilter);
+        _subClientId = 0;
+        _subPlanId = _plans.FirstOrDefault(p => p.IsActive)?.Id ?? 0;
+        _subStart = DateOnly.FromDateTime(StudioClock.Today);
+        _subPrice = null;
+        _subscribing = true;
+    }
+
+    private async Task Subscribe()
+    {
+        var (ok, error) = await MembershipService.SubscribeAsync(_subClientId, _subPlanId, _subStart, _subPrice);
+        if (!ok) { _formError = error; return; }
+        _subscribing = false;
+        _message = "Klient zapisany — pakiet sesji na pierwszy okres jest już dostępny."; _messageOk = true;
+        await LoadAsync();
+    }
+
+    private void ToggleDetails(int id)
+    {
+        if (!_expanded.Remove(id)) _expanded.Add(id);
+    }
+
+    private async Task Run(Func<Task> action, string success)
+    {
+        await action();
+        _message = success; _messageOk = true;
+        await LoadAsync();
+    }
+
+    private static (string Css, string Label) StatusBadge(MembershipStatus s) => s switch
+    {
+        MembershipStatus.Active => ("bg-success-subtle text-success-emphasis", "Aktywny"),
+        MembershipStatus.PastDue => ("bg-danger-subtle text-danger-emphasis", "Zaległa płatność"),
+        MembershipStatus.Paused => ("bg-secondary-subtle text-secondary-emphasis", "Wstrzymany"),
+        MembershipStatus.Pending => ("bg-warning-subtle text-warning-emphasis", "Czeka na płatność"),
+        _ => ("bg-light text-muted border", "Anulowany")
+    };
+}

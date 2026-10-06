@@ -1,0 +1,267 @@
+@page "/aplikacja-dla-trenera-personalnego"
+@page "/porownanie/excel-i-whatsapp"
+@page "/porownanie/systemy-rezerwacji"
+@layout PublicLayout
+@inject NavigationManager Nav
+@inject IConfiguration Config
+
+@* Strony pod wyszukiwarkę: „aplikacja dla trenera personalnego” i uczciwe porównania z tym, czego trenerzy
+   używają dziś. Treść w Pages (niżej) — jedna strona = jeden wpis, ten sam układ. *@
+
+<PageTitle>@P.Title</PageTitle>
+<HeadContent>
+    <meta name="description" content="@P.Description" />
+    <link rel="canonical" href="@Canonical" />
+    <meta property="og:title" content="@P.Title" />
+    <meta property="og:description" content="@P.Description" />
+    <meta property="og:type" content="website" />
+    @((MarkupString)FaqJsonLd)
+</HeadContent>
+
+<section class="seo-hero">
+    <div class="pts-container">
+        <div class="seo-eyebrow">@P.Eyebrow</div>
+        <h1>@P.H1</h1>
+        <p class="seo-lead">@P.Lead</p>
+        <div class="seo-ctas">
+            <a href="/register" class="pts-btn pts-btn-primary">Zbuduj swoją aplikację w 60 sekund <i class="bi bi-arrow-right"></i></a>
+            <a href="/#cennik" class="seo-link">Zobacz cennik</a>
+        </div>
+    </div>
+</section>
+
+@if (P.Features.Length > 0)
+{
+    <section class="seo-sec">
+        <div class="pts-container">
+            <h2>@P.FeaturesTitle</h2>
+            <div class="seo-features">
+                @foreach (var f in P.Features)
+                {
+                    <div class="seo-feature"><i class="bi @f.Icon"></i><h3>@f.Title</h3><p>@f.Text</p></div>
+                }
+            </div>
+        </div>
+    </section>
+}
+
+@if (P.Rows.Length > 0)
+{
+    <section class="seo-sec">
+        <div class="pts-container">
+            <h2>@P.TableTitle</h2>
+            <div class="seo-table-wrap">
+                <table class="seo-table">
+                    <thead><tr><th scope="col"></th><th scope="col" class="us">PTScheduler</th><th scope="col">@P.Other</th></tr></thead>
+                    <tbody>
+                        @foreach (var r in P.Rows)
+                        {
+                            <tr>
+                                <th scope="row">@r.Topic</th>
+                                <td class="us"><i class="bi @Icon(r.UsMark)" aria-hidden="true"></i>@r.Us</td>
+                                <td><i class="bi @Icon(r.Them)" aria-hidden="true"></i>@r.ThemText</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </section>
+}
+
+@if (P.Steps.Length > 0)
+{
+    <section class="seo-sec">
+        <div class="pts-container">
+            <h2>@P.StepsTitle</h2>
+            <ol class="seo-steps">
+                @foreach (var s in P.Steps)
+                {
+                    <li><h3>@s.Title</h3><p>@s.Text</p></li>
+                }
+            </ol>
+        </div>
+    </section>
+}
+
+@if (P.Honest is { } honest)
+{
+    <section class="seo-sec">
+        <div class="pts-container">
+            <div class="seo-honest">
+                <h2>@honest.Title</h2>
+                <p>@honest.Text</p>
+            </div>
+        </div>
+    </section>
+}
+
+<section class="seo-sec">
+    <div class="pts-container">
+        <h2>Częste pytania</h2>
+        <div class="seo-faq">
+            @foreach (var q in P.Faq)
+            {
+                <details><summary>@q.Q</summary><p>@q.A</p></details>
+            }
+        </div>
+    </div>
+</section>
+
+<section class="seo-cta">
+    <div class="pts-container">
+        <h2>Zobacz swoją aplikację, zanim cokolwiek zapłacisz</h2>
+        <p>Wpisz nazwę i specjalizację — podgląd składa się na żywo. Aplikacja powstaje dopiero po „Opublikuj”.</p>
+        <a href="/register" class="pts-btn pts-btn-primary">Zacznij budować <i class="bi bi-arrow-right"></i></a>
+        <nav class="seo-more" aria-label="Więcej">
+            @foreach (var other in Pages.Where(x => x.Key != Path))
+            {
+                <a href="@other.Key">@other.Value.Eyebrow</a>
+            }
+        </nav>
+        @if (P.Note is not null) { <p class="seo-note">@P.Note</p> }
+    </div>
+</section>
+
+@code {
+    private enum Mark { Yes, Partly, No }
+    private sealed record Feature(string Icon, string Title, string Text);
+    private sealed record Row(string Topic, string Us, Mark Them, string ThemText, Mark UsMark = Mark.Yes);
+    private sealed record Step(string Title, string Text);
+    private sealed record Faq(string Q, string A);
+    private sealed record Box(string Title, string Text);
+    private sealed record Page(string Title, string Description, string Eyebrow, string H1, string Lead, string Other,
+        string FeaturesTitle, Feature[] Features, string TableTitle, Row[] Rows, string StepsTitle, Step[] Steps,
+        Box? Honest, Faq[] Faqs, string? Note)
+    {
+        public Faq[] Faq => Faqs;
+    }
+
+    private static string Icon(Mark m) => m switch { Mark.Yes => "bi-check-circle-fill ok", Mark.Partly => "bi-dash-circle-fill mid", _ => "bi-x-circle-fill no" };
+
+    private string Path => "/" + Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].TrimEnd('/');
+    private Page P => Pages.GetValueOrDefault(Path) ?? Pages.First().Value;
+
+    private string Canonical =>
+        (Config.GetValue<string>("Portal:PublicUrl")?.TrimEnd('/') is { Length: > 0 } pub ? pub : Nav.BaseUri.TrimEnd('/')) + Path;
+
+    private string FaqJsonLd
+    {
+        get
+        {
+            var data = new Dictionary<string, object>
+            {
+                ["@context"] = "https://schema.org",
+                ["@type"] = "FAQPage",
+                ["mainEntity"] = P.Faq.Select(q => new Dictionary<string, object>
+                {
+                    ["@type"] = "Question",
+                    ["name"] = q.Q,
+                    ["acceptedAnswer"] = new Dictionary<string, object> { ["@type"] = "Answer", ["text"] = q.A }
+                }).ToArray()
+            };
+            // </script> w treści nie przerwie bloku: JsonSerializer koduje < i > jako < / >.
+            return $"<script type=\"application/ld+json\">{System.Text.Json.JsonSerializer.Serialize(data)}</script>";
+        }
+    }
+
+    private static readonly Feature[] CoreFeatures =
+    [
+        new("bi-calendar2-check", "Zapisy 24/7", "Klient sam wybiera wolny termin z Twoich godzin pracy — bez wymiany wiadomości."),
+        new("bi-credit-card", "Płatności online", "BLIK, karta albo przelew przy zapisie. Pakiety treningów odliczają się same."),
+        new("bi-bell", "Przypomnienia", "E-mail, powiadomienie na telefonie albo SMS przed treningiem — mniej nieobecności."),
+        new("bi-clipboard2-pulse", "Plany i postępy", "Plany treningowe, pomiary i zdjęcia sylwetki w aplikacji klienta."),
+        new("bi-phone", "Twoja aplikacja", "Twoja nazwa, logo i kolor. Klient dodaje ją do ekranu telefonu jednym kliknięciem."),
+        new("bi-window", "Strona internetowa", "Gotowe szablony dla różnych specjalizacji i własna domena w wyższych planach.")
+    ];
+
+    private static readonly Dictionary<string, Page> Pages = new()
+    {
+        ["/aplikacja-dla-trenera-personalnego"] = new(
+            "Aplikacja dla trenera personalnego — zapisy, płatności i plany | PTScheduler",
+            "Własna aplikacja i strona trenera personalnego: klienci sami zapisują się na treningi, płacą BLIK-iem i dostają przypomnienia. Zbudujesz ją w minutę, okres próbny za darmo.",
+            "Aplikacja dla trenera personalnego",
+            "Aplikacja dla trenera personalnego, która wygląda jak Twoja",
+            "Zapisy, płatności, przypomnienia i plany treningowe w jednym miejscu — pod Twoją nazwą, logo i kolorem. Klienci mają ją na telefonie, a Ty przestajesz gonić ich o terminy i przelewy.",
+            "",
+            "Co dostajesz", CoreFeatures,
+            "", [],
+            "Jak to działa",
+            [
+                new("Budujesz w kreatorze", "Nazwa, specjalizacja, kolor i oferta — podgląd aplikacji i strony składa się na żywo."),
+                new("Publikujesz", "Potwierdzasz e-mail, a aplikacja startuje zwykle w około minutę. Dane z kreatora są już na miejscu."),
+                new("Wysyłasz link klientom", "Klienci zapisują się i płacą sami. Ty ustawiasz tylko godziny pracy.")
+            ],
+            null,
+            [
+                new("Czy klienci muszą pobierać aplikację ze sklepu?", "Nie. Aplikację otwiera się z linku i dodaje do ekranu telefonu jednym kliknięciem — działa jak zwykła aplikacja, z Twoją ikoną i powiadomieniami."),
+                new("Ile to kosztuje?", "Jest plan darmowy dla kilku klientów i płatne plany z okresem próbnym. Abonament możesz rozliczać miesięcznie albo rocznie (taniej) i zrezygnować w każdej chwili."),
+                new("Czy mogę mieć własną domenę, np. mojestudio.pl?", "Tak, w wyższych planach. Aplikacja działa od razu pod adresem w naszej domenie, a własną domenę podłączasz w dowolnym momencie."),
+                new("Kto jest właścicielem danych klientów?", "Ty. Jesteś administratorem danych swoich klientów, a my przetwarzamy je wyłącznie na Twoje zlecenie, żeby aplikacja działała."),
+                new("Czy nadaje się dla małego studia z kilkoma trenerami?", "Tak. Wyższe plany pozwalają dodać więcej trenerów, a każdy ma swój grafik i klientów.")
+            ],
+            null),
+
+        ["/porownanie/excel-i-whatsapp"] = new(
+            "Excel i WhatsApp czy aplikacja dla trenera? Porównanie | PTScheduler",
+            "Grafik w Excelu i zapisy przez WhatsApp działają — do czasu. Porównanie z aplikacją dla trenera: zapisy, przypomnienia, płatności, pakiety i plany treningowe.",
+            "Excel i WhatsApp czy aplikacja",
+            "Excel i WhatsApp czy aplikacja dla trenera?",
+            "Na start wystarczy arkusz i czat. Kłopot zaczyna się przy kilkunastu klientach: przesuwanie terminów w wiadomościach, sprawdzanie przelewów i liczenie wejść z pakietów zabiera godziny w tygodniu.",
+            "Excel + WhatsApp",
+            "", [],
+            "Porównanie na co dzień",
+            [
+                new("Zapisy na treningi", "Klient sam wybiera wolny termin, o każdej porze", Mark.No, "Wymiana wiadomości i ręczne wpisywanie do arkusza"),
+                new("Przypomnienia", "Automatycznie: e-mail, powiadomienie albo SMS", Mark.No, "Ręcznie albo wcale"),
+                new("Płatności", "BLIK lub karta przy zapisie, potwierdzenie od razu", Mark.Partly, "Przelewy do sprawdzania na koncie"),
+                new("Pakiety treningów", "Wejścia odliczają się same, klient widzi, ile zostało", Mark.Partly, "Liczenie w arkuszu, łatwo o pomyłkę"),
+                new("Odwołania", "Twoje zasady odwołań pilnowane automatycznie", Mark.No, "Negocjacje na czacie"),
+                new("Plany treningowe", "W aplikacji klienta, z postępami i historią", Mark.Partly, "PDF-y i zdjęcia gubiące się w czacie"),
+                new("Wizerunek", "Twoja aplikacja i strona z logo", Mark.No, "Prywatny numer telefonu"),
+                new("Koszt", "Plan darmowy na start, potem abonament", Mark.Yes, "Za darmo — płacisz swoim czasem")
+            ],
+            "Jak przejść bez rewolucji",
+            [
+                new("Zacznij od nowych klientów", "Nowym osobom od razu wysyłaj link do zapisów — stali klienci mogą dołączać stopniowo."),
+                new("Przenieś stałe terminy", "Stałych klientów dodasz ręcznie, a powtarzające się treningi zaplanujesz raz."),
+                new("Wyłącz arkusz po miesiącu", "Gdy wszyscy zapisują się w aplikacji, arkusz przestaje być potrzebny.")
+            ],
+            new("Kiedy Excel naprawdę wystarczy", "Jeśli masz kilku stałych klientów w stałych godzinach i rozliczasz się gotówką, arkusz i czat w zupełności wystarczą. Aplikacja zaczyna się opłacać, gdy terminy się zmieniają, klientów przybywa albo chcesz sprzedawać pakiety."),
+            [
+                new("Czy klienci będą chcieli zapisywać się przez aplikację?", "Zwykle tak — zapis zajmuje kilka sekund, a przypomnienie przychodzi samo. Tym, którzy wolą pisać, nadal możesz wpisać trening ręcznie."),
+                new("Czy mogę dalej rozmawiać z klientami na czacie?", "Tak. W aplikacji jest też czat z klientem, więc wiadomości o treningach są w jednym miejscu, oddzielone od prywatnych."),
+                new("Ile czasu zajmuje przejście?", "Aplikację zbudujesz w kilka minut. Godziny pracy i oferta to kolejne kilkanaście minut — potem wysyłasz link."),
+                new("Co jeśli klient nie ma smartfona?", "Wpiszesz jego treningi ręcznie, a przypomnienia mogą iść e-mailem albo SMS-em.")
+            ],
+            null),
+
+        ["/porownanie/systemy-rezerwacji"] = new(
+            "Aplikacja trenera czy system rezerwacji (np. Booksy)? | PTScheduler",
+            "Czym różni się aplikacja dla trenera personalnego od ogólnego systemu rezerwacji wizyt, np. Booksy: marka, plany treningowe, pakiety, pomiary i to, skąd przychodzą klienci.",
+            "Aplikacja trenera czy system rezerwacji",
+            "Aplikacja trenera czy system rezerwacji wizyt?",
+            "Ogólne systemy rezerwacji, np. Booksy, świetnie sprawdzają się w salonach i gabinetach. Trener potrzebuje czegoś więcej niż kalendarza: planów treningowych, pakietów, postępów klientów — i własnej marki.",
+            "System rezerwacji wizyt",
+            "", [],
+            "Co jest inne",
+            [
+                new("Pod czyją marką", "Twoja aplikacja, ikona i strona — klient widzi tylko Ciebie", Mark.Partly, "Zwykle marka i aplikacja dostawcy, a w katalogu obok inne firmy"),
+                new("Nowi klienci z katalogu", "Nie — nowych klientów zdobywasz we własnym zakresie, np. ze strony i social mediów", Mark.Yes, "Tak — to duża zaleta katalogów z ruchem", Mark.No),
+                new("Plany treningowe i postępy", "Plany, ćwiczenia z wideo, historia treningów", Mark.No, "Zwykle brak — to narzędzia do umawiania wizyt"),
+                new("Pakiety i karnety", "Pakiety treningów i karnety odliczają się same", Mark.Partly, "Zależy od dostawcy i planu"),
+                new("Treningi w parach i grupach", "Wspólny trening dla dwojga i małe grupy z limitem miejsc", Mark.Partly, "Zależy od dostawcy"),
+                new("Ankiety, pomiary, zdjęcia sylwetki", "Wywiad zdrowotny, pomiary i zdjęcia postępów", Mark.No, "Zwykle brak"),
+                new("Strona internetowa", "Gotowe szablony dla trenerów, własna domena w wyższych planach", Mark.Partly, "Zwykle profil w katalogu dostawcy")
+            ],
+            "", [],
+            new("Kiedy wybrać katalog, a kiedy własną aplikację", "Jeśli większość nowych klientów ma przychodzić z wyszukiwarki dostawcy, katalog ma sens. Jeśli klienci przychodzą z polecenia, Instagrama albo z Twojej strony i zostają na miesiące, liczy się prowadzenie ich treningów i Twoja marka — wtedy lepiej sprawdza się aplikacja dla trenera. Oba rozwiązania można też łączyć."),
+            [
+                new("Czy mogę mieć profil w katalogu i własną aplikację jednocześnie?", "Tak. Wielu trenerów zdobywa część nowych klientów z katalogów, a stałych prowadzi we własnej aplikacji — z planami, pakietami i postępami."),
+                new("Czy klient musi zakładać konto u Was?", "Klient zakłada konto w Twojej aplikacji — pod Twoją nazwą i adresem. Nie widzi w niej innych trenerów."),
+                new("Czy pobieracie prowizję od rezerwacji?", "Nie. Płacisz stały abonament za plan, a płatności klientów trafiają przez Twoją bramkę płatności na Twoje konto."),
+                new("Czy przeniosę klientów z innego systemu?", "Klientów dodasz ręcznie, a przy większej liczbie napisz do nas — pomożemy z przeniesieniem.")
+            ],
+            "Nazwy innych firm służą wyłącznie do opisu rodzaju rozwiązania. Funkcje i ceny u innych dostawców się zmieniają — przed decyzją sprawdź ich aktualną ofertę.")
+    };
+}

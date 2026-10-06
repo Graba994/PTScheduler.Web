@@ -1,0 +1,129 @@
+using System.Text.Json.Serialization;
+
+namespace PTScheduler.Guardian;
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum UpgradeTarget
+{
+    Portal,
+    /// <summary>Sam obraz aplikacji trenerów (bez wdrażania).</summary>
+    Tenant,
+    /// <summary>Wdrożenie gotowego obrazu na instancje trenerów.</summary>
+    TenantRolling,
+    /// <summary>Obraz + wdrożenie w jednym zadaniu — Portal nie musi niczego łączyć.</summary>
+    TenantRelease,
+    /// <summary>Naprawa wykonana przez diagnostykę Guardiana (ręcznie albo automatycznie).</summary>
+    Maintenance,
+    /// <summary>Przywrócenie bazy Portalu z kopii.</summary>
+    PortalRestore
+}
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum UpgradeStage { Queued, Pulling, Building, Testing, Swapping, Verifying, Done }
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum UpgradeStatus { Running, Success, Failed, RolledBack, PartialSuccess }
+
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum TenantUpdateStatus { Pending, Updating, HealthCheck, Success, Failed, RolledBack, Skipped }
+
+public class UpgradeJob
+{
+    public string Id { get; set; } = "";
+    public UpgradeTarget Target { get; set; }
+    public UpgradeStage Stage { get; set; }
+    public UpgradeStatus Status { get; set; }
+    public DateTime StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    public string CommitBefore { get; set; } = "";
+    public string CommitAfter { get; set; } = "";
+    public string? Error { get; set; }
+    public List<LogEntry> Log { get; set; } = [];
+    public bool RebuildImage { get; set; }
+    public List<TenantUpdateResult>? TenantResults { get; set; }
+    public int Concurrency { get; set; }
+    public int TenantsTotal { get; set; }
+    private int _tenantsCompleted;
+    public int TenantsCompleted
+    {
+        get => Volatile.Read(ref _tenantsCompleted);
+        set => Volatile.Write(ref _tenantsCompleted, value);
+    }
+    /// <summary>Instancje aktualizują się równolegle — licznik musi być atomowy.</summary>
+    public void MarkTenantCompleted() => Interlocked.Increment(ref _tenantsCompleted);
+    /// <summary>Kto uruchomił (adres IP wywołującego) — do audytu.</summary>
+    public string? RequestedBy { get; set; }
+}
+
+public class TenantUpdateResult
+{
+    public string Slug { get; set; } = "";
+    public TenantUpdateStatus Status { get; set; } = TenantUpdateStatus.Pending;
+    public string? Error { get; set; }
+    public DateTime? StartedAt { get; set; }
+    public DateTime? CompletedAt { get; set; }
+    /// <summary>Jak potwierdzono, że nowa wersja działa (HTTP /health albo start w logach).</summary>
+    public string? Detail { get; set; }
+}
+
+public class TenantRollingRequest
+{
+    public List<TenantInfo> Tenants { get; set; } = [];
+    public int Concurrency { get; set; } = 3;
+    public bool StopOnFirstFailure { get; set; }
+    /// <summary>Adres, pod którym Guardian widzi porty instancji (host Dockera). Pusty = GUARDIAN_TENANT_HOST / host.docker.internal.</summary>
+    public string? HealthHost { get; set; }
+}
+
+public class TenantInfo
+{
+    public string Slug { get; set; } = "";
+    public int Port { get; set; }
+}
+
+public class LogEntry
+{
+    public DateTime Timestamp { get; set; } = DateTime.UtcNow;
+    public string Stage { get; set; } = "";
+    public string Message { get; set; } = "";
+    public string Level { get; set; } = "info";
+}
+
+public class GuardianStatus
+{
+    public bool Healthy { get; set; } = true;
+    public string Version { get; set; } = "unknown";
+    public string BuildTime { get; set; } = "unknown";
+    public string TenantImage { get; set; } = "";
+    public string Uptime { get; set; } = "";
+    public bool PortalHealthy { get; set; }
+    public DateTime? PortalLastChecked { get; set; }
+    public UpgradeJob? ActiveJob { get; set; }
+    public int TotalJobs { get; set; }
+}
+
+/// <summary>Problem wykryty przez diagnostykę: co jest nie tak, dlaczego i co Guardian może z tym zrobić.</summary>
+public class DoctorFinding
+{
+    public string Id { get; set; } = "";
+    /// <summary>danger | warn | info</summary>
+    public string Severity { get; set; } = "info";
+    public string Title { get; set; } = "";
+    public string Detail { get; set; } = "";
+    /// <summary>Etykieta przycisku naprawy; null = tylko podpowiedź.</summary>
+    public string? FixLabel { get; set; }
+    /// <summary>Co dokładnie zrobi naprawa (pokazywane przed potwierdzeniem).</summary>
+    public string? FixDescription { get; set; }
+    /// <summary>Bezpieczna naprawa, którą Guardian może wykonać sam, gdy Portal leży.</summary>
+    public bool AutoFix { get; set; }
+}
+
+public class DoctorReport
+{
+    public DateTime CheckedAt { get; set; } = DateTime.UtcNow;
+    public List<DoctorFinding> Findings { get; set; } = [];
+    public bool AutoHealEnabled { get; set; }
+    public bool AutoCleanupEnabled { get; set; }
+    public DateTime? LastCleanupAt { get; set; }
+    public string? LastCleanup { get; set; }
+}

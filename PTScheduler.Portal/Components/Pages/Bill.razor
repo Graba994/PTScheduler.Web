@@ -1,0 +1,196 @@
+@page "/rachunek/{Token}"
+@layout PublicLayout
+@using PTScheduler.Portal.Entities
+@inject PTScheduler.Portal.Services.BillingService Billing
+@inject PTScheduler.Portal.Services.SiteSettingsService Settings
+@inject NavigationManager Nav
+
+<PageTitle>@(_bill is null ? "Rachunek" : $"Rachunek {_bill.Number}") — PTScheduler</PageTitle>
+
+<section class="bill-section">
+    <div class="bill-container">
+        @if (_bill is null)
+        {
+            <div class="bill-card bill-empty">
+                <i class="bi bi-receipt"></i>
+                <h1>Nie znaleziono rachunku</h1>
+                <p>Link mógł zostać skopiowany niedokładnie. Otwórz go jeszcze raz z e-maila albo napisz do nas.</p>
+            </div>
+        }
+        else
+        {
+            var b = _bill;
+            var overdue = b.Status == TenantBillStatus.Issued && PTScheduler.Portal.Services.BillingService.Today > b.DueDate;
+            <div class="bill-card">
+                <div class="bill-head">
+                    <div>
+                        <div class="bill-eyebrow">Rachunek za @PTScheduler.Portal.Services.BillingService.PeriodLabel(b.PeriodStart).ToLowerInvariant()</div>
+                        <h1>@b.Number</h1>
+                    </div>
+                    @if (b.Status == TenantBillStatus.Paid)
+                    {
+                        <span class="bill-pill ok"><i class="bi bi-check-circle-fill"></i>Opłacony @Local(b.PaidAt!.Value).ToString("dd.MM.yyyy")</span>
+                    }
+                    else if (b.Status == TenantBillStatus.Cancelled)
+                    {
+                        <span class="bill-pill muted"><i class="bi bi-x-circle"></i>Anulowany</span>
+                    }
+                    else if (overdue)
+                    {
+                        <span class="bill-pill warn"><i class="bi bi-exclamation-circle-fill"></i>Po terminie</span>
+                    }
+                    else
+                    {
+                        <span class="bill-pill info"><i class="bi bi-hourglass-split"></i>Do zapłaty do @b.DueDate.ToString("dd.MM.yyyy")</span>
+                    }
+                </div>
+
+                @if (Paid == "1" && b.Status == TenantBillStatus.Issued)
+                {
+                    <div class="bill-note"><i class="bi bi-arrow-repeat"></i>Czekamy na potwierdzenie z bramki płatności — zwykle trwa to kilka sekund. <a href="@($"/rachunek/{Token}")">Odśwież</a></div>
+                }
+                @if (!string.IsNullOrWhiteSpace(Error))
+                {
+                    <div class="bill-note err"><i class="bi bi-exclamation-triangle"></i>Nie udało się rozpocząć płatności: @Error</div>
+                }
+
+                <div class="bill-parties">
+                    <div>
+                        <div class="bill-label">Sprzedawca</div>
+                        <div class="bill-multiline">@(string.IsNullOrWhiteSpace(_seller) ? "PTScheduler" : _seller)</div>
+                    </div>
+                    <div>
+                        <div class="bill-label">Dla</div>
+                        <div class="bill-multiline">@(b.Tenant?.CompanyName is { Length: > 0 } c ? c : b.Tenant?.OwnerName)
+@b.Tenant?.OwnerEmail</div>
+                    </div>
+                </div>
+
+                <table class="bill-lines">
+                    <thead><tr><th>Pozycja</th><th class="num">Kwota</th></tr></thead>
+                    <tbody>
+                        @foreach (var l in b.Lines)
+                        {
+                            <tr>
+                                <td>
+                                    <div class="bill-line-name">@l.Name@(l.Quantity > 1 ? $" × {l.Quantity}" : "")</div>
+                                    @if (!string.IsNullOrWhiteSpace(l.Detail))
+                                    {
+                                        <div class="bill-line-detail">@l.Detail</div>
+                                    }
+                                </td>
+                                <td class="num">@Money(l.Amount)</td>
+                            </tr>
+                        }
+                    </tbody>
+                    <tfoot><tr><td>Razem</td><td class="num">@Money(b.Amount)</td></tr></tfoot>
+                </table>
+
+                @if (b.Status == TenantBillStatus.Issued)
+                {
+                    @if (_gateways.Count == 0)
+                    {
+                        <div class="bill-note"><i class="bi bi-bank"></i>Płatność online jest chwilowo niedostępna — zapłać przelewem na konto podane przez sprzedawcę, w tytule wpisz <strong>@b.Number</strong>.</div>
+                    }
+                    else
+                    {
+                        <div class="bill-pay">
+                            <div class="bill-label">Zapłać online</div>
+                            <div class="bill-pay-options">
+                                @foreach (var g in _gateways)
+                                {
+                                    <form method="post" action="@($"/rachunek/{Token}/pay")">
+                                        <input type="hidden" name="gateway" value="@g" />
+                                        <button type="submit" class="bill-pay-btn">
+                                            <span class="bill-pay-name">@GatewayName(g)</span>
+                                            <span class="bill-pay-methods">@GatewayMethods(g)</span>
+                                            <i class="bi bi-arrow-right"></i>
+                                        </button>
+                                    </form>
+                                }
+                            </div>
+                            <div class="bill-fine">Po płatności wrócisz tutaj, a potwierdzenie przyjdzie e-mailem.</div>
+                        </div>
+                    }
+                }
+            </div>
+        }
+    </div>
+</section>
+
+<style>
+    .bill-section { padding: 110px 0 64px; min-height: 80vh; }
+    .bill-container { max-width: 720px; margin: 0 auto; padding: 0 16px; }
+    .bill-card { background: var(--pts-surface); border: 1px solid var(--pts-border); border-radius: var(--pts-radius); box-shadow: var(--pts-shadow); padding: 28px; display: flex; flex-direction: column; gap: 22px; }
+    .bill-empty { text-align: center; align-items: center; }
+    .bill-empty i { font-size: 2.5rem; color: var(--pts-primary); }
+    .bill-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+    .bill-head h1, .bill-empty h1 { font-family: var(--pts-font-display); font-size: 1.6rem; margin: 2px 0 0; letter-spacing: -.01em; }
+    .bill-eyebrow, .bill-label { font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--pts-text-secondary); font-weight: 600; }
+    .bill-pill { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: 99px; font-size: .82rem; font-weight: 600; }
+    .bill-pill.ok { background: #DCFCE7; color: #166534; }
+    .bill-pill.info { background: var(--pts-surface-alt); color: var(--pts-primary-dark); }
+    .bill-pill.warn { background: #FEF3C7; color: #92400E; }
+    .bill-pill.muted { background: #F1F5F9; color: #475569; }
+    .bill-note { background: var(--pts-surface-alt); border-radius: var(--pts-radius-sm); padding: 12px 14px; font-size: .9rem; line-height: 1.5; }
+    .bill-note > .bi { margin-right: 6px; color: var(--pts-primary); }
+    .bill-note.err { background: #FEE2E2; color: #991B1B; }
+    .bill-note.err > .bi { color: inherit; }
+    .bill-parties { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .bill-multiline { white-space: pre-line; font-size: .92rem; margin-top: 4px; }
+    .bill-lines { width: 100%; border-collapse: collapse; font-size: .95rem; }
+    .bill-lines th { text-align: left; font-size: .75rem; text-transform: uppercase; letter-spacing: .08em; color: var(--pts-text-secondary); font-weight: 600; padding: 0 0 8px; border-bottom: 1px solid var(--pts-border); }
+    .bill-lines td { padding: 12px 0; border-bottom: 1px solid var(--pts-border); vertical-align: top; }
+    .bill-lines .num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; padding-left: 12px; }
+    .bill-lines tfoot td { border-bottom: 0; font-weight: 700; font-size: 1.15rem; padding-top: 14px; }
+    .bill-line-name { font-weight: 600; }
+    .bill-line-detail { font-size: .82rem; color: var(--pts-text-secondary); }
+    .bill-pay { display: flex; flex-direction: column; gap: 10px; }
+    .bill-pay-options { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 10px; }
+    .bill-pay-options form { margin: 0; }
+    .bill-pay-btn { width: 100%; display: grid; grid-template-columns: 1fr auto; grid-template-rows: auto auto; column-gap: 10px; text-align: left; padding: 14px 16px; border-radius: 12px; border: 1px solid var(--pts-border); background: var(--pts-surface); cursor: pointer; transition: border-color .2s, box-shadow .2s; color: var(--pts-text); }
+    .bill-pay-btn:hover, .bill-pay-btn:focus-visible { border-color: var(--pts-primary); box-shadow: 0 0 0 3px var(--pts-glow); outline: none; }
+    .bill-pay-name { font-weight: 700; }
+    .bill-pay-methods { grid-row: 2; font-size: .8rem; color: var(--pts-text-secondary); }
+    .bill-pay-btn i { grid-row: 1 / span 2; grid-column: 2; align-self: center; color: var(--pts-primary); font-size: 1.1rem; }
+    .bill-fine { font-size: .8rem; color: var(--pts-text-secondary); }
+    @@media (max-width: 575.98px) { .bill-card { padding: 20px; } .bill-parties { grid-template-columns: 1fr; } }
+</style>
+
+@code {
+    [Parameter] public string Token { get; set; } = "";
+    [SupplyParameterFromQuery] public string? Paid { get; set; }
+    [SupplyParameterFromQuery] public string? Error { get; set; }
+
+    private TenantBill? _bill;
+    private List<string> _gateways = [];
+    private string _seller = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        _bill = await Billing.GetByTokenAsync(Token);
+        if (_bill is null) return;
+        _seller = await Settings.GetAsync(PTScheduler.Portal.Services.SiteSettingsService.Keys.OfferSellerDetails) ?? "";
+        if (_bill.Status == TenantBillStatus.Issued)
+        {
+            var available = await Billing.GatewaysAsync();
+            // Kolejność: najpierw polskie bramki z BLIK-iem.
+            _gateways = new[] { "autopay", "przelewy24", "payu", "stripe" }.Where(available.Contains).ToList();
+        }
+    }
+
+    private static string GatewayName(string g) => g switch
+    {
+        "autopay" => "Autopay",
+        "przelewy24" => "Przelewy24",
+        "payu" => "PayU",
+        "stripe" => "Karta płatnicza",
+        _ => g
+    };
+
+    private static string GatewayMethods(string g) => g == "stripe" ? "Visa, Mastercard, Apple Pay, Google Pay" : "BLIK, szybki przelew, karta";
+
+    private static string Money(decimal v) => v.ToString("#,0.00", new System.Globalization.CultureInfo("pl-PL")) + " zł";
+
+    private static DateTime Local(DateTime utc) => PTScheduler.Portal.Services.ContainerLogService.ToLocal(utc);
+}

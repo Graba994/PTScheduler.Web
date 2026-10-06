@@ -1,7 +1,12 @@
+using System.Reflection;
+using System.Text.Json;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using PTScheduler.Domain.Constants;
 using PTScheduler.Domain.Entities;
+using PTScheduler.Domain.Rules;
+using PTScheduler.Domain.Enums;
+using PTScheduler.Infrastructure.Data.SeedData;
 
 namespace PTScheduler.Infrastructure.Data;
 
@@ -9,13 +14,22 @@ public static class DbInitializer
 {
     public static async Task SeedPermissionsAsync(ApplicationDbContext db)
     {
-        if (await db.RolePermissions.AnyAsync()) return;
+        // Idempotent: add any missing (role, permission) rows without touching
+        // existing ones, so newly introduced permissions appear for management
+        // on databases that were seeded before those permissions existed.
+        var existing = (await db.RolePermissions
+                .Select(rp => new { rp.Role, rp.Permission })
+                .ToListAsync())
+            .Select(e => (e.Role, e.Permission))
+            .ToHashSet();
 
+        var toAdd = new List<RolePermission>();
         foreach (var (role, permissions) in Permissions.Defaults)
         {
             foreach (var perm in Permissions.All)
             {
-                db.RolePermissions.Add(new RolePermission
+                if (existing.Contains((role, perm.Key))) continue;
+                toAdd.Add(new RolePermission
                 {
                     Role = role,
                     Permission = perm.Key,
@@ -24,12 +38,16 @@ public static class DbInitializer
             }
         }
 
-        await db.SaveChangesAsync();
+        if (toAdd.Count > 0)
+        {
+            db.RolePermissions.AddRange(toAdd);
+            await db.SaveChangesAsync();
+        }
     }
 
     public static async Task SeedRolesAsync(RoleManager<IdentityRole> roleManager)
     {
-        string[] roles = [Roles.Admin, Roles.Trainer, Roles.Subordinate, Roles.Client];
+        string[] roles = [Roles.Admin, Roles.Root, Roles.Trainer, Roles.Subordinate, Roles.Client];
         foreach (var role in roles)
         {
             if (!await roleManager.RoleExistsAsync(role))
@@ -37,10 +55,56 @@ public static class DbInitializer
         }
     }
 
+    public const string DefaultAdminEmail = "root@admin.local";
+
+    // Hasło, którym dawniej zakładano konto startowe — znane z README.
+    private const string LegacyDefaultPassword = "password";
+
+    /// <summary>
+    /// Zakłada konto startowe administratora TYLKO wtedy, gdy w bazie nie ma żadnego
+    /// admina — i z losowym hasłem. Właściciel ustawia własne dane w kreatorze /setup
+    /// (albo operator przez Portal → reset admina).
+    ///
+    /// Dawniej konto szukano po adresie root@admin.local. Kreator zmienia ten adres na
+    /// prawdziwy, więc przy każdym restarcie powstawał DRUGI admin z hasłem „password”
+    /// — tylne drzwi do każdego tenanta. Takie „wskrzeszone” konta są tu usuwane.
+    /// </summary>
     public static async Task SeedAdminAsync(UserManager<ApplicationUser> userManager)
     {
-        const string email = "root@admin.local";
-        if (await userManager.FindByEmailAsync(email) is not null) return;
+        var admins = await userManager.GetUsersInRoleAsync(Roles.Admin);
+        if (admins.Count > 0)
+            await RemoveResurrectedDefaultAdminAsync(userManager, admins);
+        await EnsureRootAsync(userManager);
+    }
+
+    /// <summary>
+    /// Konto techniczne operatora: root@admin.local z rolami Admin i Root. Jest osobno od
+    /// administratora studia (tego zakłada kreator /setup), więc instalacje, w których kreator
+    /// kiedyś przemianował root na adres właściciela, dostają nowe konto techniczne — zawsze
+    /// z losowym hasłem (ustawia je operator przez Portal), nigdy ze znanym.
+    /// </summary>
+    public static async Task EnsureRootAsync(UserManager<ApplicationUser> userManager)
+    {
+        if ((await userManager.GetUsersInRoleAsync(Roles.Root)).Count > 0) return;
+
+        const string email = DefaultAdminEmail;
+        var existing = await userManager.FindByEmailAsync(email);
+        if (existing is not null)
+        {
+            // Konto istnieje (np. straciło rolę albo sprzed podziału ról) — dokładamy role.
+            // Ze starym hasłem z README wymuszamy zmianę przy logowaniu (bez odcinania dostępu).
+            if (existing.PasswordHash is not null
+                && userManager.PasswordHasher.VerifyHashedPassword(existing, existing.PasswordHash, LegacyDefaultPassword)
+                    != PasswordVerificationResult.Failed)
+            {
+                existing.MustChangePassword = true;
+                await userManager.UpdateAsync(existing);
+            }
+            if (!await userManager.IsInRoleAsync(existing, Roles.Admin))
+                await userManager.AddToRoleAsync(existing, Roles.Admin);
+            await userManager.AddToRoleAsync(existing, Roles.Root);
+            return;
+        }
 
         var admin = new ApplicationUser
         {
@@ -49,15 +113,42 @@ public static class DbInitializer
             NormalizedEmail = email.ToUpperInvariant(),
             NormalizedUserName = email.ToUpperInvariant(),
             EmailConfirmed = true,
-            FirstName = "Admin",
-            LastName = "System",
-            SecurityStamp = Guid.NewGuid().ToString()
+            FirstName = "Root",
+            LastName = "Techniczne",
+            SecurityStamp = Guid.NewGuid().ToString(),
+            MustChangePassword = true
         };
         await userManager.CreateAsync(admin);
-        admin.PasswordHash = userManager.PasswordHasher.HashPassword(admin, "password");
+        admin.PasswordHash = userManager.PasswordHasher.HashPassword(admin, NewRandomPassword());
         await userManager.UpdateAsync(admin);
         await userManager.AddToRoleAsync(admin, Roles.Admin);
+        await userManager.AddToRoleAsync(admin, Roles.Root);
     }
+
+    /// <summary>Administrator studia (właściciel) — admin bez roli Root. Null przed kreatorem /setup.</summary>
+    public static async Task<ApplicationUser?> FindOwnerAdminAsync(UserManager<ApplicationUser> userManager)
+    {
+        var admins = await userManager.GetUsersInRoleAsync(Roles.Admin);
+        var roots = (await userManager.GetUsersInRoleAsync(Roles.Root)).Select(r => r.Id).ToHashSet();
+        return admins.Where(a => !roots.Contains(a.Id)).OrderBy(a => a.Email).FirstOrDefault();
+    }
+
+    private static async Task RemoveResurrectedDefaultAdminAsync(
+        UserManager<ApplicationUser> userManager, IList<ApplicationUser> admins)
+    {
+        if (admins.Count < 2) return;
+        var root = admins.FirstOrDefault(a =>
+            string.Equals(a.Email, DefaultAdminEmail, StringComparison.OrdinalIgnoreCase));
+        if (root?.PasswordHash is null) return;
+
+        var check = userManager.PasswordHasher.VerifyHashedPassword(root, root.PasswordHash, LegacyDefaultPassword);
+        if (check == PasswordVerificationResult.Failed) return;
+
+        await userManager.DeleteAsync(root);
+    }
+
+    public static string NewRandomPassword() =>
+        Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24)) + "a1";
 
     public static async Task SeedSessionTypesAsync(ApplicationDbContext db)
     {
@@ -71,4 +162,164 @@ public static class DbInitializer
         );
         await db.SaveChangesAsync();
     }
+
+    private static readonly JsonSerializerOptions SeedJsonOpts =
+        new() { PropertyNameCaseInsensitive = true };
+
+    /// <summary>
+    /// Zasila katalog ćwiczeniami bazowymi z Free Exercise DB (zasób osadzony).
+    /// Idempotentnie: dokłada tylko rekordy, których jeszcze nie ma (po
+    /// SourceKey = id FED), więc ponowne uruchomienie dodaje nowe pozycje i nie
+    /// nadpisuje ćwiczeń, które trener mógł już edytować. Nazwy PL bierze z
+    /// warstwy nadpisań (exercise-names-pl.json); dla reszty zostaje nazwa EN
+    /// (opis EN dostępny zawsze). Bazę obrazów można nadpisać zmienną
+    /// EXERCISE_IMAGE_BASE_URL (domyślnie repo Free Exercise DB).
+    /// </summary>
+    /// <summary>
+    /// Typ pomiaru (ciężar+powtórzenia, czas, dystans…) dla ćwiczeń, które go jeszcze nie mają —
+    /// cała baza dostaje parametry automatycznie, a trener może je zmienić w edytorze.
+    /// </summary>
+    public static async Task AssignTrackingAsync(ApplicationDbContext db)
+    {
+        var missing = await db.Exercises.Where(e => e.Tracking == null).ToListAsync();
+        if (missing.Count == 0) return;
+        foreach (var e in missing)
+            e.Tracking = ExerciseTrackingRules.Guess(e.Category, e.Equipment, e.NameEn, e.NamePl);
+        await db.SaveChangesAsync();
+    }
+
+    public static async Task SeedExerciseCatalogAsync(ApplicationDbContext db)
+    {
+        var asm = typeof(DbInitializer).Assembly;
+        var records = ReadEmbeddedJson<List<FreeExerciseDbRecord>>(asm, "free-exercise-db.json");
+        if (records is null || records.Count == 0) return;
+
+        // Stara, kuratorowana lista nazw PL (96 pozycji) — dziś tylko do rozpoznania,
+        // czy nazwa w bazie pochodzi z automatu (i można ją nadpisać nowszym tłumaczeniem).
+        var plNames = ReadEmbeddedJson<Dictionary<string, string>>(asm, "exercise-names-pl.json")
+                      ?? new Dictionary<string, string>();
+        // Pełne tłumaczenie katalogu: id → [nazwa PL, opis PL (kroki rozdzielone \n)].
+        var plTexts = ReadEmbeddedJson<Dictionary<string, string[]>>(asm, "exercise-pl.json")
+                      ?? new Dictionary<string, string[]>();
+
+        await ApplyPolishTranslationsAsync(db, plTexts, plNames);
+        await AssignTrackingAsync(db);
+
+        var have = (await db.Exercises
+                .Where(e => e.SourceKey != null)
+                .Select(e => e.SourceKey!)
+                .ToListAsync())
+            .ToHashSet();
+
+        var imageBase = (Environment.GetEnvironmentVariable("EXERCISE_IMAGE_BASE_URL")
+            ?? "https://raw.githubusercontent.com/yuhonas/free-exercise-db/main/exercises/")
+            .TrimEnd('/') + "/";
+
+        var toAdd = new List<Exercise>();
+        foreach (var r in records)
+        {
+            if (string.IsNullOrWhiteSpace(r.Id) || have.Contains(r.Id)) continue;
+
+            var namePl = PlName(plTexts, r.Id)
+                ?? (plNames.TryGetValue(r.Id, out var pl) && !string.IsNullOrWhiteSpace(pl) ? pl : r.Name);
+
+            toAdd.Add(new Exercise
+            {
+                OwnerTrainerUserId = null,
+                Visibility = ExerciseVisibility.Public,
+                NameEn = r.Name,
+                NamePl = namePl,
+                DescriptionEn = r.Instructions.Length > 0 ? string.Join("\n", r.Instructions) : null,
+                DescriptionPl = PlDescription(plTexts, r.Id),
+                PrimaryMuscles = string.Join(",", r.PrimaryMuscles),
+                SecondaryMuscles = string.Join(",", r.SecondaryMuscles),
+                Category = MapCategory(r.Category),
+                Level = MapLevel(r.Level),
+                Equipment = r.Equipment,
+                Force = r.Force,
+                Mechanic = r.Mechanic,
+                ImageUrls = string.Join(",", r.Images.Select(p => imageBase + p.TrimStart('/'))),
+                VideoType = ExerciseVideoType.None,
+                VideoRef = null,
+                Tracking = ExerciseTrackingRules.Guess(MapCategory(r.Category), r.Equipment, r.Name, namePl),
+                SourceKey = r.Id
+            });
+        }
+
+        if (toAdd.Count > 0)
+        {
+            db.Exercises.AddRange(toAdd);
+            await db.SaveChangesAsync();
+        }
+    }
+
+    /// <summary>
+    /// Uzupełnia tłumaczenia w już zaseedowanych ćwiczeniach bazowych: brakujący opis PL
+    /// oraz nazwę PL, jeśli wciąż jest automatyczna (angielska albo ze starej listy).
+    /// Nazw i opisów zmienionych ręcznie nie ruszamy. Idempotentne.
+    /// </summary>
+    private static async Task ApplyPolishTranslationsAsync(ApplicationDbContext db,
+        Dictionary<string, string[]> plTexts, Dictionary<string, string> legacyNames)
+    {
+        if (plTexts.Count == 0) return;
+        var keys = plTexts.Keys.ToList();
+        var rows = await db.Exercises
+            .Where(e => e.OwnerTrainerUserId == null && e.SourceKey != null && keys.Contains(e.SourceKey))
+            .ToListAsync();
+
+        var changed = false;
+        foreach (var e in rows)
+        {
+            var key = e.SourceKey!;
+            if (string.IsNullOrWhiteSpace(e.DescriptionPl) && PlDescription(plTexts, key) is { } desc)
+            {
+                e.DescriptionPl = desc;
+                changed = true;
+            }
+            var autoName = e.NamePl == e.NameEn
+                || (legacyNames.TryGetValue(key, out var legacy) && e.NamePl == legacy);
+            if (autoName && PlName(plTexts, key) is { } name && name != e.NamePl)
+            {
+                e.NamePl = name;
+                changed = true;
+            }
+        }
+        if (changed) await db.SaveChangesAsync();
+    }
+
+    private static string? PlName(Dictionary<string, string[]> plTexts, string id) =>
+        plTexts.TryGetValue(id, out var t) && t.Length > 0 && !string.IsNullOrWhiteSpace(t[0]) ? t[0].Trim() : null;
+
+    private static string? PlDescription(Dictionary<string, string[]> plTexts, string id) =>
+        plTexts.TryGetValue(id, out var t) && t.Length > 1 && !string.IsNullOrWhiteSpace(t[1]) ? t[1].Trim() : null;
+
+    private static T? ReadEmbeddedJson<T>(Assembly asm, string endsWith)
+    {
+        var name = asm.GetManifestResourceNames()
+            .FirstOrDefault(n => n.EndsWith(endsWith, StringComparison.OrdinalIgnoreCase));
+        if (name is null) return default;
+        using var stream = asm.GetManifestResourceStream(name);
+        if (stream is null) return default;
+        return JsonSerializer.Deserialize<T>(stream, SeedJsonOpts);
+    }
+
+    private static ExerciseCategory MapCategory(string? c) => c switch
+    {
+        "strength" => ExerciseCategory.Strength,
+        "stretching" => ExerciseCategory.Stretching,
+        "plyometrics" => ExerciseCategory.Plyometrics,
+        "strongman" => ExerciseCategory.Strongman,
+        "powerlifting" => ExerciseCategory.Powerlifting,
+        "cardio" => ExerciseCategory.Cardio,
+        "olympic weightlifting" => ExerciseCategory.OlympicWeightlifting,
+        _ => ExerciseCategory.Other
+    };
+
+    private static ExerciseLevel MapLevel(string? l) => l switch
+    {
+        "beginner" => ExerciseLevel.Beginner,
+        "intermediate" => ExerciseLevel.Intermediate,
+        "expert" => ExerciseLevel.Expert,
+        _ => ExerciseLevel.Beginner
+    };
 }

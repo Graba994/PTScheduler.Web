@@ -1,0 +1,92 @@
+@page "/payments/sim/{Ext}"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@inject IPaymentService PaymentService
+@inject NavigationManager Nav
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Płatność testowa" />
+
+<div class="sim-wrap">
+    <div class="sim-card">
+        <div class="sim-badge"><i class="bi bi-flask me-1"></i>Środowisko testowe (Symulator)</div>
+
+        @if (_loading)
+        {
+            <div class="text-center py-4"><div class="spinner-border text-primary"></div></div>
+        }
+        else if (_order is null)
+        {
+            <div class="alert alert-danger mb-0">Nie znaleziono zamówienia.</div>
+        }
+        else if (_order.Status != "Pending")
+        {
+            <div class="text-center py-3">
+                <i class="bi bi-check-circle-fill text-success" style="font-size:2.5rem"></i>
+                <p class="mt-2 mb-3">To zamówienie zostało już rozliczone (status: @_order.Status).</p>
+                <a href="/my/orders" class="btn btn-primary">Moje zamówienia</a>
+            </div>
+        }
+        else
+        {
+            <h4 class="sim-title">@_order.ItemTitle</h4>
+            <div class="sim-amount">@_order.Amount.ToString("0.00") @_order.Currency</div>
+            <p class="text-muted small">To jest płatność testowa — nie zostaną pobrane żadne środki. Wybierz wynik, aby dokończyć symulację.</p>
+
+            @if (_err is not null) { <div class="alert alert-danger py-2">@_err</div> }
+
+            <div class="d-grid gap-2 mt-3">
+                <button class="btn btn-success btn-lg" @onclick="Pay" disabled="@_busy">
+                    @if (_busy) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                    <i class="bi bi-check-lg me-1"></i>Zapłać (symulacja udana)
+                </button>
+                <button class="btn btn-outline-secondary" @onclick="Cancel" disabled="@_busy">
+                    <i class="bi bi-x-lg me-1"></i>Anuluj płatność
+                </button>
+            </div>
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter] public string Ext { get; set; } = string.Empty;
+
+    private bool _loading = true;
+    private bool _busy;
+    private string? _err;
+    private OrderDto? _order;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _order = await PaymentService.GetOrderByExtAsync(Ext);
+        _loading = false;
+    }
+
+    private async Task Pay()
+    {
+        _busy = true; _err = null;
+        var ok = await PaymentService.CompleteSimulatorAsync(Ext, paid: true);
+        if (ok) { Nav.NavigateTo($"/payment/success?order={Ext}", forceLoad: true); return; }
+        _err = "Nie udało się zakończyć płatności testowej.";
+        _busy = false;
+    }
+
+    private async Task Cancel()
+    {
+        _busy = true; _err = null;
+        await PaymentService.CompleteSimulatorAsync(Ext, paid: false);
+        Nav.NavigateTo("/my/orders", forceLoad: true);
+    }
+}
+
+<style>
+    .sim-wrap { display:flex; justify-content:center; padding:2rem 1rem; }
+    .sim-card { width:100%; max-width:440px; background:var(--bs-body-bg); border:1px solid var(--bs-border-color);
+                border-radius:1rem; padding:1.75rem; box-shadow:0 12px 34px -18px rgba(0,0,0,.4); text-align:center; }
+    .sim-badge { display:inline-block; background:rgba(245,158,11,.15); color:#b45309; font-weight:600;
+                 font-size:.78rem; padding:.3rem .7rem; border-radius:999px; margin-bottom:1rem; }
+    .sim-title { font-weight:700; margin-bottom:.25rem; }
+    .sim-amount { font-size:2rem; font-weight:800; color:var(--c-primary); margin-bottom:.75rem; }
+    @@media (prefers-color-scheme: dark) { .sim-badge { color:#fbbf24; } }
+</style>

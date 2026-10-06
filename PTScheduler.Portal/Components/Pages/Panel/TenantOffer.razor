@@ -1,0 +1,655 @@
+@page "/panel/tenants/{Id:int}/oferta"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject OfferService OfferSvc
+@inject BillingService Billing
+@inject SiteSettingsService SiteSettings
+@inject AuthenticationStateProvider AuthState
+@rendermode InteractiveServer
+
+<PageTitle>Oferta trenera — PTScheduler Portal</PageTitle>
+
+@if (_offer is null)
+{
+    @if (_loading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    }
+    else
+    {
+        <PanelCard><div class="pp-empty"><i class="bi bi-person-x"></i><div class="pp-empty-title">Nie ma takiego trenera</div></div></PanelCard>
+    }
+}
+else
+{
+    var o = _offer;
+    <PanelHeader Title="Oferta trenera" Icon="bi-file-earmark-text" BackHref="@($"/panel/tenants/{Id}")" BackLabel="Karta trenera">
+        <Description>
+            <span class="fw-semibold">@TenantName</span> · @o.Tenant.Domain — co trener ma w abonamencie, co zamówił sam, co dostał od Ciebie w gratisie i co doliczasz do rachunku.
+        </Description>
+        <Actions>
+            <a class="btn btn-sm btn-outline-secondary" href="@($"/api/panel/tenants/{Id}/offer.pdf")" target="_blank" rel="noopener">
+                <i class="bi bi-file-earmark-pdf me-1"></i>Pobierz PDF
+            </a>
+            <button class="btn btn-sm btn-primary" @onclick="OpenForm" disabled="@_formOpen">
+                <i class="bi bi-plus-lg me-1"></i>Dodaj pozycję
+            </button>
+        </Actions>
+    </PanelHeader>
+
+    @if (_message is not null)
+    {
+        <div class="pp-callout pp-tone-@(_messageOk ? "ok" : "danger")" role="status">
+            <i class="bi @(_messageOk ? "bi-check-circle" : "bi-exclamation-octagon")"></i><div>@_message</div>
+        </div>
+    }
+
+    <div class="pp-stats">
+        <StatTile Label="Co miesiąc" Value="@OfferService.Money(o.MonthlyTotal)" Meta="abonament, dodatki i opłaty miesięczne" Icon="bi-arrow-repeat" Tone="info" />
+        <StatTile Label="Co rok" Value="@OfferService.Money(o.YearlyTotal)" Meta="@(o.YearlyTotal > 0 ? "abonament roczny i opłaty roczne" : "brak opłat rocznych")" Icon="bi-calendar3" Tone="muted" />
+        <StatTile Label="Do rozliczenia" Value="@OfferService.Money(o.OneTimeDue.Sum(c => c.Total))" Meta="@DueMeta(o)" Icon="bi-receipt" Tone="@(o.OneTimeDue.Count > 0 ? "warn" : "ok")" />
+        <StatTile Label="Gratisy" Value="@o.ActiveGifts.Count.ToString()" Meta="@GiftMeta(o)" Icon="bi-gift" Tone="ok" />
+    </div>
+
+    @if (_formOpen)
+    {
+        <section class="pp-card" aria-labelledby="of-form-title">
+            <div class="pp-card-head">
+                <div class="pp-icon"><i class="bi bi-plus-square"></i></div>
+                <div class="min-w-0">
+                    <h2 class="pp-card-title" id="of-form-title">Nowa pozycja w ofercie</h2>
+                    <div class="pp-card-sub">Wybierz usługę z katalogu albo wpisz własną. Pozycja z efektem od razu działa w aplikacji trenera.</div>
+                </div>
+            </div>
+
+            <div class="d-flex flex-wrap gap-3 align-items-end mb-3">
+                <div>
+                    <div class="pp-label">Rodzaj</div>
+                    <div class="pp-seg" role="group" aria-label="Rodzaj pozycji">
+                        <button type="button" class="@(_form.Kind == OfferItemKind.Gift ? "active" : "")" aria-pressed="@(_form.Kind == OfferItemKind.Gift ? "true" : "false")" @onclick="() => SetKind(OfferItemKind.Gift)"><i class="bi bi-gift"></i>Gratis</button>
+                        <button type="button" class="@(_form.Kind == OfferItemKind.Charge ? "active" : "")" aria-pressed="@(_form.Kind == OfferItemKind.Charge ? "true" : "false")" @onclick="() => SetKind(OfferItemKind.Charge)"><i class="bi bi-cash-coin"></i>Dodatkowo płatne</button>
+                    </div>
+                </div>
+                <div class="flex-grow-1" style="min-width:240px;max-width:460px">
+                    <label class="pp-label d-block" for="of-catalog">Z katalogu usług</label>
+                    <select id="of-catalog" class="form-select" value="@(_form.ServiceItemId?.ToString() ?? "")" @onchange="OnCatalogChanged">
+                        <option value="">— własna pozycja —</option>
+                        @foreach (var c in _catalog)
+                        {
+                            <option value="@c.Id">@c.Name · @OfferService.Money(c.Price)@OfferService.BillingSuffix(c.Billing)</option>
+                        }
+                    </select>
+                </div>
+            </div>
+
+            <div class="of-form">
+                <div class="of-span2">
+                    <label class="form-label small fw-semibold" for="of-name">Nazwa</label>
+                    <input id="of-name" class="form-control" maxlength="200" @bind="_form.Name" @bind:event="oninput" placeholder="np. Pakiet 500 SMS, Wdrożenie i szkolenie" />
+                </div>
+                <div>
+                    <label class="form-label small fw-semibold" for="of-qty">Ilość</label>
+                    <input id="of-qty" type="number" min="1" class="form-control" @bind="_form.Quantity" @bind:event="oninput" />
+                </div>
+                <div>
+                    <label class="form-label small fw-semibold" for="of-price">@(_form.Kind == OfferItemKind.Gift ? "Wartość za sztukę" : "Cena za sztukę")</label>
+                    <div class="input-group">
+                        <input id="of-price" type="number" min="0" step="0.01" class="form-control" @bind="_form.UnitPrice" @bind:event="oninput" />
+                        <span class="input-group-text">zł</span>
+                    </div>
+                    @if (_form.Kind == OfferItemKind.Gift) { <div class="form-text">Opcjonalnie — pokażemy, ile trener zyskuje.</div> }
+                </div>
+
+                <div>
+                    <label class="form-label small fw-semibold" for="of-billing">Rozliczenie</label>
+                    <select id="of-billing" class="form-select" @bind="_form.Billing">
+                        <option value="@OfferBilling.OneTime">Jednorazowo</option>
+                        <option value="@OfferBilling.Monthly">Co miesiąc</option>
+                        <option value="@OfferBilling.Yearly">Co rok</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label small fw-semibold" for="of-effect">Efekt w aplikacji</label>
+                    <select id="of-effect" class="form-select" @bind="_form.Effect">
+                        <option value="@OfferEffect.None">Brak — tylko w zestawieniu</option>
+                        <option value="@OfferEffect.Sms">SMS</option>
+                        <option value="@OfferEffect.VideoStorageGb">Przestrzeń na wideo (GB)</option>
+                        <option value="@OfferEffect.VideoBandwidthGb">Transfer wideo (GB / mies.)</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="form-label small fw-semibold" for="of-effect-amount">@EffectAmountLabel</label>
+                    <input id="of-effect-amount" type="number" min="0" class="form-control" @bind="_form.EffectAmount" @bind:event="oninput" disabled="@(_form.Effect == OfferEffect.None)" />
+                </div>
+                <div></div>
+
+                <div>
+                    <label class="form-label small fw-semibold" for="of-from">Od</label>
+                    <input id="of-from" type="date" class="form-control" @bind="_from" />
+                </div>
+                <div>
+                    <label class="form-label small fw-semibold" for="of-to">Do (włącznie)</label>
+                    <input id="of-to" type="date" class="form-control" @bind="_to" />
+                    <div class="form-text">Puste = bezterminowo.</div>
+                </div>
+                <div class="of-span2">
+                    <label class="form-label small fw-semibold" for="of-desc">Opis dla trenera <span class="fw-normal text-muted">(w PDF)</span></label>
+                    <input id="of-desc" class="form-control" maxlength="1000" @bind="_form.Description" placeholder="np. Na start — dziękujemy za zaufanie" />
+                </div>
+                <div class="of-span4">
+                    <label class="form-label small fw-semibold" for="of-note">Notatka wewnętrzna <span class="fw-normal text-muted">(tylko Ty ją widzisz)</span></label>
+                    <input id="of-note" class="form-control" maxlength="1000" @bind="_form.InternalNote" placeholder="np. ustalone telefonicznie 27.09" />
+                </div>
+            </div>
+
+            <div class="pp-callout pp-tone-info of-preview" aria-live="polite">
+                <i class="bi bi-lightbulb"></i>
+                <div><strong>Co się stanie:</strong> @Preview</div>
+            </div>
+
+            <div class="d-flex gap-2 mt-3">
+                <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving">
+                    @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-check-lg me-1"></i> }
+                    Dodaj do oferty
+                </button>
+                <button class="btn btn-outline-secondary" @onclick="() => _formOpen = false" disabled="@_saving">Anuluj</button>
+            </div>
+        </section>
+    }
+
+    <div class="of-grid">
+        <PanelCard Title="Abonament" Icon="bi-stars" IconClass="pp-tone-info">
+            <div class="of-plan">
+                <span class="of-plan-name">@(o.Plan?.Name ?? o.Tenant.PlanId)</span>
+                <span class="of-plan-price">@OfferService.Money(o.PlanAmount)@OfferService.BillingSuffix(o.PlanCycle)</span>
+            </div>
+            <div class="of-meta mb-2">
+                <span class="pp-chip pp-tone-@BillingTone(o.Tenant.BillingStatus)">@BillingLabel(o.Tenant.BillingStatus)</span>
+                @if (o.Tenant.TrialEndsAt is { } trial && trial > DateTime.UtcNow)
+                {
+                    <span class="pp-chip pp-tone-info"><i class="bi bi-hourglass-split"></i>Okres próbny do @Local(trial).ToString("dd.MM.yyyy")</span>
+                }
+            </div>
+            <dl class="pp-kv">
+                <div><dt>Podopieczni</dt><dd>@Limit(o.Plan?.MaxClients)</dd></div>
+                <div><dt>SMS miesięcznie</dt><dd>@SmsLimitText(o)</dd></div>
+                <div><dt>Wideo — przestrzeń</dt><dd>@VideoText(o.Plan?.MaxVideoStorageGB, o.ExtraStorageGb, "GB")</dd></div>
+                <div><dt>Wideo — transfer</dt><dd>@VideoText(o.Plan?.MaxVideoBandwidthGBPerMonth, o.ExtraBandwidthGb, "GB / mies.")</dd></div>
+            </dl>
+        </PanelCard>
+
+        <PanelCard Title="SMS" Icon="bi-chat-dots" IconClass="pp-icon-cyan" Subtitle="Wysyłane z konta SMSAPI platformy — trener niczego nie konfiguruje.">
+            @if (!o.Sms.PlatformEnabled)
+            {
+                <div class="pp-callout pp-tone-warn mb-0">
+                    <i class="bi bi-exclamation-triangle"></i>
+                    <div>SMS-y nie są jeszcze uruchomione. Wpisz raz token SMSAPI w <a href="/panel/setup/services#sms">Konfiguracji → Usługi</a> — wtedy zadziałają u wszystkich trenerów.</div>
+                </div>
+            }
+            else
+            {
+                <div class="pp-label">W tym miesiącu</div>
+                @if (o.Sms.Unlimited)
+                {
+                    <div class="fw-bold mb-2">@o.Sms.MonthlyUsed wysłanych · bez limitu</div>
+                }
+                else if (o.Sms.MonthlyLimit > 0)
+                {
+                    var pct = (int)Math.Min(100, o.Sms.MonthlyUsed * 100L / Math.Max(1, o.Sms.MonthlyLimit));
+                    <div class="d-flex justify-content-between small mb-1"><span class="fw-semibold">@o.Sms.MonthlyUsed / @o.Sms.MonthlyLimit</span><span class="text-muted">zostało @o.Sms.MonthlyLeft</span></div>
+                    <div class="pp-meter mb-3 @PanelUi.MeterTone(pct)"><div style="width:@(pct)%"></div></div>
+                }
+                else
+                {
+                    <div class="small text-muted mb-2">Plan nie zawiera SMS — trener wysyła tylko z dokupionych albo podarowanych SMS-ów.</div>
+                }
+                <dl class="pp-kv">
+                    <div><dt>Dokupione i w gratisie</dt><dd>@o.Sms.Credits.ToString("0") SMS</dd></div>
+                </dl>
+                <div class="small text-muted mt-2">Najpierw schodzi limit miesięczny, potem dokupione SMS-y (nie wygasają).</div>
+            }
+        </PanelCard>
+
+        <section class="pp-card pp-card-flush of-wide">
+            <div class="pp-card-head">
+                <div class="pp-icon pp-tone-ok"><i class="bi bi-gift"></i></div>
+                <div class="min-w-0">
+                    <h2 class="pp-card-title">W gratisie</h2>
+                    <div class="pp-card-sub">To, co dajesz trenerowi za darmo — z wartością, żeby było widać, ile zyskuje.</div>
+                </div>
+            </div>
+            @RenderItems(o.Gifts, "Brak gratisów. Dodaj np. pakiet SMS na start albo darmowy miesiąc dodatku.")
+        </section>
+
+        <section class="pp-card pp-card-flush of-wide">
+            <div class="pp-card-head">
+                <div class="pp-icon pp-tone-warn"><i class="bi bi-cash-coin"></i></div>
+                <div class="min-w-0">
+                    <h2 class="pp-card-title">Dodatkowo płatne</h2>
+                    <div class="pp-card-sub">Doliczane do rachunku trenera — jednorazowo albo w każdym okresie. Jednorazowe oznaczasz jako rozliczone.</div>
+                </div>
+            </div>
+            @RenderItems(o.Charges, "Brak dodatkowych opłat.")
+        </section>
+
+        <section class="pp-card pp-card-flush of-wide">
+            <div class="pp-card-head">
+                <div class="pp-icon"><i class="bi bi-bag-check"></i></div>
+                <div class="min-w-0">
+                    <h2 class="pp-card-title">Zamówione przez trenera</h2>
+                    <div class="pp-card-sub">Dodatki miesięczne i zamówienia ze sklepu usług w aplikacji trenera.</div>
+                </div>
+                <div class="pp-card-actions"><a class="btn btn-sm btn-outline-secondary" href="/panel/orders">Wszystkie zamówienia</a></div>
+            </div>
+            @if (o.Addons.Count == 0 && o.Orders.Count == 0)
+            {
+                <div class="of-empty">Trener niczego jeszcze nie zamówił.</div>
+            }
+            else
+            {
+                <ul class="of-rows">
+                    @foreach (var a in o.Addons)
+                    {
+                        <li class="of-row">
+                            <div class="min-w-0">
+                                <div class="of-name">@($"{a.Name}{(a.Quantity > 1 ? $" × {a.Quantity}" : "")}")</div>
+                                <div class="of-meta">
+                                    <span class="pp-chip pp-tone-info"><i class="bi bi-arrow-repeat"></i>Co miesiąc</span>
+                                    <span class="pp-chip pp-tone-@(a.ViaCard ? "ok" : "warn")">@(a.ViaCard ? "Karta — automatycznie" : "Sklep — rozliczasz ręcznie")</span>
+                                    <span class="pp-chip pp-tone-muted">od @Local(a.Since).ToString("dd.MM.yyyy")</span>
+                                </div>
+                            </div>
+                            <div class="of-side"><span class="of-amount">@OfferService.Money(a.Total) / mies.</span></div>
+                        </li>
+                    }
+                    @foreach (var ord in o.Orders.Take(20))
+                    {
+                        <li class="of-row @(ord.Status == ServiceOrderStatus.Cancelled ? "ended" : "")">
+                            <div class="min-w-0">
+                                <div class="of-name">@(ord.ServiceItem?.Name ?? "Usługa")</div>
+                                <div class="of-meta">
+                                    <span class="pp-chip pp-tone-@OrderTone(ord.Status)">@OfferPdf.OrderStatus(ord.Status)</span>
+                                    <span class="pp-chip pp-tone-muted">@Local(ord.CreatedAt).ToString("dd.MM.yyyy")</span>
+                                    @if (ord.PaidAt is not null) { <span class="pp-chip pp-tone-ok"><i class="bi bi-check2"></i>Zapłacone</span> }
+                                </div>
+                            </div>
+                            <div class="of-side"><span class="of-amount">@OfferService.Money(ord.Price)</span></div>
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
+
+        <section class="pp-card of-wide" aria-labelledby="of-bills-title">
+            <div class="pp-card-head">
+                <div class="pp-icon"><i class="bi bi-receipt"></i></div>
+                <div class="min-w-0 flex-grow-1">
+                    <h2 class="pp-card-title" id="of-bills-title">Rachunki</h2>
+                    <div class="pp-card-sub">Rachunek za @BillingService.PeriodLabel(BillingService.CurrentPeriod).ToLowerInvariant(): @(_currentBill is not null ? $"wystawiony ({_currentBill.Number})" : _draft.Count == 0 ? "nie ma nic do rozliczenia" : $"do wystawienia — {OfferService.Money(_draft.Sum(l => l.Amount))}")</div>
+                </div>
+                <a href="/panel/billing" class="btn btn-sm btn-outline-secondary">Wszystkie rachunki</a>
+            </div>
+            @if (_currentBill is null && _draft.Count > 0)
+            {
+                <ul class="list-unstyled small mb-2">
+                    @foreach (var l in _draft)
+                    {
+                        <li class="d-flex justify-content-between gap-3 py-1 border-bottom">
+                            <span>@l.Name@(l.Quantity > 1 ? $" × {l.Quantity}" : "") <span class="text-muted">@l.Detail</span></span>
+                            <span class="text-nowrap">@OfferService.Money(l.Amount)</span>
+                        </li>
+                    }
+                </ul>
+                <button class="btn btn-sm btn-primary" disabled="@_saving" @onclick="IssueBillAsync"><i class="bi bi-send me-1"></i>Wystaw i wyślij rachunek teraz</button>
+            }
+            @if (_bills.Count > 0)
+            {
+                <div class="table-responsive mt-3">
+                    <table class="table table-sm small mb-0 align-middle">
+                        <tbody>
+                            @foreach (var b in _bills.Take(12))
+                            {
+                                <tr>
+                                    <td><a href="@($"/rachunek/{b.PayToken}")" target="_blank" class="text-decoration-none fw-semibold">@b.Number</a></td>
+                                    <td class="text-muted">@BillingService.PeriodLabel(b.PeriodStart)</td>
+                                    <td class="text-end text-nowrap">@OfferService.Money(b.Amount)</td>
+                                    <td class="text-end">
+                                        @if (b.Status == TenantBillStatus.Paid)
+                                        {
+                                            <span class="badge bg-success-subtle text-success-emphasis">opłacony</span>
+                                        }
+                                        else if (b.Status == TenantBillStatus.Cancelled)
+                                        {
+                                            <span class="badge bg-secondary-subtle text-secondary-emphasis">anulowany</span>
+                                        }
+                                        else if (BillingService.Today > b.DueDate)
+                                        {
+                                            <span class="badge bg-danger-subtle text-danger-emphasis">po terminie</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="badge bg-warning-subtle text-warning-emphasis">do @b.DueDate.ToString("dd.MM")</span>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </section>
+
+        <details class="pp-card of-wide">
+            <summary class="pp-card-title" style="cursor:pointer">Dane sprzedawcy na PDF <span class="pp-card-sub fw-normal">— ustawiasz raz, dla wszystkich ofert</span></summary>
+            <div class="mt-3">
+                <textarea class="form-control" rows="4" maxlength="1000" @bind="_seller" placeholder="Nazwa firmy&#10;ul. Przykładowa 1, 00-000 Miasto&#10;NIP 000-000-00-00&#10;kontakt@twojadomena.pl"></textarea>
+                <button class="btn btn-sm btn-outline-primary mt-2" @onclick="SaveSellerAsync"><i class="bi bi-floppy me-1"></i>Zapisz dane</button>
+            </div>
+        </details>
+    </div>
+}
+
+@code {
+    [Parameter] public int Id { get; set; }
+
+    private OfferSummary? _offer;
+    private List<OfferCatalogOption> _catalog = [];
+    private bool _loading = true;
+    private bool _formOpen;
+    private bool _saving;
+    private string? _message;
+    private bool _messageOk;
+    private string _seller = "";
+    private OfferItemInput _form = new();
+    private DateTime? _from;
+    private DateTime? _to;
+    private int? _confirmDelete;
+
+    private static readonly TimeZoneInfo Warsaw = FindWarsaw();
+
+    private string TenantName => _offer is null ? "" : string.IsNullOrWhiteSpace(_offer.Tenant.CompanyName) ? _offer.Tenant.OwnerName : _offer.Tenant.CompanyName;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        await LoadAsync();
+        _seller = await SiteSettings.GetAsync(SiteSettingsService.Keys.OfferSellerDetails);
+        _loading = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        _offer = await OfferSvc.GetAsync(Id);
+        if (_offer is not null && _catalog.Count == 0) _catalog = await OfferSvc.CatalogAsync(Id);
+        if (_offer is null) return;
+        _bills = await Billing.ListAsync(Id, 24);
+        _currentBill = _bills.FirstOrDefault(b => b.PeriodStart == BillingService.CurrentPeriod && b.Status != TenantBillStatus.Cancelled);
+        _draft = _currentBill is null ? await Billing.DraftAsync(Id, BillingService.CurrentPeriod) : [];
+    }
+
+    private List<TenantBill> _bills = [];
+    private TenantBill? _currentBill;
+    private List<BillLineDraft> _draft = [];
+
+    private async Task IssueBillAsync()
+    {
+        _saving = true;
+        var (ok, msg, _) = await Billing.IssueAsync(Id, BillingService.CurrentPeriod);
+        (_message, _messageOk) = (msg, ok);
+        await LoadAsync();
+        _saving = false;
+    }
+
+    private void OpenForm()
+    {
+        _form = new OfferItemInput();
+        _from = Local(DateTime.UtcNow).Date;
+        _to = null;
+        _message = null;
+        _formOpen = true;
+    }
+
+    private void SetKind(string kind) => _form.Kind = kind;
+
+    private void OnCatalogChanged(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var id)) { _form.ServiceItemId = null; return; }
+        var c = _catalog.FirstOrDefault(x => x.Id == id);
+        if (c is null) return;
+        _form.ServiceItemId = c.Id;
+        _form.Name = c.Name;
+        _form.UnitPrice = c.Price;
+        _form.Billing = c.Billing;
+        _form.Effect = c.Effect;
+        _form.EffectAmount = c.EffectAmount;
+        _form.Description ??= c.Description;
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        try
+        {
+            var today = Local(DateTime.UtcNow).Date;
+            _form.StartsAt = _from is { } f && f.Date > today ? ToUtc(f.Date) : DateTime.UtcNow;
+            _form.EndsAt = _to is { } t ? ToUtc(t.Date.AddDays(1)) : null;
+            var by = (await AuthState.GetAuthenticationStateAsync()).User.Identity?.Name;
+            var (ok, message) = await OfferSvc.AddAsync(Id, _form, by);
+            _messageOk = ok;
+            _message = message;
+            if (ok)
+            {
+                _formOpen = false;
+                await LoadAsync();
+            }
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task RunAsync(Func<Task<(bool Ok, string Message)>> action)
+    {
+        var (ok, message) = await action();
+        _confirmDelete = null;
+        _messageOk = ok;
+        _message = message;
+        await LoadAsync();
+    }
+
+    private async Task SaveSellerAsync()
+    {
+        await SiteSettings.SetAsync(SiteSettingsService.Keys.OfferSellerDetails, _seller.Trim());
+        _messageOk = true;
+        _message = "Zapisano dane sprzedawcy — pojawią się w nagłówku PDF.";
+    }
+
+    private RenderFragment RenderItems(List<TenantOfferItem> items, string empty) => __builder =>
+    {
+        if (items.Count == 0)
+        {
+            <div class="of-empty">@empty</div>
+            return;
+        }
+        var now = DateTime.UtcNow;
+        <ul class="of-rows">
+            @foreach (var i in items)
+            {
+                var (status, tone) = StatusOf(i, now);
+                var ended = i.CancelledAt is not null || (i.EndsAt is { } end && end <= now);
+                <li class="of-row @(ended && i.Billing != OfferBilling.OneTime ? "ended" : "")">
+                    <div class="min-w-0">
+                        <div class="of-name">@($"{i.Name}{(i.Quantity > 1 ? $" × {i.Quantity}" : "")}")</div>
+                        @if (!string.IsNullOrWhiteSpace(i.Description)) { <div class="of-desc">@i.Description</div> }
+                        <div class="of-meta">
+                            <span class="pp-chip pp-tone-@tone">@status</span>
+                            <span class="pp-chip pp-tone-info">@OfferService.BillingLabel(i.Billing)</span>
+                            @if (OfferService.EffectLabel(i) is { } effect)
+                            {
+                                <span class="pp-chip pp-icon-cyan" style="--tone-bd:#a5f3fc"><i class="bi bi-lightning-charge"></i>@effect</span>
+                            }
+                            <span class="pp-chip pp-tone-muted">@PeriodText(i)</span>
+                            @if (!string.IsNullOrWhiteSpace(i.InternalNote))
+                            {
+                                <span class="pp-chip pp-tone-muted" title="Notatka wewnętrzna"><i class="bi bi-sticky"></i>@i.InternalNote</span>
+                            }
+                        </div>
+                    </div>
+                    <div class="of-side">
+                        @if (i.Kind == OfferItemKind.Gift)
+                        {
+                            <span class="of-amount">
+                                0 zł
+                                @if (i.Total > 0)
+                                {
+                                    <s>@($"{OfferService.Money(i.Total)}{OfferService.BillingSuffix(i.Billing)}")</s>
+                                }
+                            </span>
+                        }
+                        else
+                        {
+                            <span class="of-amount">@OfferService.Money(i.Total)@OfferService.BillingSuffix(i.Billing)</span>
+                        }
+                        <div class="of-actions">
+                            @if (i.Kind == OfferItemKind.Charge && i.Billing == OfferBilling.OneTime && i.CancelledAt is null)
+                            {
+                                <button class="btn btn-sm @(i.SettledAt is null ? "btn-outline-success" : "btn-outline-secondary")" @onclick="() => RunAsync(() => OfferSvc.ToggleSettledAsync(Id, i.Id))">
+                                    @(i.SettledAt is null ? "Oznacz jako rozliczone" : "Cofnij rozliczenie")
+                                </button>
+                            }
+                            @if (!ended && (i.Billing != OfferBilling.OneTime || i.Effect is OfferEffect.VideoStorageGb or OfferEffect.VideoBandwidthGb))
+                            {
+                                <button class="btn btn-sm btn-outline-secondary" title="Kończy pozycję dzisiaj" @onclick="() => RunAsync(() => OfferSvc.EndAsync(Id, i.Id))">Zakończ</button>
+                            }
+                            @if (_confirmDelete == i.Id)
+                            {
+                                <button class="btn btn-sm btn-danger" @onclick="() => RunAsync(() => OfferSvc.DeleteAsync(Id, i.Id))">Usuń na pewno</button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDelete = null">Nie</button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-sm btn-outline-danger" title="Usuń z oferty (pomyłka)" aria-label="@($"Usuń {i.Name}")"
+                                        @onclick="() => _confirmDelete = i.Id"><i class="bi bi-trash"></i></button>
+                            }
+                        </div>
+                    </div>
+                </li>
+            }
+        </ul>
+    };
+
+    private string EffectAmountLabel => _form.Effect switch
+    {
+        OfferEffect.Sms => _form.Billing == OfferBilling.OneTime ? "SMS na sztukę" : "SMS miesięcznie na sztukę",
+        OfferEffect.VideoStorageGb => "GB na sztukę",
+        OfferEffect.VideoBandwidthGb => "GB / mies. na sztukę",
+        _ => "Ile"
+    };
+
+    private string Preview
+    {
+        get
+        {
+            var qty = Math.Max(1, _form.Quantity);
+            var total = _form.UnitPrice * qty;
+            var effect = _form.EffectAmount * qty;
+            var period = _to is { } t ? $" do {t:dd.MM.yyyy}" : " bezterminowo";
+            var start = _from is { } f && f.Date > Local(DateTime.UtcNow).Date ? $" od {f:dd.MM.yyyy}" : " od dziś";
+            var money = _form.Kind == OfferItemKind.Gift
+                ? (total > 0 ? $"Trener dostaje to w gratisie (wartość {OfferService.Money(total)}{OfferService.BillingSuffix(_form.Billing)})." : "Trener dostaje to w gratisie.")
+                : _form.Billing switch
+                {
+                    OfferBilling.Monthly => $"Doliczasz {OfferService.Money(total)} co miesiąc{start}{period}.",
+                    OfferBilling.Yearly => $"Doliczasz {OfferService.Money(total)} co rok{start}{period}.",
+                    _ => $"Doliczasz jednorazowo {OfferService.Money(total)} — pozycja czeka „do rozliczenia”, aż oznaczysz ją jako rozliczoną."
+                };
+            var app = _form.Effect switch
+            {
+                OfferEffect.Sms when effect > 0 && _form.Billing == OfferBilling.OneTime => $" W aplikacji: {effect} SMS od razu na koncie trenera (nie wygasają).",
+                OfferEffect.Sms when effect > 0 => $" W aplikacji: limit SMS większy o {effect} miesięcznie{start}{period}.",
+                OfferEffect.VideoStorageGb when effect > 0 => $" W aplikacji: +{effect} GB przestrzeni na wideo{start}{period}.",
+                OfferEffect.VideoBandwidthGb when effect > 0 => $" W aplikacji: +{effect} GB transferu wideo miesięcznie{start}{period}.",
+                OfferEffect.None => " W aplikacji nic się nie zmienia — pozycja jest tylko w zestawieniu i na PDF.",
+                _ => " Podaj, ile SMS-ów / GB daje pozycja."
+            };
+            return money + app;
+        }
+    }
+
+    private static (string Label, string Tone) StatusOf(TenantOfferItem i, DateTime now)
+    {
+        if (i.Kind == OfferItemKind.Charge && i.Billing == OfferBilling.OneTime)
+            return i.CancelledAt is not null ? ("Anulowane", "muted")
+                : i.SettledAt is { } s ? ($"Rozliczone {Local(s):dd.MM}", "ok") : ("Do rozliczenia", "warn");
+        if (i.CancelledAt is not null) return ("Zakończone", "muted");
+        if (i.StartsAt > now) return ($"Od {Local(i.StartsAt):dd.MM.yyyy}", "info");
+        if (i.EndsAt is { } end && end <= now) return ("Wygasło", "muted");
+        if (i.Billing == OfferBilling.OneTime && i.Effect == OfferEffect.Sms)
+            return i.EffectAppliedAt is not null ? ("Dopisane", "ok") : ("Czeka", "info");
+        return ("Aktywne", "ok");
+    }
+
+    private static string PeriodText(TenantOfferItem i)
+    {
+        if (i.Billing == OfferBilling.OneTime && i.Effect is not (OfferEffect.VideoStorageGb or OfferEffect.VideoBandwidthGb))
+            return Local(i.StartsAt).ToString("dd.MM.yyyy");
+        return i.EndsAt is { } end
+            ? $"{Local(i.StartsAt):dd.MM.yyyy} – {OfferService.LastDayLocal(end, Warsaw):dd.MM.yyyy}"
+            : $"od {Local(i.StartsAt):dd.MM.yyyy}, bezterminowo";
+    }
+
+    private static string DueMeta(OfferSummary o) =>
+        o.OneTimeDue.Count == 0 ? "wszystko rozliczone" : $"{o.OneTimeDue.Count} {PanelUi.Plural(o.OneTimeDue.Count, "pozycja jednorazowa", "pozycje jednorazowe", "pozycji jednorazowych")}";
+
+    private static string GiftMeta(OfferSummary o)
+    {
+        var parts = new List<string>();
+        if (o.GiftValueMonthly > 0) parts.Add($"{OfferService.Money(o.GiftValueMonthly)} / mies.");
+        if (o.GiftValueOneTime > 0) parts.Add($"{OfferService.Money(o.GiftValueOneTime)} jednorazowo");
+        return parts.Count == 0 ? "aktywnych gratisów" : "wartość " + string.Join(" + ", parts);
+    }
+
+    private static string SmsLimitText(OfferSummary o) =>
+        !o.Sms.PlatformEnabled && o.Sms.MonthlyLimit == 0 ? "—"
+        : o.Sms.Unlimited ? "bez limitu"
+        : o.Sms.MonthlyLimit == 0 ? "brak w planie" : o.Sms.MonthlyLimit.ToString();
+
+    private static string Limit(int? v) => v is null ? "—" : v == int.MaxValue ? "bez limitu" : v.ToString()!;
+
+    private static string VideoText(int? plan, int extra, string unit) =>
+        plan is null or 0 ? "brak w planie"
+        : plan == int.MaxValue ? "bez limitu"
+        : extra > 0 ? $"{plan + extra} {unit} (w tym +{extra})" : $"{plan} {unit}";
+
+    private static string BillingLabel(string status) => status switch
+    {
+        "active" => "Opłacany kartą",
+        "trialing" => "Okres próbny (karta)",
+        "past_due" => "Zaległa płatność",
+        "canceled" => "Anulowany w Stripe",
+        _ => "Rozliczany ręcznie"
+    };
+
+    private static string BillingTone(string status) => status switch
+    {
+        "active" => "ok",
+        "trialing" => "info",
+        "past_due" => "danger",
+        "canceled" => "muted",
+        _ => "muted"
+    };
+
+    private static string OrderTone(ServiceOrderStatus s) => s switch
+    {
+        ServiceOrderStatus.Completed => "ok",
+        ServiceOrderStatus.Cancelled => "muted",
+        ServiceOrderStatus.AwaitingPayment or ServiceOrderStatus.Pending => "warn",
+        _ => "info"
+    };
+
+    private static DateTime Local(DateTime utc) => TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(utc, DateTimeKind.Utc), Warsaw);
+    private static DateTime ToUtc(DateTime localDate) => TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(localDate, DateTimeKind.Unspecified), Warsaw);
+
+    private static TimeZoneInfo FindWarsaw()
+    {
+        try { return TimeZoneInfo.FindSystemTimeZoneById("Europe/Warsaw"); }
+        catch { return TimeZoneInfo.Utc; }
+    }
+}

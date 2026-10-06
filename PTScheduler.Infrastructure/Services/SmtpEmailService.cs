@@ -6,21 +6,71 @@ using PTScheduler.Application.Interfaces;
 
 namespace PTScheduler.Infrastructure.Services;
 
-public class SmtpEmailService(IEmailSettingsService settingsService, IBrandingService brandingService, ILogger<SmtpEmailService> logger) : IEmailService
+public class SmtpEmailService(
+    IEmailSettingsService settingsService,
+    IBrandingService brandingService,
+    PlatformEmailProvider platformEmail,
+    ILogger<SmtpEmailService> logger) : IEmailService
 {
-    public async Task<bool> IsEnabledAsync()
+    private static bool OwnConfigured(Application.DTOs.EmailSettingsDto s) =>
+        s.IsEnabled && !string.IsNullOrWhiteSpace(s.SmtpHost) && !string.IsNullOrWhiteSpace(s.FromAddress);
+
+    /// <summary>
+    /// Ustawienia wysyłki: własny SMTP trenera, jeśli go skonfigurował, a w instancji
+    /// zarządzanej — serwer platformy z nazwą studia jako nadawcą i odpowiedziami do trenera.
+    /// </summary>
+    private async Task<Application.DTOs.EmailSettingsDto?> ResolveAsync()
     {
         var s = await settingsService.GetAsync();
-        return s.IsEnabled && !string.IsNullOrWhiteSpace(s.SmtpHost) && !string.IsNullOrWhiteSpace(s.FromAddress);
+        if (OwnConfigured(s)) return s;
+
+        var platform = await platformEmail.GetStatusAsync();
+        if (platform is null) return null;
+
+        var fromName = s.FromName;
+        if (string.IsNullOrWhiteSpace(fromName) || fromName == "PTScheduler")
+        {
+            try { fromName = (await brandingService.GetAsync()).CompanyName ?? "PTScheduler"; } catch { fromName = "PTScheduler"; }
+        }
+        // Wysyłkę robi Portal (bez hasła SMTP w instancji) — tu tylko nazwa nadawcy i adres odpowiedzi.
+        return new Application.DTOs.EmailSettingsDto
+        {
+            IsEnabled = true,
+            Provider = "Platform",
+            FromName = fromName,
+            ReplyTo = s.ReplyTo
+        };
+    }
+
+    public async Task<bool> IsEnabledAsync() => await ResolveAsync() is not null;
+
+    public async Task<string> GetDeliveryModeAsync()
+    {
+        var s = await ResolveAsync();
+        return s is null ? "none" : s.Provider == "Platform" ? "platform" : "own";
+    }
+
+    private static MimeMessage NewMessage(Application.DTOs.EmailSettingsDto s)
+    {
+        var message = new MimeMessage();
+        message.From.Add(new MailboxAddress(s.FromName, s.FromAddress));
+        if (!string.IsNullOrWhiteSpace(s.ReplyTo) && MailboxAddress.TryParse(s.ReplyTo, out var reply))
+            message.ReplyTo.Add(reply);
+        return message;
     }
 
     public async Task SendAsync(string toAddress, string toName, string subject, string htmlBody)
     {
-        var s = await settingsService.GetAsync();
-        if (!s.IsEnabled) return;
+        var s = await ResolveAsync();
+        if (s is null) return;
 
-        var message = new MimeMessage();
-        message.From.Add(new MailboxAddress(s.FromName, s.FromAddress));
+        if (s.Provider == "Platform")
+        {
+            await platformEmail.SendAsync(toAddress, toName, subject, htmlBody, s.FromName, s.ReplyTo);
+            return;
+        }
+
+        var message = NewMessage(s);
         message.To.Add(new MailboxAddress(toName, toAddress));
         message.Subject = subject;
         message.Body = new TextPart("html") { Text = htmlBody };
@@ -28,18 +78,31 @@ public class SmtpEmailService(IEmailSettingsService settingsService, IBrandingSe
         await SendMessageAsync(s, message);
     }
 
+    /// <summary>Dzienny limit i wykorzystanie poczty platformy (null przy własnym SMTP).</summary>
+    public async Task<(int Limit, int SentToday)?> GetPlatformQuotaAsync()
+    {
+        var st = await platformEmail.GetStatusAsync(refresh: true);
+        return st is null ? null : (st.DailyLimit, st.SentToday);
+    }
+
     public async Task<(bool Success, string? Error)> TestAsync(string testAddress)
     {
-        var s = await settingsService.GetAsync();
+        var s = await ResolveAsync();
+        if (s is null) return (false, "Wysyłka e-maili nie jest skonfigurowana.");
         try
         {
-            var message = new MimeMessage();
-            message.From.Add(new MailboxAddress(s.FromName, s.FromAddress));
+            var branding = await brandingService.GetAsync();
+            var html = TestEmailHtml(s.FromName, ThemeColor(branding.ThemeName));
+            if (s.Provider == "Platform")
+            {
+                await platformEmail.SendAsync(testAddress, testAddress, "Test połączenia — PTScheduler", html, s.FromName, s.ReplyTo);
+                return (true, null);
+            }
+
+            var message = NewMessage(s);
             message.To.Add(new MailboxAddress(testAddress, testAddress));
             message.Subject = "Test połączenia — PTScheduler";
-            var branding = await brandingService.GetAsync();
-            var accent = ThemeColor(branding.ThemeName);
-            message.Body = new TextPart("html") { Text = TestEmailHtml(s.FromName, accent) };
+            message.Body = new TextPart("html") { Text = html };
 
             await SendMessageAsync(s, message);
             return (true, null);
@@ -54,7 +117,8 @@ public class SmtpEmailService(IEmailSettingsService settingsService, IBrandingSe
     private static async Task SendMessageAsync(Application.DTOs.EmailSettingsDto s, MimeMessage message)
     {
         using var client = new SmtpClient();
-        var ssl = s.UseTls ? SecureSocketOptions.StartTls : SecureSocketOptions.None;
+        var ssl = !s.UseTls ? SecureSocketOptions.None
+            : s.SmtpPort == 465 ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls;
         await client.ConnectAsync(s.SmtpHost, s.SmtpPort, ssl);
         if (!string.IsNullOrWhiteSpace(s.Login))
             await client.AuthenticateAsync(s.Login, s.Password);

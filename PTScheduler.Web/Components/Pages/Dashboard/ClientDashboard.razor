@@ -4,14 +4,15 @@
 @using System.Globalization
 @inject ISessionService SessionService
 @inject IClientService ClientService
-@inject ISessionInvitationService InvitationService
 @inject IBodyMeasurementService MeasurementService
 @inject IJSRuntime JS
 @inject NavigationManager Nav
+@inject IModuleSettingsService ModuleSettings
+@inject PTScheduler.Web.Services.EntitlementService Entitlements
 
 @if (!_loaded)
 {
-    <div class="cd-page">
+    <div class="cdx">
         <!-- Hero skeleton -->
         <div class="skeleton-card" style="padding:2rem;text-align:center">
             <div class="skeleton skeleton-line w-40 mx-auto" style="height:14px"></div>
@@ -47,322 +48,315 @@ else if (_client is null)
 else
 {
     <PullToRefresh OnRefresh="RefreshAsync">
-    <div class="cd-page">
+    <div class="cdx">
 
-        <!-- Greeting -->
-        <div class="cd-greeting">
-            <h5 class="cd-greeting-hi">Cześć, @(_client.FirstName is { Length: > 0 } fn ? fn : _client.Email.Split('@')[0])!</h5>
-            @if (_streakCount >= 3)
-            {
-                <div class="cd-greeting-streak"><i class="bi bi-fire"></i> @_streakCount treningów z rzędu — tak trzymaj!</div>
-            }
+        <!-- Nagłówek: powitanie + najczęstsze akcje -->
+        <div class="cdx-head">
+            <div class="min-w-0">
+                <h4 class="cdx-hi">Cześć, @(_client.FirstName is { Length: > 0 } fn ? fn : _client.Email.Split('@')[0])!</h4>
+                <div class="cdx-sub">
+                    <span>@Capital(StudioClock.Now.ToString("dddd, d MMMM", _pl))</span>
+                    @if (_streakCount >= 3)
+                    {
+                        <span class="cdx-streak"><i class="bi bi-fire"></i>@_streakCount treningów z rzędu</span>
+                    }
+                </div>
+            </div>
+            <div class="cdx-head-actions">
+                @if (_trainingEnabled)
+                {
+                    <a href="/train" class="btn btn-primary"><i class="pt-ico pt-ico-dumbbell me-1"></i>Zacznij trening</a>
+                }
+                @if (_client.AllowSelfBooking)
+                {
+                    <a href="/my" class="btn btn-outline-primary"><i class="bi bi-calendar-plus me-1"></i>Umów trening</a>
+                }
+            </div>
         </div>
 
         @if (_client.Status == ClientStatus.Pending)
         {
-            <div class="cd-pending">
-                <div class="cd-pending-ico">⏳</div>
+            <div class="cdx-pending">
+                <i class="bi bi-hourglass-split"></i>
                 <div>
                     <strong>Twoje konto czeka na zatwierdzenie</strong>
                     <div class="small">Trener wkrótce zatwierdzi Twoje konto, wtedy zobaczysz pełny grafik.</div>
                 </div>
             </div>
         }
-
-        @if (_invitations.Any())
+        else
         {
-            <div class="cd-invites">
-                <div class="cd-invites-head">
-                    <i class="bi bi-envelope-fill"></i>
-                    <span>Zaproszenia na sesje (@_invitations.Count)</span>
-                </div>
-                @foreach (var inv in _invitations)
+            <ReviewPrompt ClientId="_client.Id" />
+        }
+
+        <!-- Następny trening + pakiet -->
+        <div class="cdx-row cdx-row-hero">
+            <div class="cdx-next @(IsSoon() ? "soon" : "")">
+                @if (_nextSession is null)
                 {
-                    <div class="cd-invite">
-                        <div class="cd-invite-when">
-                            <div class="cd-invite-day">@inv.SessionStartTime.ToString("dd.MM")</div>
-                            <div class="cd-invite-time">@inv.SessionStartTime.ToString("HH:mm")</div>
+                    <div class="cdx-next-empty">
+                        <span class="cdx-next-ic"><i class="bi bi-calendar2-plus"></i></span>
+                        <div>
+                            <div class="cdx-next-title">Nie masz zaplanowanego treningu</div>
+                            <div class="cdx-next-sub">@(_client.AllowSelfBooking ? "Wybierz wolny termin — zajmie to chwilę." : "Napisz do trenera, żeby umówić kolejny trening.")</div>
                         </div>
-                        <div class="cd-invite-body">
-                            <div class="cd-invite-title">@inv.SessionTypeName · @inv.DurationMinutes min</div>
-                            <div class="cd-invite-trainer"><i class="bi bi-person"></i>@inv.TrainerName</div>
-                        </div>
-                        @if (_respondingId == inv.Id)
+                        @if (_client.AllowSelfBooking)
                         {
-                            <div class="cd-invite-actions w-100">
-                                <input class="form-control form-control-sm mb-2" placeholder="Notatka..." @bind="_respondNote" />
-                                <div class="d-flex gap-2">
-                                    <button class="btn btn-sm btn-success flex-grow-1" @onclick="() => RespondAsync(inv.Id, true)">
-                                        <i class="bi bi-check-lg me-1"></i>Akceptuj
-                                    </button>
-                                    <button class="btn btn-sm btn-outline-danger flex-grow-1" @onclick="() => RespondAsync(inv.Id, false)">
-                                        <i class="bi bi-x-lg me-1"></i>Odrzuć
-                                    </button>
-                                </div>
-                                @if (_respondError is not null)
-                                {
-                                    <div class="text-danger small mt-1">@_respondError</div>
-                                }
-                            </div>
+                            <a href="/my" class="btn btn-light fw-semibold">Umów trening <i class="bi bi-arrow-right"></i></a>
                         }
                         else
                         {
-                            <button class="btn btn-sm btn-primary" @onclick="() => StartRespond(inv.Id)">
-                                Odpowiedz
-                            </button>
-                        }
-                    </div>
-                }
-            </div>
-        }
-
-        <!-- HERO: next session countdown -->
-        <div class="cd-hero @HeroToneClass()">
-            @if (_nextSession is null)
-            {
-                <div class="cd-hero-empty">
-                    <div class="cd-hero-ico">📅</div>
-                    <div class="cd-hero-title">Brak zaplanowanych treningów</div>
-                    @if (_client?.AllowSelfBooking == true)
-                    {
-                        <div class="cd-hero-sub">Umów się sam na trening w swoim grafiku!</div>
-                        <a href="/my" class="cd-hero-cta"><i class="bi bi-plus-circle me-1"></i>Zaplanuj trening</a>
-                    }
-                    else
-                    {
-                        <div class="cd-hero-sub">Skontaktuj się z trenerem, aby umówić kolejną sesję.</div>
-                    }
-                </div>
-            }
-            else
-            {
-                <div class="cd-hero-label">Twój następny trening</div>
-                <div class="cd-hero-countdown">@CountdownLabel(_nextSession.StartTime)</div>
-                <div class="cd-hero-when">@FormatWhen(_nextSession.StartTime)</div>
-
-                <div class="cd-hero-meta">
-                    <span><i class="bi bi-person"></i>@_nextSession.TrainerName</span>
-                    <span><i class="bi bi-clock"></i>@_nextSession.DurationMinutes min</span>
-                    <span><i class="bi bi-bookmark"></i>@_nextSession.SessionTypeName</span>
-                </div>
-
-                @if (_cancelConfirmId == _nextSession.Id)
-                {
-                    <div class="cd-hero-confirm">
-                        <input class="form-control form-control-sm mb-2"
-                               placeholder="Powód anulowania (opcjonalnie)"
-                               @bind="_cancelReason" />
-                        <div class="d-flex gap-2">
-                            <button class="btn btn-sm btn-light flex-grow-1" @onclick="() => _cancelConfirmId = null">
-                                Wstecz
-                            </button>
-                            <button class="btn btn-sm btn-danger flex-grow-1" @onclick="ConfirmCancel" disabled="@_cancelling">
-                                @if (_cancelling) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                                Anuluj sesję
-                            </button>
-                        </div>
-                        @if (_cancelError is not null)
-                        {
-                            <div class="cd-hero-err">@_cancelError</div>
+                            <a href="/chat" class="btn btn-light fw-semibold">Napisz do trenera <i class="bi bi-arrow-right"></i></a>
                         }
                     </div>
                 }
                 else
                 {
-                    <button class="cd-hero-cancel" @onclick="StartCancel">
-                        <i class="bi bi-x-circle"></i> Anuluj sesję
-                    </button>
+                    <div class="cdx-next-top">
+                        <div class="cdx-date">
+                            <span class="d">@_nextSession.StartTime.Day</span>
+                            <span class="m">@_nextSession.StartTime.ToString("MMM", _pl)</span>
+                        </div>
+                        <div class="min-w-0 flex-grow-1">
+                            <div class="cdx-next-label">Twój następny trening @if (IsSoon()) { <span class="cdx-soon-chip">już niedługo</span> }</div>
+                            <div class="cdx-next-count">@CountdownLabel(_nextSession.StartTime)</div>
+                            <div class="cdx-next-when">@FormatWhen(_nextSession.StartTime)</div>
+                        </div>
+                    </div>
+                    <div class="cdx-next-meta">
+                        @if (_nextSession.IsPair && _nextSession.PartnerActive)
+                        {
+                            <span><i class="bi bi-people-fill"></i>z: @_nextSession.PartnerName</span>
+                        }
+                        <span><i class="bi bi-person"></i>@_nextSession.TrainerName</span>
+                        <span><i class="bi bi-clock"></i>@_nextSession.DurationMinutes min</span>
+                        <span><i class="bi bi-bookmark"></i>@_nextSession.SessionTypeName</span>
+                    </div>
+                    <div class="cdx-next-actions">
+                        @if (!string.IsNullOrEmpty(_nextSession.MeetingUrl))
+                        {
+                            <a href="@_nextSession.MeetingUrl" target="_blank" class="cdx-pill-btn solid"><i class="bi bi-camera-video-fill me-1"></i>Dołącz do Google Meet</a>
+                        }
+                        <AddToCalendarButton Title="@($"{_nextSession.SessionTypeName} — {_nextSession.TrainerName}")"
+                                              StartTime="_nextSession.StartTime" DurationMinutes="_nextSession.DurationMinutes"
+                                              Location="@(_nextSession.MeetingUrl ?? "")" Uid="@($"session-{_nextSession.Id}")"
+                                              ButtonClass="cdx-pill-btn" Compact="false" />
+                        @if (_cancelConfirmId != _nextSession.Id && _cancelDecision?.Allowed == true)
+                        {
+                            <button class="cdx-link-btn" @onclick="StartCancel"><i class="bi bi-x-circle me-1"></i>Odwołaj</button>
+                        }
+                    </div>
+
+                    @if (_cancelConfirmId == _nextSession.Id)
+                    {
+                        <div class="cdx-confirm">
+                            @if (_nextSession.IsPair && _nextSession.PartnerActive)
+                            {
+                                <div class="cdx-confirm-note"><i class="bi bi-people me-1"></i>Odwołujesz tylko siebie — @_nextSession.PartnerName trenuje dalej i dostanie wiadomość.</div>
+                            }
+                            @if (_cancelDecision is not null)
+                            {
+                                <div class="cdx-confirm-note @(_cancelDecision.RefundsSession ? "" : "warn")">
+                                    <i class="bi @(_cancelDecision.RefundsSession ? "bi-info-circle" : "bi-exclamation-triangle") me-1"></i>@_cancelDecision.Message
+                                </div>
+                            }
+                            <input class="form-control form-control-sm mb-2" placeholder="Powód odwołania (opcjonalnie)" @bind="_cancelReason" />
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-light flex-grow-1" @onclick="() => _cancelConfirmId = null">Wstecz</button>
+                                <button class="btn btn-sm btn-danger flex-grow-1" @onclick="ConfirmCancel" disabled="@_cancelling">
+                                    @if (_cancelling) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                    Odwołaj trening
+                                </button>
+                            </div>
+                            @if (_cancelError is not null)
+                            {
+                                <div class="cdx-confirm-note warn mt-2">@_cancelError</div>
+                            }
+                        </div>
+                    }
+                    else if (_cancelDecision is { Allowed: false } && _nextSession.Status == SessionStatus.Scheduled)
+                    {
+                        <div class="cdx-next-foot"><i class="bi bi-info-circle me-1"></i>@_cancelDecision.Message</div>
+                    }
                 }
-            }
+            </div>
+
+            <div class="cdx-card cdx-pkg">
+                <div class="cdx-card-head">
+                    <h6><i class="bi bi-ticket-perforated"></i>Twój pakiet</h6>
+                    <a href="/my/packages" class="cdx-more">Wszystkie <i class="bi bi-arrow-right"></i></a>
+                </div>
+                @if (_client.ActivePackage is { } pkg)
+                {
+                    var pct = pkg.TotalSessions > 0 ? (int)((double)pkg.RemainingCredits / pkg.TotalSessions * 100) : 0;
+                    <div class="cdx-pkg-body">
+                        <div class="cdx-ring" style="--p:@pct"><span><b>@pkg.RemainingCredits</b><small>z @pkg.TotalSessions</small></span></div>
+                        <div class="min-w-0">
+                            <div class="cdx-pkg-name">@pkg.Name</div>
+                            <div class="cdx-pkg-tags">
+                                <span class="cdx-tag @(pkg.IsPaid ? "ok" : "warn")">@(pkg.IsPaid ? "Opłacony" : "Oczekuje opłaty")</span>
+                                @if (pkg.ExpiresAt.HasValue)
+                                {
+                                    var daysLeft = (int)(pkg.ExpiresAt.Value - StudioClock.Now).TotalDays;
+                                    <span class="cdx-tag @(daysLeft <= 7 ? "warn" : "muted")"><i class="bi bi-calendar-x me-1"></i>@(daysLeft <= 0 ? "Wygasł" : $"jeszcze {daysLeft} dni")</span>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                    @if (pkg.RemainingCredits <= 2)
+                    {
+                        <a href="/packages" class="cdx-pkg-cta"><i class="bi bi-bag-plus me-1"></i>Kończy się — kup kolejny pakiet</a>
+                    }
+                }
+                else
+                {
+                    <div class="cdx-empty">
+                        <i class="bi bi-box-seam"></i>
+                        <div>Nie masz aktywnego pakietu.</div>
+                        <a href="/packages" class="btn btn-sm btn-primary mt-2">Wybierz pakiet</a>
+                    </div>
+                }
+            </div>
         </div>
 
-        <!-- Quick stats -->
-        <div class="cd-stats">
-            <div class="cd-stat">
-                <div class="cd-stat-val">@(_client.ActivePackage?.RemainingCredits ?? 0)</div>
-                <div class="cd-stat-lab">Pozostałe sesje</div>
+        <!-- Liczby -->
+        <div class="cdx-kpis">
+            <div class="cdx-kpi">
+                <span class="cdx-kpi-ic"><i class="bi bi-ticket-perforated-fill"></i></span>
+                <b>@(_client!.ActivePackage?.RemainingCredits ?? 0)</b><small>pozostałe treningi</small>
             </div>
-            <div class="cd-stat">
-                <div class="cd-stat-val">@_client.TotalSessions</div>
-                <div class="cd-stat-lab">Ukończone</div>
+            <div class="cdx-kpi">
+                <span class="cdx-kpi-ic green"><i class="bi bi-check2-circle"></i></span>
+                <b>@_client.TotalSessions</b><small>ukończone</small>
             </div>
-            <div class="cd-stat">
-                <div class="cd-stat-val">
-                    @if (_latestMeasurement?.WeightKg is { } w)
-                    {
-                        <span>@w.ToString("0.#", CultureInfo.InvariantCulture)<span class="cd-stat-unit">kg</span></span>
-                        @if (_previousWeight is { } pw)
+            <div class="cdx-kpi">
+                <span class="cdx-kpi-ic violet"><i class="bi bi-speedometer2"></i></span>
+                @if (_latestMeasurement?.WeightKg is { } w)
+                {
+                    <b>
+                        @w.ToString("0.#", CultureInfo.InvariantCulture)<em>kg</em>
+                        @if (_previousWeight is { } pw && w - pw != 0)
                         {
                             var delta = w - pw;
-                            if (delta != 0)
-                            {
-                                var cls = delta < 0 ? "down" : "up";
-                                <span class="cd-stat-delta @cls">
-                                    <i class="bi bi-arrow-@(delta < 0 ? "down" : "up")-short"></i>@Math.Abs(delta).ToString("0.#", CultureInfo.InvariantCulture)
-                                </span>
-                            }
+                            <span class="cdx-delta @(delta < 0 ? "down" : "up")"><i class="bi bi-arrow-@(delta < 0 ? "down" : "up")-short"></i>@Math.Abs(delta).ToString("0.#", CultureInfo.InvariantCulture)</span>
                         }
-                    }
-                    else
-                    {
-                        <span class="cd-stat-empty">—</span>
-                    }
-                </div>
-                <div class="cd-stat-lab">Ostatnia waga</div>
+                    </b>
+                }
+                else
+                {
+                    <b class="muted">—</b>
+                }
+                <small>ostatnia waga</small>
             </div>
-            <div class="cd-stat">
-                <div class="cd-stat-val">
-                    @if (_completedCount + _noShowCount > 0)
-                    {
-                        var rate = (int)Math.Round(100.0 * _completedCount / (_completedCount + _noShowCount));
-                        <span>@rate<span class="cd-stat-unit">%</span></span>
-                    }
-                    else if (_client.TotalSessions > 0)
-                    {
-                        <span>100<span class="cd-stat-unit">%</span></span>
-                    }
-                    else
-                    {
-                        <span class="cd-stat-empty">—</span>
-                    }
-                </div>
-                <div class="cd-stat-lab">Frekwencja</div>
+            <div class="cdx-kpi">
+                <span class="cdx-kpi-ic amber"><i class="bi bi-graph-up-arrow"></i></span>
+                @if (_completedCount + _noShowCount > 0)
+                {
+                    <b>@((int)Math.Round(100.0 * _completedCount / (_completedCount + _noShowCount)))<em>%</em></b>
+                }
+                else if (_client.TotalSessions > 0)
+                {
+                    <b>100<em>%</em></b>
+                }
+                else
+                {
+                    <b class="muted">—</b>
+                }
+                <small>frekwencja</small>
             </div>
         </div>
 
-        <!-- Active package -->
-        @if (_client.ActivePackage is { } pkg)
-        {
-            var pct = pkg.TotalSessions > 0 ? (int)((double)pkg.UsedSessions / pkg.TotalSessions * 100) : 0;
-            <div class="cd-section">
-                <div class="cd-section-head">
-                    <h6 class="cd-section-title"><i class="bi bi-ticket-perforated"></i>Aktywny pakiet</h6>
-                    @if (_client.AllPackages.Count > 1)
+        <!-- Waga + skróty -->
+        <div class="cdx-row">
+            <div class="cdx-card">
+                <div class="cdx-card-head">
+                    <h6><i class="bi bi-graph-down-arrow"></i>Postęp wagi</h6>
+                    <a href="/my/measurements" class="cdx-more">Pomiary <i class="bi bi-arrow-right"></i></a>
+                </div>
+                @if (_chartPoints.Count >= 2)
+                {
+                    <div class="cdx-chart"><canvas id="cd-weight-chart-@_client.Id"></canvas></div>
+                }
+                else
+                {
+                    <p class="cdx-muted">Wpisuj wagę raz w tygodniu, a tu zobaczysz wykres postępów.</p>
+                }
+                <div class="cdx-qw">
+                    <label class="cdx-qw-label" for="cdx-qw-input">Dzisiejsza waga</label>
+                    <div class="cdx-qw-form">
+                        <input id="cdx-qw-input" type="text" inputmode="decimal" class="form-control form-control-sm" placeholder="np. 72.5" @bind="_quickWeight" />
+                        <span class="cdx-qw-unit">kg</span>
+                        <button class="btn btn-sm btn-primary" @onclick="LogQuickWeightAsync" disabled="@_weightSaving">
+                            @if (_weightSaving) { <span class="spinner-border spinner-border-sm"></span> }
+                            else { <i class="bi bi-check-lg"></i><span class="ms-1">Zapisz</span> }
+                        </button>
+                    </div>
+                    @if (_weightMsg is not null)
                     {
-                        <a href="/my/packages" class="cd-section-link">Wszystkie <i class="bi bi-arrow-right"></i></a>
+                        <div class="cdx-qw-msg @(_weightMsgOk ? "ok" : "err")">@_weightMsg</div>
                     }
                 </div>
-                <div class="cd-pkg">
-                    <div class="cd-pkg-head">
-                        <div class="cd-pkg-name">@pkg.Name</div>
-                        @if (pkg.IsPaid)
-                        {
-                            <span class="cd-pkg-badge paid">Opłacony</span>
-                        }
-                        else
-                        {
-                            <span class="cd-pkg-badge unpaid">Oczekuje opłaty</span>
-                        }
-                    </div>
-                    <div class="cd-pkg-progress">
-                        <div class="cd-pkg-bar"><div class="cd-pkg-bar-fill" style="width:@(pct)%"></div></div>
-                        <div class="cd-pkg-stats">
-                            <span><strong>@pkg.RemainingCredits</strong> z @pkg.TotalSessions</span>
-                            @if (pkg.ExpiresAt.HasValue)
-                            {
-                                var daysLeft = (int)(pkg.ExpiresAt.Value - DateTime.Now).TotalDays;
-                                var cls = daysLeft <= 7 ? "warn" : daysLeft <= 14 ? "soft" : "muted";
-                                <span class="cd-pkg-expires @cls">
-                                    <i class="bi bi-calendar-x"></i>
-                                    @(daysLeft <= 0 ? "Wygasł" : $"{daysLeft} dni")
-                                </span>
-                            }
-                        </div>
-                    </div>
-                </div>
             </div>
-        }
 
-        <!-- Mini weight chart -->
-        @if (_chartPoints.Count >= 2)
-        {
-            <div class="cd-section">
-                <div class="cd-section-head">
-                    <h6 class="cd-section-title"><i class="bi bi-graph-up"></i>Postęp wagi</h6>
-                    <a href="/my/measurements" class="cd-section-link">Pełna historia <i class="bi bi-arrow-right"></i></a>
-                </div>
-                <div class="cd-chart-wrap">
-                    <canvas id="cd-weight-chart-@_client.Id"></canvas>
-                </div>
-            </div>
-        }
-
-        <!-- Quick weight entry -->
-        <div class="cd-section">
-            <div class="cd-section-head">
-                <h6 class="cd-section-title"><i class="bi bi-speedometer2"></i>Szybki wpis wagi</h6>
-            </div>
-            <div class="cd-quick-weight">
-                <div class="cd-qw-form">
-                    <input type="text" inputmode="decimal"
-                           class="form-control form-control-sm cd-qw-input"
-                           placeholder="np. 72.5"
-                           @bind="_quickWeight" />
-                    <span class="cd-qw-unit">kg</span>
-                    <button class="btn btn-sm btn-primary cd-qw-btn" @onclick="LogQuickWeightAsync" disabled="@_weightSaving">
-                        @if (_weightSaving)
-                        {
-                            <span class="spinner-border spinner-border-sm"></span>
-                        }
-                        else
-                        {
-                            <i class="bi bi-check-lg"></i><span class="d-none d-sm-inline ms-1">Zapisz</span>
-                        }
-                    </button>
-                </div>
-                @if (_weightMsg is not null)
+            <div class="cdx-card cdx-links">
+                <div class="cdx-card-head"><h6><i class="bi bi-grid"></i>Na skróty</h6></div>
+                <a href="/my/stats"><i class="bi bi-bar-chart-line"></i><span>Statystyki i rekordy</span><i class="bi bi-chevron-right"></i></a>
+                <a href="/my/measurements"><i class="bi bi-rulers"></i><span>Pomiary i zdjęcia</span><i class="bi bi-chevron-right"></i></a>
+                <a href="/my/packages"><i class="bi bi-box-seam"></i><span>Moje pakiety</span><i class="bi bi-chevron-right"></i></a>
+                @if (_coursesEnabled)
                 {
-                    <div class="cd-qw-msg @(_weightMsgOk ? "ok" : "err")">@_weightMsg</div>
+                    <a href="/my/courses"><i class="bi bi-mortarboard"></i><span>Moje kursy</span><i class="bi bi-chevron-right"></i></a>
+                }
+                <a href="/chat"><i class="bi bi-chat-dots"></i><span>Napisz do trenera</span><i class="bi bi-chevron-right"></i></a>
+                <a href="/my/documents"><i class="bi bi-file-earmark-check"></i><span>Moje dokumenty</span><i class="bi bi-chevron-right"></i></a>
+                <a href="/Account/Manage"><i class="bi bi-person-circle"></i><span>Moje konto</span><i class="bi bi-chevron-right"></i></a>
+            </div>
+        </div>
+
+        <!-- Historia + dla Ciebie -->
+        <div class="cdx-row">
+            <div class="cdx-card">
+                <div class="cdx-card-head">
+                    <h6><i class="bi bi-clock-history"></i>Ostatnie treningi</h6>
+                    <a href="/sessions" class="cdx-more">Wszystkie <i class="bi bi-arrow-right"></i></a>
+                </div>
+                @if (_recentPast.Any())
+                {
+                    <div class="cdx-recent">
+                        @foreach (var s in _recentPast)
+                        {
+                            <div class="cdx-recent-item">
+                                <div class="cdx-recent-date"><b>@s.StartTime.ToString("dd.MM")</b><small>@s.StartTime.ToString("HH:mm")</small></div>
+                                <div class="min-w-0 flex-grow-1">
+                                    <div class="cdx-recent-title">@s.SessionTypeName</div>
+                                    <div class="cdx-recent-sub">@s.DurationMinutes min · @s.TrainerName</div>
+                                </div>
+                                <span class="cdx-tag @StatusClass(s.Status)">@StatusLabel(s.Status)</span>
+                            </div>
+                        }
+                    </div>
+                }
+                else
+                {
+                    <p class="cdx-muted">Tu pojawi się historia Twoich treningów.</p>
+                }
+            </div>
+
+            <div class="cdx-card cdx-offer">
+                <div class="cdx-card-head"><h6><i class="bi bi-stars"></i>Dla Ciebie</h6></div>
+                <a href="/packages" class="cdx-offer-item">
+                    <span class="cdx-offer-ic green"><i class="bi bi-box-seam-fill"></i></span>
+                    <span><b>Pakiety w lepszej cenie</b><small>Im więcej treningów, tym taniej za jeden.</small></span>
+                </a>
+                @if (_coursesEnabled)
+                {
+                    <a href="/courses" class="cdx-offer-item">
+                        <span class="cdx-offer-ic blue"><i class="bi bi-collection-play-fill"></i></span>
+                        <span><b>Kursy online</b><small>Wiedza od trenera dostępna o każdej porze.</small></span>
+                    </a>
                 }
             </div>
         </div>
-
-        <!-- Quick actions -->
-        <div class="cd-actions">
-            <a href="/my/profile" class="cd-action">
-                <i class="bi bi-person-circle"></i>
-                <span>Profil</span>
-            </a>
-            <a href="/my/measurements" class="cd-action">
-                <i class="bi bi-rulers"></i>
-                <span>Pomiary</span>
-            </a>
-            <a href="/my/packages" class="cd-action">
-                <i class="bi bi-box-seam"></i>
-                <span>Pakiety</span>
-            </a>
-            <a href="/my/stats" class="cd-action">
-                <i class="bi bi-graph-up"></i>
-                <span>Statystyki</span>
-            </a>
-        </div>
-
-        <!-- Recent sessions -->
-        @if (_recentPast.Any())
-        {
-            <div class="cd-section">
-                <div class="cd-section-head">
-                    <h6 class="cd-section-title"><i class="bi bi-clock-history"></i>Ostatnie treningi</h6>
-                    <a href="/sessions" class="cd-section-link">Wszystkie <i class="bi bi-arrow-right"></i></a>
-                </div>
-                <div class="cd-recent">
-                    @foreach (var s in _recentPast)
-                    {
-                        <div class="cd-recent-item">
-                            <div class="cd-recent-date">
-                                <div class="cd-recent-day">@s.StartTime.ToString("dd.MM")</div>
-                                <div class="cd-recent-time">@s.StartTime.ToString("HH:mm")</div>
-                            </div>
-                            <div class="cd-recent-body">
-                                <div class="cd-recent-title">@s.SessionTypeName</div>
-                                <div class="cd-recent-sub">@s.DurationMinutes min · @s.TrainerName</div>
-                            </div>
-                            <span class="cd-recent-badge @StatusClass(s.Status)">@StatusLabel(s.Status)</span>
-                        </div>
-                    }
-                </div>
-            </div>
-        }
     </div>
     </PullToRefresh>
 }
@@ -377,17 +371,12 @@ else
     private bool _loading;
     private ClientDto? _client;
     private SessionDto? _nextSession;
+    private PTScheduler.Application.Scheduling.CancellationDecision? _cancelDecision;
     private List<SessionDto> _recentPast = [];
     private int _upcomingCount;
-    private List<SessionInvitationDto> _invitations = [];
     private BodyMeasurementDto? _latestMeasurement;
     private List<(string Date, double Value)> _chartPoints = [];
     private string? _errorMsg;
-
-    // Invitation responding
-    private int? _respondingId;
-    private string? _respondNote;
-    private string? _respondError;
 
     // Session cancel
     private int? _cancelConfirmId;
@@ -410,6 +399,10 @@ else
     // Chart re-render trigger
     private bool _chartNeedsRender;
 
+    // Courses module
+    private bool _coursesEnabled;
+    private bool _trainingEnabled;
+
     private async Task RefreshAsync()
     {
         _loading = false;
@@ -425,6 +418,8 @@ else
             _loaded = false;
             _client = null;
             _errorMsg = null;
+            _coursesEnabled = (await ModuleSettings.GetAsync()).CoursesEnabled;
+            _trainingEnabled = Entitlements.IsAllowed("TrainingPlansEnabled");
             try
             {
                 if (ClientIdOverride.HasValue)
@@ -437,15 +432,16 @@ else
                     var upcoming = await SessionService.GetUpcomingAsync(clientId: _client.Id, count: 10);
                     _upcomingCount = upcoming.Count;
                     _nextSession   = upcoming.FirstOrDefault();
+                    _cancelDecision = _nextSession is null || ClientIdOverride.HasValue
+                        ? null
+                        : await SessionService.GetClientCancellationAsync(_nextSession.Id, _client.ApplicationUserId);
 
                     var allRecent = await SessionService.GetClientSessionsAsync(_client.Id, 50);
-                    var pastSessions = allRecent.Where(s => s.StartTime < DateTime.Now).ToList();
+                    var pastSessions = allRecent.Where(s => s.StartTime < StudioClock.Now).ToList();
                     _recentPast    = pastSessions.Take(5).ToList();
                     _completedCount = pastSessions.Count(s => s.Status == SessionStatus.Completed);
                     _noShowCount = pastSessions.Count(s => s.Status == SessionStatus.NoShow);
                     _streakCount = CalcStreak(pastSessions);
-
-                    _invitations   = await InvitationService.GetPendingForClientAsync(_client.Id);
 
                     var measurements = await MeasurementService.GetAsync(_client.Id);
                     _latestMeasurement = measurements.OrderByDescending(m => m.MeasurementDate).FirstOrDefault();
@@ -492,31 +488,6 @@ else
         }
     }
 
-    // ---- Invitations ----
-
-    private void StartRespond(int invitationId)
-    {
-        _respondingId = invitationId;
-        _respondNote  = null;
-        _respondError = null;
-    }
-
-    private async Task RespondAsync(int invitationId, bool accept)
-    {
-        _respondError = null;
-        try
-        {
-            await InvitationService.RespondAsync(invitationId, accept, _respondNote);
-            _respondingId = null;
-            if (_client is not null)
-                _invitations = await InvitationService.GetPendingForClientAsync(_client.Id);
-        }
-        catch (Exception ex)
-        {
-            _respondError = ex.Message;
-        }
-    }
-
     // ---- Cancel session ----
 
     private void StartCancel()
@@ -552,7 +523,7 @@ else
 
     private string CountdownLabel(DateTime when)
     {
-        var diff = when - DateTime.Now;
+        var diff = when - StudioClock.Now;
         if (diff.TotalSeconds < 0) return "Już trwa";
         if (diff.TotalMinutes < 60) return $"Za {(int)diff.TotalMinutes} min";
         if (diff.TotalHours < 24)
@@ -566,14 +537,10 @@ else
         return when.ToString("d MMM", _pl);
     }
 
-    private string HeroToneClass()
-    {
-        if (_nextSession is null) return "tone-empty";
-        var diff = _nextSession.StartTime - DateTime.Now;
-        if (diff.TotalHours < 4) return "tone-urgent";
-        if (diff.TotalHours < 24) return "tone-soon";
-        return "tone-default";
-    }
+    // Trening w ciągu 4 godzin — wyróżniamy go na karcie.
+    private bool IsSoon() => _nextSession is not null && (_nextSession.StartTime - StudioClock.Now).TotalHours < 4;
+
+    private static string Capital(string s) => s.Length == 0 ? s : char.ToUpper(s[0], _pl) + s[1..];
 
     private string FormatWhen(DateTime when)
     {
@@ -620,7 +587,7 @@ else
             await MeasurementService.AddAsync(new CreateBodyMeasurementDto
             {
                 ClientId = _client.Id,
-                MeasurementDate = DateOnly.FromDateTime(DateTime.Today),
+                MeasurementDate = DateOnly.FromDateTime(StudioClock.Today),
                 WeightKg = w
             });
             _quickWeight = null;

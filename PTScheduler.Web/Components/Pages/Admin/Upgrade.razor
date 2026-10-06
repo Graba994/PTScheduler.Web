@@ -1,0 +1,195 @@
+@page "/admin/upgrade"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer")]
+@inject EntitlementService Entitlements
+
+<AppTitle Page="Ulepsz plan" />
+
+@* Tylko plany wyższe od obecnego, a przy każdym — co konkretnie zyskasz (bez rzeczy, które już masz).
+   Kolejny plan pokazuje tylko to, co dochodzi ponad poprzedni, żeby nie powtarzać tej samej listy. *@
+
+<div class="upg">
+    @if (_billingPortal)
+    {
+        <div class="upg-sub">
+            <i class="bi bi-credit-card-2-front"></i>
+            <div class="flex-grow-1">
+                <b>Subskrypcja</b>
+                <div class="small text-muted">Karta, faktury, zmiana na rozliczenie roczne i anulowanie — w każdej chwili, bez dzwonienia do nikogo.</div>
+            </div>
+            <a href="/admin/subscription" class="btn btn-sm btn-outline-primary">Zarządzaj subskrypcją</a>
+        </div>
+    }
+    @if (_offers.Count == 0)
+    {
+        <div class="upg-top upg-top-max">
+            <span class="upg-top-ic"><i class="bi bi-trophy-fill"></i></span>
+            <div>
+                <div class="upg-eyebrow">Twój plan</div>
+                <h4 class="upg-title">@_current.Name — masz wszystko, co oferujemy</h4>
+                <p class="upg-lead">Wszystkie funkcje są odblokowane i nie masz limitu klientów. Gdy zabraknie SMS-ów albo miejsca na wideo, dodasz je do abonamentu w sklepie.</p>
+                <a href="/admin/sklep" class="btn btn-primary btn-sm"><i class="bi bi-bag-heart-fill me-1"></i>Przejdź do sklepu</a>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="upg-top">
+            <span class="upg-top-ic"><i class="bi bi-rocket-takeoff-fill"></i></span>
+            <div>
+                <div class="upg-eyebrow">Teraz masz plan @_current.Name@(_current.MonthlyPrice > 0 ? $" · {_current.MonthlyPrice:0} zł/mies." : "")</div>
+                <h4 class="upg-title">Co zyskasz w wyższym planie</h4>
+                <p class="upg-lead">Mniej pracy przy organizacji, więcej czasu na treningi — i narzędzia, dzięki którym klienci zostają z Tobą na dłużej.</p>
+            </div>
+        </div>
+
+        <div class="upg-grid">
+            @for (var i = 0; i < _offers.Count; i++)
+            {
+                var offer = _offers[i];
+                var first = i == 0;
+                <article class="upg-card @(first ? "upg-card-rec" : "")">
+                    @if (first)
+                    {
+                        <span class="upg-badge"><i class="bi bi-stars me-1"></i>Następny krok</span>
+                    }
+                    <header class="upg-head">
+                        <div class="upg-name">@offer.Plan.Name</div>
+                        <div class="upg-price">@offer.Plan.Price.ToString("0") <small>zł/mies.</small></div>
+                        @if (offer.Diff > 0 && _current.MonthlyPrice > 0)
+                        {
+                            <div class="upg-diff">+@offer.Diff.ToString("0") zł miesięcznie względem obecnego</div>
+                        }
+                        <p class="upg-tag">@offer.Plan.Tagline</p>
+                    </header>
+
+                    @if (!first)
+                    {
+                        <div class="upg-plus"><i class="bi bi-check2-all"></i>Wszystko z planu @_offers[i - 1].Plan.Name, a do tego:</div>
+                    }
+                    <ul class="upg-benefits">
+                        @foreach (var b in offer.Benefits)
+                        {
+                            <li>
+                                <span class="upg-b-ic"><i class="bi @b.Icon"></i></span>
+                                <span><b>@b.Title</b><small>@b.Text</small></span>
+                            </li>
+                        }
+                    </ul>
+
+                    <a class="btn @(first ? "btn-primary" : "btn-outline-primary") w-100 mt-auto" href="@MailTo(offer.Plan)">
+                        <i class="bi bi-arrow-up-circle me-1"></i>Chcę plan @offer.Plan.Name
+                    </a>
+                </article>
+            }
+        </div>
+
+        <p class="upg-note">
+            <i class="bi bi-shield-check"></i>
+            <span>Zmieniasz plan bez utraty danych — klienci, pakiety i grafik zostają na miejscu. Napisz do nas, a przełączymy plan w kilka minut.
+            Zabrakło tylko SMS-ów albo miejsca na wideo? Dodasz je do abonamentu w <a href="/admin/sklep">sklepie</a>, bez zmiany planu.</span>
+        </p>
+    }
+</div>
+
+<style>
+    .upg { max-width: 1080px; }
+    .upg-sub {
+        display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 12px 16px; margin-bottom: 16px;
+        border-radius: 14px; border: 1px solid var(--bs-border-color); background: var(--bs-body-bg);
+    }
+    .upg-sub > i { font-size: 1.4rem; color: var(--c-primary); }
+    .upg-top {
+        position: relative; overflow: hidden;
+        display: flex; gap: 16px; align-items: flex-start;
+        background: var(--c-primary-light, #EEF2FF);
+        border: 1px solid color-mix(in srgb, var(--c-primary, #4F46E5) 25%, transparent);
+        border-radius: 16px; padding: 22px 24px; margin-bottom: 24px;
+    }
+    .upg-top::after {
+        content: ""; position: absolute; right: -18px; bottom: -26px; width: 150px; height: 150px;
+        background: var(--c-primary, #4F46E5); opacity: .07; transform: rotate(-30deg);
+        -webkit-mask: var(--pt-ico-dumbbell) center / contain no-repeat; mask: var(--pt-ico-dumbbell) center / contain no-repeat;
+        pointer-events: none;
+    }
+    .upg-top-ic {
+        flex-shrink: 0; width: 46px; height: 46px; border-radius: 12px;
+        display: grid; place-items: center; font-size: 1.35rem;
+        background: var(--c-primary, #4F46E5); color: #fff;
+    }
+    .upg-top-max .upg-top-ic { background: #F59E0B; }
+    .upg-eyebrow { font-size: .72rem; font-weight: 700; letter-spacing: .06em; text-transform: uppercase; color: var(--c-primary, #4F46E5); }
+    .upg-title { font-weight: 800; margin: 2px 0 6px; text-wrap: balance; }
+    .upg-lead { color: #4B5563; margin: 0 0 10px; max-width: 62ch; }
+
+    .upg-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(290px, 1fr)); gap: 20px; align-items: stretch; }
+    .upg-card {
+        position: relative; display: flex; flex-direction: column; gap: 14px;
+        background: #fff; border: 1px solid #E5E7EB; border-radius: 16px; padding: 24px 20px 20px;
+    }
+    .upg-card-rec { border: 2px solid var(--c-primary, #4F46E5); box-shadow: 0 8px 28px rgba(79,70,229,.12); }
+    .upg-badge {
+        position: absolute; top: -12px; left: 20px;
+        background: var(--c-primary, #4F46E5); color: #fff;
+        font-size: .72rem; font-weight: 700; padding: 3px 12px; border-radius: 20px;
+    }
+    .upg-name { font-size: 1.15rem; font-weight: 800; }
+    .upg-price { font-size: 1.9rem; font-weight: 800; line-height: 1.1; font-variant-numeric: tabular-nums; }
+    .upg-price small { font-size: .85rem; font-weight: 500; color: #6B7280; }
+    .upg-diff { font-size: .78rem; color: #6B7280; margin-top: 2px; }
+    .upg-tag { margin: 8px 0 0; font-size: .9rem; color: #374151; }
+    .upg-plus { font-size: .82rem; font-weight: 600; color: #059669; display: flex; gap: 6px; align-items: center; }
+
+    .upg-benefits { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+    .upg-benefits li { display: flex; gap: 10px; align-items: flex-start; }
+    .upg-benefits b { display: block; font-size: .9rem; color: #111827; }
+    .upg-benefits small { display: block; font-size: .8rem; color: #6B7280; line-height: 1.35; }
+    .upg-b-ic {
+        flex-shrink: 0; width: 30px; height: 30px; border-radius: 8px; display: grid; place-items: center;
+        background: color-mix(in srgb, var(--c-primary, #4F46E5) 10%, transparent); color: var(--c-primary, #4F46E5);
+    }
+
+    .upg-note { display: flex; gap: 8px; margin-top: 22px; font-size: .85rem; color: #6B7280; max-width: 80ch; }
+    .upg-note i { color: #10B981; margin-top: 2px; }
+
+    [data-theme$="-dark"] .upg-top { background: rgba(79,70,229,.12); }
+    [data-theme$="-dark"] .upg-lead, [data-theme$="-dark"] .upg-tag { color: #CBD5E1; }
+    [data-theme$="-dark"] .upg-card { background: #1E293B; border-color: #334155; }
+    [data-theme$="-dark"] .upg-card-rec { border-color: var(--c-primary); }
+    [data-theme$="-dark"] .upg-benefits b { color: #F1F5F9; }
+    [data-theme$="-dark"] .upg-benefits small, [data-theme$="-dark"] .upg-price small,
+    [data-theme$="-dark"] .upg-diff, [data-theme$="-dark"] .upg-note { color: #94A3B8; }
+
+    @@media (max-width: 575.98px) {
+        .upg-top { padding: 18px 16px; }
+        .upg-top-ic { width: 40px; height: 40px; font-size: 1.15rem; }
+    }
+</style>
+
+@code {
+    private Entitlements _current = null!;
+    private List<Offer> _offers = [];
+
+    private sealed record Offer(PlanCatalog.Plan Plan, decimal Diff, IReadOnlyList<PlanCatalog.Benefit> Benefits);
+
+    private bool _billingPortal;
+
+    protected override void OnInitialized()
+    {
+        // Zarządzanie kartą i anulowanie przez portal klienta Stripe — tylko gdy instancja jest podpięta do Portalu.
+        _billingPortal = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PORTAL_URL"))
+                         && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET"));
+        _current = Entitlements.Current;
+        var shown = new HashSet<string>();
+        foreach (var plan in PlanCatalog.HigherThan(_current))
+        {
+            // Każdy kolejny plan: tylko to, czego nie było w poprzednim.
+            var benefits = PlanCatalog.GainsFor(plan, _current).Where(b => shown.Add(b.Title)).ToList();
+            if (benefits.Count == 0) continue;
+            _offers.Add(new(plan, plan.Price - _current.MonthlyPrice, benefits));
+        }
+    }
+
+    private string MailTo(PlanCatalog.Plan plan) =>
+        "mailto:kontakt" + "@" + "ptscheduler.pl?subject=" + Uri.EscapeDataString($"Zmiana planu na {plan.Name}")
+        + "&body=" + Uri.EscapeDataString($"Dzień dobry,\nchcę przejść z planu {_current.Name} na {plan.Name}.\n");
+}

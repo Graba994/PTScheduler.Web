@@ -7,6 +7,12 @@ public class Client
     public int Id { get; set; }
     public string ApplicationUserId { get; set; } = string.Empty;
 
+    /// <summary>Kod polecający klienta (link <c>/r/{kod}</c>); tworzony przy pierwszym użyciu.</summary>
+    public string? ReferralCode { get; set; }
+
+    /// <summary>Klient odłożył prośbę o opinię („Nie teraz”) — nie pytamy do tej daty.</summary>
+    public DateTime? ReviewPromptSnoozedUntil { get; set; }
+
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
     public string? Phone { get; set; }
@@ -18,6 +24,8 @@ public class Client
     public string? TrainerUserId { get; set; }
     public ClientStatus Status { get; set; } = ClientStatus.Active;
     public bool AllowSelfBooking { get; set; } = false;
+    /// <summary>Zaufany klient: rezerwacja z płatnością u trenera bez akceptacji i bez limitu nieopłaconych wizyt.</summary>
+    public bool TrustedForDeferredPayment { get; set; }
     public DateTime? TermsAcceptedAt { get; set; }
 
     public ICollection<Session> Sessions { get; set; } = [];

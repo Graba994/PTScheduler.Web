@@ -1,0 +1,833 @@
+@page "/admin/sklep"
+@using PTScheduler.Domain.Constants
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer")]
+@inject IConfiguration Config
+@inject NavigationManager Nav
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Sklep" />
+
+<div class="sh-head">
+    <div>
+        <h4 class="page-title mb-1"><i class="bi bi-bag-heart-fill me-2" style="color:var(--c-primary)"></i>Sklep</h4>
+        <p class="text-muted small mb-0">Więcej SMS-ów i miejsca na wideo co miesiąc oraz pomoc zespołu platformy. Dodatki rozliczamy razem z abonamentem — rezygnujesz jednym kliknięciem.</p>
+    </div>
+</div>
+
+@if (_paymentResult == "success")
+{
+    <div class="alert alert-success alert-dismissible">
+        <i class="bi bi-check-circle me-2"></i>Płatność zakończona pomyślnie! Zamówienie zostało przyjęte.
+        <button type="button" class="btn-close" @onclick="() => _paymentResult = null"></button>
+    </div>
+}
+else if (_paymentResult == "cancel")
+{
+    <div class="alert alert-warning alert-dismissible">
+        <i class="bi bi-x-circle me-2"></i>Płatność została anulowana. Możesz spróbować ponownie.
+        <button type="button" class="btn-close" @onclick="() => _paymentResult = null"></button>
+    </div>
+}
+
+@if (_error is not null)
+{
+    <div class="alert alert-danger"><i class="bi bi-exclamation-triangle me-2"></i>@_error</div>
+}
+
+@if (_success is not null)
+{
+    <div class="alert alert-success alert-dismissible">
+        <i class="bi bi-check-circle me-2"></i>@_success
+        <button type="button" class="btn-close" @onclick="() => _success = null"></button>
+    </div>
+}
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_catalog.Count == 0 && _error is null)
+{
+    <div class="card">
+        <div class="card-body text-center text-muted py-5">
+            <i class="bi bi-shop fs-1 d-block mb-2"></i>
+            <p class="mb-0">Brak dostępnych usług w katalogu.</p>
+        </div>
+    </div>
+}
+else if (_catalog.Count > 0)
+{
+    <div class="sh-layout">
+        <div class="sh-main">
+            <!-- Szybki wybór działu -->
+            <div class="sh-chips" role="tablist" aria-label="Działy sklepu">
+                <button type="button" role="tab" class="sh-chip @(_filter is null ? "active" : "")" @onclick="() => _filter = null">Wszystko</button>
+                @foreach (var g in VisibleGroups)
+                {
+                    <button type="button" role="tab" class="sh-chip @(_filter == g.Key ? "active" : "")" @onclick="() => _filter = g.Key">
+                        <i class="bi @g.Icon"></i>@g.Title
+                    </button>
+                }
+            </div>
+
+            @foreach (var g in VisibleGroups.Where(g => _filter is null || _filter == g.Key))
+            {
+                <section class="sh-group" id="@($"dzial-{g.Key}")">
+                    <div class="sh-group-head">
+                        <span class="sh-group-ic"><i class="bi @g.Icon"></i></span>
+                        <div>
+                            <h5 class="sh-group-title">@g.Title</h5>
+                            <p class="sh-group-lead">@g.Lead</p>
+                        </div>
+                    </div>
+                    <div class="sh-grid">
+                        @foreach (var item in _catalog.Where(i => GroupOf(i) == g.Key))
+                        {
+                            var inCart = _selected.Contains(item.Id);
+                            var owned = _addons.Where(a => a.ServiceItemId == item.Id).Sum(a => a.Quantity);
+                            <article class="sh-item @(Highlighted(item) ? "hl" : "") @(inCart ? "incart" : "")">
+                                @if (Highlighted(item)) { <span class="sh-badge">Polecane dla Ciebie</span> }
+                                <div class="sh-item-top">
+                                    <span class="sh-ic"><i class="bi @(item.Icon ?? "bi-box")"></i></span>
+                                    <div class="min-w-0">
+                                        <div class="sh-name">@item.Name</div>
+                                        <span class="sh-kind @(item.PriceType == "monthly" ? "monthly" : "")">
+                                            @(item.MonthlyAddon ? "dodatek do abonamentu" : item.PriceType == "monthly" ? "co miesiąc" : "jednorazowo")
+                                        </span>
+                                        @if (owned > 0) { <span class="sh-owned"><i class="bi bi-check-circle-fill"></i>masz@(owned > 1 ? $" ×{owned}" : "")</span> }
+                                    </div>
+                                </div>
+                                @if (!string.IsNullOrWhiteSpace(item.Description)) { <p class="sh-desc">@item.Description</p> }
+                                <div class="sh-foot">
+                                    <div class="sh-price">
+                                        @(item.MonthlyAddon ? "+" : "")@item.Price.ToString("0") zł
+                                        <small>@(item.PriceType == "monthly" ? "/ mies." : "")</small>
+                                    </div>
+                                    @if (item.MonthlyAddon)
+                                    {
+                                        @if (_confirmAdd == item.Id)
+                                        {
+                                            <div class="sh-confirm">
+                                                <span>
+                                                    @if (item.AutoBilling)
+                                                    {
+                                                        <text>Działa od razu. Doliczymy <b>@item.Price.ToString("0") zł</b> do płatności kartą za abonament (za bieżący miesiąc proporcjonalnie).</text>
+                                                    }
+                                                    else
+                                                    {
+                                                        <text>Działa od razu. <b>@item.Price.ToString("0") zł / mies.</b> doliczymy do najbliższego rachunku za abonament.</text>
+                                                    }
+                                                    Rezygnujesz jednym kliknięciem.
+                                                </span>
+                                                <div class="d-flex gap-2">
+                                                    <button class="btn btn-sm btn-primary" @onclick="() => AddAddonAsync(item.Id)" disabled="@_ordering">
+                                                        @if (_ordering) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                                        Potwierdzam
+                                                    </button>
+                                                    <button class="btn btn-sm btn-link" @onclick="() => _confirmAdd = null">Anuluj</button>
+                                                </div>
+                                            </div>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-primary btn-sm" @onclick="() => _confirmAdd = item.Id">
+                                                <i class="bi bi-plus-lg me-1"></i>@(owned > 0 ? "Dodaj kolejny" : "Dodaj do abonamentu")
+                                            </button>
+                                        }
+                                    }
+                                    else
+                                    {
+                                        <button class="btn btn-sm @(inCart ? "btn-success" : "btn-outline-primary")" @onclick="() => Toggle(item.Id)" aria-pressed="@inCart">
+                                            <i class="bi @(inCart ? "bi-check-lg" : "bi-cart-plus") me-1"></i>@(inCart ? "W koszyku" : "Do koszyka")
+                                        </button>
+                                    }
+                                </div>
+                                @if (item.MonthlyAddon && item.Category == "support")
+                                {
+                                    <div class="sh-note">Po dodaniu zespół platformy dostaje zgłoszenie i odezwie się do Ciebie.</div>
+                                }
+                                else if (!item.MonthlyAddon && item.AddonKind is null)
+                                {
+                                    <div class="sh-note">Zamówienie trafia do zespołu jako zgłoszenie — zwykle odzywamy się w 1 dzień roboczy.</div>
+                                }
+                            </article>
+                        }
+                    </div>
+                </section>
+            }
+        </div>
+
+        <aside class="sh-side">
+            <!-- Koszyk: zawsze pod ręką -->
+            <section class="sh-cart" id="koszyk">
+                <h6 class="sh-side-title"><i class="bi bi-cart3"></i>Koszyk @if (_selected.Count > 0) { <span class="sh-count">@_selected.Count</span> }</h6>
+                @if (_selected.Count == 0)
+                {
+                    <div class="sh-empty">
+                        <i class="bi bi-cart"></i>
+                        <span>Koszyk jest pusty. Dodatki z przyciskiem „Dodaj do abonamentu” włączasz od razu — bez koszyka.</span>
+                    </div>
+                }
+                else
+                {
+                    <ul class="sh-lines">
+                        @foreach (var item in _catalog.Where(c => _selected.Contains(c.Id)))
+                        {
+                            <li>
+                                <span class="sh-line-name">@item.Name</span>
+                                <span class="sh-line-price">@item.Price.ToString("0") zł</span>
+                                <button type="button" class="sh-line-x" title="Usuń z koszyka" aria-label="@($"Usuń {item.Name} z koszyka")" @onclick="() => Toggle(item.Id)"><i class="bi bi-x-lg"></i></button>
+                            </li>
+                        }
+                    </ul>
+                    <div class="sh-total"><span>@(_gateways.Count > 0 ? "Do zapłaty teraz" : "Razem")</span><b>@Total().ToString("0") zł</b></div>
+                    @if (_gateways.Count == 0)
+                    {
+                        <div class="sh-note mt-1">Doładowania działają od razu, a kwotę doliczymy do najbliższego rachunku. Usługi trafią do zespołu jako zgłoszenie.</div>
+                    }
+
+                    <label class="form-label small fw-semibold mt-3 mb-1" for="sh-notes">Uwagi (opcjonalnie)</label>
+                    <textarea id="sh-notes" class="form-control form-control-sm" rows="2" @bind="_notes" placeholder="np. preferowany termin realizacji"></textarea>
+
+                    @if (_gateways.Count > 1)
+                    {
+                        <div class="small fw-semibold mt-3 mb-1">Płatność</div>
+                        <div class="d-flex flex-wrap gap-2">
+                            @foreach (var gw in _gateways)
+                            {
+                                var isActive = _selectedGateway == gw;
+                                <button class="btn btn-sm @(isActive ? "btn-primary" : "btn-outline-secondary")" @onclick="() => _selectedGateway = gw">
+                                    <i class="bi @GatewayIcon(gw) me-1"></i>@GatewayLabel(gw)
+                                </button>
+                            }
+                        </div>
+                    }
+
+                    @if (_gateways.Count > 0 && !string.IsNullOrEmpty(_selectedGateway))
+                    {
+                        <button class="btn btn-primary w-100 mt-3" @onclick="PlaceOrderWithPayment" disabled="@_ordering">
+                            @if (_ordering) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                            <i class="bi bi-credit-card me-1"></i>Zamów i zapłać @Total().ToString("0") zł
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-primary w-100 mt-3" @onclick="PlaceOrder" disabled="@_ordering">
+                            @if (_ordering) { <span class="spinner-border spinner-border-sm me-2"></span> }
+                            <i class="bi bi-bag-check me-1"></i>Zamów @Total().ToString("0") zł
+                        </button>
+                    }
+                    <button class="btn btn-link btn-sm w-100 mt-1 text-muted" @onclick="() => _selected.Clear()">Wyczyść koszyk</button>
+                }
+            </section>
+
+            @if (_bills.Count > 0)
+            {
+                <section class="sh-active">
+                    <h6 class="sh-side-title"><i class="bi bi-receipt"></i>Twoje rachunki</h6>
+                    @foreach (var b in _bills)
+                    {
+                        <div class="sh-addon">
+                            <div class="min-w-0">
+                                <b>@b.Period</b>
+                                <small>
+                                    @b.Number ·
+                                    @if (b.Paid)
+                                    {
+                                        <span class="text-success"><i class="bi bi-check-circle"></i> opłacony</span>
+                                    }
+                                    else if (b.Overdue)
+                                    {
+                                        <span class="text-danger">po terminie (@b.DueDate?.ToString("d.MM"))</span>
+                                    }
+                                    else
+                                    {
+                                        <span>do zapłaty do @b.DueDate?.ToString("d.MM")</span>
+                                    }
+                                </small>
+                            </div>
+                            <div class="text-end">
+                                <div class="fw-semibold text-nowrap">@b.Amount.ToString("0.00") zł</div>
+                                @if (!b.Paid && !string.IsNullOrEmpty(b.PayUrl))
+                                {
+                                    <a class="btn btn-sm btn-primary mt-1" href="@b.PayUrl" target="_blank" rel="noopener">Zapłać</a>
+                                }
+                                else if (!string.IsNullOrEmpty(b.PayUrl))
+                                {
+                                    <a class="small" href="@b.PayUrl" target="_blank" rel="noopener">Zobacz</a>
+                                }
+                            </div>
+                        </div>
+                    }
+                </section>
+            }
+
+            @if (_addons.Count > 0)
+            {
+                <section class="sh-active">
+                    <h6 class="sh-side-title"><i class="bi bi-check2-circle"></i>Twoje dodatki</h6>
+                    @foreach (var a in _addons)
+                    {
+                        <div class="sh-addon">
+                            <div class="min-w-0">
+                                <b>@a.Name @if (a.Quantity > 1) { <span class="text-muted fw-normal">× @a.Quantity</span> }</b>
+                                <small>@((a.Price * a.Quantity).ToString("0")) zł / mies. · od @a.StartedAt.ToLocalTime().ToString("d.MM.yyyy")</small>
+                            </div>
+                            @if (_confirmCancel == a.Id)
+                            {
+                                <div class="sh-addon-confirm">
+                                    <span>@(a.Quantity > 1 ? "Zmniejszyć o jeden?" : "Zrezygnować? Limit spadnie od razu.")</span>
+                                    <button class="btn btn-sm btn-danger" @onclick="() => CancelAddonAsync(a.Id)" disabled="@_ordering">Tak</button>
+                                    <button class="btn btn-sm btn-link" @onclick="() => _confirmCancel = null">Nie</button>
+                                </div>
+                            }
+                            else
+                            {
+                                <button class="btn btn-sm btn-link text-muted p-0" @onclick="() => _confirmCancel = a.Id">Zrezygnuj</button>
+                            }
+                        </div>
+                    }
+                    <div class="sh-addons-total">Razem @_addons.Sum(a => a.Price * a.Quantity).ToString("0") zł / mies. do abonamentu</div>
+                </section>
+            }
+        </aside>
+    </div>
+
+    @* Telefon: koszyk przypięty nad dolnym menu, gdy coś w nim jest. *@
+    @if (_selected.Count > 0)
+    {
+        <a href="#koszyk" class="sh-cartbar">
+            <span class="sh-cartbar-ic"><i class="bi bi-cart3"></i><span>@_selected.Count</span></span>
+            <span class="sh-cartbar-txt">Koszyk · <b>@Total().ToString("0") zł</b></span>
+            <span class="sh-cartbar-go">Do kasy <i class="bi bi-arrow-right"></i></span>
+        </a>
+    }
+}
+
+<style>
+    .sh-head { display: flex; justify-content: space-between; align-items: flex-end; gap: 1rem; margin-bottom: 1rem; }
+    .sh-layout { display: grid; grid-template-columns: minmax(0, 1fr) 330px; gap: 1.25rem; align-items: start; }
+    .sh-side { position: sticky; top: 1rem; display: flex; flex-direction: column; gap: 1rem; }
+    .sh-chips { display: flex; gap: .4rem; overflow-x: auto; scrollbar-width: none; margin-bottom: 1rem; padding-bottom: 2px; }
+    .sh-chips::-webkit-scrollbar { display: none; }
+    .sh-chip {
+        flex-shrink: 0; display: inline-flex; align-items: center; gap: .35rem; padding: .4rem .85rem; border-radius: 99px;
+        border: 1px solid var(--bs-border-color); background: var(--bs-body-bg); color: var(--bs-body-color); font-size: .85rem; font-weight: 600;
+    }
+    .sh-chip:hover { border-color: var(--c-primary); color: var(--c-primary); }
+    .sh-chip.active { background: var(--c-primary); border-color: var(--c-primary); color: #fff; }
+    .sh-group { margin-bottom: 1.5rem; scroll-margin-top: 1rem; }
+    .sh-group-head { display: flex; gap: .75rem; align-items: center; margin-bottom: .75rem; }
+    .sh-group-ic { width: 38px; height: 38px; border-radius: 11px; flex-shrink: 0; display: grid; place-items: center; background: var(--c-primary-light); color: var(--c-primary); font-size: 1.1rem; }
+    .sh-group-title { font-weight: 800; margin: 0; font-size: 1.05rem; }
+    .sh-group-lead { margin: 0; font-size: .82rem; color: var(--bs-secondary-color); }
+    .sh-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: .85rem; }
+    .sh-item {
+        position: relative; display: flex; flex-direction: column; gap: .6rem; padding: 1rem; border-radius: 14px;
+        border: 1px solid var(--bs-border-color); background: var(--bs-body-bg); transition: border-color .15s, box-shadow .15s;
+    }
+    .sh-item:hover { border-color: color-mix(in srgb, var(--c-primary) 45%, var(--bs-border-color)); }
+    .sh-item.hl { border: 2px solid var(--c-primary); box-shadow: 0 8px 22px -14px var(--c-primary); }
+    .sh-item.incart { border-color: var(--c-success); }
+    .sh-badge { position: absolute; top: -10px; left: 14px; padding: 2px 10px; border-radius: 99px; background: var(--c-primary); color: #fff; font-size: .68rem; font-weight: 700; }
+    .sh-item-top { display: flex; gap: .7rem; align-items: flex-start; }
+    .sh-ic { width: 40px; height: 40px; border-radius: 11px; flex-shrink: 0; display: grid; place-items: center; background: var(--bs-tertiary-bg); color: var(--c-primary); font-size: 1.15rem; }
+    .sh-name { font-weight: 700; line-height: 1.25; }
+    .sh-kind { display: inline-block; margin-top: .2rem; font-size: .7rem; font-weight: 600; color: var(--bs-secondary-color); }
+    .sh-kind.monthly { color: var(--c-primary); }
+    .sh-owned { display: inline-flex; align-items: center; gap: .2rem; margin-left: .4rem; font-size: .7rem; font-weight: 700; color: var(--c-success); }
+    .sh-desc { margin: 0; font-size: .82rem; color: var(--bs-secondary-color); flex: 1; }
+    .sh-foot { display: flex; align-items: center; justify-content: space-between; gap: .5rem; flex-wrap: wrap; margin-top: auto; }
+    .sh-price { font-size: 1.15rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+    .sh-price small { font-size: .78rem; font-weight: 500; color: var(--bs-secondary-color); }
+    .sh-confirm { display: flex; flex-direction: column; gap: .4rem; width: 100%; padding: .6rem; border-radius: 10px; background: var(--bs-tertiary-bg); font-size: .8rem; }
+    .sh-note { font-size: .72rem; color: var(--bs-secondary-color); }
+
+    .sh-cart, .sh-active { padding: 1rem 1.1rem; border-radius: 16px; border: 1px solid var(--bs-border-color); background: var(--bs-body-bg); }
+    .sh-cart { border-color: var(--c-primary); box-shadow: 0 10px 28px -20px var(--c-primary); }
+    .sh-side-title { display: flex; align-items: center; gap: .45rem; font-weight: 800; margin-bottom: .75rem; }
+    .sh-side-title > .bi { color: var(--c-primary); }
+    .sh-count { min-width: 20px; height: 20px; padding: 0 6px; border-radius: 99px; background: var(--c-primary); color: #fff; font-size: .72rem; display: inline-grid; place-items: center; }
+    .sh-empty { display: flex; gap: .6rem; align-items: flex-start; font-size: .82rem; color: var(--bs-secondary-color); }
+    .sh-empty .bi { font-size: 1.4rem; opacity: .5; }
+    .sh-lines { list-style: none; margin: 0; padding: 0; }
+    .sh-lines li { display: flex; align-items: center; gap: .5rem; padding: .45rem 0; border-bottom: 1px dashed var(--bs-border-color); font-size: .86rem; }
+    .sh-line-name { flex: 1; min-width: 0; }
+    .sh-line-price { font-weight: 700; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .sh-line-x { border: 0; background: none; color: var(--bs-secondary-color); padding: 0 .15rem; }
+    .sh-line-x:hover { color: var(--c-danger); }
+    .sh-total { display: flex; justify-content: space-between; align-items: baseline; padding-top: .6rem; font-size: .9rem; }
+    .sh-total b { font-size: 1.25rem; font-variant-numeric: tabular-nums; }
+    .sh-addon { display: flex; align-items: center; justify-content: space-between; gap: .6rem; padding: .5rem 0; border-bottom: 1px solid var(--bs-border-color); flex-wrap: wrap; }
+    .sh-addon b { display: block; font-size: .86rem; }
+    .sh-addon small { color: var(--bs-secondary-color); font-size: .74rem; }
+    .sh-addon-confirm { display: flex; align-items: center; gap: .35rem; font-size: .76rem; width: 100%; }
+    .sh-addons-total { font-size: .76rem; color: var(--bs-secondary-color); padding-top: .5rem; }
+
+    .sh-cartbar { display: none; }
+    @@media (max-width: 991.98px) {
+        .sh-layout { grid-template-columns: minmax(0, 1fr); }
+        .sh-side { position: static; }
+        .sh-cartbar {
+            position: fixed; left: 12px; right: 12px; z-index: 150; bottom: 16px;
+            display: flex; align-items: center; gap: .7rem; padding: .65rem .9rem; border-radius: 14px;
+            background: var(--c-primary); color: #fff; text-decoration: none; box-shadow: 0 12px 28px -12px rgba(0,0,0,.45);
+        }
+        .sh-cartbar:hover { color: #fff; }
+        .sh-cartbar-ic { position: relative; font-size: 1.2rem; }
+        .sh-cartbar-ic span { position: absolute; top: -6px; right: -9px; min-width: 17px; height: 17px; padding: 0 4px; border-radius: 99px; background: #fff; color: var(--c-primary); font-size: .66rem; font-weight: 800; display: grid; place-items: center; }
+        .sh-cartbar-txt { flex: 1; font-size: .9rem; }
+        .sh-cartbar-go { font-weight: 700; font-size: .88rem; white-space: nowrap; }
+        .sh-main { padding-bottom: 4.5rem; }
+    }
+    @@media (max-width: 767.98px) {
+        .sh-cartbar { bottom: calc(64px + env(safe-area-inset-bottom, 0px) + 10px); }
+        .sh-grid { grid-template-columns: minmax(0, 1fr); }
+    }
+</style>
+
+@code {
+    [SupplyParameterFromQuery(Name = "payment")]
+    public string? PaymentQuery { get; set; }
+
+    /// <summary>„transfer” / „miejsce” — z ekranu Wideo; wyróżnia pasujący dodatek.</summary>
+    [SupplyParameterFromQuery(Name = "dodatek")]
+    public string? AddonQuery { get; set; }
+
+    private List<ActiveAddon> _addons = new();
+    private List<TrainerBill> _bills = new();
+    private int? _confirmAdd;
+    private int? _confirmCancel;
+
+    private bool Highlighted(StoreItem item) => AddonQuery switch
+    {
+        "transfer" => item.AddonKind == "bandwidth",
+        "miejsce" => item.AddonKind == "storage",
+        "sms" => item.AddonKind == "sms" && item.MonthlyAddon,
+        _ => false
+    };
+
+    // Działy sklepu — po tym, czego trener szuka (SMS-y, wideo, pomoc), a nie po technicznej kategorii.
+    private sealed record ShopGroup(string Key, string Icon, string Title, string Lead);
+    private static readonly ShopGroup[] Groups =
+    [
+        new("sms", "bi-chat-dots", "SMS-y", "Przypomnienia SMS dzień przed treningiem — mniej nieobecności i pustych okienek."),
+        new("video", "bi-camera-reels", "Wideo", "Miejsce i transfer na lekcje, instruktaże i kursy."),
+        new("services", "bi-tools", "Pomoc i konfiguracja", "Zrobimy to za Ciebie — płacisz raz."),
+        new("support", "bi-headset", "Stałe wsparcie", "Opieka zespołu platformy co miesiąc."),
+    ];
+    private string? _filter;
+
+    private static string GroupOf(StoreItem i) => i.AddonKind switch
+    {
+        "sms" => "sms",
+        "storage" or "bandwidth" => "video",
+        _ => i.Category == "support" ? "support" : "services"
+    };
+
+    private IEnumerable<ShopGroup> VisibleGroups => Groups.Where(g => _catalog.Any(i => GroupOf(i) == g.Key));
+
+    private List<StoreItem> _catalog = new();
+    private List<string> _gateways = new();
+    private HashSet<int> _selected = new();
+    private string? _notes;
+    private string? _selectedGateway;
+    private bool _loading = true;
+    private bool _ordering;
+    private string? _error;
+    private string? _success;
+    private string? _paymentResult;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _paymentResult = PaymentQuery;
+        await LoadCatalog();
+        _filter = AddonQuery switch { "sms" => "sms", "transfer" or "miejsce" => "video", _ => null };
+    }
+
+    private async Task LoadCatalog()
+    {
+        _loading = true;
+        _error = null;
+
+        var portalUrl = Environment.GetEnvironmentVariable("PORTAL_URL");
+        var slug = Environment.GetEnvironmentVariable("TENANT_SLUG");
+        var secret = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+
+        if (string.IsNullOrEmpty(portalUrl) || string.IsNullOrEmpty(slug))
+        {
+            _error = "Sklep usług nie jest skonfigurowany. Skontaktuj się z administratorem portalu.";
+            _loading = false;
+            return;
+        }
+
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            using var req = new HttpRequestMessage(HttpMethod.Get, $"{portalUrl.TrimEnd('/')}/api/store/{slug}");
+            if (!string.IsNullOrEmpty(secret))
+                req.Headers.TryAddWithoutValidation("X-Internal-Secret", secret);
+
+            var resp = await http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode)
+            {
+                _error = $"Nie udało się pobrać katalogu usług (HTTP {(int)resp.StatusCode}).";
+                _loading = false;
+                return;
+            }
+
+            var json = await resp.Content.ReadAsStringAsync();
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            _catalog.Clear();
+            if (root.TryGetProperty("catalog", out var catalogEl))
+            {
+                foreach (var el in catalogEl.EnumerateArray())
+                {
+                    _catalog.Add(new StoreItem
+                    {
+                        Id = el.GetProperty("id").GetInt32(),
+                        Name = el.GetProperty("name").GetString() ?? "",
+                        Description = el.TryGetProperty("description", out var d) ? d.GetString() : null,
+                        Category = el.GetProperty("category").GetString() ?? "",
+                        Icon = el.TryGetProperty("icon", out var ic) ? ic.GetString() : null,
+                        Price = el.GetProperty("price").GetDecimal(),
+                        PriceType = el.GetProperty("priceType").GetString() ?? "one_time",
+                        Unit = el.TryGetProperty("unit", out var u) ? u.GetString() : null,
+                        MonthlyAddon = el.TryGetProperty("monthlyAddon", out var ma) && ma.GetBoolean(),
+                        AutoBilling = el.TryGetProperty("autoBilling", out var ab) && ab.GetBoolean(),
+                        AddonKind = el.TryGetProperty("addonKind", out var ak) ? ak.GetString() : null
+                    });
+                }
+            }
+
+            _bills.Clear();
+            if (root.TryGetProperty("bills", out var billsEl) && billsEl.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                foreach (var el in billsEl.EnumerateArray())
+                {
+                    _bills.Add(new TrainerBill
+                    {
+                        Number = el.GetProperty("number").GetString() ?? "",
+                        Period = el.TryGetProperty("period", out var pe) ? pe.GetString() ?? "" : "",
+                        Amount = el.GetProperty("amount").GetDecimal(),
+                        Paid = el.TryGetProperty("paid", out var pd) && pd.GetBoolean(),
+                        DueDate = el.TryGetProperty("dueDate", out var dd) && DateOnly.TryParse(dd.GetString(), System.Globalization.CultureInfo.InvariantCulture, out var due) ? due : null,
+                        Overdue = el.TryGetProperty("overdue", out var od) && od.GetBoolean(),
+                        PayUrl = el.TryGetProperty("payUrl", out var pu) ? pu.GetString() : null
+                    });
+                }
+            }
+
+            _addons.Clear();
+            if (root.TryGetProperty("addons", out var addonsEl))
+            {
+                foreach (var el in addonsEl.EnumerateArray())
+                {
+                    _addons.Add(new ActiveAddon
+                    {
+                        Id = el.GetProperty("id").GetInt32(),
+                        ServiceItemId = el.TryGetProperty("serviceItemId", out var sid) ? sid.GetInt32() : 0,
+                        Name = el.TryGetProperty("name", out var n) ? n.GetString() ?? "" : "",
+                        Quantity = el.GetProperty("quantity").GetInt32(),
+                        Price = el.GetProperty("price").GetDecimal(),
+                        StartedAt = el.GetProperty("startedAt").GetDateTime()
+                    });
+                }
+            }
+
+            _gateways.Clear();
+            if (root.TryGetProperty("gateways", out var gwEl))
+            {
+                foreach (var gw in gwEl.EnumerateArray())
+                {
+                    var val = gw.GetString();
+                    if (!string.IsNullOrEmpty(val))
+                        _gateways.Add(val);
+                }
+            }
+
+            if (_gateways.Count == 1)
+                _selectedGateway = _gateways[0];
+        }
+        catch (Exception ex)
+        {
+            _error = $"Błąd połączenia ze sklepem: {ex.Message}";
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private async Task AddAddonAsync(int itemId)
+    {
+        _ordering = true; _error = null; _success = null;
+        var (ok, error) = await PortalCallAsync(HttpMethod.Post, "/addons", new { serviceItemId = itemId });
+        _confirmAdd = null;
+        if (ok)
+        {
+            await LoadCatalog();
+            _success = "Dodatek aktywny — nowy limit działa od razu, a opłata dolicza się do abonamentu.";
+        }
+        else _error = error;
+        _ordering = false;
+    }
+
+    private async Task CancelAddonAsync(int addonId)
+    {
+        _ordering = true; _error = null; _success = null;
+        var (ok, error) = await PortalCallAsync(HttpMethod.Delete, $"/addons/{addonId}", null);
+        _confirmCancel = null;
+        if (ok)
+        {
+            await LoadCatalog();
+            _success = "Zmieniono abonament — limit zaktualizowany.";
+        }
+        else _error = error;
+        _ordering = false;
+    }
+
+    private static async Task<(bool Ok, string? Error)> PortalCallAsync(HttpMethod method, string suffix, object? body)
+    {
+        var portalUrl = Environment.GetEnvironmentVariable("PORTAL_URL");
+        var slug = Environment.GetEnvironmentVariable("TENANT_SLUG");
+        var secret = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+        if (string.IsNullOrEmpty(portalUrl) || string.IsNullOrEmpty(slug)) return (false, "Sklep usług nie jest dostępny w tej instalacji.");
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            using var req = new HttpRequestMessage(method, $"{portalUrl.TrimEnd('/')}/api/store/{slug}{suffix}");
+            if (!string.IsNullOrEmpty(secret)) req.Headers.TryAddWithoutValidation("X-Internal-Secret", secret);
+            if (body is not null)
+                req.Content = new StringContent(System.Text.Json.JsonSerializer.Serialize(body), System.Text.Encoding.UTF8, "application/json");
+            using var resp = await http.SendAsync(req);
+            if (resp.IsSuccessStatusCode) return (true, null);
+            var text = await resp.Content.ReadAsStringAsync();
+            try
+            {
+                using var doc = System.Text.Json.JsonDocument.Parse(text);
+                if (doc.RootElement.TryGetProperty("error", out var e)) return (false, e.GetString());
+            }
+            catch { /* odpowiedź bez JSON */ }
+            return (false, $"Nie udało się zmienić abonamentu (HTTP {(int)resp.StatusCode}).");
+        }
+        catch (Exception ex)
+        {
+            return (false, $"Brak połączenia z platformą: {ex.Message}");
+        }
+    }
+
+    private void Toggle(int id)
+    {
+        if (!_selected.Remove(id))
+            _selected.Add(id);
+    }
+
+    private decimal Total() => _catalog.Where(c => _selected.Contains(c.Id)).Sum(c => c.Price);
+
+    private async Task PlaceOrder()
+    {
+        if (_selected.Count == 0) return;
+        _ordering = true;
+        _error = null;
+        _success = null;
+
+        var portalUrl = Environment.GetEnvironmentVariable("PORTAL_URL");
+        var slug = Environment.GetEnvironmentVariable("TENANT_SLUG");
+        var secret = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+            var payload = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                items = _selected.ToArray(),
+                notes = _notes
+            });
+
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"{portalUrl!.TrimEnd('/')}/api/store/{slug}/order");
+            req.Content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+            if (!string.IsNullOrEmpty(secret))
+                req.Headers.TryAddWithoutValidation("X-Internal-Secret", secret);
+
+            var resp = await http.SendAsync(req);
+            if (!resp.IsSuccessStatusCode)
+            {
+                var body = await resp.Content.ReadAsStringAsync();
+                _error = $"Nie udało się złożyć zamówienia (HTTP {(int)resp.StatusCode}). {body}";
+                return;
+            }
+
+            _selected.Clear();
+            _notes = null;
+            _success = OrderMessage(await resp.Content.ReadAsStringAsync());
+            await LoadCatalog(); // doładowania i dodatki są już aktywne
+        }
+        catch (Exception ex)
+        {
+            _error = $"Błąd: {ex.Message}";
+        }
+        finally
+        {
+            _ordering = false;
+        }
+    }
+
+    // Co się stało z zamówieniem: doładowania działają od razu, usługi idą do zespołu jako zgłoszenie.
+    private static string OrderMessage(string json)
+    {
+        int Get(System.Text.Json.JsonElement root, string name) =>
+            root.TryGetProperty(name, out var v) && v.ValueKind == System.Text.Json.JsonValueKind.Number ? v.GetInt32() : 0;
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(json);
+            var r = doc.RootElement;
+            var parts = new List<string>();
+            if (Get(r, "fulfilled") + Get(r, "addons") > 0) parts.Add("Gotowe — działa od razu, a kwotę doliczymy do najbliższego rachunku.");
+            if (Get(r, "tickets") > 0) parts.Add("Usługę przekazaliśmy zespołowi platformy — odezwiemy się zwykle w 1 dzień roboczy.");
+            if (parts.Count > 0) return string.Join(" ", parts);
+        }
+        catch { /* starszy Portal bez szczegółów */ }
+        return "Zamówienie przyjęte. Zespół platformy dostał powiadomienie.";
+    }
+
+    private async Task PlaceOrderWithPayment()
+    {
+        if (_selected.Count == 0 || string.IsNullOrEmpty(_selectedGateway)) return;
+        _ordering = true;
+        _error = null;
+        _success = null;
+
+        var portalUrl = Environment.GetEnvironmentVariable("PORTAL_URL");
+        var slug = Environment.GetEnvironmentVariable("TENANT_SLUG");
+        var secret = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+        var returnUrl = Nav.BaseUri.TrimEnd('/') + "/admin/sklep";
+
+        try
+        {
+            using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+            var payload = System.Text.Json.JsonSerializer.Serialize(new
+            {
+                items = _selected.ToArray(),
+                notes = _notes,
+                gateway = _selectedGateway,
+                returnUrl
+            });
+
+            using var req = new HttpRequestMessage(HttpMethod.Post, $"{portalUrl!.TrimEnd('/')}/api/store/{slug}/order");
+            req.Content = new StringContent(payload, System.Text.Encoding.UTF8, "application/json");
+            if (!string.IsNullOrEmpty(secret))
+                req.Headers.TryAddWithoutValidation("X-Internal-Secret", secret);
+
+            var resp = await http.SendAsync(req);
+            var body = await resp.Content.ReadAsStringAsync();
+
+            if (!resp.IsSuccessStatusCode)
+            {
+                _error = $"Nie udało się złożyć zamówienia (HTTP {(int)resp.StatusCode}). {body}";
+                return;
+            }
+
+            using var doc = System.Text.Json.JsonDocument.Parse(body);
+            var root = doc.RootElement;
+
+            if (root.TryGetProperty("paymentUrl", out var urlEl))
+            {
+                var paymentUrl = urlEl.GetString();
+                if (!string.IsNullOrWhiteSpace(paymentUrl))
+                {
+                    Nav.NavigateTo(paymentUrl, forceLoad: true);
+                    return;
+                }
+            }
+
+            _selected.Clear();
+            _notes = null;
+            _success = "Zamówienie zostało złożone. Administrator portalu zostanie powiadomiony.";
+        }
+        catch (Exception ex)
+        {
+            _error = $"Błąd: {ex.Message}";
+        }
+        finally
+        {
+            _ordering = false;
+        }
+    }
+
+    private static string CategoryLabel(string c) => c switch
+    {
+        "branding" => "Branding",
+        "setup" => "Konfiguracja",
+        "training" => "Szkolenie",
+        "support" => "Wsparcie",
+        "addon" => "Dodatek",
+        _ => c
+    };
+
+    private static string CategoryIcon(string c) => c switch
+    {
+        "branding" => "bi-palette",
+        "setup" => "bi-gear",
+        "training" => "bi-mortarboard",
+        "support" => "bi-headset",
+        "addon" => "bi-puzzle",
+        _ => "bi-box"
+    };
+
+    private static string GatewayLabel(string gw) => gw switch
+    {
+        "stripe" => "Karta (Stripe)",
+        "payu" => "PayU",
+        "przelewy24" => "Przelewy24",
+        "autopay" => "Autopay",
+        _ => gw
+    };
+
+    private static string GatewayIcon(string gw) => gw switch
+    {
+        "stripe" => "bi-credit-card",
+        "payu" => "bi-wallet2",
+        "przelewy24" => "bi-bank",
+        "autopay" => "bi-cash-coin",
+        _ => "bi-cash"
+    };
+
+    private class StoreItem
+    {
+        public int Id { get; set; }
+        public string Name { get; set; } = "";
+        public string? Description { get; set; }
+        public string Category { get; set; } = "";
+        public string? Icon { get; set; }
+        public decimal Price { get; set; }
+        public string PriceType { get; set; } = "one_time";
+        public string? Unit { get; set; }
+        public bool MonthlyAddon { get; set; }
+        public bool AutoBilling { get; set; }
+        public string? AddonKind { get; set; }
+    }
+
+    private class TrainerBill
+    {
+        public string Number { get; set; } = "";
+        public string Period { get; set; } = "";
+        public decimal Amount { get; set; }
+        public bool Paid { get; set; }
+        public DateOnly? DueDate { get; set; }
+        public bool Overdue { get; set; }
+        public string? PayUrl { get; set; }
+    }
+
+    private class ActiveAddon
+    {
+        public int Id { get; set; }
+        public int ServiceItemId { get; set; }
+        public string Name { get; set; } = "";
+        public int Quantity { get; set; }
+        public decimal Price { get; set; }
+        public DateTime StartedAt { get; set; }
+    }
+}

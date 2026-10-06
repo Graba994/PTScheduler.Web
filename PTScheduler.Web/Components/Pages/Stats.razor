@@ -1,5 +1,5 @@
 @page "/stats"
-@rendermode InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
@@ -10,7 +10,19 @@
 @inject IClientService ClientService
 @inject IJSRuntime JS
 @inject AuthenticationStateProvider AuthState
+@inject EntitlementService Entitlements
 @attribute [Authorize(Roles = $"{Roles.Admin},{Roles.Trainer},{Roles.Subordinate}")]
+
+@if (!Entitlements.IsAllowed("AdvancedAnalytics"))
+{
+    <div class="alert alert-primary d-flex align-items-center gap-3 mb-3">
+        <i class="bi bi-arrow-up-circle fs-4"></i>
+        <div class="flex-grow-1 small">
+            Widzisz <strong>podstawowe statystyki</strong>. Zaawansowana analityka (kohorty, retencja, LTV, prognozy) jest w planie <strong>Pro</strong>.
+        </div>
+        <a href="/upgrade" class="btn btn-sm btn-primary">Zwiększ plan</a>
+    </div>
+}
 
 @if (!_loaded)
 {
@@ -36,6 +48,12 @@
 }
 else
 {
+    <AuthorizeView Roles="Admin,Trainer">
+        <div class="seg-tabs mb-3" role="tablist" aria-label="Statystyki">
+            <a class="seg-tab active" href="/stats" aria-current="page"><i class="bi bi-bar-chart-line"></i>Aktywność</a>
+            <a class="seg-tab" href="/stats/business"><i class="bi bi-graph-up-arrow"></i>Biznes</a>
+        </div>
+    </AuthorizeView>
     <div class="page-header">
         <h4 class="page-title"><i class="bi bi-bar-chart-line-fill me-2" style="color:var(--c-primary)"></i>Statystyki</h4>
         <div class="btn-group btn-group-sm">
@@ -119,7 +137,7 @@ else
             else
             {
                 <div class="table-responsive">
-                    <table class="table table-hover mb-0" style="font-size:.875rem">
+                    <table class="table table-stack table-hover mb-0" style="font-size:.875rem">
                         <thead>
                             <tr>
                                 <th>#</th>
@@ -184,8 +202,8 @@ else
 
     private async Task LoadDataAsync()
     {
-        var from = DateTime.Now.AddMonths(-_months);
-        var to = DateTime.Now.AddDays(1);
+        var from = StudioClock.Now.AddMonths(-_months);
+        var to = StudioClock.Now.AddDays(1);
         _sessions = await SessionService.GetSessionsAsync(from, to, _trainerUserId);
 
         var clients = await ClientService.GetClientsAsync(_trainerUserId);
@@ -212,7 +230,7 @@ else
     private async Task RenderChartsAsync()
     {
         var monthSlots = Enumerable.Range(0, _months)
-            .Select(i => DateTime.Now.AddMonths(-(_months - 1 - i)))
+            .Select(i => StudioClock.Now.AddMonths(-(_months - 1 - i)))
             .Select(d => (Label: d.ToString("MM.yy"), Year: d.Year, Month: d.Month))
             .ToList();
 

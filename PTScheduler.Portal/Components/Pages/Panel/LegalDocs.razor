@@ -1,0 +1,165 @@
+@page "/panel/dokumenty"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject SiteSettingsService Settings
+@inject LegalService Legal
+@rendermode InteractiveServer
+@using K = PTScheduler.Portal.Services.SiteSettingsService.Keys
+
+@* Regulamin, polityka prywatności i umowa powierzenia: dane firmy wstawiane do treści, podgląd i historia akceptacji. *@
+
+<PageTitle>Dokumenty prawne — PTScheduler Portal</PageTitle>
+
+<PanelHeader Title="Dokumenty prawne" Icon="bi-file-earmark-text" IconClass="pp-tone-info"
+             Subtitle="Regulamin, umowa powierzenia danych i polityka prywatności — publiczne, do druku, akceptowane przez trenerów w kreatorze i w aplikacji." />
+
+@if (_company is { Complete: false })
+{
+    <div class="alert alert-warning small"><i class="bi bi-exclamation-triangle me-1"></i>Uzupełnij dane firmy — dopóki ich brakuje, dokumenty pokazują żółte pola „[do uzupełnienia]”, a umowa z trenerem nie wskazuje usługodawcy.</div>
+}
+@if (_saved)
+{
+    <div class="alert alert-success py-2 small">Zapisane — dokumenty od razu pokazują nowe dane.</div>
+}
+
+<div class="row g-3">
+    <div class="col-lg-7">
+        <section class="card border-0 shadow-sm h-100">
+            <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-building"></i></span>Dane usługodawcy</div>
+            <div class="card-body">
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <label class="form-label small fw-semibold">Nazwa marki</label>
+                        <input class="form-control" @bind="_brand" maxlength="60" placeholder="PTScheduler" />
+                        <div class="form-text small">Np. Trenzo po zmianie nazwy.</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small fw-semibold">E-mail do spraw umowy i danych</label>
+                        <input class="form-control" type="email" @bind="_email" maxlength="120" placeholder="kontakt@twojadomena.pl" />
+                    </div>
+                    <div class="col-12">
+                        <label class="form-label small fw-semibold">Firma (pełna nazwa z CEIDG/KRS)</label>
+                        <input class="form-control" @bind="_name" maxlength="200" placeholder="np. Jan Kowalski prowadzący działalność gospodarczą pod firmą …" />
+                    </div>
+                    <div class="col-md-8">
+                        <label class="form-label small fw-semibold">Adres siedziby</label>
+                        <input class="form-control" @bind="_address" maxlength="200" placeholder="ul. Przykładowa 1, 00-000 Miasto" />
+                    </div>
+                    <div class="col-md-4">
+                        <label class="form-label small fw-semibold">NIP</label>
+                        <input class="form-control" @bind="_nip" maxlength="20" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small fw-semibold">Dostawca serwerów</label>
+                        <input class="form-control" @bind="_hosting" maxlength="200" placeholder="np. OVH sp. z o.o. (Polska)" />
+                        <div class="form-text small">Firma, u której stoi serwer — trafia do listy podmiotów przetwarzających.</div>
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small fw-semibold">Dostawca wysyłki e-maili</label>
+                        <input class="form-control" @bind="_mail" maxlength="200" placeholder="np. dostawca skrzynki SMTP" />
+                        <div class="form-text small">Firma obsługująca serwer SMTP z Ustawień.</div>
+                    </div>
+                    <div class="col-12">
+                        <button class="btn btn-primary btn-sm" @onclick="SaveAsync"><i class="bi bi-check-lg me-1"></i>Zapisz</button>
+                    </div>
+                </div>
+            </div>
+        </section>
+    </div>
+    <div class="col-lg-5">
+        <section class="card border-0 shadow-sm h-100">
+            <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-files"></i></span>Dokumenty</div>
+            <ul class="list-group list-group-flush">
+                @foreach (var d in LegalService.Docs)
+                {
+                    var count = _accepted.GetValueOrDefault(d.Key);
+                    <li class="list-group-item d-flex justify-content-between align-items-center gap-2">
+                        <div>
+                            <div class="fw-semibold">@d.Title</div>
+                            <small class="text-muted">wersja @d.Version · @count @(count == 1 ? "trener zaakceptował" : "trenerów zaakceptowało")</small>
+                        </div>
+                        <a class="btn btn-sm btn-outline-secondary" href="@d.Path" target="_blank" rel="noopener" title="Otwórz, wydrukuj albo zapisz PDF"><i class="bi bi-printer"></i></a>
+                    </li>
+                }
+            </ul>
+            <div class="card-body small text-muted">
+                <p class="mb-2">Każda zmiana treści to nowa wersja (stała <code>Version</code> w LegalService). Po wdrożeniu nowej wersji właściciele aplikacji akceptują ją przy kolejnym wejściu — przedtem wyślij im informację o zmianie (14 dni wcześniej, konsumentom 30).</p>
+                <p class="mb-0">Trenerzy, którym aplikację zbudowano z Panelu, akceptują dokumenty przy pierwszym logowaniu.</p>
+            </div>
+        </section>
+    </div>
+</div>
+
+<section class="card border-0 shadow-sm mt-3">
+    <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-clock-history"></i></span>Ostatnie akceptacje</div>
+    @if (_recent.Count == 0)
+    {
+        <div class="card-body"><div class="pp-empty"><i class="bi bi-file-earmark-check"></i>Jeszcze nikt nie zaakceptował dokumentów.</div></div>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-sm align-middle mb-0">
+                <thead><tr><th>Kiedy</th><th>Trener</th><th>Dokument</th><th>Skąd</th><th>IP</th></tr></thead>
+                <tbody>
+                    @foreach (var a in _recent)
+                    {
+                        <tr>
+                            <td class="text-nowrap small">@a.AcceptedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</td>
+                            <td class="small">@if (a.TenantId is { } tid && _slugs.TryGetValue(tid, out var slug)) { <a href="/panel/tenants/@tid">@slug</a> } <span class="text-muted">@a.Email</span></td>
+                            <td class="small">@(LegalService.Docs.FirstOrDefault(d => d.Key == a.DocKey)?.Title ?? a.DocKey) <span class="text-muted">· @a.Version</span></td>
+                            <td class="small">@a.Source</td>
+                            <td class="small font-monospace text-muted">@a.Ip</td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@code {
+    private LegalService.Company? _company;
+    private string _brand = "", _name = "", _address = "", _nip = "", _email = "", _hosting = "", _mail = "";
+    private bool _saved;
+    private Dictionary<string, int> _accepted = new();
+    private List<LegalAcceptance> _recent = [];
+    private Dictionary<int, string> _slugs = new();
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadCompanyAsync();
+        await using var db = await DbFactory.CreateDbContextAsync();
+        foreach (var d in LegalService.Docs)
+            _accepted[d.Key] = await db.LegalAcceptances.Where(a => a.DocKey == d.Key && a.Version == d.Version && a.TenantId != null)
+                .Select(a => a.TenantId).Distinct().CountAsync();
+        _recent = await db.LegalAcceptances.AsNoTracking().OrderByDescending(a => a.AcceptedAt).Take(50).ToListAsync();
+        var ids = _recent.Where(a => a.TenantId != null).Select(a => a.TenantId!.Value).Distinct().ToList();
+        _slugs = await db.Tenants.AsNoTracking().Where(t => ids.Contains(t.Id)).ToDictionaryAsync(t => t.Id, t => t.Slug);
+    }
+
+    private async Task LoadCompanyAsync()
+    {
+        _company = await Legal.CompanyAsync();
+        var raw = await Settings.GetAllAsync(K.BrandName);
+        (_brand, _name, _address, _nip, _email, _hosting, _mail) =
+            (raw[K.BrandName], _company.Name, _company.Address, _company.Nip, _company.Email, _company.Hosting, _company.Mail);
+    }
+
+    private async Task SaveAsync()
+    {
+        await Settings.SetManyAsync(new Dictionary<string, string>
+        {
+            [K.BrandName] = _brand.Trim(),
+            [K.LegalCompany] = _name.Trim(),
+            [K.LegalAddress] = _address.Trim(),
+            [K.LegalNip] = _nip.Trim(),
+            [K.LegalEmail] = _email.Trim(),
+            [K.LegalHosting] = _hosting.Trim(),
+            [K.LegalMail] = _mail.Trim(),
+        });
+        await LoadCompanyAsync();
+        _saved = true;
+    }
+}

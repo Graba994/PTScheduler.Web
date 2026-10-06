@@ -1,0 +1,236 @@
+@* „Centrum studia” — dashboard administratora. Konto techniczne (Root) widzi dodatkowo sekcję „Technika”. *@
+@using System.Globalization
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Web.Components.Layout
+@using PTScheduler.Web.Services
+@inject AdminDashboardService Dashboard
+@inject AccountSwitchService Switcher
+@inject SetupGuide Guide
+@inject EntitlementService Entitlements
+@inject AuthenticationStateProvider AuthState
+@inject PTScheduler.Application.Interfaces.IPermissionService Permissions
+
+@if (_data is null)
+{
+    <div class="d-flex justify-content-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <div class="page-header">
+        <div>
+            <h4 class="page-title"><i class="bi bi-buildings me-2" style="color:var(--c-primary)"></i>Centrum studia</h4>
+            <p class="text-muted small mb-0">@StudioClock.Now.ToString("dddd, d MMMM", Pl) · tak wygląda Twoje studio w tym tygodniu</p>
+        </div>
+        <div class="d-flex gap-2 flex-wrap">
+            @if (_canSwitch)
+            {
+                <a href="/switch-account" class="btn btn-sm btn-primary"><i class="bi bi-people me-1"></i>Przełącz konto</a>
+            }
+            <a href="/admin" class="btn btn-sm btn-outline-primary"><i class="bi bi-sliders me-1"></i>Zarządzanie</a>
+        </div>
+    </div>
+
+    <WelcomeBanner />
+
+    <UpsellStrip />
+    <OffPackageAlerts />
+
+    @if (_setup is { Steps.Count: > 0, AllDone: false })
+    {
+        var next = _setup.Steps.First(s => !s.Done);
+        var pct = _setup.DoneCount * 100 / _setup.Steps.Count;
+        <div class="ad-setup">
+            <div class="ad-setup-ring" style="--p:@pct"><span>@_setup.DoneCount/@_setup.Steps.Count</span></div>
+            <div class="min-w-0 flex-grow-1">
+                <div class="fw-semibold">Pierwsze kroki</div>
+                <div class="small text-muted">Następny: <b>@next.Title</b> — @next.Hint</div>
+            </div>
+            <a href="@next.Href" class="btn btn-sm btn-primary">Zrób to teraz <i class="bi bi-arrow-right"></i></a>
+        </div>
+    }
+
+    <div class="ad-kpis">
+        <a href="/clients" class="ad-kpi">
+            <span class="ad-kpi-ic"><i class="bi bi-people-fill"></i></span>
+            <span class="ad-kpi-val">@_data.ActiveClients</span>
+            <span class="ad-kpi-lab">aktywnych klientów</span>
+            <span class="ad-kpi-sub @(_data.NewClients30 > 0 ? "up" : "")">@(_data.NewClients30 > 0 ? $"+{_data.NewClients30} w 30 dni" : "brak nowych w 30 dni")</span>
+        </a>
+        <a href="/calendar" class="ad-kpi">
+            <span class="ad-kpi-ic green"><i class="bi bi-calendar-check-fill"></i></span>
+            <span class="ad-kpi-val">@_data.WeekDone<small>/@_data.WeekPlanned</small></span>
+            <span class="ad-kpi-lab">wizyt w tym tygodniu</span>
+            <span class="ad-kpi-sub">dziś: @_data.TodayCount</span>
+        </a>
+        @if (Entitlements.IsAllowed("FinancialReports"))
+        {
+            var trend = _data.PackagesValuePrevMonth > 0 ? (int)Math.Round((_data.PackagesValueMonth - _data.PackagesValuePrevMonth) * 100 / _data.PackagesValuePrevMonth) : (int?)null;
+            <a href="/finance" class="ad-kpi">
+                <span class="ad-kpi-ic amber"><i class="bi bi-box-seam-fill"></i></span>
+                <span class="ad-kpi-val">@Money(_data.PackagesValueMonth)</span>
+                <span class="ad-kpi-lab">sprzedane pakiety (@_data.PackagesSoldMonth) w tym miesiącu</span>
+                <span class="ad-kpi-sub @(trend >= 0 ? "up" : trend < 0 ? "down" : "")">@(trend is null ? "pierwszy miesiąc sprzedaży" : $"{(trend >= 0 ? "+" : "")}{trend}% do poprzedniego")</span>
+            </a>
+        }
+        else
+        {
+            <a href="/clients" class="ad-kpi">
+                <span class="ad-kpi-ic amber"><i class="bi bi-hourglass-split"></i></span>
+                <span class="ad-kpi-val">@_data.PendingClients</span>
+                <span class="ad-kpi-lab">oczekuje na zatwierdzenie</span>
+                <span class="ad-kpi-sub">nowe zgłoszenia klientów</span>
+            </a>
+        }
+        <a href="@(Entitlements.IsAllowed("PaymentsEnabled") ? "/admin/payments" : "/admin/upgrade")" class="ad-kpi">
+            <span class="ad-kpi-ic violet"><i class="bi bi-credit-card-fill"></i></span>
+            <span class="ad-kpi-val">@Money(_data.OnlineRevenueMonth)</span>
+            <span class="ad-kpi-lab">płatności online w tym miesiącu</span>
+            <span class="ad-kpi-sub">BLIK, karta, przelew</span>
+        </a>
+    </div>
+
+    <div class="row g-3 mb-3">
+        <div class="col-12 col-lg-7">
+            <div class="card h-100">
+                <div class="card-header d-flex align-items-center justify-content-between">
+                    <span><i class="bi bi-people me-2"></i>Zespół w tym tygodniu</span>
+                    <a href="/admin/users" class="small">Konta <i class="bi bi-arrow-right"></i></a>
+                </div>
+                <div class="card-body p-0">
+                    @if (_data.Team.Count == 0)
+                    {
+                        <div class="text-center py-4 px-3">
+                            <i class="bi bi-person-badge" style="font-size:1.8rem;color:var(--c-primary)"></i>
+                            <div class="fw-semibold mt-2">Nie ma jeszcze profilu trenera</div>
+                            <p class="small text-muted mb-2">Utwórz swój profil trenera — na nim prowadzisz treningi i przyjmujesz zapisy.</p>
+                            <a href="/admin/users" class="btn btn-sm btn-primary"><i class="bi bi-person-plus me-1"></i>Utwórz profil trenera</a>
+                        </div>
+                    }
+                    else
+                    {
+                        var max = Math.Max(1, _data.Team.Max(t => t.WeekPlanned));
+                        @foreach (var t in _data.Team)
+                        {
+                            <div class="ad-team">
+                                <div class="ad-av">@Initials(t.Name)</div>
+                                <div class="min-w-0 flex-grow-1">
+                                    <div class="d-flex justify-content-between gap-2">
+                                        <span class="fw-semibold text-truncate">@t.Name</span>
+                                        <span class="small text-muted text-nowrap">@t.WeekDone / @t.WeekPlanned wizyt</span>
+                                    </div>
+                                    <div class="ad-bar"><span style="width:@(t.WeekPlanned * 100 / max)%"></span><i style="width:@(t.WeekDone * 100 / max)%"></i></div>
+                                    <div class="small text-muted">@AccountSwitchService.RoleLabel(t.Role)@(t.Next is { } n ? $" · następna: {n.ToString("ddd d.MM, HH:mm", Pl)}" : " · brak zaplanowanych")</div>
+                                </div>
+                                @if (_canSwitch)
+                                {
+                                    <form action="Account/SwitchTo" method="post" class="m-0">
+                                        <AntiforgeryToken />
+                                        <input type="hidden" name="userId" value="@t.Id" />
+                                        <button type="submit" class="btn btn-sm btn-outline-primary" title="Przełącz na to konto"><i class="bi bi-box-arrow-in-right"></i><span class="d-none d-md-inline ms-1">Przełącz</span></button>
+                                    </form>
+                                }
+                            </div>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-lg-5">
+            <div class="card h-100">
+                <div class="card-header"><i class="bi bi-bell me-2"></i>Wymaga uwagi</div>
+                <div class="card-body p-0">
+                    @if (_data.Attention.Count == 0)
+                    {
+                        <div class="text-center py-4">
+                            <i class="bi bi-check2-circle" style="font-size:1.8rem;color:var(--c-success)"></i>
+                            <div class="fw-semibold mt-2">Wszystko ogarnięte</div>
+                            <div class="small text-muted">Nic nie czeka na Twoją decyzję.</div>
+                        </div>
+                    }
+                    else
+                    {
+                        @foreach (var a in _data.Attention)
+                        {
+                            <a href="@a.Href" class="ad-att ad-att-@a.Tone">
+                                <i class="bi @a.Icon"></i><span>@a.Text</span><i class="bi bi-chevron-right ms-auto"></i>
+                            </a>
+                        }
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div class="ad-links">
+        <a href="/clients"><i class="bi bi-people-fill"></i>Klienci</a>
+        <a href="/calendar"><i class="bi bi-calendar3"></i>Kalendarz</a>
+        <a href="/admin/site"><i class="bi bi-globe"></i>Twoja strona</a>
+        <a href="/admin/package-offers"><i class="bi bi-box-seam"></i>Pakiety</a>
+        <a href="/admin/users"><i class="bi bi-person-gear"></i>Użytkownicy</a>
+        <a href="/admin/branding"><i class="bi bi-palette"></i>Wygląd</a>
+    </div>
+
+    @if (_tech is not null)
+    {
+        <div class="card ad-tech mt-3">
+            <div class="card-header d-flex align-items-center justify-content-between">
+                <span><i class="bi bi-tools me-2"></i>Technika <span class="badge bg-dark ms-1">tylko konto techniczne</span></span>
+            </div>
+            <div class="card-body">
+                <div class="ad-facts">
+                    <div><small>Wersja aplikacji</small><b>@_tech.Version</b></div>
+                    <div><small>Instalacja</small><b>@(_tech.Managed ? $"Portal · {_tech.Slug}" : "Samodzielna")</b></div>
+                    <div><small>Plan</small><b>@_tech.PlanName</b><span>@(_tech.MaxClients == int.MaxValue ? "klienci bez limitu" : $"klienci {_data.ActiveClients}/{_tech.MaxClients}")</span></div>
+                    <div><small>Konta</small><b>@_tech.Users</b><span>@RolesSummary()</span></div>
+                    <div><small>Historia zmian (7 dni)</small><b class="@(_tech.AuditWarnings7d > 0 ? "text-warning" : "")">@_tech.AuditWarnings7d ostrzeżeń</b><span>@(_tech.LastAuditAt is { } l ? $"ostatnie zdarzenie {l.ToLocalTime():dd.MM HH:mm}" : "brak zdarzeń")</span></div>
+                    <div><small>Przełączanie kont</small><b>@(_tech.SwitchingEnabled ? "Włączone" : "Wyłączone")</b><span>ACCOUNT_SWITCHING_ENABLED</span></div>
+                </div>
+                <div class="ad-links ad-links-tech">
+                    <a href="/admin/backup"><i class="bi bi-archive"></i>Kopie zapasowe</a>
+                    @if (!_tech.Managed) { <a href="/admin/settings"><i class="bi bi-database"></i>Baza danych</a> }
+                    <a href="/admin/demo"><i class="bi bi-database-gear"></i>Dane demo i reset</a>
+                    <a href="/admin/audit-logs"><i class="bi bi-journal-text"></i>Historia zmian</a>
+                    <a href="/switch-account"><i class="bi bi-people"></i>Testuj jako klient</a>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+@code {
+    private static readonly CultureInfo Pl = new("pl-PL");
+
+    private AdminOverview? _data;
+    private TechInfo? _tech;
+    private SetupState? _setup;
+    private bool _canSwitch;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        _canSwitch = await Switcher.CanUseAsync(user);
+        var access = await AdminAccess.LoadAsync(AuthState, Permissions);
+        var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _setup = await Guide.GetAsync(userId, access);
+        if (user.IsInRole(Roles.Root))
+            _tech = await Dashboard.GetTechAsync();
+        _data = await Dashboard.GetOverviewAsync();
+    }
+
+    private static string Money(decimal v) => v.ToString("#,0 zł", Pl);
+
+    private string RolesSummary()
+    {
+        var r = _data!.UsersByRole;
+        int C(string k) => r.GetValueOrDefault(k);
+        return $"admin {C(Roles.Admin)} · trenerzy {C(Roles.Trainer)} · asystenci {C(Roles.Subordinate)} · klienci {C(Roles.Client)}";
+    }
+
+    private static string Initials(string name)
+    {
+        var parts = name.Split(' ', '@', '.').Where(p => p.Length > 0).ToArray();
+        return parts.Length >= 2 ? $"{parts[0][0]}{parts[1][0]}".ToUpperInvariant()
+            : parts.Length == 1 ? parts[0][0].ToString().ToUpperInvariant() : "?";
+    }
+}

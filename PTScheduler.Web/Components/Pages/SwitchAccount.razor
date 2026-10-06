@@ -1,0 +1,145 @@
+@page "/switch-account"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize]
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Web.Services
+@inject AccountSwitchService Switcher
+
+<AppTitle Page="Przełącz konto" />
+
+<div class="sw-page">
+    <div class="page-header">
+        <div>
+            <h4 class="page-title"><i class="bi bi-people me-2" style="color:var(--c-primary)"></i>Przełącz konto</h4>
+            <p class="text-muted small mb-0">
+                @if (_isRoot)
+                {
+                    <text>Konto techniczne: wejdź na dowolne konto i zobacz aplikację oczami trenera, asystenta albo klienta. Bez hasła, powrót jednym kliknięciem.</text>
+                }
+                else
+                {
+                    <text>Przejdź na profil trenera bez wpisywania hasła. Na nim prowadzisz treningi, a do ustawień wracasz jednym kliknięciem.</text>
+                }
+            </p>
+        </div>
+    </div>
+
+    @if (!string.IsNullOrEmpty(Error))
+    {
+        <div class="alert alert-danger py-2 small"><i class="bi bi-exclamation-triangle me-1"></i>@Error</div>
+    }
+
+    @if (!_allowed)
+    {
+        <div class="card"><div class="card-body text-center py-5">
+            <i class="bi bi-lock" style="font-size:2rem;color:var(--c-text-muted)"></i>
+            <h6 class="mt-2">Przełączanie kont jest dostępne dla administratora</h6>
+            <p class="text-muted small mb-0">@(Switcher.Enabled ? "Twoje konto nie może przełączać się na inne." : "Ta funkcja została wyłączona w tej instalacji.")</p>
+        </div></div>
+    }
+    else
+    {
+        @if (_switchedFrom is not null)
+        {
+            <div class="sw-current">
+                <div class="sw-av sw-av-lg">@Initials(_currentName)</div>
+                <div class="min-w-0 flex-grow-1">
+                    <div class="small text-muted">Teraz jesteś na koncie</div>
+                    <div class="fw-semibold text-truncate">@_currentName</div>
+                </div>
+                <form action="Account/SwitchBack" method="post">
+                    <AntiforgeryToken />
+                    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-arrow-return-left me-1"></i>Wróć do: @_switchedFrom</button>
+                </form>
+            </div>
+        }
+
+        @if (_candidates.Count == 0)
+        {
+            <div class="card"><div class="card-body text-center py-5">
+                <i class="bi bi-person-plus" style="font-size:2rem;color:var(--c-primary)"></i>
+                <h6 class="mt-2">Nie ma jeszcze kont, na które można się przełączyć</h6>
+                <p class="text-muted small">Utwórz profil trenera — z innym adresem e-mail niż konto administratora.</p>
+                <a href="/admin/users" class="btn btn-primary btn-sm"><i class="bi bi-person-plus me-1"></i>Utwórz profil trenera</a>
+            </div></div>
+        }
+        else
+        {
+            <div data-filter>
+                @if (_candidates.Count > 6)
+                {
+                    <div class="ss-box sw-search">
+                        <i class="bi bi-search"></i>
+                        <input type="search" placeholder="Szukaj po imieniu, nazwisku albo e-mailu…" aria-label="Szukaj konta" autocomplete="off"
+                               oninput="PTListFilter(this)" />
+                    </div>
+                }
+                @foreach (var group in _candidates.GroupBy(c => c.Role))
+                {
+                    <section class="sw-group" data-filter-group>
+                        <h6 class="sw-group-title">@GroupTitle(group.Key) <span>@group.Count()</span></h6>
+                        <div class="sw-grid">
+                            @foreach (var c in group)
+                            {
+                                <form action="Account/SwitchTo" method="post" class="sw-card" data-filter-item
+                                      data-text="@PTScheduler.Web.Components.Layout.AdminMenu.Normalize($"{c.Name} {c.Email}")">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="userId" value="@c.Id" />
+                                    <div class="sw-av">@Initials(c.Name)</div>
+                                    <div class="min-w-0 flex-grow-1">
+                                        <div class="fw-semibold text-truncate">@c.Name</div>
+                                        <div class="small text-muted text-truncate">@c.Email</div>
+                                    </div>
+                                    <button type="submit" class="btn btn-sm btn-outline-primary sw-go">Przełącz <i class="bi bi-arrow-right"></i></button>
+                                </form>
+                            }
+                        </div>
+                    </section>
+                }
+                <div class="ss-empty" data-filter-empty hidden>Nie znaleziono takiego konta.</div>
+            </div>
+        }
+
+        <p class="sw-note"><i class="bi bi-shield-check me-1"></i>Każde przełączenie zapisuje się w historii zmian.</p>
+    }
+</div>
+
+@code {
+    [CascadingParameter] private HttpContext HttpContext { get; set; } = default!;
+    [SupplyParameterFromQuery] public string? Error { get; set; }
+
+    private bool _allowed;
+    private bool _isRoot;
+    private string? _switchedFrom;
+    private string _currentName = "";
+    private List<SwitchCandidate> _candidates = [];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = HttpContext.User;
+        _allowed = await Switcher.CanUseAsync(user);
+        if (!_allowed) return;
+
+        _isRoot = await Switcher.IsRootAsync(user);
+        if (AccountSwitchService.IsSwitched(user))
+        {
+            _switchedFrom = (await Switcher.GetActorAsync(user))?.Email;
+            _currentName = user.Identity?.Name ?? "";
+        }
+        _candidates = await Switcher.GetCandidatesAsync(user);
+    }
+
+    private static string GroupTitle(string role) => role switch
+    {
+        Roles.Admin => "Administrator studia",
+        Roles.Trainer => "Trenerzy",
+        Roles.Subordinate => "Asystenci trenera",
+        _ => "Klienci"
+    };
+
+    private static string Initials(string name)
+    {
+        var parts = name.Split(' ', '@', '.').Where(p => p.Length > 0).ToArray();
+        return parts.Length >= 2 ? $"{parts[0][0]}{parts[1][0]}".ToUpperInvariant()
+            : parts.Length == 1 ? parts[0][0].ToString().ToUpperInvariant() : "?";
+    }
+}

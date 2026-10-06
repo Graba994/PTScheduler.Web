@@ -1,0 +1,163 @@
+@implements IAsyncDisposable
+@inject PanelStatusService Status
+@inject NpmHealthService NpmHealth
+
+@* Pasek statusu nad panelem — jak pasek telefonu: zegar po lewej, najważniejsze stany po prawej.
+   Pokazujemy tylko to, co mówi „czy wszystko działa?” albo wymaga reakcji; reszta jest na Pulpicie. *@
+<div class="sb" role="status" aria-label="Stan platformy">
+    <span class="sb-clock" data-pt-clock aria-hidden="true"></span>
+
+    <div class="sb-items">
+        @if (_s is null)
+        {
+            <span class="sb-item sb-muted"><span class="spinner-border spinner-border-sm"></span></span>
+        }
+        else
+        {
+            @* 1. Czy instancje trenerów działają — najważniejsze *@
+            @if (_s.DownTenants > 0)
+            {
+                <a class="sb-item sb-danger" href="/panel/tenants?filtr=down" title="Instancje, które nie odpowiadają — kliknij, żeby zobaczyć które">
+                    <i class="bi bi-heart-pulse-fill"></i>@_s.DownTenants nie odpowiada
+                </a>
+            }
+            else
+            {
+                <a class="sb-item sb-ok" href="/panel/tenants" title="Aktywne instancje trenerów — wszystkie odpowiadają">
+                    <i class="bi bi-heart-fill"></i>@_s.ActiveTenants/@_s.ActiveTenants
+                </a>
+            }
+
+            @* 1b. HTTPS domen trenerów (certyfikaty w NPM) *@
+            @if (NpmHealth.Current?.Problems is { Count: > 0 } httpsProblems)
+            {
+                <a class="sb-item sb-danger" href="/panel/npm" title='@($"Domeny bez działającego HTTPS — {string.Join(", ", httpsProblems.Select(x => $"{x.Domain}: {NpmHealthService.Label(x.State, x.DaysLeft)}"))}")'>
+                    <i class="bi bi-unlock-fill"></i>@httpsProblems.Count <span class="sb-label">bez HTTPS</span>
+                </a>
+            }
+
+            @* 2. Co czeka na Twoją decyzję *@
+            @if (_s.PendingRegistrations > 0)
+            {
+                <a class="sb-item sb-warn" href="/panel/tenants?filtr=pending" title="Nowi trenerzy czekają na akceptację">
+                    <i class="bi bi-person-plus-fill"></i>@_s.PendingRegistrations <span class="sb-label">@PanelUi.Plural(_s.PendingRegistrations, "zgłoszenie", "zgłoszenia", "zgłoszeń")</span>
+                </a>
+            }
+            @if (_s.PendingOrders > 0)
+            {
+                <a class="sb-item sb-warn" href="/panel/orders" title="Zamówienia usług czekają na akceptację">
+                    <i class="bi bi-bag-fill"></i>@_s.PendingOrders <span class="sb-label">@PanelUi.Plural(_s.PendingOrders, "zamówienie", "zamówienia", "zamówień")</span>
+                </a>
+            }
+
+            @* 3. Nowa wersja *@
+            @if (_s.UpdateAvailable)
+            {
+                <a class="sb-item sb-info" href="/panel/updates" title="Dostępna nowa wersja @_s.UpdateCommit">
+                    <i class="bi bi-cloud-arrow-down-fill"></i><span class="sb-label">aktualizacja</span>
+                </a>
+            }
+
+            @* 4. Kopie zapasowe *@
+            <a class="sb-item sb-@BackupTone" href="/panel/backups" title="@BackupTitle">
+                <i class="bi @(_s.BackupRunning ? "bi-arrow-repeat" : "bi-hdd-stack-fill")"></i><span class="sb-label">@BackupText</span>
+            </a>
+
+            @* 5. Bezpieczeństwo — tylko gdy coś się dzieje *@
+            @if (_s.FailedLogins24h > 0)
+            {
+                <a class="sb-item sb-@(_s.FailedLogins24h >= 10 ? "danger" : "warn")" href="/panel/login-logs" title="Nieudane logowania do Portalu w ostatnich 24 godzinach">
+                    <i class="bi bi-shield-exclamation"></i>@_s.FailedLogins24h
+                </a>
+            }
+
+            @* 6. Serwer — tylko gdy Portal nie widzi Dockera *@
+            @if (!_s.DockerReachable)
+            {
+                <a class="sb-item sb-danger" href="/panel/resources" title="Portal nie widzi Dockera — nie zarządzi kontenerami">
+                    <i class="bi bi-plug-fill"></i><span class="sb-label">Docker</span>
+                </a>
+            }
+
+            @* 7. Pieniądze dziś *@
+            <a class="sb-item sb-@(_s.PaymentsFailedToday > 0 ? "warn" : _s.PaidToday > 0 ? "ok" : "muted")" href="/panel/finances"
+               title="@($"Wpłaty dzisiaj{(_s.PaymentsFailedToday > 0 ? $" · nieudane: {_s.PaymentsFailedToday}" : "")}")">
+                <i class="bi bi-cash-coin"></i>@(_s.PaidToday > 0 ? $"+{_s.PaidToday:0} zł" : "0 zł")
+            </a>
+        }
+    </div>
+</div>
+
+@code {
+    private PanelStatusService.Snapshot? _s;
+    private PeriodicTimer? _timer;
+    private CancellationTokenSource? _cts;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _s = await Status.GetAsync(); } catch { /* pasek nie może zepsuć strony */ }
+    }
+
+    protected override void OnAfterRender(bool firstRender)
+    {
+        if (!firstRender) return;
+        _cts = new CancellationTokenSource();
+        _timer = new PeriodicTimer(TimeSpan.FromSeconds(45));
+        _ = RefreshLoopAsync(_cts.Token);
+        NpmHealth.Changed += OnNpmChanged;
+    }
+
+    private void OnNpmChanged() => _ = InvokeAsync(StateHasChanged);
+
+    private async Task RefreshLoopAsync(CancellationToken ct)
+    {
+        try
+        {
+            while (await _timer!.WaitForNextTickAsync(ct))
+            {
+                try { _s = await Status.GetAsync(); await InvokeAsync(StateHasChanged); }
+                catch (Exception) when (!ct.IsCancellationRequested) { /* spróbujemy przy następnym tyknięciu */ }
+            }
+        }
+        catch (OperationCanceledException) { }
+    }
+
+    private string BackupTone => _s switch
+    {
+        { BackupRunning: true } => "info",
+        { LastBackupFailed: true } => "danger",
+        { LastBackupAt: null } => "muted",
+        { LastBackupAt: { } at } when DateTime.UtcNow - at > TimeSpan.FromHours(26) => "warn",
+        _ => "ok"
+    };
+
+    private string BackupText => _s switch
+    {
+        { BackupRunning: true } => "kopia w toku",
+        { LastBackupFailed: true } => "kopia: błąd",
+        { LastBackupAt: null } => "brak kopii",
+        { LastBackupAt: { } at } => $"kopia {Ago(at)}",
+        _ => ""
+    };
+
+    private string BackupTitle => _s?.LastBackupAt is { } at
+        ? $"Ostatnia udana kopia: {at.ToLocalTime():dd.MM.yyyy HH:mm}{(_s.LastBackupFailed ? " — ostatnia próba się nie udała" : "")}"
+        : "Nie ma jeszcze żadnej udanej kopii zapasowej";
+
+    private static string Ago(DateTime utc)
+    {
+        var d = DateTime.UtcNow - utc;
+        return d.TotalMinutes < 60 ? $"{Math.Max(1, (int)d.TotalMinutes)} min temu"
+            : d.TotalHours < 24 ? $"{(int)d.TotalHours} h temu"
+            : $"{(int)d.TotalDays} d temu";
+    }
+
+    public ValueTask DisposeAsync()
+    {
+        NpmHealth.Changed -= OnNpmChanged;
+        _cts?.Cancel();
+        _timer?.Dispose();
+        _cts?.Dispose();
+        return ValueTask.CompletedTask;
+    }
+}

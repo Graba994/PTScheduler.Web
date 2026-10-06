@@ -1,0 +1,180 @@
+@page "/panel/invites"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject RegistrationGateService Gates
+@inject NavigationManager Nav
+@inject InviteService InviteSvc
+@rendermode InteractiveServer
+
+<PageTitle>Kody zaproszeń — PTScheduler Portal</PageTitle>
+
+<PanelHeader Title="Kody zaproszeń" Icon="bi-ticket-perforated" IconClass="pp-tone-info"
+             Subtitle="Z kodem aplikacja trenera uruchamia się od razu po podpięciu karty — także przy trybie akceptacji i po wyczerpaniu dziennego limitu. Kod może też wydłużyć okres próbny." />
+
+@if (_message is not null)
+{
+    <div class="alert @(_msgError ? "alert-danger" : "alert-success") alert-dismissible py-2 small">
+        @_message
+        <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button>
+    </div>
+}
+
+<section class="card border-0 shadow-sm mb-3">
+    <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-plus-lg"></i></span>Nowy kod</div>
+    <div class="card-body">
+        <div class="row g-2 align-items-end">
+            <div class="col-md-3">
+                <label class="form-label small fw-semibold">Kod</label>
+                <input class="form-control font-monospace text-uppercase" @bind="_code" maxlength="40" placeholder="np. SZKOLA-XYZ" />
+                <div class="form-text small">Puste = wygenerujemy.</div>
+            </div>
+            <div class="col-md-3">
+                <label class="form-label small fw-semibold">Dla kogo / skąd</label>
+                <input class="form-control" @bind="_note" maxlength="120" placeholder="np. akcja Instagram, wrzesień" />
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label small fw-semibold">Liczba użyć</label>
+                <input type="number" min="0" class="form-control" @bind="_maxUses" />
+                <div class="form-text small">0 = bez limitu</div>
+            </div>
+            <div class="col-6 col-md-2">
+                <label class="form-label small fw-semibold">+ dni próbnych</label>
+                <input type="number" min="0" max="180" class="form-control" @bind="_extraDays" />
+            </div>
+            <div class="col-md-2">
+                <label class="form-label small fw-semibold">Ważny do</label>
+                <input type="date" class="form-control" @bind="_expires" />
+            </div>
+            <div class="col-12 d-flex flex-wrap gap-2">
+                <button class="btn btn-primary btn-sm" @onclick="CreateAsync"><i class="bi bi-plus-lg me-1"></i>Utwórz kod</button>
+                <button class="btn btn-outline-primary btn-sm" @onclick="QuickThreeMonthsAsync" title="Jednorazowy kod: okres próbny + @InviteService.ThreeMonthsExtraDays dni ≈ 3 miesiące za darmo">
+                    <i class="bi bi-qr-code me-1"></i>Szybki kod: 3 miesiące gratis
+                </button>
+            </div>
+        </div>
+    </div>
+</section>
+
+<section class="card border-0 shadow-sm mb-3">
+    <div class="card-header pp-card-header d-flex justify-content-between align-items-center flex-wrap gap-2">
+        <span><span class="pp-icon pp-icon-sm"><i class="bi bi-list-ul"></i></span>Kody</span>
+        <span class="small text-muted">Dzisiaj uruchomiło się samo: <b>@_today</b> z limitu <b>@_limit</b></span>
+    </div>
+    @if (_codes.Count == 0)
+    {
+        <p class="text-muted small p-3 mb-0">Nie ma jeszcze kodów. Utwórz pierwszy dla partnera, szkoły trenerów albo akcji w mediach społecznościowych.</p>
+    }
+    else
+    {
+        <div class="table-responsive">
+            <table class="table table-hover small align-middle mb-0 pp-table-cards">
+                <thead class="table-light"><tr><th>Kod</th><th>Dla kogo</th><th>Użycia</th><th>+ dni</th><th>Ważny do</th><th>Link</th><th></th></tr></thead>
+                <tbody>
+                    @foreach (var c in _codes)
+                    {
+                        var usable = c.IsUsable(DateTime.UtcNow);
+                        <tr class="@(usable ? "" : "text-muted")">
+                            <td data-label="Kod" class="font-monospace fw-semibold">@c.Code</td>
+                            <td data-label="Dla kogo">@(c.Note ?? "—")</td>
+                            <td data-label="Użycia">@c.Uses@(c.MaxUses > 0 ? $" / {c.MaxUses}" : " / ∞")</td>
+                            <td data-label="+ dni">@(c.ExtraTrialDays > 0 ? $"+{c.ExtraTrialDays}" : "—")</td>
+                            <td data-label="Ważny do">@(c.ExpiresAt?.ToLocalTime().ToString("dd.MM.yyyy") ?? "bezterminowo")</td>
+                            <td data-label="Link"><code class="small">@LinkFor(c)</code></td>
+                            <td class="text-end text-nowrap">
+                                @if (usable)
+                                {
+                                    <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => _share = c" title="Kod QR, link i wysyłka e-mailem"><i class="bi bi-qr-code me-1"></i>Udostępnij</button>
+                                }
+                                @if (c.IsActive)
+                                {
+                                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => ToggleAsync(c.Id, false)">Wyłącz</button>
+                                }
+                                else
+                                {
+                                    <button class="btn btn-sm btn-outline-primary" @onclick="() => ToggleAsync(c.Id, true)">Włącz</button>
+                                }
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+    }
+</section>
+
+@if (_share is not null)
+{
+    <InviteShare Invite="_share" Link="@LinkFor(_share)" OnClose="() => _share = null" />
+}
+
+@code {
+    private List<InviteCode> _codes = [];
+    private InviteCode? _share;
+    private string? _code;
+    private string? _note;
+    private int _maxUses = 1;
+    private int _extraDays;
+    private DateTime? _expires;
+    private string? _message;
+    private bool _msgError;
+    private int _today;
+    private int _limit;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _codes = await db.InviteCodes.AsNoTracking().OrderByDescending(c => c.CreatedAt).ToListAsync();
+        _today = await Gates.AutoLaunchesTodayAsync();
+        _limit = await Gates.DailyLimitAsync();
+    }
+
+    private string LinkFor(InviteCode c) => InviteSvc.LinkFor(c.Code, Nav.BaseUri);
+
+    /// <summary>Na spotkanie: jednorazowy kod z ~3 miesiącami za darmo, od razu z kodem QR do zeskanowania.</summary>
+    private async Task QuickThreeMonthsAsync()
+    {
+        var (invite, error) = await InviteSvc.CreateAsync(null, string.IsNullOrWhiteSpace(_note) ? "Spotkanie — 3 miesiące gratis" : _note, 1,
+            InviteService.ThreeMonthsExtraDays, DateTime.UtcNow.AddDays(30));
+        if (invite is null) { _message = error; _msgError = true; return; }
+        _note = null;
+        await LoadAsync();
+        _share = invite;
+    }
+
+    private async Task CreateAsync()
+    {
+        var code = string.IsNullOrWhiteSpace(_code)
+            ? "PT-" + Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(3))
+            : System.Text.RegularExpressions.Regex.Replace(_code.Trim().ToUpperInvariant(), "[^A-Z0-9-]", "");
+        if (code.Length < 4) { _message = "Kod musi mieć co najmniej 4 znaki (litery, cyfry, myślnik)."; _msgError = true; return; }
+
+        await using var db = await DbFactory.CreateDbContextAsync();
+        if (await db.InviteCodes.AnyAsync(c => c.Code == code)) { _message = $"Kod {code} już istnieje."; _msgError = true; return; }
+        db.InviteCodes.Add(new InviteCode
+        {
+            Code = code,
+            Note = string.IsNullOrWhiteSpace(_note) ? null : _note.Trim(),
+            MaxUses = Math.Max(0, _maxUses),
+            ExtraTrialDays = Math.Clamp(_extraDays, 0, 180),
+            ExpiresAt = _expires is { } d ? DateTime.SpecifyKind(d.Date.AddDays(1), DateTimeKind.Utc) : null
+        });
+        await db.SaveChangesAsync();
+        _message = $"Utworzono kod {code}. Link: {InviteSvc.LinkFor(code, Nav.BaseUri)}";
+        _msgError = false;
+        _code = null; _note = null; _maxUses = 1; _extraDays = 0; _expires = null;
+        await LoadAsync();
+    }
+
+    private async Task ToggleAsync(int id, bool active)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var c = await db.InviteCodes.FindAsync(id);
+        if (c is null) return;
+        c.IsActive = active;
+        await db.SaveChangesAsync();
+        await LoadAsync();
+    }
+}
