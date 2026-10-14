@@ -1,0 +1,179 @@
+@inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
+@inject PTScheduler.Web.Services.PlatformAssistantService Platform
+@inject PTScheduler.Web.Services.AssistantTipsService Tips
+@inject PTScheduler.Application.Interfaces.IAppClock Clock
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Asystent-maskotka (domyślnie „Hantly”) dla trenera: sam podpowiada, bez pisania do niego.
+   Co pokazać, liczy AssistantTipsService; wygląd, imię i teksty od AI przychodzą z Portalu. *@
+@if (_config is not null && _visible)
+{
+    var tip = Current;
+    <div class="hantly @(_open ? "is-open" : "") @(_muted ? "is-muted" : "")">
+        @if (_open && tip is not null)
+        {
+            <div class="hantly-bubble" role="status" aria-live="polite">
+                <div class="hantly-bubble-head">
+                    <b>@_config.Name</b>
+                    @if (_tips.Count > 1)
+                    {
+                        <span class="hantly-count">@(_index + 1) z @_tips.Count</span>
+                    }
+                    <button type="button" class="hantly-x" aria-label="Zamknij tę podpowiedź" title="Nie pokazuj jej dziś" @onclick="DismissAsync"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <p class="hantly-text">@(_text ?? "…")</p>
+                <div class="hantly-actions">
+                    @if (tip.ActionHref is not null)
+                    {
+                        <a class="btn btn-sm btn-primary" href="@tip.ActionHref" @onclick="() => _open = false">@tip.ActionLabel</a>
+                    }
+                    @if (_index < _tips.Count - 1)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="NextAsync">Dalej <i class="bi bi-chevron-right"></i></button>
+                    }
+                    <button type="button" class="btn btn-sm btn-link hantly-mute" @onclick="ToggleMuteAsync">@(_muted ? "Włącz podpowiedzi" : "Wycisz")</button>
+                </div>
+            </div>
+        }
+        <button type="button" class="hantly-btn" aria-label="@($"{_config.Name} — podpowiedzi")" aria-expanded="@(_open ? "true" : "false")" @onclick="ToggleAsync">
+            <img class="hm-mascot @(_muted ? "" : $"hm-anim-{_config.Animation}")" src="@Icon" alt="" width="64" height="64" />
+            @if (!_open && !_muted && _tips.Count > 0)
+            {
+                <span class="hantly-dot">@_tips.Count</span>
+            }
+        </button>
+    </div>
+}
+
+@code {
+    private sealed class Prefs
+    {
+        public bool Muted { get; set; }
+        /// <summary>Klucz podpowiedzi → dzień zamknięcia (yyyy-MM-dd) albo „once” (zamknięta na stałe).</summary>
+        public Dictionary<string, string> Dismissed { get; set; } = new();
+    }
+
+    private PTScheduler.Web.Services.PlatformAssistantService.Config? _config;
+    private List<PTScheduler.Web.Services.AssistantTipsService.Tip> _tips = [];
+    private Prefs _prefs = new();
+    private int _index;
+    private bool _visible;
+    private bool _open;
+    private bool _muted;
+    private string? _text;
+
+    private PTScheduler.Web.Services.AssistantTipsService.Tip? Current => _index < _tips.Count ? _tips[_index] : null;
+
+    private string Icon
+    {
+        get
+        {
+            var mood = _muted ? "sleep" : Current?.Mood ?? "happy";
+            return _config!.Icons.TryGetValue(mood, out var uri) ? uri : _config.Icons.Values.FirstOrDefault() ?? "";
+        }
+    }
+
+    private string Today => Clock.Today.ToString("yyyy-MM-dd");
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var user = (await AuthState.GetAuthenticationStateAsync()).User;
+            var isAdmin = user.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+            if (!isAdmin && !user.IsInRole(PTScheduler.Domain.Constants.Roles.Trainer)) return;
+            _config = await Platform.GetConfigAsync();
+            if (_config is not { Enabled: true } || _config.Icons.Count == 0) return;
+
+            _prefs = LoadPrefs(await JS.InvokeAsync<string>("PTHantly.load"));
+            _muted = _prefs.Muted;
+            var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+            _tips = (await Tips.GetTipsAsync(userId, isAdmin)).Where(t => !IsDismissed(t)).ToList();
+
+            // Maskotka wchodzi chwilę po załadowaniu strony; dymek otwiera się sam tylko, gdy nie jest wyciszona.
+            await Task.Delay(1200);
+            _visible = true;
+            StateHasChanged();
+            if (!_muted && _tips.Count > 0)
+            {
+                await PhraseCurrentAsync();
+                _open = true;
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException or InvalidOperationException)
+        {
+            // Asystent jest dodatkiem — gdy coś się nie uda, po prostu się nie pokazuje.
+        }
+    }
+
+    private bool IsDismissed(PTScheduler.Web.Services.AssistantTipsService.Tip tip) =>
+        _prefs.Dismissed.TryGetValue(tip.Key, out var when) && (when == "once" || when == Today);
+
+    private async Task PhraseCurrentAsync()
+    {
+        if (Current is not { } tip || _config is null) return;
+        _text = null;
+        var text = await Platform.PhraseAsync(tip.Key, tip.Kind, tip.Facts, tip.Fallback, _config.Ai);
+        foreach (var (placeholder, value) in tip.Placeholders ?? [])
+            text = text.Replace(placeholder, value);
+        _text = text;
+    }
+
+    private async Task ToggleAsync()
+    {
+        if (_open) { _open = false; return; }
+        if (_tips.Count == 0)
+        {
+            _tips = [new("idle", "brak", "happy", 0, "Wszystko ogarnięte — nie mam teraz żadnych podpowiedzi. 💪", [], null, null)];
+            _index = 0;
+        }
+        _open = true;
+        await PhraseCurrentAsync();
+    }
+
+    private async Task NextAsync()
+    {
+        if (_index >= _tips.Count - 1) return;
+        _index++;
+        await PhraseCurrentAsync();
+    }
+
+    private async Task DismissAsync()
+    {
+        if (Current is { } tip && tip.Key != "idle")
+        {
+            _prefs.Dismissed[tip.Key] = tip.Once ? "once" : Today;
+            await SavePrefsAsync();
+            _tips.RemoveAt(_index);
+            if (_index >= _tips.Count) _index = Math.Max(0, _tips.Count - 1);
+        }
+        _open = false;
+    }
+
+    private async Task ToggleMuteAsync()
+    {
+        _muted = !_muted;
+        _prefs.Muted = _muted;
+        await SavePrefsAsync();
+        if (_muted) _open = false;
+    }
+
+    private async Task SavePrefsAsync()
+    {
+        // Wpisy „na dziś” z poprzednich dni są już bez znaczenia; zamknięte na stałe trzymamy (najwyżej 200).
+        _prefs.Dismissed = _prefs.Dismissed.Where(d => d.Value == "once" || d.Value == Today)
+            .TakeLast(200).ToDictionary(d => d.Key, d => d.Value);
+        try { await JS.InvokeVoidAsync("PTHantly.save", System.Text.Json.JsonSerializer.Serialize(_prefs)); }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException) { }
+    }
+
+    private static Prefs LoadPrefs(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new();
+        try { return System.Text.Json.JsonSerializer.Deserialize<Prefs>(json) ?? new(); }
+        catch (System.Text.Json.JsonException) { return new(); }
+    }
+}

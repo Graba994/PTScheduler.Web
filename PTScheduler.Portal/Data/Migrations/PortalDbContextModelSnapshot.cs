@@ -237,6 +237,56 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.ToTable("AspNetUserTokens", (string)null);
                 });
 
+            modelBuilder.Entity("PTScheduler.Portal.Entities.AiUsageLog", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("CompletionTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal>("CostUsd")
+                        .HasPrecision(12, 6)
+                        .HasColumnType("numeric(12,6)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Error")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("Feature")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<string>("Model")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<bool>("Ok")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("PromptTokens")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("TenantId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("TenantId", "CreatedAt");
+
+                    b.ToTable("AiUsageLogs");
+                });
+
             modelBuilder.Entity("PTScheduler.Portal.Entities.AppFeedback", b =>
                 {
                     b.Property<int>("Id")
@@ -535,6 +585,29 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.HasIndex("Email");
 
                     b.ToTable("LoginLogs");
+                });
+
+            modelBuilder.Entity("PTScheduler.Portal.Entities.MascotAsset", b =>
+                {
+                    b.Property<string>("Mood")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("ContentType")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<byte[]>("Data")
+                        .IsRequired()
+                        .HasColumnType("bytea");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Mood");
+
+                    b.ToTable("MascotAssets");
                 });
 
             modelBuilder.Entity("PTScheduler.Portal.Entities.PaymentRecord", b =>
@@ -1441,6 +1514,12 @@ namespace PTScheduler.Portal.Data.Migrations
 
                     b.Property<DateTime?>("ActivatedAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<bool>("AiOff")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("AssistantOff")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("BillingInterval")
                         .IsRequired()

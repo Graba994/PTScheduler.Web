@@ -58,6 +58,10 @@ public class Tenant
     public DateTime? ActivatedAt { get; set; }
     /// <summary>Ile e-maili powitalnych już poszło (dzień 1, 3, 7 po uruchomieniu).</summary>
     public int OnboardingStage { get; set; }
+    /// <summary>Asystent-maskotka wyłączony dla tego trenera (domyślnie widoczny, gdy włączony globalnie).</summary>
+    public bool AssistantOff { get; set; }
+    /// <summary>Teksty asystenta bez AI (z szablonów) dla tego trenera.</summary>
+    public bool AiOff { get; set; }
     /// <summary>Ostatni odczyt z aplikacji trenera: liczba klientów i treningów.</summary>
     public int? MetricsClients { get; set; }
     public int? MetricsSessions { get; set; }

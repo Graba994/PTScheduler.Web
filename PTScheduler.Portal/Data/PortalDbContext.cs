@@ -38,6 +38,8 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<FunnelCounter> FunnelCounters => Set<FunnelCounter>();
     public DbSet<TrainerMeeting> TrainerMeetings => Set<TrainerMeeting>();
     public DbSet<TrainerSurveyResponse> TrainerSurveyResponses => Set<TrainerSurveyResponse>();
+    public DbSet<MascotAsset> MascotAssets => Set<MascotAsset>();
+    public DbSet<AiUsageLog> AiUsageLogs => Set<AiUsageLog>();
     public DbSet<LegalAcceptance> LegalAcceptances => Set<LegalAcceptance>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -55,6 +57,23 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.HasIndex(a => new { a.TenantId, a.DocKey, a.Version });
             e.Property(a => a.DocKey).HasMaxLength(40);
             e.Property(a => a.Version).HasMaxLength(20);
+        });
+
+        b.Entity<MascotAsset>(e =>
+        {
+            e.HasKey(m => m.Mood);
+            e.Property(m => m.Mood).HasMaxLength(20);
+            e.Property(m => m.ContentType).HasMaxLength(40);
+        });
+
+        b.Entity<AiUsageLog>(e =>
+        {
+            e.HasIndex(l => l.CreatedAt);
+            e.HasIndex(l => new { l.TenantId, l.CreatedAt });
+            e.Property(l => l.Feature).HasMaxLength(40);
+            e.Property(l => l.Model).HasMaxLength(120);
+            e.Property(l => l.Error).HasMaxLength(500);
+            e.Property(l => l.CostUsd).HasPrecision(12, 6);
         });
 
         b.Entity<FunnelCounter>(e =>

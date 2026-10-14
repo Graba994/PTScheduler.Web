@@ -1058,6 +1058,26 @@ else
             </div>
         </div>
 
+        <div class="col-md-6 @TabCls("overview")">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm pp-icon-cyan"><i class="bi bi-emoji-smile"></i></span>Asystent i AI</h2>
+                    @if (_tenant is not null)
+                    {
+                        <label class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" checked="@(!_tenant.AssistantOff)" @onchange="e => SetAssistantAsync(e.Value is true, null)" />
+                            <span class="form-check-label">Asystent widoczny w aplikacji tego trenera</span>
+                        </label>
+                        <label class="form-check form-switch mb-0">
+                            <input class="form-check-input" type="checkbox" checked="@(!_tenant.AiOff)" disabled="@_tenant.AssistantOff" @onchange="e => SetAssistantAsync(null, e.Value is true)" />
+                            <span class="form-check-label">Teksty pisane przez AI (wyłączone = gotowe teksty)</span>
+                        </label>
+                        <p class="small text-muted mt-2 mb-0">Globalne ustawienia: <a href="/panel/asystent">Asystent i AI</a>. Zmiana działa w aplikacji trenera w ciągu 30 minut.</p>
+                    }
+                </div>
+            </div>
+        </div>
+
         <div class="col-12 @TabCls("history")">
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
@@ -1830,6 +1850,19 @@ else
     }
 
     private List<LegalAcceptance>? _legal;
+
+    private async Task SetAssistantAsync(bool? visible, bool? ai)
+    {
+        if (_tenant is null) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var t = await db.Tenants.FindAsync(_tenant.Id);
+        if (t is null) return;
+        if (visible is { } v) t.AssistantOff = !v;
+        if (ai is { } a) t.AiOff = !a;
+        await db.SaveChangesAsync();
+        _tenant.AssistantOff = t.AssistantOff;
+        _tenant.AiOff = t.AiOff;
+    }
 
     private async Task LoadEvents()
     {

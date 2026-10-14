@@ -1,0 +1,434 @@
+@page "/panel/asystent"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject SiteSettingsService Settings
+@inject AssistantService Assistant
+@inject AiService Ai
+@rendermode InteractiveServer
+@using K = PTScheduler.Portal.Services.SiteSettingsService.Keys
+
+@* Asystent-maskotka w aplikacjach trenerów: wygląd (imię, ikony, animacja), zachowanie (masterprompt) i AI przez OpenRouter. *@
+
+<PageTitle>Asystent @_savedName — PTScheduler Portal</PageTitle>
+
+<PanelHeader Title="@($"Asystent {_savedName}")" Icon="bi-emoji-smile" IconClass="pp-tone-info"
+             Subtitle="Maskotka w aplikacji trenera: sama podpowiada (płatności, faktury, pochwały), bez pisania do niej. Co pokazać, liczą reguły; AI tylko ubiera to w słowa." />
+
+@if (_message is not null)
+{
+    <div class="alert @(_msgError ? "alert-danger" : "alert-success") alert-dismissible py-2 small">
+        @_message
+        <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button>
+    </div>
+}
+
+<div class="pp-seg mb-3 mt-w-tabs" role="tablist" aria-label="Ustawienia asystenta">
+    <button type="button" role="tab" class="@(_tab == "look" ? "active" : "")" @onclick='() => _tab = "look"'><i class="bi bi-palette"></i>Wygląd</button>
+    <button type="button" role="tab" class="@(_tab == "behavior" ? "active" : "")" @onclick='() => _tab = "behavior"'><i class="bi bi-chat-heart"></i>Zachowanie</button>
+    <button type="button" role="tab" class="@(_tab == "ai" ? "active" : "")" @onclick='() => _tab = "ai"'><i class="bi bi-stars"></i>AI i koszty</button>
+</div>
+
+@if (_tab == "look")
+{
+    <div class="row g-3">
+        <div class="col-lg-5">
+            <section class="card border-0 shadow-sm h-100">
+                <div class="card-body hm-stage">
+                    <div class="hm-bubble-preview">
+                        <b>@(_name.Length > 0 ? _name : AssistantService.DefaultName)</b>
+                        Cześć! Pomogę pilnować płatności i faktur, a za każdy rekord pochwalę. 💪
+                    </div>
+                    <img class="hm-mascot hm-anim-@_animation" src="@Icon(_previewMood)" alt="" width="120" height="120" />
+                    <div class="hm-moods" role="group" aria-label="Podgląd nastroju">
+                        @foreach (var m in MascotArt.Moods)
+                        {
+                            <button type="button" class="@(m.Key == _previewMood ? "on" : "")" title="@m.Label" @onclick="() => _previewMood = m.Key"><img src="@Icon(m.Key)" alt="@m.Label" width="34" height="34" /></button>
+                        }
+                    </div>
+                </div>
+            </section>
+        </div>
+        <div class="col-lg-7">
+            <section class="card border-0 shadow-sm h-100">
+                <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-person-badge"></i></span>Podstawy</div>
+                <div class="card-body d-flex flex-column gap-3">
+                    <label class="form-check form-switch m-0">
+                        <input class="form-check-input" type="checkbox" @bind="_enabled" />
+                        <span class="form-check-label fw-semibold">Asystent widoczny w aplikacjach trenerów</span>
+                        <span class="d-block small text-muted">Pojedynczych trenerów wyłączysz w ich karcie. Klienci trenerów asystenta nie widzą.</span>
+                    </label>
+                    <div>
+                        <label class="form-label small fw-semibold" for="hm-name">Imię</label>
+                        <input id="hm-name" class="form-control" @bind="_name" @bind:event="oninput" maxlength="30" placeholder="@AssistantService.DefaultName" />
+                    </div>
+                    <div>
+                        <label class="form-label small fw-semibold" for="hm-anim">Animacja</label>
+                        <select id="hm-anim" class="form-select" @bind="_animation">
+                            <option value="bounce">Podskakuje</option>
+                            <option value="float">Unosi się</option>
+                            <option value="wave">Kołysze się</option>
+                            <option value="none">Bez animacji</option>
+                        </select>
+                        <div class="form-text small">Osoby z włączonym w systemie ograniczeniem ruchu zawsze widzą wersję bez animacji.</div>
+                    </div>
+                    <div><button class="btn btn-primary btn-sm" @onclick="SaveLookAsync"><i class="bi bi-check-lg me-1"></i>Zapisz</button></div>
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <section class="card border-0 shadow-sm mt-3">
+        <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-images"></i></span>Ikony nastrojów</div>
+        <div class="card-body">
+            <p class="small text-muted">Podmień dowolną ikonę własnym plikiem (SVG, PNG, WebP lub GIF, do @(AssistantService.MaxAssetBytes / 1024) KB, najlepiej kwadrat z przezroczystym tłem).</p>
+            <div class="hm-grid">
+                @foreach (var m in MascotArt.Moods)
+                {
+                    var custom = _custom.Contains(m.Key);
+                    <div class="hm-tile">
+                        <img src="@Icon(m.Key)" alt="@m.Label" width="88" height="88" />
+                        <div class="fw-semibold">@m.Label @if (custom) { <span class="badge text-bg-info ms-1">własna</span> }</div>
+                        <div class="small text-muted">@m.Hint</div>
+                        <label class="btn btn-sm btn-outline-secondary mt-2 mb-0">
+                            <i class="bi bi-upload me-1"></i>Wgraj
+                            <InputFile class="d-none" accept=".svg,.png,.webp,.gif" OnChange="e => UploadAsync(m.Key, e)" />
+                        </label>
+                        @if (custom)
+                        {
+                            <button class="btn btn-sm btn-link text-muted" @onclick="() => ResetIconAsync(m.Key)">Przywróć domyślną</button>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    </section>
+}
+else if (_tab == "behavior")
+{
+    <div class="row g-3">
+        <div class="col-lg-7">
+            <section class="card border-0 shadow-sm h-100">
+                <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-file-earmark-text"></i></span>Masterprompt — osobowość i zasady</div>
+                <div class="card-body d-flex flex-column gap-2">
+                    <p class="small text-muted mb-1">Tak AI pisze teksty asystenta. <code>{NAZWA}</code> zamienia się na imię. Liczb i imion klientów AI nie dostaje do wymyślania — tekst z liczbą spoza faktów jest odrzucany i wraca wersja podstawowa.</p>
+                    <textarea class="form-control font-monospace small" rows="16" @bind="_prompt" @bind:event="oninput" aria-label="Masterprompt"></textarea>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button class="btn btn-primary btn-sm" @onclick="SavePromptAsync"><i class="bi bi-check-lg me-1"></i>Zapisz</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => _prompt = AssistantService.DefaultPrompt">Przywróć domyślny</button>
+                    </div>
+                </div>
+            </section>
+        </div>
+        <div class="col-lg-5">
+            <section class="card border-0 shadow-sm h-100">
+                <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-play-circle"></i></span>Wypróbuj</div>
+                <div class="card-body d-flex flex-column gap-2">
+                    <select class="form-select form-select-sm" @bind="_sample" aria-label="Przykładowa podpowiedź">
+                        @for (var i = 0; i < AssistantService.Samples.Length; i++)
+                        {
+                            <option value="@i">@AssistantService.Samples[i].Label</option>
+                        }
+                    </select>
+                    <div class="small text-muted">Tekst podstawowy: „@AssistantService.Samples[_sample].Fallback”</div>
+                    <button class="btn btn-outline-primary btn-sm" @onclick="TryAsync" disabled="@_trying">
+                        @if (_trying) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-stars me-1"></i> }
+                        Zobacz, jak to powie
+                    </button>
+                    <div class="small text-muted">Używa promptu z pola obok (także niezapisanego). Działa nawet przy wyłączonym AI, jeśli jest klucz.</div>
+                    @if (_tryResult is not null)
+                    {
+                        <div class="hm-try">
+                            <img class="hm-mascot hm-anim-@_animation" src="@Icon(AssistantService.Samples[_sample].Mood)" alt="" width="64" height="64" />
+                            <div class="hm-try-bubble">
+                                <b>@(_name.Length > 0 ? _name : AssistantService.DefaultName)</b>
+                                @_tryResult.Text
+                                <span class="d-block mt-1 small @(_tryResult.FromAi ? "text-success" : "text-muted")">@(_tryResult.FromAi ? "napisane przez AI" : "tekst podstawowy")@(_tryResult.Error is { } err ? $" · {err}" : "")</span>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </section>
+        </div>
+    </div>
+}
+else
+{
+    <div class="row g-3">
+        <div class="col-lg-6">
+            <section class="card border-0 shadow-sm h-100">
+                <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-sliders"></i></span>OpenRouter</div>
+                <div class="card-body d-flex flex-column gap-3">
+                    <label class="form-check form-switch m-0">
+                        <input class="form-check-input" type="checkbox" @bind="_aiEnabled" />
+                        <span class="form-check-label fw-semibold">AI pisze teksty asystenta</span>
+                        <span class="d-block small text-muted">Wyłączone = gotowe teksty z aplikacji (asystent działa dalej).</span>
+                    </label>
+                    <div>
+                        <label class="form-label small fw-semibold" for="ai-key">Klucz API</label>
+                        @if (_hasKey && !_editKey)
+                        {
+                            <div class="d-flex gap-2 align-items-center">
+                                <span class="badge text-bg-success"><i class="bi bi-key me-1"></i>zapisany</span>
+                                <button class="btn btn-sm btn-link" @onclick="() => _editKey = true">Zmień</button>
+                                <button class="btn btn-sm btn-link text-danger" @onclick="RemoveKeyAsync">Usuń</button>
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="input-group input-group-sm">
+                                <input id="ai-key" type="password" class="form-control font-monospace" @bind="_newKey" placeholder="sk-or-v1-…" autocomplete="off" />
+                                <button class="btn btn-outline-primary" @onclick="SaveKeyAsync">Zapisz klucz</button>
+                            </div>
+                            <div class="form-text small">Trzymany zaszyfrowany, tylko w Portalu — aplikacje trenerów go nie dostają.</div>
+                        }
+                    </div>
+                    <div>
+                        <label class="form-label small fw-semibold" for="ai-model">Model</label>
+                        <input id="ai-model" class="form-control form-control-sm font-monospace" list="ai-models" @bind="_model" maxlength="120" />
+                        <datalist id="ai-models">
+                            <option value="mistralai/mistral-large">Mistral Large (UE, tani)</option>
+                            <option value="mistralai/mistral-medium-3.1">Mistral Medium</option>
+                            <option value="anthropic/claude-haiku-4.5">Claude Haiku</option>
+                            <option value="anthropic/claude-sonnet-4.5">Claude Sonnet</option>
+                            <option value="google/gemini-2.5-flash">Gemini Flash</option>
+                            <option value="openai/gpt-5-mini">GPT-5 mini</option>
+                        </datalist>
+                        <div class="form-text small">Nazwa modelu z openrouter.ai/models. Zmiana działa od następnej podpowiedzi — sprawdź ją w „Zachowanie → Wypróbuj”.</div>
+                    </div>
+                    <div class="row g-2">
+                        <div class="col-sm-4">
+                            <label class="form-label small fw-semibold" for="ai-budget">Budżet / miesiąc ($)</label>
+                            <input id="ai-budget" class="form-control form-control-sm" @bind="_budget" inputmode="decimal" />
+                        </div>
+                        <div class="col-sm-4">
+                            <label class="form-label small fw-semibold" for="ai-in">Cena wejścia ($/1M)</label>
+                            <input id="ai-in" class="form-control form-control-sm" @bind="_priceIn" inputmode="decimal" />
+                        </div>
+                        <div class="col-sm-4">
+                            <label class="form-label small fw-semibold" for="ai-out">Cena wyjścia ($/1M)</label>
+                            <input id="ai-out" class="form-control form-control-sm" @bind="_priceOut" inputmode="decimal" />
+                        </div>
+                        <div class="col-12 form-text small mt-0">Po wyczerpaniu budżetu asystent sam wraca do gotowych tekstów. Ceny służą tylko do szacunku, gdy OpenRouter nie poda kosztu.</div>
+                    </div>
+                    <div><button class="btn btn-primary btn-sm" @onclick="SaveAiAsync"><i class="bi bi-check-lg me-1"></i>Zapisz</button></div>
+                </div>
+            </section>
+        </div>
+        <div class="col-lg-6">
+            <section class="card border-0 shadow-sm h-100">
+                <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-cash-coin"></i></span>Ten miesiąc</div>
+                <div class="card-body">
+                    <div class="hm-stats">
+                        <div><b>@_spent.ToString("0.0000", Pl) $</b><span>wydane z @_budget $</span></div>
+                        <div><b>@_calls</b><span>wywołań</span></div>
+                        <div><b>@_errors</b><span>błędów</span></div>
+                    </div>
+                    @if (_unavailable is not null)
+                    {
+                        <div class="alert alert-secondary small py-2 mt-3 mb-0"><i class="bi bi-info-circle me-1"></i>Teraz bez AI: @_unavailable</div>
+                    }
+                </div>
+            </section>
+        </div>
+    </div>
+
+    <section class="card border-0 shadow-sm mt-3">
+        <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-journal-text"></i></span>Ostatnie wywołania</div>
+        @if (_logs.Count == 0)
+        {
+            <div class="card-body"><div class="pp-empty"><i class="bi bi-stars"></i>Jeszcze żadnych wywołań AI.</div></div>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0">
+                    <thead><tr><th>Kiedy</th><th>Trener</th><th>Do czego</th><th>Model</th><th class="text-end">Tokeny</th><th class="text-end">Koszt</th><th>Wynik</th></tr></thead>
+                    <tbody>
+                        @foreach (var l in _logs)
+                        {
+                            <tr>
+                                <td class="small text-nowrap">@l.CreatedAt.ToLocalTime().ToString("dd.MM HH:mm")</td>
+                                <td class="small">@(l.TenantId is { } t && _slugs.TryGetValue(t, out var s) ? s : "—")</td>
+                                <td class="small">@l.Feature</td>
+                                <td class="small font-monospace">@l.Model</td>
+                                <td class="small text-end">@(l.PromptTokens + l.CompletionTokens)</td>
+                                <td class="small text-end">@l.CostUsd.ToString("0.00000", Pl) $</td>
+                                <td class="small">@if (l.Ok) { <span class="text-success">ok</span> } else { <span class="text-danger" title="@l.Error">@(l.Error?.Length > 60 ? l.Error[..60] + "…" : l.Error)</span> }</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+}
+
+@code {
+    private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
+    private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
+
+    private string _tab = "look";
+    private string? _message;
+    private bool _msgError;
+
+    private bool _enabled = true;
+    private string _name = "";
+    private string _savedName = AssistantService.DefaultName;
+    private string _animation = "bounce";
+    private string _previewMood = "hello";
+    private Dictionary<string, string> _icons = new();
+    private HashSet<string> _custom = [];
+
+    private string _prompt = "";
+    private int _sample;
+    private bool _trying;
+    private AssistantService.Phrase? _tryResult;
+
+    private bool _aiEnabled;
+    private bool _hasKey;
+    private bool _editKey;
+    private string? _newKey;
+    private string _model = "";
+    private string _budget = "5";
+    private string _priceIn = "2";
+    private string _priceOut = "10";
+    private decimal _spent;
+    private int _calls;
+    private int _errors;
+    private string? _unavailable;
+    private List<AiUsageLog> _logs = [];
+    private Dictionary<int, string> _slugs = new();
+
+    private string Icon(string mood) => _icons.TryGetValue(mood, out var v) ? v : MascotArt.DataUri(mood);
+
+    protected override async Task OnInitializedAsync()
+    {
+        var s = await Settings.GetAllAsync(K.AssistantEnabled, K.AssistantName, K.AssistantAnimation, K.AiEnabled, K.AiModel,
+            K.AiMonthlyBudgetUsd, K.AiPriceInputPerM, K.AiPriceOutputPerM);
+        _enabled = s[K.AssistantEnabled] != "false";
+        _name = s[K.AssistantName];
+        _savedName = _name.Length > 0 ? _name : AssistantService.DefaultName;
+        _animation = AssistantService.Animations.Contains(s[K.AssistantAnimation]) ? s[K.AssistantAnimation] : "bounce";
+        _aiEnabled = s[K.AiEnabled] == "true";
+        _model = s[K.AiModel];
+        _budget = s[K.AiMonthlyBudgetUsd];
+        _priceIn = s[K.AiPriceInputPerM];
+        _priceOut = s[K.AiPriceOutputPerM];
+        _prompt = await Assistant.GetPromptAsync();
+        await LoadIconsAsync();
+        await LoadUsageAsync();
+    }
+
+    private async Task LoadIconsAsync()
+    {
+        _icons = (await Assistant.GetConfigAsync()).Icons;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _custom = (await db.MascotAssets.Select(a => a.Mood).ToListAsync()).ToHashSet();
+    }
+
+    private async Task LoadUsageAsync()
+    {
+        _hasKey = await Ai.HasApiKeyAsync();
+        _spent = await Ai.SpentThisMonthUsdAsync();
+        _unavailable = await Ai.UnavailableReasonAsync();
+        var start = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _calls = await db.AiUsageLogs.CountAsync(l => l.CreatedAt >= start);
+        _errors = await db.AiUsageLogs.CountAsync(l => l.CreatedAt >= start && !l.Ok);
+        _logs = await db.AiUsageLogs.AsNoTracking().OrderByDescending(l => l.CreatedAt).Take(30).ToListAsync();
+        var ids = _logs.Where(l => l.TenantId != null).Select(l => l.TenantId!.Value).Distinct().ToList();
+        _slugs = await db.Tenants.AsNoTracking().Where(t => ids.Contains(t.Id)).ToDictionaryAsync(t => t.Id, t => t.Slug);
+    }
+
+    private void Ok(string text) { _message = text; _msgError = false; }
+    private void Fail(string text) { _message = text; _msgError = true; }
+
+    private async Task SaveLookAsync()
+    {
+        await Settings.SetManyAsync(new Dictionary<string, string>
+        {
+            [K.AssistantEnabled] = _enabled ? "true" : "false",
+            [K.AssistantName] = _name.Trim(),
+            [K.AssistantAnimation] = _animation,
+        });
+        _savedName = _name.Trim().Length > 0 ? _name.Trim() : AssistantService.DefaultName;
+        Ok("Zapisane. Aplikacje trenerów pokażą zmiany w ciągu 30 minut (albo po ponownym uruchomieniu).");
+    }
+
+    private async Task UploadAsync(string mood, InputFileChangeEventArgs e)
+    {
+        var file = e.File;
+        var type = Path.GetExtension(file.Name).ToLowerInvariant() switch
+        {
+            ".svg" => "image/svg+xml", ".png" => "image/png", ".webp" => "image/webp", ".gif" => "image/gif", _ => file.ContentType
+        };
+        if (file.Size > AssistantService.MaxAssetBytes) { Fail($"Plik jest za duży (najwyżej {AssistantService.MaxAssetBytes / 1024} KB)."); return; }
+        using var ms = new MemoryStream();
+        await file.OpenReadStream(AssistantService.MaxAssetBytes).CopyToAsync(ms);
+        if (await Assistant.SaveAssetAsync(mood, type, ms.ToArray()) is { } error) { Fail(error); return; }
+        await LoadIconsAsync();
+        Ok("Ikona podmieniona.");
+    }
+
+    private async Task ResetIconAsync(string mood)
+    {
+        await Assistant.ResetAssetAsync(mood);
+        await LoadIconsAsync();
+        Ok("Przywrócono domyślną ikonę.");
+    }
+
+    private async Task SavePromptAsync()
+    {
+        var value = _prompt.Trim() == AssistantService.DefaultPrompt.Trim() ? "" : _prompt.Trim();
+        await Settings.SetAsync(K.AssistantPrompt, value);
+        Ok("Masterprompt zapisany — działa od następnej podpowiedzi.");
+    }
+
+    private async Task TryAsync()
+    {
+        _trying = true;
+        _tryResult = null;
+        StateHasChanged();
+        var s = AssistantService.Samples[_sample];
+        var phrase = await Assistant.PhraseAsync(null, s.Kind, s.Facts, s.Fallback, ignoreSwitch: true,
+            promptOverride: _prompt, nameOverride: _name.Trim().Length > 0 ? _name.Trim() : AssistantService.DefaultName);
+        // W aplikacji trenera znacznik zamienia się na imię klienta — w podglądzie na przykładowe.
+        _tryResult = phrase with { Text = phrase.Text.Replace("[klient]", "Ania") };
+        _trying = false;
+        await LoadUsageAsync();
+    }
+
+    private async Task SaveKeyAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_newKey)) { Fail("Wpisz klucz."); return; }
+        await Ai.SetApiKeyAsync(_newKey);
+        _newKey = null;
+        _editKey = false;
+        await LoadUsageAsync();
+        Ok("Klucz zapisany.");
+    }
+
+    private async Task RemoveKeyAsync()
+    {
+        await Ai.SetApiKeyAsync(null);
+        await LoadUsageAsync();
+        Ok("Klucz usunięty — asystent używa gotowych tekstów.");
+    }
+
+    private async Task SaveAiAsync()
+    {
+        static bool Num(string v) => decimal.TryParse(v.Replace(',', '.'), System.Globalization.NumberStyles.Number, Inv, out var d) && d >= 0;
+        if (!Num(_budget) || !Num(_priceIn) || !Num(_priceOut)) { Fail("Budżet i ceny muszą być liczbami (np. 5 albo 0.5)."); return; }
+        await Settings.SetManyAsync(new Dictionary<string, string>
+        {
+            [K.AiEnabled] = _aiEnabled ? "true" : "false",
+            [K.AiModel] = _model.Trim(),
+            [K.AiMonthlyBudgetUsd] = _budget.Replace(',', '.').Trim(),
+            [K.AiPriceInputPerM] = _priceIn.Replace(',', '.').Trim(),
+            [K.AiPriceOutputPerM] = _priceOut.Replace(',', '.').Trim(),
+        });
+        await LoadUsageAsync();
+        Ok("Ustawienia AI zapisane.");
+    }
+}

@@ -172,6 +172,8 @@ builder.Services.AddScoped<PTScheduler.Web.Services.ClientNav>();
 builder.Services.AddSingleton<PTScheduler.Web.Services.EntitlementService>();
 builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformInfoService>();
 builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformLegalService>();
+builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformAssistantService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.AssistantTipsService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.SetupGuide>();
 builder.Services.AddHostedService<SessionReminderService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.EntitlementSyncService>();

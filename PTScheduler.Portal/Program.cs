@@ -92,6 +92,8 @@ builder.Services.AddScoped<RegistrationGateService>();
 builder.Services.AddScoped<ReferralService>();
 builder.Services.AddScoped<InviteService>();
 builder.Services.AddScoped<LegalService>();
+builder.Services.AddScoped<AiService>();
+builder.Services.AddScoped<AssistantService>();
 builder.Services.AddSingleton<FunnelService>();
 builder.Services.AddHostedService<GrowthService>();
 builder.Services.AddSingleton<CustomDomainService>();
@@ -723,6 +725,41 @@ app.MapPost("/api/internal/tenants/{slug}/legal/accept", async (
     return Results.Ok();
 });
 
+// Asystent-maskotka w aplikacji trenera: wygląd (imię, ikony nastrojów, animacja) i teksty podpowiedzi
+// ubrane w słowa przez AI. Co pokazać, liczy aplikacja trenera; bez AI wraca jej tekst zapasowy.
+app.MapGet("/api/internal/tenants/{slug}/assistant", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    AssistantService assistant,
+    IConfiguration config) =>
+{
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    var c = await assistant.GetConfigAsync(tenant);
+    return Results.Json(new { enabled = c.Enabled, name = c.Name, animation = c.Animation, ai = c.Ai, icons = c.Icons });
+});
+
+app.MapPost("/api/internal/tenants/{slug}/assistant/phrase", async (
+    string slug,
+    AssistantPhraseRequest body,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    AssistantService assistant,
+    IConfiguration config) =>
+{
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    if (string.IsNullOrWhiteSpace(body.Kind) || string.IsNullOrWhiteSpace(body.Fallback) || body.Fallback.Length > 400) return Results.BadRequest();
+    var facts = (body.Facts ?? []).Take(12)
+        .Where(f => f.Key.Length <= 40 && (f.Value?.Length ?? 0) <= 80)
+        .ToDictionary(f => f.Key, f => f.Value ?? "");
+    var phrase = await assistant.PhraseAsync(tenant, body.Kind[..Math.Min(40, body.Kind.Length)], facts, body.Fallback);
+    return Results.Json(new { text = phrase.Text, ai = phrase.FromAi });
+});
+
 // ---- Store API ----
 // Tenant apps call these endpoints to fetch their service catalog and place orders.
 // Secured by the same shared secret used for internal endpoints.
@@ -1212,6 +1249,7 @@ app.Run();
 // Wspólna kontrola nagłówka X-Internal-Secret dla wywołań tenant → Portal.
 // Pusty sekret = odmowa (wcześniej oznaczał brak jakiejkolwiek kontroli).
 record AppFeedbackRequest(int Rating, string? Text, string? ContactEmail, string? AuthorEmail);
+record AssistantPhraseRequest(string Kind, Dictionary<string, string?>? Facts, string Fallback);
 record LegalAcceptRequest(string Email, string[]? Keys, string? Ip, string? UserAgent);
 
 record GoogleAuthorizeRequest(string UserKey, string ReturnUrl);

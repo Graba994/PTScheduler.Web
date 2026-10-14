@@ -78,6 +78,22 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         /// <summary>Dane sprzedawcy w nagłówku PDF oferty trenera (nazwa, adres, NIP, konto — wiele linii).</summary>
         public const string OfferSellerDetails = "offer_seller_details";
 
+        // Asystent-maskotka (domyślnie „Hantly”) i AI przez OpenRouter
+        public const string AssistantEnabled = "assistant_enabled";
+        public const string AssistantName = "assistant_name";
+        /// <summary>„bounce” | „float” | „wave” | „none”.</summary>
+        public const string AssistantAnimation = "assistant_animation";
+        /// <summary>Masterprompt: osobowość i zasady pisania asystenta ({NAZWA} = imię maskotki).</summary>
+        public const string AssistantPrompt = "assistant_prompt";
+        public const string AiEnabled = "ai_enabled";
+        /// <summary>Klucz OpenRouter (zaszyfrowany Data Protection).</summary>
+        public const string AiApiKey = "ai_api_key";
+        public const string AiModel = "ai_model";
+        public const string AiMonthlyBudgetUsd = "ai_monthly_budget_usd";
+        /// <summary>Ceny awaryjne (USD za 1 mln tokenów) — gdy OpenRouter nie poda kosztu w odpowiedzi.</summary>
+        public const string AiPriceInputPerM = "ai_price_input_per_m";
+        public const string AiPriceOutputPerM = "ai_price_output_per_m";
+
         // Dane do dokumentów prawnych (regulamin, polityka prywatności, umowa powierzenia)
         public const string BrandName = "brand_name";
         public const string LegalCompany = "legal_company";
@@ -188,6 +204,14 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         [Keys.GithubRepo] = "ptscheduler.web",
         [Keys.GithubBranch] = "master",
         [Keys.FeaturedTrainers] = "[]",
+        [Keys.AssistantEnabled] = "true",
+        [Keys.AssistantName] = "Hantly",
+        [Keys.AssistantAnimation] = "bounce",
+        [Keys.AiEnabled] = "false",
+        [Keys.AiModel] = "mistralai/mistral-large",
+        [Keys.AiMonthlyBudgetUsd] = "5",
+        [Keys.AiPriceInputPerM] = "2",
+        [Keys.AiPriceOutputPerM] = "10",
     };
 
     public async Task<string> GetAsync(string key)
