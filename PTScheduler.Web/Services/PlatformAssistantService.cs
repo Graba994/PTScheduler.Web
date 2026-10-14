@@ -39,16 +39,18 @@ public class PlatformAssistantService(IHttpClientFactory httpFactory, ILogger<Pl
     }
 
     /// <summary>Tekst podpowiedzi: z pamięci (ten sam dzień), od AI przez Portal albo zapasowy.</summary>
-    public async Task<string> PhraseAsync(string key, string kind, IReadOnlyDictionary<string, string> facts, string fallback, bool ai)
+    /// <param name="audience">„trener” — głos maskotki; „klient” — podsumowanie dla klienta trenera (bez maskotki).</param>
+    public async Task<string> PhraseAsync(string key, string kind, IReadOnlyDictionary<string, string> facts, string fallback, bool ai,
+        string audience = "trener")
     {
         if (!ai || !PlatformInfoService.Configured) return fallback;
         var today = DateOnly.FromDateTime(DateTime.UtcNow);
-        var cacheKey = key + "|" + string.Join(";", facts.OrderBy(f => f.Key).Select(f => f.Key + "=" + f.Value));
+        var cacheKey = audience + "|" + key + "|" + string.Join(";", facts.OrderBy(f => f.Key).Select(f => f.Key + "=" + f.Value));
         if (_phrases.TryGetValue(cacheKey, out var hit) && hit.Day == today) return hit.Text;
         try
         {
             using var req = Request(HttpMethod.Post, "assistant/phrase");
-            req.Content = JsonContent.Create(new { kind, facts, fallback });
+            req.Content = JsonContent.Create(new { kind, facts, fallback, audience });
             using var resp = await Client(30).SendAsync(req);
             if (resp.IsSuccessStatusCode && await resp.Content.ReadFromJsonAsync<PhraseResponse>() is { Text.Length: > 0 } r)
             {

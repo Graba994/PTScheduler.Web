@@ -37,6 +37,20 @@ public partial class AssistantService(
         - Nie dodawaj powitania ani podpisu. Zwróć tylko treść komunikatu.
         """;
 
+    /// <summary>Podsumowania postępów czytane przez klientów trenera — w imieniu aplikacji trenera, bez maskotki.</summary>
+    public const string DefaultClientPrompt = """
+        Piszesz krótkie podsumowania postępów dla osoby, która trenuje z trenerem personalnym.
+        Tekst pojawia się w aplikacji trenera (pod jego marką), na karcie „Twoje postępy”.
+
+        Zasady:
+        - Pisz po polsku, w drugiej osobie, najwyżej 3 krótkie zdania (do 320 znaków).
+        - Używaj form neutralnych płciowo: nie pisz „zrobiłeś/zrobiłaś”; pisz „masz”, „udało się”, „Twój wynik”.
+        - Korzystaj wyłącznie z podanych faktów. Nie wymyślaj liczb, ćwiczeń ani dat. Nie oceniaj wyglądu ani wagi.
+        - Chwal konkretnie (np. ćwiczenie i przyrost w kg), motywuj spokojnie, bez wykrzykników na siłę; najwyżej jedno emoji.
+        - Nie udzielaj porad medycznych ani dietetycznych i nie zmieniaj planu — to rola trenera.
+        - Nie przedstawiaj się, nie dodawaj powitania ani podpisu. Zwróć tylko treść.
+        """;
+
     public sealed record Config(bool Enabled, string Name, string Animation, bool Ai, Dictionary<string, string> Icons);
 
     public async Task<Config> GetConfigAsync(Tenant? tenant = null)
@@ -59,6 +73,9 @@ public partial class AssistantService(
 
     public async Task<string> GetPromptAsync() =>
         await settings.GetAsync(K.AssistantPrompt) is { Length: > 0 } p ? p : DefaultPrompt;
+
+    public async Task<string> GetClientPromptAsync() =>
+        await settings.GetAsync(K.AssistantClientPrompt) is { Length: > 0 } p ? p : DefaultClientPrompt;
 
     public async Task<string?> SaveAssetAsync(string mood, string contentType, byte[] data)
     {
@@ -87,15 +104,17 @@ public partial class AssistantService(
     /// Ubiera podpowiedź w słowa asystenta. Zawsze zwraca tekst: przy wyłączonym AI, błędzie albo
     /// podejrzanej odpowiedzi (liczby spoza faktów, zgubiony znacznik [klient]) — tekst zapasowy z aplikacji.
     /// </summary>
+    /// <param name="audience">„trener” — głos maskotki (masterprompt); „klient” — podsumowanie dla klienta trenera.</param>
     public async Task<Phrase> PhraseAsync(Tenant? tenant, string kind, Dictionary<string, string> facts, string fallback,
-        bool ignoreSwitch = false, string? promptOverride = null, string? nameOverride = null)
+        bool ignoreSwitch = false, string? promptOverride = null, string? nameOverride = null, string audience = "trener")
     {
+        var forClient = audience == "klient";
         fallback = fallback.Trim();
         if (!ignoreSwitch && (tenant?.AiOff == true || await settings.GetAsync(K.AiEnabled) != "true"))
             return new(fallback, false, null);
 
         var name = nameOverride ?? (await settings.GetAsync(K.AssistantName) is { Length: > 0 } n ? n.Trim() : DefaultName);
-        var system = (promptOverride ?? await GetPromptAsync()).Replace("{NAZWA}", name);
+        var system = (promptOverride ?? (forClient ? await GetClientPromptAsync() : await GetPromptAsync())).Replace("{NAZWA}", name);
         var factsJson = JsonSerializer.Serialize(facts, new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
         var user = $"""
             Rodzaj podpowiedzi: {kind}
@@ -103,23 +122,24 @@ public partial class AssistantService(
             Wersja podstawowa (możesz ją przeredagować): {fallback}
             Napisz jedną wersję tego komunikatu.
             """;
-        var result = await ai.CompleteAsync(ignoreSwitch ? "test" : "asystent", tenant?.Id, system, user, ignoreSwitch: ignoreSwitch);
+        var result = await ai.CompleteAsync(ignoreSwitch ? "test" : forClient ? "postepy-klienta" : "asystent", tenant?.Id, system, user,
+            maxTokens: forClient ? 320 : 220, ignoreSwitch: ignoreSwitch);
         if (result.Text is null) return new(fallback, false, result.Error);
 
-        var text = Clean(result.Text);
+        var text = Clean(result.Text, forClient ? 340 : 240);
         if (!IsFaithful(text, factsJson + " " + fallback)) return new(fallback, false, "Odpowiedź AI miała liczby albo znaczniki spoza faktów — użyto tekstu podstawowego.");
         return new(text, true, null);
     }
 
-    /// <summary>Usuwa cudzysłowy i nadmiar, ucina do 240 znaków na granicy zdania lub słowa.</summary>
-    private static string Clean(string text)
+    /// <summary>Usuwa cudzysłowy i nadmiar, ucina do <paramref name="max"/> znaków na granicy zdania lub słowa.</summary>
+    private static string Clean(string text, int max)
     {
         text = text.Trim().Trim('"', '„', '”', '\'', '«', '»').Replace("\r", "").Replace("\n", " ").Trim();
         text = MultiSpace().Replace(text, " ");
-        if (text.Length <= 240) return text;
-        var cut = text[..240];
+        if (text.Length <= max) return text;
+        var cut = text[..max];
         var end = cut.LastIndexOfAny(['.', '!', '?']);
-        return end > 120 ? cut[..(end + 1)] : cut[..cut.LastIndexOf(' ')] + "…";
+        return end > max / 2 ? cut[..(end + 1)] : cut[..cut.LastIndexOf(' ')] + "…";
     }
 
     /// <summary>Każda liczba z odpowiedzi musi wystąpić w faktach, a każdy znacznik [..] z faktów — w odpowiedzi.</summary>
@@ -142,25 +162,32 @@ public partial class AssistantService(
     [GeneratedRegex(@"\s{2,}")] private static partial Regex MultiSpace();
 
     /// <summary>Przykładowe podpowiedzi do testu w Panelu — te same rodzaje, które liczy aplikacja trenera.</summary>
-    public static readonly (string Kind, string Label, string Mood, Dictionary<string, string> Facts, string Fallback)[] Samples =
+    public static readonly (string Kind, string Label, string Mood, Dictionary<string, string> Facts, string Fallback, string Audience)[] Samples =
     [
+        ("podsumowanie_klienta", "Dla klienta: podsumowanie postępów", "happy",
+            new() { ["liczba_treningow"] = "10", ["od"] = "1 września 2026", ["cwiczenie_1"] = "Wyciskanie sztangi leżąc", ["cwiczenie_1_kg"] = "60 → 70 (+10)",
+                ["cwiczenie_2"] = "Przysiad ze sztangą", ["cwiczenie_2_kg"] = "80 → 90 (+10)", ["masa_ciala_kg"] = "82,5 → 80,4 (−2,1)" },
+            "Masz za sobą już 10 treningów (od 1 września 2026). Wyciskanie sztangi leżąc: 60 → 70 kg, Przysiad ze sztangą: 80 → 90 kg. Masa ciała −2,1 kg.", "klient"),
+        ("podsumowanie_trenera", "Dla trenera: wnioski o kliencie", "think",
+            new() { ["liczba_treningow"] = "10", ["cwiczenie_1"] = "Wyciskanie sztangi leżąc", ["cwiczenie_1_kg"] = "60 → 70 (+10)", ["uwagi"] = "2" },
+            "Za klientem 10 treningów. Największy postęp: Wyciskanie sztangi leżąc +10 kg. 2 ćwiczenia wymagają uwagi — szczegóły poniżej.", "trener"),
         ("rekord_tygodnia", "Pochwała: rekordowy tydzień", "celebrate",
             new() { ["treningi_w_tym_tygodniu"] = "18", ["poprzedni_rekord"] = "15" },
-            "Rekordowy tydzień: 18 treningów! Tak trzymać 💪"),
+            "Rekordowy tydzień: 18 treningów! Tak trzymać 💪", "trener"),
         ("kamien_milowy", "Pochwała: 10. trening klienta", "celebrate",
             new() { ["klient"] = "[klient]", ["liczba_treningow"] = "10" },
-            "[klient] ma za sobą już 10 treningów! 🎉"),
+            "[klient] ma za sobą już 10 treningów! 🎉", "trener"),
         ("niezaplacone", "Przypomnienie: płatności", "remind",
             new() { ["liczba_treningow"] = "3" },
-            "3 treningi poza pakietem czekają na zapłatę. Warto przypomnieć klientom."),
+            "3 treningi poza pakietem czekają na zapłatę. Warto przypomnieć klientom.", "trener"),
         ("faktury", "Przypomnienie: faktury na koniec miesiąca", "remind",
             new() { ["miesiac"] = "październik" },
-            "Koniec miesiąca! Sprawdź, czy faktury za październik są wystawione."),
+            "Koniec miesiąca! Sprawdź, czy faktury za październik są wystawione.", "trener"),
         ("nieaktywni", "Sugestia: klienci, którzy dawno nie byli", "think",
             new() { ["liczba_klientow"] = "4", ["dni"] = "21" },
-            "4 klientów nie było od 3 tygodni. Może krótka wiadomość?"),
+            "4 klientów nie było od 3 tygodni. Może krótka wiadomość?", "trener"),
         ("dzis", "Powitanie: plan na dziś", "hello",
             new() { ["treningi_dzis"] = "5" },
-            "Dzień dobry! Dziś 5 treningów w grafiku. Powodzenia!"),
+            "Dzień dobry! Dziś 5 treningów w grafiku. Powodzenia!", "trener"),
     ];
 }

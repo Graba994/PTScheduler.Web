@@ -752,11 +752,12 @@ app.MapPost("/api/internal/tenants/{slug}/assistant/phrase", async (
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
     if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
-    if (string.IsNullOrWhiteSpace(body.Kind) || string.IsNullOrWhiteSpace(body.Fallback) || body.Fallback.Length > 400) return Results.BadRequest();
-    var facts = (body.Facts ?? []).Take(12)
+    if (string.IsNullOrWhiteSpace(body.Kind) || string.IsNullOrWhiteSpace(body.Fallback) || body.Fallback.Length > 600) return Results.BadRequest();
+    var facts = (body.Facts ?? []).Take(20)
         .Where(f => f.Key.Length <= 40 && (f.Value?.Length ?? 0) <= 80)
         .ToDictionary(f => f.Key, f => f.Value ?? "");
-    var phrase = await assistant.PhraseAsync(tenant, body.Kind[..Math.Min(40, body.Kind.Length)], facts, body.Fallback);
+    var phrase = await assistant.PhraseAsync(tenant, body.Kind[..Math.Min(40, body.Kind.Length)], facts, body.Fallback,
+        audience: body.Audience == "klient" ? "klient" : "trener");
     return Results.Json(new { text = phrase.Text, ai = phrase.FromAi });
 });
 
@@ -1249,7 +1250,7 @@ app.Run();
 // Wspólna kontrola nagłówka X-Internal-Secret dla wywołań tenant → Portal.
 // Pusty sekret = odmowa (wcześniej oznaczał brak jakiejkolwiek kontroli).
 record AppFeedbackRequest(int Rating, string? Text, string? ContactEmail, string? AuthorEmail);
-record AssistantPhraseRequest(string Kind, Dictionary<string, string?>? Facts, string Fallback);
+record AssistantPhraseRequest(string Kind, Dictionary<string, string?>? Facts, string Fallback, string? Audience);
 record LegalAcceptRequest(string Email, string[]? Keys, string? Ip, string? UserAgent);
 
 record GoogleAuthorizeRequest(string UserKey, string ReturnUrl);

@@ -85,6 +85,8 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string AssistantAnimation = "assistant_animation";
         /// <summary>Masterprompt: osobowość i zasady pisania asystenta ({NAZWA} = imię maskotki).</summary>
         public const string AssistantPrompt = "assistant_prompt";
+        /// <summary>Prompt podsumowań postępów czytanych przez klientów trenera.</summary>
+        public const string AssistantClientPrompt = "assistant_client_prompt";
         public const string AiEnabled = "ai_enabled";
         /// <summary>Klucz OpenRouter (zaszyfrowany Data Protection).</summary>
         public const string AiApiKey = "ai_api_key";

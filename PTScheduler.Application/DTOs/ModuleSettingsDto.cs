@@ -12,6 +12,9 @@ public class ModuleSettingsDto
     // Automatyczne przypomnienia klientom o kończącym się / wygasającym pakiecie.
     public bool PackageRemindersEnabled { get; set; } = true;
 
+    // Karta „Twoje postępy” na pulpicie klienta (siła, ciało, liczba treningów; tekst może ułożyć AI).
+    public bool ClientProgressSummariesEnabled { get; set; } = true;
+
     // Źródło publicznego katalogu ćwiczeń (Free Exercise DB albo wger.de).
     public PTScheduler.Domain.Enums.ExerciseSource ExerciseCatalogSource { get; set; } = PTScheduler.Domain.Enums.ExerciseSource.FreeExerciseDb;
 
