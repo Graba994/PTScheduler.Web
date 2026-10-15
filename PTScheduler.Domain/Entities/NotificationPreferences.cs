@@ -30,6 +30,8 @@ public class NotificationPreferences
     public bool PushMessages { get; set; } = true;
     /// <summary>Push: automatyczne wiadomości od trenera (powitanie, urodziny, powroty).</summary>
     public bool PushTrainerMessages { get; set; } = true;
+    /// <summary>Push (klient): nowy medal.</summary>
+    public bool PushMedals { get; set; } = true;
     /// <summary>Push (trener): aktywność klientów — ankiety, pomiary, opinie.</summary>
     public bool PushClientActivity { get; set; } = true;
     /// <summary>SMS: przypomnienie dzień przed treningiem (klient może zrezygnować).</summary>

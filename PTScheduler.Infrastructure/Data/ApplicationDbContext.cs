@@ -35,6 +35,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<SmsSettings> SmsSettings => Set<SmsSettings>();
     public DbSet<NotificationPreferences> NotificationPreferences => Set<NotificationPreferences>();
     public DbSet<TrainerStyle> TrainerStyles => Set<TrainerStyle>();
+    public DbSet<ClientMedal> ClientMedals => Set<ClientMedal>();
     public DbSet<TrainerStyleExample> TrainerStyleExamples => Set<TrainerStyleExample>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<EmailTemplate> EmailTemplates => Set<EmailTemplate>();
@@ -299,6 +300,13 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         builder.Entity<NotificationPreferences>()
             .HasIndex(n => n.UserId)
             .IsUnique();
+
+        builder.Entity<ClientMedal>(e =>
+        {
+            e.HasIndex(x => new { x.ClientId, x.Key }).IsUnique();
+            e.Property(x => x.Key).HasMaxLength(40);
+            e.HasOne(x => x.Client).WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
+        });
 
         builder.Entity<TrainerStyle>(e =>
         {

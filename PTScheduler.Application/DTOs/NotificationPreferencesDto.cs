@@ -19,6 +19,7 @@ public class NotificationPreferencesDto
     public bool PushPackages { get; set; } = true;
     public bool PushMessages { get; set; } = true;
     public bool PushTrainerMessages { get; set; } = true;
+    public bool PushMedals { get; set; } = true;
     public bool PushClientActivity { get; set; } = true;
     public bool SmsReminders { get; set; } = true;
     public bool SmsTrainerMessages { get; set; } = true;

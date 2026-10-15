@@ -11,7 +11,8 @@ namespace PTScheduler.Web.Services;
 public sealed class ClientNav(
     EntitlementService entitlements,
     IModuleSettingsService modules,
-    IMarketingSettingsService marketing)
+    IMarketingSettingsService marketing,
+    ISiteContentService site)
 {
     /// <param name="Short">Krótszy podpis na telefon (zakładki w jednym pasku bez przewijania).</param>
     public sealed record Tab(string Href, string Label, string Icon, bool Exact = false, string? Short = null);
@@ -35,6 +36,9 @@ public sealed class ClientNav(
         }
         catch { /* bez bonów i poleceń */ }
 
+        var medals = true;
+        try { medals = (await site.GetAsync()).MedalsEnabled; } catch { /* domyślnie włączone */ }
+
         var plans = entitlements.IsAllowed("TrainingPlansEnabled");
         var measurements = entitlements.IsAllowed("BodyMeasurements");
 
@@ -53,6 +57,7 @@ public sealed class ClientNav(
         if (plans) training.Add(new("/train", "Trenuj", "pt-ico-dumbbell"));
         if (plans) training.Add(new("/my/workouts", "Postępy", "bi-graph-up-arrow"));
         if (measurements) training.Add(new("/my/measurements", "Pomiary", "bi-rulers"));
+        if (medals) training.Add(new("/medale", "Medale", "bi-award"));
         if (training.Count > 0)
             sections.Add(new("training", "Trening", "pt-ico-dumbbell", training[0].Href, training));
 

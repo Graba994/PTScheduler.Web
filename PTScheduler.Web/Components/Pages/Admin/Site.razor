@@ -7,6 +7,7 @@
 @implements IDisposable
 @inject ISiteContentService SiteContentService
 @inject PlatformInfoService Platform
+@inject PTScheduler.Web.Services.MedalService MedalSvc
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Twoja strona" />
@@ -73,6 +74,7 @@ else
             <div class="sb-tabs">
                 <button class="@(_tab == "blocks" ? "active" : "")" @onclick='() => _tab = "blocks"'><i class="bi bi-grid-1x2"></i>Widgety</button>
                 <button class="@(_tab == "look" ? "active" : "")" @onclick='() => _tab = "look"'><i class="bi bi-palette"></i>Wygląd</button>
+                <button class="@(_tab == "medals" ? "active" : "")" @onclick="OpenMedalsAsync"><i class="bi bi-award"></i>Medale</button>
                 <button class="@(_tab == "settings" ? "active" : "")" @onclick='() => _tab = "settings"'><i class="bi bi-gear"></i>Ustawienia</button>
             </div>
 
@@ -182,6 +184,45 @@ else
                         <span class="form-check-label">Animacje (pojawianie się sekcji, liczniki, przewijane paski)</span>
                     </label>
                 </div>
+            }
+            else if (_tab == "medals")
+            {
+                <div class="sb-section-title">Medale dla klientów</div>
+                <div class="sb-hint mb-2">Klienci zdobywają je za kolejne treningi, serie tygodni, rekordy i staż. Kolory biorą się z motywu aplikacji, więc pasują do Twojej marki.</div>
+                <div class="sb-row">
+                    <label class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" checked="@_content.MedalsEnabled" @onchange="e => SaveMedalsAsync((bool)(e.Value ?? false), _content.MedalStyle)" />
+                        <span class="form-check-label">Medale włączone (gablota w aplikacji klienta, gratulacje i powiadomienia)</span>
+                    </label>
+                </div>
+                @if (_medalPalette is not null)
+                {
+                    <div class="sb-section-title mt-2">Styl medali</div>
+                    <div class="medal-styles">
+                        @foreach (var st in PTScheduler.Application.Medals.MedalArt.Styles)
+                        {
+                            <button type="button" class="medal-style @(_content.MedalStyle == st.Key ? "active" : "")" @onclick="() => SaveMedalsAsync(_content.MedalsEnabled, st.Key)">
+                                <span class="medal-style-row">
+                                    @foreach (var key in new[] { "treningi_10", "seria_8", "rekord_25" })
+                                    {
+                                        <MedalImage Medal="PTScheduler.Domain.Rules.MedalRules.Find(key)!" Style="@st.Key" Palette="_medalPalette" Size="52" />
+                                    }
+                                </span>
+                                <b>@st.Name</b>
+                                <small>@st.Description</small>
+                            </button>
+                        }
+                    </div>
+                    <div class="sb-section-title mt-3">Wszystkie medale w tym stylu</div>
+                    <div class="medal-preview-grid">
+                        @foreach (var m in PTScheduler.Domain.Rules.MedalRules.All)
+                        {
+                            <div title="@($"{m.Name} — {m.Description}")"><MedalImage Medal="m" Style="@_content.MedalStyle" Palette="_medalPalette" Size="56" /><span>@m.Name</span></div>
+                        }
+                    </div>
+                    <div class="sb-hint mt-2">Styl „W moim stylu strony” bierze kształt, kolory i krój z motywu w zakładce „Wygląd”. Zmiany medali działają od razu — bez publikowania strony.</div>
+                    @if (_medalSaved) { <div class="small text-success mt-1"><i class="bi bi-check2 me-1"></i>Zapisane.</div> }
+                }
             }
             else
             {
@@ -297,6 +338,30 @@ else
     }
 
     private PlatformInfoService.Info? _platform;
+    private PTScheduler.Application.Medals.MedalPalette? _medalPalette;
+    private bool _medalSaved;
+
+    private async Task OpenMedalsAsync()
+    {
+        _tab = "medals";
+        _medalSaved = false;
+        _medalPalette = (await MedalSvc.GetSettingsAsync(_content)).Palette;
+    }
+
+    /// <summary>Ustawienia medali zapisujemy od razu w opublikowanej treści (i w szkicu, jeśli jest) — nie czekają na publikację strony.</summary>
+    private async Task SaveMedalsAsync(bool enabled, string style)
+    {
+        if (_content is null) return;
+        _content.MedalsEnabled = enabled;
+        _content.MedalStyle = PTScheduler.Application.Medals.MedalArt.IsStyle(style) ? style : "klasyczny";
+        var published = await SiteContentService.GetAsync();
+        published.MedalsEnabled = _content.MedalsEnabled;
+        published.MedalStyle = _content.MedalStyle;
+        await SiteContentService.SaveAsync(published);
+        if (_hasDraft) await SiteContentService.SaveDraftAsync(_content);
+        _medalPalette = (await MedalSvc.GetSettingsAsync(_content)).Palette;
+        _medalSaved = true;
+    }
 
     private static string Summary(SiteBlock b) =>
         !string.IsNullOrWhiteSpace(b.Title) ? b.Title!

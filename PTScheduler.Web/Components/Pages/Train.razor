@@ -20,6 +20,7 @@
 @inject IJSRuntime JS
 @inject ILoggerFactory LoggerFactory
 @inject PTScheduler.Web.Services.WorkoutCompanionService Companion
+@inject PTScheduler.Web.Services.MedalService MedalSvc
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Trenuj" />
@@ -187,6 +188,7 @@ else
     {
         @* Po ankiecie (albo bez niej) — podsumowanie właśnie zakończonego treningu. *@
         <WorkoutSummary Day="_summary" Survey="_summarySurvey" Celebrate="true" Highlights="_highlights" OnClose="() => _summary = null" />
+        <NewMedalModal Medals="_newMedals" Settings="_medalSettings" OnDone="MedalsSeenAsync" />
     }
 
     @if (_selectedPlan is null)
@@ -288,6 +290,14 @@ else
     private WorkoutJournalDayDto? _summary;
     private SurveyResponseDto? _summarySurvey;
     private PTScheduler.Web.Services.WorkoutCompanionService.Summary? _highlights;
+    private List<PTScheduler.Domain.Rules.MedalRules.Medal> _newMedals = [];
+    private PTScheduler.Web.Services.MedalService.Settings? _medalSettings;
+
+    private async Task MedalsSeenAsync()
+    {
+        _newMedals = [];
+        if (_clientId is { } id) await MedalSvc.MarkSeenAsync(id);
+    }
     private WorkoutJournalDayDto? _historyDay;
     private SurveyResponseDto? _historySurvey;
     private string _savedText = "";
@@ -638,6 +648,16 @@ else
             {
                 try { _highlights = await Companion.SummaryAsync(_clientId.Value, workoutDate); }
                 catch (Exception hx) { LoggerFactory.CreateLogger("Train").LogWarning(hx, "Podsumowanie treningu bez wyróżnień."); }
+                try
+                {
+                    _medalSettings = await MedalSvc.GetSettingsAsync();
+                    if (_medalSettings.Enabled)
+                    {
+                        await MedalSvc.SyncAsync(_clientId.Value);
+                        _newMedals = await MedalSvc.UnseenAsync(_clientId.Value);
+                    }
+                }
+                catch (Exception mx) { LoggerFactory.CreateLogger("Train").LogWarning(mx, "Medale po treningu niedostępne."); }
             }
             _summarySurvey = null;
             _historyDay = null;

@@ -27,6 +27,10 @@ public class SiteContentDto
     public string? HeroImageUrl { get; set; }
     public string? AccentOverride { get; set; }              // optional CSS color to override the brand accent
 
+    // Medale klientów (zakładka „Medale” w kreatorze strony): włącznik i styl grafik (MedalArt.Styles).
+    public bool MedalsEnabled { get; set; } = true;
+    public string MedalStyle { get; set; } = "klasyczny";
+
     // Global page colors (null = default / theme-aware).
     public string? PageBackground { get; set; }    // page background
     public string? HeadingColor { get; set; }      // all section titles

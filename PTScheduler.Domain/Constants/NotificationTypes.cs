@@ -23,6 +23,8 @@ public static class NotificationTypes
     public const string PushMessages = nameof(PushMessages);
     /// <summary>Push: automatyczne wiadomości od trenera (powitanie, urodziny, powroty).</summary>
     public const string PushTrainerMessages = nameof(PushTrainerMessages);
+    /// <summary>Push (klient): nowy medal za treningi, serię, rekordy albo staż.</summary>
+    public const string PushMedals = nameof(PushMedals);
     /// <summary>Push (trener): aktywność klientów — ankiety, pomiary, opinie.</summary>
     public const string PushClientActivity = nameof(PushClientActivity);
     /// <summary>SMS: przypomnienie dzień przed treningiem (klient może zrezygnować).</summary>

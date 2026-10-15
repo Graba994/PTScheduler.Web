@@ -31,6 +31,7 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
             PushPackages = prefs.PushPackages,
             PushMessages = prefs.PushMessages,
             PushTrainerMessages = prefs.PushTrainerMessages,
+            PushMedals = prefs.PushMedals,
             PushClientActivity = prefs.PushClientActivity,
             MorningBrief = prefs.MorningBrief,
             PushMorningBrief = prefs.PushMorningBrief,
@@ -65,6 +66,7 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
         prefs.PushPackages = dto.PushPackages;
         prefs.PushMessages = dto.PushMessages;
         prefs.PushTrainerMessages = dto.PushTrainerMessages;
+        prefs.PushMedals = dto.PushMedals;
         prefs.PushClientActivity = dto.PushClientActivity;
         prefs.MorningBrief = dto.MorningBrief;
         prefs.PushMorningBrief = dto.PushMorningBrief;
@@ -94,6 +96,7 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
             NotificationTypes.PushPackages => prefs.PushPackages,
             NotificationTypes.PushMessages => prefs.PushMessages,
             NotificationTypes.PushTrainerMessages => prefs.PushTrainerMessages,
+            NotificationTypes.PushMedals => prefs.PushMedals,
             NotificationTypes.PushClientActivity => prefs.PushClientActivity,
             NotificationTypes.PushMorningBrief => prefs.PushMorningBrief,
             NotificationTypes.PushBeforeSession => prefs.PushBeforeSession,

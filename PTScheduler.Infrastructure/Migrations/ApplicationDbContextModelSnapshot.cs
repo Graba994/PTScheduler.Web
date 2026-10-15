@@ -721,6 +721,39 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.ToTable("ClientDocuments");
                 });
 
+            modelBuilder.Entity("PTScheduler.Domain.Entities.ClientMedal", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("EarnedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Key")
+                        .IsRequired()
+                        .HasMaxLength(40)
+                        .HasColumnType("character varying(40)");
+
+                    b.Property<bool>("Notified")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateTime?>("SeenAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId", "Key")
+                        .IsUnique();
+
+                    b.ToTable("ClientMedals");
+                });
+
             modelBuilder.Entity("PTScheduler.Domain.Entities.ClientReview", b =>
                 {
                     b.Property<int>("Id")
@@ -1819,6 +1852,9 @@ namespace PTScheduler.Infrastructure.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<bool>("PushClientActivity")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("PushMedals")
                         .HasColumnType("boolean");
 
                     b.Property<bool>("PushMessages")
@@ -3567,6 +3603,17 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Navigation("Client1");
 
                     b.Navigation("Client2");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.ClientMedal", b =>
+                {
+                    b.HasOne("PTScheduler.Domain.Entities.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Client");
                 });
 
             modelBuilder.Entity("PTScheduler.Domain.Entities.ClientReview", b =>
