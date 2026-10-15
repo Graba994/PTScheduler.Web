@@ -94,6 +94,10 @@ builder.Services.AddScoped<InviteService>();
 builder.Services.AddScoped<LegalService>();
 builder.Services.AddScoped<AiService>();
 builder.Services.AddScoped<AssistantService>();
+builder.Services.AddScoped<LeoService>();
+builder.Services.AddScoped<LeoInsights>();
+builder.Services.AddScoped<LeoReportService>();
+builder.Services.AddHostedService<LeoReportBackgroundService>();
 builder.Services.AddSingleton<FunnelService>();
 builder.Services.AddHostedService<GrowthService>();
 builder.Services.AddSingleton<CustomDomainService>();
@@ -729,6 +733,14 @@ app.MapPost("/api/internal/tenants/{slug}/legal/accept", async (
 app.MapGet("/assistant/mascot/{mood}.png", async (string mood, AssistantService assistant, IWebHostEnvironment env, HttpContext ctx) =>
 {
     if (await assistant.EmailImageAsync(mood, env.WebRootPath) is not { } img) return Results.NotFound();
+    ctx.Response.Headers.CacheControl = "public, max-age=86400";
+    return Results.File(img.Data, img.ContentType);
+});
+
+// Agent Portalu (Leo) w porannym raporcie administratora — te same zasady co maskotka trenerów.
+app.MapGet("/assistant/leo/{mood}.png", async (string mood, AssistantService assistant, IWebHostEnvironment env, HttpContext ctx) =>
+{
+    if (await assistant.EmailImageAsync(mood, env.WebRootPath, AssistantService.Leo) is not { } img) return Results.NotFound();
     ctx.Response.Headers.CacheControl = "public, max-age=86400";
     return Results.File(img.Data, img.ContentType);
 });

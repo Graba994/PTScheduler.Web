@@ -1,4 +1,5 @@
 @page "/panel/asystent"
+@page "/panel/asystent/{AgentSlug}"
 @layout AdminLayout
 @attribute [Authorize(Roles = "Admin")]
 @inject IDbContextFactory<PortalDbContext> DbFactory
@@ -6,15 +7,23 @@
 @inject AssistantService Assistant
 @inject AiService Ai
 @inject IJSRuntime JS
+@inject LeoReportService LeoReport
+@inject NavigationManager Nav
 @rendermode InteractiveServer
 @using K = PTScheduler.Portal.Services.SiteSettingsService.Keys
 
-@* Asystent-maskotka w aplikacjach trenerów: wygląd (imię, ikony, animacja), zachowanie (masterprompt) i AI przez OpenRouter. *@
+@* Dwóch agentów: maskotka w aplikacjach trenerów (Hantly) i agent Portalu dla administratora (Leo).
+   Wygląd (imię, ikony, animacja), zachowanie (masterprompt), poranny raport Leo i AI przez OpenRouter. *@
 
-<PageTitle>Asystent @_savedName — PTScheduler Portal</PageTitle>
+<PageTitle>@(IsLeo ? "Agent" : "Asystent") @_savedName — PTScheduler Portal</PageTitle>
 
-<PanelHeader Title="@($"Asystent {_savedName}")" Icon="bi-emoji-smile" IconClass="pp-tone-info"
-             Subtitle="Maskotka w aplikacji trenera: sama podpowiada (płatności, faktury, pochwały), bez pisania do niej. Co pokazać, liczą reguły; AI tylko ubiera to w słowa." />
+<PanelHeader Title="@($"{(IsLeo ? "Agent" : "Asystent")} {_savedName}")" Icon="@(IsLeo ? "bi-heart" : "bi-emoji-smile")" IconClass="pp-tone-info"
+             Subtitle="@(IsLeo ? "Szczeniak w Panelu: pilnuje zgłoszeń, rachunków, awarii i trenerów, którzy mogą odejść; rano wysyła raport. Co pokazać, liczą reguły; AI tylko ubiera to w słowa." : "Maskotka w aplikacji trenera: sama podpowiada (płatności, faktury, pochwały), bez pisania do niej. Co pokazać, liczą reguły; AI tylko ubiera to w słowa.")" />
+
+<nav class="hm-agents mb-3" aria-label="Agent">
+    <a href="/panel/asystent" class="@(IsLeo ? "" : "on")"><img src="@MascotArt.DataUri("hello")" alt="" width="36" height="36" /><span><b>@_hantlyName</b>w aplikacjach trenerów</span></a>
+    <a href="/panel/asystent/leo" class="@(IsLeo ? "on" : "")"><img src="@PuppyArt.DataUri("hello")" alt="" width="36" height="36" /><span><b>@_leoName</b>w Panelu administratora</span></a>
+</nav>
 
 @if (_message is not null)
 {
@@ -37,12 +46,12 @@
             <section class="card border-0 shadow-sm h-100">
                 <div class="card-body hm-stage">
                     <div class="hm-bubble-preview">
-                        <b>@(_name.Length > 0 ? _name : AssistantService.DefaultName)</b>
-                        Cześć! Pomogę pilnować płatności i faktur, a za każdy rekord pochwalę. 💪
+                        <b>@DisplayName</b>
+                        @(IsLeo ? "Hau! Przypilnuję zgłoszeń, rachunków i trenerów, którzy mogą odejść. Rano dostaniesz raport. 🐾" : "Cześć! Pomogę pilnować płatności i faktur, a za każdy rekord pochwalę. 💪")
                     </div>
                     <img class="hm-mascot hm-anim-@_animation" src="@Icon(_previewMood)" alt="" width="120" height="120" />
                     <div class="hm-moods" role="group" aria-label="Podgląd nastroju">
-                        @foreach (var m in MascotArt.Moods)
+                        @foreach (var m in AssistantService.MoodsFor(_agent))
                         {
                             <button type="button" class="@(m.Key == _previewMood ? "on" : "")" title="@m.Label" @onclick="() => _previewMood = m.Key"><img src="@Icon(m.Key)" alt="@m.Label" width="34" height="34" /></button>
                         }
@@ -56,12 +65,20 @@
                 <div class="card-body d-flex flex-column gap-3">
                     <label class="form-check form-switch m-0">
                         <input class="form-check-input" type="checkbox" @bind="_enabled" />
-                        <span class="form-check-label fw-semibold">Asystent widoczny w aplikacjach trenerów</span>
-                        <span class="d-block small text-muted">Pojedynczych trenerów wyłączysz w ich karcie. Klienci trenerów asystenta nie widzą.</span>
+                        @if (IsLeo)
+                        {
+                            <span class="form-check-label fw-semibold">Leo widoczny w Panelu</span>
+                            <span class="d-block small text-muted">Dymek z podpowiedziami w prawym dolnym rogu Panelu. Poranny raport ustawisz w zakładce „Zachowanie”.</span>
+                        }
+                        else
+                        {
+                            <span class="form-check-label fw-semibold">Asystent widoczny w aplikacjach trenerów</span>
+                            <span class="d-block small text-muted">Pojedynczych trenerów wyłączysz w ich karcie. Klienci trenerów asystenta nie widzą.</span>
+                        }
                     </label>
                     <div>
                         <label class="form-label small fw-semibold" for="hm-name">Imię</label>
-                        <input id="hm-name" class="form-control" @bind="_name" @bind:event="oninput" maxlength="30" placeholder="@AssistantService.DefaultName" />
+                        <input id="hm-name" class="form-control" @bind="_name" @bind:event="oninput" maxlength="30" placeholder="@(IsLeo ? AssistantService.DefaultLeoName : AssistantService.DefaultName)" />
                     </div>
                     <div>
                         <label class="form-label small fw-semibold" for="hm-anim">Animacja</label>
@@ -82,9 +99,9 @@
     <section class="card border-0 shadow-sm mt-3">
         <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-images"></i></span>Ikony nastrojów</div>
         <div class="card-body">
-            <p class="small text-muted">Podmień dowolną ikonę własnym plikiem (SVG, PNG, WebP lub GIF, do @(AssistantService.MaxAssetBytes / 1024) KB, najlepiej kwadrat z przezroczystym tłem). Te same ikony trafiają do e-maili — z SVG automatycznie robimy wersję PNG.</p>
+            <p class="small text-muted">Podmień dowolną ikonę własnym plikiem (SVG, PNG, WebP lub GIF, do @(AssistantService.MaxAssetBytes / 1024) KB, najlepiej kwadrat z przezroczystym tłem). Te same ikony trafiają do e-maili@(IsLeo ? " (poranny raport)" : "") — z SVG automatycznie robimy wersję PNG.</p>
             <div class="hm-grid">
-                @foreach (var m in MascotArt.Moods)
+                @foreach (var m in AssistantService.MoodsFor(_agent))
                 {
                     var custom = _custom.Contains(m.Key);
                     <div class="hm-tile">
@@ -104,6 +121,85 @@
             </div>
         </div>
     </section>
+}
+else if (_tab == "behavior" && IsLeo)
+{
+    <div class="row g-3">
+        <div class="col-lg-7">
+            <section class="card border-0 shadow-sm">
+                <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-file-earmark-text"></i></span>Masterprompt — charakter @DisplayName</div>
+                <div class="card-body d-flex flex-column gap-2">
+                    <p class="small text-muted mb-1">Tak AI pisze dymki i wstęp raportu. <code>{NAZWA}</code> zamienia się na imię. Przy „Wygeneruj” (ankieta, spotkania, oceny) dochodzą zasady dłuższej analizy. Liczby spoza faktów są odrzucane albo oznaczane do sprawdzenia.</p>
+                    <textarea class="form-control font-monospace small" rows="14" @bind="_leoPrompt" @bind:event="oninput" aria-label="Masterprompt Leo"></textarea>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button class="btn btn-primary btn-sm" @onclick="SaveLeoPromptAsync"><i class="bi bi-check-lg me-1"></i>Zapisz</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => _leoPrompt = AssistantService.DefaultLeoPrompt">Przywróć domyślny</button>
+                    </div>
+                </div>
+            </section>
+
+            <section class="card border-0 shadow-sm mt-3">
+                <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-envelope-paper-heart"></i></span>Poranny raport e-mailem</div>
+                <div class="card-body d-flex flex-column gap-3">
+                    <label class="form-check form-switch m-0">
+                        <input class="form-check-input" type="checkbox" @bind="_reportOn" />
+                        <span class="form-check-label fw-semibold">Wysyłaj codziennie rano</span>
+                        <span class="d-block small text-muted">Wczoraj w liczbach, sprawy do zrobienia, trenerzy zagrożeni odejściem i powody do radości.</span>
+                    </label>
+                    <div class="row g-2 align-items-end">
+                        <div class="col-sm-4">
+                            <label class="form-label small fw-semibold" for="leo-hour">Godzina</label>
+                            <select id="leo-hour" class="form-select form-select-sm" @bind="_reportHour">
+                                @for (var h = 5; h <= 11; h++) { <option value="@h">@($"{h}:00")</option> }
+                            </select>
+                        </div>
+                        <div class="col-sm-8">
+                            <label class="form-label small fw-semibold" for="leo-mail">Adres administratora</label>
+                            <input id="leo-mail" type="email" class="form-control form-control-sm" @bind="_adminEmail" placeholder="admin@twojadomena.pl" />
+                        </div>
+                        <div class="col-12 form-text small mt-1">Ten sam adres dostaje powiadomienia o zgłoszeniach ze sklepu. Czas warszawski.</div>
+                    </div>
+                    <div class="d-flex gap-2 flex-wrap">
+                        <button class="btn btn-primary btn-sm" @onclick="SaveReportAsync"><i class="bi bi-check-lg me-1"></i>Zapisz</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="SendTestReportAsync" disabled="@_sending">
+                            @if (_sending) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-send me-1"></i> }
+                            Wyślij mi teraz próbny
+                        </button>
+                    </div>
+                </div>
+            </section>
+        </div>
+        <div class="col-lg-5">
+            <section class="card border-0 shadow-sm h-100">
+                <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-play-circle"></i></span>Wypróbuj</div>
+                <div class="card-body d-flex flex-column gap-2">
+                    <select class="form-select form-select-sm" @bind="_leoSample" aria-label="Przykładowy komunikat">
+                        @for (var i = 0; i < AssistantService.LeoSamples.Length; i++)
+                        {
+                            <option value="@i">@AssistantService.LeoSamples[i].Label</option>
+                        }
+                    </select>
+                    <div class="small text-muted">Tekst podstawowy: „@AssistantService.LeoSamples[_leoSample].Fallback”</div>
+                    <button class="btn btn-outline-primary btn-sm" @onclick="TryLeoAsync" disabled="@_trying">
+                        @if (_trying) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-stars me-1"></i> }
+                        Zobacz, jak to powie
+                    </button>
+                    <div class="small text-muted">Używa promptu z pola obok (także niezapisanego). Działa nawet przy wyłączonym AI, jeśli jest klucz.</div>
+                    @if (_tryResult is not null)
+                    {
+                        <div class="hm-try">
+                            <img class="hm-mascot hm-anim-@_animation" src="@Icon(AssistantService.LeoSamples[_leoSample].Mood)" alt="" width="64" height="64" />
+                            <div class="hm-try-bubble">
+                                <b>@DisplayName</b>
+                                @_tryResult.Text
+                                <span class="d-block mt-1 small @(_tryResult.FromAi ? "text-success" : "text-muted")">@(_tryResult.FromAi ? "napisane przez AI" : "tekst podstawowy")@(_tryResult.Error is { } err ? $" · {err}" : "")</span>
+                            </div>
+                        </div>
+                    }
+                </div>
+            </section>
+        </div>
+    </div>
 }
 else if (_tab == "behavior")
 {
@@ -150,7 +246,7 @@ else if (_tab == "behavior")
                         <div class="hm-try">
                             <img class="hm-mascot hm-anim-@_animation" src="@Icon(AssistantService.Samples[_sample].Mood)" alt="" width="64" height="64" />
                             <div class="hm-try-bubble">
-                                <b>@(_name.Length > 0 ? _name : AssistantService.DefaultName)</b>
+                                <b>@DisplayName</b>
                                 @_tryResult.Text
                                 <span class="d-block mt-1 small @(_tryResult.FromAi ? "text-success" : "text-muted")">@(_tryResult.FromAi ? "napisane przez AI" : "tekst podstawowy")@(_tryResult.Error is { } err ? $" · {err}" : "")</span>
                             </div>
@@ -277,6 +373,20 @@ else
     private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
     private static readonly System.Globalization.CultureInfo Inv = System.Globalization.CultureInfo.InvariantCulture;
 
+    [Parameter] public string? AgentSlug { get; set; }
+    private string _agent = AssistantService.Hantly;
+    private bool IsLeo => _agent == AssistantService.Leo;
+    private string DisplayName => _name.Trim().Length > 0 ? _name.Trim() : IsLeo ? AssistantService.DefaultLeoName : AssistantService.DefaultName;
+    private string _hantlyName = AssistantService.DefaultName;
+    private string _leoName = AssistantService.DefaultLeoName;
+
+    private string _leoPrompt = "";
+    private int _leoSample;
+    private bool _reportOn = true;
+    private int _reportHour = 7;
+    private string _adminEmail = "";
+    private bool _sending;
+
     private string _tab = "look";
     private string? _message;
     private bool _msgError;
@@ -310,16 +420,27 @@ else
     private List<AiUsageLog> _logs = [];
     private Dictionary<int, string> _slugs = new();
 
-    private string Icon(string mood) => _icons.TryGetValue(mood, out var v) ? v : MascotArt.DataUri(mood);
+    private string Icon(string mood) => _icons.TryGetValue(mood, out var v) ? v : AssistantService.BuiltInIcon(_agent, mood);
 
-    protected override async Task OnInitializedAsync()
+    protected override async Task OnParametersSetAsync()
     {
+        _agent = string.Equals(AgentSlug, "leo", StringComparison.OrdinalIgnoreCase) ? AssistantService.Leo : AssistantService.Hantly;
+        _tryResult = null;
+        _message = null;
         var s = await Settings.GetAllAsync(K.AssistantEnabled, K.AssistantName, K.AssistantAnimation, K.AiEnabled, K.AiModel,
-            K.AiMonthlyBudgetUsd, K.AiPriceInputPerM, K.AiPriceOutputPerM);
-        _enabled = s[K.AssistantEnabled] != "false";
-        _name = s[K.AssistantName];
-        _savedName = _name.Length > 0 ? _name : AssistantService.DefaultName;
-        _animation = AssistantService.Animations.Contains(s[K.AssistantAnimation]) ? s[K.AssistantAnimation] : "bounce";
+            K.AiMonthlyBudgetUsd, K.AiPriceInputPerM, K.AiPriceOutputPerM,
+            K.LeoEnabled, K.LeoName, K.LeoAnimation, K.LeoReportEnabled, K.LeoReportHour, K.AdminNotificationEmail);
+        _hantlyName = s[K.AssistantName].Trim() is { Length: > 0 } hn ? hn : AssistantService.DefaultName;
+        _leoName = s[K.LeoName].Trim() is { Length: > 0 } ln ? ln : AssistantService.DefaultLeoName;
+        _enabled = (IsLeo ? s[K.LeoEnabled] : s[K.AssistantEnabled]) != "false";
+        _name = IsLeo ? s[K.LeoName] : s[K.AssistantName];
+        _savedName = IsLeo ? _leoName : _hantlyName;
+        var anim = IsLeo ? s[K.LeoAnimation] : s[K.AssistantAnimation];
+        _animation = AssistantService.Animations.Contains(anim) ? anim : IsLeo ? "wave" : "bounce";
+        _reportOn = s[K.LeoReportEnabled] != "false";
+        _reportHour = int.TryParse(s[K.LeoReportHour], out var rh) ? Math.Clamp(rh, 5, 11) : 7;
+        _adminEmail = s[K.AdminNotificationEmail];
+        _leoPrompt = await Assistant.GetLeoPromptAsync();
         _aiEnabled = s[K.AiEnabled] == "true";
         _model = s[K.AiModel];
         _budget = s[K.AiMonthlyBudgetUsd];
@@ -333,9 +454,10 @@ else
 
     private async Task LoadIconsAsync()
     {
-        _icons = (await Assistant.GetConfigAsync()).Icons;
+        _icons = (IsLeo ? await Assistant.GetLeoConfigAsync() : await Assistant.GetConfigAsync()).Icons;
         await using var db = await DbFactory.CreateDbContextAsync();
-        _custom = (await db.MascotAssets.Select(a => a.Mood).ToListAsync()).ToHashSet();
+        var keys = await db.MascotAssets.Select(a => a.Mood).ToListAsync();
+        _custom = (IsLeo ? keys.Where(k => k.StartsWith("leo:")).Select(k => k[4..]) : keys.Where(k => !k.Contains(':'))).ToHashSet();
     }
 
     private async Task LoadUsageAsync()
@@ -359,12 +481,13 @@ else
     {
         await Settings.SetManyAsync(new Dictionary<string, string>
         {
-            [K.AssistantEnabled] = _enabled ? "true" : "false",
-            [K.AssistantName] = _name.Trim(),
-            [K.AssistantAnimation] = _animation,
+            [IsLeo ? K.LeoEnabled : K.AssistantEnabled] = _enabled ? "true" : "false",
+            [IsLeo ? K.LeoName : K.AssistantName] = _name.Trim(),
+            [IsLeo ? K.LeoAnimation : K.AssistantAnimation] = _animation,
         });
-        _savedName = _name.Trim().Length > 0 ? _name.Trim() : AssistantService.DefaultName;
-        Ok("Zapisane. Aplikacje trenerów pokażą zmiany w ciągu 30 minut (albo po ponownym uruchomieniu).");
+        _savedName = DisplayName;
+        if (IsLeo) _leoName = DisplayName; else _hantlyName = DisplayName;
+        Ok(IsLeo ? "Zapisane. Panel pokaże zmiany po odświeżeniu strony." : "Zapisane. Aplikacje trenerów pokażą zmiany w ciągu 30 minut (albo po ponownym uruchomieniu).");
     }
 
     private async Task UploadAsync(string mood, InputFileChangeEventArgs e)
@@ -377,14 +500,14 @@ else
         if (file.Size > AssistantService.MaxAssetBytes) { Fail($"Plik jest za duży (najwyżej {AssistantService.MaxAssetBytes / 1024} KB)."); return; }
         using var ms = new MemoryStream();
         await file.OpenReadStream(AssistantService.MaxAssetBytes).CopyToAsync(ms);
-        if (await Assistant.SaveAssetAsync(mood, type, ms.ToArray()) is { } error) { Fail(error); return; }
+        if (await Assistant.SaveAssetAsync(mood, type, ms.ToArray(), _agent) is { } error) { Fail(error); return; }
         if (type == "image/svg+xml")
         {
             // E-maile nie pokazują SVG — przeglądarka robi z niego PNG, który trafi do szablonów wiadomości.
             try
             {
                 var png = await JS.InvokeAsync<string>("PTMascot.svgToPng", $"data:image/svg+xml;base64,{Convert.ToBase64String(ms.ToArray())}");
-                if (!string.IsNullOrEmpty(png)) await Assistant.SavePngAsync(mood, Convert.FromBase64String(png));
+                if (!string.IsNullOrEmpty(png)) await Assistant.SavePngAsync(mood, Convert.FromBase64String(png), _agent);
             }
             catch (JSException) { }
         }
@@ -394,7 +517,7 @@ else
 
     private async Task ResetIconAsync(string mood)
     {
-        await Assistant.ResetAssetAsync(mood);
+        await Assistant.ResetAssetAsync(mood, _agent);
         await LoadIconsAsync();
         Ok("Przywrócono domyślną ikonę.");
     }
@@ -422,6 +545,50 @@ else
         _tryResult = phrase with { Text = phrase.Text.Replace("[klient]", "Ania") };
         _trying = false;
         await LoadUsageAsync();
+    }
+
+    private async Task SaveLeoPromptAsync()
+    {
+        await Settings.SetAsync(K.LeoPrompt, _leoPrompt.Trim() == AssistantService.DefaultLeoPrompt.Trim() ? "" : _leoPrompt.Trim());
+        Ok("Prompt zapisany — działa od następnego tekstu.");
+    }
+
+    private async Task TryLeoAsync()
+    {
+        _trying = true;
+        _tryResult = null;
+        StateHasChanged();
+        var s = AssistantService.LeoSamples[_leoSample];
+        var phrase = await Assistant.PhraseAsync(null, s.Kind, s.Facts, s.Fallback, ignoreSwitch: true,
+            promptOverride: _leoPrompt, nameOverride: DisplayName, audience: "admin");
+        _tryResult = phrase with { Text = phrase.Text.Replace("[trener]", "Studio Siła") };
+        _trying = false;
+        await LoadUsageAsync();
+    }
+
+    private async Task SaveReportAsync()
+    {
+        var mail = _adminEmail.Trim();
+        if (mail.Length > 0 && !mail.Contains('@')) { Fail("Wpisz poprawny adres e-mail."); return; }
+        await Settings.SetManyAsync(new Dictionary<string, string>
+        {
+            [K.LeoReportEnabled] = _reportOn ? "true" : "false",
+            [K.LeoReportHour] = _reportHour.ToString(),
+            [K.AdminNotificationEmail] = mail,
+        });
+        Ok(_reportOn ? $"Zapisane — raport przyjdzie jutro o {_reportHour}:00." : "Zapisane — poranny raport wyłączony.");
+    }
+
+    private async Task SendTestReportAsync()
+    {
+        _sending = true;
+        StateHasChanged();
+        if (_adminEmail.Trim().Length > 0 && _adminEmail.Contains('@')) await Settings.SetAsync(K.AdminNotificationEmail, _adminEmail.Trim());
+        string? error;
+        try { error = await LeoReport.SendAsync(force: true, baseUrl: Nav.BaseUri); }
+        catch (Exception ex) { error = $"Nie udało się złożyć raportu: {ex.Message}"; }
+        _sending = false;
+        if (error is null) Ok($"Raport wysłany na {await LeoReport.RecipientAsync()}."); else Fail(error);
     }
 
     private async Task SaveKeyAsync()

@@ -158,3 +158,9 @@ window.PTMascot = {
         });
     }
 };
+
+// Agent Portalu (Leo): wyciszenie i zamknięte podpowiedzi zapamiętane w przeglądarce administratora.
+window.PTLeo = {
+    load: function () { try { return localStorage.getItem('pt-leo') || ''; } catch (e) { return ''; } },
+    save: function (json) { try { localStorage.setItem('pt-leo', json); } catch (e) { } }
+};

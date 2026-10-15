@@ -56,6 +56,11 @@ public class GrowthService(IServiceScopeFactory scopes, IConfiguration config, I
                 t.MetricsClients = m.Clients;
                 t.MetricsSessions = m.SessionsTotal;
                 t.MetricsAt = DateTime.UtcNow;
+                var today = DateOnly.FromDateTime(DateTime.UtcNow);
+                var snapshot = await db.TenantMetricSnapshots.FirstOrDefaultAsync(x => x.TenantId == t.Id && x.Date == today, ct);
+                if (snapshot is null) db.TenantMetricSnapshots.Add(snapshot = new TenantMetricSnapshot { TenantId = t.Id, Date = today });
+                snapshot.Clients = m.Clients;
+                snapshot.SessionsTotal = m.SessionsTotal;
                 if (t.ActivatedAt is null && m.Clients >= ActivationClients && m.SessionsTotal >= 1)
                 {
                     t.ActivatedAt = DateTime.UtcNow;

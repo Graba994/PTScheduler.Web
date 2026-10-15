@@ -1,0 +1,88 @@
+@inject EmailService Email
+@inject IJSRuntime JS
+
+@* Szkic odpowiedzi e-mail od Leo (AI albo szablon): kategoria, temat i treść do poprawienia, potem „Wyślij” albo „Kopiuj”.
+   Nic nie wychodzi samo — administrator zawsze czyta szkic przed wysłaniem. *@
+@if (_draft is null)
+{
+    <button type="button" class="btn btn-sm btn-outline-primary text-nowrap" @onclick="GenerateAsync" disabled="@_busy">
+        @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-pencil-square me-1"></i> }
+        @Label
+    </button>
+}
+else
+{
+    <div class="leo-draft">
+        <div class="leo-draft-head">
+            <img src="@PuppyArt.DataUri("think")" alt="" width="28" height="28" />
+            <span class="pp-chip pp-tone-info">@_draft.Category</span>
+            <span class="small text-muted">@(_draft.FromAi ? "szkic od AI — przeczytaj przed wysłaniem" : "szablon (bez AI)")</span>
+            <button type="button" class="btn-close btn-close-sm ms-auto" aria-label="Zamknij szkic" @onclick="() => _draft = null"></button>
+        </div>
+        @if (_draft.Error is { } err) { <div class="small text-muted mb-1">@err</div> }
+        <input class="form-control form-control-sm mb-2" @bind="_subject" aria-label="Temat e-maila" maxlength="150" />
+        <textarea class="form-control form-control-sm" rows="8" @bind="_body" aria-label="Treść e-maila"></textarea>
+        <div class="d-flex gap-2 flex-wrap align-items-center mt-2">
+            @if (!string.IsNullOrWhiteSpace(To))
+            {
+                <button type="button" class="btn btn-sm btn-primary" @onclick="SendAsync" disabled="@_busy"><i class="bi bi-send me-1"></i>Wyślij na @To</button>
+            }
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CopyAsync"><i class="bi bi-clipboard me-1"></i>Kopiuj</button>
+            <button type="button" class="btn btn-sm btn-link" @onclick="GenerateAsync" disabled="@_busy">Napisz od nowa</button>
+            @if (_status is not null) { <span class="small @(_statusError ? "text-danger" : "text-success")">@_status</span> }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public Func<Task<AssistantService.Draft>> Generate { get; set; } = default!;
+    [Parameter] public string? To { get; set; }
+    [Parameter] public string Label { get; set; } = "Szkic odpowiedzi";
+    /// <summary>Po wysłaniu (np. oznacz opinię jako przeczytaną, dopisz notatkę do zgłoszenia).</summary>
+    [Parameter] public EventCallback<string> OnSent { get; set; }
+
+    private AssistantService.Draft? _draft;
+    private string _subject = "";
+    private string _body = "";
+    private bool _busy;
+    private string? _status;
+    private bool _statusError;
+
+    private async Task GenerateAsync()
+    {
+        _busy = true;
+        _status = null;
+        try
+        {
+            _draft = await Generate();
+            _subject = _draft.Subject;
+            _body = _draft.Body;
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task SendAsync()
+    {
+        if (string.IsNullOrWhiteSpace(To) || string.IsNullOrWhiteSpace(_body)) return;
+        _busy = true;
+        var paragraphs = _body.Replace("\r", "").Split("\n\n", StringSplitOptions.RemoveEmptyEntries)
+            .Select(p => $"<p style=\"margin:0 0 12px\">{System.Net.WebUtility.HtmlEncode(p.Trim()).Replace("\n", "<br>")}</p>");
+        var html = $"<div style=\"font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;font-size:15px;line-height:1.55;color:#1f2937\">{string.Concat(paragraphs)}</div>";
+        var (ok, error) = await Email.SendAsync(To.Trim(), _subject.Trim(), html);
+        _busy = false;
+        _statusError = !ok;
+        _status = ok ? "Wysłane." : error ?? "Nie udało się wysłać.";
+        if (ok) await OnSent.InvokeAsync(_subject.Trim());
+    }
+
+    private async Task CopyAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", $"{_subject}\n\n{_body}");
+            _statusError = false;
+            _status = "Skopiowane.";
+        }
+        catch (JSException) { _statusError = true; _status = "Przeglądarka nie pozwoliła skopiować — zaznacz tekst ręcznie."; }
+    }
+}

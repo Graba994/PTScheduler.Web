@@ -18,6 +18,18 @@ public partial class AssistantService(
     AiService ai)
 {
     public const string DefaultName = "Hantly";
+    public const string DefaultLeoName = "Leo";
+
+    /// <summary>Agenci: maskotka trenerów i agent Portalu (dla administratora platformy).</summary>
+    public const string Hantly = "hantly";
+    public const string Leo = "leo";
+
+    public static MascotArt.Mood[] MoodsFor(string agent) => agent == Leo ? PuppyArt.Moods : MascotArt.Moods;
+    public static string BuiltInIcon(string agent, string mood) => agent == Leo ? PuppyArt.DataUri(mood) : MascotArt.DataUri(mood);
+
+    /// <summary>Własne ikony Leo leżą w tej samej tabeli z prefiksem „leo:”.</summary>
+    private static string AssetKey(string agent, string mood) => agent == Leo ? LeoPrefix + mood : mood;
+    private const string LeoPrefix = "leo:";
     public static readonly string[] Animations = ["bounce", "float", "wave", "none"];
     public const int MaxAssetBytes = 300 * 1024;
     public static readonly string[] AllowedTypes = ["image/svg+xml", "image/png", "image/webp", "image/gif"];
@@ -51,13 +63,28 @@ public partial class AssistantService(
         - Nie przedstawiaj się, nie dodawaj powitania ani podpisu. Zwróć tylko treść.
         """;
 
+    /// <summary>Agent Portalu: szczeniak golden retrievera, pomocnik administratora platformy.</summary>
+    public const string DefaultLeoPrompt = """
+        Jesteś {NAZWA} — szczeniakiem golden retrievera, wiernym pomocnikiem administratora platformy dla trenerów personalnych.
+        Piszesz krótkie komunikaty w dymku w Panelu administratora i we wstępie porannego raportu.
+
+        Zasady:
+        - Pisz po polsku, najwyżej 2 krótkie zdania (do 220 znaków).
+        - Używaj form neutralnych płciowo: nie zgaduj płci administratora ani trenerów.
+        - Korzystaj wyłącznie z podanych faktów. Nie wymyślaj liczb, nazw, kwot ani dat.
+        - Znaczniki w nawiasach kwadratowych, np. [trener], przepisz dokładnie bez zmian.
+        - Charakter: entuzjastyczny, lojalny i pomocny. Psia wstawka („hau!”, „merdam ogonem”) najwyżej raz i nigdy przy problemach.
+        - Przy problemach (zaległości, awarie, ryzyko odejścia trenera) bądź rzeczowy: co się dzieje i co warto zrobić.
+        - Najwyżej jedno emoji. Nie dodawaj powitania ani podpisu. Zwróć tylko treść komunikatu.
+        """;
+
     public sealed record Config(bool Enabled, string Name, string Animation, bool Ai, Dictionary<string, string> Icons);
 
     public async Task<Config> GetConfigAsync(Tenant? tenant = null)
     {
         var s = await settings.GetAllAsync(K.AssistantEnabled, K.AssistantName, K.AssistantAnimation, K.AiEnabled);
         await using var db = await dbFactory.CreateDbContextAsync();
-        var custom = await db.MascotAssets.AsNoTracking().ToDictionaryAsync(a => a.Mood);
+        var custom = await db.MascotAssets.AsNoTracking().Where(a => !a.Mood.StartsWith(LeoPrefix)).ToDictionaryAsync(a => a.Mood);
         var icons = MascotArt.Moods.ToDictionary(m => m.Key, m => custom.TryGetValue(m.Key, out var a)
             ? $"data:{a.ContentType};base64,{Convert.ToBase64String(a.Data)}"
             : MascotArt.DataUri(m.Key));
@@ -71,20 +98,41 @@ public partial class AssistantService(
             Icons: icons);
     }
 
+    /// <summary>Wygląd i stan agenta Portalu (Leo) — ikony z własnych plików albo wbudowane.</summary>
+    public async Task<Config> GetLeoConfigAsync()
+    {
+        var s = await settings.GetAllAsync(K.LeoEnabled, K.LeoName, K.LeoAnimation, K.AiEnabled);
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var custom = await db.MascotAssets.AsNoTracking().Where(a => a.Mood.StartsWith(LeoPrefix)).ToDictionaryAsync(a => a.Mood[LeoPrefix.Length..]);
+        var icons = PuppyArt.Moods.ToDictionary(m => m.Key, m => custom.TryGetValue(m.Key, out var a)
+            ? $"data:{a.ContentType};base64,{Convert.ToBase64String(a.Data)}"
+            : PuppyArt.DataUri(m.Key));
+        return new Config(
+            Enabled: s[K.LeoEnabled] != "false",
+            Name: string.IsNullOrWhiteSpace(s[K.LeoName]) ? DefaultLeoName : s[K.LeoName].Trim(),
+            Animation: Animations.Contains(s[K.LeoAnimation]) ? s[K.LeoAnimation] : "wave",
+            Ai: s[K.AiEnabled] == "true",
+            Icons: icons);
+    }
+
+    public async Task<string> GetLeoPromptAsync() =>
+        await settings.GetAsync(K.LeoPrompt) is { Length: > 0 } p ? p : DefaultLeoPrompt;
+
     public async Task<string> GetPromptAsync() =>
         await settings.GetAsync(K.AssistantPrompt) is { Length: > 0 } p ? p : DefaultPrompt;
 
     public async Task<string> GetClientPromptAsync() =>
         await settings.GetAsync(K.AssistantClientPrompt) is { Length: > 0 } p ? p : DefaultClientPrompt;
 
-    public async Task<string?> SaveAssetAsync(string mood, string contentType, byte[] data)
+    public async Task<string?> SaveAssetAsync(string mood, string contentType, byte[] data, string agent = Hantly)
     {
         if (!MascotArt.IsMood(mood)) return "Nieznany nastrój.";
+        var key = AssetKey(agent, mood);
         if (!AllowedTypes.Contains(contentType)) return "Dozwolone pliki: SVG, PNG, WebP, GIF.";
         if (data.Length is 0 or > MaxAssetBytes) return $"Plik musi mieć od 1 B do {MaxAssetBytes / 1024} KB.";
         await using var db = await dbFactory.CreateDbContextAsync();
-        var asset = await db.MascotAssets.FindAsync(mood);
-        if (asset is null) db.MascotAssets.Add(asset = new MascotAsset { Mood = mood });
+        var asset = await db.MascotAssets.FindAsync(key);
+        if (asset is null) db.MascotAssets.Add(asset = new MascotAsset { Mood = key });
         asset.ContentType = contentType;
         asset.Data = data;
         asset.UpdatedAt = DateTime.UtcNow;
@@ -93,11 +141,11 @@ public partial class AssistantService(
     }
 
     /// <summary>Zapisuje PNG wygenerowany w przeglądarce z wgranego SVG (do e-maili).</summary>
-    public async Task SavePngAsync(string mood, byte[] png)
+    public async Task SavePngAsync(string mood, byte[] png, string agent = Hantly)
     {
         if (png.Length is 0 or > MaxAssetBytes || png.Length < 8 || png[0] != 0x89 || png[1] != 0x50) return;
         await using var db = await dbFactory.CreateDbContextAsync();
-        if (await db.MascotAssets.FindAsync(mood) is { } asset)
+        if (await db.MascotAssets.FindAsync(AssetKey(agent, mood)) is { } asset)
         {
             asset.PngData = png;
             await db.SaveChangesAsync();
@@ -106,31 +154,33 @@ public partial class AssistantService(
 
     /// <summary>
     /// Obrazek nastroju do e-maili: własny plik rastrowy, PNG zrobiony z własnego SVG albo wbudowany PNG
-    /// (wwwroot/mascot — wygenerowany z MascotArt; po zmianie grafik w MascotArt trzeba go odświeżyć).
+    /// (wwwroot/mascot i wwwroot/leo — wygenerowane z MascotArt i PuppyArt; po zmianie grafik trzeba je odświeżyć).
     /// </summary>
-    public async Task<(byte[] Data, string ContentType)?> EmailImageAsync(string mood, string webRoot)
+    public async Task<(byte[] Data, string ContentType)?> EmailImageAsync(string mood, string webRoot, string agent = Hantly)
     {
         if (!MascotArt.IsMood(mood)) return null;
+        var key = AssetKey(agent, mood);
         await using var db = await dbFactory.CreateDbContextAsync();
-        var asset = await db.MascotAssets.AsNoTracking().FirstOrDefaultAsync(a => a.Mood == mood);
+        var asset = await db.MascotAssets.AsNoTracking().FirstOrDefaultAsync(a => a.Mood == key);
         if (asset is not null && asset.ContentType != "image/svg+xml") return (asset.Data, asset.ContentType);
         if (asset?.PngData is { Length: > 0 } png) return (png, "image/png");
-        var file = Path.Combine(webRoot, "mascot", mood + ".png");
+        var file = Path.Combine(webRoot, agent == Leo ? "leo" : "mascot", mood + ".png");
         return File.Exists(file) ? (await File.ReadAllBytesAsync(file), "image/png") : null;
     }
 
     /// <summary>Wersja ikon do adresów obrazków w e-mailach (zmienia się po każdej podmianie ikony).</summary>
-    public async Task<string> IconsVersionAsync()
+    public async Task<string> IconsVersionAsync(string agent = Hantly)
     {
         await using var db = await dbFactory.CreateDbContextAsync();
-        var last = await db.MascotAssets.MaxAsync(a => (DateTime?)a.UpdatedAt);
+        var last = await db.MascotAssets.Where(a => a.Mood.StartsWith(LeoPrefix) == (agent == Leo)).MaxAsync(a => (DateTime?)a.UpdatedAt);
         return last is { } t ? t.Ticks.ToString("x") : "0";
     }
 
-    public async Task ResetAssetAsync(string mood)
+    public async Task ResetAssetAsync(string mood, string agent = Hantly)
     {
+        var key = AssetKey(agent, mood);
         await using var db = await dbFactory.CreateDbContextAsync();
-        await db.MascotAssets.Where(a => a.Mood == mood).ExecuteDeleteAsync();
+        await db.MascotAssets.Where(a => a.Mood == key).ExecuteDeleteAsync();
     }
 
     public sealed record Phrase(string Text, bool FromAi, string? Error);
@@ -139,17 +189,21 @@ public partial class AssistantService(
     /// Ubiera podpowiedź w słowa asystenta. Zawsze zwraca tekst: przy wyłączonym AI, błędzie albo
     /// podejrzanej odpowiedzi (liczby spoza faktów, zgubiony znacznik [klient]) — tekst zapasowy z aplikacji.
     /// </summary>
-    /// <param name="audience">„trener” — głos maskotki (masterprompt); „klient” — podsumowanie dla klienta trenera.</param>
+    /// <param name="audience">„trener” — głos maskotki (masterprompt); „klient” — podsumowanie dla klienta trenera;
+    /// „admin” — agent Portalu (Leo) dla administratora platformy.</param>
     public async Task<Phrase> PhraseAsync(Tenant? tenant, string kind, Dictionary<string, string> facts, string fallback,
         bool ignoreSwitch = false, string? promptOverride = null, string? nameOverride = null, string audience = "trener")
     {
         var forClient = audience == "klient";
+        var forAdmin = audience == "admin";
         fallback = fallback.Trim();
         if (!ignoreSwitch && (tenant?.AiOff == true || await settings.GetAsync(K.AiEnabled) != "true"))
             return new(fallback, false, null);
 
-        var name = nameOverride ?? (await settings.GetAsync(K.AssistantName) is { Length: > 0 } n ? n.Trim() : DefaultName);
-        var system = (promptOverride ?? (forClient ? await GetClientPromptAsync() : await GetPromptAsync())).Replace("{NAZWA}", name);
+        var name = nameOverride ?? (forAdmin
+            ? (await settings.GetAsync(K.LeoName) is { Length: > 0 } ln ? ln.Trim() : DefaultLeoName)
+            : (await settings.GetAsync(K.AssistantName) is { Length: > 0 } n ? n.Trim() : DefaultName));
+        var system = (promptOverride ?? (forClient ? await GetClientPromptAsync() : forAdmin ? await GetLeoPromptAsync() : await GetPromptAsync())).Replace("{NAZWA}", name);
         var factsJson = JsonSerializer.Serialize(facts, new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
         var user = $"""
             Rodzaj podpowiedzi: {kind}
@@ -157,13 +211,121 @@ public partial class AssistantService(
             Wersja podstawowa (możesz ją przeredagować): {fallback}
             Napisz jedną wersję tego komunikatu.
             """;
-        var result = await ai.CompleteAsync(ignoreSwitch ? "test" : forClient ? "postepy-klienta" : "asystent", tenant?.Id, system, user,
+        var result = await ai.CompleteAsync(ignoreSwitch ? "test" : forClient ? "postepy-klienta" : forAdmin ? "leo" : "asystent", tenant?.Id, system, user,
             maxTokens: forClient ? 320 : 220, ignoreSwitch: ignoreSwitch);
         if (result.Text is null) return new(fallback, false, result.Error);
 
         var text = Clean(result.Text, forClient ? 340 : 240);
         if (!IsFaithful(text, factsJson + " " + fallback)) return new(fallback, false, "Odpowiedź AI miała liczby albo znaczniki spoza faktów — użyto tekstu podstawowego.");
         return new(text, true, null);
+    }
+
+    /// <summary>Wnioski „Wygeneruj” (ankieta, spotkania, opinie). <paramref name="Unverified"/> — liczby z tekstu AI, których nie ma w danych.</summary>
+    public sealed record Insight(string Text, bool FromAi, string? Error, List<string> Unverified, DateTime At);
+
+    private static readonly JsonSerializerOptions Relaxed = new() { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
+
+    /// <summary>
+    /// Analiza dla administratora na żądanie (przycisk „Wygeneruj”): kod liczy zestawienia, AI pisze wnioski w punktach.
+    /// Liczby spoza danych nie odrzucają tekstu (to dłuższa analiza, nie dymek) — wracają w <see cref="Insight.Unverified"/> do sprawdzenia.
+    /// Bez AI zwraca wnioski z reguł (<paramref name="fallback"/>).
+    /// </summary>
+    public async Task<Insight> AnalyzeAsync(string kind, string task, object data, string fallback)
+    {
+        var json = JsonSerializer.Serialize(data, Relaxed);
+        var name = await settings.GetAsync(K.LeoName) is { Length: > 0 } ln ? ln.Trim() : DefaultLeoName;
+        var system = (await GetLeoPromptAsync()).Replace("{NAZWA}", name) + """
+
+
+            Teraz piszesz dłuższą analizę na prośbę administratora (zasada o 2 zdaniach tu nie obowiązuje):
+            - 3–6 punktów, każdy w osobnej linii zaczynającej się od „- ”, każdy najwyżej 2 zdania.
+            - Na końcu linia „Co zrobić:” i 1–3 konkretne działania, każde w osobnej linii od „- ”.
+            - Tylko wnioski wynikające z danych; liczby i procenty przepisuj z danych (są już policzone).
+            - Gdy danych jest za mało na pewne wnioski, napisz to wprost w pierwszym punkcie.
+            - Bez psich wstawek, bez emoji, bez nagłówków markdown i pogrubień.
+            """;
+        var user = $"""
+            Zadanie: {task}
+            Dane (JSON): {json}
+            """;
+        var result = await ai.CompleteAsync("leo-" + kind, null, system, user, maxTokens: 900);
+        if (result.Text is null) return new(fallback, false, result.Error, [], DateTime.UtcNow);
+
+        var text = string.Join('\n', result.Text.Replace("\r", "").Split('\n')
+            .Select(l => l.Trim().Replace("**", "")).Where(l => l.Length > 0 && !l.StartsWith('#')));
+        if (text.Length > 3000) text = text[..3000] + "…";
+        var allowed = Numbers().Matches(json).Select(m => Normalize(m.Value)).ToHashSet();
+        var unverified = Numbers().Matches(text).Select(m => m.Value).Where(v => !allowed.Contains(Normalize(v))).Distinct().Take(10).ToList();
+        return new(text, true, null, unverified, DateTime.UtcNow);
+    }
+
+    /// <summary>Szkic odpowiedzi e-mail do trenera (zgłoszenie, opinia, ryzyko odejścia) z kategorią.</summary>
+    public sealed record Draft(string Category, string Subject, string Body, bool FromAi, string? Error);
+
+    public static readonly string[] DraftCategories = ["błąd", "pytanie", "prośba o funkcję", "płatności", "konfiguracja", "pochwała", "rezygnacja", "inne"];
+
+    /// <summary>
+    /// Szkic odpowiedzi w imieniu zespołu platformy — administrator zawsze go czyta i poprawia przed wysłaniem.
+    /// Bez AI: kategoria z prostych reguł i szablon <paramref name="fallbackBody"/>.
+    /// </summary>
+    /// <param name="message">Wiadomość trenera do kategorii z reguł; bez niej (np. kontakt z naszej inicjatywy) kategoria to „kontakt”.</param>
+    public async Task<Draft> DraftReplyAsync(string kind, string situation, Dictionary<string, string> facts, string fallbackSubject, string fallbackBody,
+        string? message = null)
+    {
+        var category = string.IsNullOrWhiteSpace(message) ? "kontakt" : Categorize(message);
+        var brand = await settings.GetAsync(K.BrandName) is { Length: > 0 } b ? b.Trim() : ReferralService.PlatformName;
+        fallbackBody = fallbackBody.Replace("{MARKA}", brand);
+        var system = $"""
+            Piszesz szkic e-maila w imieniu zespołu platformy {brand} (aplikacja dla trenerów personalnych) do trenera, który z niej korzysta.
+            Administrator przeczyta i poprawi szkic przed wysłaniem.
+
+            Zasady:
+            - Po polsku, uprzejmie i konkretnie, 3–7 zdań. Zacznij od „Dzień dobry,” (bez imienia, jeśli go nie podano), zakończ podpisem „Zespół {brand}”.
+            - Formy neutralne płciowo: nie zgaduj płci trenera („dziękujemy za wiadomość”, „daj znać”, nie „napisałeś/napisałaś”).
+            - Korzystaj tylko z podanych faktów. Nie obiecuj terminów, zwrotów pieniędzy, rabatów ani nowych funkcji.
+            - Gdy czegoś nie wiadomo, zaproponuj krótką rozmowę albo poproś o szczegóły.
+
+            Format odpowiedzi (dokładnie tak):
+            KATEGORIA: jedna z: {string.Join(", ", DraftCategories)}
+            TEMAT: krótki temat e-maila
+            TREŚĆ:
+            treść e-maila
+            """;
+        var user = $"""
+            Sytuacja: {situation}
+            Fakty (JSON): {JsonSerializer.Serialize(facts, Relaxed)}
+            """;
+        var result = await ai.CompleteAsync("leo-szkic-" + kind, null, system, user, maxTokens: 600);
+        if (result.Text is null) return new(category, fallbackSubject, fallbackBody, false, result.Error);
+
+        var text = result.Text.Replace("\r", "").Trim();
+        var cat = Field(text, "KATEGORIA:");
+        var subject = Field(text, "TEMAT:");
+        var bodyAt = text.IndexOf("TREŚĆ:", StringComparison.OrdinalIgnoreCase);
+        var body = bodyAt >= 0 ? text[(bodyAt + 6)..].Trim() : "";
+        if (body.Length < 20) return new(category, fallbackSubject, fallbackBody, false, "AI nie zwróciło szkicu w oczekiwanym formacie — użyto szablonu.");
+        if (cat is not null && DraftCategories.FirstOrDefault(c => cat.StartsWith(c, StringComparison.OrdinalIgnoreCase)) is { } known) category = known;
+        return new(category, string.IsNullOrWhiteSpace(subject) ? fallbackSubject : subject.Trim().Trim('"', '„', '”'), body, true, null);
+
+        static string? Field(string text, string label) =>
+            text.Split('\n').FirstOrDefault(l => l.TrimStart().StartsWith(label, StringComparison.OrdinalIgnoreCase)) is { } line
+                ? line.Trim()[label.Length..].Trim() : null;
+    }
+
+    /// <summary>Kategoria z prostych słów kluczowych — gdy AI jest wyłączone albo nie odpowie.</summary>
+    public static string Categorize(string text)
+    {
+        var t = text.ToLowerInvariant();
+        if (Has(t, "rezygn", "anulow", "wypowied", "odchodz", "zamknąć konto", "usunąć konto")) return "rezygnacja";
+        if (Has(t, "błąd", "nie działa", "bug", "zawiesza", "crash", "nie mogę", "nie da się", "wywala", "error")) return "błąd";
+        if (Has(t, "płatno", "faktur", "rachun", "przelew", "karta", "zapłat", " cen", "drogo", "abonament") || t.StartsWith("cen")) return "płatności";
+        if (Has(t, "konfigur", "ustawi", "domena", "podłącz", "integrac", "stripe", "autopay", "payu", "przelewy24")) return "konfiguracja";
+        if (Has(t, "dodajcie", "brakuje", "przydał", "fajnie gdyby", "chciał", "propozyc", "funkcj")) return "prośba o funkcję";
+        if (Has(t, "jak ", "czy ", "gdzie", "?")) return "pytanie";
+        if (Has(t, "super", "świetn", "dziękuj", "polecam", "genialn", "dobra robota", "zadowolon")) return "pochwała";
+        return "inne";
+
+        static bool Has(string t, params string[] words) => words.Any(t.Contains);
     }
 
     /// <summary>Usuwa cudzysłowy i nadmiar, ucina do <paramref name="max"/> znaków na granicy zdania lub słowa.</summary>
@@ -195,6 +357,29 @@ public partial class AssistantService(
     [GeneratedRegex(@"\d+(?:[.,]\d+)?")] private static partial Regex Numbers();
     [GeneratedRegex(@"\[[a-ząćęłńóśźż]+\]")] private static partial Regex Placeholders();
     [GeneratedRegex(@"\s{2,}")] private static partial Regex MultiSpace();
+
+    /// <summary>Przykładowe komunikaty Leo do testu w Panelu — te same rodzaje, które liczy LeoService.</summary>
+    public static readonly (string Kind, string Label, string Mood, Dictionary<string, string> Facts, string Fallback)[] LeoSamples =
+    [
+        ("poranny_raport", "Wstęp porannego raportu", "hello",
+            new() { ["rejestracje_wczoraj"] = "2", ["wplaty_wczoraj_zl"] = "596", ["sprawy_do_zrobienia"] = "3", ["zagrozeni_trenerzy"] = "1", ["aktywni_trenerzy"] = "24" },
+            "Wczoraj: 2 rejestracje, wpłaty 596 zł. Do zrobienia: 3."),
+        ("nowa_rejestracja", "Świętuje: nowa rejestracja", "celebrate",
+            new() { ["trener"] = "[trener]" },
+            "Nowa rejestracja: [trener]! Witamy na pokładzie 🎉"),
+        ("ryzyko", "Czujny: trenerzy zagrożeni odejściem", "remind",
+            new() { ["liczba_trenerow"] = "3" },
+            "3 trenerów może niedługo odejść. Warto się odezwać — lista z powodami czeka."),
+        ("zalegle_rachunki", "Czujny: rachunki po terminie", "remind",
+            new() { ["liczba_rachunkow"] = "2", ["kwota"] = "298 zł" },
+            "2 rachunki są po terminie — razem 298 zł."),
+        ("awaria", "Czujny: aplikacja trenera nie odpowiada", "remind",
+            new() { ["trener"] = "[trener]", ["czas"] = "25 min" },
+            "Aplikacja [trener] nie odpowiada od 25 min. Zajrzyj do kontenera."),
+        ("ankieta", "Myśli: nowe odpowiedzi w ankiecie", "think",
+            new() { ["liczba_odpowiedzi"] = "7" },
+            "7 nowych odpowiedzi w ankiecie w tym tygodniu. Kliknij „Wygeneruj”, a podsumuję wnioski."),
+    ];
 
     /// <summary>Przykładowe podpowiedzi do testu w Panelu — te same rodzaje, które liczy aplikacja trenera.</summary>
     public static readonly (string Kind, string Label, string Mood, Dictionary<string, string> Facts, string Fallback, string Audience)[] Samples =

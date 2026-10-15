@@ -1,0 +1,168 @@
+@inject LeoService Leo
+@inject AssistantService Assistant
+@inject IJSRuntime JS
+
+@* Agent Portalu (domyślnie szczeniak „Leo”): sam podpowiada administratorowi, bez pisania do niego.
+   Co pokazać, liczy LeoService; wygląd, imię i charakter ustawia się w Panelu → Asystent i AI → Leo. *@
+@if (_config is not null && _visible)
+{
+    var tip = Current;
+    <div class="leo @(_open ? "is-open" : "") @(_muted ? "is-muted" : "")">
+        @if (_open && tip is not null)
+        {
+            <div class="leo-bubble" role="status" aria-live="polite">
+                <div class="leo-bubble-head">
+                    <b>@_config.Name</b>
+                    @if (_tips.Count > 1)
+                    {
+                        <span class="leo-count">@(_index + 1) z @_tips.Count</span>
+                    }
+                    <button type="button" class="leo-x" aria-label="Zamknij tę podpowiedź" title="Nie pokazuj jej dziś" @onclick="DismissAsync"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <p class="leo-text">@(_text ?? "…")</p>
+                <div class="leo-actions">
+                    @if (tip.ActionHref is not null)
+                    {
+                        <a class="btn btn-sm btn-primary" href="@tip.ActionHref" @onclick="() => _open = false">@tip.ActionLabel</a>
+                    }
+                    @if (_index < _tips.Count - 1)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="NextAsync">Dalej <i class="bi bi-chevron-right"></i></button>
+                    }
+                    <button type="button" class="btn btn-sm btn-link leo-mute" @onclick="ToggleMuteAsync">@(_muted ? "Włącz podpowiedzi" : "Wycisz")</button>
+                </div>
+            </div>
+        }
+        <button type="button" class="leo-btn" aria-label="@($"{_config.Name} — podpowiedzi")" aria-expanded="@(_open ? "true" : "false")" @onclick="ToggleAsync">
+            <img class="hm-mascot @(_muted ? "" : $"hm-anim-{_config.Animation}")" src="@Icon" alt="" width="68" height="68" />
+            @if (!_open && !_muted && _todo > 0)
+            {
+                <span class="leo-dot">@_todo</span>
+            }
+        </button>
+    </div>
+}
+
+@code {
+    private sealed class Prefs
+    {
+        public bool Muted { get; set; }
+        /// <summary>Klucz podpowiedzi → dzień zamknięcia (yyyy-MM-dd).</summary>
+        public Dictionary<string, string> Dismissed { get; set; } = new();
+    }
+
+    private AssistantService.Config? _config;
+    private List<LeoService.Tip> _tips = [];
+    private Prefs _prefs = new();
+    private int _index;
+    private int _todo;
+    private bool _visible;
+    private bool _open;
+    private bool _muted;
+    private string? _text;
+
+    private LeoService.Tip? Current => _index < _tips.Count ? _tips[_index] : null;
+
+    private string Icon
+    {
+        get
+        {
+            var mood = _muted ? "sleep" : Current?.Mood ?? "happy";
+            return _config!.Icons.TryGetValue(mood, out var uri) ? uri : _config.Icons.Values.FirstOrDefault() ?? "";
+        }
+    }
+
+    private static string Today => BillingService.LocalNow.ToString("yyyy-MM-dd");
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            _config = await Assistant.GetLeoConfigAsync();
+            if (!_config.Enabled) { _config = null; return; }
+            _prefs = LoadPrefs(await JS.InvokeAsync<string>("PTLeo.load"));
+            _muted = _prefs.Muted;
+            _tips = (await Leo.GetTipsAsync()).Where(t => !IsDismissed(t)).ToList();
+            _todo = _tips.Count(t => t.IsTodo);
+
+            // Szczeniak wbiega chwilę po załadowaniu; dymek otwiera się sam tylko przy sprawach do zrobienia albo powodach do radości.
+            await Task.Delay(900);
+            _visible = true;
+            StateHasChanged();
+            if (!_muted && _tips.Any(t => t.IsTodo || t.IsPraise))
+            {
+                await PhraseCurrentAsync();
+                _open = true;
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or TaskCanceledException or InvalidOperationException)
+        {
+            // Agent jest dodatkiem — gdy coś się nie uda, po prostu się nie pokazuje.
+        }
+    }
+
+    private bool IsDismissed(LeoService.Tip tip) => _prefs.Dismissed.TryGetValue(tip.Key, out var when) && when == Today;
+
+    private async Task PhraseCurrentAsync()
+    {
+        if (Current is not { } tip || _config is null) return;
+        _text = null;
+        _text = await Leo.PhraseAsync(tip, _config.Ai);
+    }
+
+    private async Task ToggleAsync()
+    {
+        if (_open) { _open = false; return; }
+        if (_tips.Count == 0)
+        {
+            _tips = [new("idle", "brak", "happy", 0, "Wszystko ogarnięte — nie mam teraz żadnych podpowiedzi. Hau! 🐾", [], null, null)];
+            _index = 0;
+        }
+        _open = true;
+        await PhraseCurrentAsync();
+    }
+
+    private async Task NextAsync()
+    {
+        if (_index >= _tips.Count - 1) return;
+        _index++;
+        await PhraseCurrentAsync();
+    }
+
+    private async Task DismissAsync()
+    {
+        if (Current is { } tip && tip.Key != "idle")
+        {
+            _prefs.Dismissed[tip.Key] = Today;
+            await SavePrefsAsync();
+            _tips.RemoveAt(_index);
+            _todo = _tips.Count(t => t.IsTodo);
+            if (_index >= _tips.Count) _index = Math.Max(0, _tips.Count - 1);
+        }
+        _open = false;
+    }
+
+    private async Task ToggleMuteAsync()
+    {
+        _muted = !_muted;
+        _prefs.Muted = _muted;
+        await SavePrefsAsync();
+        if (_muted) _open = false;
+    }
+
+    private async Task SavePrefsAsync()
+    {
+        _prefs.Dismissed = _prefs.Dismissed.Where(d => d.Value == Today).ToDictionary(d => d.Key, d => d.Value);
+        try { await JS.InvokeVoidAsync("PTLeo.save", System.Text.Json.JsonSerializer.Serialize(_prefs)); }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException) { }
+    }
+
+    private static Prefs LoadPrefs(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json)) return new();
+        try { return System.Text.Json.JsonSerializer.Deserialize<Prefs>(json) ?? new(); }
+        catch (System.Text.Json.JsonException) { return new(); }
+    }
+}

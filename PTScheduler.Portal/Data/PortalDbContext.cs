@@ -40,6 +40,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<TrainerSurveyResponse> TrainerSurveyResponses => Set<TrainerSurveyResponse>();
     public DbSet<MascotAsset> MascotAssets => Set<MascotAsset>();
     public DbSet<AiUsageLog> AiUsageLogs => Set<AiUsageLog>();
+    public DbSet<TenantMetricSnapshot> TenantMetricSnapshots => Set<TenantMetricSnapshot>();
     public DbSet<LegalAcceptance> LegalAcceptances => Set<LegalAcceptance>();
 
     protected override void OnModelCreating(ModelBuilder b)
@@ -58,6 +59,8 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.Property(a => a.DocKey).HasMaxLength(40);
             e.Property(a => a.Version).HasMaxLength(20);
         });
+
+        b.Entity<TenantMetricSnapshot>(e => e.HasIndex(m => new { m.TenantId, m.Date }).IsUnique());
 
         b.Entity<MascotAsset>(e =>
         {

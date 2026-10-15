@@ -1989,6 +1989,34 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.ToTable("TenantMailCounters");
                 });
 
+            modelBuilder.Entity("PTScheduler.Portal.Entities.TenantMetricSnapshot", b =>
+                {
+                    b.Property<long>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("bigint");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
+
+                    b.Property<int>("Clients")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<int>("SessionsTotal")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("TenantId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId", "Date")
+                        .IsUnique();
+
+                    b.ToTable("TenantMetricSnapshots");
+                });
+
             modelBuilder.Entity("PTScheduler.Portal.Entities.TenantOfferItem", b =>
                 {
                     b.Property<int>("Id")

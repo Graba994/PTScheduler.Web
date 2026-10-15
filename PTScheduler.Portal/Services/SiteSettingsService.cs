@@ -96,6 +96,22 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string AiPriceInputPerM = "ai_price_input_per_m";
         public const string AiPriceOutputPerM = "ai_price_output_per_m";
 
+        // Agent Portalu — szczeniak (domyślnie „Leo”) dla administratora platformy
+        public const string LeoEnabled = "leo_enabled";
+        public const string LeoName = "leo_name";
+        public const string LeoAnimation = "leo_animation";
+        /// <summary>Masterprompt Leo ({NAZWA} = imię).</summary>
+        public const string LeoPrompt = "leo_prompt";
+        /// <summary>"true" — poranny raport e-mailem na adres powiadomień administratora.</summary>
+        public const string LeoReportEnabled = "leo_report_enabled";
+        public const string LeoReportHour = "leo_report_hour";
+        /// <summary>Dzień ostatniego porannego raportu (yyyy-MM-dd) — chroni przed podwójną wysyłką.</summary>
+        public const string LeoReportSentOn = "leo_report_sent_on";
+        /// <summary>Ostatnie wnioski „Wygeneruj” (JSON: tekst, data, czy z AI) — ankieta, spotkania, opinie.</summary>
+        public const string LeoInsightSurvey = "leo_insight_survey";
+        public const string LeoInsightMeetings = "leo_insight_meetings";
+        public const string LeoInsightFeedback = "leo_insight_feedback";
+
         // Dane do dokumentów prawnych (regulamin, polityka prywatności, umowa powierzenia)
         public const string BrandName = "brand_name";
         public const string LegalCompany = "legal_company";
@@ -214,6 +230,11 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         [Keys.AiMonthlyBudgetUsd] = "5",
         [Keys.AiPriceInputPerM] = "2",
         [Keys.AiPriceOutputPerM] = "10",
+        [Keys.LeoEnabled] = "true",
+        [Keys.LeoName] = "Leo",
+        [Keys.LeoAnimation] = "wave",
+        [Keys.LeoReportEnabled] = "true",
+        [Keys.LeoReportHour] = "7",
     };
 
     public async Task<string> GetAsync(string key)

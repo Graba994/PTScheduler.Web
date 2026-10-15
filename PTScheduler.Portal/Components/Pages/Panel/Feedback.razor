@@ -2,6 +2,7 @@
 @layout AdminLayout
 @attribute [Authorize(Roles = "Admin")]
 @inject IDbContextFactory<PortalDbContext> DbFactory
+@inject AssistantService Assistant
 @rendermode InteractiveServer
 
 <PageTitle>Oceny aplikacji — PTScheduler Portal</PageTitle>
@@ -46,6 +47,8 @@ else
         </div>
     </div>
 
+    <LeoInsight Kind="@LeoInsights.Feedback" Title="Tematy w ocenach" Hint="Leo pogrupuje opinie (błędy, prośby o funkcje, ceny, pochwały) i podpowie, od czego zacząć." />
+
     <div class="pp-callout">
         <i class="bi bi-megaphone"></i>
         <div>Wybrane opinie pokazujesz na <a href="/" target="_blank" rel="noopener">stronie głównej</a> w sekcji „Co mówią trenerzy” — przyciskiem <strong>Na stronę</strong>. Podpis ustawiasz sam (domyślnie imię, inicjał nazwiska i nazwa studia). Publikuj opinie, na które trener się zgodził.</div>
@@ -67,9 +70,13 @@ else
                                 <div class="text-muted">@f.AuthorEmail</div>
                             </td>
                             <td class="text-warning text-nowrap">@(new string('★', f.Rating))<span class="text-muted">@(new string('☆', 5 - f.Rating))</span></td>
-                            <td class="small" style="max-width:420px;white-space:pre-wrap">@f.Text</td>
-                            <td class="small">
-                                @if (!string.IsNullOrEmpty(f.ContactEmail)) { <a href="mailto:@f.ContactEmail">@f.ContactEmail</a> }
+                            <td class="small" style="max-width:420px;white-space:pre-wrap">@if (!string.IsNullOrWhiteSpace(f.Text)) { <span class="pp-chip pp-tone-info me-1">@AssistantService.Categorize(f.Text)</span> }@f.Text</td>
+                            <td class="small" style="min-width:200px">
+                                @if (!string.IsNullOrEmpty(f.ContactEmail))
+                                {
+                                    <a href="mailto:@f.ContactEmail">@f.ContactEmail</a>
+                                    <LeoDraft To="@f.ContactEmail" Generate="() => DraftAsync(f)" OnSent="_ => MarkReadAsync(f.Id)" />
+                                }
                                 else { <span class="text-muted">—</span> }
                             </td>
                             <td style="min-width:220px">
@@ -106,6 +113,22 @@ else
     private List<AppFeedback> _items = [];
 
     protected override Task OnInitializedAsync() => LoadAsync();
+
+    private Task<AssistantService.Draft> DraftAsync(AppFeedback f)
+    {
+        var facts = new Dictionary<string, string>
+        {
+            ["ocena"] = $"{f.Rating}/5",
+            ["tresc_opinii"] = f.Text ?? "",
+            ["studio"] = f.Tenant?.CompanyName ?? "",
+        };
+        var body = f.Rating >= 4
+            ? $"Dzień dobry,\n\ndziękujemy za ocenę i miłe słowa — to dla nas ważne. Jeśli czegoś w aplikacji brakuje, daj znać.\n\nPozdrawiamy\nZespół {"{MARKA}"}"
+            : $"Dzień dobry,\n\ndziękujemy za szczerą ocenę. Chcemy to poprawić — czy możesz napisać, co dokładnie przeszkadza albo kiedy pojawia się problem? Chętnie też porozmawiamy telefonicznie.\n\nPozdrawiamy\nZespół {"{MARKA}"}";
+        return Assistant.DraftReplyAsync("opinia",
+            "Trener ocenił aplikację i zgodził się na kontakt. Odpowiedz na jego opinię: podziękuj, odnieś się konkretnie do treści, przy problemie poproś o szczegóły.",
+            facts, "Dziękujemy za ocenę aplikacji", body, message: f.Text);
+    }
 
     private async Task LoadAsync()
     {

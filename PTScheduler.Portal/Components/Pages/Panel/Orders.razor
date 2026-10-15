@@ -5,6 +5,7 @@
 @inject EmailService EmailService
 @inject SiteSettingsService SiteSettings
 @inject CreditService Credits
+@inject AssistantService Assistant
 @rendermode InteractiveServer
 
 <PageTitle>Zgłoszenia — PTScheduler Portal</PageTitle>
@@ -104,6 +105,10 @@ else
                                     <i class="bi @(order.ServiceItem?.Icon ?? "bi-box") text-primary"></i>
                                     <h6 class="fw-bold mb-0">@(order.ServiceItem?.Name ?? "—")</h6>
                                     <span class="badge @StatusBadge(order.Status)">@StatusLabel(order.Status)</span>
+                                    @if (!string.IsNullOrWhiteSpace(order.Notes))
+                                    {
+                                        <span class="pp-chip pp-tone-info" title="Kategoria wiadomości trenera (wstępnie, z reguł)">@AssistantService.Categorize(order.Notes)</span>
+                                    }
                                 </div>
                                 <div class="small text-muted">
                                     <i class="bi bi-building me-1"></i>@(order.Tenant?.CompanyName ?? "—")
@@ -194,6 +199,12 @@ else
                                 </button>
                             }
                         </div>
+                        @if (!string.IsNullOrWhiteSpace(order.Tenant?.OwnerEmail) && order.Status != ServiceOrderStatus.Cancelled)
+                        {
+                            <div class="mt-2">
+                                <LeoDraft To="@order.Tenant!.OwnerEmail" Label="Szkic odpowiedzi do trenera" Generate="() => DraftAsync(order)" OnSent="subject => NoteSentAsync(order.Id, subject)" />
+                            </div>
+                        }
                     </div>
                 </div>
             </div>
@@ -326,6 +337,41 @@ else
         {
             _message = ex.Message; _msgError = true;
         }
+    }
+
+    private Task<AssistantService.Draft> DraftAsync(ServiceOrder order)
+    {
+        var service = order.ServiceItem?.Name ?? "usługa";
+        var facts = new Dictionary<string, string>
+        {
+            ["usluga"] = service,
+            ["status"] = StatusLabel(order.Status),
+            ["wiadomosc_trenera"] = order.Notes ?? "",
+            ["notatka_administratora"] = order.AdminNotes ?? "",
+            ["oplacone"] = order.PaidAt.HasValue ? "tak" : "nie",
+        };
+        var next = order.Status switch
+        {
+            ServiceOrderStatus.Pending => "Wkrótce się odezwiemy, żeby ustalić szczegóły i termin.",
+            ServiceOrderStatus.Accepted or ServiceOrderStatus.InProgress => "Zajmujemy się tym — damy znać, gdy będzie gotowe.",
+            ServiceOrderStatus.Completed => "Usługa jest zrealizowana. Jeśli coś jeszcze trzeba poprawić, daj znać.",
+            _ => "Daj znać, jeśli masz pytania.",
+        };
+        var body = $"Dzień dobry,\n\ndziękujemy za zamówienie: {service}. {next}\n\nPozdrawiamy\nZespół {"{MARKA}"}";
+        return Assistant.DraftReplyAsync("zgloszenie",
+            "Trener zamówił usługę ze sklepu platformy (np. szkolenie, konfigurację płatności, pakiet wsparcia). Odpowiedz na jego wiadomość i stan zamówienia. Jeśli brakuje informacji do realizacji, poproś o nie.",
+            facts, $"Twoje zamówienie: {service}", body, message: order.Notes);
+    }
+
+    private async Task NoteSentAsync(int orderId, string subject)
+    {
+        await using var db = DbFactory.CreateDbContext();
+        if (await db.ServiceOrders.FindAsync(orderId) is not { } order) return;
+        var line = $"{DateTime.Now:dd.MM HH:mm} wysłano e-mail: {subject}";
+        order.AdminNotes = string.IsNullOrWhiteSpace(order.AdminNotes) ? line : $"{order.AdminNotes} · {line}";
+        if (order.AdminNotes.Length > 1000) order.AdminNotes = order.AdminNotes[^1000..];
+        await db.SaveChangesAsync();
+        await Load();
     }
 
     private async Task SaveAdminNotes(int orderId)
