@@ -1,0 +1,72 @@
+@using PTScheduler.Application.Progress
+@inject PTScheduler.Application.Interfaces.IClientProgressService ProgressService
+@inject PTScheduler.Web.Services.RetentionService Retention
+@inject PTScheduler.Web.Services.PlatformAssistantService Assistant
+
+@* „W skrócie” na górze profilu klienta: postępy, frekwencja, samopoczucie, ryzyko odejścia, zdrowie i pakiet
+   w kilku zdaniach (AI albo tekst podstawowy z reguł) i jedna rada. Bez danych karta się nie pokazuje. *@
+@if (_snapshot is { HasData: true } s)
+{
+    <section class="cs-card">
+        <div class="cs-head">
+            @if (_mascot is not null)
+            {
+                <img src="@_mascot" alt="" width="40" height="40" />
+            }
+            <div class="flex-grow-1">
+                <div class="cs-title">
+                    W skrócie
+                    <InfoTip Title="W skrócie" Class="info-tip-sm" Text="Asystent zbiera w jednym miejscu to, co jest w kartach poniżej: frekwencję, postępy w ciężarach, samopoczucie z ankiet po treningu, uwagi zdrowotne, stan pakietu i ryzyko odejścia — i podpowiada jedną rzecz do zrobienia. Liczby pochodzą z aplikacji; AI tylko układa je w zdania." />
+                </div>
+                <p class="cs-text">@(_text ?? s.Headline)</p>
+            </div>
+        </div>
+        <div class="cs-points">
+            @foreach (var point in s.Points)
+            {
+                <span class="cs-point @point.Tone"><i class="bi @(point.Tone switch { "good" => "bi-check-circle-fill", "bad" => "bi-exclamation-circle-fill", _ => "bi-info-circle-fill" })"></i>@point.Text</span>
+            }
+        </div>
+        @if (_text is null)
+        {
+            @* Tekst od AI kończy się radą — bez AI pokazujemy ją osobno. *@
+            <div class="cs-advice"><i class="bi bi-lightbulb-fill"></i><span>@s.Advice</span></div>
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public int ClientId { get; set; }
+
+    private ClientSnapshotResult? _snapshot;
+    private string? _text;
+    private string? _mascot;
+    private int _loadedFor = -1;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == ClientId) return;
+        _loadedFor = ClientId;
+        _snapshot = null;
+        _text = null;
+        try
+        {
+            var progress = await ProgressService.GetAsync(ClientId);
+            var insights = await Retention.GetInsightsAsync(ClientId);
+            _snapshot = ClientSnapshot.Compute(new(progress.HasData ? progress : null, insights?.Wellbeing, insights?.Risk,
+                insights?.HealthFlags.Count ?? 0, insights?.PackageRemaining, insights?.DaysSinceLastVisit));
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or Microsoft.EntityFrameworkCore.DbUpdateException)
+        {
+            return; // karta jest dodatkiem — przy błędzie po prostu jej nie ma
+        }
+        if (!_snapshot.HasData) return;
+
+        var config = await Assistant.GetConfigAsync();
+        if (config is { Enabled: true })
+            _mascot = config.Icons.TryGetValue(_snapshot.Points.Any(p => p.Tone == "bad") ? "think" : "happy", out var icon) ? icon : null;
+        if (config is not { Ai: true }) return;
+        StateHasChanged();
+        _text = await Assistant.PhraseAsync($"skrot-{ClientId}", "w_skrocie", _snapshot.Facts, _snapshot.Fallback, ai: true);
+    }
+}

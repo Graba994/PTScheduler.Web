@@ -1833,6 +1833,12 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Property<bool>("ExpiringPackages")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("MonthlySummary")
+                        .HasColumnType("boolean");
+
+                    b.Property<DateOnly?>("MonthlySummarySentFor")
+                        .HasColumnType("date");
+
                     b.Property<bool>("MorningBrief")
                         .HasColumnType("boolean");
 
@@ -1858,6 +1864,9 @@ namespace PTScheduler.Infrastructure.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<bool>("PushMessages")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("PushMonthlySummary")
                         .HasColumnType("boolean");
 
                     b.Property<bool>("PushMorningBrief")

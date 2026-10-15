@@ -181,6 +181,8 @@ builder.Services.AddScoped<PTScheduler.Web.Services.MessageDraftService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.WorkoutCompanionService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.MedalService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.MedalBackgroundService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.ClientRecapService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.ClientRecapBackgroundService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.BeforeSessionPushService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.MorningBriefBackgroundService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.SetupGuide>();

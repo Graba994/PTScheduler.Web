@@ -34,4 +34,9 @@ public static class NotificationTypes
 
     public const string PushMorningBrief = nameof(PushMorningBrief);
     public const string PushBeforeSession = nameof(PushBeforeSession);
+
+    /// <summary>E-mail (klient): podsumowanie miesiąca / roku.</summary>
+    public const string MonthlySummary = nameof(MonthlySummary);
+    /// <summary>Push (klient): podsumowanie miesiąca / roku.</summary>
+    public const string PushMonthlySummary = nameof(PushMonthlySummary);
 }

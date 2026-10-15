@@ -8,6 +8,7 @@
 @inject IBusinessReportService ReportSvc
 @inject AuthenticationStateProvider AuthState
 @inject EntitlementService Entitlements
+@inject PTScheduler.Web.Services.PlatformAssistantService Assistant
 @attribute [Authorize(Roles = $"{Roles.Admin},{Roles.Trainer}")]
 
 <AppTitle Page="Raporty biznesowe" />
@@ -51,6 +52,42 @@
 }
 
 <p class="text-muted small mb-3">Ostatnie @r.PeriodDays dni w porównaniu z poprzednimi @r.PeriodDays dniami. Przychód to opłacone pakiety, karnety i pojedyncze treningi.</p>
+
+<!-- Co się zmieniło: najważniejsze zmiany z reguł, opisane przez asystenta (AI albo tekst podstawowy) -->
+@if (_changes is { } ch)
+{
+    <section class="br-changes mb-3">
+        <div class="br-changes-head">
+            @if (_mascot is not null)
+            {
+                <img src="@_mascot" alt="" width="40" height="40" />
+            }
+            <div class="flex-grow-1">
+                <div class="br-changes-title">
+                    Co się zmieniło
+                    <InfoTip Title="Co się zmieniło" Class="info-tip-sm" Text="Asystent porównuje ten okres z poprzednim i wybiera kilka najważniejszych zmian: retencję, przychód i jego przyczynę, nowych i utraconych klientów, obłożenie, odwołania oraz kończące się pakiety. Liczby pochodzą z raportu poniżej — AI tylko ubiera je w słowa i nie może dodać własnych." />
+                </div>
+                <p class="br-changes-text">@(_changesText ?? ch.Fallback)</p>
+            </div>
+        </div>
+        @if (ch.Items.Count > 0)
+        {
+            <ul class="br-changes-list">
+                @foreach (var item in ch.Items)
+                {
+                    <li class="@item.Tone">
+                        <i class="bi @(item.Tone switch { "good" => "bi-arrow-up-right-circle-fill", "bad" => "bi-exclamation-circle-fill", _ => "bi-lightbulb-fill" })"></i>
+                        <span>@item.Text</span>
+                        @if (item.Href is not null)
+                        {
+                            <a href="@item.Href" class="br-changes-link">Zobacz</a>
+                        }
+                    </li>
+                }
+            </ul>
+        }
+    </section>
+}
 
 <!-- Najważniejsze liczby -->
 <div class="br-kpis mb-3">
@@ -349,6 +386,18 @@
     .br-kpi-accent { border-color: var(--c-primary); background: var(--c-primary-light); }
     .br-kpi-label { font-size: .78rem; color: var(--bs-secondary-color); display: flex; gap: .4rem; align-items: center; }
     .br-kpi-label .bi { color: var(--c-primary); }
+    .br-changes { border: 1px solid var(--bs-border-color); border-radius: 14px; padding: 1rem 1.1rem; background: linear-gradient(135deg, var(--c-primary-light), var(--bs-body-bg) 60%); }
+    .br-changes-head { display: flex; gap: .75rem; align-items: flex-start; }
+    .br-changes-head img { flex-shrink: 0; }
+    .br-changes-title { font-weight: 700; font-size: .95rem; display: flex; align-items: center; gap: .3rem; }
+    .br-changes-text { margin: .2rem 0 0; font-size: .92rem; line-height: 1.5; max-width: 75ch; }
+    .br-changes-list { list-style: none; margin: .75rem 0 0; padding: .75rem 0 0; border-top: 1px dashed var(--bs-border-color); display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: .45rem 1rem; }
+    .br-changes-list li { display: flex; gap: .45rem; align-items: baseline; font-size: .82rem; }
+    .br-changes-list li .bi { flex-shrink: 0; }
+    .br-changes-list li.good .bi { color: var(--c-success, #16A34A); }
+    .br-changes-list li.bad .bi { color: var(--c-danger, #DC2626); }
+    .br-changes-list li.info .bi { color: var(--c-warning, #D97706); }
+    .br-changes-link { white-space: nowrap; font-weight: 600; text-decoration: none; }
     .br-info-list { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: .45rem; }
     .br-kpi-value { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
     .br-kpi-help { font-size: .76rem; color: var(--bs-secondary-color); }
@@ -393,6 +442,9 @@
     private int _days = 90;
     private string? _trainerUserId;
     private BusinessReportDto? _report;
+    private PTScheduler.Application.Reports.BusinessChangesResult? _changes;
+    private string? _changesText;
+    private string? _mascot;
 
     protected override async Task OnInitializedAsync()
     {
@@ -400,14 +452,31 @@
         var user = (await AuthState.GetAuthenticationStateAsync()).User;
         _trainerUserId = user.IsInRole(Roles.Admin) ? null : user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         _report = await ReportSvc.GetAsync(_days, _trainerUserId);
+        await DescribeChangesAsync();
     }
 
     private async Task ChangePeriod(int days)
     {
         _days = days;
         _report = null;
+        _changes = null;
         StateHasChanged();
         _report = await ReportSvc.GetAsync(_days, _trainerUserId);
+        await DescribeChangesAsync();
+    }
+
+    /// <summary>Zmiany z reguł od razu; tekst od AI dociera chwilę później (do tego czasu — tekst podstawowy).</summary>
+    private async Task DescribeChangesAsync()
+    {
+        if (_report is null) return;
+        _changes = PTScheduler.Application.Reports.BusinessChanges.Compute(_report);
+        _changesText = null;
+        var config = await Assistant.GetConfigAsync();
+        _mascot = config is { Enabled: true } && config.Icons.TryGetValue(_changes.Items.FirstOrDefault()?.Tone == "bad" ? "think" : "happy", out var icon) ? icon : null;
+        if (config is not { Ai: true }) return;
+        StateHasChanged();
+        _changesText = await Assistant.PhraseAsync($"zmiany-{_trainerUserId ?? "studio"}-{_days}", "co_sie_zmienilo",
+            _changes.Facts, _changes.Fallback, ai: true);
     }
 
     private static string Money(decimal v) => v.ToString("#,0", Pl) + "\u00A0zł";

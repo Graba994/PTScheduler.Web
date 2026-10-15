@@ -16,7 +16,8 @@ public class RetentionService(IDbContextFactory<ApplicationDbContext> dbFactory,
     public sealed record ClientRisk(int ClientId, string Name, string FirstName, string? Phone,
         ClientChurnRules.Result Result, WellbeingSummary Wellbeing, int CompletedTotal, int? PackageRemaining, int? DaysSinceLastVisit);
 
-    public sealed record ClientInsights(WellbeingSummary Wellbeing, List<HealthPlanRules.Flag> HealthFlags, ClientChurnRules.Result Risk);
+    public sealed record ClientInsights(WellbeingSummary Wellbeing, List<HealthPlanRules.Flag> HealthFlags, ClientChurnRules.Result Risk,
+        int? PackageRemaining = null, int? DaysSinceLastVisit = null);
 
     /// <summary>Klienci z ryzykiem co najmniej średnim, od najbardziej zagrożonych.</summary>
     public async Task<List<ClientRisk>> GetRisksAsync(string? trainerUserId)
@@ -29,7 +30,7 @@ public class RetentionService(IDbContextFactory<ApplicationDbContext> dbFactory,
     {
         var risk = (await ComputeAsync(null, clientId)).FirstOrDefault();
         if (risk is null) return null;
-        return new(risk.Wellbeing, await HealthFlagsAsync(clientId), risk.Result);
+        return new(risk.Wellbeing, await HealthFlagsAsync(clientId), risk.Result, risk.PackageRemaining, risk.DaysSinceLastVisit);
     }
 
     private async Task<List<ClientRisk>> ComputeAsync(string? trainerUserId, int? onlyClientId)

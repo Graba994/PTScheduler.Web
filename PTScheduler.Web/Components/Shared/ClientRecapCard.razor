@@ -1,0 +1,47 @@
+@using PTScheduler.Application.Progress
+@inject PTScheduler.Web.Services.ClientRecapService Recaps
+
+@* „Twój miesiąc” / „Twój rok” na pulpicie klienta: przez pierwsze dni miesiąca (w styczniu dłużej) —
+   treningi, seria, rekordy, medale i krótki tekst asystenta pod marką trenera. *@
+@if (_recap is { } r)
+{
+    <section class="rcp-card" aria-label="@r.Result.Title">
+        <div class="rcp-hero">
+            <div class="rcp-kicker"><i class="bi @(r.IsYear ? "bi-stars" : "bi-calendar-heart")"></i>@r.Result.Subtitle</div>
+            <h5 class="rcp-title">@r.Result.Title</h5>
+        </div>
+        <p class="rcp-text">@r.Text</p>
+        <div class="rcp-tiles">
+            @foreach (var t in r.Result.Tiles)
+            {
+                <div class="rcp-tile"><i class="bi @t.Icon"></i><b>@t.Value</b><span>@t.Label</span></div>
+            }
+        </div>
+        @if (r.Result.Highlights.Count > 0)
+        {
+            <ul class="rcp-highlights">
+                @foreach (var h in r.Result.Highlights)
+                {
+                    <li><i class="bi bi-star-fill"></i>@h</li>
+                }
+            </ul>
+        }
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public int ClientId { get; set; }
+    /// <summary>Podgląd trenera — karta widoczna każdego dnia, nie tylko na początku miesiąca.</summary>
+    [Parameter] public bool Preview { get; set; }
+
+    private PTScheduler.Web.Services.ClientRecapService.Recap? _recap;
+    private int _loadedFor = -1;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == ClientId) return;
+        _loadedFor = ClientId;
+        try { _recap = await Recaps.CurrentAsync(ClientId, anyDay: Preview); }
+        catch (InvalidOperationException) { _recap = null; } // karta jest dodatkiem
+    }
+}

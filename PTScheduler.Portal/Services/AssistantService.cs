@@ -185,6 +185,15 @@ public partial class AssistantService(
 
     public sealed record Phrase(string Text, bool FromAi, string? Error);
 
+    /// <summary>Dłuższe podsumowania (kilka zdań zamiast dymka) — rodzaj → limit znaków.</summary>
+    public static readonly IReadOnlyDictionary<string, int> LongKinds = new Dictionary<string, int>
+    {
+        ["co_sie_zmienilo"] = 440,
+        ["w_skrocie"] = 420,
+        ["twoj_miesiac"] = 420,
+        ["twoj_rok"] = 460,
+    };
+
     /// <summary>
     /// Ubiera podpowiedź w słowa asystenta. Zawsze zwraca tekst: przy wyłączonym AI, błędzie albo
     /// podejrzanej odpowiedzi (liczby spoza faktów, zgubiony znacznik [klient]) — tekst zapasowy z aplikacji.
@@ -205,17 +214,19 @@ public partial class AssistantService(
             : (await settings.GetAsync(K.AssistantName) is { Length: > 0 } n ? n.Trim() : DefaultName));
         var system = (promptOverride ?? (forClient ? await GetClientPromptAsync() : forAdmin ? await GetLeoPromptAsync() : await GetPromptAsync())).Replace("{NAZWA}", name);
         var factsJson = JsonSerializer.Serialize(facts, new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
+        var longLimit = LongKinds.TryGetValue(kind, out var l) ? l : (int?)null;
         var user = $"""
             Rodzaj podpowiedzi: {kind}
             Fakty: {factsJson}
             Wersja podstawowa (możesz ją przeredagować): {fallback}
+            {(longLimit is { } lim ? $"To dłuższe podsumowanie, nie dymek: napisz 3–4 krótkie zdania (do {lim - 20} znaków), zacznij od najważniejszej rzeczy i zakończ {(forClient ? "krótką zachętą" : "jedną konkretną radą")}." : "")}
             Napisz jedną wersję tego komunikatu.
             """;
         var result = await ai.CompleteAsync(ignoreSwitch ? "test" : forClient ? "postepy-klienta" : forAdmin ? "leo" : "asystent", tenant?.Id, system, user,
-            maxTokens: forClient ? 320 : 220, ignoreSwitch: ignoreSwitch);
+            maxTokens: longLimit is not null ? 480 : forClient ? 320 : 220, ignoreSwitch: ignoreSwitch);
         if (result.Text is null) return new(fallback, false, result.Error);
 
-        var text = Clean(result.Text, forClient ? 340 : 240);
+        var text = Clean(result.Text, longLimit ?? (forClient ? 340 : 240));
         if (!IsFaithful(text, factsJson + " " + fallback)) return new(fallback, false, "Odpowiedź AI miała liczby albo znaczniki spoza faktów — użyto tekstu podstawowego.");
         return new(text, true, null);
     }
@@ -446,6 +457,18 @@ public partial class AssistantService(
         ("podsumowanie_trenera", "Dla trenera: wnioski o kliencie", "think",
             new() { ["liczba_treningow"] = "10", ["cwiczenie_1"] = "Wyciskanie sztangi leżąc", ["cwiczenie_1_kg"] = "60 → 70 (+10)", ["uwagi"] = "2" },
             "Za klientem 10 treningów. Największy postęp: Wyciskanie sztangi leżąc +10 kg. 2 ćwiczenia wymagają uwagi — szczegóły poniżej.", "trener"),
+        ("twoj_miesiac", "Dla klienta: „Twój miesiąc”", "celebrate",
+            new() { ["okres"] = "październik 2026", ["treningi"] = "9", ["treningi_poprzednio"] = "7", ["roznica"] = "+2", ["tygodnie_z_rzedu"] = "6",
+                ["rekordy"] = "2", ["najlepszy_rekord"] = "Przysiad ze sztangą: 80 kg", ["medale"] = "10 treningów", ["liczba_medali"] = "1" },
+            "W październiku 9 treningów — o 2 więcej niż we wrześniu. To już 6 tygodni z rzędu z treningiem. Nowy rekord: Przysiad ze sztangą — 80 kg. Nowy medal: 10 treningów. Tak trzymać!", "klient"),
+        ("w_skrocie", "Dla trenera: „W skrócie” o kliencie", "think",
+            new() { ["treningi_30_dni"] = "6", ["najwiekszy_postep"] = "Wyciskanie sztangi leżąc +10 kg", ["samopoczucie"] = "spada", ["treningi_w_pakiecie"] = "2",
+                ["rada"] = "Zapytaj o sen i regenerację — może przyda się lżejszy tydzień." },
+            "Ciężary rosną — największy postęp: Wyciskanie sztangi leżąc +10 kg. Samopoczucie z ankiet po treningu spada. W pakiecie zostały 2 treningi. Zapytaj o sen i regenerację — może przyda się lżejszy tydzień.", "trener"),
+        ("co_sie_zmienilo", "Dla trenera: „Co się zmieniło” w biznesie", "think",
+            new() { ["okres_dni"] = "90", ["retencja_proc"] = "80", ["retencja_zmiana_pp"] = "−20", ["przestalo_przychodzic"] = "1", ["przychod"] = "11 420 zł",
+                ["przychod_zmiana_proc"] = "+45%", ["przyczyna"] = "dzięki większym zakupom na klienta", ["oblozenie_proc"] = "13", ["najluzniejsze_dni"] = "w czwartki, w piątki" },
+            "Retencja spadła o 20 pp, do 80% — 1 osoba przestała przychodzić. Przychód wzrósł o 45% (do 11 420 zł) — dzięki większym zakupom na klienta. Obłożenie grafiku 13% — najwięcej wolnego w czwartki i w piątki. Te godziny można sprzedać.", "trener"),
         ("rekord_tygodnia", "Pochwała: rekordowy tydzień", "celebrate",
             new() { ["treningi_w_tym_tygodniu"] = "18", ["poprzedni_rekord"] = "15" },
             "Rekordowy tydzień: 18 treningów! Tak trzymać 💪", "trener"),

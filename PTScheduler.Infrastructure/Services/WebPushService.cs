@@ -145,6 +145,7 @@ public class WebPushService(
             PTScheduler.Domain.Constants.NotificationTypes.PushMessages => p.PushMessages,
             PTScheduler.Domain.Constants.NotificationTypes.PushTrainerMessages => p.PushTrainerMessages,
             PTScheduler.Domain.Constants.NotificationTypes.PushMedals => p.PushMedals,
+            PTScheduler.Domain.Constants.NotificationTypes.PushMonthlySummary => p.PushMonthlySummary,
             PTScheduler.Domain.Constants.NotificationTypes.PushClientActivity => p.PushClientActivity,
             _ => true
         };

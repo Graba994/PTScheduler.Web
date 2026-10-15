@@ -50,4 +50,12 @@ public class NotificationPreferences
     public DateOnly? MorningBriefSentOn { get; set; }
     /// <summary>Push (trener): 15 minut przed treningiem — karta „przed treningiem”.</summary>
     public bool PushBeforeSession { get; set; } = true;
+
+    // ── Podsumowania dla klienta ──
+    /// <summary>E-mail (klient): „Twój miesiąc” 1. dnia miesiąca (w styczniu — „Twój rok”).</summary>
+    public bool MonthlySummary { get; set; } = true;
+    /// <summary>Push (klient): „Twój miesiąc” / „Twój rok”.</summary>
+    public bool PushMonthlySummary { get; set; } = true;
+    /// <summary>Pierwszy dzień miesiąca, za który wysłano ostatnie podsumowanie — jedno na miesiąc, także po restarcie.</summary>
+    public DateOnly? MonthlySummarySentFor { get; set; }
 }
