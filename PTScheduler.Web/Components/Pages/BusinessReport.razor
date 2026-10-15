@@ -55,19 +55,19 @@
 <!-- Najważniejsze liczby -->
 <div class="br-kpis mb-3">
     <div class="br-kpi">
-        <div class="br-kpi-label"><i class="bi bi-arrow-repeat"></i>Retencja</div>
+        <div class="br-kpi-label"><i class="bi bi-arrow-repeat"></i>Retencja<InfoTip Title="Retencja" Class="info-tip-sm ms-auto" Text="Jaka część klientów, którzy trenowali w poprzednim okresie, była na treningu także w tym. Przykład: wcześniej trenowało 10 osób, 8 z nich trenuje dalej — retencja 80%. Liczą się tylko odbyte treningi. Strzałka pokazuje zmianę w punktach procentowych (pp) względem okresu wcześniej. Im wyżej, tym lepiej — zatrzymanie klienta jest zwykle tańsze niż pozyskanie nowego." /></div>
         <div class="br-kpi-value">@(r.RetentionPercent is int ret ? $"{ret}%" : "—")</div>
         @Trend(r.RetentionPercent, r.RetentionPercentPrevious, "pp")
         <div class="br-kpi-help">Tylu klientów z poprzedniego okresu trenuje dalej.</div>
     </div>
     <div class="br-kpi">
-        <div class="br-kpi-label"><i class="bi bi-cash-coin"></i>Średnio na klienta</div>
+        <div class="br-kpi-label"><i class="bi bi-cash-coin"></i>Średnio na klienta<InfoTip Title="Średnio na klienta" Class="info-tip-sm ms-auto" Text="Przychód z okresu podzielony przez liczbę osób, które w tym czasie coś zapłaciły (pakiet, karnet albo pojedynczy trening). Druga liczba pod spodem — „/ mies. na aktywnego klienta” — to przychód podzielony przez wszystkich, którzy trenowali (także tych, którzy zapłacili wcześniej), w przeliczeniu na jeden miesiąc. Rośnie, gdy klienci kupują większe pakiety albo kupują częściej." /></div>
         <div class="br-kpi-value">@Money(r.AvgRevenuePerClient)</div>
         @Trend(r.AvgRevenuePerClient, r.AvgRevenuePerClientPrevious, "zł")
         <div class="br-kpi-help">@r.PayingClients płacących · @Money(r.AvgMonthlyRevenuePerActiveClient) / mies. na aktywnego klienta</div>
     </div>
     <div class="br-kpi">
-        <div class="br-kpi-label"><i class="bi bi-calendar-check"></i>Obłożenie grafiku</div>
+        <div class="br-kpi-label"><i class="bi bi-calendar-check"></i>Obłożenie grafiku<InfoTip Title="Obłożenie grafiku" Class="info-tip-sm ms-auto" Text="Jaka część godzin pracy z ostatnich 4 tygodni była zajęta przez treningi. Godziny pracy pochodzą z ustawień dostępności; odwołane wizyty nie zajmują miejsca, a trening w parze liczy się raz. Poniżej 40% — dużo wolnego czasu do sprzedania. Powyżej 75% — grafik jest prawie pełny; to dobry moment na wyższe ceny albo większe pakiety." /></div>
         <div class="br-kpi-value">@(r.PastOccupancy.Percent is int occ ? $"{occ}%" : "—")</div>
         <div class="br-kpi-help">
             @if (r.PastOccupancy.AvailableMinutes == 0)
@@ -81,7 +81,7 @@
         </div>
     </div>
     <div class="br-kpi br-kpi-accent">
-        <div class="br-kpi-label"><i class="bi bi-graph-up-arrow"></i>Prognoza — @f.Days dni</div>
+        <div class="br-kpi-label"><i class="bi bi-graph-up-arrow"></i>Prognoza — @f.Days dni<InfoTip Title="Prognoza przychodu" Class="info-tip-sm ms-auto" Text="Szacunek przychodu na najbliższe 30 dni: odnowienia aktywnych karnetów (bez tych z zaplanowaną rezygnacją) plus wartość pakietów, które zaraz się skończą, pomnożona przez to, jak często Twoi klienci kupują kolejny pakiet. To prognoza, nie gwarancja — wynik zależy od decyzji klientów." /></div>
         <div class="br-kpi-value">@Money(f.Total)</div>
         <div class="br-kpi-help">Odnowienia karnetów i szacowane zakupy kolejnych pakietów.</div>
     </div>
@@ -91,7 +91,16 @@
     <!-- Retencja -->
     <div class="col-12 col-xl-7">
         <section class="card h-100">
-            <div class="card-header py-2 fw-semibold small"><i class="bi bi-people me-2 text-primary"></i>Klienci i retencja</div>
+            <div class="card-header py-2 fw-semibold small d-flex align-items-center"><i class="bi bi-people me-2 text-primary"></i>Klienci i retencja
+                <InfoTip Title="Klienci i retencja" Class="info-tip-sm ms-auto">
+                    <ul class="br-info-list">
+                        <li><b>Aktywni</b> — klienci z co najmniej jednym odbytym treningiem w wybranym okresie. Liczba obok to zmiana względem poprzedniego okresu.</li>
+                        <li><b>Nowi</b> — aktywni, których pierwszy trening w ogóle wypadł w tym okresie.</li>
+                        <li><b>Przestało przychodzić</b> — trenowali w poprzednim okresie, a w tym nie mieli treningu i nie mają zaplanowanej wizyty. To lista „Warto się odezwać”.</li>
+                        <li><b>Retencja miesiąc do miesiąca</b> — dla każdego miesiąca: jaka część klientów z miesiąca wcześniej trenowała też w tym.</li>
+                    </ul>
+                </InfoTip>
+            </div>
             <div class="card-body">
                 <div class="br-mini mb-3">
                     <div><strong>@r.ActiveClients</strong><span>aktywnych @Delta(r.ActiveClients - r.ActiveClientsPrevious)</span></div>
@@ -132,7 +141,9 @@
     <!-- Przychód -->
     <div class="col-12 col-xl-5">
         <section class="card h-100">
-            <div class="card-header py-2 fw-semibold small"><i class="bi bi-wallet2 me-2 text-primary"></i>Przychód</div>
+            <div class="card-header py-2 fw-semibold small d-flex align-items-center"><i class="bi bi-wallet2 me-2 text-primary"></i>Przychód
+                <InfoTip Title="Przychód" Class="info-tip-sm ms-auto" Text="Suma opłaconych pakietów, karnetów i pojedynczych treningów w wybranym okresie — liczona w dniu płatności, nie w dniu treningu. „Poprzednio” to taki sam okres tuż wcześniej. Nieopłacone pakiety nie są wliczane. „Najwięcej wydali” — 5 osób z największą sumą płatności w tym okresie." />
+            </div>
             <div class="card-body">
                 <div class="d-flex align-items-baseline gap-2 mb-1">
                     <span class="fs-4 fw-bold">@Money(r.Revenue)</span>
@@ -166,7 +177,16 @@
     <!-- Obłożenie -->
     <div class="col-12 col-xl-6">
         <section class="card h-100">
-            <div class="card-header py-2 fw-semibold small"><i class="bi bi-calendar-week me-2 text-primary"></i>Obłożenie grafiku</div>
+            <div class="card-header py-2 fw-semibold small d-flex align-items-center"><i class="bi bi-calendar-week me-2 text-primary"></i>Obłożenie grafiku
+                <InfoTip Title="Obłożenie grafiku" Class="info-tip-sm ms-auto">
+                    <ul class="br-info-list">
+                        <li><b>Ostatnie 4 tyg.</b> — jaka część godzin pracy z minionych 28 dni była zajęta przez treningi.</li>
+                        <li><b>Najbliższe 2 tyg.</b> — ile godzin pracy na kolejne 14 dni jest już zarezerwowane.</li>
+                        <li><b>Wolnego do sprzedania</b> — godziny pracy w najbliższych 2 tygodniach, na które nikt się jeszcze nie zapisał.</li>
+                        <li><b>Wg dnia tygodnia</b> — obłożenie każdego dnia z ostatnich 8 tygodni. Pomarańczowy pasek: poniżej 40%, zielony: 75% i więcej. „Wolne” — dzień bez godzin pracy.</li>
+                    </ul>
+                </InfoTip>
+            </div>
             <div class="card-body">
                 @if (r.PastOccupancy.AvailableMinutes == 0 && r.UpcomingOccupancy.AvailableMinutes == 0)
                 {
@@ -198,7 +218,18 @@
     <!-- Prognoza -->
     <div class="col-12 col-xl-6">
         <section class="card h-100">
-            <div class="card-header py-2 fw-semibold small"><i class="bi bi-binoculars me-2 text-primary"></i>Prognoza przychodu — najbliższe @f.Days dni</div>
+            <div class="card-header py-2 fw-semibold small d-flex align-items-center"><i class="bi bi-binoculars me-2 text-primary"></i>Prognoza przychodu — najbliższe @f.Days dni
+                <InfoTip Title="Prognoza przychodu" Class="info-tip-sm ms-auto">
+                    <ul class="br-info-list">
+                        <li><b>Odnowienia karnetów</b> — karnety, których kolejna płatność wypada w najbliższych 30 dniach (bez zaplanowanych rezygnacji).</li>
+                        <li><b>Kolejne pakiety (szacunek)</b> — wartość pakietów, które się kończą (zostały najwyżej 2 treningi albo ważność mija w ciągu 30 dni), pomnożona przez „kupuje ponownie”.</li>
+                        <li><b>Kupuje ponownie</b> — jaka część wykorzystanych lub wygasłych pakietów z ostatniego roku skończyła się zakupem kolejnego przez tę samą osobę.</li>
+                        <li><b>Stały przychód z karnetów</b> — suma aktywnych karnetów w przeliczeniu na miesiąc.</li>
+                        <li><b>Opłacone treningi do zrobienia</b> — treningi z opłaconych pakietów, które klienci mają jeszcze do wykorzystania: pieniądze już są, treningi dopiero przed Wami.</li>
+                        <li><b>Nieopłacone pakiety</b> — pakiety przypisane klientom, za które nie odnotowano jeszcze płatności.</li>
+                    </ul>
+                </InfoTip>
+            </div>
             <div class="card-body">
                 <div class="br-forecast mb-3">
                     <div>
@@ -242,7 +273,16 @@
 
 <!-- Odwołania -->
 <section class="card mb-3">
-    <div class="card-header py-2 fw-semibold small"><i class="bi bi-calendar-x me-2 text-primary"></i>Odwołania i nieobecności</div>
+    <div class="card-header py-2 fw-semibold small d-flex align-items-center"><i class="bi bi-calendar-x me-2 text-primary"></i>Odwołania i nieobecności
+        <InfoTip Title="Odwołania i nieobecności" Class="info-tip-sm ms-auto">
+            <ul class="br-info-list">
+                <li><b>Wizyt odwołanych</b> — jaka część wizyt z okresu została odwołana albo klient nie przyszedł.</li>
+                <li><b>Późne odwołania</b> — odwołane później, niż pozwalają Twoje zasady odwoływania (np. mniej niż 24 h przed treningiem).</li>
+                <li><b>Nieobecności</b> — klient nie przyszedł i wcześniej nie odwołał wizyty.</li>
+                <li><b>Najczęściej odwoływane godziny i mapa</b> — ile odwołań i nieobecności wypadło w danym dniu tygodnia i o danej godzinie. Im ciemniejsze pole, tym więcej.</li>
+            </ul>
+        </InfoTip>
+    </div>
     <div class="card-body">
         <div class="br-mini mb-3">
             <div><strong>@(r.CancellationRatePercent ?? 0)%</strong><span>wizyt odwołanych</span></div>
@@ -309,6 +349,7 @@
     .br-kpi-accent { border-color: var(--c-primary); background: var(--c-primary-light); }
     .br-kpi-label { font-size: .78rem; color: var(--bs-secondary-color); display: flex; gap: .4rem; align-items: center; }
     .br-kpi-label .bi { color: var(--c-primary); }
+    .br-info-list { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: .45rem; }
     .br-kpi-value { font-size: 1.6rem; font-weight: 700; font-variant-numeric: tabular-nums; line-height: 1.2; }
     .br-kpi-help { font-size: .76rem; color: var(--bs-secondary-color); }
     .br-trend { font-size: .75rem; font-weight: 600; }

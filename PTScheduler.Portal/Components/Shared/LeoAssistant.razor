@@ -42,9 +42,9 @@
             {
                 <img class="hm-mascot @(_muted ? "" : $"hm-anim-{_config.Animation}")" src="@Icon" alt="" width="68" height="68" />
             }
-            @if (!_open && !_muted && _todo > 0)
+            @if (!_open && !_muted && Unseen > 0)
             {
-                <span class="leo-dot">@_todo</span>
+                <span class="leo-dot">@Unseen</span>
             }
         </button>
     </div>
@@ -56,19 +56,29 @@
         public bool Muted { get; set; }
         /// <summary>Klucz podpowiedzi → dzień zamknięcia (yyyy-MM-dd).</summary>
         public Dictionary<string, string> Dismissed { get; set; } = new();
+        /// <summary>Klucz podpowiedzi → „dzień:podpis treści” — przeczytana dziś w tej wersji (znika z licznika).</summary>
+        public Dictionary<string, string> Seen { get; set; } = new();
     }
 
     private AssistantService.Config? _config;
     private List<LeoService.Tip> _tips = [];
     private Prefs _prefs = new();
     private int _index;
-    private int _todo;
     private bool _visible;
     private bool _open;
     private bool _muted;
     private string? _text;
 
     private LeoService.Tip? Current => _index < _tips.Count ? _tips[_index] : null;
+
+    /// <summary>Sprawy do zrobienia, których jeszcze nie przeczytano — to pokazuje cyfra przy Leo.</summary>
+    private int Unseen => _tips.Count(t => t.IsTodo && !IsSeen(t));
+
+    // Podpis treści: gdy zmienią się liczby (np. więcej nieopłaconych), podpowiedź znów liczy się jako nowa.
+    private static string SeenMark(LeoService.Tip tip) =>
+        $"{Today}:{Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(tip.Fallback)))[..10]}";
+
+    private bool IsSeen(LeoService.Tip tip) => _prefs.Seen.TryGetValue(tip.Key, out var mark) && mark == SeenMark(tip);
 
     // Animowany szczeniak (gdy ikony są wbudowane): scena i nastrój sterują klasami nad SVG (panel.css).
     private static readonly string AnimatedSvg = PuppyArt.AnimatedSvg();
@@ -111,7 +121,6 @@
             _prefs = LoadPrefs(await JS.InvokeAsync<string>("PTLeo.load"));
             _muted = _prefs.Muted;
             _tips = (await Leo.GetTipsAsync()).Where(t => !IsDismissed(t)).ToList();
-            _todo = _tips.Count(t => t.IsTodo);
 
             _animated = _config.Icons.All(i => i.Value == PuppyArt.DataUri(i.Key));
 
@@ -132,8 +141,10 @@
                 }
             }
             StateHasChanged();
-            if (!_muted && _tips.Any(t => t.IsTodo || t.IsPraise))
+            // Przeczytane podpowiedzi nie wyskakują ponownie przy każdym przejściu między stronami.
+            if (!_muted && _tips.Any(t => (t.IsTodo || t.IsPraise) && !IsSeen(t)))
             {
+                _index = _tips.FindIndex(t => !IsSeen(t));
                 await PhraseCurrentAsync();
                 _open = true;
                 StateHasChanged();
@@ -152,6 +163,11 @@
         if (Current is not { } tip || _config is null) return;
         _text = null;
         _text = await Leo.PhraseAsync(tip, _config.Ai);
+        if (tip.Key != "idle" && !IsSeen(tip))
+        {
+            _prefs.Seen[tip.Key] = SeenMark(tip);
+            await SavePrefsAsync();
+        }
     }
 
     private async Task ToggleAsync()
@@ -182,7 +198,6 @@
             _prefs.Dismissed[tip.Key] = Today;
             await SavePrefsAsync();
             _tips.RemoveAt(_index);
-            _todo = _tips.Count(t => t.IsTodo);
             if (_index >= _tips.Count) _index = Math.Max(0, _tips.Count - 1);
         }
         _open = false;
@@ -201,6 +216,7 @@
     private async Task SavePrefsAsync()
     {
         _prefs.Dismissed = _prefs.Dismissed.Where(d => d.Value == Today).ToDictionary(d => d.Key, d => d.Value);
+        _prefs.Seen = _prefs.Seen.Where(d => d.Value.StartsWith(Today + ":")).ToDictionary(d => d.Key, d => d.Value);
         try { await JS.InvokeVoidAsync("PTLeo.save", System.Text.Json.JsonSerializer.Serialize(_prefs)); }
         catch (Exception ex) when (ex is JSException or JSDisconnectedException) { }
     }

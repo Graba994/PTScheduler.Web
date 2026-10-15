@@ -38,9 +38,9 @@
         }
         <button type="button" class="hantly-btn" aria-label="@($"{_config.Name} — podpowiedzi")" aria-expanded="@(_open ? "true" : "false")" @onclick="ToggleAsync">
             <img class="hm-mascot @(_muted ? "" : $"hm-anim-{_config.Animation}")" src="@Icon" alt="" width="64" height="64" />
-            @if (!_open && !_muted && _tips.Count > 0)
+            @if (!_open && !_muted && Unseen > 0)
             {
-                <span class="hantly-dot">@_tips.Count</span>
+                <span class="hantly-dot">@Unseen</span>
             }
         </button>
     </div>
@@ -52,6 +52,8 @@
         public bool Muted { get; set; }
         /// <summary>Klucz podpowiedzi → dzień zamknięcia (yyyy-MM-dd) albo „once” (zamknięta na stałe).</summary>
         public Dictionary<string, string> Dismissed { get; set; } = new();
+        /// <summary>Klucz podpowiedzi → „dzień:podpis treści” — przeczytana dziś w tej wersji (znika z licznika).</summary>
+        public Dictionary<string, string> Seen { get; set; } = new();
     }
 
     private PTScheduler.Web.Services.PlatformAssistantService.Config? _config;
@@ -76,6 +78,16 @@
 
     private string Today => Clock.Today.ToString("yyyy-MM-dd");
 
+    /// <summary>Ile podpowiedzi jeszcze nie przeczytano — to pokazuje cyfra przy maskotce.</summary>
+    private int Unseen => _tips.Count(t => !IsSeen(t));
+
+    // Podpis treści: gdy zmienią się liczby (np. więcej nieopłaconych), podpowiedź znów liczy się jako nowa.
+    private string SeenMark(PTScheduler.Web.Services.AssistantTipsService.Tip tip) =>
+        $"{Today}:{Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(System.Text.Encoding.UTF8.GetBytes(tip.Fallback)))[..10]}";
+
+    private bool IsSeen(PTScheduler.Web.Services.AssistantTipsService.Tip tip) =>
+        _prefs.Seen.TryGetValue(tip.Key, out var mark) && mark == SeenMark(tip);
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
@@ -92,12 +104,14 @@
             var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
             _tips = (await Tips.GetTipsAsync(userId, isAdmin)).Where(t => !IsDismissed(t)).ToList();
 
-            // Maskotka wchodzi chwilę po załadowaniu strony; dymek otwiera się sam tylko, gdy nie jest wyciszona.
+            // Maskotka wchodzi chwilę po załadowaniu strony; dymek otwiera się sam tylko, gdy nie jest wyciszona
+            // i ma coś nowego (przeczytane podpowiedzi nie wyskakują ponownie przy każdym przejściu między stronami).
             await Task.Delay(1200);
             _visible = true;
             StateHasChanged();
-            if (!_muted && _tips.Count > 0)
+            if (!_muted && Unseen > 0)
             {
+                _index = _tips.FindIndex(t => !IsSeen(t));
                 await PhraseCurrentAsync();
                 _open = true;
                 StateHasChanged();
@@ -120,6 +134,11 @@
         foreach (var (placeholder, value) in tip.Placeholders ?? [])
             text = text.Replace(placeholder, value);
         _text = text;
+        if (tip.Key != "idle" && !IsSeen(tip))
+        {
+            _prefs.Seen[tip.Key] = SeenMark(tip);
+            await SavePrefsAsync();
+        }
     }
 
     private async Task ToggleAsync()
@@ -166,6 +185,7 @@
         // Wpisy „na dziś” z poprzednich dni są już bez znaczenia; zamknięte na stałe trzymamy (najwyżej 200).
         _prefs.Dismissed = _prefs.Dismissed.Where(d => d.Value == "once" || d.Value == Today)
             .TakeLast(200).ToDictionary(d => d.Key, d => d.Value);
+        _prefs.Seen = _prefs.Seen.Where(d => d.Value.StartsWith(Today + ":")).ToDictionary(d => d.Key, d => d.Value);
         try { await JS.InvokeVoidAsync("PTHantly.save", System.Text.Json.JsonSerializer.Serialize(_prefs)); }
         catch (Exception ex) when (ex is JSException or JSDisconnectedException) { }
     }

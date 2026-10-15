@@ -65,39 +65,43 @@ else
 
     <div class="row g-3 mb-3">
         <div class="col-6 col-xl-3">
-            <div class="stat-card">
+            <div class="stat-card st-card">
                 <div class="stat-icon"><i class="bi bi-calendar3"></i></div>
                 <div>
                     <div class="stat-value">@_sessions.Count</div>
                     <div class="stat-label">Sesji łącznie</div>
                 </div>
+                <InfoTip Title="Sesji łącznie" Class="info-tip-sm st-info" Text="Wszystkie wizyty z wybranego okresu (3, 6 albo 12 miesięcy), niezależnie od statusu: odbyte, odwołane, nieobecności, zaplanowane na dziś i jutro oraz czekające na pakiet." />
             </div>
         </div>
         <div class="col-6 col-xl-3">
-            <div class="stat-card">
+            <div class="stat-card st-card">
                 <div class="stat-icon stat-icon-green"><i class="bi bi-check-circle-fill"></i></div>
                 <div>
                     <div class="stat-value">@_sessions.Count(s => s.Status == SessionStatus.Completed)</div>
                     <div class="stat-label">Ukończone</div>
                 </div>
+                <InfoTip Title="Ukończone" Class="info-tip-sm st-info" Text="Treningi, które się odbyły (wizyty oznaczone jako ukończone). To one liczą się do retencji w zakładce Biznes i do medali klientów." />
             </div>
         </div>
         <div class="col-6 col-xl-3">
-            <div class="stat-card">
+            <div class="stat-card st-card">
                 <div class="stat-icon stat-icon-red"><i class="bi bi-x-circle-fill"></i></div>
                 <div>
                     <div class="stat-value">@_sessions.Count(s => s.Status == SessionStatus.Cancelled)</div>
                     <div class="stat-label">Anulowane</div>
                 </div>
+                <InfoTip Title="Anulowane" Class="info-tip-sm st-info" Text="Wizyty odwołane — przez klienta albo przez Ciebie, z wyprzedzeniem lub po terminie. Szczegóły (np. które godziny są najczęściej odwoływane) znajdziesz w zakładce Biznes." />
             </div>
         </div>
         <div class="col-6 col-xl-3">
-            <div class="stat-card">
+            <div class="stat-card st-card">
                 <div class="stat-icon stat-icon-amber"><i class="bi bi-person-dash-fill"></i></div>
                 <div>
                     <div class="stat-value">@_sessions.Count(s => s.Status == SessionStatus.NoShow)</div>
                     <div class="stat-label">Nieobecności</div>
                 </div>
+                <InfoTip Title="Nieobecności" Class="info-tip-sm st-info" Text="Klient nie przyszedł i wcześniej nie odwołał wizyty. Częste nieobecności to dobry powód do rozmowy albo do ustawienia zasad odwoływania z opłatą." />
             </div>
         </div>
     </div>
@@ -105,8 +109,9 @@ else
     <div class="row g-3 mb-3">
         <div class="col-12 col-lg-8">
             <div class="card h-100">
-                <div class="card-header py-2 fw-semibold" style="font-size:.875rem">
+                <div class="card-header py-2 fw-semibold d-flex align-items-center" style="font-size:.875rem">
                     <i class="bi bi-bar-chart-fill me-2" style="color:var(--c-primary)"></i>Sesje — miesięcznie
+                    <InfoTip Title="Sesje — miesięcznie" Class="info-tip-sm ms-auto" Text="Dwa słupki dla każdego miesiąca: wszystkie wizyty i te ukończone. Duża różnica między nimi oznacza dużo odwołań albo nieobecności w tym miesiącu. W bieżącym miesiącu część wizyt jest jeszcze przed Tobą." />
                 </div>
                 <div class="card-body" style="height:220px;position:relative">
                     <canvas id="stats-bar"></canvas>
@@ -115,8 +120,17 @@ else
         </div>
         <div class="col-12 col-lg-4">
             <div class="card h-100">
-                <div class="card-header py-2 fw-semibold" style="font-size:.875rem">
+                <div class="card-header py-2 fw-semibold d-flex align-items-center" style="font-size:.875rem">
                     <i class="bi bi-pie-chart-fill me-2" style="color:var(--c-primary)"></i>Statusy
+                    <InfoTip Title="Statusy wizyt" Class="info-tip-sm ms-auto">
+                        <ul class="st-info-list">
+                            <li><b>Ukończone</b> — trening się odbył.</li>
+                            <li><b>Anulowane</b> — wizyta odwołana.</li>
+                            <li><b>Nieobecność</b> — klient nie przyszedł i nie odwołał.</li>
+                            <li><b>Zaplanowane</b> — wizyta jeszcze przed Wami.</li>
+                            <li><b>Bez pakietu</b> — termin jest zarezerwowany, ale klient nie ma wolnych treningów w pakiecie; czeka na zakup albo płatność.</li>
+                        </ul>
+                    </InfoTip>
                 </div>
                 <div class="card-body" style="height:220px;position:relative">
                     <canvas id="stats-donut"></canvas>
@@ -126,8 +140,9 @@ else
     </div>
 
     <div class="card">
-        <div class="card-header py-2 fw-semibold" style="font-size:.875rem">
+        <div class="card-header py-2 fw-semibold d-flex align-items-center" style="font-size:.875rem">
             <i class="bi bi-trophy-fill me-2" style="color:var(--c-primary)"></i>Top klienci — liczba sesji
+            <InfoTip Title="Top klienci" Class="info-tip-sm ms-auto" Text="10 osób z największą liczbą ukończonych treningów w wybranym okresie. „Łącznie” liczy wszystkie ich wizyty — także odwołane, nieobecności i zaplanowane." />
         </div>
         <div class="card-body p-0">
             @if (!_topClients.Any())
@@ -166,6 +181,12 @@ else
         </div>
     </div>
 }
+
+<style>
+    .st-card { position: relative; padding-right: 2.2rem; }
+    .st-info { position: absolute; top: .5rem; right: .5rem; }
+    .st-info-list { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: .4rem; }
+</style>
 
 @code {
     private bool _loaded;
