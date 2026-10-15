@@ -133,6 +133,34 @@ public class LeoTests
         ids.Should().OnlyHaveUniqueItems().And.OnlyContain(i => i!.StartsWith("leoa"), "animowany Leo jest wstawiany do strony obok statycznych ikon");
     }
 
+    [Fact]
+    public void Animated_hantly_has_every_face_effect_and_own_styles()
+    {
+        var svg = XDocument.Parse(MascotArt.AnimatedSvg());
+        var classes = svg.Descendants().Select(e => (string?)e.Attribute("class") ?? "").SelectMany(c => c.Split(' ')).ToHashSet();
+        classes.Should().Contain(["hma-rig", "hma-breath", "hma-plate-l", "hma-plate-r", "hma-blink", "hma-glint", "hma-burst"]);
+        foreach (var mood in MascotArt.Moods)
+        {
+            classes.Should().Contain($"hma-face-{mood.Key}");
+            classes.Should().Contain($"hma-fx-{mood.Key}");
+        }
+        svg.Descendants().Should().Contain(e => e.Name.LocalName == "style", "style animacji jadą razem z SVG do aplikacji trenera i na stronę główną");
+        var ids = svg.Descendants().Select(e => (string?)e.Attribute("id")).Where(i => i is not null).ToList();
+        ids.Should().OnlyHaveUniqueItems().And.OnlyContain(i => i!.StartsWith("hma-"), "inline SVG nie może dublować id statycznych ikon");
+        foreach (var stage in MascotArt.Stages) MascotArt.LiveCss.Should().Contain($".st-{stage}");
+    }
+
+    [Fact]
+    public void Static_hantly_icons_stay_valid_and_self_contained()
+    {
+        foreach (var mood in MascotArt.Moods)
+        {
+            var svg = XDocument.Parse(MascotArt.Svg(mood.Key));
+            svg.Descendants().Select(e => (string?)e.Attribute("id")).Where(i => i is not null).Should().BeEquivalentTo(["hb", "hp", "hc"]);
+            MascotArt.Svg(mood.Key).Should().NotContain("hma-", "statyczna ikona (e-maile, PNG) nie ma części animowanych");
+        }
+    }
+
     [Theory]
     [InlineData(1, "rachunek")]
     [InlineData(3, "rachunki")]

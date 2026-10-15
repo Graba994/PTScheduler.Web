@@ -760,7 +760,8 @@ app.MapGet("/api/internal/tenants/{slug}/assistant", async (
     var c = await assistant.GetConfigAsync(tenant);
     var version = await assistant.IconsVersionAsync();
     var emailIcons = MascotArt.Moods.ToDictionary(m => m.Key, m => $"{PublicBase(ctx)}/assistant/mascot/{m.Key}.png?v={version}");
-    return Results.Json(new { enabled = c.Enabled, name = c.Name, animation = c.Animation, ai = c.Ai, icons = c.Icons, emailIcons });
+    return Results.Json(new { enabled = c.Enabled, name = c.Name, animation = c.Animation, ai = c.Ai, icons = c.Icons, emailIcons,
+        layout = c.Layout, animatedSvg = c.AnimatedSvg });
 });
 
 app.MapPost("/api/internal/tenants/{slug}/assistant/phrase", async (
@@ -776,7 +777,7 @@ app.MapPost("/api/internal/tenants/{slug}/assistant/phrase", async (
     if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
     if (string.IsNullOrWhiteSpace(body.Kind) || string.IsNullOrWhiteSpace(body.Fallback) || body.Fallback.Length > 600) return Results.BadRequest();
     var facts = (body.Facts ?? []).Take(20)
-        .Where(f => f.Key.Length <= 40 && (f.Value?.Length ?? 0) <= 80)
+        .Where(f => f.Key.Length <= 40 && (f.Value?.Length ?? 0) <= 160)
         .ToDictionary(f => f.Key, f => f.Value ?? "");
     var phrase = await assistant.PhraseAsync(tenant, body.Kind[..Math.Min(40, body.Kind.Length)], facts, body.Fallback,
         audience: body.Audience == "klient" ? "klient" : "trener");

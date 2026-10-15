@@ -3,6 +3,7 @@
 @inject PTScheduler.Web.Services.PlatformAssistantService Platform
 @inject PTScheduler.Web.Services.AssistantTipsService Tips
 @inject PTScheduler.Application.Interfaces.IAppClock Clock
+@inject NavigationManager Nav
 @rendermode PTScheduler.Web.RenderModes.Server
 
 @* Asystent-maskotka (domyślnie „Hantly”) dla trenera: sam podpowiada, bez pisania do niego.
@@ -10,7 +11,7 @@
 @if (_config is not null && _visible)
 {
     var tip = Current;
-    <div class="hantly @(_open ? "is-open" : "") @(_muted ? "is-muted" : "")">
+    <div class="hantly layout-@_config.Layout @(_open ? "is-open" : "") @(_muted ? "is-muted" : "") @(Live ? "is-live" : "")">
         @if (_open && tip is not null)
         {
             <div class="hantly-bubble" role="status" aria-live="polite">
@@ -37,7 +38,14 @@
             </div>
         }
         <button type="button" class="hantly-btn" aria-label="@($"{_config.Name} — podpowiedzi")" aria-expanded="@(_open ? "true" : "false")" @onclick="ToggleAsync">
-            <img class="hm-mascot @(_muted ? "" : $"hm-anim-{_config.Animation}")" src="@Icon" alt="" width="64" height="64" />
+            @if (Live)
+            {
+                <span class="hm-live hm-mascot-live st-@_stage md-@Mood">@((MarkupString)_config.AnimatedSvg!)</span>
+            }
+            else
+            {
+                <img class="hm-mascot @(_muted ? "" : $"hm-anim-{(_config.Animation == "live" ? "bounce" : _config.Animation)}")" src="@Icon" alt="" width="64" height="64" />
+            }
             @if (!_open && !_muted && Unseen > 0)
             {
                 <span class="hantly-dot">@Unseen</span>
@@ -66,6 +74,29 @@
     private string? _text;
 
     private PTScheduler.Web.Services.AssistantTipsService.Tip? Current => _index < _tips.Count ? _tips[_index] : null;
+
+    // Animowany hantelek z Portalu (animacja „Żywy” i wbudowane ikony): scena i nastrój to klasy nad SVG.
+    private bool Live => _config?.AnimatedSvg is { Length: > 0 };
+    private string _stage = "enter";
+    private int _stageVersion;
+    private string Mood => _muted ? "sleep" : Current?.Mood ?? "happy";
+
+    /// <summary>Ustawia scenę; po <paramref name="thenIdleMs"/> wraca do spoczynku (albo snu, gdy wyciszony).</summary>
+    private async Task StageAsync(string stage, int thenIdleMs = 0)
+    {
+        if (!Live) return;
+        var version = ++_stageVersion;
+        _stage = stage;
+        StateHasChanged();
+        if (thenIdleMs <= 0) return;
+        await Task.Delay(thenIdleMs);
+        if (version != _stageVersion) return;
+        _stage = _muted ? "sleep" : "idle";
+        StateHasChanged();
+    }
+
+    /// <summary>Na pulpicie podpowiedzi są w karcie „Na dziś” — dymek sam się tam nie otwiera.</summary>
+    private bool OnDashboard => Nav.ToBaseRelativePath(Nav.Uri).Split('?', '#')[0].TrimEnd('/') is "app" or "";
 
     private string Icon
     {
@@ -108,8 +139,17 @@
             // i ma coś nowego (przeczytane podpowiedzi nie wyskakują ponownie przy każdym przejściu między stronami).
             await Task.Delay(1200);
             _visible = true;
+            _stage = "enter";
             StateHasChanged();
-            if (!_muted && Unseen > 0)
+            if (Live)
+            {
+                // Wchodzi podskokami, ląduje z przysiadem, potem oddycha (albo od razu zasypia, gdy wyciszony).
+                await Task.Delay(1500);
+                await StageAsync("land");
+                await Task.Delay(550);
+                await StageAsync(_muted ? "sleep" : "idle");
+            }
+            if (!_muted && Unseen > 0 && !OnDashboard)
             {
                 _index = _tips.FindIndex(t => !IsSeen(t));
                 await PhraseCurrentAsync();
@@ -144,6 +184,7 @@
     private async Task ToggleAsync()
     {
         if (_open) { _open = false; return; }
+        if (!_muted) _ = StageAsync("excited", 1000);
         if (_tips.Count == 0)
         {
             _tips = [new("idle", "brak", "happy", 0, "Wszystko ogarnięte — nie mam teraz żadnych podpowiedzi. 💪", [], null, null)];
@@ -157,6 +198,7 @@
     {
         if (_index >= _tips.Count - 1) return;
         _index++;
+        if (!_muted) _ = StageAsync("excited", 1000);
         await PhraseCurrentAsync();
     }
 
@@ -178,6 +220,7 @@
         _prefs.Muted = _muted;
         await SavePrefsAsync();
         if (_muted) _open = false;
+        _ = _muted ? StageAsync("sleep") : StageAsync("land", 550);
     }
 
     private async Task SavePrefsAsync()

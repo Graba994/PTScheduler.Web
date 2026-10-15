@@ -49,7 +49,19 @@
                         <b>@DisplayName</b>
                         @(IsLeo ? "Hau! Przypilnuję zgłoszeń, rachunków i trenerów, którzy mogą odejść. Rano dostaniesz raport. 🐾" : "Cześć! Pomogę pilnować płatności i faktur, a za każdy rekord pochwalę. 💪")
                     </div>
-                    @if (IsLeo && _custom.Count == 0)
+                    @if (!IsLeo && _custom.Count == 0 && _animation == "live")
+                    {
+                        <div class="leo-stage-preview">
+                            <span class="hm-live hm-live-preview st-@_hmStage md-@(_hmStage == "sleep" ? "sleep" : _previewMood)">@((MarkupString)HantlyAnimatedSvg)</span>
+                            <div class="leo-stage-buttons" role="group" aria-label="Ruchy hantelka">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="HmEnterAsync"><i class="bi bi-arrow-left me-1"></i>Wejście</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => HmStageAsync("excited", 1000)'><i class="bi bi-balloon-heart me-1"></i>Salto</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => HmStageAsync("sleep", 0)'><i class="bi bi-moon me-1"></i>Spanie</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => HmStageAsync("land", 550)'><i class="bi bi-arrow-up me-1"></i>Pobudka</button>
+                            </div>
+                        </div>
+                    }
+                    else if (IsLeo && _custom.Count == 0)
                     {
                         <div class="leo-stage-preview">
                             <span class="leo-anim leo-stage-@_leoStage leo-mood-@(_leoStage == "sleep" ? "sleep" : _previewMood)">@((MarkupString)LeoAnimatedSvg)</span>
@@ -63,7 +75,7 @@
                     }
                     else
                     {
-                        <img class="hm-mascot hm-anim-@_animation" src="@Icon(_previewMood)" alt="" width="120" height="120" />
+                        <img class="hm-mascot hm-anim-@(_animation == "live" ? "bounce" : _animation)" src="@Icon(_previewMood)" alt="" width="120" height="120" />
                     }
                     <div class="hm-moods" role="group" aria-label="Podgląd nastroju">
                         @foreach (var m in AssistantService.MoodsFor(_agent))
@@ -98,13 +110,41 @@
                     <div>
                         <label class="form-label small fw-semibold" for="hm-anim">Animacja</label>
                         <select id="hm-anim" class="form-select" @bind="_animation">
+                            @if (!IsLeo)
+                            {
+                                <option value="live">Żywy — wchodzi, mruga, robi salto, zasypia</option>
+                            }
                             <option value="bounce">Podskakuje</option>
                             <option value="float">Unosi się</option>
                             <option value="wave">Kołysze się</option>
+                            <option value="pulse">Oddycha</option>
+                            <option value="swing">Huśta się</option>
                             <option value="none">Bez animacji</option>
                         </select>
-                        <div class="form-text small">Osoby z włączonym w systemie ograniczeniem ruchu zawsze widzą wersję bez animacji.</div>
+                        <div class="form-text small">
+                            @if (!IsLeo && _animation == "live" && _custom.Count > 0)
+                            {
+                                <span>Pełna animacja działa z wbudowanymi ikonami — przy własnych ikonach maskotka lekko podskakuje. </span>
+                            }
+                            Osoby z włączonym w systemie ograniczeniem ruchu zawsze widzą wersję bez animacji.
+                        </div>
                     </div>
+                    @if (!IsLeo)
+                    {
+                        <div>
+                            <div class="form-label small fw-semibold mb-2">Układ w aplikacji trenera</div>
+                            <div class="hm-layouts" role="radiogroup" aria-label="Układ widżetu">
+                                @foreach (var l in AssistantService.Layouts)
+                                {
+                                    <button type="button" role="radio" aria-checked="@(_layout == l.Key ? "true" : "false")" class="hm-layout @(_layout == l.Key ? "on" : "")" @onclick="() => _layout = l.Key">
+                                        <span class="hm-lay-mock hm-lay-@l.Key" aria-hidden="true"><i class="m"></i><i class="b"></i></span>
+                                        <b>@l.Label</b>
+                                        <span>@l.Hint</span>
+                                    </button>
+                                }
+                            </div>
+                        </div>
+                    }
                     <div><button class="btn btn-primary btn-sm" @onclick="SaveLookAsync"><i class="bi bi-check-lg me-1"></i>Zapisz</button></div>
                 </div>
             </section>
@@ -406,6 +446,32 @@ else
 
     // Podgląd animowanego Leo (gdy ikony są wbudowane).
     private static readonly string LeoAnimatedSvg = PuppyArt.AnimatedSvg();
+    private static readonly string HantlyAnimatedSvg = MascotArt.AnimatedSvg();
+    private string _layout = "bubble";
+    private string _hmStage = "idle";
+    private int _hmVersion;
+
+    private async Task HmStageAsync(string stage, int thenIdleMs)
+    {
+        var v = ++_hmVersion;
+        _hmStage = stage;
+        StateHasChanged();
+        if (thenIdleMs <= 0) return;
+        await Task.Delay(thenIdleMs);
+        if (v != _hmVersion) return;
+        _hmStage = "idle";
+        StateHasChanged();
+    }
+
+    private async Task HmEnterAsync()
+    {
+        var v = ++_hmVersion;
+        _hmStage = "enter";
+        StateHasChanged();
+        await Task.Delay(1500);
+        if (v != _hmVersion) return;
+        await HmStageAsync("land", 550);
+    }
     private string _leoStage = "idle";
     private int _leoVersion;
 
@@ -471,14 +537,15 @@ else
         _message = null;
         var s = await Settings.GetAllAsync(K.AssistantEnabled, K.AssistantName, K.AssistantAnimation, K.AiEnabled, K.AiModel,
             K.AiMonthlyBudgetUsd, K.AiPriceInputPerM, K.AiPriceOutputPerM,
-            K.LeoEnabled, K.LeoName, K.LeoAnimation, K.LeoReportEnabled, K.LeoReportHour, K.AdminNotificationEmail);
+            K.LeoEnabled, K.LeoName, K.LeoAnimation, K.LeoReportEnabled, K.LeoReportHour, K.AdminNotificationEmail, K.AssistantLayout);
         _hantlyName = s[K.AssistantName].Trim() is { Length: > 0 } hn ? hn : AssistantService.DefaultName;
         _leoName = s[K.LeoName].Trim() is { Length: > 0 } ln ? ln : AssistantService.DefaultLeoName;
         _enabled = (IsLeo ? s[K.LeoEnabled] : s[K.AssistantEnabled]) != "false";
         _name = IsLeo ? s[K.LeoName] : s[K.AssistantName];
         _savedName = IsLeo ? _leoName : _hantlyName;
         var anim = IsLeo ? s[K.LeoAnimation] : s[K.AssistantAnimation];
-        _animation = AssistantService.Animations.Contains(anim) ? anim : IsLeo ? "wave" : "bounce";
+        _animation = AssistantService.Animations.Contains(anim) && !(IsLeo && anim == "live") ? anim : IsLeo ? "wave" : "live";
+        _layout = AssistantService.IsLayout(s[K.AssistantLayout]) ? s[K.AssistantLayout] : "bubble";
         _reportOn = s[K.LeoReportEnabled] != "false";
         _reportHour = int.TryParse(s[K.LeoReportHour], out var rh) ? Math.Clamp(rh, 5, 11) : 7;
         _adminEmail = s[K.AdminNotificationEmail];
@@ -521,12 +588,14 @@ else
 
     private async Task SaveLookAsync()
     {
-        await Settings.SetManyAsync(new Dictionary<string, string>
+        var values = new Dictionary<string, string>
         {
             [IsLeo ? K.LeoEnabled : K.AssistantEnabled] = _enabled ? "true" : "false",
             [IsLeo ? K.LeoName : K.AssistantName] = _name.Trim(),
             [IsLeo ? K.LeoAnimation : K.AssistantAnimation] = _animation,
-        });
+        };
+        if (!IsLeo) values[K.AssistantLayout] = _layout;
+        await Settings.SetManyAsync(values);
         _savedName = DisplayName;
         if (IsLeo) _leoName = DisplayName; else _hantlyName = DisplayName;
         Ok(IsLeo ? "Zapisane. Panel pokaże zmiany po odświeżeniu strony." : "Zapisane. Aplikacje trenerów pokażą zmiany w ciągu 30 minut (albo po ponownym uruchomieniu).");

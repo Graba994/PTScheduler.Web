@@ -30,7 +30,19 @@ public partial class AssistantService(
     /// <summary>Własne ikony Leo leżą w tej samej tabeli z prefiksem „leo:”.</summary>
     private static string AssetKey(string agent, string mood) => agent == Leo ? LeoPrefix + mood : mood;
     private const string LeoPrefix = "leo:";
-    public static readonly string[] Animations = ["bounce", "float", "wave", "none"];
+    /// <summary>„live” — animowany hantelek (tylko z wbudowanymi ikonami); pozostałe ruszają obrazkiem.</summary>
+    public static readonly string[] Animations = ["live", "bounce", "float", "wave", "pulse", "swing", "none"];
+
+    /// <summary>Układy widżetu w aplikacji trenera.</summary>
+    public static readonly (string Key, string Label, string Hint)[] Layouts =
+    [
+        ("bubble", "Dymek", "Maskotka w rogu, dymek nad nią — klasyka"),
+        ("card", "Karta", "Szersza karta z maskotką obok tekstu"),
+        ("pill", "Pasek", "Mała maskotka i zwarty pasek z tekstem"),
+        ("peek", "Wychyla się", "Maskotka zerka zza krawędzi ekranu, wysuwa się po kliknięciu"),
+    ];
+
+    public static bool IsLayout(string? key) => Layouts.Any(l => l.Key == key);
     public const int MaxAssetBytes = 300 * 1024;
     public static readonly string[] AllowedTypes = ["image/svg+xml", "image/png", "image/webp", "image/gif"];
 
@@ -78,24 +90,48 @@ public partial class AssistantService(
         - Najwyżej jedno emoji. Nie dodawaj powitania ani podpisu. Zwróć tylko treść komunikatu.
         """;
 
-    public sealed record Config(bool Enabled, string Name, string Animation, bool Ai, Dictionary<string, string> Icons);
+    /// <param name="AnimatedSvg">Animowany hantelek — tylko przy animacji „live” i wbudowanych ikonach (inaczej null).</param>
+    public sealed record Config(bool Enabled, string Name, string Animation, bool Ai, Dictionary<string, string> Icons,
+        string Layout = "bubble", string? AnimatedSvg = null);
 
     public async Task<Config> GetConfigAsync(Tenant? tenant = null)
     {
-        var s = await settings.GetAllAsync(K.AssistantEnabled, K.AssistantName, K.AssistantAnimation, K.AiEnabled);
+        var s = await settings.GetAllAsync(K.AssistantEnabled, K.AssistantName, K.AssistantAnimation, K.AiEnabled, K.AssistantLayout);
         await using var db = await dbFactory.CreateDbContextAsync();
         var custom = await db.MascotAssets.AsNoTracking().Where(a => !a.Mood.StartsWith(LeoPrefix)).ToDictionaryAsync(a => a.Mood);
         var icons = MascotArt.Moods.ToDictionary(m => m.Key, m => custom.TryGetValue(m.Key, out var a)
             ? $"data:{a.ContentType};base64,{Convert.ToBase64String(a.Data)}"
             : MascotArt.DataUri(m.Key));
         var name = string.IsNullOrWhiteSpace(s[K.AssistantName]) ? DefaultName : s[K.AssistantName].Trim();
-        var animation = Animations.Contains(s[K.AssistantAnimation]) ? s[K.AssistantAnimation] : "bounce";
+        var animation = Animations.Contains(s[K.AssistantAnimation]) ? s[K.AssistantAnimation] : "live";
         return new Config(
             Enabled: s[K.AssistantEnabled] != "false" && tenant?.AssistantOff != true,
             Name: name,
             Animation: animation,
             Ai: s[K.AiEnabled] == "true" && tenant?.AiOff != true,
-            Icons: icons);
+            Icons: icons,
+            Layout: IsLayout(s[K.AssistantLayout]) ? s[K.AssistantLayout] : "bubble",
+            AnimatedSvg: animation == "live" && custom.Count == 0 ? LiveSvg : null);
+    }
+
+    private static readonly string LiveSvg = MascotArt.AnimatedSvg();
+
+    /// <summary>Wygląd asystenta na publiczną stronę Portalu (lekko: bez danych ikon — własne ikony idą adresem PNG).</summary>
+    /// <param name="AnimatedSvg">Animowany hantelek, gdy animacja „live” i wbudowane ikony.</param>
+    /// <param name="IconUrl">Adres ikony nastroju (PNG z Portalu) — gdy nie ma animowanego SVG.</param>
+    public sealed record PublicLook(string Name, string Animation, string? AnimatedSvg, Func<string, string> IconUrl);
+
+    public async Task<PublicLook> GetPublicLookAsync()
+    {
+        var s = await settings.GetAllAsync(K.AssistantName, K.AssistantAnimation);
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var hasCustom = await db.MascotAssets.AnyAsync(a => !a.Mood.StartsWith(LeoPrefix));
+        var version = await IconsVersionAsync();
+        var animation = Animations.Contains(s[K.AssistantAnimation]) ? s[K.AssistantAnimation] : "live";
+        return new(string.IsNullOrWhiteSpace(s[K.AssistantName]) ? DefaultName : s[K.AssistantName].Trim(),
+            animation == "live" ? (hasCustom ? "bounce" : "live") : animation,
+            animation == "live" && !hasCustom ? LiveSvg : null,
+            mood => $"/assistant/mascot/{(MascotArt.IsMood(mood) ? mood : "happy")}.png?v={version}");
     }
 
     /// <summary>Wygląd i stan agenta Portalu (Leo) — ikony z własnych plików albo wbudowane.</summary>

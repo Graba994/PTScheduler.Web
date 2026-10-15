@@ -2,6 +2,7 @@
 @layout PublicLayout
 @inject SiteSettingsService Settings
 @inject IDbContextFactory<PortalDbContext> DbFactory
+@inject AssistantService Assistant
 
 <PageTitle>PTScheduler — aplikacja dla trenerów personalnych</PageTitle>
 <HeadContent>
@@ -14,7 +15,11 @@
 <section class="lp-hero">
     <div class="lp-container lp-hero-inner">
         <div>
-            <div class="lp-hero-badge"><i class="bi bi-lightning-charge-fill"></i>@_s("hero_badge", "Dla trenerów personalnych i małych studiów")</div>
+            <a href="#ai" class="lp-hero-badge lp-ai-pill">
+                <span class="lp-ai-pill-mascot">@Mascot("hello", "")</span>
+                <span><b>Nowość:</b> @_look.Name — asystent AI w Twojej aplikacji</span>
+                <i class="bi bi-arrow-right"></i>
+            </a>
             @if (_settings.TryGetValue("hero_title", out var customTitle) && !string.IsNullOrWhiteSpace(customTitle)
                  && customTitle != SiteSettingsService.DefaultHeroTitle)
             {
@@ -25,7 +30,7 @@
                 <h1>Mniej papierologii.<br /><span class="lp-mark">Więcej treningów.</span></h1>
             }
             <p class="lp-hero-sub">
-                @_s("hero_subtitle", "Grafik i rezerwacje online, karnety, płatności, czat z klientem i plany treningowe — w jednej aplikacji pod Twoją marką. Klienci instalują ją na telefonie jak zwykłą apkę.")
+                @HeroSubtitle
             </p>
             <div class="lp-hero-ctas">
                 <a href="@_s("hero_cta_url", "/register")" class="lp-btn lp-btn-energy"><i class="bi bi-rocket-takeoff"></i>@_s("hero_cta", "Zacznij za darmo")</a>
@@ -79,11 +84,12 @@
                 </div>
             </div>
 
-            <div class="lp-float-card lp-float-rev">
-                <div class="lp-stars">★★★★★</div>
-                <div style="font-size:.85rem;margin-top:4px">„Najlepsza inwestycja w formę od lat.”</div>
-                <div style="font-size:.75rem;color:var(--pts-text-secondary);margin-top:4px">Ania P. — opinia na stronie trenera</div>
+            <div class="lp-ai-float">
+                <span class="lp-ai-float-mascot">@Mascot("think", "")</span>
+                <div class="lp-ai-float-bubble"><b>@_look.Name</b>Anna nie była od 3 tygodni. Mam szkic wiadomości w Twoim stylu — wysłać?</div>
             </div>
+
+
         </div>
     </div>
 </section>
@@ -98,6 +104,70 @@
         <s>gonieniem za przelewami</s>
     </div>
 </div>
+
+<!-- ASYSTENT AI: maskotka z ustawień Portalu (imię, ikony i animacja zmieniają się razem z Panelem) -->
+<section class="lp-ai" id="ai" aria-labelledby="lp-ai-title">
+    <div class="lp-container lp-ai-inner">
+        <div class="lp-ai-stage" aria-hidden="true">
+            <div class="lp-ai-glow"></div>
+            @for (var i = 0; i < _aiSlides.Length; i++)
+            {
+                var slide = _aiSlides[i];
+                <div class="lp-ai-slide" style="animation-delay:@(i * 4)s">
+                    <div class="lp-ai-bubble"><span class="lp-ai-bubble-kicker"><i class="bi @slide.Icon"></i>@slide.Kicker</span>@slide.Text</div>
+                    <div class="lp-ai-big">@Mascot(slide.Mood, "")</div>
+                </div>
+            }
+            <div class="lp-ai-dots">@for (var i = 0; i < _aiSlides.Length; i++) { <span style="animation-delay:@(i * 4)s"></span> }</div>
+        </div>
+        <div class="lp-ai-copy">
+            <div class="lp-eyebrow lp-ai-eyebrow"><i class="bi bi-stars me-1"></i>Asystent AI w Twojej aplikacji</div>
+            <h2 id="lp-ai-title" class="lp-section-title lp-ai-title">Poznaj @_look.Name.<br /><span class="lp-ai-grad">Asystenta, który zna Twój biznes.</span></h2>
+            <p class="lp-ai-sub">Nie musisz do niego pisać. Sam przegląda grafik, płatności, ankiety i treningi Twoich klientów — i mówi, co jest ważne dziś. Krótko, po ludzku, z gotowym przyciskiem do działania.</p>
+            <div class="lp-ai-grid">
+                @foreach (var f in _aiFeatures)
+                {
+                    <div class="lp-ai-card">
+                        <span class="lp-ai-card-ic"><i class="bi @f.Icon"></i></span>
+                        <b>@f.Title</b>
+                        <span>@f.Text</span>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+    <div class="lp-container">
+        <div class="lp-ai-clients">
+            <div class="lp-ai-clients-head">
+                <div class="lp-eyebrow lp-ai-eyebrow">Twoi klienci też to poczują</div>
+                <h3>Motywacja, która przychodzi sama</h3>
+                <p>Po treningu klient widzi swoje rekordy i postęp, za regularność dostaje medale, a 1. dnia miesiąca — podsumowanie „Twój miesiąc”. Wszystko pod Twoją marką.</p>
+            </div>
+            <div class="lp-ai-mocks" aria-hidden="true">
+                <div class="lp-ai-mock lp-ai-mock-recap">
+                    <div class="lp-ai-mock-hero"><small>Podsumowanie: październik</small><b>Twój październik</b></div>
+                    <p>W październiku 12 treningów — o 3 więcej niż we wrześniu. Nowy rekord: przysiad — 80 kg. Tak trzymać!</p>
+                    <div class="lp-ai-mock-tiles"><span><b>12</b>treningów</span><span><b>6</b>tyg. z rzędu</span><span><b>2</b>rekordy</span></div>
+                </div>
+                <div class="lp-ai-mock lp-ai-mock-after">
+                    <div class="lp-ai-mock-row"><i class="bi bi-trophy-fill"></i><span><b>Rekord!</b> Martwy ciąg — 120 kg (poprzednio 115 kg)</span></div>
+                    <div class="lp-ai-mock-row"><i class="bi bi-graph-up-arrow"></i><span>Wyciskanie: 10 powt. przy 60 kg (ostatnio 8)</span></div>
+                    <div class="lp-ai-mock-row"><i class="bi bi-fire"></i><span>8. tydzień z rzędu z treningiem</span></div>
+                </div>
+                <div class="lp-ai-mock lp-ai-mock-medal">
+                    <span class="lp-ai-medal"><i class="bi bi-award-fill"></i></span>
+                    <b>Nowy medal: Miesiąc bez przerwy</b>
+                    <span>Trening w 4 kolejnych tygodniach 🏅</span>
+                </div>
+            </div>
+        </div>
+        <ul class="lp-ai-trust">
+            <li><i class="bi bi-calculator"></i><span><b>AI nie zmyśla liczb.</b> Liczy je aplikacja, a każda liczba w tekście asystenta jest sprawdzana — gdy coś się nie zgadza, zostaje tekst podstawowy.</span></li>
+            <li><i class="bi bi-incognito"></i><span><b>Imiona klientów zostają u Ciebie.</b> Do AI trafiają same liczby i fakty, bez danych osobowych.</span></li>
+            <li><i class="bi bi-toggle-on"></i><span><b>Ty decydujesz.</b> Asystenta wyciszysz jednym kliknięciem, a podsumowania dla klientów wyłączysz w ustawieniach.</span></li>
+        </ul>
+    </div>
+</section>
 
 <!-- WSZYSTKO W JEDNYM: to, co inne aplikacje dzielą na kilka narzędzi -->
 <section class="lp-allin" aria-labelledby="lp-allin-title">
@@ -692,6 +762,56 @@
 
     private record Feature(string Icon, string Title, string Text);
 
+    private AssistantService.PublicLook _look = new(AssistantService.DefaultName, "live", null, m => $"/assistant/mascot/{m}.png");
+
+    /// <summary>Maskotka asystenta: animowany SVG (wbudowane ikony, animacja „Żywy”) albo ikona nastroju z Panelu.</summary>
+    private RenderFragment Mascot(string mood, string css) => __builder =>
+    {
+        if (_look.AnimatedSvg is { } svg)
+        {
+            <span class="hm-live st-idle md-@mood @css">@((MarkupString)svg)</span>
+        }
+        else
+        {
+            <img class="lp-ai-img hm-anim-@_look.Animation @css" src="@_look.IconUrl(mood)" alt="" loading="lazy" />
+        }
+    };
+
+    /// <summary>Podtytuł: własny z Panelu albo (przy domyślnym) wersja z asystentem AI.</summary>
+    private string HeroSubtitle
+    {
+        get
+        {
+            var custom = _s("hero_subtitle", "");
+            const string oldDefault = "Grafik i rezerwacje online, karnety, płatności, czat z klientem i plany treningowe — w jednej aplikacji pod Twoją marką. Klienci instalują ją na telefonie jak zwykłą apkę.";
+            return string.IsNullOrWhiteSpace(custom) || custom == oldDefault
+                ? $"Grafik i rezerwacje online, karnety, płatności, czat z klientem i plany treningowe — w jednej aplikacji pod Twoją marką. A asystent AI {_look.Name} podpowiada, kto czeka na odpowiedź, kto może odejść i co napisać."
+                : custom;
+        }
+    }
+
+    private record AiSlide(string Mood, string Icon, string Kicker, string Text);
+
+    private static readonly AiSlide[] _aiSlides =
+    [
+        new("hello", "bi-sunrise", "Poranny brief", "Dzień dobry! Dziś 5 treningów, pierwszy o 7:30. Do załatwienia: 2 sprawy — reszta ogarnięta."),
+        new("think", "bi-heart-pulse", "Kto może odejść", "Anna nie była od 3 tygodni, a jej samopoczucie w ankietach spada. Mam szkic wiadomości w Twoim stylu."),
+        new("remind", "bi-wallet2", "Płatności", "3 treningi poza pakietem czekają na zapłatę. Przypomnieć klientom jednym kliknięciem?"),
+        new("celebrate", "bi-trophy", "Powody do dumy", "Tomek pobił rekord w przysiadzie — 100 kg! Medal już czeka w jego aplikacji. 🎉"),
+    ];
+
+    private static readonly Feature[] _aiFeatures =
+    [
+        new("bi-chat-heart", "Podpowiedzi na dziś", "Akceptacje, płatności, faktury i klienci, którzy dawno nie byli — z przyciskiem „zrób to”."),
+        new("bi-envelope-paper-heart", "Poranny brief", "Codziennie rano e-mail i push: plan dnia, sprawy do załatwienia i pochwały."),
+        new("bi-person-exclamation", "Kto może odejść", "Wykrywa przerwy, rzadsze treningi i spadek samopoczucia — zanim klient zrezygnuje."),
+        new("bi-pen", "Wiadomości w Twoim stylu", "Szkic gotowy do wysłania, a asystent uczy się z Twoich poprawek."),
+        new("bi-person-vcard", "Klient „w skrócie”", "Przed treningiem wiesz wszystko: postępy, samopoczucie, ból, pakiet i jedną radę."),
+        new("bi-graph-up-arrow", "Co się zmieniło w biznesie", "Retencja, przychód i jego przyczyna, wolne godziny do sprzedania — w trzech zdaniach."),
+        new("bi-clipboard2-pulse", "Zdrowie a plan", "Zestawia ankietę zdrowotną i zgłoszony ból z ćwiczeniami w planie."),
+        new("bi-trophy", "Motywacja klientów", "Rekordy po treningu, medale i „Twój miesiąc” — klienci chętniej wracają."),
+    ];
+
     private static readonly Feature[] _all =
     [
         new("bi-phone", "Aplikacja na telefon", "Klienci instalują ją z przeglądarki — ikona, pełny ekran, powiadomienia."),
@@ -709,7 +829,8 @@
         new("bi-camera-video", "Kursy wideo", "Sprzedawaj kursy i programy online z własnym wideo."),
         new("bi-calendar2-week", "Kalendarz Google i Meet", "Wizyty w Twoim kalendarzu, prywatne terminy blokują grafik, linki Meet do treningów online."),
         new("bi-bar-chart-line", "Finanse i statystyki", "Przychody, frekwencja i najlepsze usługi w liczbach."),
-        new("bi-person-plus", "Zespół", "Dodaj trenerów i pracowników z osobnymi uprawnieniami.")
+        new("bi-person-plus", "Zespół", "Dodaj trenerów i pracowników z osobnymi uprawnieniami."),
+        new("bi-stars", "Asystent AI", "Podpowiedzi na dziś, poranny brief, szkice wiadomości i podsumowania dla klientów.")
     ];
 
     private static readonly (string Icon, string Label)[] _allInOne =
@@ -731,6 +852,7 @@
         new("Jak działają płatności online?", "Podpinasz swoje konto PayU albo Przelewy24. Klienci płacą BLIKIEM, kartą lub przelewem, a pieniądze trafiają bezpośrednio na Twoje konto. Nie pobieramy prowizji od Twoich płatności."),
         new("Czy mogę wystawiać faktury i wysyłać je do KSeF?", "Tak. Aplikacja tworzy faktury z danymi firmy klienta i może wysłać je do KSeF — wystarczy token z Twojego konta w KSeF."),
         new("Czy mogę podpiąć własną domenę?", "Tak (od planu Starter), np. annafit.pl. Wpisujesz ją w kreatorze, ustawiasz u dostawcy domeny jeden rekord DNS, a my sami podłączamy domenę i certyfikat HTTPS — dostaniesz e-mail, gdy zadziała."),
+        new("Czy asystent AI ma dostęp do danych moich klientów?", "Asystent korzysta z danych w Twojej aplikacji, żeby wiedzieć, co jest ważne — ale do modelu AI wysyłamy tylko liczby i fakty (np. „3 treningi poza pakietem”), bez imion i danych kontaktowych. Każda liczba w odpowiedzi jest sprawdzana z faktami, a asystenta wyciszysz jednym kliknięciem."),
         new("Czy dane moich klientów są bezpieczne?", "Każdy trener ma osobną aplikację i osobną bazę danych na serwerach w Europie. Zdjęcia sylwetki i ankiety zdrowotne widzisz tylko Ty i dany klient. Klient może pobrać lub usunąć swoje dane zgodnie z RODO."),
         new("Dlaczego przy rejestracji trzeba podać kartę?", "Żeby każda aplikacja należała do prawdziwego trenera, a serwer pracował dla Twoich klientów, nie dla kont „na próbę”. Okres próbny jest za darmo, przed pierwszą opłatą przypominamy e-mailem, a subskrypcję anulujesz w aplikacji jednym kliknięciem."),
         new("Czy mogę zacząć za darmo?", "Tak. Każdy plan zaczyna się od okresu próbnego, a plan startowy jest za 0 zł. Przy publikacji podpinasz kartę — pierwsza opłata dopiero po okresie próbnym, a zrezygnujesz w każdej chwili jednym kliknięciem."),
@@ -739,6 +861,9 @@
 
     protected override async Task OnInitializedAsync()
     {
+        try { _look = await Assistant.GetPublicLookAsync(); }
+        catch (Exception ex) when (ex is InvalidOperationException or Npgsql.NpgsqlException) { } // strona działa też bez ustawień asystenta
+
         _settings = await Settings.GetAllAsync(
             SiteSettingsService.Keys.HeroBadge, SiteSettingsService.Keys.HeroTitle, SiteSettingsService.Keys.HeroSubtitle,
             SiteSettingsService.Keys.HeroCta, SiteSettingsService.Keys.HeroCtaUrl, SiteSettingsService.Keys.SectionTitle,

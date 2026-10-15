@@ -11,8 +11,10 @@ namespace PTScheduler.Web.Services;
 public class PlatformAssistantService(IHttpClientFactory httpFactory, ILogger<PlatformAssistantService> logger)
 {
     /// <param name="EmailIcons">Adresy PNG nastrojów w Portalu — do e-maili (data URI i SVG nie działają w Gmailu).</param>
+    /// <param name="Layout">Układ widżetu: bubble, card, pill, peek.</param>
+    /// <param name="AnimatedSvg">Animowany hantelek z Portalu (gdy animacja „live” i wbudowane ikony), inaczej null.</param>
     public sealed record Config(bool Enabled, string Name, string Animation, bool Ai, Dictionary<string, string> Icons,
-        Dictionary<string, string>? EmailIcons = null);
+        Dictionary<string, string>? EmailIcons = null, string Layout = "bubble", string? AnimatedSvg = null);
 
     private static readonly TimeSpan ConfigTtl = TimeSpan.FromMinutes(30);
     private Config? _config;

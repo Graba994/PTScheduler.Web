@@ -83,6 +83,8 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string AssistantName = "assistant_name";
         /// <summary>„bounce” | „float” | „wave” | „none”.</summary>
         public const string AssistantAnimation = "assistant_animation";
+        /// <summary>Układ widżetu asystenta w aplikacji trenera: bubble, card, pill, peek.</summary>
+        public const string AssistantLayout = "assistant_layout";
         /// <summary>Masterprompt: osobowość i zasady pisania asystenta ({NAZWA} = imię maskotki).</summary>
         public const string AssistantPrompt = "assistant_prompt";
         /// <summary>Prompt podsumowań postępów czytanych przez klientów trenera.</summary>
@@ -224,7 +226,8 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         [Keys.FeaturedTrainers] = "[]",
         [Keys.AssistantEnabled] = "true",
         [Keys.AssistantName] = "Hantly",
-        [Keys.AssistantAnimation] = "bounce",
+        [Keys.AssistantAnimation] = "live",
+        [Keys.AssistantLayout] = "bubble",
         [Keys.AiEnabled] = "false",
         [Keys.AiModel] = "mistralai/mistral-large",
         [Keys.AiMonthlyBudgetUsd] = "5",
