@@ -9,6 +9,7 @@
 @inject AuthenticationStateProvider AuthState
 @inject EntitlementService Entitlements
 @inject PTScheduler.Web.Services.PlatformAssistantService Assistant
+@inject IJSRuntime JS
 @attribute [Authorize(Roles = $"{Roles.Admin},{Roles.Trainer}")]
 
 <AppTitle Page="Raporty biznesowe" />
@@ -54,9 +55,9 @@
 <p class="text-muted small mb-3">Ostatnie @r.PeriodDays dni w porównaniu z poprzednimi @r.PeriodDays dniami. Przychód to opłacone pakiety, karnety i pojedyncze treningi.</p>
 
 <!-- Co się zmieniło: najważniejsze zmiany z reguł, opisane przez asystenta (AI albo tekst podstawowy) -->
-@if (_changes is { } ch)
+@if (_changes is { } ch && _foldLoaded)
 {
-    <section class="br-changes mb-3">
+    <section class="br-changes mb-3 @(_folded ? "is-folded" : "")">
         <div class="br-changes-head">
             @if (_mascot is not null)
             {
@@ -69,8 +70,12 @@
                 </div>
                 <p class="br-changes-text">@(_changesText ?? ch.Fallback)</p>
             </div>
+            <button type="button" class="ai-fold" @onclick="ToggleFoldAsync" aria-expanded="@(_folded ? "false" : "true")"
+                    title="@(_folded ? "Rozwiń" : "Zwiń — aplikacja to zapamięta")">
+                <i class="bi @(_folded ? "bi-chevron-down" : "bi-chevron-up")"></i><span>@(_folded ? "Rozwiń" : "Zwiń")</span>
+            </button>
         </div>
-        @if (ch.Items.Count > 0)
+        @if (ch.Items.Count > 0 && !_folded)
         {
             <ul class="br-changes-list">
                 @foreach (var item in ch.Items)
@@ -391,6 +396,10 @@
     .br-changes-head img { flex-shrink: 0; }
     .br-changes-title { font-weight: 700; font-size: .95rem; display: flex; align-items: center; gap: .3rem; }
     .br-changes-text { margin: .2rem 0 0; font-size: .92rem; line-height: 1.5; max-width: 75ch; }
+    .br-changes.is-folded { padding: .6rem 1rem; }
+    .br-changes.is-folded .br-changes-head img { width: 28px; height: 28px; }
+    .br-changes.is-folded .br-changes-text { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: none; font-size: .85rem; color: var(--bs-secondary-color); }
+    .br-changes.is-folded .br-changes-head > .flex-grow-1 { min-width: 0; }
     .br-changes-list { list-style: none; margin: .75rem 0 0; padding: .75rem 0 0; border-top: 1px dashed var(--bs-border-color); display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); gap: .45rem 1rem; }
     .br-changes-list li { display: flex; gap: .45rem; align-items: baseline; font-size: .82rem; }
     .br-changes-list li .bi { flex-shrink: 0; }
@@ -445,6 +454,30 @@
     private PTScheduler.Application.Reports.BusinessChangesResult? _changes;
     private string? _changesText;
     private string? _mascot;
+    // Zwinięta karta „Co się zmieniło” — wybór zapamiętany w przeglądarce.
+    private const string FoldKey = "pt-ai-changes-folded";
+    private bool _folded;
+    private bool _foldLoaded;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try { _folded = await JS.InvokeAsync<string?>("localStorage.getItem", FoldKey) == "1"; }
+        catch (Exception ex) when (ex is JSException or InvalidOperationException) { }
+        _foldLoaded = true;
+        StateHasChanged();
+    }
+
+    private async Task ToggleFoldAsync()
+    {
+        _folded = !_folded;
+        try
+        {
+            if (_folded) await JS.InvokeVoidAsync("localStorage.setItem", FoldKey, "1");
+            else await JS.InvokeVoidAsync("localStorage.removeItem", FoldKey);
+        }
+        catch (JSException) { }
+    }
 
     protected override async Task OnInitializedAsync()
     {

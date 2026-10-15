@@ -2,12 +2,13 @@
 @inject PTScheduler.Application.Interfaces.IClientProgressService ProgressService
 @inject PTScheduler.Web.Services.RetentionService Retention
 @inject PTScheduler.Web.Services.PlatformAssistantService Assistant
+@inject IJSRuntime JS
 
 @* „W skrócie” na górze profilu klienta: postępy, frekwencja, samopoczucie, ryzyko odejścia, zdrowie i pakiet
    w kilku zdaniach (AI albo tekst podstawowy z reguł) i jedna rada. Bez danych karta się nie pokazuje. *@
-@if (_snapshot is { HasData: true } s)
+@if (_snapshot is { HasData: true } s && _foldLoaded)
 {
-    <section class="cs-card">
+    <section class="cs-card @(_folded ? "is-folded" : "")">
         <div class="cs-head">
             @if (_mascot is not null)
             {
@@ -18,19 +19,26 @@
                     W skrócie
                     <InfoTip Title="W skrócie" Class="info-tip-sm" Text="Asystent zbiera w jednym miejscu to, co jest w kartach poniżej: frekwencję, postępy w ciężarach, samopoczucie z ankiet po treningu, uwagi zdrowotne, stan pakietu i ryzyko odejścia — i podpowiada jedną rzecz do zrobienia. Liczby pochodzą z aplikacji; AI tylko układa je w zdania." />
                 </div>
-                <p class="cs-text">@(_text ?? s.Headline)</p>
+                <p class="cs-text">@(_folded ? s.Headline : _text ?? s.Headline)</p>
             </div>
+            <button type="button" class="ai-fold" @onclick="ToggleFoldAsync" aria-expanded="@(_folded ? "false" : "true")"
+                    title="@(_folded ? "Rozwiń" : "Zwiń we wszystkich profilach — aplikacja to zapamięta")">
+                <i class="bi @(_folded ? "bi-chevron-down" : "bi-chevron-up")"></i><span>@(_folded ? "Rozwiń" : "Zwiń")</span>
+            </button>
         </div>
-        <div class="cs-points">
-            @foreach (var point in s.Points)
-            {
-                <span class="cs-point @point.Tone"><i class="bi @(point.Tone switch { "good" => "bi-check-circle-fill", "bad" => "bi-exclamation-circle-fill", _ => "bi-info-circle-fill" })"></i>@point.Text</span>
-            }
-        </div>
-        @if (_text is null)
+        @if (!_folded)
         {
-            @* Tekst od AI kończy się radą — bez AI pokazujemy ją osobno. *@
-            <div class="cs-advice"><i class="bi bi-lightbulb-fill"></i><span>@s.Advice</span></div>
+            <div class="cs-points">
+                @foreach (var point in s.Points)
+                {
+                    <span class="cs-point @point.Tone"><i class="bi @(point.Tone switch { "good" => "bi-check-circle-fill", "bad" => "bi-exclamation-circle-fill", _ => "bi-info-circle-fill" })"></i>@point.Text</span>
+                }
+            </div>
+            @if (_text is null)
+            {
+                @* Tekst od AI kończy się radą — bez AI pokazujemy ją osobno. *@
+                <div class="cs-advice"><i class="bi bi-lightbulb-fill"></i><span>@s.Advice</span></div>
+            }
         }
     </section>
 }
@@ -42,6 +50,30 @@
     private string? _text;
     private string? _mascot;
     private int _loadedFor = -1;
+    // Zwinięcie dotyczy wszystkich profili (jeden wybór trenera), zapamiętane w przeglądarce.
+    private const string FoldKey = "pt-ai-snapshot-folded";
+    private bool _folded;
+    private bool _foldLoaded;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try { _folded = await JS.InvokeAsync<string?>("localStorage.getItem", FoldKey) == "1"; }
+        catch (Exception ex) when (ex is JSException or InvalidOperationException) { }
+        _foldLoaded = true;
+        StateHasChanged();
+    }
+
+    private async Task ToggleFoldAsync()
+    {
+        _folded = !_folded;
+        try
+        {
+            if (_folded) await JS.InvokeVoidAsync("localStorage.setItem", FoldKey, "1");
+            else await JS.InvokeVoidAsync("localStorage.removeItem", FoldKey);
+        }
+        catch (JSException) { }
+    }
 
     protected override async Task OnParametersSetAsync()
     {
