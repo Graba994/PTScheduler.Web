@@ -7,7 +7,7 @@
 @if (_config is not null && _visible)
 {
     var tip = Current;
-    <div class="leo @(_open ? "is-open" : "") @(_muted ? "is-muted" : "")">
+    <div class="leo @(_open ? "is-open" : "") @(_muted ? "is-muted" : "") @(_animated ? "leo-animated" : "")">
         @if (_open && tip is not null)
         {
             <div class="leo-bubble" role="status" aria-live="polite">
@@ -34,7 +34,14 @@
             </div>
         }
         <button type="button" class="leo-btn" aria-label="@($"{_config.Name} — podpowiedzi")" aria-expanded="@(_open ? "true" : "false")" @onclick="ToggleAsync">
-            <img class="hm-mascot @(_muted ? "" : $"hm-anim-{_config.Animation}")" src="@Icon" alt="" width="68" height="68" />
+            @if (_animated)
+            {
+                <span class="leo-anim leo-stage-@_stage leo-mood-@Mood">@((MarkupString)AnimatedSvg)</span>
+            }
+            else
+            {
+                <img class="hm-mascot @(_muted ? "" : $"hm-anim-{_config.Animation}")" src="@Icon" alt="" width="68" height="68" />
+            }
             @if (!_open && !_muted && _todo > 0)
             {
                 <span class="leo-dot">@_todo</span>
@@ -63,6 +70,26 @@
 
     private LeoService.Tip? Current => _index < _tips.Count ? _tips[_index] : null;
 
+    // Animowany szczeniak (gdy ikony są wbudowane): scena i nastrój sterują klasami nad SVG (panel.css).
+    private static readonly string AnimatedSvg = PuppyArt.AnimatedSvg();
+    private bool _animated;
+    private string _stage = "walk";
+    private int _stageVersion;
+    private string Mood => _muted ? "sleep" : Current?.Mood ?? "happy";
+
+    /// <summary>Ustawia scenę; po <paramref name="thenIdleMs"/> wraca do spoczynku (chyba że w międzyczasie zmieniła się scena).</summary>
+    private async Task StageAsync(string stage, int thenIdleMs = 0)
+    {
+        var version = ++_stageVersion;
+        _stage = stage;
+        StateHasChanged();
+        if (thenIdleMs <= 0) return;
+        await Task.Delay(thenIdleMs);
+        if (version != _stageVersion) return;
+        _stage = _muted ? "sleep" : "idle";
+        StateHasChanged();
+    }
+
     private string Icon
     {
         get
@@ -86,9 +113,24 @@
             _tips = (await Leo.GetTipsAsync()).Where(t => !IsDismissed(t)).ToList();
             _todo = _tips.Count(t => t.IsTodo);
 
-            // Szczeniak wbiega chwilę po załadowaniu; dymek otwiera się sam tylko przy sprawach do zrobienia albo powodach do radości.
-            await Task.Delay(900);
+            _animated = _config.Icons.All(i => i.Value == PuppyArt.DataUri(i.Key));
+
+            // Szczeniak wchodzi chwilę po załadowaniu: idzie bokiem, siada (albo kładzie się spać, gdy wyciszony),
+            // a dymek otwiera się sam tylko przy sprawach do zrobienia albo powodach do radości.
+            await Task.Delay(700);
             _visible = true;
+            if (_animated)
+            {
+                await StageAsync("walk");
+                await Task.Delay(1700);
+                if (_muted) await StageAsync("sleep");
+                else
+                {
+                    await StageAsync("sit");
+                    await Task.Delay(620);
+                    _stage = "idle";
+                }
+            }
             StateHasChanged();
             if (!_muted && _tips.Any(t => t.IsTodo || t.IsPraise))
             {
@@ -115,6 +157,7 @@
     private async Task ToggleAsync()
     {
         if (_open) { _open = false; return; }
+        if (_animated && !_muted) _ = StageAsync("excited", 1150);
         if (_tips.Count == 0)
         {
             _tips = [new("idle", "brak", "happy", 0, "Wszystko ogarnięte — nie mam teraz żadnych podpowiedzi. Hau! 🐾", [], null, null)];
@@ -128,6 +171,7 @@
     {
         if (_index >= _tips.Count - 1) return;
         _index++;
+        if (_animated && !_muted) _ = StageAsync("excited", 1150);
         await PhraseCurrentAsync();
     }
 
@@ -150,6 +194,8 @@
         _prefs.Muted = _muted;
         await SavePrefsAsync();
         if (_muted) _open = false;
+        // Wyciszony — kładzie się spać; włączony — wstaje i siada.
+        if (_animated) _ = _muted ? StageAsync("sleep") : StageAsync("sit", 620);
     }
 
     private async Task SavePrefsAsync()

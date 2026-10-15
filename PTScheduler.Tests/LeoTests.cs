@@ -118,6 +118,21 @@ public class LeoTests
         }
     }
 
+    [Fact]
+    public void Animated_puppy_has_every_pose_face_and_effect_with_unique_ids()
+    {
+        var svg = XDocument.Parse(PuppyArt.AnimatedSvg());
+        var classes = svg.Descendants().Select(e => (string?)e.Attribute("class") ?? "").SelectMany(c => c.Split(' ')).ToHashSet();
+        classes.Should().Contain(["leo-pose-walk", "leo-pose-sit", "leo-pose-lie", "leo-tail", "leo-head", "leo-paw-up", "leo-leg-l"]);
+        foreach (var mood in PuppyArt.Moods)
+        {
+            classes.Should().Contain($"leo-face-{mood.Key}");
+            classes.Should().Contain($"leo-fx-{mood.Key}");
+        }
+        var ids = svg.Descendants().Select(e => (string?)e.Attribute("id")).Where(i => i is not null).ToList();
+        ids.Should().OnlyHaveUniqueItems().And.OnlyContain(i => i!.StartsWith("leoa"), "animowany Leo jest wstawiany do strony obok statycznych ikon");
+    }
+
     [Theory]
     [InlineData(1, "rachunek")]
     [InlineData(3, "rachunki")]

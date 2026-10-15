@@ -49,7 +49,22 @@
                         <b>@DisplayName</b>
                         @(IsLeo ? "Hau! Przypilnuję zgłoszeń, rachunków i trenerów, którzy mogą odejść. Rano dostaniesz raport. 🐾" : "Cześć! Pomogę pilnować płatności i faktur, a za każdy rekord pochwalę. 💪")
                     </div>
-                    <img class="hm-mascot hm-anim-@_animation" src="@Icon(_previewMood)" alt="" width="120" height="120" />
+                    @if (IsLeo && _custom.Count == 0)
+                    {
+                        <div class="leo-stage-preview">
+                            <span class="leo-anim leo-stage-@_leoStage leo-mood-@(_leoStage == "sleep" ? "sleep" : _previewMood)">@((MarkupString)LeoAnimatedSvg)</span>
+                            <div class="leo-stage-buttons" role="group" aria-label="Ruchy Leo">
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="LeoEnterAsync"><i class="bi bi-arrow-left me-1"></i>Wejście</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => LeoStageAsync("excited", 1150)'><i class="bi bi-balloon-heart me-1"></i>Radość</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => LeoStageAsync("sleep", 0)'><i class="bi bi-moon me-1"></i>Spanie</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => LeoStageAsync("sit", 620)'><i class="bi bi-arrow-up me-1"></i>Wstań</button>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <img class="hm-mascot hm-anim-@_animation" src="@Icon(_previewMood)" alt="" width="120" height="120" />
+                    }
                     <div class="hm-moods" role="group" aria-label="Podgląd nastroju">
                         @foreach (var m in AssistantService.MoodsFor(_agent))
                         {
@@ -388,6 +403,33 @@ else
     private bool _sending;
 
     private string _tab = "look";
+
+    // Podgląd animowanego Leo (gdy ikony są wbudowane).
+    private static readonly string LeoAnimatedSvg = PuppyArt.AnimatedSvg();
+    private string _leoStage = "idle";
+    private int _leoVersion;
+
+    private async Task LeoStageAsync(string stage, int thenIdleMs)
+    {
+        var v = ++_leoVersion;
+        _leoStage = stage;
+        StateHasChanged();
+        if (thenIdleMs <= 0) return;
+        await Task.Delay(thenIdleMs);
+        if (v != _leoVersion) return;
+        _leoStage = "idle";
+        StateHasChanged();
+    }
+
+    private async Task LeoEnterAsync()
+    {
+        var v = ++_leoVersion;
+        _leoStage = "walk";
+        StateHasChanged();
+        await Task.Delay(1700);
+        if (v != _leoVersion) return;
+        await LeoStageAsync("sit", 620);
+    }
     private string? _message;
     private bool _msgError;
 

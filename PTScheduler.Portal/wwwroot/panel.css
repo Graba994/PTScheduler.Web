@@ -628,3 +628,117 @@ button.pp-chip:focus-visible { outline: 2px solid var(--accent); outline-offset:
 .leo-point { position: relative; padding-left: 18px; }
 .leo-point::before { content: ""; position: absolute; left: 4px; top: .6em; width: 6px; height: 6px; border-radius: 50%; background: #E29E40; }
 .leo-subhead { margin-top: 6px; font-size: .75rem; letter-spacing: .06em; text-transform: uppercase; font-weight: 700; color: #B45309; }
+
+/* ============================================================
+   LEO — animacje (PuppyArt.AnimatedSvg + klasy .leo-stage-* / .leo-mood-* na rodzicu)
+   walk: wchodzi bokiem z prawej · sit: siada (przysiad i odbicie) · idle: oddycha, mruga, merda, rusza uchem
+   excited: podskakuje przy nowej podpowiedzi · sleep: kładzie się i śpi (Zzz)
+   ============================================================ */
+.leo-anim { position: relative; display: block; width: 76px; height: 76px; }
+.leo-anim .leo-svg { width: 100%; height: 100%; overflow: visible; filter: drop-shadow(0 6px 10px rgba(146, 84, 17, .2)); }
+.leo-svg .leo-pose, .leo-svg .leo-face > *, .leo-svg .leo-fx > *, .leo-svg .leo-paw-up { display: none; }
+.leo-stage-walk .leo-pose-walk,
+.leo-stage-sit .leo-pose-sit, .leo-stage-idle .leo-pose-sit, .leo-stage-excited .leo-pose-sit,
+.leo-stage-sleep .leo-pose-lie { display: inline; }
+
+/* Miny i efekty (w pozie siedzącej); sen ma własną pozę i „Zzz”. */
+.leo-mood-hello .leo-face-hello, .leo-mood-happy .leo-face-happy, .leo-mood-celebrate .leo-face-celebrate,
+.leo-mood-think .leo-face-think, .leo-mood-remind .leo-face-remind, .leo-mood-sleep .leo-face-sleep { display: inline; }
+.leo-stage-idle.leo-mood-hello .leo-fx-hello, .leo-stage-excited.leo-mood-hello .leo-fx-hello,
+.leo-stage-idle.leo-mood-celebrate .leo-fx-celebrate, .leo-stage-excited.leo-mood-celebrate .leo-fx-celebrate,
+.leo-stage-idle.leo-mood-think .leo-fx-think, .leo-stage-idle.leo-mood-remind .leo-fx-remind, .leo-stage-excited.leo-mood-remind .leo-fx-remind,
+.leo-stage-sleep .leo-fx-sleep { display: inline; }
+.leo-mood-hello .leo-paw-up { display: inline; }
+.leo-mood-hello .leo-leg-l { display: none; }
+
+/* Osie obrotu części (w układzie 120×120). */
+.leo-svg .leo-tail { transform-box: view-box; transform-origin: 86px 100px; }
+.leo-svg .leo-head { transform-box: view-box; transform-origin: 60px 52px; transition: transform .45s cubic-bezier(.3, 1.3, .5, 1); }
+.leo-svg .leo-ear-l { transform-box: view-box; transform-origin: 37px 27px; transition: transform .35s ease-out; }
+.leo-svg .leo-ear-r { transform-box: view-box; transform-origin: 83px 27px; transition: transform .35s ease-out; }
+.leo-svg .leo-chest { transform-box: fill-box; transform-origin: 50% 0; }
+.leo-svg .leo-chest-lie { transform-box: fill-box; transform-origin: 50% 100%; }
+.leo-svg .leo-blink { transform-box: fill-box; transform-origin: center; }
+.leo-svg .leo-paw-up { transform-box: view-box; transform-origin: 49.5px 84px; transform: rotate(-38deg); }
+.leo-svg .leo-pose-sit, .leo-svg .leo-pose-lie { transform-box: view-box; transform-origin: 60px 109px; }
+.leo-svg .leo-leg { transform-box: fill-box; transform-origin: 50% 0; }
+.leo-svg .leo-tail-w { transform-box: view-box; transform-origin: 93px 64px; }
+.leo-svg .leo-ear-w { transform-box: view-box; transform-origin: 33px 29px; }
+.leo-svg .leo-head-w { transform-box: view-box; transform-origin: 34px 52px; }
+
+/* Nastroje w ruchu: przy „myśli” przechyla głowę, przy czujności stawia uszy. */
+.leo-mood-think .leo-head { transform: rotate(-9deg); }
+.leo-mood-remind .leo-ear-l { transform: rotate(16deg); }
+.leo-mood-remind .leo-ear-r { transform: rotate(-16deg); }
+
+/* Wejście: idzie bokiem z prawej krawędzi. */
+.leo-stage-walk .leo-svg { animation: leo-walk-in 1.7s cubic-bezier(.25, .7, .35, 1) both; }
+.leo-stage-walk .leo-walk-body { animation: leo-bob .2s ease-in-out infinite alternate; }
+.leo-stage-walk .leo-leg-fn, .leo-stage-walk .leo-leg-bf { animation: leo-step .4s ease-in-out infinite alternate; }
+.leo-stage-walk .leo-leg-ff, .leo-stage-walk .leo-leg-bn { animation: leo-step .4s ease-in-out infinite alternate-reverse; }
+.leo-stage-walk .leo-tail-w { animation: leo-wag-walk .3s ease-in-out infinite alternate; }
+.leo-stage-walk .leo-ear-w { animation: leo-ear-bounce .2s ease-in-out infinite alternate; }
+.leo-stage-walk .leo-head-w { animation: leo-head-bob .4s ease-in-out infinite alternate; }
+@keyframes leo-walk-in { from { transform: translateX(240px); } to { transform: none; } }
+@keyframes leo-bob { from { transform: translateY(0); } to { transform: translateY(-1.6px); } }
+@keyframes leo-step { from { transform: rotate(-26deg); } to { transform: rotate(26deg); } }
+@keyframes leo-wag-walk { from { transform: rotate(-10deg); } to { transform: rotate(12deg); } }
+@keyframes leo-ear-bounce { from { transform: rotate(0); } to { transform: rotate(7deg); } }
+@keyframes leo-head-bob { from { transform: rotate(-2deg); } to { transform: rotate(3deg); } }
+
+/* Siadanie: przysiad, odbicie i merdnięcie. */
+.leo-stage-sit .leo-pose-sit { animation: leo-sit .6s cubic-bezier(.3, 1.4, .5, 1) both; }
+.leo-stage-sit .leo-tail { animation: leo-wag-fast .15s ease-in-out 4 alternate; }
+@keyframes leo-sit { 0% { transform: translateY(-8px) scale(.94, 1.08); } 50% { transform: translateY(0) scale(1.08, .9); } 75% { transform: scale(.97, 1.03); } 100% { transform: none; } }
+
+/* Spoczynek: oddycha, mruga, czasem merda i rusza uchem; macha łapą przy powitaniu. */
+.leo-stage-idle .leo-chest { animation: leo-breathe 3.4s ease-in-out infinite; }
+.leo-stage-idle .leo-tail { animation: leo-wag 3.6s ease-in-out infinite; }
+.leo-stage-idle:not(.leo-mood-remind) .leo-ear-r { animation: leo-twitch 7s ease-in-out infinite; }
+.leo-stage-idle:not(.leo-mood-think) .leo-head { animation: leo-sway 6s ease-in-out infinite; }
+.leo-svg .leo-blink { animation: leo-blink 5s infinite; }
+.leo-stage-idle.leo-mood-hello .leo-paw-up, .leo-stage-excited.leo-mood-hello .leo-paw-up { animation: leo-wave 1.1s ease-in-out infinite; }
+@keyframes leo-breathe { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(1.035); } }
+@keyframes leo-wag { 0%, 58%, 100% { transform: rotate(0); } 63% { transform: rotate(16deg); } 68% { transform: rotate(-6deg); } 73% { transform: rotate(16deg); } 78% { transform: rotate(-4deg); } 84% { transform: rotate(8deg); } 90% { transform: rotate(0); } }
+@keyframes leo-wag-fast { from { transform: rotate(-8deg); } to { transform: rotate(18deg); } }
+@keyframes leo-twitch { 0%, 86%, 100% { transform: rotate(0); } 89% { transform: rotate(-12deg); } 92% { transform: rotate(3deg); } 95% { transform: rotate(0); } }
+@keyframes leo-sway { 0%, 100% { transform: rotate(0); } 30% { transform: rotate(-2.5deg); } 70% { transform: rotate(2.5deg); } }
+@keyframes leo-blink { 0%, 92%, 100% { transform: scaleY(1); } 94% { transform: scaleY(.1); } 96% { transform: scaleY(1); } }
+@keyframes leo-wave { 0%, 100% { transform: rotate(-22deg); } 50% { transform: rotate(-64deg); } }
+
+/* Radość: podskok z merdaniem (nowa podpowiedź, kliknięcie). */
+.leo-stage-excited .leo-pose-sit { animation: leo-hop .55s cubic-bezier(.3, .7, .4, 1) 2; }
+.leo-stage-excited .leo-tail { animation: leo-wag-fast .14s ease-in-out infinite alternate; }
+.leo-stage-excited .leo-ear-l { animation: leo-ear-flap-l .28s ease-in-out infinite alternate; }
+.leo-stage-excited .leo-ear-r { animation: leo-ear-flap-r .28s ease-in-out infinite alternate; }
+@keyframes leo-hop { 0% { transform: scale(1.06, .92); } 35% { transform: translateY(-14px) scale(.96, 1.05); } 65% { transform: translateY(-14px) scale(.98, 1.02); } 90% { transform: scale(1.06, .93); } 100% { transform: none; } }
+@keyframes leo-ear-flap-l { from { transform: rotate(0); } to { transform: rotate(14deg); } }
+@keyframes leo-ear-flap-r { from { transform: rotate(0); } to { transform: rotate(-14deg); } }
+
+/* Sen: kładzie się i spokojnie oddycha, nad głową lecą „Zzz”. */
+.leo-stage-sleep .leo-pose-lie { animation: leo-lie .7s cubic-bezier(.3, 1.2, .5, 1) both; }
+.leo-stage-sleep .leo-chest-lie { animation: leo-breathe-slow 4.4s ease-in-out infinite; }
+.leo-stage-sleep .leo-z { animation: leo-z 3s ease-in-out infinite; opacity: 0; }
+.leo-stage-sleep .leo-z2 { animation-delay: .6s; }
+.leo-stage-sleep .leo-z3 { animation-delay: 1.2s; }
+@keyframes leo-lie { 0% { transform: translateY(-6px) scale(.9, 1.12); opacity: .4; } 60% { transform: scale(1.04, .95); opacity: 1; } 100% { transform: none; } }
+@keyframes leo-breathe-slow { 0%, 100% { transform: scaleY(1); } 50% { transform: scaleY(1.05); } }
+@keyframes leo-z { 0% { opacity: 0; transform: translate(0, 4px); } 30% { opacity: 1; } 100% { opacity: 0; transform: translate(6px, -10px); } }
+
+/* Bez ruchu (ustawienie systemu): od razu siedzi, nic się nie porusza. */
+@media (prefers-reduced-motion: reduce) {
+    .leo-anim *, .leo-anim .leo-svg { animation: none !important; transition: none !important; }
+    .leo-stage-walk .leo-pose-walk { display: none; }
+    .leo-stage-walk .leo-pose-sit { display: inline; }
+}
+
+/* Dymek z animowanym Leo: bez wjazdu kontenera (wchodzi sam), przycisk bez tła. */
+.leo.leo-animated { animation: none; }
+.leo-btn .leo-anim { pointer-events: none; }
+.leo.is-muted .leo-btn .leo-anim { opacity: .95; transform: none; }
+@media (max-width: 767.98px) { .leo-btn .leo-anim { width: 62px; height: 62px; } }
+
+/* Podgląd w ustawieniach Leo: scena z przyciskami ruchu. */
+.leo-stage-preview { position: relative; overflow: hidden; width: 100%; display: flex; flex-direction: column; align-items: center; gap: 10px; }
+.leo-stage-preview .leo-anim { width: 150px; height: 150px; }
+.leo-stage-buttons { display: flex; gap: 6px; flex-wrap: wrap; justify-content: center; }
