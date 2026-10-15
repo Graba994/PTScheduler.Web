@@ -70,6 +70,34 @@ public class PlatformAssistantService(IHttpClientFactory httpFactory, ILogger<Pl
 
     private sealed record PhraseResponse(string Text, bool Ai);
 
+    /// <summary>
+    /// Szkic wiadomości do klienta w stylu trenera (bez pamięci podręcznej — każde kliknięcie to nowa wersja).
+    /// Zwraca (tekst, czy z AI); przy braku Portalu albo AI — tekst zapasowy.
+    /// </summary>
+    public async Task<(string Text, bool Ai)> DraftAsync(string purpose, IReadOnlyDictionary<string, string> facts, string fallback,
+        Domain.Entities.TrainerStyle style, IReadOnlyList<string> examples, bool ai)
+    {
+        if (!ai || !PlatformInfoService.Configured) return (fallback, false);
+        try
+        {
+            using var req = Request(HttpMethod.Post, "assistant/draft");
+            req.Content = JsonContent.Create(new
+            {
+                purpose, facts, fallback,
+                address = style.Address, emoji = style.Emoji, length = style.Length,
+                greeting = style.Greeting, signature = style.Signature, notes = style.Notes, examples
+            });
+            using var resp = await Client(35).SendAsync(req);
+            if (resp.IsSuccessStatusCode && await resp.Content.ReadFromJsonAsync<PhraseResponse>() is { Text.Length: > 0 } r)
+                return (r.Text, r.Ai);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or System.Text.Json.JsonException)
+        {
+            logger.LogDebug(ex, "Szkic wiadomości z Portalu niedostępny — używam szablonu.");
+        }
+        return (fallback, false);
+    }
+
     private HttpClient Client(int seconds)
     {
         var http = httpFactory.CreateClient();

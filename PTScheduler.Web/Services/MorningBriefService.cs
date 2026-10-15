@@ -84,7 +84,7 @@ public class MorningBriefService(
         }
 
         var all = await tips.GetTipsAsync(user.Id, studioWide);
-        var todo = all.Where(t => t.Kind is "akceptacje" or "niezaplacone" or "faktury" or "pakiety" or "nieaktywni").ToList();
+        var todo = all.Where(t => t.Kind is "akceptacje" or "niezaplacone" or "faktury" or "pakiety" or "nieaktywni" or "ryzyko_odejscia").ToList();
         var praise = all.Where(t => t.Kind is "kamien_milowy" or "rekord_tygodnia").ToList();
         if (!force && lines.Count == 0 && todo.Count == 0) return null;
 

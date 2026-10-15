@@ -12,7 +12,7 @@ namespace PTScheduler.Web.Services;
 /// kolejne 10 treningów klienta, klienci, którzy dawno nie byli, rekordowy tydzień i plan na dziś.
 /// AI (przez Portal) najwyżej przeredaguje tekst zapasowy; liczby zawsze pochodzą stąd.
 /// </summary>
-public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFactory, IAppClock clock)
+public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFactory, IAppClock clock, RetentionService retention)
 {
     private static readonly CultureInfo Pl = CultureInfo.GetCultureInfo("pl-PL");
 
@@ -107,19 +107,33 @@ public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFact
             }
         }
 
-        // Aktywni klienci bez treningu od 3 tygodni (i bez zaplanowanego).
-        var from = now.AddDays(-90);
-        var to = now.AddDays(-21);
-        var inactive = await clients.Where(c => c.Status == ClientStatus.Active)
-            .Select(c => new
-            {
-                Last = db.Sessions.Where(s => s.ClientId == c.Id && s.Status != SessionStatus.Cancelled).Max(s => (DateTime?)s.StartTime)
-            })
-            .CountAsync(x => x.Last != null && x.Last >= from && x.Last <= to);
-        if (inactive > 0)
-            tips.Add(new("inactive", "nieaktywni", "think", 40,
-                $"{inactive} {Plural(inactive, "osoba nie była", "osoby nie były", "osób nie było")} na treningu od ponad 3 tygodni. Może krótka wiadomość?",
-                new() { ["liczba_osob"] = inactive.ToString(), ["dni"] = "21" }, "Klienci", "/clients"));
+        // Klienci, którzy mogą odejść (reguły retencji); bez nich — prostsza reguła „dawno nie byli”.
+        var risks = await retention.GetRisksAsync(studioWide ? null : userId);
+        var highRisk = risks.Count(r => r.Result.IsHigh);
+        if (risks.Count > 0)
+            tips.Add(new($"retention-{today:yyyy-MM-dd}", "ryzyko_odejscia", "think", 45,
+                highRisk > 0
+                    ? $"{risks.Count} {Plural(risks.Count, "klient może", "klientów może", "klientów może")} odejść (w tym {highRisk} z wysokim ryzykiem). Krótka wiadomość często wystarczy — przygotuję szkic w Twoim stylu."
+                    : $"{risks.Count} {Plural(risks.Count, "klient może", "klientów może", "klientów może")} odejść. Krótka wiadomość często wystarczy — przygotuję szkic w Twoim stylu.",
+                highRisk > 0
+                    ? new() { ["liczba_klientow"] = risks.Count.ToString(), ["wysokie_ryzyko"] = highRisk.ToString() }
+                    : new() { ["liczba_klientow"] = risks.Count.ToString() },
+                "Zobacz", "/trainer/retencja"));
+        else
+        {
+            var from = now.AddDays(-90);
+            var to = now.AddDays(-21);
+            var inactive = await clients.Where(c => c.Status == ClientStatus.Active)
+                .Select(c => new
+                {
+                    Last = db.Sessions.Where(s => s.ClientId == c.Id && s.Status != SessionStatus.Cancelled).Max(s => (DateTime?)s.StartTime)
+                })
+                .CountAsync(x => x.Last != null && x.Last >= from && x.Last <= to);
+            if (inactive > 0)
+                tips.Add(new("inactive", "nieaktywni", "think", 40,
+                    $"{inactive} {Plural(inactive, "osoba nie była", "osoby nie były", "osób nie było")} na treningu od ponad 3 tygodni. Może krótka wiadomość?",
+                    new() { ["liczba_osob"] = inactive.ToString(), ["dni"] = "21" }, "Klienci", "/clients"));
+        }
 
         // Rekordowy tydzień (od poniedziałku) na tle 8 poprzednich.
         var weekStart = today.AddDays(-(((int)today.DayOfWeek + 6) % 7));

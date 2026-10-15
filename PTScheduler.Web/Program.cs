@@ -176,6 +176,8 @@ builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformAssistantService>
 builder.Services.AddScoped<PTScheduler.Web.Services.AssistantTipsService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.MorningBriefService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.PreSessionBriefService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.RetentionService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.MessageDraftService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.BeforeSessionPushService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.MorningBriefBackgroundService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.SetupGuide>();

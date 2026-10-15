@@ -783,6 +783,33 @@ app.MapPost("/api/internal/tenants/{slug}/assistant/phrase", async (
     return Results.Json(new { text = phrase.Text, ai = phrase.FromAi });
 });
 
+// Szkic wiadomości trenera do klienta w stylu trenera (profil + przykłady). Imiona klientów zostają w aplikacji ([klient]).
+app.MapPost("/api/internal/tenants/{slug}/assistant/draft", async (
+    string slug,
+    AssistantDraftRequest body,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    AssistantService assistant,
+    IConfiguration config) =>
+{
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    if (string.IsNullOrWhiteSpace(body.Purpose) || string.IsNullOrWhiteSpace(body.Fallback) || body.Fallback.Length > 1000) return Results.BadRequest();
+    var facts = (body.Facts ?? []).Take(20)
+        .Where(f => f.Key.Length <= 40 && (f.Value?.Length ?? 0) <= 120)
+        .ToDictionary(f => f.Key, f => f.Value ?? "");
+    static string? Cut(string? v, int max) => string.IsNullOrWhiteSpace(v) ? null : v.Trim().Length <= max ? v.Trim() : v.Trim()[..max];
+    var style = new AssistantService.TrainerStyleInfo(
+        body.Address == "pan" ? "pan" : "ty",
+        body.Emoji is "brak" or "często" ? body.Emoji : "czasem",
+        body.Length == "srednio" ? "srednio" : "krotko",
+        Cut(body.Greeting, 40), Cut(body.Signature, 80), Cut(body.Notes, 300));
+    var examples = (body.Examples ?? []).Where(e => !string.IsNullOrWhiteSpace(e)).Take(5).Select(e => e.Length > 600 ? e[..600] : e).ToList();
+    var draft = await assistant.DraftInStyleAsync(tenant, body.Purpose[..Math.Min(40, body.Purpose.Length)], facts, body.Fallback, style, examples);
+    return Results.Json(new { text = draft.Text, ai = draft.FromAi });
+});
+
 // ---- Store API ----
 // Tenant apps call these endpoints to fetch their service catalog and place orders.
 // Secured by the same shared secret used for internal endpoints.
@@ -1273,6 +1300,8 @@ app.Run();
 // Pusty sekret = odmowa (wcześniej oznaczał brak jakiejkolwiek kontroli).
 record AppFeedbackRequest(int Rating, string? Text, string? ContactEmail, string? AuthorEmail);
 record AssistantPhraseRequest(string Kind, Dictionary<string, string?>? Facts, string Fallback, string? Audience);
+record AssistantDraftRequest(string Purpose, Dictionary<string, string?>? Facts, string Fallback, string? Address, string? Emoji, string? Length,
+    string? Greeting, string? Signature, string? Notes, List<string>? Examples);
 record LegalAcceptRequest(string Email, string[]? Keys, string? Ip, string? UserAgent);
 
 record GoogleAuthorizeRequest(string UserKey, string ReturnUrl);

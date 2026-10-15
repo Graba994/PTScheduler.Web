@@ -2,6 +2,7 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
 @inject PTScheduler.Web.Services.PreSessionBriefService Briefs
 @inject AuthenticationStateProvider AuthState
+@inject PTScheduler.Web.Services.RetentionService RetentionSvc
 @rendermode PTScheduler.Web.RenderModes.Server
 
 @* Karta „przed treningiem” — otwierana z powiadomienia 15 minut przed wizytą albo z listy dzisiejszych treningów. *@
@@ -56,6 +57,23 @@ else
                 <section class="bs-card bs-alert">
                     <h2><i class="bi bi-heart-pulse"></i>Ankieta zdrowotna@(c.HealthDate is { } hd ? $" · {hd:dd.MM.yyyy}" : "")</h2>
                     <ul>@foreach (var n in c.HealthNotes) { <li>@n</li> }</ul>
+                </section>
+            }
+
+            @if (_insights is { } ins && (ins.HealthFlags.Count > 0 || ins.Wellbeing.Points.Count >= 4))
+            {
+                <section class="bs-card @(ins.HealthFlags.Count > 0 || ins.Wellbeing.IsDropping ? "bs-alert" : "")">
+                    <h2><i class="bi bi-activity"></i>Samopoczucie i zdrowie a plan</h2>
+                    @if (ins.Wellbeing.Points.Count >= 4) { <p class="small mb-2">@ins.Wellbeing.Text</p> }
+                    @if (ins.HealthFlags.Count > 0)
+                    {
+                        <ul>
+                            @foreach (var f in ins.HealthFlags)
+                            {
+                                <li><b>@f.Area</b> (@f.Mention): @string.Join(", ", f.Exercises). <span class="text-muted">@f.Advice</span></li>
+                            }
+                        </ul>
+                    }
                 </section>
             }
 
@@ -129,6 +147,7 @@ else
     private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
     private PTScheduler.Web.Services.PreSessionBriefService.Card? _card;
     private bool _loading = true;
+    private PTScheduler.Web.Services.RetentionService.ClientInsights? _insights;
 
     protected override async Task OnParametersSetAsync()
     {
@@ -136,6 +155,7 @@ else
         var user = (await AuthState.GetAuthenticationStateAsync()).User;
         var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
         _card = await Briefs.GetAsync(SessionId, userId, user.IsInRole(PTScheduler.Domain.Constants.Roles.Admin));
+        _insights = _card is null ? null : await RetentionSvc.GetInsightsAsync(_card.ClientId);
         _loading = false;
     }
 }

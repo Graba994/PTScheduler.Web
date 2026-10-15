@@ -1,0 +1,125 @@
+@using PTScheduler.Domain.Rules
+@using PTScheduler.Application.Messaging
+@inject PTScheduler.Web.Services.MessageDraftService Drafts
+@inject PTScheduler.Web.Services.PlatformAssistantService Platform
+@inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
+
+@* Szkic wiadomości do klienta w stylu trenera: wybór celu → szkic (AI albo szablon) → poprawka → czat / WhatsApp / SMS / kopiuj.
+   Poprawione i wysłane szkice uczą asystenta stylu trenera. *@
+<div class="md-box">
+    <div class="md-purposes" role="group" aria-label="Cel wiadomości">
+        @foreach (var p in Purposes)
+        {
+            <button type="button" class="md-chip @(p == _purpose ? "on" : "")" @onclick="() => PickAsync(p)" disabled="@_busy">@MessageTemplates.Label(p)</button>
+        }
+    </div>
+    @if (_draft is null)
+    {
+        <button type="button" class="btn btn-sm btn-primary mt-2" @onclick="GenerateAsync" disabled="@_busy">
+            @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-magic me-1"></i> }
+            Napisz szkic
+        </button>
+    }
+    else
+    {
+        <textarea class="form-control mt-2" rows="5" @bind="_text" @bind:event="oninput" aria-label="Treść wiadomości"></textarea>
+        <div class="md-meta">
+            @(_draft.FromAi ? "Szkic od asystenta w Twoim stylu — popraw, jeśli trzeba. Poprawki uczą asystenta." : "Szablon w Twoim stylu — popraw, jeśli trzeba. Poprawki uczą asystenta.")
+            <a href="/trainer/styl">Mój styl</a>
+        </div>
+        <div class="md-actions">
+            <button type="button" class="btn btn-sm btn-primary" @onclick="SendChatAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_text))"><i class="bi bi-chat-dots me-1"></i>Wyślij na czacie</button>
+            @if (MessageTemplates.WhatsAppNumber(Phone) is { } wa)
+            {
+                <a class="btn btn-sm btn-outline-success" href="@($"https://wa.me/{wa}?text={Uri.EscapeDataString(_text)}")" target="_blank" rel="noopener" @onclick="LearnAsync"><i class="bi bi-whatsapp me-1"></i>WhatsApp</a>
+            }
+            @if (!string.IsNullOrWhiteSpace(Phone))
+            {
+                <a class="btn btn-sm btn-outline-secondary" href="@($"sms:{Phone.Replace(" ", "")}?body={Uri.EscapeDataString(_text)}")" @onclick="LearnAsync"><i class="bi bi-phone me-1"></i>SMS</a>
+            }
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="CopyAsync"><i class="bi bi-clipboard me-1"></i>Kopiuj</button>
+            <button type="button" class="btn btn-sm btn-link" @onclick="GenerateAsync" disabled="@_busy">Inna wersja</button>
+        </div>
+    }
+    @if (_status is not null)
+    {
+        <div class="small mt-1 @(_error ? "text-danger" : "text-success")">@_status</div>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public int ClientId { get; set; }
+    [Parameter] public string? Phone { get; set; }
+    [Parameter] public DraftPurpose Purpose { get; set; } = DraftPurpose.Comeback;
+
+    private static readonly DraftPurpose[] Purposes = Enum.GetValues<DraftPurpose>();
+    private DraftPurpose _purpose;
+    private PTScheduler.Web.Services.MessageDraftService.Draft? _draft;
+    private string _text = "";
+    private bool _busy;
+    private bool _learned;
+    private string? _status;
+    private bool _error;
+    private string _userId = "";
+    private bool _isAdmin;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _purpose = Purpose;
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        _userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _isAdmin = user.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+    }
+
+    private async Task PickAsync(DraftPurpose p)
+    {
+        _purpose = p;
+        if (_draft is not null) await GenerateAsync();
+    }
+
+    private async Task GenerateAsync()
+    {
+        _busy = true;
+        _status = null;
+        try
+        {
+            var ai = (await Platform.GetConfigAsync())?.Ai == true;
+            _draft = await Drafts.DraftAsync(_userId, _isAdmin, ClientId, _purpose, ai);
+            _text = _draft?.Text ?? "";
+            _learned = false;
+            if (_draft is null) { _error = true; _status = "Nie znaleziono klienta."; }
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task SendChatAsync()
+    {
+        if (_draft is null) return;
+        _busy = true;
+        var (ok, error) = await Drafts.SendChatAsync(_userId, _isAdmin, ClientId, _draft, _text);
+        _busy = false;
+        _error = !ok;
+        _status = ok ? "Wysłane na czacie." : error ?? "Nie udało się wysłać.";
+        if (ok) _learned = true;
+    }
+
+    private async Task LearnAsync()
+    {
+        if (_draft is null || _learned) return;
+        _learned = true;
+        await Drafts.LearnAsync(_userId, ClientId, _draft, _text);
+    }
+
+    private async Task CopyAsync()
+    {
+        try
+        {
+            await JS.InvokeVoidAsync("navigator.clipboard.writeText", _text);
+            _error = false;
+            _status = "Skopiowane.";
+            await LearnAsync();
+        }
+        catch (JSException) { _error = true; _status = "Przeglądarka nie pozwoliła skopiować — zaznacz tekst ręcznie."; }
+    }
+}

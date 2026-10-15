@@ -34,6 +34,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<EmailSettings> EmailSettings => Set<EmailSettings>();
     public DbSet<SmsSettings> SmsSettings => Set<SmsSettings>();
     public DbSet<NotificationPreferences> NotificationPreferences => Set<NotificationPreferences>();
+    public DbSet<TrainerStyle> TrainerStyles => Set<TrainerStyle>();
+    public DbSet<TrainerStyleExample> TrainerStyleExamples => Set<TrainerStyleExample>();
     public DbSet<RolePermission> RolePermissions => Set<RolePermission>();
     public DbSet<EmailTemplate> EmailTemplates => Set<EmailTemplate>();
     public DbSet<WebPushSettings> WebPushSettings => Set<WebPushSettings>();
@@ -297,6 +299,24 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
         builder.Entity<NotificationPreferences>()
             .HasIndex(n => n.UserId)
             .IsUnique();
+
+        builder.Entity<TrainerStyle>(e =>
+        {
+            e.HasIndex(x => x.TrainerUserId).IsUnique();
+            e.Property(x => x.Address).HasMaxLength(10);
+            e.Property(x => x.Emoji).HasMaxLength(10);
+            e.Property(x => x.Length).HasMaxLength(10);
+            e.Property(x => x.Greeting).HasMaxLength(40);
+            e.Property(x => x.Signature).HasMaxLength(80);
+            e.Property(x => x.Notes).HasMaxLength(300);
+        });
+        builder.Entity<TrainerStyleExample>(e =>
+        {
+            e.HasIndex(x => new { x.TrainerUserId, x.CreatedAt });
+            e.Property(x => x.Text).HasMaxLength(1000);
+            e.Property(x => x.Purpose).HasMaxLength(20);
+            e.Property(x => x.Source).HasMaxLength(20);
+        });
 
         builder.Entity<RolePermission>()
             .HasIndex(rp => new { rp.Role, rp.Permission })

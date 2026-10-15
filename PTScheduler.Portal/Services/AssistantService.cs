@@ -312,6 +312,61 @@ public partial class AssistantService(
                 ? line.Trim()[label.Length..].Trim() : null;
     }
 
+    /// <summary>Styl trenera do szkiców wiadomości (z aplikacji trenera).</summary>
+    public sealed record TrainerStyleInfo(string Address, string Emoji, string Length, string? Greeting, string? Signature, string? Notes);
+
+    /// <summary>
+    /// Szkic wiadomości trenera do klienta w stylu trenera: profil (forma, emoji, długość, powitanie, podpis)
+    /// i przykłady jego wiadomości (z poprawek szkiców). Imię klienta to znacznik [klient] — podmienia je aplikacja.
+    /// Zabezpieczenia jak w dymku: liczby tylko z faktów, znacznik [klient] musi zostać; inaczej tekst zapasowy.
+    /// </summary>
+    public async Task<Phrase> DraftInStyleAsync(Tenant tenant, string purpose, Dictionary<string, string> facts, string fallback,
+        TrainerStyleInfo style, IReadOnlyList<string> examples)
+    {
+        fallback = fallback.Trim();
+        if (tenant.AiOff || await settings.GetAsync(K.AiEnabled) != "true") return new(fallback, false, null);
+
+        var address = style.Address == "pan"
+            ? "Forma grzecznościowa bez zgadywania płci: „Dzień dobry”, formy bezosobowe („zapraszam”, „czy pasuje termin…”), bez „Pan/Pani” i bez form rodzajowych."
+            : "Pisz na Ty, w formach neutralnych płciowo („masz”, „udało się”, „daj znać”), bez „zrobiłeś/zrobiłaś”.";
+        var emoji = style.Emoji switch { "brak" => "Bez emoji.", "często" => "Możesz użyć 1–2 emoji.", _ => "Najwyżej jedno emoji." };
+        var length = style.Length == "srednio" ? "3–4 zdania (do 450 znaków)." : "1–2 zdania (do 260 znaków).";
+        var exampleBlock = examples.Count == 0 ? "" :
+            "\n\nPrzykłady wiadomości tego trenera (naśladuj ton, słownictwo i długość, nie kopiuj treści):\n"
+            + string.Join("\n", examples.Take(5).Select(e => "- " + (e.Length > 400 ? e[..400] : e).Replace("\n", " ")));
+        var system = $"""
+            Piszesz krótką wiadomość od trenera personalnego do jego klienta (czat albo SMS), tak jakby pisał ją sam trener.
+
+            Styl trenera:
+            - {address}
+            - {emoji}
+            - Długość: {length}
+            - Powitanie: {(string.IsNullOrWhiteSpace(style.Greeting) ? "dowolne, naturalne" : $"„{style.Greeting}”")}.
+            - Podpis: {(string.IsNullOrWhiteSpace(style.Signature) ? "bez podpisu" : $"zakończ podpisem „{style.Signature}”")}.
+            {(string.IsNullOrWhiteSpace(style.Notes) ? "" : $"- Opis stylu od trenera: {style.Notes}")}
+
+            Zasady:
+            - Po polsku. Nie zgaduj płci klienta.
+            - Imię klienta to znacznik [klient] — użyj go dokładnie w tej postaci (bez odmiany), najlepiej w powitaniu.
+            - Korzystaj tylko z podanych faktów. Nie wymyślaj liczb, dat, cen ani obietnic.
+            - Bez porad medycznych i dietetycznych. Bez presji i wyrzutów — życzliwie i konkretnie.
+            - Zwróć tylko treść wiadomości.{exampleBlock}
+            """;
+        var factsJson = JsonSerializer.Serialize(facts, Relaxed);
+        var user = $"""
+            Cel wiadomości: {purpose}
+            Fakty: {factsJson}
+            Wersja podstawowa (przeredaguj ją w stylu trenera): {fallback}
+            """;
+        var result = await ai.CompleteAsync("szkic-wiadomosci", tenant.Id, system, user, maxTokens: 400);
+        if (result.Text is null) return new(fallback, false, result.Error);
+        var text = result.Text.Trim().Trim('"', '„', '”').Replace("\r", "").Trim();
+        if (text.Length > 700) text = text[..700];
+        if (!IsFaithful(text, factsJson + " " + fallback + " " + style.Signature + " " + style.Greeting))
+            return new(fallback, false, "Szkic AI miał liczby albo znaczniki spoza faktów — użyto wersji podstawowej.");
+        return new(text, true, null);
+    }
+
     /// <summary>Kategoria z prostych słów kluczowych — gdy AI jest wyłączone albo nie odpowie.</summary>
     public static string Categorize(string text)
     {
@@ -403,6 +458,9 @@ public partial class AssistantService(
         ("faktury", "Przypomnienie: faktury na koniec miesiąca", "remind",
             new() { ["miesiac"] = "październik" },
             "Koniec miesiąca! Sprawdź, czy faktury za październik są wystawione.", "trener"),
+        ("ryzyko_odejscia", "Sugestia: klienci, którzy mogą odejść", "think",
+            new() { ["liczba_klientow"] = "3", ["wysokie_ryzyko"] = "1" },
+            "3 klientów może odejść (w tym 1 z wysokim ryzykiem). Krótka wiadomość często wystarczy — przygotuję szkic w Twoim stylu.", "trener"),
         ("nieaktywni", "Sugestia: klienci, którzy dawno nie byli", "think",
             new() { ["liczba_klientow"] = "4", ["dni"] = "21" },
             "4 klientów nie było od 3 tygodni. Może krótka wiadomość?", "trener"),
