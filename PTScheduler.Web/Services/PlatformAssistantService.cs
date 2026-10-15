@@ -10,7 +10,9 @@ namespace PTScheduler.Web.Services;
 /// </summary>
 public class PlatformAssistantService(IHttpClientFactory httpFactory, ILogger<PlatformAssistantService> logger)
 {
-    public sealed record Config(bool Enabled, string Name, string Animation, bool Ai, Dictionary<string, string> Icons);
+    /// <param name="EmailIcons">Adresy PNG nastrojów w Portalu — do e-maili (data URI i SVG nie działają w Gmailu).</param>
+    public sealed record Config(bool Enabled, string Name, string Animation, bool Ai, Dictionary<string, string> Icons,
+        Dictionary<string, string>? EmailIcons = null);
 
     private static readonly TimeSpan ConfigTtl = TimeSpan.FromMinutes(30);
     private Config? _config;

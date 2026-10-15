@@ -602,6 +602,9 @@ namespace PTScheduler.Portal.Data.Migrations
                         .IsRequired()
                         .HasColumnType("bytea");
 
+                    b.Property<byte[]>("PngData")
+                        .HasColumnType("bytea");
+
                     b.Property<DateTime>("UpdatedAt")
                         .HasColumnType("timestamp with time zone");
 

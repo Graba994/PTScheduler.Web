@@ -32,6 +32,21 @@ public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFact
         var sessions = db.Sessions.AsNoTracking().Where(s => studioWide || s.TrainerUserId == userId);
         var clients = db.Clients.AsNoTracking().Where(c => studioWide || c.TrainerUserId == userId);
 
+        // Najbliższy własny trening w ciągu godziny — karta „przed treningiem”.
+        var soon = await db.Sessions.AsNoTracking()
+            .Where(s => s.TrainerUserId == userId && s.Status == SessionStatus.Scheduled && s.StartTime > now && s.StartTime <= now.AddMinutes(60))
+            .OrderBy(s => s.StartTime)
+            .Select(s => new { s.Id, s.StartTime, s.Client.FirstName })
+            .FirstOrDefaultAsync();
+        if (soon is not null)
+        {
+            var minutes = Math.Max(1, (int)Math.Round((soon.StartTime - now).TotalMinutes));
+            tips.Add(new($"before-{soon.Id}", "przed_treningiem", "hello", 100,
+                $"Za {minutes} min: [klient]. Zerknij na kartę — ostatni trening, uwagi i plan na dziś.",
+                new() { ["klient"] = "[klient]", ["minuty"] = minutes.ToString() }, "Karta", $"/trainer/before/{soon.Id}",
+                Placeholders: new() { ["[klient]"] = string.IsNullOrWhiteSpace(soon.FirstName) ? "kolejny trening" : soon.FirstName.Trim() }));
+        }
+
         // Rezerwacje „zapłacę u trenera” czekające na decyzję.
         var approvals = await sessions.CountAsync(s => s.AwaitingApproval && s.Status == SessionStatus.Scheduled && s.StartTime >= now);
         if (approvals > 0)

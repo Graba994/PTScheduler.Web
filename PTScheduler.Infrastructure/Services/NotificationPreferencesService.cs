@@ -32,6 +32,10 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
             PushMessages = prefs.PushMessages,
             PushTrainerMessages = prefs.PushTrainerMessages,
             PushClientActivity = prefs.PushClientActivity,
+            MorningBrief = prefs.MorningBrief,
+            PushMorningBrief = prefs.PushMorningBrief,
+            MorningBriefHour = prefs.MorningBriefHour,
+            PushBeforeSession = prefs.PushBeforeSession,
             SmsReminders = prefs.SmsReminders,
             SmsTrainerMessages = prefs.SmsTrainerMessages,
         };
@@ -62,6 +66,10 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
         prefs.PushMessages = dto.PushMessages;
         prefs.PushTrainerMessages = dto.PushTrainerMessages;
         prefs.PushClientActivity = dto.PushClientActivity;
+        prefs.MorningBrief = dto.MorningBrief;
+        prefs.PushMorningBrief = dto.PushMorningBrief;
+        prefs.MorningBriefHour = Math.Clamp(dto.MorningBriefHour, 5, 11);
+        prefs.PushBeforeSession = dto.PushBeforeSession;
         prefs.SmsReminders = dto.SmsReminders;
         prefs.SmsTrainerMessages = dto.SmsTrainerMessages;
         await db.SaveChangesAsync();
@@ -87,6 +95,8 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
             NotificationTypes.PushMessages => prefs.PushMessages,
             NotificationTypes.PushTrainerMessages => prefs.PushTrainerMessages,
             NotificationTypes.PushClientActivity => prefs.PushClientActivity,
+            NotificationTypes.PushMorningBrief => prefs.PushMorningBrief,
+            NotificationTypes.PushBeforeSession => prefs.PushBeforeSession,
             NotificationTypes.SmsReminders => prefs.SmsReminders,
             NotificationTypes.SmsTrainerMessages => prefs.SmsTrainerMessages,
             _ => true

@@ -5,6 +5,7 @@
 @inject SiteSettingsService Settings
 @inject AssistantService Assistant
 @inject AiService Ai
+@inject IJSRuntime JS
 @rendermode InteractiveServer
 @using K = PTScheduler.Portal.Services.SiteSettingsService.Keys
 
@@ -81,7 +82,7 @@
     <section class="card border-0 shadow-sm mt-3">
         <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-images"></i></span>Ikony nastrojów</div>
         <div class="card-body">
-            <p class="small text-muted">Podmień dowolną ikonę własnym plikiem (SVG, PNG, WebP lub GIF, do @(AssistantService.MaxAssetBytes / 1024) KB, najlepiej kwadrat z przezroczystym tłem).</p>
+            <p class="small text-muted">Podmień dowolną ikonę własnym plikiem (SVG, PNG, WebP lub GIF, do @(AssistantService.MaxAssetBytes / 1024) KB, najlepiej kwadrat z przezroczystym tłem). Te same ikony trafiają do e-maili — z SVG automatycznie robimy wersję PNG.</p>
             <div class="hm-grid">
                 @foreach (var m in MascotArt.Moods)
                 {
@@ -377,6 +378,16 @@ else
         using var ms = new MemoryStream();
         await file.OpenReadStream(AssistantService.MaxAssetBytes).CopyToAsync(ms);
         if (await Assistant.SaveAssetAsync(mood, type, ms.ToArray()) is { } error) { Fail(error); return; }
+        if (type == "image/svg+xml")
+        {
+            // E-maile nie pokazują SVG — przeglądarka robi z niego PNG, który trafi do szablonów wiadomości.
+            try
+            {
+                var png = await JS.InvokeAsync<string>("PTMascot.svgToPng", $"data:image/svg+xml;base64,{Convert.ToBase64String(ms.ToArray())}");
+                if (!string.IsNullOrEmpty(png)) await Assistant.SavePngAsync(mood, Convert.FromBase64String(png));
+            }
+            catch (JSException) { }
+        }
         await LoadIconsAsync();
         Ok("Ikona podmieniona.");
     }

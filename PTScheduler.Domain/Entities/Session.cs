@@ -44,6 +44,8 @@ public class Session
     /// w kolejnym cyklu. Trwały dedup przeżywa restart usługi.
     /// </summary>
     public DateTime? ReminderSentAt { get; set; }
+    /// <summary>Kiedy trener dostał push z kartą „przed treningiem” (jedno powiadomienie na trening).</summary>
+    public DateTime? TrainerBriefSentAt { get; set; }
 
     /// <summary>
     /// Znacznik per-kanał: ustawiany, gdy przypomnienie e-mail zostało wysłane

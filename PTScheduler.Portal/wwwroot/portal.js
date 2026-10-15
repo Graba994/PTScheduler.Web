@@ -135,3 +135,26 @@ window.ptLogs = {
         }
     };
 })();
+
+// Asystent-maskotka (Panel → Asystent i AI): wgrany SVG zamieniamy w przeglądarce na PNG 240×240,
+// bo e-maile (Gmail, Outlook) nie wyświetlają SVG. Zwraca PNG w base64 albo pusty tekst.
+window.PTMascot = {
+    svgToPng: function (dataUri) {
+        return new Promise(function (resolve) {
+            var img = new Image();
+            img.onload = function () {
+                try {
+                    var size = 240, canvas = document.createElement('canvas');
+                    canvas.width = size; canvas.height = size;
+                    var ctx = canvas.getContext('2d');
+                    var w = img.naturalWidth || size, h = img.naturalHeight || size;
+                    var scale = Math.min(size / w, size / h);
+                    ctx.drawImage(img, (size - w * scale) / 2, (size - h * scale) / 2, w * scale, h * scale);
+                    resolve(canvas.toDataURL('image/png').split(',')[1] || '');
+                } catch (e) { resolve(''); }
+            };
+            img.onerror = function () { resolve(''); };
+            img.src = dataUri;
+        });
+    }
+};

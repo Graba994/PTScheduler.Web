@@ -22,4 +22,8 @@ public class NotificationPreferencesDto
     public bool PushClientActivity { get; set; } = true;
     public bool SmsReminders { get; set; } = true;
     public bool SmsTrainerMessages { get; set; } = true;
+    public bool MorningBrief { get; set; } = true;
+    public bool PushMorningBrief { get; set; } = true;
+    public int MorningBriefHour { get; set; } = 7;
+    public bool PushBeforeSession { get; set; } = true;
 }

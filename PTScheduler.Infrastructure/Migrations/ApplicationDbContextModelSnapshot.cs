@@ -1800,16 +1800,31 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Property<bool>("ExpiringPackages")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("MorningBrief")
+                        .HasColumnType("boolean");
+
+                    b.Property<int>("MorningBriefHour")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly?>("MorningBriefSentOn")
+                        .HasColumnType("date");
+
                     b.Property<bool>("NewClientPending")
                         .HasColumnType("boolean");
 
                     b.Property<bool>("PackageAssigned")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("PushBeforeSession")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("PushClientActivity")
                         .HasColumnType("boolean");
 
                     b.Property<bool>("PushMessages")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("PushMorningBrief")
                         .HasColumnType("boolean");
 
                     b.Property<bool>("PushPackages")
@@ -2506,6 +2521,9 @@ namespace PTScheduler.Infrastructure.Migrations
 
                     b.Property<int>("Status")
                         .HasColumnType("integer");
+
+                    b.Property<DateTime?>("TrainerBriefSentAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("TrainerUserId")
                         .IsRequired()

@@ -1,0 +1,141 @@
+@page "/trainer/before/{SessionId:int}"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@inject PTScheduler.Web.Services.PreSessionBriefService Briefs
+@inject AuthenticationStateProvider AuthState
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Karta „przed treningiem” — otwierana z powiadomienia 15 minut przed wizytą albo z listy dzisiejszych treningów. *@
+
+<AppTitle Page="Przed treningiem" />
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_card is null)
+{
+    <div class="alert alert-warning">Nie znaleziono tego treningu.</div>
+    <a href="/calendar" class="btn btn-sm btn-outline-secondary">Wróć do grafiku</a>
+}
+else
+{
+    var c = _card;
+    <div class="bs-wrap">
+        <div class="bs-head">
+            <div>
+                <div class="bs-eyebrow">Przed treningiem · @c.Start.ToString("dddd, d MMMM, HH:mm", Pl)</div>
+                <h1 class="bs-title">@c.ClientName</h1>
+                <div class="bs-sub">@c.Type · @(c.Number == 1 ? "pierwszy trening" : $"{c.Number}. trening")</div>
+            </div>
+            <div class="bs-head-actions">
+                <a class="btn btn-sm btn-primary" href="@($"/clients/{c.ClientId}")"><i class="bi bi-person me-1"></i>Profil</a>
+                @if (!string.IsNullOrWhiteSpace(c.Phone))
+                {
+                    <a class="btn btn-sm btn-outline-secondary" href="@($"tel:{c.Phone}")"><i class="bi bi-telephone"></i></a>
+                }
+            </div>
+        </div>
+
+        <div class="bs-summary">
+            @if (c.Mascot is not null)
+            {
+                <img src="@c.Mascot" alt="" width="48" height="48" />
+            }
+            <p class="mb-0">@if (c.MascotName is not null) { <b class="prg-who">@c.MascotName</b> }@c.Summary</p>
+        </div>
+
+        <div class="bs-chips">
+            @if (c.PackageInfo is not null) { <span class="bs-chip"><i class="bi bi-ticket-perforated"></i>@c.PackageInfo</span> }
+            @if (c.UnpaidAtTrainer) { <span class="bs-chip warn"><i class="bi bi-cash-coin"></i>Płatność u Ciebie</span> }
+            @if (c.Number == 1 || c.Number % 10 == 0) { <span class="bs-chip good"><i class="bi bi-stars"></i>@(c.Number == 1 ? "Pierwszy trening" : $"{c.Number}. trening — pogratuluj!")</span> }
+        </div>
+
+        <div class="bs-grid">
+            @if (c.HealthNotes.Count > 0)
+            {
+                <section class="bs-card bs-alert">
+                    <h2><i class="bi bi-heart-pulse"></i>Ankieta zdrowotna@(c.HealthDate is { } hd ? $" · {hd:dd.MM.yyyy}" : "")</h2>
+                    <ul>@foreach (var n in c.HealthNotes) { <li>@n</li> }</ul>
+                </section>
+            }
+
+            <section class="bs-card">
+                <h2><i class="bi bi-list-check"></i>Plan na dziś@(c.PlanDayLabel is not null ? $" · {c.PlanDayLabel}" : "")</h2>
+                @if (c.PlanToday.Count == 0)
+                {
+                    <p class="text-muted small mb-0">Klient nie ma przypisanego planu.</p>
+                }
+                else
+                {
+                    <ul class="bs-ex">@foreach (var e in c.PlanToday) { <li><span>@e.Name</span><b>@e.Detail</b></li> }</ul>
+                    <a class="btn btn-sm btn-link px-0" href="@($"/plans/edit/{c.PlanId}")">Otwórz plan „@c.PlanName”</a>
+                }
+            </section>
+
+            @if (c.Progression.Count > 0 || c.Insights.Count > 0)
+            {
+                <section class="bs-card">
+                    <h2><i class="bi bi-graph-up-arrow"></i>Na dziś warto</h2>
+                    <ul>
+                        @foreach (var p in c.Progression)
+                        {
+                            <li><b>@p.ExerciseName:</b> @p.FromKg.ToString("0.##", Pl) → @p.SuggestedKg.ToString("0.##", Pl) kg <span class="text-muted small">(@p.Reason)</span></li>
+                        }
+                        @foreach (var i in c.Insights)
+                        {
+                            <li><b>@i.Exercise:</b> @i.Recommendation</li>
+                        }
+                    </ul>
+                </section>
+            }
+
+            <section class="bs-card">
+                <h2><i class="bi bi-clock-history"></i>Ostatni trening@(c.LastWorkoutDate is { } lw ? $" · {lw:dd.MM}" : "")</h2>
+                @if (c.LastWorkout.Count == 0)
+                {
+                    <p class="text-muted small mb-0">Brak zapisanych ćwiczeń.</p>
+                }
+                else
+                {
+                    <ul class="bs-ex">@foreach (var e in c.LastWorkout) { <li><span>@e.Name</span><b>@e.Detail</b></li> }</ul>
+                }
+            </section>
+
+            @if (c.LastFeeling.Count > 0 || !string.IsNullOrWhiteSpace(c.LastComment))
+            {
+                <section class="bs-card">
+                    <h2><i class="bi bi-emoji-smile"></i>Samopoczucie po ostatnim treningu@(c.LastFeelingDate is { } lf ? $" · {lf:dd.MM}" : "")</h2>
+                    <ul>@foreach (var f in c.LastFeeling) { <li>@f</li> }</ul>
+                    @if (!string.IsNullOrWhiteSpace(c.LastComment)) { <p class="bs-quote">„@c.LastComment”</p> }
+                </section>
+            }
+
+            @if (c.Notes.Count > 0)
+            {
+                <section class="bs-card">
+                    <h2><i class="bi bi-journal-text"></i>Twoje notatki</h2>
+                    @foreach (var n in c.Notes)
+                    {
+                        <p class="mb-1 small"><span class="text-muted">@n.At.ToLocalTime().ToString("dd.MM"):</span> @n.Text</p>
+                    }
+                </section>
+            }
+        </div>
+    </div>
+}
+
+@code {
+    [Parameter] public int SessionId { get; set; }
+    private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
+    private PTScheduler.Web.Services.PreSessionBriefService.Card? _card;
+    private bool _loading = true;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _card = await Briefs.GetAsync(SessionId, userId, user.IsInRole(PTScheduler.Domain.Constants.Roles.Admin));
+        _loading = false;
+    }
+}

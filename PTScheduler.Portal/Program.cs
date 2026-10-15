@@ -725,6 +725,14 @@ app.MapPost("/api/internal/tenants/{slug}/legal/accept", async (
     return Results.Ok();
 });
 
+// Ikona nastroju maskotki do e-maili (PNG — Gmail i Outlook nie wyświetlają SVG). Publiczna, bez danych.
+app.MapGet("/assistant/mascot/{mood}.png", async (string mood, AssistantService assistant, IWebHostEnvironment env, HttpContext ctx) =>
+{
+    if (await assistant.EmailImageAsync(mood, env.WebRootPath) is not { } img) return Results.NotFound();
+    ctx.Response.Headers.CacheControl = "public, max-age=86400";
+    return Results.File(img.Data, img.ContentType);
+});
+
 // Asystent-maskotka w aplikacji trenera: wygląd (imię, ikony nastrojów, animacja) i teksty podpowiedzi
 // ubrane w słowa przez AI. Co pokazać, liczy aplikacja trenera; bez AI wraca jej tekst zapasowy.
 app.MapGet("/api/internal/tenants/{slug}/assistant", async (
@@ -738,7 +746,9 @@ app.MapGet("/api/internal/tenants/{slug}/assistant", async (
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
     if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
     var c = await assistant.GetConfigAsync(tenant);
-    return Results.Json(new { enabled = c.Enabled, name = c.Name, animation = c.Animation, ai = c.Ai, icons = c.Icons });
+    var version = await assistant.IconsVersionAsync();
+    var emailIcons = MascotArt.Moods.ToDictionary(m => m.Key, m => $"{PublicBase(ctx)}/assistant/mascot/{m.Key}.png?v={version}");
+    return Results.Json(new { enabled = c.Enabled, name = c.Name, animation = c.Animation, ai = c.Ai, icons = c.Icons, emailIcons });
 });
 
 app.MapPost("/api/internal/tenants/{slug}/assistant/phrase", async (

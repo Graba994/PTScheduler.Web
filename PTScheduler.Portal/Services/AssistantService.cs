@@ -92,6 +92,41 @@ public partial class AssistantService(
         return null;
     }
 
+    /// <summary>Zapisuje PNG wygenerowany w przeglądarce z wgranego SVG (do e-maili).</summary>
+    public async Task SavePngAsync(string mood, byte[] png)
+    {
+        if (png.Length is 0 or > MaxAssetBytes || png.Length < 8 || png[0] != 0x89 || png[1] != 0x50) return;
+        await using var db = await dbFactory.CreateDbContextAsync();
+        if (await db.MascotAssets.FindAsync(mood) is { } asset)
+        {
+            asset.PngData = png;
+            await db.SaveChangesAsync();
+        }
+    }
+
+    /// <summary>
+    /// Obrazek nastroju do e-maili: własny plik rastrowy, PNG zrobiony z własnego SVG albo wbudowany PNG
+    /// (wwwroot/mascot — wygenerowany z MascotArt; po zmianie grafik w MascotArt trzeba go odświeżyć).
+    /// </summary>
+    public async Task<(byte[] Data, string ContentType)?> EmailImageAsync(string mood, string webRoot)
+    {
+        if (!MascotArt.IsMood(mood)) return null;
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var asset = await db.MascotAssets.AsNoTracking().FirstOrDefaultAsync(a => a.Mood == mood);
+        if (asset is not null && asset.ContentType != "image/svg+xml") return (asset.Data, asset.ContentType);
+        if (asset?.PngData is { Length: > 0 } png) return (png, "image/png");
+        var file = Path.Combine(webRoot, "mascot", mood + ".png");
+        return File.Exists(file) ? (await File.ReadAllBytesAsync(file), "image/png") : null;
+    }
+
+    /// <summary>Wersja ikon do adresów obrazków w e-mailach (zmienia się po każdej podmianie ikony).</summary>
+    public async Task<string> IconsVersionAsync()
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var last = await db.MascotAssets.MaxAsync(a => (DateTime?)a.UpdatedAt);
+        return last is { } t ? t.Ticks.ToString("x") : "0";
+    }
+
     public async Task ResetAssetAsync(string mood)
     {
         await using var db = await dbFactory.CreateDbContextAsync();

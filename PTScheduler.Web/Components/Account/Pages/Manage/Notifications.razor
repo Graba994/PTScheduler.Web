@@ -3,6 +3,8 @@
 @inject AuthenticationStateProvider AuthState
 @inject IAuditLogService AuditLogService
 @inject EntitlementService Entitlements
+@inject PTScheduler.Web.Services.MorningBriefService MorningBrief
+@inject Microsoft.AspNetCore.Identity.UserManager<PTScheduler.Infrastructure.Data.ApplicationUser> Users
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
@@ -66,6 +68,22 @@ else
             </div>
         }
     </div>
+    @if (_isStaff)
+    {
+        <div class="acct-brief">
+            <label for="briefHour" class="fw-semibold small mb-0"><i class="bi bi-sunrise me-1"></i>Poranny brief o godzinie</label>
+            <select id="briefHour" class="form-select form-select-sm" style="width:auto" value="@_prefs.MorningBriefHour" @onchange="SetBriefHourAsync">
+                @for (var h = 5; h <= 11; h++)
+                {
+                    <option value="@h">@($"{h}:00")</option>
+                }
+            </select>
+            <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="SendTestBriefAsync" disabled="@_sendingBrief">
+                @if (_sendingBrief) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-send me-1"></i> }
+                Wyślij mi teraz próbny
+            </button>
+        </div>
+    }
     @if (_showSms)
     {
         <p class="small text-muted mb-0"><i class="bi bi-chat-dots me-1"></i>SMS-y wysyłamy tylko wtedy, gdy trener je włączył i masz podany numer telefonu w Moje konto → Profil.</p>
@@ -81,7 +99,7 @@ else
     private const string Email = "email", Push = "push", Sms = "sms";
 
     private string _userId = "", _userEmail = "", _userRole = "";
-    private bool _isAdminRole, _loading = true, _showSms;
+    private bool _isAdminRole, _loading = true, _showSms, _isStaff, _sendingBrief;
     private NotificationPreferencesDto _prefs = new();
     private List<string> _columns = [];
     private List<Row> _rows = [];
@@ -91,6 +109,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        _principal = user;
         _userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
         _userEmail = user.Identity?.Name ?? "";
         _isAdminRole = user.IsInRole(Roles.Admin);
@@ -100,6 +119,7 @@ else
         _showSms = isClient && Entitlements.IsAllowed("SmsReminders");
         _columns = _showSms ? [Email, Push, Sms] : [Email, Push];
         _rows = isClient ? ClientRows() : StaffRows();
+        _isStaff = !isClient && (user.IsInRole(Roles.Trainer) || _isAdminRole);
         _loading = false;
     }
 
@@ -138,6 +158,11 @@ else
             push: new(() => _prefs.PushClientActivity, v => _prefs.PushClientActivity = v)),
         new("Wiadomości i komentarze", "Nowa wiadomość na czacie, komentarz klienta do treningu",
             push: new(() => _prefs.PushMessages, v => _prefs.PushMessages = v)),
+        new("Poranny brief od asystenta", "Plan dnia, sprawy do załatwienia i powody do dumy — codziennie rano",
+            email: new(() => _prefs.MorningBrief, v => _prefs.MorningBrief = v),
+            push: new(() => _prefs.PushMorningBrief, v => _prefs.PushMorningBrief = v)),
+        new("Przed treningiem", "15 minut przed wizytą: karta klienta — ostatni trening, uwagi, plan na dziś",
+            push: new(() => _prefs.PushBeforeSession, v => _prefs.PushBeforeSession = v)),
     ];
 
     private async Task ToggleAsync(Cell cell, ChangeEventArgs e)
@@ -152,6 +177,28 @@ else
         catch { } // audyt to najlepszy wysiłek
         _ = ToastAsync("Zapisano");
     }
+
+    private async Task SetBriefHourAsync(ChangeEventArgs e)
+    {
+        if (!int.TryParse(e.Value?.ToString(), out var hour)) return;
+        _prefs.MorningBriefHour = hour;
+        await NotifService.SaveAsync(_userId, _prefs);
+        _ = ToastAsync($"Brief przyjdzie o {hour}:00");
+    }
+
+    private async Task SendTestBriefAsync()
+    {
+        _sendingBrief = true;
+        try
+        {
+            var user = await Users.FindByIdAsync(_userId);
+            var sent = user is not null && await MorningBrief.SendAsync(user, studioWide: _isAdminRole && !_principal.IsInRole(Roles.Trainer), force: true);
+            _ = ToastAsync(sent ? "Wysłane — sprawdź skrzynkę" : "Nie udało się wysłać — sprawdź ustawienia poczty");
+        }
+        finally { _sendingBrief = false; }
+    }
+
+    private System.Security.Claims.ClaimsPrincipal _principal = new();
 
     private async Task ToastAsync(string text)
     {

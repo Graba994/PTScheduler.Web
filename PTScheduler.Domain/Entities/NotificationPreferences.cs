@@ -36,4 +36,16 @@ public class NotificationPreferences
     public bool SmsReminders { get; set; } = true;
     /// <summary>SMS: automatyczne wiadomości od trenera.</summary>
     public bool SmsTrainerMessages { get; set; } = true;
+
+    // ── Asystent trenera ──
+    /// <summary>E-mail (trener): poranny brief — plan dnia, sprawy do załatwienia, pochwały.</summary>
+    public bool MorningBrief { get; set; } = true;
+    /// <summary>Push (trener): poranny brief w skrócie.</summary>
+    public bool PushMorningBrief { get; set; } = true;
+    /// <summary>Godzina porannego briefu (zegar ścienny studia), 5–11.</summary>
+    public int MorningBriefHour { get; set; } = 7;
+    /// <summary>Dzień ostatniego wysłanego briefu — jeden na dzień, także po restarcie.</summary>
+    public DateOnly? MorningBriefSentOn { get; set; }
+    /// <summary>Push (trener): 15 minut przed treningiem — karta „przed treningiem”.</summary>
+    public bool PushBeforeSession { get; set; } = true;
 }
