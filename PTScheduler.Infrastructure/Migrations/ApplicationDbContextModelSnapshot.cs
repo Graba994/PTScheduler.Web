@@ -2984,6 +2984,9 @@ namespace PTScheduler.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<string>("CustomDescription")
+                        .HasColumnType("text");
+
                     b.Property<int>("ExerciseId")
                         .HasColumnType("integer");
 
@@ -3147,6 +3150,9 @@ namespace PTScheduler.Infrastructure.Migrations
                         .HasColumnType("text");
 
                     b.Property<string>("Notes")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Purpose")
                         .HasColumnType("text");
 
                     b.Property<string>("TrainerUserId")

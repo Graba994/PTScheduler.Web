@@ -18,6 +18,9 @@ public class TrainingPlan
     public string Name { get; set; } = string.Empty;
     public string? Notes { get; set; }
 
+    /// <summary>„Po co ten plan” — cel planu własnymi słowami trenera; klient widzi go nad planem.</summary>
+    public string? Purpose { get; set; }
+
     public bool IsTemplate { get; set; }
 
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

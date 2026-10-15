@@ -49,6 +49,8 @@ public sealed class ExerciseDetailDto
     public string NameEn { get; set; } = string.Empty;
     public string? DescriptionPl { get; set; }
     public string? DescriptionEn { get; set; }
+    /// <summary>Opis słowami trenera (dla klientów) — ma pierwszeństwo przed opisem z katalogu.</summary>
+    public string? TrainerDescription { get; set; }
     public string PrimaryMuscles { get; set; } = string.Empty;
     public string SecondaryMuscles { get; set; } = string.Empty;
     public ExerciseCategory Category { get; set; }

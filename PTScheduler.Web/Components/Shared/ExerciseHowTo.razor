@@ -59,11 +59,24 @@
                     <div class="howto-note"><i class="bi bi-chat-quote-fill"></i><span><b>Od trenera:</b> @Note</span></div>
                 }
 
+                @if (!string.IsNullOrWhiteSpace(d.TrainerDescription))
+                {
+                    var own = d.TrainerDescription.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+                    <div class="howto-section">Wskazówki trenera</div>
+                    @if (own.Length > 1)
+                    {
+                        <ol class="howto-steps">@foreach (var step in own) { <li>@step</li> }</ol>
+                    }
+                    else
+                    {
+                        <p class="howto-text">@own[0]</p>
+                    }
+                }
                 @{
                     var desc = !string.IsNullOrWhiteSpace(d.DescriptionPl) ? d.DescriptionPl : d.DescriptionEn;
                     var steps = (desc ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
                 }
-                <div class="howto-section">Krok po kroku</div>
+                <div class="howto-section">@(string.IsNullOrWhiteSpace(d.TrainerDescription) ? "Krok po kroku" : "Opis z katalogu")</div>
                 @if (steps.Length > 1)
                 {
                     <ol class="howto-steps">

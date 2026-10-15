@@ -120,8 +120,10 @@ public class ExerciseCatalogService(
                 (x.Visibility == ExerciseVisibility.Public || x.OwnerTrainerUserId == trainerUserId));
         if (e is null) return null;
 
-        var isFav = await db.TrainerExercisePrefs
-            .AnyAsync(p => p.TrainerUserId == trainerUserId && p.ExerciseId == id && p.IsFavorite);
+        var pref = await db.TrainerExercisePrefs.AsNoTracking()
+            .Where(p => p.TrainerUserId == trainerUserId && p.ExerciseId == id)
+            .Select(p => new { p.IsFavorite, p.CustomDescription }).FirstOrDefaultAsync();
+        var isFav = pref?.IsFavorite == true;
 
         return new ExerciseDetailDto
         {
@@ -130,6 +132,7 @@ public class ExerciseCatalogService(
             NameEn = e.NameEn,
             DescriptionPl = e.DescriptionPl,
             DescriptionEn = e.DescriptionEn,
+            TrainerDescription = pref?.CustomDescription,
             PrimaryMuscles = e.PrimaryMuscles,
             SecondaryMuscles = e.SecondaryMuscles,
             Category = e.Category,
@@ -211,6 +214,17 @@ public class ExerciseCatalogService(
         pref.IsFavorite = !pref.IsFavorite;
         await db.SaveChangesAsync();
         return pref.IsFavorite;
+    }
+
+    public async Task SetTrainerDescriptionAsync(string trainerUserId, int exerciseId, string? text)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var pref = await db.TrainerExercisePrefs
+            .FirstOrDefaultAsync(p => p.TrainerUserId == trainerUserId && p.ExerciseId == exerciseId);
+        if (pref is null) db.TrainerExercisePrefs.Add(pref = new TrainerExercisePref { TrainerUserId = trainerUserId, ExerciseId = exerciseId });
+        var t = text?.Replace("\r", "").Trim();
+        pref.CustomDescription = string.IsNullOrEmpty(t) ? null : t.Length <= 2000 ? t : t[..2000];
+        await db.SaveChangesAsync();
     }
 
     public async Task MarkUsedAsync(string trainerUserId, int exerciseId)

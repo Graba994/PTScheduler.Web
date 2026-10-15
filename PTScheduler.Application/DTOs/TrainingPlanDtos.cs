@@ -19,6 +19,8 @@ public sealed class PlanEditDto
     public int? Id { get; set; }
     public string Name { get; set; } = string.Empty;
     public string? Notes { get; set; }
+    /// <summary>„Po co ten plan” — widzi klient.</summary>
+    public string? Purpose { get; set; }
     public bool IsTemplate { get; set; }
     public int? ClientId { get; set; }
     public List<PlanDayEditDto> Days { get; set; } = [];

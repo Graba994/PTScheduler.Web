@@ -82,6 +82,7 @@ public class TrainingPlanService(
             Id = plan.Id,
             Name = plan.Name,
             Notes = plan.Notes,
+            Purpose = plan.Purpose,
             IsTemplate = plan.IsTemplate,
             ClientId = plan.ClientId,
             Days = plan.Days.OrderBy(d => d.Order).Select(d => new PlanDayEditDto
@@ -138,6 +139,7 @@ public class TrainingPlanService(
 
         plan.Name = dto.Name.Trim();
         plan.Notes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim();
+        plan.Purpose = string.IsNullOrWhiteSpace(dto.Purpose) ? null : dto.Purpose.Trim()[..Math.Min(800, dto.Purpose.Trim().Length)];
         plan.IsTemplate = dto.IsTemplate;
         plan.ClientId = dto.IsTemplate ? null : dto.ClientId;
 
@@ -225,6 +227,7 @@ public class TrainingPlanService(
             TrainerUserId = trainerUserId,
             Name = src.Name + " (kopia)",
             Notes = src.Notes,
+            Purpose = src.Purpose,
             IsTemplate = asTemplate,
             ClientId = null,
             CreatedAt = clock.UtcNow,

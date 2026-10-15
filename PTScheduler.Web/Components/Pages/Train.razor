@@ -19,6 +19,7 @@
 @inject AuthenticationStateProvider AuthState
 @inject IJSRuntime JS
 @inject ILoggerFactory LoggerFactory
+@inject PTScheduler.Web.Services.WorkoutCompanionService Companion
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Trenuj" />
@@ -84,6 +85,14 @@ else if (_draft is not null)
                 <span class="train-ex-title">
                     <span class="train-ex-name">@ex.NamePl</span>
                     <span class="train-ex-target">Cel: @TargetText(ex)@(ex.RestSeconds is int rest && rest > 0 ? $" · przerwa {ExerciseTrackingRules.FormatDuration(rest)}" : "")</span>
+                    @if (!string.IsNullOrEmpty(ex.LastText))
+                    {
+                        <span class="train-ex-last">Ostatnio @ex.LastDate?.ToString("dd.MM"): @ex.LastText</span>
+                    }
+                    @if (ex.TargetWeightKg is { } tw && ex.LastMaxKg is { } lm && lm > 0 && tw > lm)
+                    {
+                        <span class="train-ex-up"><i class="bi bi-arrow-up-circle-fill"></i>Nowy ciężar od trenera: @tw.ToString("0.##") kg (ostatnio @lm.ToString("0.##"))</span>
+                    }
                 </span>
                 @if (exDone)
                 {
@@ -177,7 +186,7 @@ else
     else if (_summary is not null)
     {
         @* Po ankiecie (albo bez niej) — podsumowanie właśnie zakończonego treningu. *@
-        <WorkoutSummary Day="_summary" Survey="_summarySurvey" Celebrate="true" OnClose="() => _summary = null" />
+        <WorkoutSummary Day="_summary" Survey="_summarySurvey" Celebrate="true" Highlights="_highlights" OnClose="() => _summary = null" />
     }
 
     @if (_selectedPlan is null)
@@ -214,6 +223,10 @@ else
                 <a href="@($"/plans/{pdfId}/pdf")" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary" title="Plan do wydruku"><i class="bi bi-file-earmark-pdf me-1"></i>PDF</a>
             }
         </div>
+        @if (!string.IsNullOrWhiteSpace(_selectedPlan.Purpose))
+        {
+            <div class="train-purpose"><div class="train-purpose-label"><i class="bi bi-compass me-1"></i>Po co ten plan</div>@_selectedPlan.Purpose</div>
+        }
         <div class="text-muted small mb-2">Wybierz dzień:</div>
         <div class="row g-2">
             @foreach (var d in _selectedPlan.Days)
@@ -274,6 +287,7 @@ else
     private SurveyTemplateDto? _survey;
     private WorkoutJournalDayDto? _summary;
     private SurveyResponseDto? _summarySurvey;
+    private PTScheduler.Web.Services.WorkoutCompanionService.Summary? _highlights;
     private WorkoutJournalDayDto? _historyDay;
     private SurveyResponseDto? _historySurvey;
     private string _savedText = "";
@@ -408,6 +422,25 @@ else
                 return ex;
             }).ToList()
         };
+        // „Ostatnio” przy każdym ćwiczeniu; bez ciężaru w planie — wpisujemy ostatnio użyte kilogramy.
+        try
+        {
+            var last = await Companion.LastAsync(_clientId!.Value, _draft.Exercises.Select(e => e.ExerciseId).Distinct().ToList(), Clock.Today);
+            foreach (var ex in _draft.Exercises)
+            {
+                if (!last.TryGetValue(ex.ExerciseId, out var l)) continue;
+                ex.LastDate = l.Date;
+                ex.LastText = PTScheduler.Application.Training.WorkoutHighlights.Describe(l.Sets);
+                ex.LastMaxKg = l.MaxKg;
+                if (ex.TargetWeightKg is null && ExerciseTrackingRules.UsesWeight(ex.Tracking))
+                {
+                    var weights = l.Sets.Where(x => x.Reps > 0 && x.WeightKg > 0).Select(x => x.WeightKg).ToList();
+                    for (var i = 0; i < ex.Sets.Count && weights.Count > 0; i++)
+                        ex.Sets[i].Weight = weights[Math.Min(i, weights.Count - 1)];
+                }
+            }
+        }
+        catch (Exception lx) { LoggerFactory.CreateLogger("Train").LogWarning(lx, "Nie udało się wczytać poprzednich serii."); }
         _expanded.Clear();
         _selectedPlan = null;
         await SaveDraft();
@@ -600,6 +633,12 @@ else
             _justFinished = _savedText;
             _history = await WorkoutLog.GetRecentForClientAsync(_clientId.Value, 10);
             _summary = saved > 0 ? await WorkoutLog.GetDayAsync(_clientId.Value, workoutDate) : null;
+            _highlights = null;
+            if (saved > 0)
+            {
+                try { _highlights = await Companion.SummaryAsync(_clientId.Value, workoutDate); }
+                catch (Exception hx) { LoggerFactory.CreateLogger("Train").LogWarning(hx, "Podsumowanie treningu bez wyróżnień."); }
+            }
             _summarySurvey = null;
             _historyDay = null;
             await OfferSurveyAsync(workoutDate, minutes);
@@ -690,6 +729,10 @@ else
         public decimal? TargetDistanceMeters { get; set; }
         public int? RestSeconds { get; set; }
         public string? Notes { get; set; }
+        /// <summary>Ostatni raz z tym ćwiczeniem: data, opis serii („3×10 · 60 kg”) i najwyższy ciężar.</summary>
+        public DateOnly? LastDate { get; set; }
+        public string? LastText { get; set; }
+        public decimal? LastMaxKg { get; set; }
         public List<DraftSet> Sets { get; set; } = [];
     }
 

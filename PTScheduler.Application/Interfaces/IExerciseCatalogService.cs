@@ -26,6 +26,9 @@ public interface IExerciseCatalogService
     /// <summary>Przełącza „interesujące mnie". Zwraca nowy stan (true = ulubione).</summary>
     Task<bool> ToggleFavoriteAsync(string trainerUserId, int exerciseId);
 
+    /// <summary>Opis ćwiczenia słowami trenera dla jego klientów (pusty = opis z katalogu).</summary>
+    Task SetTrainerDescriptionAsync(string trainerUserId, int exerciseId, string? text);
+
     /// <summary>Odświeża znacznik „ostatnio używane" (wołane przy użyciu w planie).</summary>
     Task MarkUsedAsync(string trainerUserId, int exerciseId);
 

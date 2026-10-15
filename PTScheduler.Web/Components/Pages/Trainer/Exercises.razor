@@ -11,6 +11,7 @@
 @inject AuthenticationStateProvider AuthState
 @inject IJSRuntime JS
 @inject ILoggerFactory LoggerFactory
+@inject PTScheduler.Web.Services.PlatformAssistantService Platform
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Katalog ćwiczeń" />
@@ -234,7 +235,26 @@ else
                                 </div>
                             }
 
-                            <div class="small text-muted mb-1 mt-3">Jak wykonać</div>
+                            <div class="ex-own mt-3">
+                                <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-1">
+                                    <label class="small fw-semibold mb-0" for="ex-own">Moje wskazówki dla klientów</label>
+                                    @if (!string.IsNullOrWhiteSpace(_detail.DescriptionPl))
+                                    {
+                                        <button type="button" class="btn btn-sm btn-link px-0" @onclick="SimplifyAsync" disabled="@_ownBusy">
+                                            @if (_ownBusy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-magic me-1"></i> }
+                                            Uprość opis z katalogu
+                                        </button>
+                                    }
+                                </div>
+                                <textarea id="ex-own" class="form-control form-control-sm" rows="4" @bind="_ownDesc" maxlength="2000"
+                                          placeholder="Twoimi słowami, każdy krok w nowej linii — klienci zobaczą to w „Jak wykonać to ćwiczenie?” zamiast opisu z katalogu."></textarea>
+                                <div class="d-flex gap-2 align-items-center mt-1">
+                                    <button type="button" class="btn btn-sm btn-primary" @onclick="SaveOwnAsync"><i class="bi bi-check-lg me-1"></i>Zapisz wskazówki</button>
+                                    @if (_ownSaved) { <span class="small text-success">Zapisane — klienci już je widzą.</span> }
+                                </div>
+                            </div>
+
+                            <div class="small text-muted mb-1 mt-3">Jak wykonać (katalog)</div>
                             @{
                                 var descPl = string.IsNullOrWhiteSpace(_detail.DescriptionPl) ? null : _detail.DescriptionPl;
                                 var descEn = string.IsNullOrWhiteSpace(_detail.DescriptionEn) ? null : _detail.DescriptionEn;
@@ -436,6 +456,36 @@ else
 
 @code {
     private string _userId = string.Empty;
+    private string? _ownDesc;
+    private bool _ownBusy;
+    private bool _ownSaved;
+
+    private async Task SaveOwnAsync()
+    {
+        if (_detail is null) return;
+        await Catalog.SetTrainerDescriptionAsync(_userId, _detail.Id, _ownDesc);
+        _detail.TrainerDescription = string.IsNullOrWhiteSpace(_ownDesc) ? null : _ownDesc.Trim();
+        _ownSaved = true;
+    }
+
+    /// <summary>Krótsza, prostsza wersja opisu z katalogu (AI pod marką trenera, bez AI — pierwsze kroki z katalogu).</summary>
+    private async Task SimplifyAsync()
+    {
+        if (_detail?.DescriptionPl is not { Length: > 0 } source) return;
+        _ownBusy = true;
+        try
+        {
+            var steps = source.Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).Take(4).ToList();
+            var fallback = string.Join("\n", steps);
+            if (fallback.Length > 560) fallback = fallback[..560];
+            var cfg = await Platform.GetConfigAsync();
+            var text = await Platform.PhraseAsync($"opis-{_detail.Id}-{Guid.NewGuid():N}", "opis_cwiczenia",
+                new Dictionary<string, string> { ["cwiczenie"] = _detail.NamePl.Length <= 80 ? _detail.NamePl : _detail.NamePl[..80] }, fallback, cfg?.Ai == true, audience: "klient");
+            _ownDesc = text;
+            _ownSaved = false;
+        }
+        finally { _ownBusy = false; }
+    }
     private readonly ExerciseFilterDto _filter = new();
     private List<ExerciseListItemDto> _items = [];
     private List<string> _equipment = [];
@@ -491,6 +541,8 @@ else
     {
         _showEn = false;
         _detail = await Catalog.GetAsync(_userId, id);
+        _ownDesc = _detail?.TrainerDescription;
+        _ownSaved = false;
         _showDetail = _detail is not null;
     }
     private void CloseDetail() { _showDetail = false; _detail = null; }

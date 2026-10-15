@@ -20,4 +20,7 @@ public class TrainerExercisePref
 
     /// <summary>Ostatnie użycie w planie (instant, UTC). Null = nieużywane.</summary>
     public DateTime? LastUsedAt { get; set; }
+
+    /// <summary>Opis ćwiczenia słowami trenera (wskazówki dla klientów) — klient widzi go zamiast opisu z katalogu.</summary>
+    public string? CustomDescription { get; set; }
 }
