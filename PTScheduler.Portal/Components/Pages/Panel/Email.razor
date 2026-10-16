@@ -72,6 +72,15 @@ else
         </div>
     </div>
 
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-send"></i></span>Test</div>
+        <div class="card-body">
+            <label class="form-label small fw-semibold" for="testTo">Wyślij testowy e-mail na</label>
+            <input id="testTo" type="email" class="form-control" style="max-width:420px" @bind="_testTo" placeholder="twoj.prywatny@gmail.com" />
+            <div class="form-text">Np. Twój prywatny adres. Puste pole — test pójdzie na adres nadawcy (skrzynka noreply@@… zwykle nie istnieje). Test używa danych z formularza, także niezapisanych.</div>
+        </div>
+    </div>
+
     <div class="d-flex gap-2">
         <button type="submit" class="btn btn-primary" disabled="@_saving">
             @if (_saving)
@@ -95,6 +104,7 @@ else
     private bool _saving, _testing;
     private string? _message;
     private bool _isError;
+    private string _testTo = "";
 
     private class EmailForm
     {
@@ -125,6 +135,7 @@ else
         _form.SmtpFrom = s[SiteSettingsService.Keys.SmtpFrom];
         _form.SmtpFromName = s[SiteSettingsService.Keys.SmtpFromName];
         _form.SmtpSsl = s[SiteSettingsService.Keys.SmtpSsl] == "true";
+        _testTo = await Settings.GetAsync(SiteSettingsService.Keys.AdminNotificationEmail) ?? "";
     }
 
     private async Task Save()
@@ -180,10 +191,11 @@ else
                 Body = "Konfiguracja SMTP działa poprawnie!",
                 IsBodyHtml = false,
             };
-            mail.To.Add(from);
+            var to = string.IsNullOrWhiteSpace(_testTo) ? from : _testTo.Trim();
+            mail.To.Add(to);
 
             await smtp.SendMailAsync(mail);
-            _message = $"Testowy e-mail wysłany na {from}.";
+            _message = $"Testowy e-mail wysłany na {to}. Nie widać go? Zajrzyj do spamu i do logów wysyłki u dostawcy (Brevo → Transactional → Logs).";
             _isError = false;
         }
         catch (Exception ex)
