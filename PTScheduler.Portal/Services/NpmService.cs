@@ -80,7 +80,8 @@ public class NpmService(SiteSettingsService settings, ILogger<NpmService> logger
             var hostId = existing?.GetProperty("id").GetInt32();
             if (hostId is null)
             {
-                var (ok, body) = await SendAsync(url, token, HttpMethod.Post, "/api/nginx/proxy-hosts", HostPayload(domain, forwardHost, forwardPort, 0, false));
+                var (ok, body) = await SendWithMetaFallbackAsync(url, token, HttpMethod.Post, "/api/nginx/proxy-hosts", HostMetas,
+                    meta => HostPayload(domain, forwardHost, forwardPort, 0, false, meta));
                 if (!ok) return (false, $"NPM: {body}");
                 hostId = JsonDocument.Parse(body).RootElement.GetProperty("id").GetInt32();
             }
@@ -92,8 +93,8 @@ public class NpmService(SiteSettingsService settings, ILogger<NpmService> logger
                 return (true, $"Proxy host dla {domain} działa po http, ale certyfikat nie powstał: {certMsg}");
 
             // 3) Host z certyfikatem, wymuszonym HTTPS i HSTS.
-            var (updated, updBody) = await SendAsync(url, token, HttpMethod.Put, $"/api/nginx/proxy-hosts/{hostId}",
-                HostPayload(domain, forwardHost, forwardPort, certId.Value, true));
+            var (updated, updBody) = await SendWithMetaFallbackAsync(url, token, HttpMethod.Put, $"/api/nginx/proxy-hosts/{hostId}", HostMetas,
+                meta => HostPayload(domain, forwardHost, forwardPort, certId.Value, true, meta));
             return updated
                 ? (true, $"Zarejestrowano {domain} z HTTPS ({certMsg})")
                 : (true, $"Proxy host dla {domain} działa, ale nie udało się włączyć HTTPS: {updBody}");
@@ -126,7 +127,27 @@ public class NpmService(SiteSettingsService settings, ILogger<NpmService> logger
         return results;
     }
 
-    private static object HostPayload(string domain, string forwardHost, int forwardPort, int certificateId, bool ssl) => new
+    // Różne wersje NPM przyjmują różne pola „meta”: starsze chcą letsencrypt_*, nowsze (2.12+) odrzucają je
+    // błędem „data/meta must NOT have additional properties”. Próbujemy od najpełniejszego wariantu.
+    private static readonly object[] HostMetas = [new { letsencrypt_agree = false, dns_challenge = false }, new { dns_challenge = false }, new { }];
+
+    private static async Task<(bool Ok, string Body)> SendWithMetaFallbackAsync(string url, string token, HttpMethod method, string path,
+        object[] metas, Func<object, object> payload, TimeSpan? timeout = null)
+    {
+        (bool Ok, string Body) result = (false, "");
+        foreach (var meta in metas)
+        {
+            result = await SendAsync(url, token, method, path, payload(meta), timeout);
+            if (result.Ok || !IsSchemaRejection(result.Body)) return result;
+        }
+        return result;
+    }
+
+    /// <summary>NPM odrzucił pola zapytania (inna wersja API), a nie samą operację.</summary>
+    public static bool IsSchemaRejection(string body) =>
+        body.Contains("additional properties", StringComparison.OrdinalIgnoreCase) || body.Contains("must NOT have", StringComparison.OrdinalIgnoreCase);
+
+    private static object HostPayload(string domain, string forwardHost, int forwardPort, int certificateId, bool ssl, object? meta = null) => new
     {
         domain_names = new[] { domain },
         forward_scheme = "http",
@@ -142,7 +163,7 @@ public class NpmService(SiteSettingsService settings, ILogger<NpmService> logger
         hsts_enabled = ssl,
         hsts_subdomains = false,
         enabled = true,
-        meta = new { letsencrypt_agree = false, dns_challenge = false },
+        meta = meta ?? HostMetas[0],
         advanced_config = "",
         locations = Array.Empty<object>()
     };
@@ -169,19 +190,17 @@ public class NpmService(SiteSettingsService settings, ILogger<NpmService> logger
 
         var s = await settings.GetAllAsync(SiteSettingsService.Keys.AdminNotificationEmail, SiteSettingsService.Keys.NpmEmail);
         var email = s[SiteSettingsService.Keys.AdminNotificationEmail] is { Length: > 0 } a ? a : s[SiteSettingsService.Keys.NpmEmail];
-        var payload = new
-        {
-            provider = "letsencrypt",
-            nice_name = domain,
-            domain_names = new[] { domain },
-            meta = new { letsencrypt_email = email, letsencrypt_agree = true, dns_challenge = false }
-        };
+        // Nowsze NPM biorą e-mail do Let's Encrypt z konta NPM i nie przyjmują go w zapytaniu.
+        object[] metas = [new { letsencrypt_email = email, letsencrypt_agree = true, dns_challenge = false }, new { dns_challenge = false }, new { }];
         // Let's Encrypt weryfikuje domenę przez http — to trwa do minuty.
-        var (created, certBody) = await SendAsync(url, token, HttpMethod.Post, "/api/nginx/certificates", payload, TimeSpan.FromSeconds(120));
+        var (created, certBody) = await SendWithMetaFallbackAsync(url, token, HttpMethod.Post, "/api/nginx/certificates", metas,
+            meta => new { provider = "letsencrypt", nice_name = domain, domain_names = new[] { domain }, meta }, TimeSpan.FromSeconds(120));
         if (!created)
         {
             logger.LogWarning("Let's Encrypt dla {Domain} nie powiódł się: {Body}", domain, certBody);
-            return (null, "Let's Encrypt odmówił — sprawdź, czy domena wskazuje na ten serwer (rekord A) i czy port 80 jest otwarty. " + Short(certBody));
+            return (null, IsSchemaRejection(certBody)
+                ? "NPM nie przyjął zapytania o certyfikat (nieznana wersja API NPM) — wystaw go ręcznie w NPM albo zaktualizuj Portal. " + Short(certBody)
+                : "Let's Encrypt odmówił — sprawdź, czy domena wskazuje na ten serwer (rekord A) i czy port 80 jest otwarty. " + Short(certBody));
         }
         return (JsonDocument.Parse(certBody).RootElement.GetProperty("id").GetInt32(), "nowy certyfikat Let's Encrypt");
     }
@@ -350,8 +369,8 @@ public class NpmService(SiteSettingsService settings, ILogger<NpmService> logger
             if (!renewed)
                 return (false, $"Let's Encrypt nie odnowił certyfikatu {host.Domain} — sprawdź, czy domena wskazuje na ten serwer i czy port 80 jest otwarty. {Short(body)}");
             if (!host.SslForced)
-                await SendAsync(url, token, HttpMethod.Put, $"/api/nginx/proxy-hosts/{host.Id}",
-                    HostPayload(host.Domain, host.ForwardHost, host.ForwardPort, host.CertificateId, true));
+                await SendWithMetaFallbackAsync(url, token, HttpMethod.Put, $"/api/nginx/proxy-hosts/{host.Id}", HostMetas,
+                    meta => HostPayload(host.Domain, host.ForwardHost, host.ForwardPort, host.CertificateId, true, meta));
             DateTime? expires = null;
             try { expires = JsonDocument.Parse(body).RootElement.TryGetProperty("expires_on", out var e) && DateTime.TryParse(e.GetString(), out var d) ? d : null; } catch { }
             return (true, $"Odnowiono certyfikat {host.Domain}" + (expires is { } x ? $" — ważny do {x:dd.MM.yyyy}." : "."));
