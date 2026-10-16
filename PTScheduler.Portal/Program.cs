@@ -529,7 +529,7 @@ app.MapGet("/moje-konto/subskrypcja/{id:int}", async (int id, HttpContext ctx, I
 app.MapGet("/api/konto/wyloguj", async (HttpContext ctx) =>
 {
     await Microsoft.AspNetCore.Authentication.AuthenticationHttpContextExtensions.SignOutAsync(ctx, TrainerAccounts.Scheme);
-    return Results.Redirect("/login?wylogowano=1");
+    return Results.Redirect("/logout?trener=1");
 });
 
 // Drugi krok logowania: kod z Google Authenticator (TOTP) albo kod zapasowy.

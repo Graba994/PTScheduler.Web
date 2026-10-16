@@ -409,9 +409,20 @@
 
     // Zalogowany trener widzi skrót do swojego panelu, ale formularz zostaje — ta sama przeglądarka
     // może służyć administratorowi (np. po teście kreatora), więc niczego nie przekierowujemy.
+    [SupplyParameterFromQuery(Name = "z")] public string? From { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
-        if (Http is not null && !TwoFactorStep) _trainerEmail = await TrainerAccounts.CurrentEmailAsync(Http);
+        if (Http is null || TwoFactorStep || !string.IsNullOrEmpty(Error)) return;
+        // Już zalogowany administrator nie musi wpisywać hasła — od razu do Panelu.
+        if (Http.User.Identity?.IsAuthenticated == true && Http.User.IsInRole("Admin") && Wylogowano is null)
+        {
+            Nav.NavigateTo(ReturnUrl is { Length: > 1 } r && r.StartsWith('/') && !r.StartsWith("//") ? r : "/panel");
+            return;
+        }
+        _trainerEmail = await TrainerAccounts.CurrentEmailAsync(Http);
+        // Z kreatora („Masz już aplikację?”) zalogowany trener trafia prosto do swojego panelu.
+        if (_trainerEmail is not null && From == "kreator") Nav.NavigateTo("/moje-konto");
     }
 
     private bool TwoFactorStep => Step == "2fa";
