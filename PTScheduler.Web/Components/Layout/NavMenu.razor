@@ -22,8 +22,11 @@
 <!-- Navigation -->
 <div class="sidebar-nav">
     <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer},{Roles.Subordinate}")">
+        @* Cztery grupy zamiast długiej listy: praca na co dzień, trening, biznes, ustawienia. *@
+        <div class="sidebar-quick"><QuickAdd Css="qa-side" Label="Dodaj" /></div>
+        <div class="sidebar-label">Praca</div>
         <NavLink class="sidebar-link" href="app" Match="NavLinkMatch.All">
-            <i class="bi bi-house-fill"></i><span>Dashboard</span>
+            <i class="bi bi-house-fill"></i><span>Pulpit</span>
         </NavLink>
         <NavLink class="sidebar-link" href="dzis">
             <i class="bi bi-sun"></i><span>Dziś</span>
@@ -31,34 +34,51 @@
         <NavLink class="sidebar-link" href="calendar">
             <i class="bi bi-calendar3"></i><span>Kalendarz</span>
         </NavLink>
-        <NavLink class="sidebar-link" href="sessions">
-            <i class="bi bi-calendar-check"></i><span>Wizyty</span>
-        </NavLink>
         <NavLink class="sidebar-link" href="clients">
             <i class="bi bi-people-fill"></i><span>Klienci</span>
         </NavLink>
-        <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer}")" Context="retentionAuth">
-            <NavLink class="sidebar-link" href="trainer/retencja">
-                <i class="bi bi-heart-pulse"></i><span>Mogą odejść</span>
-            </NavLink>
-        </AuthorizeView>
         <NavLink class="sidebar-link" href="chat">
             <i class="bi bi-chat-dots-fill"></i><span>Wiadomości</span>
             <ChatUnreadBadge @rendermode="PTScheduler.Web.RenderModes.Server" />
         </NavLink>
-        @* Moduły spoza planu nie pojawiają się w menu (nikomu) — dostępne plany pokazuje „Ulepsz plan”. *@
-        @if (Entitlements.IsAllowed("AdvancedAnalytics"))
+
+        @if (Entitlements.IsAllowed("TrainingPlansEnabled"))
         {
-            <NavLink class="sidebar-link" href="stats">
-                <i class="bi bi-bar-chart-line-fill"></i><span>Statystyki</span>
+            <div class="sidebar-label">Trening</div>
+            <NavLink class="sidebar-link" href="plans">
+                <i class="bi bi-list-check"></i><span>Plany</span>
+            </NavLink>
+            <NavLink class="sidebar-link" href="exercises">
+                <i class="bi pt-ico-dumbbell"></i><span>Ćwiczenia</span>
+            </NavLink>
+            <NavLink class="sidebar-link" href="trainer/activity">
+                <i class="bi bi-people"></i><span>Aktywność</span>
             </NavLink>
         }
+
+        @if (Entitlements.IsAllowed("FinancialReports") || Entitlements.IsAllowed("AdvancedAnalytics")
+             || context.User.IsInRole(Roles.Admin) || context.User.IsInRole(Roles.Trainer))
+        {
+            <div class="sidebar-label">Biznes</div>
+        }
+        @* Moduły spoza planu nie pojawiają się w menu (nikomu) — dostępne plany pokazuje „Ulepsz plan”. *@
         @if (Entitlements.IsAllowed("FinancialReports"))
         {
             <NavLink class="sidebar-link" href="finance">
                 <i class="bi bi-currency-dollar"></i><span>Finanse</span>
             </NavLink>
         }
+        @if (Entitlements.IsAllowed("AdvancedAnalytics"))
+        {
+            <NavLink class="sidebar-link" href="stats">
+                <i class="bi bi-bar-chart-line-fill"></i><span>Statystyki</span>
+            </NavLink>
+        }
+        <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer}")" Context="retentionAuth">
+            <NavLink class="sidebar-link" href="trainer/retencja">
+                <i class="bi bi-heart-pulse"></i><span>Mogą odejść</span>
+            </NavLink>
+        </AuthorizeView>
     </AuthorizeView>
 
     <AuthorizeView Roles="@Roles.Client">
@@ -83,7 +103,7 @@
     </AuthorizeView>
 
     <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer},{Roles.Subordinate}")">
-        <div class="sidebar-divider"></div>
+        <div class="sidebar-label">Ustawienia</div>
         <NavLink class="sidebar-link" href="trainer/availability">
             <i class="bi bi-clock-fill"></i><span>Godziny pracy</span>
         </NavLink>
@@ -96,22 +116,6 @@
         <NavLink class="sidebar-link" href="trainer/pairs">
             <i class="bi bi-people-fill"></i><span>Treningi w parach</span>
         </NavLink>
-        @if (Entitlements.IsAllowed("TrainingPlansEnabled"))
-        {
-            <NavLink class="sidebar-link" href="exercises">
-                <i class="bi pt-ico-dumbbell"></i><span>Ćwiczenia</span>
-            </NavLink>
-            <NavLink class="sidebar-link" href="plans">
-                <i class="bi bi-list-check"></i><span>Plany</span>
-            </NavLink>
-            <NavLink class="sidebar-link" href="trainer/activity">
-                <i class="bi bi-people"></i><span>Aktywność</span>
-            </NavLink>
-        }
-    </AuthorizeView>
-
-    <AuthorizeView Roles="@($"{Roles.Admin},{Roles.Trainer},{Roles.Subordinate}")">
-        <div class="sidebar-divider"></div>
         <NavLink class="sidebar-link" href="admin" Match="NavLinkMatch.All">
             <i class="bi bi-shield-fill-check"></i><span>Zarządzanie</span>
         </NavLink>

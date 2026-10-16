@@ -3,6 +3,7 @@
 @using Microsoft.AspNetCore.Authorization
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Exceptions
 @using PTScheduler.Domain.Constants
 @using PTScheduler.Domain.Enums
 @using Microsoft.EntityFrameworkCore
@@ -218,7 +219,17 @@
                                 <a class="td-icon" href="@($"tel:{phone}")" title="Zadzwoń" aria-label="Zadzwoń"><i class="bi bi-telephone"></i></a>
                             }
                             <a class="td-icon" href="@($"/chat?client={s.ClientId}")" title="Wiadomość" aria-label="Wiadomość"><i class="bi bi-chat-dots"></i></a>
+                            @if (_cardsLoaded && !s.IsPair && s.Status != SessionStatus.NoShow && !_hasFuture.Contains(s.ClientId))
+                            {
+                                <button type="button" class="td-rebook" disabled="@_busy" title="Ten sam rodzaj i godzina za tydzień" @onclick="() => RebookAsync(s)">
+                                    <i class="bi bi-arrow-repeat"></i>Umów za tydzień <small>@s.StartTime.AddDays(7).ToString("ddd d.MM", Pl)</small>
+                                </button>
+                            }
                         </div>
+                        @if (_rebookConflict == s.Id)
+                        {
+                            <div class="td-confirm"><span>Ten termin za tydzień jest zajęty.</span><a class="btn btn-sm btn-outline-primary" href="@($"/calendar?klient={s.ClientId}")">Wybierz inny w kalendarzu</a></div>
+                        }
                         @if (_flash.TryGetValue(s.Id, out var msg)) { <div class="td-flash"><i class="bi bi-check2-circle"></i>@msg</div> }
                     </div>
                 </li>
@@ -264,7 +275,8 @@
     private string? _daySummary, _mascot, _error, _noteText;
     private int? _noteFor, _confirmNoShow;
     private readonly Dictionary<int, string> _flash = [];
-    private HashSet<int> _logged = [], _noted = [];
+    private HashSet<int> _logged = [], _noted = [], _hasFuture = [];
+    private int? _rebookConflict;
     private bool _drafting;
 
     private string DayTitle => _day == _today ? "Dziś" : _day == _today.AddDays(1) ? "Jutro" : _day == _today.AddDays(-1) ? "Wczoraj" : "Dzień";
@@ -300,6 +312,16 @@
                 await using var db = await DbFactory.CreateDbContextAsync();
                 _logged = (await db.WorkoutLogs.Where(l => clientIds.Contains(l.ClientId) && l.WorkoutDate == _day).Select(l => l.ClientId).Distinct().ToListAsync()).ToHashSet();
                 _noted = (await db.TrainerNotes.Where(n => clientIds.Contains(n.ClientId) && n.CreatedAt >= fromUtc && n.CreatedAt < toUtc).Select(n => n.ClientId).Distinct().ToListAsync()).ToHashSet();
+            }
+            if (_visits.Count > 0)
+            {
+                // Klienci, którzy mają już kolejną wizytę — im nie proponujemy „Umów za tydzień”.
+                var ids = _visits.Select(v => v.S.ClientId).Distinct().ToList();
+                var after = from.AddDays(1);
+                await using var db2 = await DbFactory.CreateDbContextAsync();
+                _hasFuture = (await db2.Sessions.Where(x => ids.Contains(x.ClientId) && x.StartTime >= after
+                        && (x.Status == SessionStatus.Scheduled || x.Status == SessionStatus.AwaitingPackage))
+                    .Select(x => x.ClientId).Distinct().ToListAsync()).ToHashSet();
             }
             if (_plansOn && _visits.Count > 0)
             {
@@ -426,6 +448,24 @@
         try { _noteText = await NoteDrafts.DraftAsync(s.ClientId, _day, $"note-{s.Id}") ?? _noteText; }
         catch { }
         finally { _drafting = false; }
+    }
+
+    private async Task RebookAsync(SessionDto s)
+    {
+        _busy = true; _error = null; _rebookConflict = null;
+        try
+        {
+            var created = await SessionService.CreateSessionAsync(new CreateSessionDto
+            {
+                ClientId = s.ClientId, SessionTypeId = s.SessionTypeId, TrainerUserId = s.TrainerUserId, StartTime = s.StartTime.AddDays(7)
+            });
+            _hasFuture.Add(s.ClientId);
+            _flash[s.Id] = $"Umówiono: {created.StartTime.ToString("dddd d.MM, HH:mm", Pl)}. Klient dostanie potwierdzenie.";
+        }
+        catch (SlotConflictException) { _rebookConflict = s.Id; }
+        catch (InvalidOperationException ex) { _error = ex.Message; }
+        catch { _error = "Nie udało się umówić wizyty."; }
+        finally { _busy = false; }
     }
 
     private async Task MarkPaidAsync(SessionDto s, string via)

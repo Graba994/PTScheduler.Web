@@ -55,6 +55,15 @@ export function initCalendar(dotnetRef, el, canEdit) {
             } catch (e) { failure(e); }
         },
         dateClick: canEdit ? info => dotnetRef.invokeMethodAsync('OnDateClick', info.dateStr) : undefined,
+        // Przeciąganie: tylko zaplanowane wizyty (każde zdarzenie ma własne „editable”), długość się nie zmienia.
+        editable: false,
+        eventDurationEditable: false,
+        eventAllow: dropInfo => dropInfo.start >= new Date(),
+        eventDrop: async info => {
+            const error = await dotnetRef.invokeMethodAsync('OnEventDrop', parseInt(info.event.id), localIso(info.event.start));
+            if (error) { info.revert(); showCalToast(error, true); }
+            else { showCalToast('Przeniesiono na ' + info.event.start.toLocaleString('pl-PL', { weekday: 'short', day: 'numeric', month: 'numeric', hour: '2-digit', minute: '2-digit' }) + '. Klient dostanie informację.', false); }
+        },
         eventContent: renderEventContent,
         eventClick: info => dotnetRef.invokeMethodAsync('OnEventClick', parseInt(info.event.id)),
         eventDidMount: info => {
@@ -170,4 +179,20 @@ export function destroyCalendar() {
     if (summaryEl) { summaryEl.remove(); summaryEl = null; }
     calendar?.destroy();
     calendar = null;
+}
+
+// Zegar ścienny bez strefy (tak jak StartTime w bazie): 2026-10-17T10:30:00
+function localIso(d) {
+    const p = n => String(n).padStart(2, '0');
+    return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}T${p(d.getHours())}:${p(d.getMinutes())}:00`;
+}
+
+function showCalToast(text, isError) {
+    let el = document.querySelector('.cal-toast');
+    if (!el) { el = document.createElement('div'); el.className = 'cal-toast'; el.setAttribute('role', 'status'); document.body.appendChild(el); }
+    el.textContent = text;
+    el.classList.toggle('is-error', !!isError);
+    el.classList.add('show');
+    clearTimeout(el._t);
+    el._t = setTimeout(() => el.classList.remove('show'), isError ? 6000 : 3500);
 }

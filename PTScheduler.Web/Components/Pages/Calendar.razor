@@ -33,6 +33,7 @@
                 <i class="bi bi-calendar3 me-2"></i>Kalendarz
             </h4>
             <CalendarFeedButton />
+            @if (_canEdit) { <ScheduleViewSwitch Current="calendar" /> }
         </div>
         <div class="cal-filters">
             <button class='cal-filter-chip chip-all @(IsAllActive ? "active" : "")'
@@ -409,13 +410,21 @@
 
                     <div class="mb-3">
                         <label class="form-label small fw-semibold mb-1">Klient</label>
-                        <select class="form-select form-select-sm" @bind="_bookingClientId" @bind:after="LoadBookingPartnersAsync">
+                        <select class="form-select form-select-sm" @bind="_bookingClientId" @bind:after="OnBookingClientChanged">
                             <option value="0">— wybierz —</option>
                             @foreach (var c in _allClients)
                             {
                                 <option value="@c.Id">@c.FullName</option>
                             }
                         </select>
+                        @if (_bookingHabit is { } habit)
+                        {
+                            <button type="button" class="cal-habit" @onclick="UseHabitAsync">
+                                <i class="bi bi-stars"></i>
+                                <span>Zwykle <b>@HabitDay(habit.Day) @habit.Time.ToString("HH:mm")</b> — ustaw @habit.NextAfter(StudioClock.Now).ToString("d.MM")</span>
+                            </button>
+                        }
+                        @if (!string.IsNullOrEmpty(_habitNote)) { <div class="small text-muted mt-1">@_habitNote</div> }
                     </div>
 
                     <div class="mb-3">
@@ -637,12 +646,26 @@
         }
     }
 
+    [SupplyParameterFromQuery(Name = "nowa")] public string? NewQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "klient")] public int? ClientQuery { get; set; }
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
         _ref    = DotNetObjectReference.Create(this);
         _module = await JS.InvokeAsync<IJSObjectReference>("import", "/js/calendar-interop.js");
         await _module.InvokeVoidAsync("initCalendar", _ref, _calendarEl, _canEdit);
+        // Szybkie akcje i „Umów” z ekranu Dziś: od razu panel nowej wizyty (z wybranym klientem).
+        if (_canEdit && (NewQuery == "1" || ClientQuery is not null))
+        {
+            await OnDateClick(StudioClock.Today.ToString("yyyy-MM-dd"));
+            if (ClientQuery is { } cid && _allClients.Any(c => c.Id == cid))
+            {
+                _bookingClientId = cid;
+                await OnBookingClientChanged();
+                StateHasChanged();
+            }
+        }
     }
 
     [JSInvokable]
@@ -679,7 +702,8 @@
                     trainerName = s.TrainerName,
                     initials    = s.IsPair && s.PartnerActive && !_isClientRole ? PairInitials(s) : Initials(s.ClientName),
                     duration    = s.DurationMinutes
-                }
+                },
+                editable = _canEdit && !_isClientRole && (s.Status is SessionStatus.Scheduled or SessionStatus.AwaitingPackage) && s.StartTime > StudioClock.Now
             }).ToList();
 
             // Zajęte terminy z Google Calendar jako tło — widać, czemu godzina nie jest do rezerwacji.
@@ -833,6 +857,64 @@
     }
 
     // Partner podpowiadany z par; gdy para jest jedna — wybrany od razu.
+    private PTScheduler.Application.Scheduling.BookingHabit? _bookingHabit;
+    private string? _habitNote;
+
+    private async Task OnBookingClientChanged()
+    {
+        _bookingHabit = null; _habitNote = null;
+        await LoadBookingPartnersAsync();
+        if (_bookingClientId <= 0) return;
+        try
+        {
+            var recent = await SessionService.GetClientSessionsAsync(_bookingClientId, 12);
+            _bookingHabit = PTScheduler.Application.Scheduling.BookingHabit.Detect(recent.Select(r => (r.StartTime, r.SessionTypeId, r.Status)));
+        }
+        catch { _bookingHabit = null; }
+    }
+
+    /// <summary>„Zwykle wt 18:00” — ustawia rodzaj, dzień i godzinę, jeśli termin jest wolny.</summary>
+    private async Task UseHabitAsync()
+    {
+        if (_bookingHabit is not { } h) return;
+        if (_sessionTypes.Any(t => t.Id == h.SessionTypeId)) _bookingSessionTypeId = h.SessionTypeId;
+        var next = h.NextAfter(StudioClock.Now);
+        _bookingSlotDate = DateOnly.FromDateTime(next);
+        await LoadBookingSlotsAsync();
+        var slot = _bookingAvailableSlots.FirstOrDefault(x => x.Start == next);
+        if (slot is not null) { _bookingDateTime = slot.Start; _habitNote = null; }
+        else _habitNote = $"{next:d.MM, HH:mm} jest zajęte — wybierz inną godzinę poniżej.";
+    }
+
+    private static string HabitDay(DayOfWeek d) => d switch
+    {
+        DayOfWeek.Monday => "pon.", DayOfWeek.Tuesday => "wt.", DayOfWeek.Wednesday => "śr.", DayOfWeek.Thursday => "czw.",
+        DayOfWeek.Friday => "pt.", DayOfWeek.Saturday => "sob.", _ => "niedz."
+    };
+
+    /// <summary>Przeciągnięcie wizyty w kalendarzu. Zwraca komunikat błędu (wtedy kafelek wraca na miejsce) albo null.</summary>
+    [JSInvokable]
+    public async Task<string?> OnEventDrop(int sessionId, string newStart)
+    {
+        if (!_canEdit) return "Brak uprawnień.";
+        if (!DateTime.TryParse(newStart, CultureInfo.InvariantCulture, DateTimeStyles.None, out var start)) return "Nieprawidłowy termin.";
+        try
+        {
+            var s = await SessionService.GetSessionAsync(sessionId);
+            if (s is null || (!_isAdminRole && s.TrainerUserId != _userId)) return "Nie znaleziono wizyty.";
+            if (s.Status is not (SessionStatus.Scheduled or SessionStatus.AwaitingPackage)) return "Przenieść można tylko zaplanowaną wizytę.";
+            if (start < StudioClock.Now) return "Nie można przenieść wizyty w przeszłość.";
+            await SessionService.RescheduleAsync(sessionId, start);
+            await AuditLogService.LogAsync(_userId, _userEmail, _userRole, "SessionRescheduled", "Session", sessionId.ToString(),
+                $"Klient: {s.ClientName}, stary: {s.StartTime:dd.MM.yyyy HH:mm}, nowy: {start:dd.MM.yyyy HH:mm} (przeciągnięto w kalendarzu)");
+            if (_selectedSession?.Id == sessionId) await OnEventClick(sessionId);
+            return null;
+        }
+        catch (SlotConflictException) { return "W tym terminie jest już inna wizyta — kafelek wrócił na miejsce. Żeby nałożyć terminy, użyj „Przeplanuj wizytę”."; }
+        catch (InvalidOperationException ex) { return ex.Message; }
+        catch (Exception ex) { Logger.LogWarning(ex, "Przeciąganie wizyty {Id} nie powiodło się", sessionId); return "Nie udało się przenieść wizyty."; }
+    }
+
     private async Task LoadBookingPartnersAsync()
     {
         _bookingPartners = _bookingClientId > 0 ? await PairService.GetPartnersAsync(_bookingClientId) : [];

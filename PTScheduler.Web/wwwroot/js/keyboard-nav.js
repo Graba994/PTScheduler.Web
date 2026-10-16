@@ -43,3 +43,13 @@ window.PTKeyboard = (() => {
 
     return { listen, unlisten };
 })();
+
+// Menu „+” (QuickAdd): zamknij po wyborze i po kliknięciu obok.
+document.addEventListener('click', e => {
+    document.querySelectorAll('details.qa[open]').forEach(d => {
+        if (!d.contains(e.target) || e.target.closest('.qa-menu a')) d.removeAttribute('open');
+    });
+});
+document.addEventListener('keydown', e => {
+    if (e.key === 'Escape') document.querySelectorAll('details.qa[open]').forEach(d => d.removeAttribute('open'));
+});
