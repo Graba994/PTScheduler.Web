@@ -9,6 +9,7 @@
 @inject UserManager<ApplicationUser> UserManager
 @inject EntitlementService Entitlements
 @inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Użytkownicy" />
@@ -20,6 +21,38 @@
     </button>
 </div>
 <hr />
+
+@if (_solo is { Possible: true } solo)
+{
+    <section class="solo-card @(solo.Enabled ? "on" : "")" id="solo" aria-labelledby="solo-title">
+        <div class="solo-ic" aria-hidden="true"><i class="bi @(solo.Enabled ? "bi-person-check-fill" : "bi-person-workspace")"></i></div>
+        <div class="min-w-0 flex-grow-1">
+            <h6 id="solo-title">Pracuję sam — jedno konto do wszystkiego</h6>
+            @if (solo.Enabled)
+            {
+                <p>Włączone. Profil trenera <b>@solo.TrainerName</b> (@solo.TrainerEmail) ma też uprawnienia administratora — loguj się tylko nim, bez przełączania. To konto zostaje jako zapasowe.</p>
+            }
+            else
+            {
+                <p>Masz jeden profil trenera. Po włączeniu <b>@solo.TrainerName</b> dostanie też uprawnienia administratora: ustawienia, ceny i treningi w jednym miejscu, bez przełączania kont.</p>
+            }
+            @if (_soloMsg is not null) { <div class="small @(_soloErr ? "text-danger" : "text-success") mb-2">@_soloMsg</div> }
+            <div class="d-flex gap-2 flex-wrap">
+                <button type="button" class="btn btn-sm @(solo.Enabled ? "btn-outline-secondary" : "btn-primary")" disabled="@_soloBusy" @onclick="() => ToggleSoloAsync(!solo.Enabled)">
+                    @(solo.Enabled ? "Wyłącz" : "Włącz tryb „pracuję sam”")
+                </button>
+                @if (solo.Enabled && solo.TrainerId is { } tid && _canSwitchToSolo)
+                {
+                    <form action="Account/SwitchTo" method="post" data-enhance="false">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="userId" value="@tid" />
+                        <button type="submit" class="btn btn-sm btn-success"><i class="bi bi-person-badge me-1"></i>Przejdź na swój profil</button>
+                    </form>
+                }
+            </div>
+        </div>
+    </section>
+}
 
 @if (users is null)
 {
@@ -182,6 +215,27 @@ else
 }
 
 @code {
+    private SoloModeState? _solo;
+    private string? _currentUserId;
+    private bool _soloBusy, _soloErr, _canSwitchToSolo;
+    private string? _soloMsg;
+
+    private async Task LoadSoloAsync()
+    {
+        try { _solo = await UserService.GetSoloModeAsync(); } catch { _solo = null; }
+        _canSwitchToSolo = _solo?.TrainerId is not null && _currentUserId != _solo.TrainerId;
+    }
+
+    private async Task ToggleSoloAsync(bool on)
+    {
+        _soloBusy = true; _soloMsg = null;
+        var (ok, error) = await UserService.SetSoloModeAsync(on);
+        _soloErr = !ok;
+        _soloMsg = ok ? (on ? "Gotowe. Przejdź na swój profil — od teraz to Twoje jedyne konto do pracy." : "Wyłączone. Profil trenera ma znowu tylko uprawnienia trenera.") : error;
+        await LoadSoloAsync();
+        _soloBusy = false;
+    }
+
     private List<UserDto>? users;
     private List<UserDto> trainers = [];
     private string search = string.Empty;
@@ -203,6 +257,8 @@ else
     {
         users = await UserService.GetAllUsersAsync();
         trainers = await UserService.GetTrainersAsync();
+        _currentUserId = (await AuthState.GetAuthenticationStateAsync()).User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        await LoadSoloAsync();
     }
 
     private void OpenCreateModal()

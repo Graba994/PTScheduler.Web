@@ -23,6 +23,8 @@ public class AccountSwitchTests
     [InlineData(new[] { Roles.Admin }, new[] { Roles.Subordinate }, true)]
     [InlineData(new[] { Roles.Admin }, new[] { Roles.Client }, false)]
     [InlineData(new[] { Roles.Admin }, new[] { Roles.Admin }, false)]
+    // Tryb „pracuję sam”: profil trenera właściciela ma też uprawnienia administratora.
+    [InlineData(new[] { Roles.Admin }, new[] { Roles.Admin, Roles.Trainer }, true)]
     [InlineData(new[] { Roles.Admin }, new[] { Roles.Admin, Roles.Root }, false)]
     // Trener i klient nie przełączają się na nikogo.
     [InlineData(new[] { Roles.Trainer }, new[] { Roles.Client }, false)]

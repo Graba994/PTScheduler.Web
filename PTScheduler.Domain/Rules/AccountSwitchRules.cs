@@ -7,15 +7,16 @@ public static class AccountSwitchRules
 {
     /// <summary>
     /// Konto techniczne (Root) → każde konto poza innym kontem technicznym (np. klient — do testów).
-    /// Administrator studia → trenerzy i asystenci. Pozostali — nikt.
+    /// Administrator studia → trenerzy i asystenci, także własny profil trenera z uprawnieniami
+    /// administratora (tryb „pracuję sam”). Pozostali — nikt.
     /// </summary>
     public static bool CanSwitch(ICollection<string> actorRoles, ICollection<string> targetRoles)
     {
         if (actorRoles.Contains(Roles.Root))
             return !targetRoles.Contains(Roles.Root);
         if (actorRoles.Contains(Roles.Admin))
-            return !targetRoles.Contains(Roles.Admin)
-                && (targetRoles.Contains(Roles.Trainer) || targetRoles.Contains(Roles.Subordinate));
+            return !targetRoles.Contains(Roles.Root)
+                && (targetRoles.Contains(Roles.Trainer) || (!targetRoles.Contains(Roles.Admin) && targetRoles.Contains(Roles.Subordinate)));
         return false;
     }
 }

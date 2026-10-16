@@ -75,6 +75,38 @@ public class UserManagementService(
         }
     }
 
+    public async Task<SoloModeState> GetSoloModeAsync()
+    {
+        var trainers = await userManager.GetUsersInRoleAsync(Roles.Trainer);
+        var assistants = await userManager.GetUsersInRoleAsync(Roles.Subordinate);
+        if (trainers.Count != 1 || assistants.Count > 0) return new(false, false, null, null, null);
+        var t = trainers[0];
+        var enabled = await userManager.IsInRoleAsync(t, Roles.Admin);
+        return new(true, enabled, t.Id, $"{t.FirstName} {t.LastName}".Trim(), t.Email);
+    }
+
+    public async Task<(bool Ok, string? Error)> SetSoloModeAsync(bool on)
+    {
+        var state = await GetSoloModeAsync();
+        if (!state.Possible || state.TrainerId is null)
+            return (false, "Tryb „pracuję sam” działa, gdy w studiu jest jeden profil trenera i nie ma asystentów.");
+        var trainer = await userManager.FindByIdAsync(state.TrainerId);
+        if (trainer is null) return (false, "Nie znaleziono profilu trenera.");
+        if (on == state.Enabled) return (true, null);
+        if (!on)
+        {
+            // Bez drugiego administratora nikt nie mógłby już zmieniać ustawień studia.
+            var admins = await userManager.GetUsersInRoleAsync(Roles.Admin);
+            if (!admins.Any(a => a.Id != trainer.Id && (a.LockoutEnd is null || a.LockoutEnd < DateTimeOffset.UtcNow)))
+                return (false, "Najpierw utwórz osobne konto administratora — inaczej nikt nie zmieni ustawień studia.");
+        }
+        var result = on ? await userManager.AddToRoleAsync(trainer, Roles.Admin) : await userManager.RemoveFromRoleAsync(trainer, Roles.Admin);
+        if (!result.Succeeded) return (false, string.Join(" ", result.Errors.Select(e => e.Description)));
+        // Nowe uprawnienia obowiązują od następnego logowania na profil trenera.
+        await userManager.UpdateSecurityStampAsync(trainer);
+        return (true, null);
+    }
+
     public async Task SetSupervisorAsync(string userId, string? supervisorId)
     {
         var user = await userManager.FindByIdAsync(userId)
