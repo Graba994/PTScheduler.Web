@@ -333,6 +333,7 @@ else
     ];
 
     private string _userId = string.Empty;
+    private bool _isAdmin;
     private PlanEditDto? _plan;
     private List<ClientDto> _clients = [];
     private bool _loading = true;
@@ -368,11 +369,13 @@ else
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
         _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
-        _clients = await Clients.GetClientsAsync(_userId);
+        _isAdmin = auth.User.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+        // Właściciel studia przypisuje plany klientom wszystkich trenerów.
+        _clients = await Clients.GetClientsAsync(_isAdmin ? null : _userId);
 
         if (Id is { } id)
         {
-            _plan = await Plans.GetForEditAsync(_userId, id);
+            _plan = await Plans.GetForEditAsync(_userId, id, _isAdmin);
         }
         else
         {
@@ -539,7 +542,7 @@ else
         _saving = true;
         try
         {
-            await Plans.SavePlanAsync(_userId, _plan);
+            await Plans.SavePlanAsync(_userId, _plan, _isAdmin);
             Nav.NavigateTo("/plans");
         }
         catch (Exception ex)

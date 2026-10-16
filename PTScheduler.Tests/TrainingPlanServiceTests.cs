@@ -310,4 +310,23 @@ public class TrainingPlanServiceTests
         map.ContainsKey(20).Should().BeFalse();       // odwołana pominięta
         (await svc.RotateUpcomingAsync(T2, false, 11, a)).Should().Be(0);
     }
+    [Fact]
+    public async Task Owner_Can_Edit_Trainer_Plan_And_Ownership_Stays()
+    {
+        var (f, _) = TestDb.CreateFresh();
+        await SeedAsync(f);
+        var svc = Make(f);
+        var id = await svc.SavePlanAsync(T1, NewPlan());
+
+        (await svc.GetForEditAsync("owner", id)).Should().BeNull();
+        var dto = await svc.GetForEditAsync("owner", id, isAdmin: true);
+        dto.Should().NotBeNull();
+        dto!.Name = "Plan od właściciela";
+        await svc.SavePlanAsync("owner", dto, isAdmin: true);
+
+        var reloaded = await svc.GetForEditAsync(T1, id);
+        reloaded!.Name.Should().Be("Plan od właściciela");
+        (await svc.GetPlansAsync("owner", isAdmin: true)).Should().ContainSingle(p => p.Id == id);
+        (await svc.GetPlansAsync("owner")).Should().BeEmpty();
+    }
 }

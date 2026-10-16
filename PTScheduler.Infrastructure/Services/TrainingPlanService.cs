@@ -10,11 +10,12 @@ public class TrainingPlanService(
     IDbContextFactory<ApplicationDbContext> dbFactory,
     IAppClock clock) : ITrainingPlanService
 {
-    public async Task<List<TrainingPlanListItemDto>> GetPlansAsync(string trainerUserId)
+    public async Task<List<TrainingPlanListItemDto>> GetPlansAsync(string trainerUserId, bool isAdmin = false)
     {
         await using var db = dbFactory.CreateDbContext();
         return await db.TrainingPlans.AsNoTracking()
-            .Where(p => p.TrainerUserId == trainerUserId)
+            // Właściciel studia widzi plany wszystkich trenerów.
+            .Where(p => isAdmin || p.TrainerUserId == trainerUserId)
             .OrderByDescending(p => p.CreatedAt)
             .Select(p => new TrainingPlanListItemDto
             {
@@ -33,12 +34,12 @@ public class TrainingPlanService(
             .ToListAsync();
     }
 
-    public async Task<PlanEditDto?> GetForEditAsync(string trainerUserId, int planId)
+    public async Task<PlanEditDto?> GetForEditAsync(string trainerUserId, int planId, bool isAdmin = false)
     {
         await using var db = dbFactory.CreateDbContext();
         var plan = await db.TrainingPlans.AsNoTracking()
             .Include(p => p.Days).ThenInclude(d => d.Exercises)
-            .FirstOrDefaultAsync(p => p.Id == planId && p.TrainerUserId == trainerUserId);
+            .FirstOrDefaultAsync(p => p.Id == planId && (isAdmin || p.TrainerUserId == trainerUserId));
         if (plan is null) return null;
         return await BuildEditDtoAsync(db, plan);
     }
@@ -210,7 +211,7 @@ public class TrainingPlanService(
         };
     }
 
-    public async Task<int> SavePlanAsync(string trainerUserId, PlanEditDto dto)
+    public async Task<int> SavePlanAsync(string trainerUserId, PlanEditDto dto, bool isAdmin = false)
     {
         if (string.IsNullOrWhiteSpace(dto.Name))
             throw new InvalidOperationException("Podaj nazwę planu.");
@@ -223,7 +224,7 @@ public class TrainingPlanService(
         {
             plan = await db.TrainingPlans
                 .Include(p => p.Days).ThenInclude(d => d.Exercises)
-                .FirstOrDefaultAsync(p => p.Id == dto.Id && p.TrainerUserId == trainerUserId)
+                .FirstOrDefaultAsync(p => p.Id == dto.Id && (isAdmin || p.TrainerUserId == trainerUserId))
                 ?? throw new InvalidOperationException("Plan nie istnieje.");
         }
         else
@@ -247,7 +248,7 @@ public class TrainingPlanService(
         var wantedExIds = dto.Days.SelectMany(d => d.Exercises).Select(e => e.ExerciseId).Distinct().ToList();
         var validExIds = (await db.Exercises
                 .Where(e => wantedExIds.Contains(e.Id) &&
-                    (e.Visibility == Domain.Enums.ExerciseVisibility.Public || e.OwnerTrainerUserId == trainerUserId))
+                    (e.Visibility == Domain.Enums.ExerciseVisibility.Public || (e.OwnerTrainerUserId == trainerUserId || e.OwnerTrainerUserId == plan.TrainerUserId)))
                 .Select(e => e.Id)
                 .ToListAsync())
             .ToHashSet();
@@ -305,21 +306,21 @@ public class TrainingPlanService(
         return plan.Id;
     }
 
-    public async Task DeletePlanAsync(string trainerUserId, int planId)
+    public async Task DeletePlanAsync(string trainerUserId, int planId, bool isAdmin = false)
     {
         await using var db = dbFactory.CreateDbContext();
-        var plan = await db.TrainingPlans.FirstOrDefaultAsync(p => p.Id == planId && p.TrainerUserId == trainerUserId);
+        var plan = await db.TrainingPlans.FirstOrDefaultAsync(p => p.Id == planId && (isAdmin || p.TrainerUserId == trainerUserId));
         if (plan is null) return;
         db.TrainingPlans.Remove(plan); // kaskada usuwa dni i ćwiczenia planu
         await db.SaveChangesAsync();
     }
 
-    public async Task<int> DuplicateAsync(string trainerUserId, int planId, bool asTemplate)
+    public async Task<int> DuplicateAsync(string trainerUserId, int planId, bool asTemplate, bool isAdmin = false)
     {
         await using var db = dbFactory.CreateDbContext();
         var src = await db.TrainingPlans.AsNoTracking()
             .Include(p => p.Days).ThenInclude(d => d.Exercises)
-            .FirstOrDefaultAsync(p => p.Id == planId && p.TrainerUserId == trainerUserId)
+            .FirstOrDefaultAsync(p => p.Id == planId && (isAdmin || p.TrainerUserId == trainerUserId))
             ?? throw new InvalidOperationException("Plan nie istnieje.");
 
         var copy = new TrainingPlan

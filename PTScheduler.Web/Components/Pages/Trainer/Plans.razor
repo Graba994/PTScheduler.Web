@@ -178,7 +178,7 @@ else
     private async Task LoadAsync()
     {
         _loading = true;
-        try { _plans = await PlanService.GetPlansAsync(_userId); }
+        try { _plans = await PlanService.GetPlansAsync(_userId, _isAdmin); }
         catch (Exception ex) { LoggerFactory.CreateLogger("Plans").LogError(ex, "Błąd ładowania planów."); _plans = []; }
         _loading = false;
     }
@@ -220,7 +220,7 @@ else
     {
         try
         {
-            var newId = await PlanService.DuplicateAsync(_userId, p.Id, asTemplate: p.IsTemplate);
+            var newId = await PlanService.DuplicateAsync(_userId, p.Id, asTemplate: p.IsTemplate, isAdmin: _isAdmin);
             Nav.NavigateTo($"/plans/edit/{newId}");
         }
         catch (Exception ex) { await JS.InvokeVoidAsync("alert", ex.Message); }
@@ -229,7 +229,7 @@ else
     private async Task Delete(TrainingPlanListItemDto p)
     {
         if (!await JS.InvokeAsync<bool>("confirm", $"Usunąć plan „{p.Name}\"?")) return;
-        try { await PlanService.DeletePlanAsync(_userId, p.Id); await LoadAsync(); }
+        try { await PlanService.DeletePlanAsync(_userId, p.Id, _isAdmin); await LoadAsync(); }
         catch (Exception ex) { await JS.InvokeVoidAsync("alert", ex.Message); }
     }
 }

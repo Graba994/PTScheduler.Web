@@ -8,22 +8,22 @@ namespace PTScheduler.Application.Interfaces;
 /// </summary>
 public interface ITrainingPlanService
 {
-    Task<List<TrainingPlanListItemDto>> GetPlansAsync(string trainerUserId);
+    Task<List<TrainingPlanListItemDto>> GetPlansAsync(string trainerUserId, bool isAdmin = false);
 
     /// <summary>Pełny plan do edycji; null gdy nie istnieje lub nie należy do trenera.</summary>
-    Task<PlanEditDto?> GetForEditAsync(string trainerUserId, int planId);
+    Task<PlanEditDto?> GetForEditAsync(string trainerUserId, int planId, bool isAdmin = false);
 
     /// <summary>
     /// Tworzy nowy albo aktualizuje istniejący plan wraz z dniami i ćwiczeniami
     /// (dopasowanie po Id: aktualizacja/dodanie/usunięcie). Zwraca Id planu.
     /// Odświeża też „ostatnio używane" dla użytych ćwiczeń.
     /// </summary>
-    Task<int> SavePlanAsync(string trainerUserId, PlanEditDto dto);
+    Task<int> SavePlanAsync(string trainerUserId, PlanEditDto dto, bool isAdmin = false);
 
-    Task DeletePlanAsync(string trainerUserId, int planId);
+    Task DeletePlanAsync(string trainerUserId, int planId, bool isAdmin = false);
 
     /// <summary>Kopiuje plan (opcjonalnie jako szablon, bez przypisania klienta). Zwraca Id kopii.</summary>
-    Task<int> DuplicateAsync(string trainerUserId, int planId, bool asTemplate);
+    Task<int> DuplicateAsync(string trainerUserId, int planId, bool asTemplate, bool isAdmin = false);
 
     // --- Widok klienta (do trenowania) ---
 
