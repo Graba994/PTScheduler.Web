@@ -21,6 +21,8 @@ public interface IClientService
     Task<List<ClientDto>> GetPendingClientsAsync(string? trainerUserId = null);
     Task SetAllowSelfBookingAsync(int clientId, bool allow);
     Task<CsvImportResult> ImportClientsFromCsvAsync(Stream csvStream, string? trainerUserId = null);
+    /// <summary>Import gotowych wierszy (po podglądzie): wiersze z problemem i istniejące e-maile są pomijane.</summary>
+    Task<CsvImportResult> ImportCandidatesAsync(IReadOnlyList<PTScheduler.Application.Import.ImportCandidate> rows, string? trainerUserId = null);
 }
 
 public class CsvImportResult

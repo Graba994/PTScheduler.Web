@@ -366,93 +366,53 @@ public class ClientService(
 
     public async Task<CsvImportResult> ImportClientsFromCsvAsync(Stream csvStream, string? trainerUserId = null)
     {
-        var result = new CsvImportResult();
         using var reader = new StreamReader(csvStream, System.Text.Encoding.UTF8);
-        var header = await reader.ReadLineAsync();
-        if (header is null) { result.Errors.Add("Plik jest pusty."); return result; }
+        var table = PTScheduler.Application.Import.ClientImportParser.Parse(await reader.ReadToEndAsync());
+        if (table.Rows.Count == 0) return new CsvImportResult { Errors = { "Plik jest pusty." } };
+        var map = PTScheduler.Application.Import.ClientImportParser.GuessMapping(table);
+        if (!PTScheduler.Application.Import.ClientImportParser.HasName(map) || !map.ContainsValue(PTScheduler.Application.Import.ImportField.Email))
+            return new CsvImportResult { Errors = { "Brak wymaganych kolumn: Imię (albo Imię i nazwisko) oraz Email." } };
+        return await ImportCandidatesAsync(PTScheduler.Application.Import.ClientImportParser.Build(table, map), trainerUserId);
+    }
 
-        var cols = header.Split(';').Select(c => c.Trim().Trim('"')).ToArray();
-        int Col(params string[] names) => Array.FindIndex(cols, c => names.Any(n => c.Equals(n, StringComparison.OrdinalIgnoreCase)));
-
-        var iFirst = Col("Imię", "Imie", "FirstName");
-        var iLast  = Col("Nazwisko", "LastName");
-        var iEmail = Col("Email", "E-mail");
-        var iPhone = Col("Telefon", "Phone");
-        var iGoal  = Col("Cel treningowy", "TrainingGoal", "Cel");
-        var iDob   = Col("Data urodzenia", "DateOfBirth", "Urodziny");
-
-        if (iFirst < 0 || iLast < 0 || iEmail < 0)
+    public async Task<CsvImportResult> ImportCandidatesAsync(IReadOnlyList<PTScheduler.Application.Import.ImportCandidate> rows, string? trainerUserId = null)
+    {
+        var result = new CsvImportResult();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in rows)
         {
-            result.Errors.Add("Brak wymaganych kolumn: Imię, Nazwisko, Email (rozdzielane średnikiem).");
-            return result;
-        }
-
-        var row = 1;
-        while (await reader.ReadLineAsync() is { } line)
-        {
-            row++;
-            if (string.IsNullOrWhiteSpace(line)) continue;
-            var parts = ParseCsvLine(line, ';');
-            string Val(int idx) => idx >= 0 && idx < parts.Length ? parts[idx].Trim().Trim('"') : string.Empty;
-
-            var email = Val(iEmail);
-            var first = Val(iFirst);
-            var last  = Val(iLast);
-
-            if (string.IsNullOrWhiteSpace(email) || string.IsNullOrWhiteSpace(first))
+            if (r.Problem is not null || r.Email is null)
             {
-                result.Errors.Add($"Wiersz {row}: brak email lub imienia — pominięto.");
+                result.Errors.Add($"Wiersz {r.Row}: {r.Problem ?? "brak e-maila"} — pominięto.");
                 result.Skipped++;
                 continue;
             }
-
-            if (await userManager.FindByEmailAsync(email) is not null)
+            if (!seen.Add(r.Email) || await userManager.FindByEmailAsync(r.Email) is not null)
             {
-                result.Errors.Add($"Wiersz {row}: {email} — email już istnieje — pominięto.");
+                result.Errors.Add($"Wiersz {r.Row}: {r.Email} — taki e-mail już jest — pominięto.");
                 result.Skipped++;
                 continue;
             }
-
-            DateOnly? dob = null;
-            var dobStr = Val(iDob);
-            if (!string.IsNullOrEmpty(dobStr) && DateOnly.TryParse(dobStr, out var parsed))
-                dob = parsed;
-
             try
             {
                 await CreateClientAsync(new CreateClientDto
                 {
-                    Email = email,
-                    FirstName = first,
-                    LastName = string.IsNullOrWhiteSpace(last) ? first : last,
-                    Phone = string.IsNullOrWhiteSpace(Val(iPhone)) ? null : Val(iPhone),
-                    TrainingGoal = string.IsNullOrWhiteSpace(Val(iGoal)) ? null : Val(iGoal),
-                    DateOfBirth = dob,
+                    Email = r.Email,
+                    FirstName = r.FirstName,
+                    LastName = string.IsNullOrWhiteSpace(r.LastName) ? r.FirstName : r.LastName,
+                    Phone = r.Phone,
+                    TrainingGoal = r.Goal,
+                    DateOfBirth = r.BirthDate,
                     TrainerUserId = trainerUserId
                 });
                 result.Imported++;
             }
             catch (Exception ex)
             {
-                result.Errors.Add($"Wiersz {row}: {email} — {ex.Message}");
+                result.Errors.Add($"Wiersz {r.Row}: {r.Email} — {ex.Message}");
                 result.Skipped++;
             }
         }
         return result;
-    }
-
-    private static string[] ParseCsvLine(string line, char sep)
-    {
-        var fields = new List<string>();
-        var inQuote = false;
-        var sb = new System.Text.StringBuilder();
-        foreach (var ch in line)
-        {
-            if (ch == '"') { inQuote = !inQuote; continue; }
-            if (ch == sep && !inQuote) { fields.Add(sb.ToString()); sb.Clear(); continue; }
-            sb.Append(ch);
-        }
-        fields.Add(sb.ToString());
-        return fields.ToArray();
     }
 }
