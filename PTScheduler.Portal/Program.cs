@@ -416,7 +416,11 @@ app.MapPost("/api/account/login", async (
     await db.SaveChangesAsync();
 
     if (result.Succeeded)
+    {
+        // Administrator w tej samej przeglądarce co test kreatora — sesja trenera nie powinna się mieszać.
+        await Microsoft.AspNetCore.Authentication.AuthenticationHttpContextExtensions.SignOutAsync(ctx, TrainerAccounts.Scheme);
         return Results.Redirect(SafeReturn(returnUrl));
+    }
 
     if (trainerOk)
     {
@@ -521,7 +525,11 @@ app.MapPost("/api/account/login-2fa", async (HttpContext ctx, SignInManager<Iden
     });
     await db.SaveChangesAsync();
 
-    if (result.Succeeded) return Results.Redirect(returnUrl);
+    if (result.Succeeded)
+    {
+        await Microsoft.AspNetCore.Authentication.AuthenticationHttpContextExtensions.SignOutAsync(ctx, TrainerAccounts.Scheme);
+        return Results.Redirect(returnUrl);
+    }
     if (result.IsLockedOut) return Results.Redirect("/login?step=2fa&error=locked");
     return Results.Redirect($"/login?step=2fa&error=2fa&remember={(remember ? "1" : "0")}&returnUrl={Uri.EscapeDataString(returnUrl)}");
 });

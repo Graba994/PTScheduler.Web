@@ -25,6 +25,14 @@
                 }
             </div>
 
+            @if (_trainerEmail is not null && Wylogowano is null)
+            {
+                <div class="login-alert login-alert-ok">
+                    <i class="bi bi-person-badge" style="font-size:18px" aria-hidden="true"></i>
+                    <span>Jesteś zalogowany w panelu trenera jako <b>@_trainerEmail</b>. <a href="/moje-konto">Przejdź do panelu</a> albo <a href="/api/konto/wyloguj">wyloguj</a>. Administrator loguje się poniżej.</span>
+                </div>
+            }
+
             @if (Link == "sent")
             {
                 <div class="login-alert login-alert-ok">
@@ -397,12 +405,13 @@
     [SupplyParameterFromQuery] public string? Wylogowano { get; set; }
     [CascadingParameter] public HttpContext? Http { get; set; }
 
+    private string? _trainerEmail;
+
+    // Zalogowany trener widzi skrót do swojego panelu, ale formularz zostaje — ta sama przeglądarka
+    // może służyć administratorowi (np. po teście kreatora), więc niczego nie przekierowujemy.
     protected override async Task OnInitializedAsync()
     {
-        // Już zalogowany trener nie musi wpisywać hasła drugi raz.
-        if (Http is not null && !TwoFactorStep && string.IsNullOrEmpty(Error) && Wylogowano is null
-            && await TrainerAccounts.CurrentEmailAsync(Http) is not null)
-            Nav.NavigateTo("/moje-konto");
+        if (Http is not null && !TwoFactorStep) _trainerEmail = await TrainerAccounts.CurrentEmailAsync(Http);
     }
 
     private bool TwoFactorStep => Step == "2fa";
