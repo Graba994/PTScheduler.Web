@@ -224,9 +224,17 @@ using (var scope = app.Services.CreateScope())
     // Awaryjny dostęp: Portal__RecoverAdmin=adres@e-mail w zmiennych kontenera i restart. Konto dostaje
     // rolę administratora, nowe losowe hasło (raz w logach), zdjętą blokadę i wyłączoną weryfikację
     // dwuetapową. Po zalogowaniu usuń zmienną i zmień hasło.
-    if (app.Configuration["Portal:RecoverAdmin"] is { Length: > 3 } recoverEmail && recoverEmail.Contains('@'))
+    // Jednorazowo: zostawiona zmienna (Guardian kopiuje ją przy aktualizacjach) nie resetuje hasła i 2FA przy każdym starcie.
+    var recoverSettings = scope.ServiceProvider.GetRequiredService<SiteSettingsService>();
+    var recoverUsed = await recoverSettings.GetAsync(SiteSettingsService.Keys.RecoverAdminUsed);
+    var recoverWanted = app.Configuration["Portal:RecoverAdmin"]?.Trim();
+    if (string.IsNullOrEmpty(recoverWanted) && !string.IsNullOrEmpty(recoverUsed))
+        await recoverSettings.SetAsync(SiteSettingsService.Keys.RecoverAdminUsed, ""); // zmienna zdjęta — kolejne odzyskanie znów możliwe
+    else if (!string.IsNullOrEmpty(recoverWanted) && string.Equals(recoverUsed, recoverWanted, StringComparison.OrdinalIgnoreCase))
+        app.Logger.LogWarning("Zmienna Portal__RecoverAdmin nadal jest ustawiona ({Email}) — dostęp już odzyskano, usuń ją (SKIP_BUILD=1 bash deploy/update-portal.sh).", recoverWanted);
+    else if (recoverWanted is { Length: > 3 } recoverEmail && recoverEmail.Contains('@'))
     {
-        recoverEmail = recoverEmail.Trim();
+        await recoverSettings.SetAsync(SiteSettingsService.Keys.RecoverAdminUsed, recoverEmail);
         var password = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(18)) + "aA1!";
         var user = await userManager.FindByEmailAsync(recoverEmail);
         if (user is null)

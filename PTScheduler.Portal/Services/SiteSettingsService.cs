@@ -118,6 +118,8 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string BrandName = "brand_name";
         /// <summary>„true” — każdy administrator Portalu musi mieć włączoną weryfikację dwuetapową.</summary>
         public const string RequireAdmin2fa = "require_admin_2fa";
+        /// <summary>Adres, dla którego odzyskiwanie dostępu (Portal__RecoverAdmin) już zadziałało — drugi raz nie resetujemy.</summary>
+        public const string RecoverAdminUsed = "recover_admin_used";
         public const string LegalCompany = "legal_company";
         public const string LegalAddress = "legal_address";
         public const string LegalNip = "legal_nip";
