@@ -212,11 +212,40 @@ using (var scope = app.Services.CreateScope())
         app.Logger.LogWarning("Utworzono konto administratora Portalu {Email} z hasłem: {Password} — zmień je po zalogowaniu.",
             adminEmail, password);
     }
-    else if (admins.Count > 1)
+    else
     {
+        // Nigdy nie usuwamy kont administratorów przy starcie (dawniej konto startowe ze starym hasłem
+        // znikało, gdy pojawił się drugi administrator — przy zapraszaniu adminów to odcinało dostęp).
         var legacy = admins.FirstOrDefault(a => string.Equals(a.Email, adminEmail, StringComparison.OrdinalIgnoreCase));
         if (legacy is not null && await userManager.CheckPasswordAsync(legacy, legacyAdminPassword))
-            await userManager.DeleteAsync(legacy);
+            app.Logger.LogWarning("Konto {Email} ma stare domyślne hasło — zmień je w Panelu → Bezpieczeństwo.", adminEmail);
+    }
+
+    // Awaryjny dostęp: Portal__RecoverAdmin=adres@e-mail w zmiennych kontenera i restart. Konto dostaje
+    // rolę administratora, nowe losowe hasło (raz w logach), zdjętą blokadę i wyłączoną weryfikację
+    // dwuetapową. Po zalogowaniu usuń zmienną i zmień hasło.
+    if (app.Configuration["Portal:RecoverAdmin"] is { Length: > 3 } recoverEmail && recoverEmail.Contains('@'))
+    {
+        recoverEmail = recoverEmail.Trim();
+        var password = Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(18)) + "aA1!";
+        var user = await userManager.FindByEmailAsync(recoverEmail);
+        if (user is null)
+        {
+            user = new IdentityUser { UserName = recoverEmail, Email = recoverEmail, EmailConfirmed = true };
+            await userManager.CreateAsync(user, password);
+        }
+        else
+        {
+            await userManager.RemovePasswordAsync(user);
+            await userManager.AddPasswordAsync(user, password);
+        }
+        await userManager.SetLockoutEndDateAsync(user, null);
+        await userManager.ResetAccessFailedCountAsync(user);
+        await userManager.SetTwoFactorEnabledAsync(user, false);
+        await userManager.ResetAuthenticatorKeyAsync(user);
+        if (!await userManager.IsInRoleAsync(user, "Admin")) await userManager.AddToRoleAsync(user, "Admin");
+        app.Logger.LogWarning("ODZYSKIWANIE DOSTĘPU: konto administratora {Email}, hasło: {Password} — po zalogowaniu usuń zmienną Portal__RecoverAdmin i zmień hasło.",
+            recoverEmail, password);
     }
 
     // Sekret komunikacji Portal ↔ tenanci. Bez niego endpointy /api/credits, /api/store
