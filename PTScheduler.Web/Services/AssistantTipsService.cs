@@ -12,7 +12,8 @@ namespace PTScheduler.Web.Services;
 /// kolejne 10 treningów klienta, klienci, którzy dawno nie byli, rekordowy tydzień i plan na dziś.
 /// AI (przez Portal) najwyżej przeredaguje tekst zapasowy; liczby zawsze pochodzą stąd.
 /// </summary>
-public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFactory, IAppClock clock, RetentionService retention)
+public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFactory, IAppClock clock, RetentionService retention,
+    IEmailSettingsService emailSettings)
 {
     private static readonly CultureInfo Pl = CultureInfo.GetCultureInfo("pl-PL");
 
@@ -45,6 +46,18 @@ public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFact
                 $"Za {minutes} min: [klient]. Zerknij na kartę — ostatni trening, uwagi i plan na dziś.",
                 new() { ["klient"] = "[klient]", ["minuty"] = minutes.ToString() }, "Karta", $"/trainer/before/{soon.Id}",
                 Placeholders: new() { ["[klient]"] = string.IsNullOrWhiteSpace(soon.FirstName) ? "kolejny trening" : soon.FirstName.Trim() }));
+        }
+
+        // Własna skrzynka nie działa — maile idą awaryjnie przez serwer platformy (widzi właściciel studia, który ma ustawienia poczty).
+        if (studioWide)
+        {
+            var mail = await emailSettings.GetAsync();
+            if (mail.IsEnabled && mail.OwnFailing(clock.UtcNow))
+                tips.Add(new($"mail-{mail.LastErrorAt:yyyyMMddHH}", "poczta_blad", "remind", 98,
+                    mail.FallbackCount > 0
+                        ? $"Twoja skrzynka nie wysyła maili — {mail.FallbackCount} {Plural(mail.FallbackCount, "wiadomość wyszła", "wiadomości wyszły", "wiadomości wyszło")} awaryjnie przez serwer platformy. Sprawdź hasło w ustawieniach poczty."
+                        : "Twoja skrzynka nie wysyła maili — sprawdź hasło w ustawieniach poczty. Do tego czasu maile idą przez serwer platformy.",
+                    new() { ["awaryjne_wysylki"] = mail.FallbackCount.ToString() }, "Ustawienia poczty", "/admin/email"));
         }
 
         // Rezerwacje „zapłacę u trenera” czekające na decyzję.

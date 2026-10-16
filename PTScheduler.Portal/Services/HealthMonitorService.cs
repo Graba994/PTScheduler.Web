@@ -160,7 +160,8 @@ public class HealthMonitorService(
         var json = await resp.Content.ReadAsStringAsync(ct);
         using var doc = System.Text.Json.JsonDocument.Parse(json);
         if (doc.RootElement.TryGetProperty("lastActivity", out var val) && val.ValueKind == System.Text.Json.JsonValueKind.String)
-            return DateTime.Parse(val.GetString()!, null, System.Globalization.DateTimeStyles.RoundtripKind);
+            // Aplikacja trenera podaje czas z przesunięciem (+00:00) — bez zamiany na UTC Npgsql odrzuci zapis całej iteracji.
+            return DateTime.Parse(val.GetString()!, null, System.Globalization.DateTimeStyles.RoundtripKind).ToUniversalTime();
         return null;
     }
 

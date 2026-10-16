@@ -49,9 +49,9 @@ public static class PuppyArt
     /// Animowany Leo do osadzenia w stronie: wszystkie pozy, miny i efekty w jednym SVG. Co widać i jak się rusza,
     /// ustawiają klasy rodzica: leo-stage-walk | sit | idle | excited | sleep oraz leo-mood-{nastrój} (panel.css).
     /// </summary>
-    public static string AnimatedSvg()
+    /// <param name="p">Przedrostek id — drugi Leo na tej samej stronie (karta na Pulpicie) dostaje własny, żeby id się nie dublowały.</param>
+    public static string AnimatedSvg(string p = "leoa")
     {
-        const string p = "leoa";
         var fx = string.Concat(MoodKeys.Select(m => $"""<g class="leo-fx-{m}">{Fx(m)}</g>"""));
         return $"""<svg class="leo-svg" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" aria-hidden="true" focusable="false">{Defs(p)}<g class="leo-pose leo-pose-walk">{Walk(p)}</g><g class="leo-pose leo-pose-sit">{Sit(p, null)}</g><g class="leo-pose leo-pose-lie">{Lie(p, animated: true)}</g><g class="leo-fx">{fx}</g></svg>""";
     }

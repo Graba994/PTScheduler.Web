@@ -1613,6 +1613,18 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<int?>("LastHealthResponseMs")
                         .HasColumnType("integer");
 
+                    b.Property<int?>("MailFallbacks")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("MailMode")
+                        .HasColumnType("text");
+
+                    b.Property<string>("MailOwnError")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("MailOwnErrorAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime?>("MetricsAt")
                         .HasColumnType("timestamp with time zone");
 

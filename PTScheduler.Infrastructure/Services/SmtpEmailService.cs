@@ -75,8 +75,67 @@ public class SmtpEmailService(
         message.Subject = subject;
         message.Body = new TextPart("html") { Text = htmlBody };
 
-        await SendMessageAsync(s, message);
+        try
+        {
+            await SendMessageAsync(s, message);
+            // Po wcześniejszym błędzie zapisujemy, że skrzynka znowu działa (przy zwykłej pracy — bez zapisu).
+            if (s.LastErrorAt is not null && (s.LastOkAt is null || s.LastOkAt < s.LastErrorAt))
+                await settingsService.RecordOwnResultAsync(true, null);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await settingsService.RecordOwnResultAsync(false, Friendly(ex));
+            // Własna skrzynka nie działa — mail wychodzi awaryjnie przez serwer platformy (klient nie traci przypomnienia).
+            if (await platformEmail.GetStatusAsync() is null) throw;
+            logger.LogWarning(ex, "Własna skrzynka nie wysłała maila do {To} — wysyłam przez serwer platformy.", toAddress);
+            await platformEmail.SendAsync(toAddress, toName, subject, htmlBody, s.FromName, s.FromAddress);
+        }
     }
+
+    public async Task<(bool Success, string? Error)> TestOwnAsync(Application.DTOs.EmailSettingsDto form, string testAddress)
+    {
+        if (string.IsNullOrWhiteSpace(form.SmtpHost) || string.IsNullOrWhiteSpace(form.FromAddress))
+            return (false, "Uzupełnij serwer SMTP i adres nadawcy.");
+        try
+        {
+            // Puste hasło w formularzu = zostaje zapisane wcześniej.
+            var s = form;
+            if (string.IsNullOrWhiteSpace(form.Password))
+            {
+                var saved = await settingsService.GetAsync();
+                s = new Application.DTOs.EmailSettingsDto
+                {
+                    IsEnabled = true, Provider = form.Provider, SmtpHost = form.SmtpHost, SmtpPort = form.SmtpPort, UseTls = form.UseTls,
+                    Login = form.Login, Password = saved.Password, FromAddress = form.FromAddress, FromName = form.FromName, ReplyTo = form.ReplyTo
+                };
+            }
+            var branding = await brandingService.GetAsync();
+            var message = NewMessage(s);
+            message.To.Add(new MailboxAddress(testAddress, testAddress));
+            message.Subject = "Test połączenia — PTScheduler";
+            message.Body = new TextPart("html") { Text = TestEmailHtml(s.FromName, ThemeColor(branding.ThemeName)) };
+            await SendMessageAsync(s, message);
+            return (true, null);
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Test własnej skrzynki nie powiódł się");
+            return (false, Friendly(ex));
+        }
+    }
+
+    /// <summary>Najczęstsze błędy SMTP po ludzku (zostawiamy też oryginalny komunikat).</summary>
+    public static string Friendly(Exception ex) => ex switch
+    {
+        AuthenticationException => $"Serwer odrzucił login lub hasło. Przy Gmailu i Microsoft 365 użyj hasła aplikacji, nie hasła do konta. ({ex.Message})",
+        SslHandshakeException => $"Nie udało się nawiązać szyfrowanego połączenia — sprawdź port (587 lub 465) i przełącznik TLS. ({ex.Message})",
+        System.Net.Sockets.SocketException or TimeoutException => $"Brak połączenia z serwerem — sprawdź adres serwera i port. ({ex.Message})",
+        SmtpCommandException sce when sce.StatusCode is SmtpStatusCode.MailboxUnavailable or SmtpStatusCode.MailboxNameNotAllowed
+            => $"Serwer nie pozwala wysyłać z tego adresu nadawcy — użyj adresu skrzynki albo dodaj alias. ({ex.Message})",
+        NotSupportedException when ex.Message.Contains("authentication", StringComparison.OrdinalIgnoreCase)
+            => $"Serwer nie przyjmuje logowania na tym porcie — wybierz port 587 z TLS albo 465, albo zostaw login pusty, jeśli serwer go nie wymaga. ({ex.Message})",
+        _ => ex.Message
+    };
 
     /// <summary>Dzienny limit i wykorzystanie poczty platformy (null przy własnym SMTP).</summary>
     public async Task<(int Limit, int SentToday)?> GetPlatformQuotaAsync()
@@ -116,7 +175,7 @@ public class SmtpEmailService(
 
     private static async Task SendMessageAsync(Application.DTOs.EmailSettingsDto s, MimeMessage message)
     {
-        using var client = new SmtpClient();
+        using var client = new SmtpClient { Timeout = 20000 };
         var ssl = !s.UseTls ? SecureSocketOptions.None
             : s.SmtpPort == 465 ? SecureSocketOptions.SslOnConnect : SecureSocketOptions.StartTls;
         await client.ConnectAsync(s.SmtpHost, s.SmtpPort, ssl);

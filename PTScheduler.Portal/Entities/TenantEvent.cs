@@ -47,4 +47,8 @@ public static class TenantEventTypes
     public const string Activated = "activated";
     public const string ReferralReward = "referral_reward";
     public const string OnboardingEmail = "onboarding_email";
+    /// <summary>Trener przeszedł na własną skrzynkę pocztową.</summary>
+    public const string MailOwn = "mail_own";
+    /// <summary>Trener wysyła (znów) przez naszą skrzynkę.</summary>
+    public const string MailPlatform = "mail_platform";
 }

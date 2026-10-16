@@ -56,6 +56,7 @@ public class GrowthService(IServiceScopeFactory scopes, IConfiguration config, I
                 t.MetricsClients = m.Clients;
                 t.MetricsSessions = m.SessionsTotal;
                 t.MetricsAt = DateTime.UtcNow;
+                ApplyMail(db, t, m);
                 var today = DateOnly.FromDateTime(DateTime.UtcNow);
                 var snapshot = await db.TenantMetricSnapshots.FirstOrDefaultAsync(x => x.TenantId == t.Id && x.Date == today, ct);
                 if (snapshot is null) db.TenantMetricSnapshots.Add(snapshot = new TenantMetricSnapshot { TenantId = t.Id, Date = today });
@@ -75,7 +76,23 @@ public class GrowthService(IServiceScopeFactory scopes, IConfiguration config, I
         await db.SaveChangesAsync(ct);
     }
 
-    private sealed record Metrics(int Clients, int SessionsTotal);
+    private sealed record Metrics(int Clients, int SessionsTotal,
+        string? MailMode = null, DateTime? MailOwnErrorAt = null, string? MailOwnError = null, int? MailFallbacks = null);
+
+    /// <summary>Poczta trenera: tryb (nasza / własna skrzynka) i błędy własnej — dla Leo i karty trenera.
+    /// Zmianę trybu zapisujemy w historii, żeby Leo mógł o niej powiedzieć.</summary>
+    private static void ApplyMail(PortalDbContext db, Tenant t, Metrics m)
+    {
+        if (m.MailMode is not { Length: > 0 } mode) return; // starsza wersja aplikacji — bez danych o poczcie
+        if (t.MailMode is not null && t.MailMode != mode && mode is "platform" or "own")
+            db.TenantEvents.Add(mode == "own"
+                ? new TenantEvent { TenantId = t.Id, EventType = TenantEventTypes.MailOwn, Detail = "Maile wychodzą z własnej skrzynki trenera" }
+                : new TenantEvent { TenantId = t.Id, EventType = TenantEventTypes.MailPlatform, Detail = "Maile wychodzą przez skrzynkę platformy" });
+        t.MailMode = mode;
+        t.MailOwnErrorAt = mode == "own" ? m.MailOwnErrorAt?.ToUniversalTime() : null; // JSON z przesunięciem daje czas lokalny, a Npgsql przyjmuje tylko UTC
+        t.MailOwnError = mode == "own" && m.MailOwnErrorAt is not null ? m.MailOwnError : null;
+        t.MailFallbacks = mode == "own" ? m.MailFallbacks : null;
+    }
 
     /// <summary>Prawdziwa płatność: opłacona faktura Stripe z kwotą albo opłacony rachunek (bez płatności weryfikacyjnej).</summary>
     private static async Task DetectFirstPaymentsAsync(IServiceProvider sp)

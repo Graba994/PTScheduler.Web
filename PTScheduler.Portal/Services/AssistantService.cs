@@ -481,6 +481,12 @@ public partial class AssistantService(
         ("ankieta", "Myśli: nowe odpowiedzi w ankiecie", "think",
             new() { ["liczba_odpowiedzi"] = "7" },
             "7 nowych odpowiedzi w ankiecie w tym tygodniu. Kliknij „Wygeneruj”, a podsumuję wnioski."),
+        ("poczta_blad", "Czujny: własna skrzynka trenera nie działa", "remind",
+            new() { ["trener"] = "[trener]", ["wyslane_awaryjnie"] = "4" },
+            "Własna skrzynka [trener] zgłasza błąd — maile idą awaryjnie przez naszą skrzynkę (już 4). Warto się odezwać, zanim limit się skończy."),
+        ("poczta_platformy", "Myśli: kto wysyła przez naszą skrzynkę", "think",
+            new() { ["trenerzy_na_naszej_skrzynce"] = "5", ["maile_dzis"] = "212", ["trener"] = "[trener]", ["najwiecej"] = "96" },
+            "Przez naszą skrzynkę wysyła 5 trenerów: dziś 212 maili, najwięcej [trener] (96)."),
     ];
 
     /// <summary>Przykładowe podpowiedzi do testu w Panelu — te same rodzaje, które liczy aplikacja trenera.</summary>

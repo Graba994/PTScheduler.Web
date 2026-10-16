@@ -11,6 +11,7 @@
 @inject NavigationManager Nav
 @inject IConfiguration Config
 @inject EmailService EmailSvc
+@inject TenantMailRelay MailRelay
 @inject AddonService AddonSvc
 @inject UpdateService UpdateSvc
 @rendermode InteractiveServer
@@ -656,6 +657,42 @@ else
                                 </div>
                             </div>
                         </div>
+                        var mailMode = _metrics.MailMode ?? _tenant!.MailMode;
+                        @if (mailMode is not null)
+                        {
+                            var live = _metrics.MailMode is not null;
+                            var errAt = live ? _metrics.MailOwnErrorAt : _tenant!.MailOwnErrorAt;
+                            var err = live ? _metrics.MailOwnError : _tenant!.MailOwnError;
+                            var fallbacks = (live ? _metrics.MailFallbacks : _tenant!.MailFallbacks) ?? 0;
+                            <div class="border rounded p-2 mt-2 small">
+                                <div class="d-flex flex-wrap align-items-center gap-2">
+                                    <i class="bi bi-envelope-paper text-muted"></i><span class="fw-semibold">Poczta</span>
+                                    @if (mailMode == "own")
+                                    {
+                                        <span class="pp-chip pp-tone-ok">własna skrzynka</span>
+                                    }
+                                    else if (mailMode == "platform")
+                                    {
+                                        <span class="pp-chip pp-tone-info">nasza skrzynka</span>
+                                    }
+                                    else
+                                    {
+                                        <span class="pp-chip pp-tone-warn">wyłączona</span>
+                                    }
+                                    @if (mailMode == "own" && errAt is not null)
+                                    {
+                                        <span class="pp-chip pp-tone-danger">błąd — awaryjnie przez naszą</span>
+                                    }
+                                    <span class="text-muted ms-auto">dziś przez naszą: @_mailSentToday z @_mailLimit</span>
+                                </div>
+                                @if (mailMode == "own" && errAt is { } at)
+                                {
+                                    <div class="mt-1 text-danger-emphasis">
+                                        @at.ToLocalTime().ToString("dd.MM HH:mm") · @(err ?? "błąd wysyłki")@(fallbacks > 0 ? $" · awaryjnie wysłane: {fallbacks}" : "")
+                                    </div>
+                                }
+                            </div>
+                        }
                         <div class="text-muted small mt-2"><i class="bi bi-clock me-1"></i>@_metrics.Timestamp.ToLocalTime().ToString("HH:mm dd.MM.yyyy")</div>
                     }
                     else if (_metricsError is not null)
@@ -1595,6 +1632,8 @@ else
             var json = await resp.Content.ReadAsStringAsync();
             _metrics = System.Text.Json.JsonSerializer.Deserialize<TenantMetrics>(json,
                 new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+            _mailSentToday = await MailRelay.SentTodayAsync(_tenant.Id);
+            _mailLimit = await MailRelay.GetDailyLimitAsync();
         }
         catch (Exception ex) { _metricsError = ex.Message; }
         finally { _loadingMetrics = false; }
@@ -1610,7 +1649,14 @@ else
         public int OrdersTotal { get; init; }
         public decimal Revenue { get; init; }
         public DateTime Timestamp { get; init; }
+        public string? MailMode { get; init; }
+        public DateTime? MailOwnErrorAt { get; init; }
+        public string? MailOwnError { get; init; }
+        public int? MailFallbacks { get; init; }
     }
+
+    private int _mailSentToday;
+    private int _mailLimit;
 
     // "owner" — administrator studia (z kreatora), "root" — konto techniczne operatora.
     private string _adminAccount = "owner";
@@ -1899,6 +1945,8 @@ else
         TenantEventTypes.DomainChanged => "Zmiana domeny",
         TenantEventTypes.HealthDown => "Awaria",
         TenantEventTypes.HealthRecovered => "Przywrócony",
+        TenantEventTypes.MailOwn => "Własna skrzynka pocztowa",
+        TenantEventTypes.MailPlatform => "Poczta przez naszą skrzynkę",
         TenantEventTypes.InactivityWarning => "Ostrzeżenie nieaktywność",
         TenantEventTypes.InactivitySuspended => "Zawieszony (nieaktywność)",
         TenantEventTypes.GraceExtended => "Przedłużono ochronę",
@@ -1923,6 +1971,8 @@ else
         TenantEventTypes.DomainChanged => "bi-globe",
         TenantEventTypes.HealthDown => "bi-heart-pulse",
         TenantEventTypes.HealthRecovered => "bi-heart",
+        TenantEventTypes.MailOwn => "bi-envelope-check",
+        TenantEventTypes.MailPlatform => "bi-envelope-paper",
         TenantEventTypes.InactivityWarning => "bi-hourglass-split",
         TenantEventTypes.InactivitySuspended => "bi-moon",
         TenantEventTypes.GraceExtended => "bi-shield-check",

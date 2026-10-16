@@ -66,6 +66,13 @@ public class Tenant
     public int? MetricsClients { get; set; }
     public int? MetricsSessions { get; set; }
     public DateTime? MetricsAt { get; set; }
+    /// <summary>Poczta z ostatniego odczytu: „platform” (nasza skrzynka), „own” (własna skrzynka trenera), „none”; null — starsza wersja aplikacji.</summary>
+    public string? MailMode { get; set; }
+    /// <summary>Własna skrzynka trenera zgłasza błąd — maile idą awaryjnie przez naszą (czas i treść błędu z aplikacji).</summary>
+    public DateTime? MailOwnErrorAt { get; set; }
+    public string? MailOwnError { get; set; }
+    /// <summary>Ile maili poszło awaryjnie przez naszą skrzynkę od ostatniego błędu własnej.</summary>
+    public int? MailFallbacks { get; set; }
     public string? WebContainerName { get; set; }
     public string? DbContainerName { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;

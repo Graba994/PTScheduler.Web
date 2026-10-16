@@ -1075,6 +1075,9 @@ namespace PTScheduler.Infrastructure.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<int>("FallbackCount")
+                        .HasColumnType("integer");
+
                     b.Property<string>("FromAddress")
                         .IsRequired()
                         .HasColumnType("text");
@@ -1085,6 +1088,15 @@ namespace PTScheduler.Infrastructure.Migrations
 
                     b.Property<bool>("IsEnabled")
                         .HasColumnType("boolean");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("LastErrorAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastOkAt")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("Login")
                         .IsRequired()

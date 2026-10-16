@@ -24,7 +24,11 @@ public class EmailSettingsService(IDbContextFactory<ApplicationDbContext> dbFact
             Password     = e.Password,
             FromAddress  = e.FromAddress,
             FromName     = e.FromName,
-            ReplyTo      = e.ReplyTo
+            ReplyTo      = e.ReplyTo,
+            LastOkAt     = e.LastOkAt,
+            LastErrorAt  = e.LastErrorAt,
+            LastError    = e.LastError,
+            FallbackCount = e.FallbackCount
         };
     }
 
@@ -47,6 +51,27 @@ public class EmailSettingsService(IDbContextFactory<ApplicationDbContext> dbFact
         e.FromAddress = dto.FromAddress;
         e.FromName    = dto.FromName;
         e.ReplyTo     = string.IsNullOrWhiteSpace(dto.ReplyTo) ? null : dto.ReplyTo.Trim();
+        // Nowe dane własnej skrzynki — zaczynamy z czystym stanem (trener właśnie je sprawdził).
+        if (dto.IsEnabled) { e.LastErrorAt = null; e.LastError = null; e.FallbackCount = 0; }
+        await db.SaveChangesAsync();
+    }
+
+    public async Task RecordOwnResultAsync(bool ok, string? error)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var e = await db.EmailSettings.FirstOrDefaultAsync();
+        if (e is null) return;
+        if (ok)
+        {
+            e.LastOkAt = DateTime.UtcNow;
+            e.FallbackCount = 0;
+        }
+        else
+        {
+            e.LastErrorAt = DateTime.UtcNow;
+            e.LastError = error is { Length: > 300 } ? error[..300] : error;
+            e.FallbackCount++;
+        }
         await db.SaveChangesAsync();
     }
 }

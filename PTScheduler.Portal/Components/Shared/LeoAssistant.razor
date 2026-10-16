@@ -1,6 +1,7 @@
 @inject LeoService Leo
 @inject AssistantService Assistant
 @inject IJSRuntime JS
+@inject NavigationManager Nav
 
 @* Agent Portalu (domyślnie szczeniak „Leo”): sam podpowiada administratorowi, bez pisania do niego.
    Co pokazać, liczy LeoService; wygląd, imię i charakter ustawia się w Panelu → Asystent i AI → Leo. *@
@@ -111,6 +112,8 @@
 
     private static string Today => BillingService.LocalNow.ToString("yyyy-MM-dd");
 
+    private bool OnDashboard => new Uri(Nav.Uri).AbsolutePath.TrimEnd('/') == "/panel";
+
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
         if (!firstRender) return;
@@ -141,6 +144,14 @@
                 }
             }
             StateHasChanged();
+            // Na Pulpicie wszystko widać w karcie Leo — dymek nie wyskakuje, a podpowiedzi liczą się jako przeczytane.
+            if (OnDashboard)
+            {
+                foreach (var t in _tips) _prefs.Seen[t.Key] = SeenMark(t);
+                await SavePrefsAsync();
+                StateHasChanged();
+                return;
+            }
             // Przeczytane podpowiedzi nie wyskakują ponownie przy każdym przejściu między stronami.
             if (!_muted && _tips.Any(t => (t.IsTodo || t.IsPraise) && !IsSeen(t)))
             {

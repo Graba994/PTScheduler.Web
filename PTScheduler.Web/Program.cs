@@ -819,7 +819,8 @@ app.MapPost("/internal/setup/bootstrap",
 });
 
 app.MapGet("/internal/metrics",
-    async (HttpContext ctx, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+    async (HttpContext ctx, IDbContextFactory<ApplicationDbContext> dbFactory,
+        PTScheduler.Application.Interfaces.IEmailService email, PTScheduler.Application.Interfaces.IEmailSettingsService emailSettings) =>
 {
     if (!InternalSecretMatches(ctx)) return Results.NotFound();
 
@@ -835,6 +836,7 @@ app.MapGet("/internal/metrics",
     var revenue = await db.Orders
         .Where(o => o.Status == PTScheduler.Domain.Enums.OrderStatus.Paid)
         .SumAsync(o => (decimal?)o.Amount) ?? 0;
+    var mailSettings = await emailSettings.GetAsync();
 
     return Results.Json(new
     {
@@ -845,6 +847,11 @@ app.MapGet("/internal/metrics",
         packagesActive,
         ordersTotal,
         revenue,
+        // Poczta: „platform” (serwer platformy), „own” (własna skrzynka trenera), „none”; przy awarii własnej — od kiedy i co.
+        mailMode = await email.GetDeliveryModeAsync(),
+        mailOwnErrorAt = mailSettings.OwnFailing(DateTime.UtcNow) ? mailSettings.LastErrorAt : null,
+        mailOwnError = mailSettings.OwnFailing(DateTime.UtcNow) ? mailSettings.LastError : null,
+        mailFallbacks = mailSettings.FallbackCount,
         timestamp = DateTime.UtcNow.ToString("o")
     });
 });

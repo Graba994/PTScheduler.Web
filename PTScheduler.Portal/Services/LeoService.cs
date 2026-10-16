@@ -13,7 +13,8 @@ namespace PTScheduler.Portal.Services;
 /// kopie zapasowe, nowe opinie i ankiety, a także powody do radości (rejestracje, pierwsze płatności, aktywacje).
 /// AI najwyżej przeredaguje tekst zapasowy; liczby zawsze pochodzą stąd.
 /// </summary>
-public class LeoService(IDbContextFactory<PortalDbContext> dbFactory, SiteSettingsService settings, AssistantService assistant, AiService ai)
+public class LeoService(IDbContextFactory<PortalDbContext> dbFactory, SiteSettingsService settings, AssistantService assistant, AiService ai,
+    TenantMailRelay mailRelay)
 {
     private static readonly CultureInfo Pl = CultureInfo.GetCultureInfo("pl-PL");
 
@@ -150,6 +151,20 @@ public class LeoService(IDbContextFactory<PortalDbContext> dbFactory, SiteSettin
                     new() { ["wydane_usd"] = spent.ToString("0.##", Pl), ["budzet_usd"] = budget.ToString("0.##", Pl) }, "Ustawienia AI", "/panel/asystent"));
         }
 
+        // Poczta trenerów: błędy własnych skrzynek, limit naszej skrzynki, zmiany i stan.
+        var mailTenants = await active.Select(t => new { t.Id, t.Slug, t.CompanyName, t.MailMode, t.MailOwnErrorAt, t.MailFallbacks }).ToListAsync();
+        var sentToday = await mailRelay.SentTodayByTenantAsync();
+        var mailChanges = (await db.TenantEvents.AsNoTracking()
+                .Where(e => (e.EventType == TenantEventTypes.MailOwn || e.EventType == TenantEventTypes.MailPlatform) && e.OccurredAt >= weekAgo)
+                .Select(e => new { e.TenantId, e.EventType, e.OccurredAt }).ToListAsync())
+            .GroupBy(e => e.TenantId).Select(g => g.OrderByDescending(e => e.OccurredAt).First())
+            .Select(e => new MailChange(e.TenantId, e.EventType == TenantEventTypes.MailOwn ? "own" : "platform", e.OccurredAt)).ToList();
+        var mailTips = MailTips(
+            mailTenants.Select(t => new MailTenant(t.Id, Display(t.CompanyName, t.Slug), t.MailMode, t.MailOwnErrorAt, t.MailFallbacks,
+                sentToday.GetValueOrDefault(t.Id))).ToList(),
+            mailChanges, await mailRelay.GetDailyLimitAsync(), now);
+        tips.AddRange(mailTips.Where(t => t.Kind != MailStatusKind));
+
         if (tips.Count == 0)
         {
             var count = await active.CountAsync();
@@ -157,7 +172,124 @@ public class LeoService(IDbContextFactory<PortalDbContext> dbFactory, SiteSettin
                 $"Wszystko pod kontrolą: {count} {Plural(count, "aktywny trener", "aktywnych trenerów", "aktywnych trenerów")}, żadnych pilnych spraw. Merdam ogonem 🐾",
                 new() { ["aktywni_trenerzy"] = count.ToString() }, null, null));
         }
+        // Stan naszej skrzynki to informacja, nie sprawa do załatwienia — nie zastępuje „wszystko pod kontrolą”.
+        tips.AddRange(mailTips.Where(t => t.Kind == MailStatusKind));
         return tips.OrderByDescending(t => t.Priority).ToList();
+    }
+
+    // ── Poczta trenerów ──
+
+    /// <param name="Mode">„platform” (nasza skrzynka), „own” (własna skrzynka trenera), „none”; null — starsza wersja aplikacji.</param>
+    /// <param name="SentToday">Ile maili poszło dziś przez naszą skrzynkę (także awaryjnie przy własnej).</param>
+    public sealed record MailTenant(int Id, string Name, string? Mode, DateTime? OwnErrorAt, int? Fallbacks, int SentToday);
+    public sealed record MailChange(int TenantId, string Mode, DateTime At);
+
+    public const string MailStatusKind = "poczta_platformy";
+
+    /// <summary>
+    /// Podpowiedzi o poczcie: własne skrzynki z błędem (maile idą awaryjnie przez naszą), trenerzy blisko dziennego
+    /// limitu naszej skrzynki, zmiany trybu z ostatniego tygodnia i stan — kto i ile wysyła przez naszą skrzynkę.
+    /// </summary>
+    public static List<Tip> MailTips(IReadOnlyList<MailTenant> tenants, IReadOnlyList<MailChange> changes, int dailyLimit, DateTime now)
+    {
+        var tips = new List<Tip>();
+        var today = DateOnly.FromDateTime(now);
+        var byId = tenants.ToDictionary(t => t.Id);
+        Dictionary<string, string> Name(MailTenant t) => new() { ["[trener]"] = t.Name };
+
+        // Własna skrzynka zgłasza błąd — maile idą awaryjnie przez naszą.
+        var failing = tenants.Where(t => t.Mode == "own" && t.OwnErrorAt is { } at && now - at < TimeSpan.FromDays(3))
+            .OrderByDescending(t => t.OwnErrorAt).ToList();
+        if (failing.Count == 1)
+        {
+            var t = failing[0];
+            var fallbacks = t.Fallbacks ?? 0;
+            var facts = new Dictionary<string, string> { ["trener"] = "[trener]" };
+            if (fallbacks > 0) facts["wyslane_awaryjnie"] = fallbacks.ToString();
+            tips.Add(new($"mail-own-{t.Id}-{t.OwnErrorAt:yyyyMMddHH}", "poczta_blad", "remind", 78,
+                $"Własna skrzynka [trener] zgłasza błąd — maile idą awaryjnie przez naszą skrzynkę" +
+                (fallbacks > 0 ? $" (już {fallbacks})" : "") + ". Warto się odezwać, zanim limit się skończy.",
+                facts, "Zobacz", $"/panel/tenants/{t.Id}", Name(t)));
+        }
+        else if (failing.Count > 1)
+            tips.Add(new($"mail-own-{today:yyyy-MM-dd}-{failing.Count}", "poczta_blad", "remind", 78,
+                $"{failing.Count} {Plural(failing.Count, "własna skrzynka trenera zgłasza", "własne skrzynki trenerów zgłaszają", "własnych skrzynek trenerów zgłasza")} błąd — " +
+                "ich maile idą awaryjnie przez naszą skrzynkę.",
+                new() { ["liczba_skrzynek"] = failing.Count.ToString() }, "Trenerzy", "/panel/tenants"));
+
+        // Blisko dziennego limitu naszej skrzynki.
+        if (dailyLimit > 0)
+        {
+            var near = tenants.Where(t => t.SentToday * 10 >= dailyLimit * 8).OrderByDescending(t => t.SentToday).ToList();
+            if (near.Count > 0)
+            {
+                var top = near[0];
+                var exhausted = top.SentToday >= dailyLimit;
+                var facts = new Dictionary<string, string>
+                {
+                    ["trener"] = "[trener]", ["wyslane_dzis"] = top.SentToday.ToString(), ["limit_dzienny"] = dailyLimit.ToString(),
+                };
+                var text = exhausted
+                    ? $"Dzienny limit naszej skrzynki wyczerpany: [trener] ({top.SentToday} z {dailyLimit}). Kolejne maile poczekają do jutra."
+                    : $"[trener]: dziś już {top.SentToday} z {dailyLimit} maili przez naszą skrzynkę.";
+                if (near.Count > 1)
+                {
+                    facts["blisko_limitu"] = near.Count.ToString();
+                    text += $" Blisko limitu: {near.Count} {Plural(near.Count, "trener", "trenerów", "trenerów")}.";
+                }
+                text += " Warto zaproponować własną skrzynkę — podłącza się ją w ustawieniach poczty w aplikacji.";
+                tips.Add(new($"mail-limit-{today:yyyy-MM-dd}-{top.Id}{(exhausted ? "-max" : "")}", "poczta_limit", exhausted ? "remind" : "think",
+                    exhausted ? 76 : 48, text, facts, "Zobacz", $"/panel/tenants/{top.Id}", Name(top)));
+            }
+        }
+
+        // Zmiany z ostatniego tygodnia: przejście na własną skrzynkę albo powrót na naszą.
+        foreach (var c in changes.OrderByDescending(c => c.At).Take(2))
+        {
+            if (!byId.TryGetValue(c.TenantId, out var t)) continue;
+            if (c.Mode == "own")
+                tips.Add(new($"mail-change-{t.Id}-{c.At:yyyyMMdd}", "poczta_zmiana", "celebrate", 50,
+                    "[trener] wysyła już maile z własnej skrzynki — nasza ma mniej pracy. 🎉",
+                    new() { ["trener"] = "[trener]" }, "Zobacz", $"/panel/tenants/{t.Id}", Name(t)));
+            else if (c.Mode == "platform")
+                tips.Add(new($"mail-change-{t.Id}-{c.At:yyyyMMdd}", "poczta_zmiana", "think", 46,
+                    "[trener] korzysta teraz z naszej skrzynki zamiast własnej.",
+                    new() { ["trener"] = "[trener]" }, "Zobacz", $"/panel/tenants/{t.Id}", Name(t)));
+        }
+
+        // Stan: kto wysyła przez naszą skrzynkę i ile dziś.
+        var onPlatform = tenants.Where(t => t.Mode == "platform" || (t.Mode is null && t.SentToday > 0)).ToList();
+        if (onPlatform.Count > 0)
+        {
+            var total = tenants.Sum(t => t.SentToday);
+            var top = tenants.Where(t => t.SentToday > 0).OrderByDescending(t => t.SentToday).FirstOrDefault();
+            var facts = new Dictionary<string, string> { ["trenerzy_na_naszej_skrzynce"] = onPlatform.Count.ToString(), ["maile_dzis"] = total.ToString() };
+            string text;
+            Dictionary<string, string>? placeholders = null;
+            if (onPlatform.Count == 1)
+            {
+                facts["trener"] = "[trener]";
+                placeholders = Name(onPlatform[0]);
+                text = total > 0
+                    ? $"Z naszej skrzynki korzysta [trener] — dziś {total} {Plural(total, "mail", "maile", "maili")}."
+                    : "Z naszej skrzynki korzysta [trener] — dziś jeszcze bez maili.";
+            }
+            else
+            {
+                text = $"Przez naszą skrzynkę wysyła {onPlatform.Count} {Plural(onPlatform.Count, "trener", "trenerów", "trenerów")}";
+                if (top is null) text += " — dziś jeszcze bez maili.";
+                else
+                {
+                    facts["trener"] = "[trener]";
+                    facts["najwiecej"] = top.SentToday.ToString();
+                    placeholders = Name(top);
+                    text += $": dziś {total} {Plural(total, "mail", "maile", "maili")}, najwięcej [trener] ({top.SentToday}).";
+                }
+            }
+            if (dailyLimit > 0) facts["limit_dzienny"] = dailyLimit.ToString();
+            tips.Add(new($"mail-platform-{today:yyyy-MM-dd}", MailStatusKind, "think", 20, text, facts, "Limit poczty", "/panel/setup/isolation", placeholders));
+        }
+        return tips;
     }
 
     // ── Teksty od AI (z pamięcią na dzień, żeby nie płacić za ten sam dymek przy każdej stronie) ──

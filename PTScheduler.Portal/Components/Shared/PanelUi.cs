@@ -61,6 +61,8 @@ public static class PanelUi
         TenantEventTypes.Activated => "Aktywny trener",
         TenantEventTypes.ReferralReward => "Nagroda za polecenie",
         TenantEventTypes.OnboardingEmail => "E-mail powitalny",
+        TenantEventTypes.MailOwn => "Własna skrzynka pocztowa",
+        TenantEventTypes.MailPlatform => "Poczta przez naszą skrzynkę",
         _ => type
     };
 
@@ -88,6 +90,8 @@ public static class PanelUi
         TenantEventTypes.BillIssued => "bi-receipt",
         TenantEventTypes.BillPaid => "bi-receipt-cutoff",
         TenantEventTypes.ErrorSpike => "bi-bug",
+        TenantEventTypes.MailOwn => "bi-envelope-check",
+        TenantEventTypes.MailPlatform => "bi-envelope-paper",
         TenantEventTypes.BackupVerified => "bi-shield-check",
         TenantEventTypes.BackupVerifyFailed => "bi-shield-x",
         TenantEventTypes.BackupRestored => "bi-arrow-counterclockwise",
