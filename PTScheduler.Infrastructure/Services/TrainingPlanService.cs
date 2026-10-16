@@ -25,7 +25,10 @@ public class TrainingPlanService(
                 ClientName = p.Client != null ? p.Client.FirstName + " " + p.Client.LastName : null,
                 DayCount = p.Days.Count,
                 ExerciseCount = p.Days.SelectMany(d => d.Exercises).Count(),
-                CreatedAt = p.CreatedAt
+                CreatedAt = p.CreatedAt,
+                Use = p.Use,
+                SortOrder = p.SortOrder,
+                IsArchived = p.IsArchived
             })
             .ToListAsync();
     }
@@ -40,12 +43,13 @@ public class TrainingPlanService(
         return await BuildEditDtoAsync(db, plan);
     }
 
-    public async Task<List<TrainingPlanListItemDto>> GetClientPlansAsync(int clientId)
+    public async Task<List<TrainingPlanListItemDto>> GetClientPlansAsync(int clientId, bool includeArchived = false)
     {
         await using var db = dbFactory.CreateDbContext();
-        return await db.TrainingPlans.AsNoTracking()
-            .Where(p => p.ClientId == clientId)
-            .OrderByDescending(p => p.CreatedAt)
+        var now = clock.LocalNow;
+        var plans = await db.TrainingPlans.AsNoTracking()
+            .Where(p => p.ClientId == clientId && (includeArchived || !p.IsArchived))
+            .OrderBy(p => p.IsArchived).ThenBy(p => p.SortOrder).ThenByDescending(p => p.CreatedAt)
             .Select(p => new TrainingPlanListItemDto
             {
                 Id = p.Id,
@@ -54,9 +58,70 @@ public class TrainingPlanService(
                 ClientId = p.ClientId,
                 DayCount = p.Days.Count,
                 ExerciseCount = p.Days.SelectMany(d => d.Exercises).Count(),
-                CreatedAt = p.CreatedAt
+                CreatedAt = p.CreatedAt,
+                Use = p.Use,
+                SortOrder = p.SortOrder,
+                IsArchived = p.IsArchived,
+                LastWorkout = db.WorkoutLogs.Where(l => l.ClientId == clientId && l.PlanExercise!.PlanDay!.PlanId == p.Id)
+                    .Max(l => (DateOnly?)l.WorkoutDate),
+                NextSessionAt = db.Sessions.Where(x => x.ClientId == clientId && x.PlanDay!.PlanId == p.Id
+                        && x.Status == Domain.Enums.SessionStatus.Scheduled && x.StartTime >= now)
+                    .Min(x => (DateTime?)x.StartTime)
             })
             .ToListAsync();
+        return plans;
+    }
+
+    public async Task ReorderClientPlansAsync(string userId, bool isAdmin, int clientId, IReadOnlyList<int> orderedPlanIds)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var plans = await db.TrainingPlans
+            .Where(p => p.ClientId == clientId && orderedPlanIds.Contains(p.Id) && (isAdmin || p.TrainerUserId == userId))
+            .ToListAsync();
+        for (var i = 0; i < orderedPlanIds.Count; i++)
+            if (plans.FirstOrDefault(p => p.Id == orderedPlanIds[i]) is { } plan) plan.SortOrder = i;
+        await db.SaveChangesAsync();
+    }
+
+    public async Task SetArchivedAsync(string userId, bool isAdmin, int planId, bool archived)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var plan = await db.TrainingPlans.FirstOrDefaultAsync(p => p.Id == planId && (isAdmin || p.TrainerUserId == userId))
+            ?? throw new InvalidOperationException("Plan nie istnieje.");
+        plan.IsArchived = archived;
+        await db.SaveChangesAsync();
+    }
+
+    public async Task<bool> AssignSessionDayAsync(string userId, bool isAdmin, int sessionId, int? planDayId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var session = await db.Sessions.FirstOrDefaultAsync(s => s.Id == sessionId && (isAdmin || s.TrainerUserId == userId));
+        if (session is null) return false;
+        if (planDayId is { } dayId)
+        {
+            // Dzień musi być z planu tego samego klienta — nie da się podpiąć cudzego planu.
+            var ok = await db.PlanDays.AnyAsync(d => d.Id == dayId && d.Plan!.ClientId == session.ClientId);
+            if (!ok) return false;
+        }
+        session.PlanDayId = planDayId;
+        await db.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<Dictionary<int, SessionPlanDayDto>> GetSessionPlanDaysAsync(IReadOnlyCollection<int> sessionIds)
+    {
+        if (sessionIds.Count == 0) return [];
+        await using var db = dbFactory.CreateDbContext();
+        var rows = await db.Sessions.AsNoTracking()
+            .Where(s => sessionIds.Contains(s.Id) && s.PlanDayId != null)
+            .Select(s => new
+            {
+                s.Id, DayId = s.PlanDayId!.Value, s.PlanDay!.PlanId, PlanName = s.PlanDay.Plan!.Name,
+                s.PlanDay.Label, s.PlanDay.Order, Count = s.PlanDay.Exercises.Count
+            })
+            .ToListAsync();
+        return rows.ToDictionary(r => r.Id, r => new SessionPlanDayDto(r.Id, r.PlanId, r.DayId, r.PlanName,
+            string.IsNullOrWhiteSpace(r.Label) ? $"Dzień {r.Order + 1}" : r.Label, r.Count));
     }
 
     public async Task<PlanEditDto?> GetForWorkoutAsync(int clientId, int planId)
@@ -85,6 +150,7 @@ public class TrainingPlanService(
             Purpose = plan.Purpose,
             IsTemplate = plan.IsTemplate,
             ClientId = plan.ClientId,
+            Use = plan.Use,
             Days = plan.Days.OrderBy(d => d.Order).Select(d => new PlanDayEditDto
             {
                 Id = d.Id,
@@ -124,6 +190,7 @@ public class TrainingPlanService(
         await using var db = dbFactory.CreateDbContext();
 
         TrainingPlan plan;
+        var isNew = false;
         if (dto.Id is > 0)
         {
             plan = await db.TrainingPlans
@@ -135,13 +202,18 @@ public class TrainingPlanService(
         {
             plan = new TrainingPlan { TrainerUserId = trainerUserId, CreatedAt = clock.UtcNow };
             db.TrainingPlans.Add(plan);
+            isNew = true;
         }
 
         plan.Name = dto.Name.Trim();
         plan.Notes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim();
         plan.Purpose = string.IsNullOrWhiteSpace(dto.Purpose) ? null : dto.Purpose.Trim()[..Math.Min(800, dto.Purpose.Trim().Length)];
         plan.IsTemplate = dto.IsTemplate;
+        // Nowy plan klienta trafia na górę jego listy (kolejność trener zmieni w profilu).
+        if (isNew && !dto.IsTemplate && dto.ClientId is { } newClient)
+            plan.SortOrder = (await db.TrainingPlans.Where(p => p.ClientId == newClient).MinAsync(p => (int?)p.SortOrder) ?? 1) - 1;
         plan.ClientId = dto.IsTemplate ? null : dto.ClientId;
+        plan.Use = dto.Use;
 
         // Tylko ćwiczenia widoczne dla trenera (baza publiczna lub własne).
         var wantedExIds = dto.Days.SelectMany(d => d.Exercises).Select(e => e.ExerciseId).Distinct().ToList();
@@ -228,6 +300,7 @@ public class TrainingPlanService(
             Name = src.Name + " (kopia)",
             Notes = src.Notes,
             Purpose = src.Purpose,
+            Use = src.Use,
             IsTemplate = asTemplate,
             ClientId = null,
             CreatedAt = clock.UtcNow,

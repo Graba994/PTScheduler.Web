@@ -33,6 +33,10 @@ public class Session
     public int? SeriesId { get; set; }
     public SessionSeries? Series { get; set; }
 
+    /// <summary>Dzień planu zaplanowany na tę wizytę (trener wybiera, co robicie). Null — kolejny dzień z planu.</summary>
+    public int? PlanDayId { get; set; }
+    public PlanDay? PlanDay { get; set; }
+
     public string? MeetingUrl { get; set; }
     public string? CalendarEventId { get; set; }
     /// <summary>Skrót stanu wysłanego do Google Calendar — zmiana = trzeba zaktualizować wydarzenie.</summary>

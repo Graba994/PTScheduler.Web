@@ -417,22 +417,60 @@ else if (client is not null)
                 <div class="cp-col">
                     <section class="cp-card">
                         <div class="cp-card-head">
-                            <h6 class="cp-card-title mb-0"><i class="bi bi-clipboard-check"></i>Plany klienta</h6>
-                            <a class="btn btn-link btn-sm p-0" href="/plans/new"><i class="bi bi-plus-lg me-1"></i>Nowy</a>
+                            <h6 class="cp-card-title mb-0"><i class="bi bi-clipboard-check"></i>Plany klienta @if (_plans.Count > 1) { <small class="text-muted fw-normal">· kolejność jak u klienta</small> }</h6>
+                            <a class="btn btn-link btn-sm p-0" href="@($"/plans/new?klient={Id}")"><i class="bi bi-plus-lg me-1"></i>Nowy</a>
                         </div>
                         @if (_plans.Count == 0)
                         {
-                            <p class="text-muted small mb-0">Brak przypisanego planu. Przypisz plan, a klient zobaczy go w aplikacji i zacznie zapisywać treningi.</p>
+                            <p class="text-muted small mb-0">Brak aktywnego planu. Przypisz plan, a klient zobaczy go w aplikacji i zacznie zapisywać treningi.</p>
                         }
                         else
                         {
-                            @foreach (var p in _plans)
+                            <ol class="cpl">
+                                @for (var i = 0; i < _plans.Count; i++)
+                                {
+                                    var p = _plans[i];
+                                    var idx = i;
+                                    <li class="cpl-item">
+                                        <div class="cpl-move">
+                                            <button type="button" title="Wyżej" aria-label="Przesuń wyżej" disabled="@(idx == 0 || _planBusy)" @onclick="() => MovePlanAsync(idx, -1)"><i class="bi bi-chevron-up"></i></button>
+                                            <button type="button" title="Niżej" aria-label="Przesuń niżej" disabled="@(idx == _plans.Count - 1 || _planBusy)" @onclick="() => MovePlanAsync(idx, 1)"><i class="bi bi-chevron-down"></i></button>
+                                        </div>
+                                        <a class="cpl-main" href="@($"/plans/edit/{p.Id}")">
+                                            <b class="text-truncate">@p.Name</b>
+                                            <span class="cpl-meta">
+                                                <span class="cpl-use use-@p.Use.ToString().ToLowerInvariant()"><i class="bi @PTScheduler.Web.Services.PlanUseText.Icon(p.Use)"></i>@PTScheduler.Web.Services.PlanUseText.Short(p.Use)</span>
+                                                <span>@p.DayCount @Plural(p.DayCount, "dzień", "dni", "dni") · @p.ExerciseCount @Plural(p.ExerciseCount, "ćw.", "ćw.", "ćw.")</span>
+                                                @if (p.LastWorkout is { } lw) { <span><i class="bi bi-clock-history"></i>@lw.ToString("dd.MM")</span> }
+                                                @if (p.NextSessionAt is { } ns) { <span class="cpl-next"><i class="bi bi-calendar-check"></i>@ns.ToString("dd.MM HH:mm")</span> }
+                                            </span>
+                                        </a>
+                                        <button type="button" class="cpl-end" title="Zakończ plan — zniknie z aplikacji klienta, zostanie w historii" disabled="@_planBusy" @onclick="() => ArchivePlanAsync(p.Id, true)"><i class="bi bi-archive"></i></button>
+                                    </li>
+                                }
+                            </ol>
+                        }
+                        <button type="button" class="btn btn-link btn-sm p-0 mt-2" @onclick="ToggleArchivedAsync">
+                            <i class="bi @(_showArchived ? "bi-chevron-up" : "bi-archive") me-1"></i>@(_showArchived ? "Ukryj zakończone" : "Zakończone plany")
+                        </button>
+                        @if (_showArchived)
+                        {
+                            @if (_archivedPlans.Count == 0)
                             {
-                                <a class="cp-plan" href="@($"/plans/edit/{p.Id}")">
-                                    <span class="cp-plan-ic"><i class="bi bi-clipboard-pulse"></i></span>
-                                    <span class="min-w-0"><b class="text-truncate d-block">@p.Name</b><small>@p.DayCount @Plural(p.DayCount, "dzień", "dni", "dni") · @p.ExerciseCount @Plural(p.ExerciseCount, "ćwiczenie", "ćwiczenia", "ćwiczeń")</small></span>
-                                    <i class="bi bi-chevron-right cp-go"></i>
-                                </a>
+                                <p class="text-muted small mb-0 mt-1">Brak zakończonych planów.</p>
+                            }
+                            else
+                            {
+                                <ul class="cpl cpl-archived">
+                                    @foreach (var p in _archivedPlans)
+                                    {
+                                        <li class="cpl-item">
+                                            <a class="cpl-main" href="@($"/plans/edit/{p.Id}")"><b class="text-truncate">@p.Name</b>
+                                                <span class="cpl-meta"><span>@(p.LastWorkout is { } lwArch ? $"ostatnio {lwArch:dd.MM.yyyy}" : "bez treningów")</span></span></a>
+                                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_planBusy" @onclick="() => ArchivePlanAsync(p.Id, false)">Przywróć</button>
+                                        </li>
+                                    }
+                                </ul>
                             }
                         }
                     </section>
@@ -1251,6 +1289,38 @@ else if (client is not null)
 
     private List<WorkoutJournalDayDto> _journal = [];
     private List<TrainingPlanListItemDto> _plans = [];
+    private List<TrainingPlanListItemDto> _archivedPlans = [];
+    private bool _showArchived;
+    private bool _planBusy;
+
+    private async Task MovePlanAsync(int index, int dir)
+    {
+        var target = index + dir;
+        if (target < 0 || target >= _plans.Count) return;
+        (_plans[index], _plans[target]) = (_plans[target], _plans[index]);
+        _planBusy = true;
+        try { await PlanService.ReorderClientPlansAsync(currentUserId, _isAdmin, Id, _plans.Select(p => p.Id).ToList()); }
+        finally { _planBusy = false; }
+    }
+
+    private async Task ArchivePlanAsync(int planId, bool archived)
+    {
+        _planBusy = true;
+        try
+        {
+            await PlanService.SetArchivedAsync(currentUserId, _isAdmin, planId, archived);
+            _plans = await PlanService.GetClientPlansAsync(Id);
+            if (_showArchived) _archivedPlans = (await PlanService.GetClientPlansAsync(Id, includeArchived: true)).Where(p => p.IsArchived).ToList();
+        }
+        catch (InvalidOperationException) { }
+        finally { _planBusy = false; }
+    }
+
+    private async Task ToggleArchivedAsync()
+    {
+        _showArchived = !_showArchived;
+        if (_showArchived) _archivedPlans = (await PlanService.GetClientPlansAsync(Id, includeArchived: true)).Where(p => p.IsArchived).ToList();
+    }
     private List<PersonalRecordDto> _records = [];
     private Dictionary<DateOnly, PTScheduler.Application.Surveys.SurveyResponseDto> _postWorkout = [];
     private PTScheduler.Application.Surveys.SurveyResponseDto? _health;

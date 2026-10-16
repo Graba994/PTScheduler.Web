@@ -95,6 +95,18 @@ else
                         </select>
                     </div>
                 }
+                <div class="col-12">
+                    <label class="form-label mb-1">Jak klient korzysta z planu?</label>
+                    <div class="pe-use" role="radiogroup">
+                        @foreach (var (use, icon, title, hint) in UseOptions)
+                        {
+                            <button type="button" role="radio" aria-checked="@(_plan.Use == use ? "true" : "false")" class="pe-use-opt @(_plan.Use == use ? "on" : "")" @onclick="() => _plan.Use = use">
+                                <i class="bi @icon"></i>
+                                <span><b>@title</b><small>@hint</small></span>
+                            </button>
+                        }
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -312,6 +324,13 @@ else
     }
 
     [Parameter] public int? Id { get; set; }
+
+    private static readonly (PTScheduler.Domain.Enums.PlanUse Use, string Icon, string Title, string Hint)[] UseOptions =
+    [
+        (PTScheduler.Domain.Enums.PlanUse.Both, "bi-arrow-left-right", "Z trenerem i samodzielnie", "Na wizytach i w aplikacji między nimi"),
+        (PTScheduler.Domain.Enums.PlanUse.WithTrainer, "bi-people", "Na treningach z trenerem", "Plan widoczny w aplikacji, trening startuje na wizycie"),
+        (PTScheduler.Domain.Enums.PlanUse.Solo, "bi-person-walking", "Samodzielnie", "Bez spotkania — trening w aplikacji, kiedy pasuje"),
+    ];
 
     private string _userId = string.Empty;
     private PlanEditDto? _plan;

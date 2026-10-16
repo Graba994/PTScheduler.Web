@@ -224,6 +224,11 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             .HasIndex(s => new { s.TrainerUserId, s.StartTime });
         builder.Entity<Session>()
             .HasIndex(s => s.StartTime);
+        // Dzień planu wybrany na wizytę — usunięcie dnia z planu nie kasuje wizyty, tylko czyści wybór.
+        builder.Entity<Session>()
+            .HasOne(s => s.PlanDay).WithMany()
+            .HasForeignKey(s => s.PlanDayId)
+            .OnDelete(DeleteBehavior.SetNull);
 
         // Optymistyczna współbieżność na liczniku kredytów pakietu. UsedSessions
         // jest inkrementowane/dekrementowane z wielu ścieżek (booking, seria,

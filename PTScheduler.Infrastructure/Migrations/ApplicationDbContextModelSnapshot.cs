@@ -2552,6 +2552,9 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Property<Guid?>("PairGroupId")
                         .HasColumnType("uuid");
 
+                    b.Property<int?>("PlanDayId")
+                        .HasColumnType("integer");
+
                     b.Property<int>("ReminderAttempts")
                         .HasColumnType("integer");
 
@@ -2593,6 +2596,8 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.HasIndex("PackageId");
 
                     b.HasIndex("PairGroupId");
+
+                    b.HasIndex("PlanDayId");
 
                     b.HasIndex("SeriesId");
 
@@ -3199,6 +3204,9 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("IsArchived")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsTemplate")
                         .HasColumnType("boolean");
 
@@ -3212,9 +3220,15 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Property<string>("Purpose")
                         .HasColumnType("text");
 
+                    b.Property<int>("SortOrder")
+                        .HasColumnType("integer");
+
                     b.Property<string>("TrainerUserId")
                         .IsRequired()
                         .HasColumnType("text");
+
+                    b.Property<int>("Use")
+                        .HasColumnType("integer");
 
                     b.HasKey("Id");
 
@@ -3904,6 +3918,11 @@ namespace PTScheduler.Infrastructure.Migrations
                         .HasForeignKey("PackageId")
                         .OnDelete(DeleteBehavior.SetNull);
 
+                    b.HasOne("PTScheduler.Domain.Entities.PlanDay", "PlanDay")
+                        .WithMany()
+                        .HasForeignKey("PlanDayId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
                     b.HasOne("PTScheduler.Domain.Entities.SessionSeries", "Series")
                         .WithMany("Sessions")
                         .HasForeignKey("SeriesId")
@@ -3918,6 +3937,8 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Navigation("Client");
 
                     b.Navigation("Package");
+
+                    b.Navigation("PlanDay");
 
                     b.Navigation("Series");
 

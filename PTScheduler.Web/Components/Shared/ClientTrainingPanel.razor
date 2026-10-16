@@ -64,7 +64,8 @@
                         {
                             <button type="button" role="tab" aria-selected="@(d.Id == _dayId ? "true" : "false")" class="ctp-day @(d.Id == _dayId ? "on" : "")" @onclick="() => _dayId = d.Id">
                                 @DayName(d)
-                                @if (d.Id == _suggestedDayId) { <em>kolejny</em> }
+                                @if (d.Id == _assigned?.PlanDayId) { <em class="ctp-day-set">na wizytę</em> }
+                                else if (d.Id == _suggestedDayId) { <em>kolejny</em> }
                             </button>
                         }
                     </div>
@@ -83,11 +84,28 @@
                                 }
                             </ol>
                         }
+                        @if (_targetSessionId is not null)
+                        {
+                            <div class="ctp-assign @(day.Id == _assigned?.PlanDayId ? "on" : "")">
+                                @if (day.Id == _assigned?.PlanDayId)
+                                {
+                                    <i class="bi bi-calendar-check-fill"></i>
+                                    <span><b>Zaplanowane na wizytę @_targetAt?.ToString("dddd d.MM, HH:mm", Pl)</b><small>Klient widzi ten dzień przy wizycie w swojej aplikacji.</small></span>
+                                    <button type="button" class="btn btn-sm btn-link" disabled="@_saving" @onclick="() => AssignAsync(null)">Wyczyść</button>
+                                }
+                                else
+                                {
+                                    <i class="bi bi-calendar-plus"></i>
+                                    <span><b>Ten dzień na wizytę @_targetAt?.ToString("dddd d.MM, HH:mm", Pl)?</b><small>Klient zobaczy, co będziecie robić. Bez wyboru — kolejny dzień z planu.</small></span>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_saving" @onclick="() => AssignAsync(day.Id)">Ustaw na wizytę</button>
+                                }
+                            </div>
+                        }
                         <div class="ctp-actions">
                             <a class="btn btn-primary" href="@($"/train?klient={ClientId}&plan={_plan.Id}&dzien={day.Id}")"><i class="bi bi-play-circle-fill me-1"></i>Zacznij trening na żywo</a>
                             <a class="btn btn-outline-secondary" href="@($"/plans/edit/{_plan.Id}")"><i class="bi bi-pencil me-1"></i>Edytuj plan</a>
                         </div>
-                        <p class="ctp-hint">„Kolejny” to dzień po ostatnio zrobionym. Klient może też zrobić go sam w aplikacji (Trenuj).</p>
+                        <p class="ctp-hint">„Kolejny” to dzień po ostatnio zrobionym. @(_plan.Use == PlanUse.WithTrainer ? "Ten plan jest tylko na treningi z Tobą — w aplikacji klienta nie da się go zacząć bez wizyty." : "Między wizytami klient może też zrobić go w aplikacji (Trenuj).")</p>
                     }
                 }
             </div>
@@ -179,6 +197,10 @@
             if (upcoming is not null && id is null) _nextAt = upcoming.StartTime;
             if (id is { } sid) _card = await Briefs.GetAsync(sid, userId, isAdmin);
             if (_card is not null && _card.ClientId != ClientId) _card = null;
+            // Wizyta, na którą można zaplanować dzień planu: ta z karty albo najbliższa w grafiku.
+            _targetSessionId = _card?.SessionId ?? upcoming?.Id;
+            _targetAt = _card?.Start ?? upcoming?.StartTime;
+            _userId = userId; _isAdmin = isAdmin;
 
             // Ostatni trening i dzień planu, który był ostatnio — żeby zaproponować kolejny.
             var lastLogs = await db.WorkoutLogs.AsNoTracking().Where(l => l.ClientId == ClientId)
@@ -197,8 +219,13 @@
         }
 
         if (!PlansOn) return;
-        _plans = (await PlanService.GetClientPlansAsync(ClientId)).Where(p => !p.IsTemplate).OrderByDescending(p => p.CreatedAt).ToList();
-        var planId = _card?.PlanId is { } cp && _plans.Any(p => p.Id == cp) ? cp : _plans.FirstOrDefault()?.Id;
+        _plans = (await PlanService.GetClientPlansAsync(ClientId)).Where(p => !p.IsTemplate).ToList();
+        if (_targetSessionId is { } target)
+            _assigned = (await PlanService.GetSessionPlanDaysAsync([target])).GetValueOrDefault(target);
+        var planId = _assigned?.PlanId is { } ap && _plans.Any(p => p.Id == ap) ? ap
+            : _card?.PlanId is { } cp && _plans.Any(p => p.Id == cp) ? cp
+            // Na wizytę proponuj plan do pracy z trenerem — samodzielny tylko, gdy nie ma innego.
+            : (_plans.FirstOrDefault(p => p.Use != PTScheduler.Domain.Enums.PlanUse.Solo) ?? _plans.FirstOrDefault())?.Id;
         if (planId is { } pid) await LoadPlanAsync(pid);
     }
 
@@ -211,7 +238,26 @@
         var days = _plan.Days.OrderBy(d => d.Order).ToList();
         var idx = days.FindIndex(d => d.Id == _lastDayId);
         _suggestedDayId = days[(idx + 1) % days.Count].Id;
-        _dayId = _suggestedDayId;
+        _dayId = _assigned is { } a && a.PlanId == planId ? a.PlanDayId : _suggestedDayId;
+    }
+
+    private int? _targetSessionId;
+    private DateTime? _targetAt;
+    private SessionPlanDayDto? _assigned;
+    private bool _saving;
+    private string _userId = "";
+    private bool _isAdmin;
+
+    private async Task AssignAsync(int? dayId)
+    {
+        if (_targetSessionId is not { } sid) return;
+        _saving = true;
+        try
+        {
+            if (await PlanService.AssignSessionDayAsync(_userId, _isAdmin, sid, dayId))
+                _assigned = dayId is null ? null : (await PlanService.GetSessionPlanDaysAsync([sid])).GetValueOrDefault(sid);
+        }
+        finally { _saving = false; }
     }
 
     private async Task PlanChangedAsync(ChangeEventArgs e)

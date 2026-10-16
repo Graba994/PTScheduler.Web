@@ -27,8 +27,20 @@ public interface ITrainingPlanService
 
     // --- Widok klienta (do trenowania) ---
 
-    /// <summary>Plany przypisane danemu klientowi (do wyboru „co trenuję").</summary>
-    Task<List<TrainingPlanListItemDto>> GetClientPlansAsync(int clientId);
+    /// <summary>Plany przypisane danemu klientowi w kolejności ułożonej przez trenera (bez zakończonych, chyba że <paramref name="includeArchived"/>).</summary>
+    Task<List<TrainingPlanListItemDto>> GetClientPlansAsync(int clientId, bool includeArchived = false);
+
+    /// <summary>Nowa kolejność planów klienta (Id od góry). Trener — tylko swoje plany; administrator — wszystkie.</summary>
+    Task ReorderClientPlansAsync(string userId, bool isAdmin, int clientId, IReadOnlyList<int> orderedPlanIds);
+
+    /// <summary>Zakończenie planu (znika z list klienta) albo przywrócenie.</summary>
+    Task SetArchivedAsync(string userId, bool isAdmin, int planId, bool archived);
+
+    /// <summary>Wybór dnia planu na konkretną wizytę (null — kolejny dzień z planu). Fałsz, gdy wizyta albo dzień nie pasują.</summary>
+    Task<bool> AssignSessionDayAsync(string userId, bool isAdmin, int sessionId, int? planDayId);
+
+    /// <summary>Dni planu wybrane na podane wizyty.</summary>
+    Task<Dictionary<int, SessionPlanDayDto>> GetSessionPlanDaysAsync(IReadOnlyCollection<int> sessionIds);
 
     /// <summary>Plan do wykonania przez klienta; null jeśli nie jest do niego przypisany.</summary>
     Task<PlanEditDto?> GetForWorkoutAsync(int clientId, int planId);

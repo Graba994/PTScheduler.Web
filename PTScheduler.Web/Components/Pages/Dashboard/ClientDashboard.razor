@@ -8,6 +8,7 @@
 @inject IJSRuntime JS
 @inject NavigationManager Nav
 @inject IModuleSettingsService ModuleSettings
+@inject ITrainingPlanService PlanService
 @inject PTScheduler.Web.Services.EntitlementService Entitlements
 
 @if (!_loaded)
@@ -134,6 +135,10 @@ else
                         <span><i class="bi bi-clock"></i>@_nextSession.DurationMinutes min</span>
                         <span><i class="bi bi-bookmark"></i>@_nextSession.SessionTypeName</span>
                     </div>
+                    @if (_nextPlanDay is { } npd)
+                    {
+                        <div class="cdx-next-plan"><i class="bi bi-clipboard-check"></i><span>Na treningu: <b>@npd.DayLabel</b> · @npd.PlanName (@npd.ExerciseCount ćw.)</span></div>
+                    }
                     <div class="cdx-next-actions">
                         @if (!string.IsNullOrEmpty(_nextSession.MeetingUrl))
                         {
@@ -388,6 +393,7 @@ else
     private bool _loading;
     private ClientDto? _client;
     private SessionDto? _nextSession;
+    private SessionPlanDayDto? _nextPlanDay;
     private PTScheduler.Application.Scheduling.CancellationDecision? _cancelDecision;
     private List<SessionDto> _recentPast = [];
     private int _upcomingCount;
@@ -449,6 +455,8 @@ else
                     var upcoming = await SessionService.GetUpcomingAsync(clientId: _client.Id, count: 10);
                     _upcomingCount = upcoming.Count;
                     _nextSession   = upcoming.FirstOrDefault();
+                    try { _nextPlanDay = _nextSession is null ? null : (await PlanService.GetSessionPlanDaysAsync([_nextSession.Id])).GetValueOrDefault(_nextSession.Id); }
+                    catch { _nextPlanDay = null; }
                     _cancelDecision = _nextSession is null || ClientIdOverride.HasValue
                         ? null
                         : await SessionService.GetClientCancellationAsync(_nextSession.Id, _client.ApplicationUserId);

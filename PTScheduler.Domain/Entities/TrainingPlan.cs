@@ -23,6 +23,15 @@ public class TrainingPlan
 
     public bool IsTemplate { get; set; }
 
+    /// <summary>Z trenerem, samodzielnie albo oba — decyduje, gdzie klient widzi plan.</summary>
+    public Enums.PlanUse Use { get; set; } = Enums.PlanUse.Both;
+
+    /// <summary>Kolejność planów klienta (trener układa ręcznie; mniejsza = wyżej).</summary>
+    public int SortOrder { get; set; }
+
+    /// <summary>Zakończony plan — znika z list klienta, zostaje w historii i dzienniku.</summary>
+    public bool IsArchived { get; set; }
+
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
 
     public ICollection<PlanDay> Days { get; set; } = [];

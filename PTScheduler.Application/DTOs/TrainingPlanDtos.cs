@@ -11,7 +11,17 @@ public sealed class TrainingPlanListItemDto
     public int DayCount { get; set; }
     public int ExerciseCount { get; set; }
     public DateTime CreatedAt { get; set; }
+    public PTScheduler.Domain.Enums.PlanUse Use { get; set; }
+    public int SortOrder { get; set; }
+    public bool IsArchived { get; set; }
+    /// <summary>Ostatni zapisany trening z tego planu (dziennik klienta).</summary>
+    public DateOnly? LastWorkout { get; set; }
+    /// <summary>Najbliższa wizyta, na którą wybrano dzień z tego planu.</summary>
+    public DateTime? NextSessionAt { get; set; }
 }
+
+/// <summary>Dzień planu przypisany do wizyty (pokazywany klientowi i trenerowi przy wizycie).</summary>
+public sealed record SessionPlanDayDto(int SessionId, int PlanId, int PlanDayId, string PlanName, string DayLabel, int ExerciseCount);
 
 /// <summary>Pełny plan do edycji w kreatorze (plan → dni → ćwiczenia).</summary>
 public sealed class PlanEditDto
@@ -23,6 +33,8 @@ public sealed class PlanEditDto
     public string? Purpose { get; set; }
     public bool IsTemplate { get; set; }
     public int? ClientId { get; set; }
+    /// <summary>Z trenerem / samodzielnie / oba.</summary>
+    public PTScheduler.Domain.Enums.PlanUse Use { get; set; }
     public List<PlanDayEditDto> Days { get; set; } = [];
 }
 

@@ -215,20 +215,40 @@ else
         }
         else
         {
-            <div class="text-muted small mb-2">Wybierz plan:</div>
-            <div class="row g-2">
-                @foreach (var p in _plans)
-                {
-                    <div class="col-12 col-md-6">
-                        <button class="card w-100 text-start border-0 shadow-sm" @onclick="() => SelectPlan(p.Id)">
-                            <div class="card-body py-2">
-                                <div class="fw-semibold">@p.Name</div>
-                                <div class="text-muted small"><i class="bi bi-calendar3 me-1"></i>@p.DayCount dni · @p.ExerciseCount ćwiczeń</div>
-                            </div>
-                        </button>
-                    </div>
-                }
-            </div>
+            // Klient zaczyna sam tylko plany „samodzielnie” i „oba”; trener (na żywo) — każdy.
+            var startable = _plans.Where(p => _liveFor is not null || p.Use != PTScheduler.Domain.Enums.PlanUse.WithTrainer).ToList();
+            var withTrainer = _liveFor is null ? _plans.Where(p => p.Use == PTScheduler.Domain.Enums.PlanUse.WithTrainer).ToList() : [];
+            @if (startable.Count > 0)
+            {
+                <div class="text-muted small mb-2">@(_liveFor is null ? "Wybierz plan na dziś:" : "Wybierz plan:")</div>
+                <div class="row g-2">
+                    @foreach (var p in startable)
+                    {
+                        <div class="col-12 col-md-6">
+                            <button class="card w-100 text-start border-0 shadow-sm" @onclick="() => SelectPlan(p.Id)">
+                                <div class="card-body py-2">
+                                    <div class="fw-semibold">@p.Name</div>
+                                    <div class="text-muted small"><i class="bi bi-calendar3 me-1"></i>@p.DayCount @(PTScheduler.Web.Services.AssistantTipsService.Plural(p.DayCount, "dzień", "dni", "dni")) · @p.ExerciseCount @(PTScheduler.Web.Services.AssistantTipsService.Plural(p.ExerciseCount, "ćwiczenie", "ćwiczenia", "ćwiczeń"))@(p.LastWorkout is { } lw ? $" · ostatnio {lw:dd.MM}" : "")</div>
+                                </div>
+                            </button>
+                        </div>
+                    }
+                </div>
+            }
+            @if (withTrainer.Count > 0)
+            {
+                <div class="tr-with-trainer">
+                    <div class="text-muted small mb-1"><i class="bi bi-people me-1"></i>Na treningach z trenerem — zrobicie je razem:</div>
+                    @foreach (var p in withTrainer)
+                    {
+                        <div class="tr-wt-item"><b>@p.Name</b><span>@(p.NextSessionAt is { } ns ? $"najbliżej: {ns:dd.MM, HH:mm}" : $"{p.DayCount} {PTScheduler.Web.Services.AssistantTipsService.Plural(p.DayCount, "dzień", "dni", "dni")} · {p.ExerciseCount} {PTScheduler.Web.Services.AssistantTipsService.Plural(p.ExerciseCount, "ćwiczenie", "ćwiczenia", "ćwiczeń")}")</span></div>
+                    }
+                </div>
+            }
+            @if (startable.Count == 0 && withTrainer.Count > 0)
+            {
+                <div class="alert alert-secondary small mt-2 mb-0"><i class="bi bi-info-circle me-1"></i>Na razie nie masz planu do samodzielnego trenowania — trener prowadzi Cię na wizytach.</div>
+            }
         }
     }
     else

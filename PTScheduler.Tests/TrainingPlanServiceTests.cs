@@ -193,4 +193,86 @@ public class TrainingPlanServiceTests
         var act = async () => await svc.SavePlanAsync(T1, dto);
         await act.Should().ThrowAsync<InvalidOperationException>();
     }
+    [Fact]
+    public async Task New_Client_Plan_Lands_On_Top_And_Reorder_Persists()
+    {
+        var (f, _) = TestDb.CreateFresh();
+        await SeedAsync(f);
+        var svc = Make(f);
+
+        var a = await svc.SavePlanAsync(T1, NewPlan());
+        var b2 = NewPlan(); b2.Name = "Plan B";
+        var b = await svc.SavePlanAsync(T1, b2);
+
+        (await svc.GetClientPlansAsync(1)).Select(p => p.Id).Should().ContainInOrder(b, a);
+
+        await svc.ReorderClientPlansAsync(T1, false, 1, [a, b]);
+        (await svc.GetClientPlansAsync(1)).Select(p => p.Id).Should().ContainInOrder(a, b);
+
+        // Cudzy trener nie przestawi kolejności.
+        await svc.ReorderClientPlansAsync(T2, false, 1, [b, a]);
+        (await svc.GetClientPlansAsync(1)).Select(p => p.Id).Should().ContainInOrder(a, b);
+    }
+
+    [Fact]
+    public async Task Archived_Plans_Are_Hidden_Unless_Requested()
+    {
+        var (f, _) = TestDb.CreateFresh();
+        await SeedAsync(f);
+        var svc = Make(f);
+        var id = await svc.SavePlanAsync(T1, NewPlan());
+
+        await svc.SetArchivedAsync(T1, false, id, true);
+        (await svc.GetClientPlansAsync(1)).Should().BeEmpty();
+        (await svc.GetClientPlansAsync(1, includeArchived: true)).Should().ContainSingle(p => p.Id == id && p.IsArchived);
+
+        await svc.SetArchivedAsync(T1, false, id, false);
+        (await svc.GetClientPlansAsync(1)).Should().ContainSingle();
+    }
+
+    [Fact]
+    public async Task Use_Mode_Roundtrips()
+    {
+        var (f, _) = TestDb.CreateFresh();
+        await SeedAsync(f);
+        var svc = Make(f);
+        var dto = NewPlan();
+        dto.Use = PlanUse.Solo;
+
+        var id = await svc.SavePlanAsync(T1, dto);
+
+        (await svc.GetForEditAsync(T1, id))!.Use.Should().Be(PlanUse.Solo);
+        (await svc.GetClientPlansAsync(1)).Single().Use.Should().Be(PlanUse.Solo);
+    }
+
+    [Fact]
+    public async Task Assign_Session_Day_Only_From_Same_Client()
+    {
+        var (f, _) = TestDb.CreateFresh();
+        await SeedAsync(f);
+        var svc = Make(f);
+        var planId = await svc.SavePlanAsync(T1, NewPlan());
+        int dayId, foreignDayId;
+        await using (var db = f.CreateDbContext())
+        {
+            db.Clients.Add(new Client { Id = 2, ApplicationUserId = "c2", FirstName = "Ola", LastName = "Nowak", TrainerUserId = T1 });
+            db.TrainingPlans.Add(new TrainingPlan { Id = 99, Name = "Cudzy", ClientId = 2, TrainerUserId = T1, Days = [new PlanDay { Id = 990, Label = "X" }] });
+            db.Sessions.Add(new Session { Id = 5, ClientId = 1, SessionTypeId = 1, TrainerUserId = T1, StartTime = new DateTime(2026, 1, 2, 10, 0, 0) });
+            await db.SaveChangesAsync();
+            dayId = db.PlanDays.Single(d => d.PlanId == planId).Id;
+            foreignDayId = 990;
+        }
+
+        (await svc.AssignSessionDayAsync(T1, false, 5, foreignDayId)).Should().BeFalse();
+        (await svc.AssignSessionDayAsync(T2, false, 5, dayId)).Should().BeFalse();
+        (await svc.AssignSessionDayAsync(T1, false, 5, dayId)).Should().BeTrue();
+
+        var map = await svc.GetSessionPlanDaysAsync([5]);
+        map[5].PlanDayId.Should().Be(dayId);
+        map[5].DayLabel.Should().Be("Dzień A");
+        map[5].ExerciseCount.Should().Be(2);
+
+        (await svc.AssignSessionDayAsync(T1, false, 5, null)).Should().BeTrue();
+        (await svc.GetSessionPlanDaysAsync([5])).Should().BeEmpty();
+    }
 }

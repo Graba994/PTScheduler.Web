@@ -85,10 +85,14 @@ public class PreSessionBriefService(
         var lastWorkout = lastLogs.Select(l => new ExerciseLine(l.NamePl,
             string.Join(" · ", l.Sets.Select(x => x.WeightKg > 0 ? $"{x.Reps}×{x.WeightKg:0.##}" : $"{x.Reps}")))).ToList();
 
-        // Proponowany dzień planu: następny po ostatnio zrobionym (w kolejce dni planu).
+        // Dzień planu: wybrany przez trenera na tę wizytę, a bez wyboru — następny po ostatnio zrobionym
+        // w pierwszym aktywnym planie klienta (kolejność planów ustala trener).
+        var chosenDayId = await db.Sessions.Where(x => x.Id == s.Id).Select(x => x.PlanDayId).FirstOrDefaultAsync();
+        var chosenPlanId = chosenDayId is null ? null
+            : await db.PlanDays.Where(d => d.Id == chosenDayId).Select(d => (int?)d.PlanId).FirstOrDefaultAsync();
         var plan = await db.TrainingPlans.AsNoTracking()
-            .Where(p => p.ClientId == s.ClientId && !p.IsTemplate)
-            .OrderByDescending(p => p.CreatedAt)
+            .Where(p => p.ClientId == s.ClientId && !p.IsTemplate && (chosenPlanId != null ? p.Id == chosenPlanId : !p.IsArchived && p.Use != PlanUse.Solo))
+            .OrderBy(p => p.SortOrder).ThenByDescending(p => p.CreatedAt)
             .Select(p => new
             {
                 p.Id, p.Name,
@@ -105,7 +109,7 @@ public class PreSessionBriefService(
         {
             var lastDayId = lastLogs.Select(l => l.PlanDayId).FirstOrDefault(id => id != null);
             var idx = plan.Days.FindIndex(d => d.Id == lastDayId);
-            var day = plan.Days[(idx + 1) % plan.Days.Count];
+            var day = plan.Days.FirstOrDefault(d => d.Id == chosenDayId) ?? plan.Days[(idx + 1) % plan.Days.Count];
             dayLabel = string.IsNullOrWhiteSpace(day.Label) ? $"Dzień {plan.Days.IndexOf(day) + 1}" : day.Label;
             planToday = day.Exercises.Select(e => new ExerciseLine(e.NamePl,
                 $"{e.Sets} × {e.Reps ?? "—"}" + (e.TargetWeightKg is decimal kg and > 0 ? $" · {kg:0.##} kg" : ""))).ToList();
