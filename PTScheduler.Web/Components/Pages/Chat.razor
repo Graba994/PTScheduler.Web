@@ -11,6 +11,7 @@
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 @inject IAppClock Clock
+@inject PTScheduler.Web.Services.PlatformAssistantService Assistant
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Wiadomości" />
@@ -104,6 +105,22 @@ else
                         </div>
                     }
                 </div>
+                @if (_isStaff && _messages.LastOrDefault() is { FromStaff: false } lastIn)
+                {
+                    @* Ostatnia wiadomość od klienta bez odpowiedzi: gotowe krótkie odpowiedzi i szkic od asystenta — tylko wpisują się w pole. *@
+                    <div class="chat-quick" role="group" aria-label="Szybkie odpowiedzi">
+                        @foreach (var r in PTScheduler.Application.Messaging.QuickReplies.For(lastIn.Body))
+                        {
+                            <button type="button" class="chat-quick-chip" @onclick="() => _draft = r">@r</button>
+                        }
+                        @if (_aiOn)
+                        {
+                            <button type="button" class="chat-quick-chip ai" disabled="@_drafting" @onclick="() => AiReplyAsync(lastIn.Body)">
+                                @if (_drafting) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-stars me-1"></i> }Szkic od asystenta
+                            </button>
+                        }
+                    </div>
+                }
                 <div class="chat-input">
                     <textarea class="form-control" rows="1" maxlength="2000" placeholder="Napisz wiadomość…"
                               @bind="_draft" @bind:event="oninput" @onkeydown="OnKeyDown"></textarea>
@@ -129,6 +146,25 @@ else
     private List<ChatConversationDto> _conversations = [];
     private List<ChatMessageDto> _messages = [];
     private string _draft = "";
+    private bool _aiOn, _drafting;
+
+    /// <summary>Szkic odpowiedzi od asystenta: do AI idzie wiadomość bez imienia, telefonu i e-maila klienta.</summary>
+    private async Task AiReplyAsync(string incoming)
+    {
+        _drafting = true;
+        try
+        {
+            var parts = _title.Split(' ', 2, StringSplitOptions.RemoveEmptyEntries);
+            var safe = PTScheduler.Application.Messaging.MessageTemplates.ToExample(incoming, parts.ElementAtOrDefault(0) ?? "", parts.ElementAtOrDefault(1));
+            if (safe.Length > 158) safe = safe[..155] + "…";
+            var fallback = PTScheduler.Application.Messaging.QuickReplies.For(incoming)[0];
+            var facts = new Dictionary<string, string> { ["wiadomosc_klienta"] = safe, ["klient"] = PTScheduler.Application.Messaging.MessageTemplates.ClientTag };
+            var text = await Assistant.PhraseAsync($"reply-{_clientId}-{incoming.GetHashCode()}", "odpowiedz_klientowi", facts, fallback, true);
+            _draft = text.Replace(PTScheduler.Application.Messaging.MessageTemplates.ClientTag, parts.ElementAtOrDefault(0) ?? "").Trim();
+        }
+        catch { }
+        finally { _drafting = false; }
+    }
     private bool _sending;
     private string? _error;
     private ElementReference _scrollEl;
@@ -141,6 +177,7 @@ else
         _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
         _isAdmin = auth.User.IsInRole(Roles.Admin);
         _isStaff = _isAdmin || auth.User.IsInRole(Roles.Trainer) || auth.User.IsInRole(Roles.Subordinate);
+        if (_isStaff) { try { _aiOn = (await Assistant.GetConfigAsync())?.Ai == true; } catch { _aiOn = false; } }
 
         if (_isStaff)
         {

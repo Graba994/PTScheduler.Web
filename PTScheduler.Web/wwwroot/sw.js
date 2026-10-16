@@ -1,4 +1,4 @@
-const CACHE = 'ptscheduler-v6';
+const CACHE = 'ptscheduler-v7';
 const PRECACHE = [
     '/',
     '/offline.html',
@@ -115,14 +115,37 @@ self.addEventListener('push', e => {
             body: data.body || '',
             icon: data.icon || '/icons/icon-192.png',
             badge: '/icons/icon-96.png',
-            data: { url: data.url || '/app' }
+            // Przyciski (np. „Akceptuj”, gotowe odpowiedzi) — szczegóły akcji w data.actions.
+            actions: Array.isArray(data.actions) ? data.actions.slice(0, 2) : [],
+            data: { url: data.url || '/app', actions: data.actionData || {} }
         })
     );
 });
 
 self.addEventListener('notificationclick', e => {
     e.notification.close();
-    const url = new URL(e.notification.data?.url || '/app', self.location.origin).href;
+    const act = e.action ? e.notification.data?.actions?.[e.action] : null;
+    // Przycisk z tokenem: wykonaj w tle (bez otwierania aplikacji) i pokaż krótkie potwierdzenie.
+    if (act && act.token) {
+        e.waitUntil((async () => {
+            try {
+                const res = await fetch('/api/push/act', {
+                    method: 'POST', credentials: 'same-origin',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ token: act.token })
+                });
+                const j = res.ok ? await res.json() : { ok: false, message: 'Zaloguj się, żeby dokończyć.', url: e.notification.data?.url };
+                await self.registration.showNotification(j.ok ? '✓ Gotowe' : 'Nie udało się', {
+                    body: j.message || '', icon: '/icons/icon-192.png', badge: '/icons/icon-96.png',
+                    data: { url: j.url || e.notification.data?.url || '/app' }
+                });
+            } catch (_) {
+                await clients.openWindow(new URL(e.notification.data?.url || '/app', self.location.origin).href);
+            }
+        })());
+        return;
+    }
+    const url = new URL((act && act.url) || e.notification.data?.url || '/app', self.location.origin).href;
     e.waitUntil((async () => {
         const list = await clients.matchAll({ type: 'window', includeUncontrolled: true });
         for (const client of list) {

@@ -26,7 +26,24 @@ public class PushMessageDto
     /// w ustawieniach konta, wiadomość nie jest wysyłana. Null — zawsze wysyłamy.
     /// </summary>
     public string? Category { get; set; }
+    /// <summary>Przyciski w powiadomieniu (zwykle najwyżej 2 — tyle pokazuje większość systemów).</summary>
+    public List<PushActionDto>? Actions { get; set; }
 }
 
 /// <summary>Wynik wysyłki do wszystkich urządzeń użytkownika.</summary>
 public sealed record PushSendReport(int Sent, int Failed, string? LastError);
+
+/// <summary>
+/// Przycisk w powiadomieniu push. Z <see cref="Kind"/> akcja wykonuje się bez otwierania aplikacji
+/// (podpisany token, ważny 3 dni, tylko dla odbiorcy); z samym <see cref="Url"/> — otwiera ten adres.
+/// </summary>
+public class PushActionDto
+{
+    public string Action { get; set; } = "";
+    public string Title { get; set; } = "";
+    public string? Url { get; set; }
+    /// <summary>„approve” (akceptacja rezerwacji) albo „reply” (gotowa odpowiedź na czacie).</summary>
+    public string? Kind { get; set; }
+    public int TargetId { get; set; }
+    public string? Arg { get; set; }
+}

@@ -35,6 +35,7 @@ public static class DependencyInjection
         // zmienia się w trakcie życia instancji. Zob. IAppClock po opis
         // konwencji instant / zegar ścienny.
         services.AddSingleton<IAppClock, AppClock>();
+        services.AddSingleton<IPushActionTokens, PushActionTokens>();
 
         services.AddScoped<IBrandingService, BrandingService>();
         services.AddScoped<ISiteContentService, SiteContentService>();

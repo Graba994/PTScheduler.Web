@@ -73,7 +73,11 @@ public class OffPackageService(
 
         await NotifyTrainerAsync(created, instant
             ? ("Nowa rezerwacja — płatność u Ciebie", $"{created.ClientName}: {created.SessionTypeName}, {created.StartTime:dd.MM HH:mm}. Klient zapłaci przy treningu.")
-            : ("Prośba o termin do akceptacji", $"{created.ClientName}: {created.SessionTypeName}, {created.StartTime:dd.MM HH:mm}. Klient chce zapłacić u Ciebie."));
+            : ("Prośba o termin do akceptacji", $"{created.ClientName}: {created.SessionTypeName}, {created.StartTime:dd.MM HH:mm}. Klient chce zapłacić u Ciebie."),
+            // Prośba o akceptację: „Akceptuj” prosto z powiadomienia, „Szczegóły” otwiera listę wizyt.
+            instant ? null : [
+                new PushActionDto { Action = "approve", Title = "✓ Akceptuj", Kind = "approve", TargetId = created.Id },
+                new PushActionDto { Action = "open", Title = "Szczegóły", Url = "/sessions" }]);
         await LogAsync(clientUserId, "Client", instant ? "OffPackageBooked" : "OffPackageRequested", created.Id,
             $"{created.SessionTypeName} {created.StartTime:dd.MM.yyyy HH:mm} — płatność u trenera{(instant ? "" : ", do akceptacji")}");
 
@@ -248,9 +252,9 @@ public class OffPackageService(
         await db.SaveChangesAsync();
     }
 
-    private async Task NotifyTrainerAsync(SessionDto s, (string Title, string Body) msg)
+    private async Task NotifyTrainerAsync(SessionDto s, (string Title, string Body) msg, List<PushActionDto>? actions = null)
     {
-        try { await push.SendAsync(s.TrainerUserId, new PushMessageDto { Category = PTScheduler.Domain.Constants.NotificationTypes.PushSessions, Title = msg.Title, Body = msg.Body, Url = "/sessions" }); }
+        try { await push.SendAsync(s.TrainerUserId, new PushMessageDto { Category = PTScheduler.Domain.Constants.NotificationTypes.PushSessions, Title = msg.Title, Body = msg.Body, Url = "/sessions", Actions = actions }); }
         catch (Exception ex) { logger.LogWarning(ex, "Powiadomienie trenera o rezerwacji poza pakietem nie wyszło (SessionId={Id})", s.Id); }
     }
 

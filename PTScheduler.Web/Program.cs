@@ -428,6 +428,44 @@ app.MapGet("/reports/client/{clientId:int}/monthly", async (
 }).RequireAuthorization();
 
 // Plan treningowy w PDF (logo i kolory studia) — trener swoich planów, klient swoich, admin wszystkich.
+// Przyciski w powiadomieniach push (service worker): podpisany token ważny 3 dni, tylko dla odbiorcy.
+app.MapPost("/api/push/act", async (
+    PushActRequest body,
+    HttpContext ctx,
+    PTScheduler.Application.Interfaces.IPushActionTokens tokens,
+    PTScheduler.Application.Interfaces.IOffPackageService offPackage,
+    PTScheduler.Application.Interfaces.IChatService chat,
+    IDbContextFactory<ApplicationDbContext> dbFactory) =>
+{
+    var userId = ctx.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+    var t = string.IsNullOrEmpty(body?.Token) ? null : tokens.Read(body.Token);
+    if (t is null || userId is null || t.UserId != userId)
+        return Results.Json(new { ok = false, message = "Ten przycisk wygasł — otwórz aplikację.", url = "/dzis" });
+    var isAdmin = ctx.User.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+    try
+    {
+        switch (t.Kind)
+        {
+            case "approve":
+            {
+                await using var db = await dbFactory.CreateDbContextAsync();
+                var owner = await db.Sessions.Where(s => s.Id == t.TargetId).Select(s => s.TrainerUserId).FirstOrDefaultAsync();
+                if (owner is null || (!isAdmin && owner != userId)) return Results.Json(new { ok = false, message = "Nie znaleziono wizyty.", url = "/sessions" });
+                await offPackage.ApproveAsync(t.TargetId, userId);
+                return Results.Json(new { ok = true, message = "Termin zaakceptowany — klient dostał potwierdzenie.", url = "/sessions" });
+            }
+            case "reply" when !string.IsNullOrWhiteSpace(t.Arg):
+            {
+                if (!await chat.CanAccessAsync(t.TargetId, userId, isAdmin)) return Results.Json(new { ok = false, message = "Brak dostępu do tej rozmowy.", url = "/chat" });
+                var r = await chat.SendAsync(t.TargetId, userId, fromStaff: true, t.Arg);
+                return Results.Json(new { ok = r.Ok, message = r.Ok ? $"Wysłano: „{t.Arg}”" : r.Error, url = $"/chat?client={t.TargetId}" });
+            }
+        }
+    }
+    catch (InvalidOperationException ex) { return Results.Json(new { ok = false, message = ex.Message, url = "/sessions" }); }
+    return Results.Json(new { ok = false, message = "Nieznana akcja.", url = "/app" });
+}).RequireAuthorization();
+
 app.MapGet("/plans/{planId:int}/pdf", async (
     int planId,
     PTScheduler.Application.Interfaces.ITrainingPlanPdfService planPdf,
@@ -1272,3 +1310,5 @@ public sealed class StartupHealth
     public string? DatabaseErrorDetail { get; set; }
     public DateTime FailedAt { get; set; }
 }
+
+internal sealed record PushActRequest(string? Token);

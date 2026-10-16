@@ -139,7 +139,11 @@ public class ChatService(
                     Category = PTScheduler.Domain.Constants.NotificationTypes.PushMessages,
                     Title = $"💬 {(string.IsNullOrWhiteSpace(senderName) ? "Nowa wiadomość" : senderName)}",
                     Body = body.Length > 120 ? body[..117] + "…" : body,
-                    Url = fromStaff ? "/chat" : $"/chat?client={clientId}"
+                    Url = fromStaff ? "/chat" : $"/chat?client={clientId}",
+                    // Do trenera: dwie gotowe odpowiedzi — wysyłają się bez otwierania aplikacji.
+                    Actions = fromStaff ? null : PTScheduler.Application.Messaging.QuickReplies.For(body).Take(2)
+                        .Select((r, i) => new PushActionDto { Action = $"reply{i}", Title = r.Length > 32 ? r[..31] + "…" : r, Kind = "reply", TargetId = clientId, Arg = r })
+                        .ToList()
                 });
             }
             catch (Exception ex) { logger.LogWarning(ex, "Chat push failed for client {ClientId}.", clientId); }

@@ -13,7 +13,8 @@ namespace PTScheduler.Infrastructure.Services;
 
 public class WebPushService(
     IDbContextFactory<ApplicationDbContext> dbFactory,
-    ILogger<WebPushService> logger) : IWebPushService
+    ILogger<WebPushService> logger,
+    IPushActionTokens? actionTokens = null) : IWebPushService
 {
     public async Task<WebPushSettingsDto> GetSettingsAsync()
     {
@@ -171,12 +172,20 @@ public class WebPushService(
     {
         try
         {
+            // Przyciski: akcja z rodzajem dostaje podpisany token (wykonuje się bez otwierania aplikacji).
+            var actions = (message.Actions ?? []).Where(a => a.Kind is null || actionTokens is not null).Take(2).ToList();
             var payload = JsonSerializer.Serialize(new
             {
                 title = message.Title,
                 body = message.Body,
                 url = message.Url,
-                icon = message.Icon
+                icon = message.Icon,
+                actions = actions.Select(a => new { action = a.Action, title = a.Title }),
+                actionData = actions.ToDictionary(a => a.Action, a => new
+                {
+                    url = a.Url,
+                    token = a.Kind is null ? null : actionTokens!.Create(sub.UserId, a.Kind, a.TargetId, a.Arg)
+                })
             });
 
             var endpoint = new Uri(sub.Endpoint);

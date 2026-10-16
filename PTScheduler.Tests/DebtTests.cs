@@ -49,3 +49,35 @@ public class DebtTests
         formal.Should().StartWith("Dzień dobry!").And.Contain("Uprzejmie przypominam").And.EndWith("Anna");
     }
 }
+
+public class QuickRepliesTests
+{
+    [Theory]
+    [InlineData("Niestety jestem chory, nie dam rady jutro", "Zdrowiej")]
+    [InlineData("Czy możemy przełożyć na czwartek?", "nowy termin")]
+    [InlineData("Spóźnię się 10 minut, korek", "czekam")]
+    [InlineData("Dzięki za trening!", "Do zobaczenia")]
+    [InlineData("Ok", "👍")]
+    public void Picks_Replies_By_Intent(string message, string expected)
+    {
+        PTScheduler.Application.Messaging.QuickReplies.For(message).Should().Contain(r => r.Contains(expected));
+    }
+}
+
+public class PushActionTokenTests
+{
+    [Fact]
+    public void Roundtrips_And_Rejects_Tampered_Tokens()
+    {
+        var tokens = new PTScheduler.Infrastructure.Services.PushActionTokens(new Microsoft.AspNetCore.DataProtection.EphemeralDataProtectionProvider());
+        var t = tokens.Create("trainer-1", "reply", 42, "Jasne!");
+        var read = tokens.Read(t);
+        read.Should().NotBeNull();
+        read!.UserId.Should().Be("trainer-1");
+        read.Kind.Should().Be("reply");
+        read.TargetId.Should().Be(42);
+        read.Arg.Should().Be("Jasne!");
+        tokens.Read(t[..^2] + "xx").Should().BeNull();
+        tokens.Read("").Should().BeNull();
+    }
+}
