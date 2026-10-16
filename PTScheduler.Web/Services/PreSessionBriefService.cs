@@ -28,7 +28,8 @@ public class PreSessionBriefService(
         DateOnly? LastWorkoutDate, List<ExerciseLine> LastWorkout,
         string? PlanName, string? PlanDayLabel, int? PlanId, List<ExerciseLine> PlanToday,
         List<ProgressionSuggestionDto> Progression, List<PlanInsightDto> Insights,
-        List<(DateTime At, string Text)> Notes, string Summary, string? Mascot, string? MascotName);
+        List<(DateTime At, string Text)> Notes, string Summary, string? Mascot, string? MascotName,
+        int? PackageLeft = null, bool SummaryFromAi = false);
 
     /// <summary>Karta dla treningu — null, gdy go nie ma albo nie należy do tego trenera.</summary>
     public async Task<Card?> GetAsync(int sessionId, string userId, bool isAdmin)
@@ -137,8 +138,8 @@ public class PreSessionBriefService(
             ["platnosc_u_trenera"] = s.OffPackagePayment == "trainer" && s.PaidAt is null ? "tak" : "nie",
         };
         var config = await assistant.GetConfigAsync();
-        var summary = await assistant.PhraseAsync($"before-{s.Id}", "przed_treningiem", facts, fallback, config?.Ai == true)
-            is var text ? text.Replace("[klient]", string.IsNullOrWhiteSpace(s.FirstName) ? "Klient" : s.FirstName.Trim()) : fallback;
+        var rawSummary = await assistant.PhraseAsync($"before-{s.Id}", "przed_treningiem", facts, fallback, config?.Ai == true);
+        var summary = rawSummary.Replace("[klient]", string.IsNullOrWhiteSpace(s.FirstName) ? "Klient" : s.FirstName.Trim());
 
         return new Card(s.Id, s.ClientId, s.Client.Trim(), s.Phone, s.StartTime, s.Type, number,
             s.Package is { } pk ? $"{pk.Name}: zostało {pk.Left} z {pk.TotalSessions}" : null,
@@ -151,7 +152,8 @@ public class PreSessionBriefService(
             notes.Select(n => (n.CreatedAt, n.Content)).ToList(),
             summary,
             config is { Enabled: true } ? config.Icons.GetValueOrDefault(healthNotes.Count > 0 ? "think" : "hello") : null,
-            config is { Enabled: true } ? config.Name : null);
+            config is { Enabled: true } ? config.Name : null,
+            s.Package?.Left, config?.Ai == true && rawSummary != fallback);
     }
 
 }

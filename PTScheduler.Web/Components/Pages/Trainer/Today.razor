@@ -1,0 +1,406 @@
+@page "/dzis"
+@using System.Globalization
+@using Microsoft.AspNetCore.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
+@attribute [Authorize(Roles = Roles.Admin + "," + Roles.Trainer + "," + Roles.Subordinate)]
+@inject ISessionService SessionService
+@inject IClientService ClientService
+@inject ITrainingPlanService PlanService
+@inject PreSessionBriefService Briefs
+@inject PlatformAssistantService Assistant
+@inject EntitlementService Entitlements
+@inject IAppClock Clock
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Dzień pracy w jednym miejscu: wizyty po kolei, przy każdej to, co trzeba wiedzieć, i akcje jednym kliknięciem.
+   Asystent dopisuje zdanie o dniu i o każdej wizycie — tylko gdy AI jest włączone; reszta to zwykłe reguły. *@
+
+<AppTitle Page="Dziś" />
+
+<div class="td">
+    <header class="td-head">
+        <div class="min-w-0">
+            <h4 class="td-title">@DayTitle</h4>
+            <div class="td-date">@_day.ToString("dddd, d MMMM", Pl)</div>
+        </div>
+        <nav class="td-nav" aria-label="Wybór dnia">
+            <a class="td-nav-btn" href="@DayHref(_day.AddDays(-1))" aria-label="Poprzedni dzień"><i class="bi bi-chevron-left"></i></a>
+            <a class="td-nav-btn @(_day == _today ? "on" : "")" href="/dzis">Dziś</a>
+            <a class="td-nav-btn @(_day == _today.AddDays(1) ? "on" : "")" href="@DayHref(_today.AddDays(1))">Jutro</a>
+            <a class="td-nav-btn" href="@DayHref(_day.AddDays(1))" aria-label="Następny dzień"><i class="bi bi-chevron-right"></i></a>
+        </nav>
+    </header>
+
+    @if (_loading)
+    {
+        <div class="text-center text-muted py-5"><div class="spinner-border"></div></div>
+    }
+    else
+    {
+        var active = _visits.Where(v => v.S.Status != SessionStatus.Cancelled).ToList();
+        var cancelled = _visits.Where(v => v.S.Status == SessionStatus.Cancelled).ToList();
+
+        <section class="td-sum" aria-live="polite">
+            @if (_mascot is not null)
+            {
+                <img class="td-sum-mascot" src="@_mascot" alt="" width="44" height="44" />
+            }
+            else
+            {
+                <span class="td-sum-ic" aria-hidden="true"><i class="bi bi-sun"></i></span>
+            }
+            <div class="min-w-0 flex-grow-1">
+                <p class="td-sum-text">@(_daySummary ?? FallbackDaySummary(active))</p>
+                <div class="td-stats">
+                    <span><b>@active.Count</b> @AssistantTipsService.Plural(active.Count, "wizyta", "wizyty", "wizyt")</span>
+                    @if (_cardsLoaded)
+                    {
+                        var todo = active.Count(v => v.S.Status is SessionStatus.Scheduled or SessionStatus.AwaitingPackage);
+                        var unpaid = active.Count(v => v.S.UnpaidAtTrainer);
+                        var health = active.Count(v => v.Card?.HealthNotes.Count > 0);
+                        if (todo != active.Count) { <span><b>@todo</b> do zrobienia</span> }
+                        if (unpaid > 0) { <span class="warn"><b>@unpaid</b> płatność na miejscu</span> }
+                        if (health > 0) { <span class="warn"><b>@health</b> z uwagami zdrowotnymi</span> }
+                    }
+                </div>
+            </div>
+        </section>
+
+        @if (active.Count == 0)
+        {
+            <div class="td-empty">
+                <i class="bi bi-cup-hot"></i>
+                <b>@(_day == _today ? "Dziś bez wizyt" : "Bez wizyt tego dnia")</b>
+                <span>Dobry moment na plany, wiadomości albo odpoczynek.</span>
+                <a class="btn btn-sm btn-outline-primary" href="/calendar"><i class="bi bi-calendar-plus me-1"></i>Otwórz kalendarz</a>
+            </div>
+        }
+
+        <ol class="td-list">
+            @foreach (var v in active)
+            {
+                var s = v.S;
+                var open = s.Status is SessionStatus.Scheduled or SessionStatus.AwaitingPackage;
+                var isNext = v.S.Id == _nextId;
+                <li class="td-visit st-@s.Status.ToString().ToLowerInvariant() @(isNext ? "is-next" : "")">
+                    <div class="td-time">
+                        <b>@s.StartTime.ToString("HH:mm")</b>
+                        <small>@s.DurationMinutes min</small>
+                        @if (isNext) { <span class="td-next">@(s.StartTime <= _now ? "teraz" : "następna")</span> }
+                    </div>
+                    <div class="td-body">
+                        <div class="td-who">
+                            <a class="td-name" href="@($"/clients/{s.ClientId}")">@s.DisplayName</a>
+                            <span class="td-status">@StatusText(s.Status)</span>
+                        </div>
+                        <div class="td-meta">
+                            <span>@s.SessionTypeName</span>
+                            @if (_isAdmin && !string.IsNullOrWhiteSpace(s.TrainerName)) { <span><i class="bi bi-person"></i>@s.TrainerName</span> }
+                            @if (v.Day is { } day)
+                            {
+                                <span class="td-plan"><i class="bi bi-clipboard-check"></i>@day.DayLabel · @day.PlanName</span>
+                            }
+                            else if (v.Card?.PlanDayLabel is { } dl)
+                            {
+                                <span class="td-plan soft" title="Proponowany kolejny dzień planu"><i class="bi bi-clipboard"></i>@dl · @v.Card.PlanName</span>
+                            }
+                            @if (v.Card?.LastWorkoutDate is { } lw) { <span><i class="bi bi-clock-history"></i>ostatnio @LastText(lw)</span> }
+                        </div>
+
+                        @if (v.Card is null && !_cardsLoaded)
+                        {
+                            <div class="td-hints"><span class="td-skel"></span><span class="td-skel w2"></span></div>
+                        }
+                        else if (v.Hints.Count > 0)
+                        {
+                            <div class="td-hints">
+                                @foreach (var h in v.Hints)
+                                {
+                                    <span class="td-hint k-@h.Kind"><i class="bi @h.Icon"></i>@h.Text</span>
+                                }
+                            </div>
+                        }
+                        @if (v.Card is { SummaryFromAi: true } c)
+                        {
+                            <p class="td-ai"><i class="bi bi-stars" aria-hidden="true"></i>@c.Summary</p>
+                        }
+
+                        @if (_noteFor == s.Id)
+                        {
+                            <div class="td-note">
+                                <textarea class="form-control form-control-sm" rows="2" placeholder="Co warto zapamiętać z tej wizyty?" aria-label="Notatka" @bind="_noteText" @bind:event="oninput"></textarea>
+                                <div class="td-note-actions">
+                                    <button type="button" class="btn btn-sm btn-light" @onclick="() => _noteFor = null">Anuluj</button>
+                                    <button type="button" class="btn btn-sm btn-primary" disabled="@(_busy || string.IsNullOrWhiteSpace(_noteText))" @onclick="() => SaveNoteAsync(s)">Zapisz notatkę</button>
+                                </div>
+                            </div>
+                        }
+                        @if (_confirmNoShow == s.Id)
+                        {
+                            <div class="td-confirm">
+                                <span>Oznaczyć nieobecność @s.ClientName?</span>
+                                <button type="button" class="btn btn-sm btn-light" @onclick="() => _confirmNoShow = null">Nie</button>
+                                <button type="button" class="btn btn-sm btn-warning" disabled="@_busy" @onclick="() => SetStatusAsync(s, SessionStatus.NoShow)">Tak, nieobecność</button>
+                            </div>
+                        }
+
+                        <div class="td-actions">
+                            @if (open && _plansOn)
+                            {
+                                <a class="btn btn-sm btn-primary" href="@LiveHref(v)"><i class="bi bi-play-circle-fill me-1"></i>Prowadź trening</a>
+                            }
+                            @if (open && s.StartTime <= _now.AddHours(2))
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-success" disabled="@_busy" @onclick="() => SetStatusAsync(s, SessionStatus.Completed)"><i class="bi bi-check2 me-1"></i>Ukończona</button>
+                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => _confirmNoShow = s.Id"><i class="bi bi-person-x me-1"></i>Nieobecność</button>
+                            }
+                            @if (s.Status == SessionStatus.NoShow)
+                            {
+                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => RestoreAsync(s)"><i class="bi bi-arrow-counterclockwise me-1"></i>Cofnij nieobecność</button>
+                            }
+                            <button type="button" class="td-icon" title="Notatka" aria-label="Notatka" @onclick="() => OpenNote(s.Id)"><i class="bi bi-pencil-square"></i></button>
+                            @if (v.Card?.Phone is { Length: > 0 } phone)
+                            {
+                                <a class="td-icon" href="@($"tel:{phone}")" title="Zadzwoń" aria-label="Zadzwoń"><i class="bi bi-telephone"></i></a>
+                            }
+                            <a class="td-icon" href="@($"/chat?client={s.ClientId}")" title="Wiadomość" aria-label="Wiadomość"><i class="bi bi-chat-dots"></i></a>
+                        </div>
+                        @if (_flash.TryGetValue(s.Id, out var msg)) { <div class="td-flash"><i class="bi bi-check2-circle"></i>@msg</div> }
+                    </div>
+                </li>
+            }
+        </ol>
+
+        @if (cancelled.Count > 0)
+        {
+            <details class="td-cancelled">
+                <summary>Odwołane (@cancelled.Count)</summary>
+                <ul>
+                    @foreach (var v in cancelled)
+                    {
+                        <li><b>@v.S.StartTime.ToString("HH:mm")</b> @v.S.DisplayName@(string.IsNullOrWhiteSpace(v.S.CancellationReason) ? "" : $" — {v.S.CancellationReason}")</li>
+                    }
+                </ul>
+            </details>
+        }
+        @if (_error is not null) { <div class="alert alert-danger small mt-3">@_error</div> }
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "d")] public string? DayQuery { get; set; }
+
+    private static readonly CultureInfo Pl = new("pl-PL");
+
+    private sealed record Hint(string Kind, string Icon, string Text);
+    private sealed class Visit(SessionDto s)
+    {
+        public SessionDto S { get; set; } = s;
+        public PreSessionBriefService.Card? Card { get; set; }
+        public SessionPlanDayDto? Day { get; set; }
+        public List<Hint> Hints { get; set; } = [];
+    }
+
+    private List<Visit> _visits = [];
+    private DateOnly _day, _today;
+    private DateTime _now;
+    private int? _nextId;
+    private bool _loading = true, _cardsLoaded, _busy, _isAdmin, _plansOn;
+    private string _userId = "";
+    private string? _daySummary, _mascot, _error, _noteText;
+    private int? _noteFor, _confirmNoShow;
+    private readonly Dictionary<int, string> _flash = [];
+
+    private string DayTitle => _day == _today ? "Dziś" : _day == _today.AddDays(1) ? "Jutro" : _day == _today.AddDays(-1) ? "Wczoraj" : "Dzień";
+    private static string DayHref(DateOnly d) => $"/dzis?d={d:yyyy-MM-dd}";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        _userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _isAdmin = user.IsInRole(Roles.Admin);
+        _plansOn = Entitlements.IsAllowed("TrainingPlansEnabled");
+        _now = Clock.LocalNow;
+        _today = DateOnly.FromDateTime(_now);
+        _day = DateOnly.TryParseExact(DayQuery, "yyyy-MM-dd", out var d) ? d : _today;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true; _cardsLoaded = false; _daySummary = null; _error = null;
+        try
+        {
+            var from = _day.ToDateTime(TimeOnly.MinValue);
+            var sessions = await SessionService.GetSessionsAsync(from, from.AddDays(1), _isAdmin ? null : _userId);
+            _visits = sessions.Where(s => !s.IsPairFollower).OrderBy(s => s.StartTime).Select(s => new Visit(s)).ToList();
+            _nextId = _day == _today
+                ? _visits.FirstOrDefault(v => v.S.Status is SessionStatus.Scheduled or SessionStatus.AwaitingPackage && v.S.EndTime > _now)?.S.Id
+                : null;
+            if (_plansOn && _visits.Count > 0)
+            {
+                var days = await PlanService.GetSessionPlanDaysAsync(_visits.Select(v => v.S.Id).ToList());
+                foreach (var v in _visits) v.Day = days.GetValueOrDefault(v.S.Id);
+            }
+        }
+        catch { _error = "Nie udało się wczytać wizyt. Odśwież stronę."; _visits = []; }
+        _loading = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_loading || _cardsLoaded) return;
+        _cardsLoaded = true; // od razu, żeby kolejne rendery nie zaczęły ładować drugi raz
+        var config = await SafeConfigAsync();
+        _mascot = config is { Enabled: true } ? config.Icons.GetValueOrDefault("hello") : null;
+        // Karty wizyt (te same co „przed treningiem”) — równolegle, każda z własnym kontekstem bazy.
+        var todo = _visits.Where(v => v.S.Status != SessionStatus.Cancelled).ToList();
+        await Task.WhenAll(todo.Select(async v =>
+        {
+            try { v.Card = await Briefs.GetAsync(v.S.Id, _userId, _isAdmin); } catch { v.Card = null; }
+            v.Hints = BuildHints(v);
+        }));
+        _daySummary = await DaySummaryAsync(todo, config);
+        StateHasChanged();
+    }
+
+    private async Task<PlatformAssistantService.Config?> SafeConfigAsync()
+    {
+        try { return await Assistant.GetConfigAsync(); } catch { return null; }
+    }
+
+    private List<Hint> BuildHints(Visit v)
+    {
+        var list = new List<Hint>();
+        if (v.Card is not { } c) return list;
+        if (c.Number == 1) list.Add(new("info", "bi-stars", "Pierwszy trening — zacznij od rozmowy"));
+        if (c.HealthNotes.Count > 0) list.Add(new("warn", "bi-heart-pulse", Short("Zdrowie: " + c.HealthNotes[0])));
+        if (c.LastFeeling.Any(f => f.StartsWith("Ból", StringComparison.OrdinalIgnoreCase)))
+            list.Add(new("warn", "bi-bandaid", "Ostatnio zgłoszony ból"));
+        if (c.LastWorkoutDate is { } lw && (_day.DayNumber - lw.DayNumber) is var gap && gap >= 14)
+            list.Add(new("info", "bi-hourglass-split", $"Przerwa {gap} dni — zacznij lżej"));
+        if (c.Progression.Count > 0)
+            list.Add(new("good", "bi-graph-up-arrow", $"{c.Progression.Count} {AssistantTipsService.Plural(c.Progression.Count, "propozycja ciężaru", "propozycje ciężaru", "propozycji ciężaru")}"));
+        if (v.S.UnpaidAtTrainer) list.Add(new("money", "bi-cash-coin", "Płatność na miejscu"));
+        if (c.PackageLeft is { } left && left <= 1)
+            list.Add(new("money", "bi-box-seam", left <= 0 ? "Pakiet wykorzystany — zaproponuj nowy" : "Ostatni trening z pakietu"));
+        return list;
+    }
+
+    private static string Short(string text) => text.Length > 60 ? text[..57].TrimEnd() + "…" : text;
+
+    private string FallbackDaySummary(List<Visit> active)
+    {
+        if (active.Count == 0) return _day == _today ? "Dziś bez wizyt w grafiku." : "Tego dnia nie ma wizyt.";
+        var first = active[0].S.StartTime.ToString("HH:mm");
+        var last = active[^1].S.StartTime.ToString("HH:mm");
+        return active.Count == 1
+            ? $"Jedna wizyta, o {first}."
+            : $"{active.Count} {AssistantTipsService.Plural(active.Count, "wizyta", "wizyty", "wizyt")} od {first} do {last}.";
+    }
+
+    /// <summary>Zdanie o dniu: reguły, a z włączonym AI — ta sama treść ładniej. Bez imion klientów w zapytaniu.</summary>
+    private async Task<string> DaySummaryAsync(List<Visit> active, PlatformAssistantService.Config? config)
+    {
+        var fallback = FallbackDaySummary(active);
+        if (active.Count == 0) return fallback;
+        var health = active.Count(v => v.Card?.HealthNotes.Count > 0);
+        var firsts = active.Count(v => v.Card?.Number == 1);
+        var back = active.Count(v => v.Card?.LastWorkoutDate is { } lw && _day.DayNumber - lw.DayNumber >= 14);
+        var unpaid = active.Count(v => v.S.UnpaidAtTrainer);
+        var parts = new List<string> { fallback };
+        if (firsts > 0) parts.Add(firsts == 1 ? "Jeden pierwszy trening." : $"Pierwsze treningi: {firsts}.");
+        if (back > 0) parts.Add(back == 1 ? "Jedna osoba wraca po dłuższej przerwie." : $"{back} osoby wracają po przerwie.");
+        if (health > 0) parts.Add(health == 1 ? "Jedna osoba ma uwagi zdrowotne." : $"Uwagi zdrowotne: {health} osoby.");
+        if (unpaid > 0) parts.Add(unpaid == 1 ? "Jedną płatność odbierasz na miejscu." : $"Płatności na miejscu: {unpaid}.");
+        var rules = string.Join(" ", parts);
+        if (config?.Ai != true) return rules;
+        var facts = new Dictionary<string, string>
+        {
+            ["dzien"] = _day == _today ? "dziś" : _day.ToString("dddd", Pl),
+            ["liczba_wizyt"] = active.Count.ToString(),
+            ["pierwsza_godzina"] = active[0].S.StartTime.ToString("HH:mm"),
+            ["ostatnia_godzina"] = active[^1].S.StartTime.ToString("HH:mm"),
+            ["pierwsze_treningi"] = firsts.ToString(),
+            ["powroty_po_przerwie"] = back.ToString(),
+            ["uwagi_zdrowotne"] = health.ToString(),
+            ["platnosci_na_miejscu"] = unpaid.ToString(),
+        };
+        try { return await Assistant.PhraseAsync($"day-{_userId}-{_day:yyyyMMdd}", "dzien_trenera", facts, rules, true); }
+        catch { return rules; }
+    }
+
+    private string LastText(DateOnly d)
+    {
+        var days = _day.DayNumber - d.DayNumber;
+        if (days == 0) return "dziś";
+        if (days == 1) return "wczoraj";
+        return days >= 2 && days <= 6 ? $"{days} dni temu" : d.ToString("d.MM");
+    }
+
+    private string LiveHref(Visit v) => v.Day is { } d
+        ? $"/train?klient={v.S.ClientId}&plan={d.PlanId}&dzien={d.PlanDayId}"
+        : $"/clients/{v.S.ClientId}?trening={v.S.Id}";
+
+    private static string StatusText(SessionStatus s) => s switch
+    {
+        SessionStatus.Completed => "ukończona",
+        SessionStatus.NoShow => "nieobecność",
+        SessionStatus.AwaitingPackage => "czeka na pakiet",
+        _ => ""
+    };
+
+    private void OpenNote(int sessionId) { _noteFor = sessionId; _noteText = ""; _confirmNoShow = null; }
+
+    private async Task SaveNoteAsync(SessionDto s)
+    {
+        if (string.IsNullOrWhiteSpace(_noteText)) return;
+        _busy = true;
+        try
+        {
+            await ClientService.AddNoteAsync(s.ClientId, _userId, _noteText.Trim());
+            _flash[s.Id] = "Notatka zapisana w profilu klienta.";
+            _noteFor = null;
+        }
+        catch { _error = "Nie udało się zapisać notatki."; }
+        finally { _busy = false; }
+    }
+
+    private async Task SetStatusAsync(SessionDto s, SessionStatus status)
+    {
+        _busy = true; _error = null;
+        try
+        {
+            await SessionService.UpdateStatusAsync(s.Id, status, includePartner: status == SessionStatus.Completed);
+            _confirmNoShow = null;
+            await RefreshAsync(s.Id, status == SessionStatus.Completed ? "Wizyta ukończona." : "Zapisano nieobecność.");
+        }
+        catch (Exception ex) when (ex is InvalidOperationException) { _error = ex.Message; }
+        catch { _error = "Nie udało się zmienić statusu."; }
+        finally { _busy = false; }
+    }
+
+    private async Task RestoreAsync(SessionDto s)
+    {
+        _busy = true; _error = null;
+        try { await SessionService.RestoreAsync(s.Id); await RefreshAsync(s.Id, "Przywrócono wizytę."); }
+        catch (Exception ex) when (ex is InvalidOperationException) { _error = ex.Message; }
+        catch { _error = "Nie udało się przywrócić wizyty."; }
+        finally { _busy = false; }
+    }
+
+    private async Task RefreshAsync(int sessionId, string message)
+    {
+        if (await SessionService.GetSessionAsync(sessionId) is { } fresh && _visits.FirstOrDefault(v => v.S.Id == sessionId) is { } v)
+            v.S = fresh;
+        _nextId = _day == _today
+            ? _visits.FirstOrDefault(x => x.S.Status is SessionStatus.Scheduled or SessionStatus.AwaitingPackage && x.S.EndTime > _now)?.S.Id
+            : null;
+        _flash[sessionId] = message;
+    }
+}
