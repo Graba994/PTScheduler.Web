@@ -176,6 +176,7 @@ builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformAssistantService>
 builder.Services.AddScoped<PTScheduler.Web.Services.AssistantTipsService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.MorningBriefService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.PreSessionBriefService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.WorkoutNoteDraftService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.RetentionService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.MessageDraftService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.WorkoutCompanionService>();
@@ -192,6 +193,7 @@ builder.Services.AddHostedService<PTScheduler.Web.Services.PackageReminderServic
 builder.Services.AddHostedService<PTScheduler.Web.Services.AutomationBackgroundService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.KsefStatusService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.OffPackageHoldService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.SessionAutoCompleteService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.MembershipBillingService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.ReferralRewardService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.CalendarSyncService>();

@@ -563,6 +563,36 @@ public class SessionServiceTests
         (await v.SessionPackages.FindAsync(1))!.UsedSessions.Should().Be(0);
     }
 
+    [Fact]
+    public async Task AutoComplete_Marks_Only_Recent_Unmarked_Sessions_Of_Opted_In_Trainers()
+    {
+        var (factory, db) = TestDb.CreateFresh();
+        SeedSessionType(db);
+        db.Clients.Add(new Client { Id = 1, ApplicationUserId = "c1", FirstName = "Jan", LastName = "K" });
+        var now = new DateTime(2026, 10, 16, 20, 0, 0);
+        db.Sessions.AddRange(
+            new Session { Id = 1, ClientId = 1, SessionTypeId = 1, TrainerUserId = "t1", StartTime = now.AddHours(-4) },               // koniec 3 h temu → ukończona
+            new Session { Id = 2, ClientId = 1, SessionTypeId = 1, TrainerUserId = "t1", StartTime = now.AddHours(-2) },               // koniec 1 h temu → jeszcze nie
+            new Session { Id = 3, ClientId = 1, SessionTypeId = 1, TrainerUserId = "t1", StartTime = now.AddDays(-10) },               // za stara
+            new Session { Id = 4, ClientId = 1, SessionTypeId = 1, TrainerUserId = "t1", StartTime = now.AddHours(-5), Status = SessionStatus.NoShow },
+            new Session { Id = 5, ClientId = 1, SessionTypeId = 1, TrainerUserId = "t2", StartTime = now.AddHours(-5) },               // trener wyłączył
+            new Session { Id = 6, ClientId = 1, SessionTypeId = 1, TrainerUserId = "t1", StartTime = now.AddHours(-5), AwaitingApproval = true });
+        db.TrainerConfigs.Add(new TrainerConfig { TrainerUserId = "t2", AutoCompleteSessions = false });
+        await db.SaveChangesAsync();
+
+        var n = await MakeService(factory).AutoCompletePastAsync(now, TimeSpan.FromHours(2), TimeSpan.FromDays(3));
+
+        n.Should().Be(1);
+        await using var verify = factory.CreateDbContext();
+        var st = await verify.Sessions.ToDictionaryAsync(s => s.Id, s => s.Status);
+        st[1].Should().Be(SessionStatus.Completed);
+        st[2].Should().Be(SessionStatus.Scheduled);
+        st[3].Should().Be(SessionStatus.Scheduled);
+        st[4].Should().Be(SessionStatus.NoShow);
+        st[5].Should().Be(SessionStatus.Scheduled);
+        st[6].Should().Be(SessionStatus.Scheduled);
+    }
+
     private static void SeedSessionType(Infrastructure.Data.ApplicationDbContext db)
     {
         db.SessionTypes.Add(new SessionType { Id = 1, Name = "Trening", DurationMinutes = 60 });

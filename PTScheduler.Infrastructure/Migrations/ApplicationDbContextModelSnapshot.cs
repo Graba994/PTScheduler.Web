@@ -2993,6 +2993,9 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Property<bool>("AllowClientsDiscoverPeers")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("AutoCompleteSessions")
+                        .HasColumnType("boolean");
+
                     b.Property<int>("BreakAfterSessionMinutes")
                         .HasColumnType("integer");
 

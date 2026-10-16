@@ -431,6 +431,22 @@ public class SessionService(
         }
     }
 
+    public async Task<int> AutoCompletePastAsync(DateTime localNow, TimeSpan grace, TimeSpan lookback)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var since = localNow - lookback;
+        var optedOut = db.TrainerConfigs.Where(c => !c.AutoCompleteSessions).Select(c => c.TrainerUserId);
+        var due = await db.Sessions
+            .Where(s => s.Status == SessionStatus.Scheduled && !s.AwaitingApproval
+                        && s.StartTime >= since
+                        && s.StartTime.AddMinutes(s.SessionType.DurationMinutes) <= localNow - grace
+                        && !optedOut.Contains(s.TrainerUserId))
+            .ToListAsync();
+        foreach (var s in due) s.Status = SessionStatus.Completed;
+        await db.SaveChangesAsync();
+        return due.Count;
+    }
+
     public async Task RestoreAsync(int id)
     {
         await using var db = dbFactory.CreateDbContext();

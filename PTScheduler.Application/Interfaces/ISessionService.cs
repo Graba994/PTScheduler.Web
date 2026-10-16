@@ -32,6 +32,11 @@ public interface ISessionService
     Task<List<SessionDto>> GetAwaitingPackageAsync(string? trainerUserId = null);
     Task RescheduleAsync(int id, DateTime newStartTime, bool allowOverlap = false);
     Task RestoreAsync(int id);
+    /// <summary>
+    /// Wizyty, których trener nie oznaczył, stają się „ukończone” <paramref name="grace"/> po końcu
+    /// (tylko u trenerów z włączonym AutoCompleteSessions i tylko z ostatnich <paramref name="lookback"/>).
+    /// </summary>
+    Task<int> AutoCompletePastAsync(DateTime localNow, TimeSpan grace, TimeSpan lookback);
     /// <summary>Czy (i na jakich warunkach) klient może teraz odwołać tę wizytę.</summary>
     Task<CancellationDecision> GetClientCancellationAsync(int id, string clientUserId);
     Task<CancellationDecision> ClientCancelSessionAsync(int id, string clientUserId, string? reason = null);

@@ -27,6 +27,9 @@ public class TrainerConfig
     /// <summary>Nieobecność bez odwołania (No-show) pobiera sesję z pakietu.</summary>
     public bool NoShowChargesSession { get; set; } = true;
 
+    /// <summary>Wizyta, której trener nie oznaczy, sama staje się „ukończona” 2 godziny po końcu.</summary>
+    public bool AutoCompleteSessions { get; set; } = true;
+
     // ── Rezerwacja przez klienta bez pakietu ──
     /// <summary>Klient może zapłacić online za pojedynczy trening (gdy rodzaj treningu ma cenę).</summary>
     public bool OffPackageOnline { get; set; } = true;

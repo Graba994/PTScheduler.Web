@@ -22,6 +22,7 @@ public class TrainerConfigService(IDbContextFactory<ApplicationDbContext> dbFact
             CancellationWindowHours = cfg.CancellationWindowHours,
             LateCancellationPolicy = cfg.LateCancellationPolicy,
             NoShowChargesSession = cfg.NoShowChargesSession,
+            AutoCompleteSessions = cfg.AutoCompleteSessions,
             OffPackageOnline = cfg.OffPackageOnline,
             OffPackageAtTrainer = cfg.OffPackageAtTrainer,
             OffPackageNeedsApproval = cfg.OffPackageNeedsApproval,
@@ -44,6 +45,7 @@ public class TrainerConfigService(IDbContextFactory<ApplicationDbContext> dbFact
         cfg.CancellationWindowHours = Math.Clamp(dto.CancellationWindowHours, 0, 168);
         cfg.LateCancellationPolicy = dto.LateCancellationPolicy;
         cfg.NoShowChargesSession = dto.NoShowChargesSession;
+        cfg.AutoCompleteSessions = dto.AutoCompleteSessions;
         cfg.OffPackageOnline = dto.OffPackageOnline;
         cfg.OffPackageAtTrainer = dto.OffPackageAtTrainer;
         cfg.OffPackageNeedsApproval = dto.OffPackageNeedsApproval;

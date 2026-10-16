@@ -5,11 +5,15 @@
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
 @using PTScheduler.Domain.Enums
+@using Microsoft.EntityFrameworkCore
 @attribute [Authorize(Roles = Roles.Admin + "," + Roles.Trainer + "," + Roles.Subordinate)]
 @inject ISessionService SessionService
 @inject IClientService ClientService
 @inject ITrainingPlanService PlanService
 @inject PreSessionBriefService Briefs
+@inject WorkoutNoteDraftService NoteDrafts
+@inject IOffPackageService OffPackage
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
 @inject PlatformAssistantService Assistant
 @inject EntitlementService Entitlements
 @inject IAppClock Clock
@@ -81,13 +85,52 @@
             </div>
         }
 
+        @if (CloseItems(active) is { Count: > 0 } close)
+        {
+            <section class="td-close" aria-labelledby="td-close-title">
+                <div class="td-close-head">
+                    <span class="td-close-ic" aria-hidden="true"><i class="bi bi-moon-stars"></i></span>
+                    <div class="min-w-0">
+                        <h6 id="td-close-title">Domknij dzień</h6>
+                        <small>@close.Count @AssistantTipsService.Plural(close.Count, "sprawa", "sprawy", "spraw") po wizytach — każda to jedno kliknięcie.</small>
+                    </div>
+                </div>
+                <ul class="td-close-list">
+                    @foreach (var (v, kind) in close)
+                    {
+                        <li>
+                            <span class="td-close-what"><b>@v.S.StartTime.ToString("HH:mm")</b> @v.S.DisplayName</span>
+                            @switch (kind)
+                            {
+                                case "mark":
+                                    <span class="td-close-why">nie oznaczono</span>
+                                    <button type="button" class="btn btn-sm btn-outline-success" disabled="@_busy" @onclick="() => SetStatusAsync(v.S, SessionStatus.Completed)">Ukończona</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => _confirmNoShow = v.S.Id">Nieobecność</button>
+                                    break;
+                                case "pay":
+                                    <span class="td-close-why">płatność na miejscu</span>
+                                    <PaidButtons Busy="_busy" OnPaid="via => MarkPaidAsync(v.S, via)" />
+                                    break;
+                                default:
+                                    <span class="td-close-why">bez notatki</span>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OpenNoteAsync(v.S, _logged.Contains(v.S.ClientId))">
+                                        @if (_logged.Contains(v.S.ClientId)) { <i class="bi bi-stars me-1"></i><span>Szkic z treningu</span> } else { <i class="bi bi-pencil-square me-1"></i><span>Notatka</span> }
+                                    </button>
+                                    break;
+                            }
+                        </li>
+                    }
+                </ul>
+            </section>
+        }
+
         <ol class="td-list">
             @foreach (var v in active)
             {
                 var s = v.S;
                 var open = s.Status is SessionStatus.Scheduled or SessionStatus.AwaitingPackage;
                 var isNext = v.S.Id == _nextId;
-                <li class="td-visit st-@s.Status.ToString().ToLowerInvariant() @(isNext ? "is-next" : "")">
+                <li id="@($"v-{s.Id}")" class="td-visit st-@s.Status.ToString().ToLowerInvariant() @(isNext ? "is-next" : "")">
                     <div class="td-time">
                         <b>@s.StartTime.ToString("HH:mm")</b>
                         <small>@s.DurationMinutes min</small>
@@ -133,8 +176,14 @@
                         @if (_noteFor == s.Id)
                         {
                             <div class="td-note">
-                                <textarea class="form-control form-control-sm" rows="2" placeholder="Co warto zapamiętać z tej wizyty?" aria-label="Notatka" @bind="_noteText" @bind:event="oninput"></textarea>
+                                <textarea class="form-control form-control-sm" rows="3" placeholder="Co warto zapamiętać z tej wizyty?" aria-label="Notatka" @bind="_noteText" @bind:event="oninput"></textarea>
                                 <div class="td-note-actions">
+                                    @if (_logged.Contains(s.ClientId))
+                                    {
+                                        <button type="button" class="btn btn-sm btn-link me-auto px-0" disabled="@_drafting" @onclick="() => DraftAsync(s)">
+                                            @if (_drafting) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-stars me-1"></i> }Szkic z zapisanego treningu
+                                        </button>
+                                    }
                                     <button type="button" class="btn btn-sm btn-light" @onclick="() => _noteFor = null">Anuluj</button>
                                     <button type="button" class="btn btn-sm btn-primary" disabled="@(_busy || string.IsNullOrWhiteSpace(_noteText))" @onclick="() => SaveNoteAsync(s)">Zapisz notatkę</button>
                                 </div>
@@ -163,7 +212,7 @@
                             {
                                 <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => RestoreAsync(s)"><i class="bi bi-arrow-counterclockwise me-1"></i>Cofnij nieobecność</button>
                             }
-                            <button type="button" class="td-icon" title="Notatka" aria-label="Notatka" @onclick="() => OpenNote(s.Id)"><i class="bi bi-pencil-square"></i></button>
+                            <button type="button" class="td-icon" title="Notatka" aria-label="Notatka" @onclick="() => OpenNoteAsync(s, false)"><i class="bi bi-pencil-square"></i></button>
                             @if (v.Card?.Phone is { Length: > 0 } phone)
                             {
                                 <a class="td-icon" href="@($"tel:{phone}")" title="Zadzwoń" aria-label="Zadzwoń"><i class="bi bi-telephone"></i></a>
@@ -215,6 +264,8 @@
     private string? _daySummary, _mascot, _error, _noteText;
     private int? _noteFor, _confirmNoShow;
     private readonly Dictionary<int, string> _flash = [];
+    private HashSet<int> _logged = [], _noted = [];
+    private bool _drafting;
 
     private string DayTitle => _day == _today ? "Dziś" : _day == _today.AddDays(1) ? "Jutro" : _day == _today.AddDays(-1) ? "Wczoraj" : "Dzień";
     private static string DayHref(DateOnly d) => $"/dzis?d={d:yyyy-MM-dd}";
@@ -242,6 +293,14 @@
             _nextId = _day == _today
                 ? _visits.FirstOrDefault(v => v.S.Status is SessionStatus.Scheduled or SessionStatus.AwaitingPackage && v.S.EndTime > _now)?.S.Id
                 : null;
+            if (_visits.Count > 0 && _day <= _today)
+            {
+                var clientIds = _visits.Select(v => v.S.ClientId).Distinct().ToList();
+                var fromUtc = Clock.ToUtc(from); var toUtc = Clock.ToUtc(from.AddDays(1));
+                await using var db = await DbFactory.CreateDbContextAsync();
+                _logged = (await db.WorkoutLogs.Where(l => clientIds.Contains(l.ClientId) && l.WorkoutDate == _day).Select(l => l.ClientId).Distinct().ToListAsync()).ToHashSet();
+                _noted = (await db.TrainerNotes.Where(n => clientIds.Contains(n.ClientId) && n.CreatedAt >= fromUtc && n.CreatedAt < toUtc).Select(n => n.ClientId).Distinct().ToListAsync()).ToHashSet();
+            }
             if (_plansOn && _visits.Count > 0)
             {
                 var days = await PlanService.GetSessionPlanDaysAsync(_visits.Select(v => v.S.Id).ToList());
@@ -355,7 +414,42 @@
         _ => ""
     };
 
-    private void OpenNote(int sessionId) { _noteFor = sessionId; _noteText = ""; _confirmNoShow = null; }
+    private async Task OpenNoteAsync(SessionDto s, bool withDraft)
+    {
+        _noteFor = s.Id; _noteText = ""; _confirmNoShow = null;
+        if (withDraft) await DraftAsync(s);
+    }
+
+    private async Task DraftAsync(SessionDto s)
+    {
+        _drafting = true;
+        try { _noteText = await NoteDrafts.DraftAsync(s.ClientId, _day, $"note-{s.Id}") ?? _noteText; }
+        catch { }
+        finally { _drafting = false; }
+    }
+
+    private async Task MarkPaidAsync(SessionDto s, string via)
+    {
+        _busy = true; _error = null;
+        try { await OffPackage.MarkPaidAsync(s.Id, _userId, via); await RefreshAsync(s.Id, "Zapisano płatność."); }
+        catch (Exception ex) when (ex is InvalidOperationException) { _error = ex.Message; }
+        catch { _error = "Nie udało się zapisać płatności."; }
+        finally { _busy = false; }
+    }
+
+    /// <summary>Po wizytach: nieoznaczone, nieopłacone na miejscu, bez notatki — tylko dla dzisiaj i dni minionych.</summary>
+    private List<(Visit V, string Kind)> CloseItems(List<Visit> active)
+    {
+        var list = new List<(Visit, string)>();
+        if (_day > _today) return list;
+        foreach (var v in active.Where(v => v.S.EndTime <= _now))
+        {
+            if (v.S.Status is SessionStatus.Scheduled or SessionStatus.AwaitingPackage) list.Add((v, "mark"));
+            if (v.S.UnpaidAtTrainer && v.S.Status != SessionStatus.NoShow) list.Add((v, "pay"));
+            if (v.S.Status == SessionStatus.Completed && !_noted.Contains(v.S.ClientId)) list.Add((v, "note"));
+        }
+        return list;
+    }
 
     private async Task SaveNoteAsync(SessionDto s)
     {
@@ -365,6 +459,7 @@
         {
             await ClientService.AddNoteAsync(s.ClientId, _userId, _noteText.Trim());
             _flash[s.Id] = "Notatka zapisana w profilu klienta.";
+            _noted.Add(s.ClientId);
             _noteFor = null;
         }
         catch { _error = "Nie udało się zapisać notatki."; }
