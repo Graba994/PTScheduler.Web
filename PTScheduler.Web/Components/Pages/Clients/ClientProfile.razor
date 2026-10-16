@@ -47,10 +47,21 @@
 }
 else if (notFound)
 {
-    <div class="alert alert-warning">Klient nie został znaleziony.</div>
+    <div class="alert alert-warning">
+        <i class="bi bi-person-x me-2"></i>Nie ma takiego klienta na Twojej liście — mógł zostać usunięty albo jest przypisany do innego trenera.
+        <a href="/clients" class="alert-link ms-1">Wróć do klientów</a>
+    </div>
 }
 else if (client is not null)
 {
+    @if (!string.IsNullOrEmpty(_createdNotice))
+    {
+        <div class="alert alert-success d-flex align-items-start gap-2 py-2 mb-3" role="status">
+            <i class="bi bi-check-circle-fill mt-1"></i>
+            <div class="flex-grow-1">@_createdNotice</div>
+            <button type="button" class="btn-close btn-sm" aria-label="Zamknij" @onclick="() => _createdNotice = null"></button>
+        </div>
+    }
     <div class="d-flex align-items-center justify-content-between gap-2 mb-2">
         <nav aria-label="breadcrumb" class="m-0 flex-grow-1 min-w-0">
             <ol class="breadcrumb m-0 flex-nowrap">
@@ -1210,6 +1221,9 @@ else if (client is not null)
     [Parameter] public int Id { get; set; }
 
     [SupplyParameterFromQuery(Name = "invite")] public string? InviteQuery { get; set; }
+    // Komunikat po dodaniu klienta (ClientNew → ?info=…): np. klient już był w bazie i trafił na listę.
+    [SupplyParameterFromQuery(Name = "info")] public string? InfoQuery { get; set; }
+    private string? _createdNotice;
     [SupplyParameterFromQuery(Name = "tab")] public string? TabQuery { get; set; }
 
     // ── Panel klienta: „Co się dzieje”, oś zdarzeń i treningi z planu ──
@@ -1692,6 +1706,14 @@ else if (client is not null)
         _pastShown = 20;
         _feedShown = FeedStart;
         RefreshPanel();
+
+        if (!string.IsNullOrWhiteSpace(InfoQuery)) { _createdNotice = InfoQuery.Length > 300 ? InfoQuery[..300] : InfoQuery; InfoQuery = null; }
+        else if (InviteQuery is "sent" or "failed" or "none") _createdNotice = InviteQuery switch
+        {
+            "sent" => $"Klient {client.FullName} dodany do Twojej listy. Zaproszenie wysłane na {client.Email}.",
+            "failed" => $"Klient {client.FullName} dodany do Twojej listy, ale e-mail z zaproszeniem nie wyszedł — w zakładce „Konto” przygotujesz link do wysłania.",
+            _ => $"Klient {client.FullName} dodany do Twojej listy. Zaproszenie wyślesz w zakładce „Konto”, kiedy zechcesz.",
+        };
 
         // Wynik zaproszenia wysłanego przy zakładaniu klienta (ClientNew → ?invite=…), tylko raz.
         if (InviteQuery is "sent")

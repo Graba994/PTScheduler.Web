@@ -103,8 +103,14 @@ public class UserManagementService(
 
     public async Task<(bool Success, string? Error)> CreateUserAsync(CreateUserDto dto)
     {
-        if (await userManager.FindByEmailAsync(dto.Email) is not null)
-            return (false, $"Email '{dto.Email}' jest już zarejestrowany.");
+        dto.Email = Domain.Rules.EmailRules.Normalize(dto.Email);
+        if (Domain.Rules.EmailRules.Problem(dto.Email) is { } problem) return (false, problem);
+        if (await userManager.FindByEmailAsync(dto.Email) is { } existing)
+        {
+            var roles = await userManager.GetRolesAsync(existing);
+            var who = roles.Contains(Roles.Client) ? "klienta" : roles.Contains(Roles.Trainer) ? "trenera" : roles.Contains(Roles.Subordinate) ? "asystenta" : "administratora";
+            return (false, $"Adres {dto.Email} ma już konto {who} ({$"{existing.FirstName} {existing.LastName}".Trim()}). Jeden adres = jedno konto — użyj innego albo edytuj istniejące.");
+        }
 
         var user = new ApplicationUser
         {

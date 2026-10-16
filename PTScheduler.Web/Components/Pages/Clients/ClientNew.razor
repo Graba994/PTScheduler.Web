@@ -4,6 +4,11 @@
 @inject IClientInvitationService Invitations
 @inject EntitlementService Entitlements
 @inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
+@inject Microsoft.AspNetCore.Identity.UserManager<PTScheduler.Infrastructure.Data.ApplicationUser> UserManager
+@inject IUserManagementService UserService
+@using PTScheduler.Domain.Rules
+@using PTScheduler.Domain.Constants
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @rendermode PTScheduler.Web.RenderModes.Server
@@ -46,6 +51,20 @@
                 }
 
                 <div class="row g-3">
+                    @if (_trainers is not null)
+                    {
+                        <div class="col-12">
+                            <label class="form-label">Trener klienta <span class="text-danger">*</span></label>
+                            <select class="form-select" @bind="dto.TrainerUserId">
+                                <option value="">— wybierz trenera —</option>
+                                @foreach (var t in _trainers)
+                                {
+                                    <option value="@t.Id">@t.FullName</option>
+                                }
+                            </select>
+                            <div class="form-text">Klient pojawi się na liście tego trenera, a trener dostanie jego wizyty i wiadomości.</div>
+                        </div>
+                    }
                     <div class="col-6">
                         <label class="form-label">Imię <span class="text-danger">*</span></label>
                         <input class="form-control" @bind="dto.FirstName" placeholder="Jan" />
@@ -56,8 +75,38 @@
                     </div>
                     <div class="col-12">
                         <label class="form-label">Email <span class="text-danger">*</span></label>
-                        <input type="email" class="form-control" @bind="dto.Email" placeholder="jan@example.com" />
-                        <div class="form-text">Klient użyje tego emaila do logowania.</div>
+                        <input type="email" class="form-control @(_emailProblem is not null ? "is-invalid" : _owner is null && _emailChecked ? "is-valid" : "")"
+                               @bind="dto.Email" @bind:after="CheckEmailAsync" placeholder="jan@example.com" autocomplete="off" spellcheck="false" />
+                        @if (_emailProblem is not null)
+                        {
+                            <div class="invalid-feedback d-block">
+                                @_emailProblem
+                                @if (_suggestion is not null)
+                                {
+                                    <span class="d-block">Czy chodziło o <button type="button" class="btn btn-link btn-sm p-0 align-baseline" @onclick="UseSuggestionAsync">@_suggestion</button>?</span>
+                                }
+                            </div>
+                        }
+                        else if (_suggestion is not null)
+                        {
+                            <div class="form-text text-warning-emphasis">
+                                <i class="bi bi-magic me-1"></i>Czy chodziło o <button type="button" class="btn btn-link btn-sm p-0 align-baseline" @onclick="UseSuggestionAsync">@_suggestion</button>?
+                            </div>
+                        }
+                        else if (_owner is { } o)
+                        {
+                            <div class="alert @(OwnerBlocks ? "alert-warning" : "alert-info") py-2 small mt-2 mb-0">
+                                <i class="bi @(OwnerBlocks ? "bi-exclamation-triangle" : "bi-info-circle") me-1"></i>@OwnerText
+                                @if (o.ClientId is { } cid && o.TrainerUserId == dto.TrainerUserId)
+                                {
+                                    <a href="/clients/@cid" class="alert-link ms-1">Otwórz profil</a>
+                                }
+                            </div>
+                        }
+                        else
+                        {
+                            <div class="form-text">Klient użyje tego e-maila do logowania.</div>
+                        }
                     </div>
                     <div class="col-12">
                         <label class="form-label">Telefon</label>
@@ -84,7 +133,7 @@
                 </div>
 
                 <div class="d-flex gap-2 mt-4">
-                    <button class="btn btn-primary flex-grow-1" @onclick="Submit" disabled="@(isBusy || _limitReached)">
+                    <button class="btn btn-primary flex-grow-1" @onclick="Submit" disabled="@(isBusy || _limitReached || OwnerBlocks || (_trainers is not null && string.IsNullOrEmpty(dto.TrainerUserId)))">
                         @if (isBusy)
                         {
                             <span class="spinner-border spinner-border-sm me-1"></span>
@@ -107,32 +156,86 @@
     private int _maxClients;
     private bool _sendInvite = true;
 
+    // Administrator wybiera trenera; trener (i asystent — przez swojego trenera) dostaje klienta od razu.
+    private List<UserDto>? _trainers;
+    private string? _emailProblem;
+    private string? _suggestion;
+    private EmailOwnerDto? _owner;
+    private bool _emailChecked;
+
+    private bool OwnerBlocks => _owner is { Kind: "staff" }
+        || (_owner is { Kind: "client", TrainerUserId: { } t } && t != dto.TrainerUserId && !string.IsNullOrEmpty(dto.TrainerUserId));
+
+    private string OwnerText => _owner switch
+    {
+        { Kind: "staff" } o => $"Ten adres należy do konta zespołu studia ({o.Name}). Klient potrzebuje innego e-maila.",
+        { TrainerUserId: null } o => $"{o.Name} jest już w bazie, ale bez trenera — po kliknięciu „Dodaj klienta” trafi na listę.",
+        { } o when o.TrainerUserId == dto.TrainerUserId => $"{o.Name} już jest na liście klientów.",
+        { } o => $"Ten adres ma już klient trenera {o.TrainerName ?? "z zespołu"}. Trenera zmieni administrator w profilu klienta.",
+        _ => ""
+    };
+
     protected override async Task OnInitializedAsync()
     {
         var (allowed, current, max) = await Entitlements.CheckClientLimitAsync();
         _limitReached = !allowed;
         _clientCount = current;
         _maxClients = max;
+
+        var principal = (await AuthState.GetAuthenticationStateAsync()).User;
+        var me = await UserManager.GetUserAsync(principal);
+        if (principal.IsInRole(Roles.Trainer)) dto.TrainerUserId = me?.Id;
+        else if (principal.IsInRole(Roles.Subordinate)) dto.TrainerUserId = me?.SupervisorId ?? me?.Id;
+        else
+        {
+            _trainers = (await UserService.GetTrainersAsync()).OrderBy(t => t.FullName).ToList();
+            if (_trainers.Count == 1) dto.TrainerUserId = _trainers[0].Id;
+        }
+    }
+
+    private async Task CheckEmailAsync()
+    {
+        _owner = null;
+        _emailChecked = false;
+        _suggestion = null;
+        _emailProblem = string.IsNullOrWhiteSpace(dto.Email) ? null : EmailRules.Problem(dto.Email);
+        _suggestion = string.IsNullOrWhiteSpace(dto.Email) ? null : EmailRules.Suggestion(dto.Email);
+        if (string.IsNullOrWhiteSpace(dto.Email) || _emailProblem is not null) return;
+        _owner = await ClientService.FindEmailOwnerAsync(dto.Email);
+        _emailChecked = true;
+    }
+
+    private async Task UseSuggestionAsync()
+    {
+        dto.Email = _suggestion ?? dto.Email;
+        await CheckEmailAsync();
     }
 
     private async Task Submit()
     {
         if (_limitReached) return;
-
-        if (string.IsNullOrWhiteSpace(dto.Email)) { error = "Email jest wymagany."; return; }
+        error = string.Empty;
+        if (EmailRules.Problem(dto.Email) is { } problem) { error = problem; return; }
         if (string.IsNullOrWhiteSpace(dto.FirstName) && string.IsNullOrWhiteSpace(dto.LastName))
         { error = "Podaj imię lub nazwisko."; return; }
+        if (_trainers is not null && string.IsNullOrEmpty(dto.TrainerUserId)) { error = "Wybierz trenera klienta."; return; }
 
         // Re-check right before the mutation to close the race window between page load and submit
         var (allowed, current, max) = await Entitlements.CheckClientLimitAsync();
         if (!allowed) { _limitReached = true; _clientCount = current; _maxClients = max; return; }
 
         isBusy = true;
-        error = string.Empty;
         try
         {
-            var client = await ClientService.CreateClientAsync(dto);
-            var invite = "";
+            var result = await ClientService.AddClientAsync(dto);
+            if (!result.Ok) { error = result.Error ?? "Nie udało się dodać klienta."; isBusy = false; return; }
+            var client = result.Client!;
+            if (result.Notice is { } notice)
+            {
+                Nav.NavigateTo($"/clients/{client.Id}?info={Uri.EscapeDataString(notice)}");
+                return;
+            }
+            var invite = "?invite=none";
             if (_sendInvite)
             {
                 var r = await Invitations.SendInviteAsync(client.Id, Nav.BaseUri);
@@ -147,4 +250,3 @@
         }
     }
 }
-

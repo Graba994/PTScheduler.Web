@@ -31,6 +31,8 @@ public class ClientDto
 public class CreateClientDto
 {
     public string Email { get; set; } = string.Empty;
+    /// <summary>Trener, do którego trafia klient (trener tworzący konto albo wybrany przez administratora).</summary>
+    public string? TrainerUserId { get; set; }
     public string FirstName { get; set; } = string.Empty;
     public string LastName { get; set; } = string.Empty;
     public string? Phone { get; set; }
@@ -54,3 +56,13 @@ public class TrainerNoteDto
     public string TrainerName { get; set; } = string.Empty;
     public DateTime CreatedAt { get; set; }
 }
+
+/// <summary>Wynik dodania klienta. <paramref name="Notice"/> — co się stało poza zwykłym dodaniem (np. klient już był w bazie).</summary>
+public sealed record ClientCreateResult(ClientDto? Client, string? Error, string? Notice = null)
+{
+    public bool Ok => Client is not null && Error is null;
+}
+
+/// <summary>Do kogo już należy adres e-mail (sprawdzane przed dodaniem klienta).</summary>
+/// <param name="Kind">„client” — klient studia, „staff” — trener, asystent albo administrator.</param>
+public sealed record EmailOwnerDto(string Kind, string Name, int? ClientId, string? TrainerUserId, string? TrainerName);

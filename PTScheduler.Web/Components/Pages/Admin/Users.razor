@@ -159,12 +159,13 @@ else
                         <div class="mb-2">
                             <label class="form-label">Trener</label>
                             <select class="form-select" @bind="newClientTrainerId">
-                                <option value="">— brak —</option>
+                                <option value="">— wybierz trenera —</option>
                                 @foreach (var t in trainers)
                                 {
                                     <option value="@t.Id">@t.FullName (@t.Email)</option>
                                 }
                             </select>
+                            <div class="form-text">Klient pojawi się na liście tego trenera.</div>
                         </div>
                     }
                 </div>
@@ -190,6 +191,7 @@ else
     private string createError = string.Empty;
     private CreateUserDto newUser = new();
     private string newClientTrainerId = string.Empty;
+    private string? _confirmedEmail;
 
     private IEnumerable<UserDto> Filtered => users?
         .Where(u => string.IsNullOrEmpty(search) ||
@@ -206,7 +208,7 @@ else
     private void OpenCreateModal()
     {
         newUser = new CreateUserDto { Role = Roles.Trainer };
-        newClientTrainerId = string.Empty;
+        newClientTrainerId = trainers.Count == 1 ? trainers[0].Id : string.Empty;
         createError = string.Empty;
         showCreateModal = true;
     }
@@ -217,7 +219,15 @@ else
     {
         createError = string.Empty;
 
-        if (string.IsNullOrWhiteSpace(newUser.Email))   { createError = "E-mail jest wymagany."; return; }
+        newUser.Email = PTScheduler.Domain.Rules.EmailRules.Normalize(newUser.Email);
+        if (PTScheduler.Domain.Rules.EmailRules.Problem(newUser.Email) is { } emailProblem) { createError = emailProblem; return; }
+        if (PTScheduler.Domain.Rules.EmailRules.Suggestion(newUser.Email) is { } suggestion && newUser.Email != _confirmedEmail)
+        {
+            _confirmedEmail = newUser.Email;
+            createError = $"Sprawdź adres — czy chodziło o {suggestion}? Jeśli adres jest dobry, kliknij „Utwórz” jeszcze raz.";
+            return;
+        }
+        if (newUser.Role == Roles.Client && trainers.Count > 0 && string.IsNullOrEmpty(newClientTrainerId)) { createError = "Wybierz trenera klienta."; return; }
         if (string.IsNullOrWhiteSpace(newUser.Password)) { createError = "Hasło jest wymagane."; return; }
 
         // Plan limit checks — trainers and subordinates are limited by the plan

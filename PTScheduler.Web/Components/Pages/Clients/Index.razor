@@ -242,10 +242,11 @@ else
         try
         {
             await using var stream = e.File.OpenReadStream(5 * 1024 * 1024);
-            _importResult = await ClientService.ImportClientsFromCsvAsync(stream);
             var auth = await AuthState.GetAuthenticationStateAsync();
             var isAdmin = auth.User.IsInRole(Roles.Admin);
             var trainerUserId = isAdmin ? null : auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            // Zaimportowani klienci trafiają do trenera, który importuje (u administratora — bez trenera, jak dotąd).
+            _importResult = await ClientService.ImportClientsFromCsvAsync(stream, trainerUserId);
             clients = await ClientService.GetClientsAsync(trainerUserId);
         }
         catch (Exception ex) { _importError = $"Błąd importu: {ex.Message}"; }

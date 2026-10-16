@@ -150,6 +150,23 @@ public static class DbInitializer
     public static string NewRandomPassword() =>
         Convert.ToBase64String(System.Security.Cryptography.RandomNumberGenerator.GetBytes(24)) + "a1";
 
+    /// <summary>
+    /// Klienci bez trenera (dodani przed poprawką formularza „Nowy klient”) nie były widoczne na liście trenera.
+    /// Gdy w studiu jest dokładnie jeden trener — przypisujemy ich do niego; przy kilku trenerach decyduje administrator.
+    /// </summary>
+    public static async Task AssignOrphanClientsAsync(ApplicationDbContext db)
+    {
+        var trainerIds = await (from ur in db.UserRoles
+                                join r in db.Roles on ur.RoleId equals r.Id
+                                where r.Name == Roles.Trainer
+                                select ur.UserId).Distinct().ToListAsync();
+        if (trainerIds.Count != 1) return;
+        var orphans = await db.Clients.Where(c => c.TrainerUserId == null || c.TrainerUserId == "").ToListAsync();
+        if (orphans.Count == 0) return;
+        foreach (var c in orphans) c.TrainerUserId = trainerIds[0];
+        await db.SaveChangesAsync();
+    }
+
     public static async Task SeedSessionTypesAsync(ApplicationDbContext db)
     {
         if (await db.SessionTypes.AnyAsync()) return;

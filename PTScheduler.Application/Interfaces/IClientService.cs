@@ -8,6 +8,10 @@ public interface IClientService
     Task<ClientDto?> GetClientAsync(int id);
     Task<ClientDto?> GetClientByUserIdAsync(string userId);
     Task<ClientDto> CreateClientAsync(CreateClientDto dto);
+    /// <summary>Dodanie klienta z formularza: sprawdza adres, duplikaty i przypisuje trenera — bez wyjątków, z komunikatem.</summary>
+    Task<ClientCreateResult> AddClientAsync(CreateClientDto dto);
+    /// <summary>Czy adres jest już zajęty i przez kogo (null — wolny).</summary>
+    Task<EmailOwnerDto?> FindEmailOwnerAsync(string email);
     Task UpdateClientAsync(int id, UpdateClientDto dto);
     Task UpdateProfilePictureAsync(int id, string pictureUrl);
     Task<List<TrainerNoteDto>> GetNotesAsync(int clientId);
@@ -16,7 +20,7 @@ public interface IClientService
     Task ApproveClientAsync(int clientId);
     Task<List<ClientDto>> GetPendingClientsAsync(string? trainerUserId = null);
     Task SetAllowSelfBookingAsync(int clientId, bool allow);
-    Task<CsvImportResult> ImportClientsFromCsvAsync(Stream csvStream);
+    Task<CsvImportResult> ImportClientsFromCsvAsync(Stream csvStream, string? trainerUserId = null);
 }
 
 public class CsvImportResult

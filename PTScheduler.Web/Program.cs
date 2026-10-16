@@ -1111,6 +1111,7 @@ static async Task TryInitializeDatabaseAsync(IServiceProvider services, StartupH
         await DbInitializer.SeedSessionTypesAsync(db);
         await DbInitializer.SeedPermissionsAsync(db);
         await DbInitializer.SeedExerciseCatalogAsync(db);
+        await DbInitializer.AssignOrphanClientsAsync(db);
 
         var wasDown = !health.DatabaseAvailable;
         health.DatabaseAvailable = true;
