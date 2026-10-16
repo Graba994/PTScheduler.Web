@@ -301,7 +301,7 @@ public class OffsiteBackupService(
         var probe = Path.Combine(Path.GetTempPath(), $"ptscheduler-test-{Guid.NewGuid():N}.txt");
         try
         {
-            await File.WriteAllTextAsync(probe, $"Test połączenia z Portalu PTScheduler, {DateTime.UtcNow:u}. Ten plik można usunąć.", ct);
+            await File.WriteAllTextAsync(probe, $"Test połączenia z Portalu Hantly, {DateTime.UtcNow:u}. Ten plik można usunąć.", ct);
             if (target == TargetSftp)
             {
                 using var client = await ConnectSftpAsync(ct);

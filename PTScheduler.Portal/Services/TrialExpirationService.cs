@@ -79,12 +79,12 @@ public class TrialExpirationService(
                 var plan = await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == t.PlanId, ct);
                 var yearly = t.BillingInterval == "yearly" && plan?.YearlyPrice is > 0;
                 var amount = yearly ? plan!.YearlyPrice!.Value : plan?.MonthlyPrice ?? 0;
-                _ = emailSvc.SendAsync(t.OwnerEmail, $"Za {daysLeft} dni koniec okresu próbnego — PTScheduler",
+                _ = emailSvc.SendAsync(t.OwnerEmail, $"Za {daysLeft} dni koniec okresu próbnego — Hantly",
                     emailSvc.TrialEndingWithCardEmailBody(t.OwnerName, daysLeft, amount, yearly, plan?.Name ?? t.PlanId, t.Domain));
                 continue;
             }
             var body = emailSvc.TrialWarningEmailBody(t.OwnerName, daysLeft);
-            _ = emailSvc.SendAsync(t.OwnerEmail, $"Trial konczy sie za {daysLeft} dni — PTScheduler", body);
+            _ = emailSvc.SendAsync(t.OwnerEmail, $"Trial konczy sie za {daysLeft} dni — Hantly", body);
         }
 
         // Subskrypcje Stripe (karta podpięta w kreatorze) rozlicza Stripe: po okresie próbnym pobiera opłatę,
@@ -122,7 +122,7 @@ public class TrialExpirationService(
                 await db.SaveChangesAsync(ct);
 
                 var body = emailSvc.SuspensionEmailBody(t.OwnerName, "Okres probny zakonczyl sie bez aktywnej subskrypcji.");
-                _ = emailSvc.SendAsync(t.OwnerEmail, "Twoje konto PTScheduler zostalo zawieszone", body);
+                _ = emailSvc.SendAsync(t.OwnerEmail, "Twoje konto Hantly zostalo zawieszone", body);
             }
             catch (Exception ex)
             {

@@ -74,7 +74,7 @@ public class StoreTicketService(
             if (smsOn)
             {
                 var (ok, error) = await credits.SendPlatformSmsAsync(phone,
-                    $"PTScheduler: nowe zgloszenie #{o.Id} - {what} ({who}). {panelUrl}");
+                    $"Hantly: nowe zgloszenie #{o.Id} - {what} ({who}). {panelUrl}");
                 if (!ok) logger.LogWarning("SMS o zgłoszeniu #{Id} nie wyszedł: {Error}", o.Id, error);
             }
         }

@@ -54,7 +54,7 @@ public class LegalService(
     {
         var doc = Get(key);
         var c = await CompanyAsync();
-        var site = config.GetValue<string>("Portal:PublicUrl")?.TrimEnd('/') is { Length: > 0 } pub ? pub : "https://ptscheduler.pl";
+        var site = config.GetValue<string>("Portal:PublicUrl")?.TrimEnd('/') is { Length: > 0 } pub ? pub : "https://hantly.pl";
         var domain = await settings.GetAsync(K.MainDomain) is { Length: > 0 } d ? d : new Uri(site).Host;
         var date = DateTime.ParseExact(doc.Version, "yyyy-MM-dd", null).ToString("d MMMM yyyy", new System.Globalization.CultureInfo("pl-PL"));
 

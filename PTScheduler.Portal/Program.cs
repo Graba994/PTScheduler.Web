@@ -569,7 +569,7 @@ app.MapGet("/api/panel/tenants/{id:int}/offer.pdf", async (
     var offer = await offers.GetAsync(id);
     if (offer is null) return Results.NotFound();
     var seller = await siteSettings.GetAsync(SiteSettingsService.Keys.OfferSellerDetails);
-    var pdf = OfferPdf.Render(offer, seller, "PTScheduler");
+    var pdf = OfferPdf.Render(offer, seller, "Hantly");
     return Results.File(pdf, "application/pdf", $"oferta-{offer.Tenant.Slug}-{DateTime.UtcNow:yyyy-MM-dd}.pdf");
 }).RequireAuthorization();
 
@@ -1026,8 +1026,8 @@ app.MapPost("/api/store/{slug}/order", async (
     {
         var totalAmount = orders.Sum(o => o.Price);
         var description = orders.Count == 1
-            ? orders[0].Notes ?? "Zamówienie usługi PTScheduler"
-            : $"Zamówienie {orders.Count} usług PTScheduler";
+            ? orders[0].Notes ?? "Zamówienie usługi Hantly"
+            : $"Zamówienie {orders.Count} usług Hantly";
 
         var portalUrl = config.GetValue<string>("Portal:PublicUrl") ?? "";
         var (paymentUrl, externalId, error) = await storePayment.CreatePaymentAsync(
@@ -1162,7 +1162,7 @@ app.MapPost("/api/credits/{slug}/sms/test", async (
         var fields = new Dictionary<string, string>
         {
             ["to"] = normalized,
-            ["message"] = "Test SMS PTScheduler — konfiguracja dziala poprawnie.",
+            ["message"] = "Test SMS Hantly — konfiguracja dziala poprawnie.",
             ["format"] = "json"
         };
         if (!string.IsNullOrWhiteSpace(senderName))

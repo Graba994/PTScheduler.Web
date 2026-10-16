@@ -254,7 +254,7 @@ public class StripeService(
         try { await tenants.SuspendAsync(tenant.Id); } catch (Exception ex) { logger.LogError(ex, "Subskrypcja tenanta {TenantId} anulowana, ale automatyczne zawieszenie kontenerów się nie powiodło — wymaga ręcznej interwencji.", tenant.Id); }
 
         var body = email.SuspensionEmailBody(tenant.OwnerName, "Subskrypcja została anulowana.");
-        _ = email.SendAsync(tenant.OwnerEmail, "Twoje konto PTScheduler zostalo zawieszone", body);
+        _ = email.SendAsync(tenant.OwnerEmail, "Twoje konto Hantly zostalo zawieszone", body);
     }
 
     private async Task HandlePaymentFailedAsync(Invoice invoice)
@@ -288,7 +288,7 @@ public class StripeService(
         logger.LogWarning("Payment failed for tenant {Slug} — customer {Customer}", tenant.Slug, invoice.CustomerId);
 
         var body = email.PaymentFailedEmailBody(tenant.OwnerName, invoice.AmountDue / 100m, invoice.Number ?? "—");
-        _ = email.SendAsync(tenant.OwnerEmail, "Nieudana platnosc — PTScheduler", body);
+        _ = email.SendAsync(tenant.OwnerEmail, "Nieudana platnosc — Hantly", body);
     }
 
     private async Task HandlePaymentSucceededAsync(Invoice invoice)
@@ -321,7 +321,7 @@ public class StripeService(
 
         var amount = (invoice.AmountPaid > 0 ? invoice.AmountPaid : invoice.AmountDue) / 100m;
         var body = email.PaymentReceivedEmailBody(tenant.OwnerName, amount, invoice.Number ?? "—");
-        _ = email.SendAsync(tenant.OwnerEmail, "Potwierdzenie platnosci — PTScheduler", body);
+        _ = email.SendAsync(tenant.OwnerEmail, "Potwierdzenie platnosci — Hantly", body);
     }
 
     public async Task<List<InvoiceInfo>> ListInvoicesAsync(string customerId, int limit = 12)
@@ -395,7 +395,7 @@ public class StripeService(
             {
                 var product = await new ProductService().CreateAsync(new ProductCreateOptions
                 {
-                    Name = $"PTScheduler {plan.Name}",
+                    Name = $"Hantly {plan.Name}",
                     Metadata = new Dictionary<string, string> { ["planId"] = plan.Id }
                 });
                 plan.StripeProductId = product.Id;

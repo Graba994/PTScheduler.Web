@@ -199,7 +199,7 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
 
     private static readonly Dictionary<string, string> Defaults = new()
     {
-        [Keys.MainDomain] = "ptscheduler.pl",
+        [Keys.MainDomain] = "hantly.pl",
         [Keys.NpmAutoRegister] = "true",
         [Keys.BackupDir] = "/opt/ptscheduler/backups",
         [Keys.BackupSchedule] = "daily",

@@ -77,7 +77,7 @@ public class CustomDomainService(IServiceScopeFactory scopes, ILogger<CustomDoma
                     t.CustomDomainStatus = "active";
                     db.TenantEvents.Add(new TenantEvent { TenantId = t.Id, EventType = TenantEventTypes.DomainChanged, Detail = $"Własna domena {domain} działa (HTTPS)" });
                     await db.SaveChangesAsync();
-                    _ = email.SendAsync(t.OwnerEmail, $"{domain} działa — PTScheduler", email.CustomDomainActiveEmailBody(first ?? t.OwnerName, domain));
+                    _ = email.SendAsync(t.OwnerEmail, $"{domain} działa — Hantly", email.CustomDomainActiveEmailBody(first ?? t.OwnerName, domain));
                     logger.LogInformation("Własna domena {Domain} tenanta {Slug} działa.", domain, t.Slug);
                     return $"{domain} działa — certyfikat wystawiony.";
                 }

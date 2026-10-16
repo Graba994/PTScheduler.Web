@@ -170,7 +170,7 @@ public class BackupMaintenanceService(
         }
         if (!string.IsNullOrWhiteSpace(phone))
         {
-            var (ok, _) = await credits.SendPlatformSmsAsync(phone, $"PTScheduler{(test ? " TEST" : "")}: problem z kopiami zapasowymi ({problems.Count}). {link}");
+            var (ok, _) = await credits.SendPlatformSmsAsync(phone, $"Hantly{(test ? " TEST" : "")}: problem z kopiami zapasowymi ({problems.Count}). {link}");
             sent |= ok;
         }
         logger.LogWarning("Kopie zapasowe: {Count} problemów: {Problems}", problems.Count, string.Join(" | ", problems));

@@ -30,7 +30,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             var pass = s[SiteSettingsService.Keys.SmtpPass];
             var from = string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.SmtpFrom]) ? user : s[SiteSettingsService.Keys.SmtpFrom];
             var fromName = !string.IsNullOrWhiteSpace(fromNameOverride) ? fromNameOverride
-                : string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.SmtpFromName]) ? "PTScheduler" : s[SiteSettingsService.Keys.SmtpFromName];
+                : string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.SmtpFromName]) ? "Hantly" : s[SiteSettingsService.Keys.SmtpFromName];
             var ssl = s[SiteSettingsService.Keys.SmtpSsl] == "true";
 
             using var smtp = new SmtpClient(host)
@@ -68,10 +68,10 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
             <div style="text-align: center; padding: 20px 0;">
-                <h1 style="color: #6366f1;">🎉 Witaj w PTScheduler!</h1>
+                <h1 style="color: #6366f1;">🎉 Witaj w Hantly!</h1>
             </div>
             <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
-            <p>Twoja instancja PTScheduler została utworzona i jest gotowa do konfiguracji.</p>
+            <p>Twoja instancja Hantly została utworzona i jest gotowa do konfiguracji.</p>
 
             <div style="background: #f9fafb; border-radius: 12px; padding: 20px; margin: 20px 0;">
                 <div style="margin-bottom: 12px;"><strong>Plan:</strong> {WebUtility.HtmlEncode(planName)}</div>
@@ -96,7 +96,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
             <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
                 Masz pytania? Odpisz na tego maila.<br>
-                PTScheduler — Platforma dla trenerów personalnych
+                Hantly — Platforma dla trenerów personalnych
             </p>
         </body>
         </html>
@@ -118,7 +118,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                 <a href="https://{domain}/admin/upgrade" style="background: #7c3aed; color: white; padding: 12px 26px; border-radius: 8px; text-decoration: none; font-weight: 600;">Zarządzaj subskrypcją</a>
             </p>
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
-            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">Masz pytania? Odpisz na tego maila.<br>PTScheduler</p>
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">Masz pytania? Odpisz na tego maila.<br>Hantly</p>
         </body>
         </html>
         """;
@@ -132,13 +132,13 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                 <h1 style="color: #f59e0b;">Twoj okres probny konczy sie za {daysLeft} dni</h1>
             </div>
             <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
-            <p>Twoj darmowy okres probny PTScheduler konczy sie za <strong>{daysLeft} dni</strong>.</p>
+            <p>Twoj darmowy okres probny Hantly konczy sie za <strong>{daysLeft} dni</strong>.</p>
             <p>Aby kontynuowac korzystanie z platformy, dodaj metode platnosci lub wybierz plan subskrypcji.</p>
             <p>Jesli nie podejmiesz zadnej akcji, Twoje konto zostanie automatycznie zawieszone po zakonczeniu okresu probnego.</p>
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
             <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
                 Masz pytania? Odpisz na tego maila.<br>
-                PTScheduler
+                Hantly
             </p>
         </body>
         </html>
@@ -158,9 +158,9 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                 <div style="margin-bottom: 8px;"><strong>Kwota:</strong> {amount:0.00} PLN</div>
                 <div><strong>Faktura:</strong> {WebUtility.HtmlEncode(invoiceNumber)}</div>
             </div>
-            <p>Dziekujemy za korzystanie z PTScheduler!</p>
+            <p>Dziekujemy za korzystanie z Hantly!</p>
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
-            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">PTScheduler</p>
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">Hantly</p>
         </body>
         </html>
         """;
@@ -181,7 +181,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             </div>
             <p>Prosimy o aktualizacje metody platnosci. Jesli platnosc nie zostanie zrealizowana, Twoje konto moze zostac zawieszone.</p>
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
-            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">PTScheduler</p>
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">Hantly</p>
         </body>
         </html>
         """;
@@ -195,13 +195,13 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                 <h1 style="color: #ef4444;">Konto zawieszone</h1>
             </div>
             <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
-            <p>Twoje konto PTScheduler zostalo zawieszone.</p>
+            <p>Twoje konto Hantly zostalo zawieszone.</p>
             <div style="background: #fef2f2; border-radius: 12px; padding: 20px; margin: 20px 0;">
                 <strong>Powod:</strong> {WebUtility.HtmlEncode(reason)}
             </div>
             <p>Aby przywrocic dostep, skontaktuj sie z nami lub odnow subskrypcje.</p>
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
-            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">PTScheduler</p>
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">Hantly</p>
         </body>
         </html>
         """;
@@ -215,13 +215,13 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                 <h1 style="color: #f59e0b;">Twoje konto jest nieaktywne</h1>
             </div>
             <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
-            <p>Zauazylismy, ze Twoje konto PTScheduler nie bylo uzywane od <strong>{inactiveDays} dni</strong>.</p>
+            <p>Zauazylismy, ze Twoje konto Hantly nie bylo uzywane od <strong>{inactiveDays} dni</strong>.</p>
             <p>Jesli nie zalogujesz sie w ciagu <strong>{daysUntilSuspend} dni</strong>, Twoje konto zostanie automatycznie zawieszone.</p>
             <p>Wystarczy sie zalogowac, zeby konto pozostalo aktywne.</p>
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
             <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
                 Masz pytania? Odpisz na tego maila.<br>
-                PTScheduler
+                Hantly
             </p>
         </body>
         </html>
@@ -236,13 +236,13 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                 <h1 style="color: #ef4444;">Twoje konto zostanie usuniete</h1>
             </div>
             <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
-            <p>Twoje konto PTScheduler jest zawieszone i zostanie <strong>trwale usuniete za {daysLeft} dni</strong>.</p>
+            <p>Twoje konto Hantly jest zawieszone i zostanie <strong>trwale usuniete za {daysLeft} dni</strong>.</p>
             <p>Po usunieciu wszystkie Twoje dane (klienci, sesje, pakiety, kursy) zostana bezpowrotnie skasowane.</p>
             <p>Aby temu zapobiec, skontaktuj sie z nami lub odnow subskrypcje.</p>
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
             <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
                 Masz pytania? Odpisz na tego maila.<br>
-                PTScheduler
+                Hantly
             </p>
         </body>
         </html>
@@ -257,11 +257,11 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                 <h1 style="color: #ef4444;">Konto zostalo usuniete</h1>
             </div>
             <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
-            <p>Twoje konto PTScheduler bylo zawieszone przez {suspendedDays} dni i zostalo trwale usuniete.</p>
-            <p>Wszystkie dane zostaly skasowane. Jesli chcesz wrocic do PTScheduler, mozesz zalozyc nowe konto w kazdej chwili.</p>
+            <p>Twoje konto Hantly bylo zawieszone przez {suspendedDays} dni i zostalo trwale usuniete.</p>
+            <p>Wszystkie dane zostaly skasowane. Jesli chcesz wrocic do Hantly, mozesz zalozyc nowe konto w kazdej chwili.</p>
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
             <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
-                PTScheduler — platforma dla trenerów personalnych
+                Hantly — platforma dla trenerów personalnych
             </p>
         </body>
         </html>
@@ -281,7 +281,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
             <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
                 Masz pytania? Odpisz na tego maila.<br>
-                PTScheduler
+                Hantly
             </p>
         </body>
         </html>
@@ -296,7 +296,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                 <h1 style="color: #6366f1;">Dziekujemy za rejestracje!</h1>
             </div>
             <p>Czesc {WebUtility.HtmlEncode(trainerName)},</p>
-            <p>Twoje zgloszenie w PTScheduler zostalo przyjete i oczekuje na weryfikacje.</p>
+            <p>Twoje zgloszenie w Hantly zostalo przyjete i oczekuje na weryfikacje.</p>
 
             <div style="background: #eff6ff; border-radius: 12px; padding: 20px; margin: 20px 0;">
                 <strong>Plan:</strong> {WebUtility.HtmlEncode(planName)}<br>
@@ -308,7 +308,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
             <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
                 Masz pytania? Odpisz na tego maila.<br>
-                PTScheduler
+                Hantly
             </p>
         </body>
         </html>
@@ -322,7 +322,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             <div style="text-align: center; padding: 20px 0;">
                 <h1 style="color: #f59e0b;">Nowa rejestracja trenera</h1>
             </div>
-            <p>Nowy trener zarejestrował się w PTScheduler i czeka na akceptację.</p>
+            <p>Nowy trener zarejestrował się w Hantly i czeka na akceptację.</p>
 
             <div style="background: #fef3c7; border-radius: 12px; padding: 20px; margin: 20px 0;">
                 <div style="margin-bottom: 8px;"><strong>Imie i nazwisko:</strong> {WebUtility.HtmlEncode(trainerName)}</div>
@@ -339,7 +339,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             </p>
 
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
-            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">PTScheduler Portal</p>
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">Hantly Portal</p>
         </body>
         </html>
         """;
@@ -379,7 +379,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
             <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
                 Masz pytania? Odpisz na tego maila.<br>
-                PTScheduler — platforma dla trenerów personalnych
+                Hantly — platforma dla trenerów personalnych
             </p>
         </body>
         </html>
@@ -402,7 +402,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             </p>
             <p style="color: #6b7280; font-size: 0.9rem;">Adres aplikacji: <a href="{appUrl}">{WebUtility.HtmlEncode(appUrl)}</a> · plan {WebUtility.HtmlEncode(planName)}</p>
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
-            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">Masz pytania? Odpisz na tego maila.<br>PTScheduler</p>
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">Masz pytania? Odpisz na tego maila.<br>Hantly</p>
         </body>
         </html>
         """;
@@ -419,7 +419,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                nic nie trzeba wpisywać od nowa. Gdy tylko ją uruchomimy, dostaniesz e-mail z adresem. Zwykle trwa to kilka godzin.</p>
             <p>Okres próbny liczymy od dnia uruchomienia aplikacji.</p>
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
-            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">Masz pytania? Odpisz na tego maila.<br>PTScheduler</p>
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">Masz pytania? Odpisz na tego maila.<br>Hantly</p>
         </body>
         </html>
         """;
@@ -430,7 +430,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 560px; margin: 0 auto; padding: 20px; color: #1f2937; line-height: 1.55;">
         {inner}
-            <p style="color: #6b7280; font-size: 0.875rem; margin-top: 28px;">Coś nie działa albo masz pytanie? Odpisz na tego maila — czytamy wszystko.<br>PTScheduler</p>
+            <p style="color: #6b7280; font-size: 0.875rem; margin-top: 28px;">Coś nie działa albo masz pytanie? Odpisz na tego maila — czytamy wszystko.<br>Hantly</p>
         </body>
         </html>
         """;
@@ -525,7 +525,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
             <p>Twoja domena wskazuje już naszą platformę i ma certyfikat HTTPS. Klienci mogą wchodzić pod
                <a href="https://{domain}" style="color: #7c3aed;">https://{domain}</a> — poprzedni adres też dalej działa.</p>
-            <p style="color: #6b7280; font-size: 0.875rem;">PTScheduler</p>
+            <p style="color: #6b7280; font-size: 0.875rem;">Hantly</p>
         </body>
         </html>
         """;
@@ -541,7 +541,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                <a href="https://{platformHost}">{WebUtility.HtmlEncode(platformHost)}</a>.</p>
             <p>Żeby podłączyć domenę, dodaj u jej dostawcy rekord {(serverIp is null ? "" : $"<b>A</b> dla {WebUtility.HtmlEncode(domain)} → <b>{serverIp}</b> oraz ")}<b>CNAME</b> dla www.{WebUtility.HtmlEncode(domain)} → <b>{WebUtility.HtmlEncode(platformHost)}</b>,
                a potem odpisz na tego maila — podłączymy ją od razu.</p>
-            <p style="color: #6b7280; font-size: 0.875rem;">PTScheduler</p>
+            <p style="color: #6b7280; font-size: 0.875rem;">Hantly</p>
         </body>
         </html>
         """;
@@ -576,7 +576,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                 <div><strong>Adres:</strong> {WebUtility.HtmlEncode(appUrl)}</div>
             </div>
             <pre style="white-space: pre-wrap; background: #f3f4f6; padding: 12px; border-radius: 8px; font-size: 12px;">{WebUtility.HtmlEncode(details)}</pre>
-            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">PTScheduler Portal</p>
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">Hantly Portal</p>
         </body>
         </html>
         """;
@@ -590,7 +590,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                 <h1 style="color: #10b981;">Twoja aplikacja działa!</h1>
             </div>
             <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
-            <p>rejestracja w PTScheduler została zaakceptowana — aplikacja jest gotowa, z ustawieniami z kreatora.</p>
+            <p>rejestracja w Hantly została zaakceptowana — aplikacja jest gotowa, z ustawieniami z kreatora.</p>
 
             <div style="background: #f0fdf4; border-radius: 12px; padding: 20px; margin: 20px 0;">
                 <div style="margin-bottom: 12px;"><strong>Plan:</strong> {WebUtility.HtmlEncode(planName)}</div>
@@ -614,7 +614,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
             <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
                 Masz pytania? Odpisz na tego maila.<br>
-                PTScheduler — Platforma dla trenerow personalnych
+                Hantly — Platforma dla trenerow personalnych
             </p>
         </body>
         </html>
@@ -646,7 +646,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             </p>
 
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
-            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">PTScheduler Portal</p>
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">Hantly Portal</p>
         </body>
         </html>
         """;
@@ -671,7 +671,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             <p>Jesli masz pytania, skontaktuj sie z administratorem platformy.</p>
 
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
-            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">PTScheduler</p>
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">Hantly</p>
         </body>
         </html>
         """;
@@ -682,7 +682,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
             <div style="text-align: center; padding: 20px 0;">
-                <h1 style="color: #6366f1;">Witaj w PTScheduler!</h1>
+                <h1 style="color: #6366f1;">Witaj w Hantly!</h1>
             </div>
             <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
             <p>Dzięki za rejestrację. Wybrałeś plan <strong>{WebUtility.HtmlEncode(planName)}</strong> ({price:0} zł/mies.).</p>
@@ -694,14 +694,14 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
 
             <p>W międzyczasie możesz zapoznać się z:</p>
             <ul style="line-height: 1.8;">
-                <li>Dokumentacją: <a href="https://ptscheduler.pl/docs" style="color: #6366f1;">ptscheduler.pl/docs</a></li>
-                <li>Przykładowym demo: <a href="https://demo.ptscheduler.pl" style="color: #6366f1;">demo.ptscheduler.pl</a></li>
+                <li>Dokumentacją: <a href="https://hantly.pl" style="color: #6366f1;">hantly.pl</a></li>
+                <li>Przykładowym demo: <a href="https://hantly.pl/#szablony" style="color: #6366f1;">hantly.pl</a></li>
             </ul>
 
             <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
             <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">
                 Odpowiadaj na tego maila jeśli masz pytania.<br>
-                PTScheduler
+                Hantly
             </p>
         </body>
         </html>

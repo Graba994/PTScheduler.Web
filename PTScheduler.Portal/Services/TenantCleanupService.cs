@@ -88,7 +88,7 @@ public class TenantCleanupService(
 
                     var body = emailSvc.SuspensionEmailBody(t.OwnerName,
                         $"Twoje konto bylo nieaktywne przez {inactiveDays} dni i zostalo automatycznie zawieszone. Skontaktuj sie z nami, aby je przywrocic.");
-                    _ = emailSvc.SendAsync(t.OwnerEmail, "Twoje konto PTScheduler zostalo zawieszone z powodu nieaktywnosci", body);
+                    _ = emailSvc.SendAsync(t.OwnerEmail, "Twoje konto Hantly zostalo zawieszone z powodu nieaktywnosci", body);
                 }
                 catch (Exception ex)
                 {
@@ -108,7 +108,7 @@ public class TenantCleanupService(
                 await db.SaveChangesAsync(ct);
 
                 var body = emailSvc.InactivityWarningEmailBody(t.OwnerName, inactiveDays, suspendDays - inactiveDays);
-                _ = emailSvc.SendAsync(t.OwnerEmail, $"Twoje konto PTScheduler jest nieaktywne od {inactiveDays} dni", body);
+                _ = emailSvc.SendAsync(t.OwnerEmail, $"Twoje konto Hantly jest nieaktywne od {inactiveDays} dni", body);
             }
         }
     }
@@ -163,7 +163,7 @@ public class TenantCleanupService(
                 try
                 {
                     var body = emailSvc.CleanupDeletionEmailBody(t.OwnerName, suspendedDays);
-                    _ = emailSvc.SendAsync(t.OwnerEmail, "Twoje konto PTScheduler zostalo trwale usuniete", body);
+                    _ = emailSvc.SendAsync(t.OwnerEmail, "Twoje konto Hantly zostalo trwale usuniete", body);
 
                     await tenantSvc.DeleteAsync(t.Id, removeContainers: true);
                 }
@@ -186,7 +186,7 @@ public class TenantCleanupService(
                 await db.SaveChangesAsync(ct);
 
                 var body = emailSvc.CleanupWarningEmailBody(t.OwnerName, daysLeft);
-                _ = emailSvc.SendAsync(t.OwnerEmail, $"Twoje konto PTScheduler zostanie usuniete za {daysLeft} dni", body);
+                _ = emailSvc.SendAsync(t.OwnerEmail, $"Twoje konto Hantly zostanie usuniete za {daysLeft} dni", body);
             }
         }
     }

@@ -17,7 +17,7 @@ public class ReferralService(
     ILogger<ReferralService> logger)
 {
     /// <summary>Nazwa platformy w stopce „Zrobione w …” i w e-mailach polecających.</summary>
-    public const string PlatformName = "PTScheduler";
+    public const string PlatformName = "Hantly";
     public const int ReferredBonusDays = 30;
     public const int MaxRewardsPerYear = 12;
 
@@ -43,7 +43,7 @@ public class ReferralService(
     public string LinkFor(string slug, string? portalBase = null)
     {
         var portal = portalBase?.TrimEnd('/') is { Length: > 0 } b ? b
-            : config.GetValue<string>("Portal:PublicUrl")?.TrimEnd('/') is { Length: > 0 } pub ? pub : "https://ptscheduler.pl";
+            : config.GetValue<string>("Portal:PublicUrl")?.TrimEnd('/') is { Length: > 0 } pub ? pub : "https://hantly.pl";
         return $"{portal}/register?ref={Uri.EscapeDataString(slug)}";
     }
 

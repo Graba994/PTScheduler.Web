@@ -153,7 +153,7 @@ public class ErrorAlertService(
         }
         if (cfg.Sms && !string.IsNullOrWhiteSpace(phone))
         {
-            var (ok, _) = await credits.SendPlatformSmsAsync(phone, $"PTScheduler{(test ? " TEST" : "")}: {scan.Errors} bledow w {cfg.WindowMinutes} min - {scan.Label}. {link}");
+            var (ok, _) = await credits.SendPlatformSmsAsync(phone, $"Hantly{(test ? " TEST" : "")}: {scan.Errors} bledow w {cfg.WindowMinutes} min - {scan.Label}. {link}");
             sent |= ok;
         }
         if (!test) logger.LogWarning("Alarm: {Errors} błędów w {Window} min w {Container}.", scan.Errors, cfg.WindowMinutes, scan.Container);

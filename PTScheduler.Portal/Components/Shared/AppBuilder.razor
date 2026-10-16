@@ -11,6 +11,7 @@
 @inject StripeService StripeSvc
 @inject NavigationManager Nav
 @inject IJSRuntime JS
+@inject AssistantService Assistant
 @inject IHttpContextAccessor HttpAccessor
 @inject ILogger<AppBuilder> Log
 
@@ -18,7 +19,7 @@
    po prawej) — instancja trenera powstaje dopiero po „Opublikuj”, a dane z kreatora trafiają
    prosto do aplikacji (konto, kolor, strona, oferta), więc /setup nie pyta o nie drugi raz. *@
 
-<PageTitle>@(AdminMode ? "Zbuduj dla trenera — PTScheduler Portal" : "Zbuduj swoją aplikację — PTScheduler")</PageTitle>
+<PageTitle>@(AdminMode ? "Zbuduj dla trenera — Hantly Portal" : "Zbuduj swoją aplikację — Hantly")</PageTitle>
 <HeadContent><link rel="stylesheet" href="builder.css" /></HeadContent>
 
 <section class="bd @(_phase == Phase.Build ? "" : "bd-launch") @(_phase == Phase.Done ? "bd-is-done" : "")" style="@StyleVars">
@@ -52,6 +53,8 @@
                         }
                     </div>
                 </div>
+
+                <BuilderGuidePanel Line="GuideLine" Look="_look" />
 
                 <div class="bd-step" @key="_step">
                     @if (_step == 1)
@@ -303,6 +306,7 @@
             }
             else if (_phase == Phase.Verify)
             {
+                <BuilderGuidePanel Line="GuideLine" Look="_look" />
                 <div class="bd-deploy">
                     <div class="bd-eyebrow"><i class="bi bi-envelope-check"></i>Potwierdź e-mail</div>
                     <h1 class="bd-title">Wpisz kod z e-maila</h1>
@@ -329,6 +333,7 @@
             }
             else if (_phase == Phase.Card)
             {
+                <BuilderGuidePanel Line="GuideLine" Look="_look" />
                 <div class="bd-done">
                     <div class="bd-done-badge"><i class="bi bi-credit-card-2-front"></i></div>
                     @if (_waitingPayment)
@@ -354,6 +359,7 @@
             }
             else if (_phase == Phase.Deploying && _launch is not null)
             {
+                <BuilderGuidePanel Line="GuideLine" Look="_look" />
                 <div class="bd-deploy">
                     <div class="bd-eyebrow"><i class="bi bi-rocket-takeoff"></i>Publikacja</div>
                     <h1 class="bd-title">Stawiamy <span class="bd-accent">@CompanyOr</span></h1>
@@ -382,6 +388,7 @@
             }
             else if (_phase == Phase.Done && _launch is not null)
             {
+                <BuilderGuidePanel Line="GuideLine" Look="_look" />
                 <div class="bd-done">
                     <div class="bd-done-badge"><i class="bi bi-check-lg"></i></div>
                     <h1 class="bd-title">Gotowe! Twoja aplikacja działa.</h1>
@@ -433,6 +440,7 @@
                 }
                 else
                 {
+                <BuilderGuidePanel Line="GuideLine" Look="_look" />
                 <div class="bd-done">
                     <div class="bd-done-badge"><i class="bi bi-hourglass-split"></i></div>
                     <h1 class="bd-title">Twoja aplikacja czeka w kolejce</h1>
@@ -664,7 +672,7 @@
     private string? _error;
 
     private List<Plan> _plans = [];
-    private string _mainDomain = "ptscheduler.pl";
+    private string _mainDomain = "hantly.pl";
     private string _slug = "";
     private string _slugState = "";
     private int _slugCheck;
@@ -888,6 +896,23 @@
     private bool CanResend => DateTime.UtcNow - _codeSentAt > TimeSpan.FromSeconds(60) && _codeSends < 5;
     private int ResendIn => Math.Max(0, 60 - (int)(DateTime.UtcNow - _codeSentAt).TotalSeconds);
 
+    // ── Asystent w kreatorze (teksty z BuilderGuide) ──
+    private AssistantService.PublicLook? _look;
+
+    private BuilderGuide.Line GuideLine => BuilderGuide.Say(new(
+        _phase switch
+        {
+            Phase.Verify => BuilderGuide.Phase.Verify, Phase.Card => BuilderGuide.Phase.Card, Phase.Deploying => BuilderGuide.Phase.Deploying,
+            Phase.Done => BuilderGuide.Phase.Done, Phase.Queued => BuilderGuide.Phase.Queued, _ => BuilderGuide.Phase.Build
+        },
+        _step, AdminMode, _look?.Name ?? AssistantService.DefaultName,
+        _company, FirstName, _fullName.Trim().Length >= 2, string.IsNullOrEmpty(_appHost) ? AddressText : _appHost, _slugState, _wantDomain,
+        _spec is null ? null : Spec.Name, Color.Name, Template.Name, _template == Spec.Template,
+        _offers.Count(o => !string.IsNullOrWhiteSpace(o.Name)), _offers.FirstOrDefault(o => !string.IsNullOrWhiteSpace(o.Name) && o.Price <= 0)?.Name.Trim(),
+        _offers.FirstOrDefault()?.Price ?? 0, _withPackage, _pkgCount, _pkgPrice,
+        _email.Trim().Length > 0, ValidEmail, PasswordScore, SelectedPlan?.Name, _consent,
+        _error, _email.Trim(), _launch?.Steps.FirstOrDefault(st => st.State == AppLaunchService.StepState.Running)?.Label));
+
     private string? PackageHint
     {
         get
@@ -930,6 +955,7 @@
         var md = await Settings.GetAsync(SiteSettingsService.Keys.MainDomain);
         if (!string.IsNullOrWhiteSpace(md)) _mainDomain = md.Trim();
         _gateway = await Gates.RegistrationGatewayAsync();
+        try { _look = await Assistant.GetPublicLookAsync(); } catch (InvalidOperationException) { }
         _verifyAmount = await Gates.VerifyAmountAsync();
         Launcher.Changed += OnLaunchChanged;
 

@@ -326,7 +326,7 @@ public class BillingService(
         }
         var phone = s[SiteSettingsService.Keys.AdminNotificationPhone];
         if (!string.IsNullOrWhiteSpace(phone) && s[SiteSettingsService.Keys.NotifyTicketsSms] == "true")
-            await credits.SendPlatformSmsAsync(phone, $"PTScheduler: zalegly rachunek {bill.Number} ({who}, {bill.Amount:0} zl, {overdueDays} dni po terminie). {link}");
+            await credits.SendPlatformSmsAsync(phone, $"Hantly: zalegly rachunek {bill.Number} ({who}, {bill.Amount:0} zl, {overdueDays} dni po terminie). {link}");
     }
 
     // ── Obsługa rachunków w panelu ──
@@ -391,7 +391,7 @@ public class BillingService(
         if (!(await payments.GetAvailableGatewaysAsync()).Contains(gateway)) return (null, "Ta metoda płatności jest niedostępna.");
 
         var sessionId = Guid.NewGuid().ToString("N");
-        var (url, externalId, error) = await payments.CreatePaymentAsync(gateway, bill.Amount, $"Rachunek {bill.Number} — PTScheduler",
+        var (url, externalId, error) = await payments.CreatePaymentAsync(gateway, bill.Amount, $"Rachunek {bill.Number} — Hantly",
             sessionId, $"{PayUrl(bill)}?paid=1", PublicUrl, bill.Tenant?.OwnerEmail);
         if (error is not null || url is null) return (null, error ?? "Bramka płatności nie zwróciła adresu.");
 
@@ -522,12 +522,12 @@ public class BillingService(
         <html lang="pl"><body style="margin:0;background:#f1f5f9;font-family:-apple-system,BlinkMacSystemFont,Segoe UI,Roboto,sans-serif;color:#0f172a">
         <div style="max-width:560px;margin:0 auto;padding:24px 16px">
           <div style="background:#fff;border-radius:16px;padding:28px">
-            <div style="font-weight:700;color:#7C3AED;margin-bottom:12px">PTScheduler</div>
+            <div style="font-weight:700;color:#7C3AED;margin-bottom:12px">Hantly</div>
             <h1 style="font-size:20px;margin:0 0 12px">{Enc(title)}</h1>
             <div style="font-size:15px;line-height:1.6">{body}</div>
             <p style="text-align:center;margin:24px 0 8px"><a href="{Enc(url)}" style="display:inline-block;background:#7C3AED;color:#fff;text-decoration:none;padding:12px 24px;border-radius:10px;font-weight:600">{Enc(button)}</a></p>
           </div>
-          <p style="text-align:center;color:#94a3b8;font-size:12px;margin-top:16px">PTScheduler · wiadomość wysłana automatycznie</p>
+          <p style="text-align:center;color:#94a3b8;font-size:12px;margin-top:16px">Hantly · wiadomość wysłana automatycznie</p>
         </div></body></html>
         """;
 }

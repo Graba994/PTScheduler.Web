@@ -341,7 +341,7 @@ public class StorePaymentService(
             amount = amountInt,
             currency = "PLN",
             description,
-            email = buyerEmail ?? "noreply@ptscheduler.pl",
+            email = buyerEmail ?? "noreply@hantly.pl",
             country = "PL",
             language = "pl",
             urlReturn = $"{returnUrl}?payment=success&gateway=przelewy24",
