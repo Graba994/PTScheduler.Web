@@ -63,6 +63,7 @@ public static class PanelUi
         TenantEventTypes.OnboardingEmail => "E-mail powitalny",
         TenantEventTypes.MailOwn => "Własna skrzynka pocztowa",
         TenantEventTypes.MailPlatform => "Poczta przez naszą skrzynkę",
+        TenantEventTypes.AdminSso => "Wejście administratora Portalu",
         _ => type
     };
 
@@ -92,6 +93,7 @@ public static class PanelUi
         TenantEventTypes.ErrorSpike => "bi-bug",
         TenantEventTypes.MailOwn => "bi-envelope-check",
         TenantEventTypes.MailPlatform => "bi-envelope-paper",
+        TenantEventTypes.AdminSso => "bi-box-arrow-in-right",
         TenantEventTypes.BackupVerified => "bi-shield-check",
         TenantEventTypes.BackupVerifyFailed => "bi-shield-x",
         TenantEventTypes.BackupRestored => "bi-arrow-counterclockwise",

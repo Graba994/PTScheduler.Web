@@ -111,10 +111,21 @@
     [SupplyParameterFromQuery]
     private string? ReturnUrl { get; set; }
 
+    // Wejście z Portalu Hantly, które się nie udało (/sso/portal).
+    [SupplyParameterFromQuery(Name = "sso")]
+    private string? Sso { get; set; }
+
     protected override async Task OnInitializedAsync()
     {
         Input ??= new();
         editContext = new EditContext(Input);
+        if (HttpMethods.IsGet(HttpContext.Request.Method))
+            errorMessage ??= Sso switch
+            {
+                "expired" => "Błąd: Link z Portalu wygasł albo został już użyty — wróć do Portalu i kliknij „Wejdź” jeszcze raz.",
+                "noroot" => "Błąd: Ta aplikacja nie ma konta technicznego — zaloguj się hasłem albo ustaw konto w karcie trenera w Portalu.",
+                _ => null
+            };
 
         if (HttpMethods.IsGet(HttpContext.Request.Method))
             await HttpContext.SignOutAsync(IdentityConstants.ExternalScheme);

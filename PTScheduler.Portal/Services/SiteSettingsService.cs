@@ -116,6 +116,8 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
 
         // Dane do dokumentów prawnych (regulamin, polityka prywatności, umowa powierzenia)
         public const string BrandName = "brand_name";
+        /// <summary>„true” — każdy administrator Portalu musi mieć włączoną weryfikację dwuetapową.</summary>
+        public const string RequireAdmin2fa = "require_admin_2fa";
         public const string LegalCompany = "legal_company";
         public const string LegalAddress = "legal_address";
         public const string LegalNip = "legal_nip";

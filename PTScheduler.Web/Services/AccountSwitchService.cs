@@ -27,6 +27,8 @@ public sealed class AccountSwitchService(
     ILogger<AccountSwitchService> logger)
 {
     public const string OriginalUserClaim = "pt:switched_from";
+    /// <summary>Sesja otwarta z Portalu Hantly (/sso/portal) — e-mail administratora platformy.</summary>
+    public const string PortalAdminClaim = "pt:portal_admin";
 
     public bool Enabled => !string.Equals(config["ACCOUNT_SWITCHING_ENABLED"], "false", StringComparison.OrdinalIgnoreCase);
 

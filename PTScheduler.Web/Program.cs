@@ -334,6 +334,8 @@ app.Use(async (ctx, next) =>
         && ctx.User.IsInRole(PTScheduler.Domain.Constants.Roles.Admin)
         && ctx.User.HasClaim(PTScheduler.Web.Services.AppClaimsPrincipalFactory.MustChangePasswordClaim, "1")
         && !PTScheduler.Web.Services.AccountSwitchService.IsSwitched(ctx.User)
+        // Wejście z Portalu: operator nie zna hasła tego konta i nie powinien go zmieniać za trenera.
+        && !ctx.User.HasClaim(c => c.Type == PTScheduler.Web.Services.AccountSwitchService.PortalAdminClaim)
         && HttpMethods.IsGet(ctx.Request.Method))
     {
         var path = ctx.Request.Path;
@@ -816,6 +818,54 @@ app.MapPost("/internal/setup/bootstrap",
     {
         return Results.Json(new { completed = false, message = ex.Message }, statusCode: 409);
     }
+});
+
+// Wejście administratora Portalu (Hantly) jednym kliknięciem: Portal podpisuje krótki, jednorazowy
+// token sekretem tej instancji. Logujemy konto techniczne (Root) albo — z przełączeniem — właściciela
+// studia; dalej działa zwykłe przełączanie kont. Każde wejście trafia do historii zmian.
+app.MapGet("/sso/portal", async (HttpContext ctx, string? t,
+    Microsoft.Extensions.Caching.Memory.IMemoryCache cache,
+    UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager,
+    IAuditLogService audit, ILogger<Program> log) =>
+{
+    var secret = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+    var slug = Environment.GetEnvironmentVariable("TENANT_SLUG");
+    if (string.IsNullOrWhiteSpace(secret) || string.IsNullOrWhiteSpace(slug)) return Results.NotFound();
+
+    var sso = PTScheduler.Application.Security.PortalSsoToken.Validate(t ?? "", secret, slug, DateTimeOffset.UtcNow);
+    // Każdy token tylko raz — ponowne otwarcie tego samego linku (historia, podgląd w komunikatorze) nic nie da.
+    if (sso is null || cache.TryGetValue("sso:" + sso.Nonce, out _))
+    {
+        log.LogWarning("Odrzucono wejście z Portalu (token nieważny, wygasły albo użyty) z {Ip}.", ctx.Connection.RemoteIpAddress);
+        return Results.Redirect("/Account/Login?sso=expired");
+    }
+    Microsoft.Extensions.Caching.Memory.CacheExtensions.Set(cache, "sso:" + sso.Nonce, true, TimeSpan.FromSeconds(PTScheduler.Application.Security.PortalSsoToken.MaxLifetimeSeconds * 2));
+
+    var roots = await userManager.GetUsersInRoleAsync(PTScheduler.Domain.Constants.Roles.Root);
+    var root = roots.OrderBy(u => u.Email).FirstOrDefault();
+    if (root is null) return Results.Redirect("/Account/Login?sso=noroot");
+
+    var portalClaim = new Claim(AccountSwitchService.PortalAdminClaim, sso.AdminEmail);
+    ApplicationUser target = root;
+    if (sso.Target == "owner")
+    {
+        var owner = (await userManager.GetUsersInRoleAsync(PTScheduler.Domain.Constants.Roles.Admin))
+            .Where(u => roots.All(r => r.Id != u.Id)).OrderBy(u => u.Email).FirstOrDefault();
+        if (owner is not null) target = owner;
+    }
+    await signInManager.SignOutAsync();
+    if (target.Id == root.Id)
+        await signInManager.SignInWithClaimsAsync(root, isPersistent: false, [portalClaim]);
+    else
+        await signInManager.SignInWithClaimsAsync(target, isPersistent: false, [new Claim(AccountSwitchService.OriginalUserClaim, root.Id), portalClaim]);
+
+    try
+    {
+        await audit.LogAsync(root.Id, root.Email ?? "", PTScheduler.Domain.Constants.Roles.Root, "PortalSso", "User", target.Id,
+            $"Wejście z Portalu Hantly: {sso.AdminEmail}{(target.Id == root.Id ? "" : $" — jako {target.Email}")}", PTScheduler.Domain.Enums.AuditSeverity.Warning);
+    }
+    catch (Exception ex) { log.LogWarning(ex, "Nie udało się zapisać wejścia z Portalu w historii zmian."); }
+    return Results.Redirect("/app"); // pulpit (strona główna „/” to publiczna strona trenera)
 });
 
 app.MapGet("/internal/metrics",

@@ -51,4 +51,6 @@ public static class TenantEventTypes
     public const string MailOwn = "mail_own";
     /// <summary>Trener wysyła (znów) przez naszą skrzynkę.</summary>
     public const string MailPlatform = "mail_platform";
+    /// <summary>Administrator Portalu wszedł do aplikacji trenera (Detail: kto i jako kto).</summary>
+    public const string AdminSso = "admin_sso";
 }

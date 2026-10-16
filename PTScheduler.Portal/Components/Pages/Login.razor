@@ -8,12 +8,73 @@
         <div class="login-card">
             <div class="login-header">
                 <div class="login-logo">
-                    <i class="bi bi-calendar-heart" style="font-size:24px" aria-hidden="true"></i>
+                    <img src="/brand/hantly-mark.svg" alt="" width="44" height="44" />
                 </div>
-                <h2>Panel administracyjny</h2>
-                <p>Zaloguj się aby zarządzać platformą</p>
+                @if (TwoFactorStep)
+                {
+                    <h2>Kod weryfikacyjny</h2>
+                    <p>Otwórz Google Authenticator (albo inną aplikację uwierzytelniającą) i wpisz 6-cyfrowy kod dla Hantly.</p>
+                }
+                else
+                {
+                    <h2>Panel administracyjny</h2>
+                    <p>Zaloguj się, aby zarządzać platformą</p>
+                }
             </div>
 
+            @if (Zaproszenie == "ok")
+            {
+                <div class="login-alert login-alert-ok">
+                    <i class="bi bi-check-circle" style="font-size:18px" aria-hidden="true"></i>
+                    Hasło ustawione. Zaloguj się nowym hasłem.
+                </div>
+            }
+
+            @if (TwoFactorStep)
+            {
+                <form method="post" action="/api/account/login-2fa" data-enhance="false">
+                    <input type="hidden" name="returnUrl" value="@(ReturnUrl ?? "/panel")" />
+                    <input type="hidden" name="rememberMe" value="@(Remember == "1" ? "true" : "false")" />
+                    <AntiforgeryToken />
+
+                    @if (Error == "2fa")
+                    {
+                        <div class="login-alert login-alert-danger">
+                            <i class="bi bi-exclamation-circle" style="font-size:18px" aria-hidden="true"></i>
+                            Kod się nie zgadza. Sprawdź, czy zegar w telefonie jest ustawiony automatycznie, i wpisz nowy kod.
+                        </div>
+                    }
+                    else if (Error == "locked")
+                    {
+                        <div class="login-alert login-alert-danger">
+                            <i class="bi bi-lock" style="font-size:18px" aria-hidden="true"></i>
+                            Konto zablokowane po zbyt wielu próbach. Spróbuj za 15 minut.
+                        </div>
+                    }
+
+                    <div class="login-field">
+                        <label for="code">Kod z aplikacji</label>
+                        <div class="login-input-wrap">
+                            <i class="bi bi-shield-lock login-input-icon" aria-hidden="true"></i>
+                            <input id="code" name="code" inputmode="numeric" autocomplete="one-time-code" maxlength="20"
+                                   placeholder="123 456" required autofocus />
+                        </div>
+                        <div class="login-hint">Nie masz telefonu? Wpisz jeden z kodów zapasowych zapisanych przy włączaniu weryfikacji.</div>
+                    </div>
+
+                    <div class="login-remember">
+                        <input type="checkbox" name="rememberDevice" value="true" id="rememberDevice" />
+                        <label for="rememberDevice">Nie pytaj o kod na tym urządzeniu przez 30 dni</label>
+                    </div>
+
+                    <button type="submit" class="login-submit">
+                        <i class="bi bi-check2-circle" style="font-size:20px" aria-hidden="true"></i>
+                        Potwierdź
+                    </button>
+                </form>
+            }
+            else
+            {
             <form method="post" action="/api/account/login" data-enhance="false">
                 <input type="hidden" name="returnUrl" value="/panel" />
                 <AntiforgeryToken />
@@ -23,6 +84,13 @@
                     <div class="login-alert login-alert-danger">
                         <i class="bi bi-lock" style="font-size:18px" aria-hidden="true"></i>
                         Konto zablokowane po zbyt wielu próbach. Spróbuj za 15 minut.
+                    </div>
+                }
+                else if (Error == "2fa-expired")
+                {
+                    <div class="login-alert login-alert-danger">
+                        <i class="bi bi-hourglass-bottom" style="font-size:18px" aria-hidden="true"></i>
+                        Sesja logowania wygasła — wpisz hasło jeszcze raz.
                     </div>
                 }
                 else if (_error)
@@ -37,7 +105,7 @@
                     <label for="email">Email</label>
                     <div class="login-input-wrap">
                         <i class="bi bi-envelope login-input-icon" aria-hidden="true"></i>
-                        <input id="email" type="email" name="email" placeholder="admin@@ptscheduler.pl" required autofocus />
+                        <input id="email" type="email" name="email" placeholder="admin@@hantly.pl" required autofocus />
                     </div>
                 </div>
 
@@ -59,6 +127,7 @@
                     Zaloguj się
                 </button>
             </form>
+            }
 
             <div class="login-footer">
                 <a href="/">
@@ -122,7 +191,6 @@
     .login-logo {
         width: 52px; height: 52px;
         border-radius: 14px;
-        background: linear-gradient(135deg, var(--pts-primary), var(--pts-accent));
         display: inline-flex;
         align-items: center; justify-content: center;
         color: #fff;
@@ -151,6 +219,12 @@
         font-weight: 500;
         margin-bottom: 20px;
     }
+    .login-alert-ok {
+        background: rgba(6, 214, 160, 0.1);
+        color: #047857;
+        border: 1px solid rgba(6, 214, 160, 0.25);
+    }
+    .login-hint { font-size: .78rem; color: var(--pts-text-secondary); margin-top: 6px; }
     .login-alert-danger {
         background: rgba(239, 68, 68, 0.08);
         color: #DC2626;
@@ -271,6 +345,12 @@
 
 @code {
     [SupplyParameterFromQuery] public string? Error { get; set; }
+    [SupplyParameterFromQuery] public string? Step { get; set; }
+    [SupplyParameterFromQuery] public string? Remember { get; set; }
+    [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
+    [SupplyParameterFromQuery] public string? Zaproszenie { get; set; }
+
+    private bool TwoFactorStep => Step == "2fa";
 
     private bool _error => !string.IsNullOrEmpty(Error);
 }

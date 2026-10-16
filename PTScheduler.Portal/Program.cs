@@ -241,6 +241,31 @@ app.Use((ctx, next) =>
 app.UseRateLimiter();
 app.UseAuthentication();
 app.UseAuthorization();
+
+// „Wymagaj 2FA od wszystkich” (Panel → Administratorzy): konto bez weryfikacji dwuetapowej
+// trafia najpierw na stronę jej włączenia. Sprawdzamy tylko zwykłe wejścia na strony panelu.
+app.Use(async (ctx, next) =>
+{
+    var path = ctx.Request.Path;
+    if (ctx.User.Identity?.IsAuthenticated == true && HttpMethods.IsGet(ctx.Request.Method)
+        && path.StartsWithSegments("/panel") && !path.StartsWithSegments("/panel/bezpieczenstwo")
+        && !Path.HasExtension(path.Value))
+    {
+        var settings = ctx.RequestServices.GetRequiredService<SiteSettingsService>();
+        if (await settings.GetAsync(SiteSettingsService.Keys.RequireAdmin2fa) == "true")
+        {
+            var users = ctx.RequestServices.GetRequiredService<UserManager<IdentityUser>>();
+            var user = await users.GetUserAsync(ctx.User);
+            if (user is not null && !user.TwoFactorEnabled)
+            {
+                ctx.Response.Redirect("/panel/bezpieczenstwo?wymagane=1");
+                return;
+            }
+        }
+    }
+    await next();
+});
+
 app.UseAntiforgery();
 
 // ?ref= z linku polecającego albo stopki „Zrobione w …” — zapamiętujemy na 30 dni, żeby polecenie
@@ -313,6 +338,30 @@ app.MapGet("/api/internal/git-config", async (HttpContext ctx, SiteSettingsServi
     });
 });
 
+// Wejście do aplikacji trenera jednym kliknięciem: token powstaje dopiero po kliknięciu, żyje 2 minuty
+// i działa raz; aplikacja trenera sprawdza go w /sso/portal. Wejście zapisujemy w historii trenera.
+app.MapGet("/panel/wejdz/{id:int}", async (int id, string? jako, HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory,
+    TenantService tenants, IConfiguration config, ILogger<Program> log) =>
+{
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var t = await db.Tenants.FirstOrDefaultAsync(x => x.Id == id);
+    if (t is null || t.Status != TenantStatus.Active) return Results.Redirect($"/panel/tenants/{id}");
+    var secret = TenantSecrets.For(t, config);
+    if (string.IsNullOrWhiteSpace(secret)) return Results.Redirect($"/panel/tenants/{id}?sso=nosecret");
+    var admin = ctx.User.Identity?.Name ?? "admin";
+    var target = jako == "wlasciciel" ? "owner" : "root";
+    db.TenantEvents.Add(new TenantEvent
+    {
+        TenantId = t.Id, EventType = TenantEventTypes.AdminSso,
+        Detail = $"{admin} — {(target == "owner" ? "jako właściciel studia" : "konto techniczne")}",
+    });
+    await db.SaveChangesAsync();
+    log.LogInformation("Administrator {Admin} wchodzi do aplikacji {Slug} ({Target}).", admin, t.Slug, target);
+    var token = TenantSso.CreateToken(t.Slug, admin, target, secret, DateTimeOffset.UtcNow);
+    ctx.Response.Headers.CacheControl = "no-store";
+    return Results.Redirect(TenantSso.Url(await tenants.PublicUrlAsync(t), token));
+}).RequireAuthorization(p => p.RequireRole("Admin"));
+
 app.MapPost("/api/account/login", async (
     HttpContext ctx,
     SignInManager<IdentityUser> signIn,
@@ -347,13 +396,79 @@ app.MapPost("/api/account/login", async (
     await db.SaveChangesAsync();
 
     if (result.Succeeded)
-        return Results.Redirect(returnUrl);
+        return Results.Redirect(SafeReturn(returnUrl));
+
+    // Hasło dobre, ale konto ma weryfikację dwuetapową — drugi krok (kod z aplikacji).
+    if (result.RequiresTwoFactor)
+        return Results.Redirect($"/login?step=2fa&remember={(remember ? "1" : "0")}&returnUrl={Uri.EscapeDataString(SafeReturn(returnUrl))}");
 
     if (result.IsLockedOut)
         return Results.Redirect("/login?error=locked");
 
     return Results.Redirect("/login?error=1");
 });
+
+// Drugi krok logowania: kod z Google Authenticator (TOTP) albo kod zapasowy.
+app.MapPost("/api/account/login-2fa", async (HttpContext ctx, SignInManager<IdentityUser> signIn, IDbContextFactory<PortalDbContext> dbFactory) =>
+{
+    var form = await ctx.Request.ReadFormAsync();
+    var code = new string(form["code"].ToString().Where(char.IsLetterOrDigit).ToArray());
+    var remember = form["rememberMe"] == "true";
+    var rememberDevice = form["rememberDevice"] == "true";
+    var returnUrl = SafeReturn(form["returnUrl"].ToString());
+
+    var user = await signIn.GetTwoFactorAuthenticationUserAsync();
+    if (user is null) return Results.Redirect("/login?error=2fa-expired");
+
+    // 6 cyfr — kod z aplikacji; dłuższy albo z literami — kod zapasowy (jednorazowy).
+    var recovery = code.Length != 6 || code.Any(char.IsLetter);
+    var result = recovery
+        ? await signIn.TwoFactorRecoveryCodeSignInAsync(code)
+        : await signIn.TwoFactorAuthenticatorSignInAsync(code, remember, rememberDevice);
+
+    await using var db = dbFactory.CreateDbContext();
+    var ua = ctx.Request.Headers.UserAgent.ToString();
+    db.LoginLogs.Add(new LoginLog
+    {
+        Email = user.Email ?? "",
+        Success = result.Succeeded,
+        IpAddress = ctx.Connection.RemoteIpAddress?.ToString(),
+        UserAgent = ua.Length > 256 ? ua[..256] : ua,
+        FailureReason = result.Succeeded ? (recovery ? "recovery_code" : null) : result.IsLockedOut ? "locked_out" : "invalid_2fa_code"
+    });
+    await db.SaveChangesAsync();
+
+    if (result.Succeeded) return Results.Redirect(returnUrl);
+    if (result.IsLockedOut) return Results.Redirect("/login?step=2fa&error=locked");
+    return Results.Redirect($"/login?step=2fa&error=2fa&remember={(remember ? "1" : "0")}&returnUrl={Uri.EscapeDataString(returnUrl)}");
+});
+
+// Ustawienie hasła z zaproszenia (nowy administrator) — token resetu hasła z Identity, ważny dobę.
+app.MapPost("/api/account/admin-invite", async (HttpContext ctx, UserManager<IdentityUser> userMgr) =>
+{
+    var form = await ctx.Request.ReadFormAsync();
+    var id = form["u"].ToString();
+    var token = form["t"].ToString();
+    var password = form["password"].ToString();
+    string Back(string error) => $"/zaproszenie-admina?u={Uri.EscapeDataString(id)}&t={Uri.EscapeDataString(token)}&error={Uri.EscapeDataString(error)}";
+    if (password != form["password2"].ToString()) return Results.Redirect(Back("Hasła się różnią."));
+    var user = await userMgr.FindByIdAsync(id);
+    if (user is null || !await userMgr.IsInRoleAsync(user, "Admin")) return Results.Redirect(Back("Zaproszenie jest nieaktualne."));
+    var result = await userMgr.ResetPasswordAsync(user, token, password);
+    if (!result.Succeeded)
+    {
+        var msg = result.Errors.Any(e => e.Code == "InvalidToken")
+            ? "Link wygasł albo został już użyty — poproś o nowe zaproszenie."
+            : "Hasło musi mieć co najmniej 8 znaków, wielką literę, cyfrę i znak specjalny.";
+        return Results.Redirect(Back(msg));
+    }
+    await userMgr.SetLockoutEndDateAsync(user, null);
+    return Results.Redirect("/login?zaproszenie=ok");
+});
+
+// Tylko adresy w obrębie Portalu (bez przekierowań na obce strony po zalogowaniu).
+static string SafeReturn(string? url) =>
+    !string.IsNullOrEmpty(url) && url.StartsWith('/') && !url.StartsWith("//") && !url.StartsWith("/\\") ? url : "/panel";
 
 app.MapGet("/api/account/logout", async (SignInManager<IdentityUser> signIn) =>
 {
