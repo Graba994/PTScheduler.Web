@@ -313,7 +313,7 @@ else
                     <p class="small text-muted mb-3">
                         @(_adminAccount == "root"
                             ? "Twoje konto operatora: pełne ustawienia, funkcje techniczne i przełączanie na dowolne konto do testów."
-                            : "Konto administratora, które trener założył w kreatorze. Reset hasła wymusi jego zmianę przy logowaniu.")
+                            : "Konto właściciela studia: logowanie do aplikacji trenera i do panelu trenera na stronie Hantly (/moje-konto). Reset hasła wymusi jego zmianę przy logowaniu do aplikacji.")
                     </p>
 
                     @if (_adminInfo is not null && _adminInfo.Found)
@@ -1751,7 +1751,12 @@ else
 
             if (root.TryGetProperty("success", out var s) && s.GetBoolean())
             {
-                _adminResetMessage = "Dane admina zaktualizowane.";
+                // Konto właściciela studia to też logowanie do jego panelu na stronie Hantly (/moje-konto):
+                // ten sam e-mail i hasło mają działać w obu miejscach.
+                if (_adminAccount != "root") await SyncOwnerLoginAsync(payload.GetValueOrDefault("email"), payload.GetValueOrDefault("password"));
+                _adminResetMessage = _adminAccount == "root"
+                    ? "Dane konta technicznego zaktualizowane."
+                    : "Dane właściciela zaktualizowane — działają w aplikacji trenera i w panelu trenera (hantly.pl/moje-konto).";
                 _adminResetError = false;
                 _newAdminPassword = "";
                 await LoadAdminInfo();
@@ -1765,6 +1770,18 @@ else
         }
         catch (Exception ex) { _adminResetMessage = ex.Message; _adminResetError = true; }
         finally { _resettingAdmin = false; }
+    }
+
+    private async Task SyncOwnerLoginAsync(string? email, string? password)
+    {
+        if (_tenant is null || (email is null && password is null)) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var t = await db.Tenants.FindAsync(_tenant.Id);
+        if (t is null) return;
+        if (!string.IsNullOrWhiteSpace(email)) t.OwnerEmail = email.Trim().ToLowerInvariant();
+        if (!string.IsNullOrWhiteSpace(password)) t.OwnerPasswordHash = TenantSetupPayload.HashPassword(password);
+        await db.SaveChangesAsync();
+        _tenant.OwnerEmail = t.OwnerEmail;
     }
 
     private bool _extending;
