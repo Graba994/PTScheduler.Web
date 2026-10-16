@@ -1,7 +1,10 @@
 @page "/login"
 @layout PublicLayout
 
-<PageTitle>Logowanie — Hantly Portal</PageTitle>
+@inject TrainerAccounts Trainers
+@inject NavigationManager Nav
+
+<PageTitle>Logowanie — Hantly</PageTitle>
 
 <section class="login-page">
     <div class="login-container">
@@ -17,10 +20,32 @@
                 }
                 else
                 {
-                    <h2>Panel administracyjny</h2>
-                    <p>Zaloguj się, aby zarządzać platformą</p>
+                    <h2>Zaloguj się</h2>
+                    <p>Trenerzy: e-mail i hasło z kreatora aplikacji — trafisz do swojego panelu z planem, płatnościami i stanem aplikacji.</p>
                 }
             </div>
+
+            @if (Link == "sent")
+            {
+                <div class="login-alert login-alert-ok">
+                    <i class="bi bi-envelope-check" style="font-size:18px" aria-hidden="true"></i>
+                    Jeśli ten adres ma u nas aplikację, właśnie wysłaliśmy na niego link do logowania. Sprawdź skrzynkę (i spam) — link działa 30 minut.
+                </div>
+            }
+            else if (Error == "link")
+            {
+                <div class="login-alert login-alert-danger">
+                    <i class="bi bi-hourglass-bottom" style="font-size:18px" aria-hidden="true"></i>
+                    Link do logowania wygasł albo został już użyty. Poproś o nowy poniżej.
+                </div>
+            }
+            else if (Wylogowano == "1")
+            {
+                <div class="login-alert login-alert-ok">
+                    <i class="bi bi-door-open" style="font-size:18px" aria-hidden="true"></i>
+                    Wylogowano. Do zobaczenia!
+                </div>
+            }
 
             @if (Zaproszenie == "ok")
             {
@@ -93,7 +118,7 @@
                         Sesja logowania wygasła — wpisz hasło jeszcze raz.
                     </div>
                 }
-                else if (_error)
+                else if (_error && Error != "link")
                 {
                     <div class="login-alert login-alert-danger">
                         <i class="bi bi-exclamation-circle" style="font-size:18px" aria-hidden="true"></i>
@@ -105,7 +130,7 @@
                     <label for="email">Email</label>
                     <div class="login-input-wrap">
                         <i class="bi bi-envelope login-input-icon" aria-hidden="true"></i>
-                        <input id="email" type="email" name="email" placeholder="admin@@hantly.pl" required autofocus />
+                        <input id="email" type="email" name="email" placeholder="twoj@@email.pl" autocomplete="email" required autofocus />
                     </div>
                 </div>
 
@@ -127,6 +152,18 @@
                     Zaloguj się
                 </button>
             </form>
+
+            <details class="login-magic" open="@(Error == "link" || Error == "1")">
+                <summary><i class="bi bi-magic" aria-hidden="true"></i>Nie pamiętasz hasła? Wyślemy link na e-mail</summary>
+                <form method="post" action="/api/konto/link" data-enhance="false">
+                    <AntiforgeryToken />
+                    <p>Działa dla trenerów — link wpuści Cię do panelu Hantly bez hasła. Hasło do samej aplikacji zmienisz w aplikacji („Nie pamiętasz hasła?” przy logowaniu).</p>
+                    <div class="login-magic-row">
+                        <input type="email" name="email" placeholder="twoj@@email.pl" required autocomplete="email" aria-label="Twój e-mail" />
+                        <button type="submit">Wyślij link</button>
+                    </div>
+                </form>
+            </details>
             }
 
             <div class="login-footer">
@@ -225,6 +262,13 @@
         border: 1px solid rgba(6, 214, 160, 0.25);
     }
     .login-hint { font-size: .78rem; color: var(--pts-text-secondary); margin-top: 6px; }
+    .login-magic { margin-top: 18px; padding-top: 16px; border-top: 1px solid var(--pts-border); font-size: .86rem; }
+    .login-magic > summary { cursor: pointer; font-weight: 600; color: var(--pts-primary); display: flex; gap: 8px; align-items: center; list-style: none; }
+    .login-magic > summary::-webkit-details-marker { display: none; }
+    .login-magic p { color: var(--pts-text-secondary); font-size: .8rem; line-height: 1.5; margin: 10px 0; }
+    .login-magic-row { display: flex; gap: 8px; }
+    .login-magic-row input { flex: 1; min-width: 0; padding: 10px 12px; border-radius: 10px; border: 1px solid var(--pts-border); background: var(--pts-surface); color: var(--pts-text); font: inherit; }
+    .login-magic-row button { border: 0; border-radius: 10px; padding: 10px 14px; font: inherit; font-weight: 700; color: #fff; background: var(--pts-primary); cursor: pointer; white-space: nowrap; }
     .login-alert-danger {
         background: rgba(239, 68, 68, 0.08);
         color: #DC2626;
@@ -349,6 +393,17 @@
     [SupplyParameterFromQuery] public string? Remember { get; set; }
     [SupplyParameterFromQuery] public string? ReturnUrl { get; set; }
     [SupplyParameterFromQuery] public string? Zaproszenie { get; set; }
+    [SupplyParameterFromQuery] public string? Link { get; set; }
+    [SupplyParameterFromQuery] public string? Wylogowano { get; set; }
+    [CascadingParameter] public HttpContext? Http { get; set; }
+
+    protected override async Task OnInitializedAsync()
+    {
+        // Już zalogowany trener nie musi wpisywać hasła drugi raz.
+        if (Http is not null && !TwoFactorStep && string.IsNullOrEmpty(Error) && Wylogowano is null
+            && await TrainerAccounts.CurrentEmailAsync(Http) is not null)
+            Nav.NavigateTo("/moje-konto");
+    }
 
     private bool TwoFactorStep => Step == "2fa";
 

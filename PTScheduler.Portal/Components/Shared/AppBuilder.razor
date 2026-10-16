@@ -12,6 +12,7 @@
 @inject NavigationManager Nav
 @inject IJSRuntime JS
 @inject AssistantService Assistant
+@inject TrainerAccounts Trainers
 @inject IHttpContextAccessor HttpAccessor
 @inject ILogger<AppBuilder> Log
 
@@ -309,8 +310,20 @@
                 <BuilderGuidePanel Line="GuideLine" Look="_look" />
                 <div class="bd-deploy">
                     <div class="bd-eyebrow"><i class="bi bi-envelope-check"></i>Potwierdź e-mail</div>
-                    <h1 class="bd-title">Wpisz kod z e-maila</h1>
-                    <p class="bd-sub">Wysłaliśmy 6 cyfr na <b>@_email</b>. To chroni Twoją aplikację i nasz serwer przed automatami.</p>
+                    <h1 class="bd-title">Sprawdź skrzynkę</h1>
+                    <div class="bd-mail bd-mail-big" role="status">
+                        <span class="bd-mail-ic"><i class="bi bi-envelope-paper-heart"></i></span>
+                        <div class="bd-mail-txt">
+                            <small>Wysłaliśmy 6-cyfrowy kod na</small>
+                            <b>@_email.Trim()</b>
+                            <span>Temat: „… — kod do publikacji aplikacji”. Nie widzisz? Zajrzyj do spamu albo zakładki „Oferty”.</span>
+                        </div>
+                        @if (MailboxUrl is { } box)
+                        {
+                            <a class="bd-mail-open" href="@box.Url" target="_blank" rel="noopener"><i class="bi bi-box-arrow-up-right"></i>Otwórz @box.Name</a>
+                        }
+                    </div>
+                    <label class="bd-label" for="bd-code">Kod z e-maila</label>
                     <input id="bd-code" class="bd-input bd-code" inputmode="numeric" autocomplete="one-time-code" maxlength="6" placeholder="••••••"
                            @bind="_codeInput" @bind:event="oninput" @bind:after="CodeTyped" aria-label="Kod z e-maila" />
                     @if (_error is not null)
@@ -363,7 +376,15 @@
                 <div class="bd-deploy">
                     <div class="bd-eyebrow"><i class="bi bi-rocket-takeoff"></i>Publikacja</div>
                     <h1 class="bd-title">Stawiamy <span class="bd-accent">@CompanyOr</span></h1>
-                    <p class="bd-sub">Zbudowane w @_builtSeconds s. Teraz serwer uruchamia Twoją aplikację — zwykle zajmuje to około minuty. Możesz zamknąć kartę, dostaniesz e-mail.</p>
+                    <p class="bd-sub">Zbudowane w @_builtSeconds s. Teraz serwer uruchamia Twoją aplikację — zwykle zajmuje to około minuty.</p>
+                    <div class="bd-addr">
+                        <small>@(AdminMode ? "Strona trenera będzie pod adresem" : "Twoja strona będzie pod adresem")</small>
+                        <b>@StageHost</b>
+                    </div>
+                    <div class="bd-mail" role="status">
+                        <span class="bd-mail-ic"><i class="bi bi-envelope-check"></i></span>
+                        <div class="bd-mail-txt"><b>Możesz zamknąć kartę</b><span>Gdy aplikacja wstanie, wyślemy e-mail na <strong>@_email.Trim()</strong>.</span></div>
+                    </div>
                     <ol class="bd-checklist">
                         <li class="done"><span class="bd-ck"><i class="bi bi-check-lg"></i></span>Zapisuję Twoje ustawienia</li>
                         @foreach (var st in _launch.Steps)
@@ -400,17 +421,27 @@
                     {
                         <p class="bd-sub">Zbudowana w <b>@_builtSeconds s</b>, opublikowana w <b>@((int)((_launch.FinishedAt ?? DateTime.UtcNow) - _launch.StartedAt).TotalSeconds) s</b>. Kolor, strona i oferta są już na miejscu.</p>
                     }
+                    <div class="bd-addr bd-addr-big">
+                        <small>@(AdminMode ? "Strona i aplikacja trenera są pod adresem" : "Twoja strona i aplikacja są pod adresem")</small>
+                        <a href="@_launch.AppUrl" target="_blank" rel="noopener">@_appHost<i class="bi bi-box-arrow-up-right"></i></a>
+                        <button type="button" class="bd-addr-copy" @onclick="CopyAddressAsync"><i class="bi @(_copied ? "bi-check2" : "bi-copy")"></i>@(_copied ? "Skopiowano" : "Kopiuj adres")</button>
+                    </div>
                     @if (AdminMode)
                     {
                         <a class="bd-publish bd-enter" href="/panel/tenants/@_launch.TenantId">Otwórz kartę trenera<i class="bi bi-arrow-right"></i></a>
-                        <a class="bd-back bd-site-link" href="@_launch.AppUrl" target="_blank" rel="noopener"><i class="bi bi-globe2"></i>@_appHost</a>
-                        <p class="bd-foot">Trener dostał e-mail na <b>@_email</b> z linkiem do ustawienia hasła.</p>
+                        <div class="bd-mail" role="status">
+                            <span class="bd-mail-ic"><i class="bi bi-envelope-check"></i></span>
+                            <div class="bd-mail-txt"><b>Trener dostał e-mail</b><span>Na <strong>@_email.Trim()</strong> poszedł link do ustawienia hasła.</span></div>
+                        </div>
                     }
                     else
                     {
                         <a class="bd-publish bd-enter" href="@_launch.EnterUrl">Wejdź do swojej aplikacji<i class="bi bi-arrow-right"></i></a>
-                        <a class="bd-back bd-site-link" href="@_launch.AppUrl" target="_blank" rel="noopener"><i class="bi bi-globe2"></i>@_appHost</a>
-                        <p class="bd-foot">Wysłaliśmy e-mail z adresem aplikacji i trzema krokami na dobry start na <b>@_email</b>.</p>
+                        <div class="bd-mail" role="status">
+                            <span class="bd-mail-ic"><i class="bi bi-envelope-check"></i></span>
+                            <div class="bd-mail-txt"><b>Wysłaliśmy e-mail na @_email.Trim()</b><span>Jest w nim adres aplikacji i trzy kroki na dobry start. Zapisz go — przyda się, gdy zmienisz telefon.</span></div>
+                        </div>
+                        <a class="bd-back bd-site-link" href="/moje-konto"><i class="bi bi-person-badge"></i>Twój panel w Hantly: plan, płatności, stan aplikacji</a>
                     }
                     @if (DomainToConnect is { } dom)
                     {
@@ -444,7 +475,19 @@
                 <div class="bd-done">
                     <div class="bd-done-badge"><i class="bi bi-hourglass-split"></i></div>
                     <h1 class="bd-title">Twoja aplikacja czeka w kolejce</h1>
-                    <p class="bd-sub">Aplikacja <b>@CompanyOr</b> jest zbudowana, a wszystkie ustawienia są zapisane. Uruchomimy ją i damy znać e-mailem na <b>@_email</b> — zwykle w ciągu kilku godzin.</p>
+                    <p class="bd-sub">Aplikacja <b>@CompanyOr</b> jest zbudowana, a wszystkie ustawienia są zapisane. Uruchomimy ją zwykle w ciągu kilku godzin.</p>
+                    <div class="bd-addr">
+                        <small>@(AdminMode ? "Strona trenera będzie pod adresem" : "Twoja strona będzie pod adresem")</small>
+                        <b>@StageHost</b>
+                    </div>
+                    <div class="bd-mail" role="status">
+                        <span class="bd-mail-ic"><i class="bi bi-envelope-check"></i></span>
+                        <div class="bd-mail-txt"><b>Damy znać e-mailem</b><span>Gdy aplikacja ruszy, napiszemy na <strong>@_email.Trim()</strong>.</span></div>
+                    </div>
+                    @if (!AdminMode)
+                    {
+                        <a class="bd-back bd-site-link" href="/moje-konto"><i class="bi bi-person-badge"></i>Sprawdzaj stan w swoim panelu Hantly</a>
+                    }
                     <p class="bd-foot"><i class="bi bi-calendar-heart"></i>Okres próbny liczymy od dnia uruchomienia, nie od dziś.</p>
                     @if (!AdminMode)
                     {
@@ -567,35 +610,58 @@
                         <span>W planie <b>@plan.Name</b></span>
                         <span class="bd-perks-price" @key="@($"{plan.Id}{_interval}")">@PlanPrice(plan)</span>
                     </div>
-                    <ul class="bd-perks-list" @key="plan.Id">
-                        @foreach (var (perk, i) in PlanPerks(plan).Select((perk, i) => (perk, i)))
+                    @{ var perks = PlanPerks(plan).ToList(); var upgrades = perks.Where(x => !x.Included).GroupBy(x => x.From ?? "wyższy").ToList(); }
+                    <div class="bd-perks-cols @(upgrades.Count == 0 ? "one" : "")" @key="plan.Id">
+                        <div>
+                            <div class="bd-perks-k"><i class="bi bi-check2-circle"></i>Masz od razu</div>
+                            <ul class="bd-perks-in">
+                                @foreach (var (perk, i) in perks.Where(x => x.Included).Select((perk, i) => (perk, i)))
+                                {
+                                    <li style="--i:@i"><i class="bi @perk.Icon"></i><span>@perk.Text</span></li>
+                                }
+                            </ul>
+                        </div>
+                        @if (upgrades.Count > 0)
                         {
-                            <li class="@(perk.Included ? "" : "off")" style="--i:@i">
-                                <i class="bi @(perk.Included ? perk.Icon : "bi-lock")"></i>
-                                <span>@perk.Text@if (!perk.Included && perk.From is not null) { <small>od planu @perk.From</small> }</span>
-                            </li>
+                            <div>
+                                <div class="bd-perks-k"><i class="bi bi-stars"></i>Dojdzie w wyższym planie</div>
+                                @foreach (var g in upgrades)
+                                {
+                                    <div class="bd-perks-up">
+                                        <span class="bd-perks-plan">@g.Key</span>
+                                        <ul>
+                                            @foreach (var perk in g) { <li><i class="bi @perk.Icon"></i><span>@perk.Text</span></li> }
+                                        </ul>
+                                    </div>
+                                }
+                            </div>
                         }
-                    </ul>
-                    <div class="bd-perks-trust">
-                        @if (plan.MonthlyPrice > 0 && plan.TrialDays > 0) { <span><i class="bi bi-gift"></i>@(plan.TrialDays + ExtraDays) dni za darmo</span> }
-                        <span><i class="bi bi-x-circle"></i>Rezygnujesz w każdej chwili</span>
-                        <span><i class="bi bi-shield-check"></i>Dane klientów należą do Ciebie</span>
-                        <span><i class="bi bi-chat-heart"></i>Pomoc po polsku</span>
                     </div>
+                    <ul class="bd-perks-trust">
+                        @if (plan.MonthlyPrice > 0 && plan.TrialDays > 0) { <li><i class="bi bi-gift"></i><span><b>@(plan.TrialDays + ExtraDays) dni</b> za darmo</span></li> }
+                        <li><i class="bi bi-x-circle"></i><span><b>Rezygnujesz</b> w każdej chwili</span></li>
+                        <li><i class="bi bi-shield-check"></i><span><b>Dane klientów</b> należą do Ciebie</span></li>
+                        <li><i class="bi bi-chat-heart"></i><span><b>Pomoc</b> po polsku</span></li>
+                    </ul>
                 </div>
                 <ol class="bd-after" aria-label="Co dalej po publikacji">
-                    <li><i class="bi bi-envelope-check"></i><b>@(AdminMode ? "Trener dostaje e-mail" : "Potwierdzasz e-mail")</b><small>@AfterFirstNote</small></li>
-                    <li><i class="bi bi-rocket-takeoff"></i><b>Aplikacja startuje</b><small>zwykle w około minutę</small></li>
-                    <li><i class="bi bi-send"></i><b>@(AdminMode ? "Trener wysyła link klientom" : "Wysyłasz link klientom")</b><small>zapisują się i płacą sami</small></li>
+                    <li><i class="bi bi-envelope-check"></i><b>@(AdminMode ? "Trener dostaje e-mail" : "Potwierdzasz e-mail")</b> <small>@AfterFirstNote</small></li>
+                    <li><i class="bi bi-rocket-takeoff"></i><b>Aplikacja startuje</b> <small>zwykle w około minutę, pod adresem @StageHost</small></li>
+                    <li><i class="bi bi-send"></i><b>@(AdminMode ? "Trener wysyła link klientom" : "Wysyłasz link klientom")</b> <small>zapisują się i płacą sami</small></li>
                 </ol>
             }
 
-            <ol class="bd-log" aria-live="polite" aria-label="Dziennik budowy">
-                @foreach (var l in _log.TakeLast(4))
-                {
-                    <li @key="l.Id"><i class="bi @l.Icon"></i><span>@l.Text</span></li>
-                }
-            </ol>
+            @if (_phase != Phase.Done)
+            {
+                <div class="bd-where" aria-live="polite">
+                    <span class="bd-where-ic"><i class="bi bi-globe2"></i></span>
+                    <span class="bd-where-txt">
+                        <small>@(_phase == Phase.Build && string.IsNullOrWhiteSpace(_company) ? "Tu pojawi się adres Twojej strony" : AdminMode ? "Strona trenera będzie pod adresem" : "Twoja strona będzie pod adresem")</small>
+                        <b @key="StageHost">@StageHost</b>
+                        @if (NormalizedDomain is { } own) { <em>a po podłączeniu domeny także @own</em> }
+                    </span>
+                </div>
+            }
         </div>
     </div>
 </section>
@@ -623,7 +689,6 @@
         public bool IsGroup { get; set; }
     }
 
-    private sealed record LogLine(int Id, string Icon, string Text);
 
     /// <summary>Szkic w przeglądarce (bez hasła) — po powrocie na stronę wszystko jest na miejscu.</summary>
     private sealed class Draft
@@ -677,8 +742,6 @@
     private string _slugState = "";
     private int _slugCheck;
 
-    private readonly List<LogLine> _log = [];
-    private int _logId;
     private int _colorVersion;
     private int _siteVersion;
     private DateTime? _startedAt;
@@ -767,6 +830,29 @@
     private string? FirstName => TenantSetupPayload.SplitName(_fullName).First;
     private string BaseSlug => AppBuilderCatalog.Slugify(_company) is { Length: >= 3 } s ? s : (AppBuilderCatalog.Slugify(_company) + "-pt").Trim('-');
     private string AddressText => $"{(string.IsNullOrEmpty(_slug) ? "twoje-studio" : _slug)}.{_mainDomain}";
+    /// <summary>Adres, pod którym stanie strona trenera — po zapisie zgłoszenia ten z bazy (może różnić się końcówką).</summary>
+    private string StageHost => string.IsNullOrEmpty(_appHost) ? AddressText : _appHost;
+
+    /// <summary>Skrót do skrzynki popularnych dostawców — kod z e-maila wpisuje się szybciej.</summary>
+    private (string Name, string Url)? MailboxUrl => (_email.Trim().ToLowerInvariant().Split('@').LastOrDefault() ?? "") switch
+    {
+        "gmail.com" or "googlemail.com" => ("Gmail", "https://mail.google.com/"),
+        "wp.pl" => ("Pocztę WP", "https://poczta.wp.pl/"),
+        "o2.pl" => ("Pocztę o2", "https://poczta.o2.pl/"),
+        "onet.pl" or "op.pl" or "vp.pl" or "onet.eu" => ("Pocztę Onet", "https://poczta.onet.pl/"),
+        "interia.pl" or "interia.eu" or "poczta.fm" => ("Pocztę Interia", "https://poczta.interia.pl/"),
+        "outlook.com" or "hotmail.com" or "live.com" or "outlook.pl" => ("Outlook", "https://outlook.live.com/mail/"),
+        "icloud.com" or "me.com" => ("iCloud Mail", "https://www.icloud.com/mail"),
+        "yahoo.com" => ("Yahoo Mail", "https://mail.yahoo.com/"),
+        _ => null
+    };
+
+    private bool _copied;
+    private async Task CopyAddressAsync()
+    {
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", _launch?.AppUrl ?? $"https://{StageHost}"); _copied = true; }
+        catch (JSException) { }
+    }
 
     private string StyleVars
     {
@@ -977,7 +1063,6 @@
             _startedAt = DateTime.UtcNow;
             await CompanyChanged();
         }
-        AddLog("bi-cpu", AdminMode ? "Kreator dla trenera — uzupełnij dane, a podgląd składa się na żywo" : "Kreator gotowy — buduj, a podgląd składa się na żywo");
     }
 
     /// <summary>Powrót z płatności kartą (albo odświeżenie strony po publikacji): wracamy do tego samego zgłoszenia.</summary>
@@ -1032,7 +1117,6 @@
             var (ok, tenantId, error) = await StripeSvc.VerifyCardCheckoutAsync(SessionId);
             if (ok && tenantId == tenant.Id)
             {
-                AddLog("bi-credit-card-2-front", "Karta podpięta — pierwsza opłata dopiero po okresie próbnym");
                 await GoLiveAsync(tenant.Id);
                 return;
             }
@@ -1099,7 +1183,6 @@
                     RestoreDraft(d);
                     if (_referrer is null && d.Ref is not null) _referrer = await Referrals.FindReferrerAsync(d.Ref);
                     await CompanyChanged();
-                    AddLog("bi-arrow-counterclockwise", "Przywrócono Twój szkic — możesz budować dalej");
                     StateHasChanged();
                 }
             }
@@ -1148,12 +1231,6 @@
         _error = null;
     }
 
-    private void AddLog(string icon, string text)
-    {
-        _log.Add(new LogLine(++_logId, icon, text));
-        if (_log.Count > 12) _log.RemoveAt(0);
-    }
-
     private async Task CompanyChanged()
     {
         Touch();
@@ -1192,9 +1269,6 @@
         _withPackage = true;
         _colorVersion++;
         _siteVersion++;
-        AddLog("bi-window-stack", $"Strona „{Template.Name}” złożona z {Template.Sections} sekcji");
-        AddLog("bi-tags", $"Oferta: {_offers.Count} rodzaje treningów i pakiet {_pkgCount} treningów");
-        AddLog("bi-palette", $"Kolor „{Color.Name}” dobrany do specjalizacji");
     }
 
     private void PickColor(AppBuilderCatalog.AppColor c)
@@ -1204,7 +1278,6 @@
         _color = c.Key;
         // Bez przebudowy ekranu: kolor przechodzi płynnie (zmienne --app/--app2 są animowane w CSS).
         Flash("color");
-        AddLog("bi-palette-fill", $"Kolor „{c.Name}” w całej aplikacji — przyciski, ikony, powiadomienia");
     }
 
     private void PickTemplate(AppBuilderCatalog.SiteTemplate t)
@@ -1213,7 +1286,6 @@
         if (_template == t.Key) return;
         _template = t.Key;
         _siteVersion++;
-        AddLog("bi-layout-text-window-reverse", $"Strona przebudowana: „{t.Name}”, {t.Sections} sekcji");
     }
 
     private void AddOffer()
@@ -1252,19 +1324,14 @@
             case 1:
                 if (!AdminMode && _maxStep == 1) await Funnel.TrackAsync(FunnelKinds.Start);
                 Flash("brand");
-                AddLog("bi-badge-ad", $"Logo „{Mono}” wygenerowane z nazwy");
-                AddLog("bi-globe2", $"Adres {AddressText} — wolny");
                 break;
             case 3:
-                AddLog("bi-phone", "Aplikacja na telefon gotowa do instalacji z Twoją ikoną");
                 break;
             case 4:
                 if (!AdminMode && _maxStep == 4) await Funnel.TrackAsync(FunnelKinds.Account);
                 Flash("offers");
                 var named = _offers.Count(o => !string.IsNullOrWhiteSpace(o.Name));
                 _offers.RemoveAll(o => string.IsNullOrWhiteSpace(o.Name));
-                AddLog("bi-cash-coin", $"Cennik: {named} {(named == 1 ? "pozycja" : "pozycje")}{(_withPackage ? " i pakiet" : "")} — klienci zapłacą online albo u Ciebie");
-                AddLog("bi-hand-index", "Symulacja: klient klika na stronie, rezerwuje i płaci BLIK-iem");
                 break;
         }
         _step++;
@@ -1374,7 +1441,6 @@
             _codeSends++;
             _codeInput = "";
             _phase = Phase.Verify;
-            AddLog("bi-envelope-check", $"Kod wysłany na {_email.Trim()}");
             try { await JS.InvokeVoidAsync("window.scrollTo", 0, 0); await JS.InvokeVoidAsync("ptBuilder.focus", "#bd-code"); } catch (JSException) { }
         }
         finally { _publishing = false; }
@@ -1402,7 +1468,6 @@
             return;
         }
         _emailVerified = true;
-        AddLog("bi-patch-check", "E-mail potwierdzony");
         await CreateTenantAndCardAsync();
     }
 
@@ -1457,6 +1522,7 @@
             if (_referrer is not null && !string.Equals(_referrer.OwnerEmail, email, StringComparison.OrdinalIgnoreCase))
                 t.ReferredByTenantId = _referrer.Id;
             if (NormalizedDomain is { } dom) { t.CustomDomain = dom; t.CustomDomainStatus = "waiting"; t.CustomDomainSince = DateTime.UtcNow; }
+            t.OwnerPasswordHash = passwordHash;
             await db.SaveChangesAsync();
             tenant = t;
         }
@@ -1467,7 +1533,9 @@
         _appHost = tenant.Domain;
         _slug = tenant.Slug;
         _pendingTenantId = tenant.Id;
-        AddLog("bi-person-check", $"Zgłoszenie zapisane: {tenant.Domain}");
+        // Trener od razu ma swój panel na stronie Hantly (stan aplikacji, plan, płatności) — logujemy go w tle.
+        if (!AdminMode)
+            try { await JS.InvokeAsync<bool>("ptBuilder.signIn", Trainers.CreateLoginToken(email)); } catch (JSException) { }
         return tenant;
     }
 
@@ -1544,7 +1612,6 @@
                 await InvokeAsync(async () =>
                 {
                     _waitingPayment = false;
-                    AddLog("bi-patch-check", "Płatność potwierdzona");
                     await GoLiveAsync(tenantId);
                     StateHasChanged();
                 });
@@ -1575,7 +1642,6 @@
         var token = await Gates.PrepareWelcomeTokenAsync(tenantId);
         _launch = Launcher.Start(tenantId, token, invite is not null ? "invite" : "limit");
         _phase = Phase.Deploying;
-        AddLog("bi-rocket-takeoff", "Publikacja rozpoczęta");
         try { await JS.InvokeVoidAsync("ptBuilder.clear"); await JS.InvokeVoidAsync("window.scrollTo", 0, 0); } catch (Exception) { }
     }
 
@@ -1583,7 +1649,6 @@
     {
         await Gates.QueueAsync(tenantId, reason);
         _phase = Phase.Queued;
-        AddLog("bi-hourglass-split", "Zgłoszenie w kolejce do uruchomienia");
         try
         {
             await using var db = await DbFactory.CreateDbContextAsync();
@@ -1609,7 +1674,6 @@
             var tenant = await CreateTenantAsync(passwordHash: null);
             _launch = Launcher.Start(tenant.Id, null, null, builtByAdmin: true);
             _phase = Phase.Deploying;
-            AddLog("bi-rocket-takeoff", "Uruchamiam aplikację trenera");
         }
         catch (Exception ex)
         {
@@ -1630,7 +1694,6 @@
                 _phase = _launch.Failed ? Phase.Queued : Phase.Done;
                 if (!_launch.Failed)
                 {
-                    AddLog("bi-stars", AdminMode ? "Aplikacja trenera działa" : "Aplikacja działa — witaj na pokładzie!");
                     if (NormalizedDomain is { } dom) _serverIp = await ResolveServerIpAsync();
                     StateHasChanged();
                     try { await JS.InvokeVoidAsync("ptBuilder.confetti", new[] { Color.Hex, Color.Hex2, "#06D6A0", "#FFD166", "#FF6B9D", "#7C3AED" }, ".bd-phone"); }

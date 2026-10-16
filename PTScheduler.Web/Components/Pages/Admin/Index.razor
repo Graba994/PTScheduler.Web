@@ -107,21 +107,29 @@ else
     var locked = AdminMenu.Groups.SelectMany(g => g.Items).Where(i => _access.Sees(i) && IsLocked(i)).ToList();
     @if (_access.IsOwner && !_isHighestPlan && locked.Count > 0)
     {
-        <details class="set-more">
-            <summary><i class="bi bi-lock"></i>W wyższym planie (@locked.Count)</summary>
-            <div class="set-done mb-3">
+        <details class="set-more set-gold" open>
+            <summary><i class="bi bi-gem"></i>W wyższym planie <span class="set-gold-count">@locked.Count</span></summary>
+            <p class="set-gold-lead">Te funkcje czekają na Ciebie w wyższym planie. Kliknij, żeby zobaczyć, co dają i ile kosztują.</p>
+            <div class="set-gold-grid">
                 @foreach (var item in locked)
                 {
-                    <a href="/admin/upgrade" title="@item.Description"><i class="bi bi-lock-fill text-secondary"></i>@item.Title <small>plan @(item.PlanName ?? "Pro")</small></a>
+                    <a href="/admin/upgrade" class="set-gold-item" title="@item.Description">
+                        <i class="bi @item.Icon"></i>
+                        <span><b>@item.Title</b><small>@item.Description</small></span>
+                        <em>@(item.PlanName ?? "Pro")</em>
+                    </a>
                 }
             </div>
+            <a href="/admin/upgrade" class="set-gold-cta"><i class="bi bi-stars"></i>Porównaj plany<i class="bi bi-arrow-right"></i></a>
         </details>
     }
 
-    @if (AdminMenu.Groups.Any(g => g.Advanced && g.Items.Any(_access.Sees)))
+    // Zwinięte „Więcej ustawień” pokazujemy tylko z tym, co faktycznie jest w środku (w Starterze bywa puste).
+    var advanced = AdminMenu.Groups.Where(g => g.Advanced).SelectMany(g => g.Items).Where(i => _access.Sees(i) && !IsLocked(i)).ToList();
+    @if (advanced.Count > 0)
     {
         <details class="set-more">
-            <summary><i class="bi bi-sliders"></i>Więcej ustawień: zespół, kopie zapasowe, eksport, historia zmian</summary>
+            <summary><i class="bi bi-sliders"></i>Więcej ustawień: @string.Join(", ", advanced.Select(i => i.Title.ToLower()))</summary>
             @foreach (var group in AdminMenu.Groups.Where(g => g.Advanced))
             {
                 @RenderGroup(group)

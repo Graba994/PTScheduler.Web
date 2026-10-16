@@ -24,6 +24,9 @@ public class Tenant
     /// </summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public string? SetupPayload { get; set; }
+    /// <summary>Skrót hasła z kreatora — logowanie trenera do jego panelu na stronie Hantly (/moje-konto). Null — tylko link z e-maila.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public string? OwnerPasswordHash { get; set; }
     public string? Notes { get; set; }
     /// <summary>Rozliczenie abonamentu: „monthly” albo „yearly” (wybrane w kreatorze).</summary>
     public string BillingInterval { get; set; } = "monthly";

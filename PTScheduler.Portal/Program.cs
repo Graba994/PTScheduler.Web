@@ -50,6 +50,20 @@ builder.Services.ConfigureApplicationCookie(o =>
 });
 builder.Services.AddAntiforgery(o => o.Cookie.Name = ".PTPortal.AF");
 
+// Panel trenera na stronie Hantly (/moje-konto) — osobne ciasteczko i schemat, bez ról: trener
+// nie jest użytkownikiem Identity, więc żadna strona ani API administratora go nie wpuści.
+builder.Services.AddMemoryCache();
+builder.Services.AddScoped<TrainerAccounts>();
+builder.Services.AddAuthentication().AddCookie(TrainerAccounts.Scheme, o =>
+{
+    o.Cookie.Name = ".Hantly.Trainer";
+    o.Cookie.HttpOnly = true;
+    o.Cookie.SameSite = SameSiteMode.Lax;
+    o.LoginPath = "/login";
+    o.ExpireTimeSpan = TimeSpan.FromDays(30);
+    o.SlidingExpiration = true;
+});
+
 // Klucze szyfrujące ciasteczka w bazie portalu, a nie w kontenerze — inaczej
 // każda aktualizacja portalu wylogowywała administratorów.
 builder.Services.AddDataProtection()
@@ -381,14 +395,20 @@ app.MapPost("/api/account/login", async (
 
     var result = await signIn.PasswordSignInAsync(email, password, remember, lockoutOnFailure: true);
 
+    // Nie administrator? To może trener z hasłem z kreatora — trafia do swojego panelu (/moje-konto).
+    var trainers = ctx.RequestServices.GetRequiredService<TrainerAccounts>();
+    var trainerOk = !result.Succeeded && !result.RequiresTwoFactor && !result.IsLockedOut
+        && await trainers.CheckPasswordAsync(email, password);
+
     await using var db = dbFactory.CreateDbContext();
     db.LoginLogs.Add(new LoginLog
     {
         Email = email,
-        Success = result.Succeeded,
+        Success = result.Succeeded || trainerOk,
         IpAddress = ip,
         UserAgent = ua,
         FailureReason = result.Succeeded ? null
+            : trainerOk ? "trainer_panel"
             : result.IsLockedOut ? "locked_out"
             : result.IsNotAllowed ? "not_allowed"
             : "invalid_credentials"
@@ -398,6 +418,14 @@ app.MapPost("/api/account/login", async (
     if (result.Succeeded)
         return Results.Redirect(SafeReturn(returnUrl));
 
+    if (trainerOk)
+    {
+        await TrainerAccounts.SignInAsync(ctx, email);
+        return Results.Redirect("/moje-konto");
+    }
+    if (trainers.IsLocked(email))
+        return Results.Redirect("/login?error=locked");
+
     // Hasło dobre, ale konto ma weryfikację dwuetapową — drugi krok (kod z aplikacji).
     if (result.RequiresTwoFactor)
         return Results.Redirect($"/login?step=2fa&remember={(remember ? "1" : "0")}&returnUrl={Uri.EscapeDataString(SafeReturn(returnUrl))}");
@@ -406,6 +434,61 @@ app.MapPost("/api/account/login", async (
         return Results.Redirect("/login?error=locked");
 
     return Results.Redirect("/login?error=1");
+});
+
+// ── Panel trenera (/moje-konto): wejście jednorazowym kluczem, link z e-maila, wylogowanie ──
+app.MapGet("/moje-konto/wejdz", async (string? t, HttpContext ctx, TrainerAccounts trainers) =>
+{
+    ctx.Response.Headers.CacheControl = "no-store";
+    if (trainers.ConsumeLoginToken(t) is not { } email) return Results.Redirect("/login?error=link");
+    await TrainerAccounts.SignInAsync(ctx, email);
+    return Results.Redirect("/moje-konto");
+});
+
+// Kreator po zapisaniu zgłoszenia loguje trenera w tle (fetch) — panel jest gotowy, zanim aplikacja wstanie.
+app.MapPost("/api/konto/auto", async (HttpContext ctx, TrainerAccounts trainers) =>
+{
+    var form = await ctx.Request.ReadFormAsync();
+    if (trainers.ConsumeLoginToken(form["t"].ToString()) is not { } email) return Results.BadRequest();
+    await TrainerAccounts.SignInAsync(ctx, email);
+    return Results.NoContent();
+});
+
+app.MapPost("/api/konto/link", async (HttpContext ctx, TrainerAccounts trainers, EmailService mail) =>
+{
+    var form = await ctx.Request.ReadFormAsync();
+    var email = TrainerAccounts.Normalize(form["email"].ToString());
+    // Ta sama odpowiedź bez względu na to, czy adres jest u nas — nie zdradzamy, kto ma konto.
+    if (email.Length is > 3 and < 255 && email.Contains('@') && (await trainers.TenantsOfAsync(email)).Count > 0 && trainers.TryReserveLinkEmail(email))
+    {
+        var link = $"{PublicBase(ctx)}/moje-konto/wejdz?t={trainers.CreateLoginToken(email)}";
+        await mail.SendAsync(email, "Link do panelu Hantly", mail.TrainerLoginLinkEmailBody(link));
+    }
+    return Results.Redirect("/login?link=sent");
+});
+
+// „Zarządzaj subskrypcją” z panelu trenera: karta → portal klienta Stripe; rachunki → strona subskrypcji Portalu.
+app.MapGet("/moje-konto/subskrypcja/{id:int}", async (int id, HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory, StripeService stripe) =>
+{
+    if (await TrainerAccounts.CurrentEmailAsync(ctx) is not { } email) return Results.Redirect("/login");
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Id == id && t.OwnerEmail.ToLower() == email);
+    if (tenant is null) return Results.NotFound();
+    ctx.Response.Headers.CacheControl = "no-store";
+    if (!string.IsNullOrWhiteSpace(tenant.StripeCustomerId))
+    {
+        var url = await stripe.CreateCustomerPortalLinkAsync(tenant.StripeCustomerId, $"{PublicBase(ctx)}/moje-konto");
+        return url is null ? Results.Redirect("/moje-konto?blad=stripe") : Results.Redirect(url);
+    }
+    var token = ctx.RequestServices.GetRequiredService<IDataProtectionProvider>()
+        .CreateProtector(SubscriptionLinks.Purpose).ToTimeLimitedDataProtector().Protect(tenant.Id.ToString(), TimeSpan.FromMinutes(30));
+    return Results.Redirect($"/subskrypcja/{Uri.EscapeDataString(token)}");
+});
+
+app.MapGet("/api/konto/wyloguj", async (HttpContext ctx) =>
+{
+    await Microsoft.AspNetCore.Authentication.AuthenticationHttpContextExtensions.SignOutAsync(ctx, TrainerAccounts.Scheme);
+    return Results.Redirect("/login?wylogowano=1");
 });
 
 // Drugi krok logowania: kod z Google Authenticator (TOTP) albo kod zapasowy.

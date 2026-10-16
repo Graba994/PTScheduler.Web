@@ -31,7 +31,7 @@ public class TrainerMeeting
     public int? PriceExpensive { get; set; }
     public int? PriceTooExpensive { get; set; }
 
-    /// <summary>Zgodził(a) się wystartować z kodem zaproszenia.</summary>
+    /// <summary>Zgoda na start z kodem zaproszenia.</summary>
     public bool Committed { get; set; }
     public string? InviteCode { get; set; }
     public string? Notes { get; set; }

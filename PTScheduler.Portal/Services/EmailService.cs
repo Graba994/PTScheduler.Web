@@ -508,6 +508,14 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <p style="color: #6b7280; font-size: 0.9rem;">Twój kod zaproszenia: <b style="font-family: monospace; color: #1f2937;">{WebUtility.HtmlEncode(code)}</b> — jest już wpisany w linku.</p>
         """);
 
+    /// <summary>Link logowania do panelu trenera na stronie Hantly (gdy trener nie pamięta hasła z kreatora).</summary>
+    public string TrainerLoginLinkEmailBody(string link) => Shell($"""
+        <h1 style="color: #7c3aed; font-size: 1.35rem;">Twój link do panelu Hantly</h1>
+        <p>Cześć! Kliknij przycisk, żeby wejść do swojego panelu: plan, płatności i stan aplikacji w jednym miejscu.</p>
+        {Btn(link, "Wejdź do panelu")}
+        <p style="color: #6b7280; font-size: 0.9rem;">Link działa raz, przez 30 minut. Jeśli to nie Ty prosisz o logowanie — zignoruj tę wiadomość.</p>
+        """);
+
     public string ReferralRewardEmailBody(string name, string referredCompany, string referralLink) => Shell($"""
         <h1 style="color: #059669; font-size: 1.35rem;">Masz miesiąc gratis 🎁</h1>
         <p>Cześć {WebUtility.HtmlEncode(name)},</p>

@@ -84,6 +84,11 @@ window.ptLogs = {
         save: function (json) { try { localStorage.setItem(KEY, json); } catch (e) { } },
         load: function () { try { return localStorage.getItem(KEY); } catch (e) { return null; } },
         clear: function () { try { localStorage.removeItem(KEY); } catch (e) { } },
+        /* Po zapisaniu zgłoszenia: logowanie do panelu trenera (/moje-konto) w tle, jednorazowym kluczem */
+        signIn: function (t) {
+            var f = new FormData(); f.append('t', t);
+            return fetch('/api/konto/auto', { method: 'POST', body: f, credentials: 'same-origin' }).then(function (r) { return r.ok; }).catch(function () { return false; });
+        },
         /* Kod polecenia zapamiętany z wcześniejszej wizyty (?ref= na stronie głównej) */
         refCookie: function () { var m = document.cookie.match(/(?:^|;\s*)pt_ref=([a-z0-9-]+)/); return m ? m[1] : null; },
         focus: function (sel) {
