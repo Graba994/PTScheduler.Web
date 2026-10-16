@@ -38,6 +38,11 @@ public interface ITrainingPlanService
 
     /// <summary>Wybór dnia planu na konkretną wizytę (null — kolejny dzień z planu). Fałsz, gdy wizyta albo dzień nie pasują.</summary>
     Task<bool> AssignSessionDayAsync(string userId, bool isAdmin, int sessionId, int? planDayId);
+    /// <summary>
+    /// Rozpisuje dni planu po kolei na tę i następne zaplanowane wizyty klienta (A → B → A…), zaczynając od wskazanego dnia.
+    /// Pomija wizyty z dniem z innego planu (trener wybrał je świadomie). Zwraca liczbę ustawionych wizyt.
+    /// </summary>
+    Task<int> RotateUpcomingAsync(string userId, bool isAdmin, int fromSessionId, int startPlanDayId, int maxSessions = 12);
 
     /// <summary>Dni planu wybrane na podane wizyty.</summary>
     Task<Dictionary<int, SessionPlanDayDto>> GetSessionPlanDaysAsync(IReadOnlyCollection<int> sessionIds);

@@ -275,4 +275,39 @@ public class TrainingPlanServiceTests
         (await svc.AssignSessionDayAsync(T1, false, 5, null)).Should().BeTrue();
         (await svc.GetSessionPlanDaysAsync([5])).Should().BeEmpty();
     }
+    [Fact]
+    public async Task Rotate_Assigns_Days_In_Order_And_Keeps_Other_Plan_Choices()
+    {
+        var (f, _) = TestDb.CreateFresh();
+        await SeedAsync(f);
+        var svc = Make(f);
+        var dto = NewPlan();
+        dto.Days.Add(new PlanDayEditDto { Label = "Dzień B", Exercises = [new PlanExerciseEditDto { ExerciseId = 3, Sets = 3, Reps = "5" }] });
+        var planId = await svc.SavePlanAsync(T1, dto);
+        var other = NewPlan(); other.Name = "Inny";
+        var otherId = await svc.SavePlanAsync(T1, other);
+        int a, b, otherDay;
+        await using (var db = f.CreateDbContext())
+        {
+            var days = db.PlanDays.Where(d => d.PlanId == planId).OrderBy(d => d.Order).Select(d => d.Id).ToList();
+            a = days[0]; b = days[1];
+            otherDay = db.PlanDays.Single(d => d.PlanId == otherId).Id;
+            for (var i = 0; i < 5; i++)
+                db.Sessions.Add(new Session { Id = 10 + i, ClientId = 1, SessionTypeId = 1, TrainerUserId = T1, StartTime = new DateTime(2026, 1, 5 + i, 10, 0, 0), PlanDayId = i == 3 ? otherDay : null });
+            db.Sessions.Add(new Session { Id = 20, ClientId = 1, SessionTypeId = 1, TrainerUserId = T1, StartTime = new DateTime(2026, 1, 7, 12, 0, 0), Status = SessionStatus.Cancelled });
+            await db.SaveChangesAsync();
+        }
+
+        var n = await svc.RotateUpcomingAsync(T1, false, 11, b);
+
+        n.Should().Be(3);
+        var map = await svc.GetSessionPlanDaysAsync([10, 11, 12, 13, 14, 20]);
+        map.ContainsKey(10).Should().BeFalse();       // wcześniejsza wizyta bez zmian
+        map[11].PlanDayId.Should().Be(b);
+        map[12].PlanDayId.Should().Be(a);
+        map[13].PlanDayId.Should().Be(otherDay);      // świadomy wybór z innego planu zostaje
+        map[14].PlanDayId.Should().Be(b);
+        map.ContainsKey(20).Should().BeFalse();       // odwołana pominięta
+        (await svc.RotateUpcomingAsync(T2, false, 11, a)).Should().Be(0);
+    }
 }

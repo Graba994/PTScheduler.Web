@@ -108,6 +108,34 @@ public class TrainingPlanService(
         return true;
     }
 
+    public async Task<int> RotateUpcomingAsync(string userId, bool isAdmin, int fromSessionId, int startPlanDayId, int maxSessions = 12)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var from = await db.Sessions.FirstOrDefaultAsync(s => s.Id == fromSessionId && (isAdmin || s.TrainerUserId == userId));
+        if (from is null) return 0;
+        var start = await db.PlanDays.AsNoTracking().FirstOrDefaultAsync(d => d.Id == startPlanDayId && d.Plan!.ClientId == from.ClientId);
+        if (start is null) return 0;
+        var days = await db.PlanDays.AsNoTracking().Where(d => d.PlanId == start.PlanId)
+            .OrderBy(d => d.Order).ThenBy(d => d.Id).Select(d => d.Id).ToListAsync();
+        var otherPlanDayIds = db.PlanDays.Where(d => d.PlanId != start.PlanId).Select(d => d.Id);
+        var sessions = await db.Sessions
+            .Where(s => s.ClientId == from.ClientId && s.StartTime >= from.StartTime
+                        && (s.Status == Domain.Enums.SessionStatus.Scheduled || s.Status == Domain.Enums.SessionStatus.AwaitingPackage)
+                        && (isAdmin || s.TrainerUserId == userId)
+                        && (s.Id == from.Id || s.PlanDayId == null || !otherPlanDayIds.Contains(s.PlanDayId.Value)))
+            .OrderBy(s => s.StartTime).ThenBy(s => s.Id)
+            .Take(maxSessions)
+            .ToListAsync();
+        var idx = days.IndexOf(startPlanDayId);
+        foreach (var s in sessions)
+        {
+            s.PlanDayId = days[idx % days.Count];
+            idx++;
+        }
+        await db.SaveChangesAsync();
+        return sessions.Count;
+    }
+
     public async Task<Dictionary<int, SessionPlanDayDto>> GetSessionPlanDaysAsync(IReadOnlyCollection<int> sessionIds)
     {
         if (sessionIds.Count == 0) return [];

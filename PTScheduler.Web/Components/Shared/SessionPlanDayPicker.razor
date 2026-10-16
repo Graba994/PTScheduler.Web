@@ -1,0 +1,175 @@
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Enums
+@inject ITrainingPlanService PlanService
+@inject EntitlementService Entitlements
+@inject AuthenticationStateProvider AuthState
+
+@* Panel wizyty (kalendarz, lista wizyt): który dzień planu robimy na tej wizycie.
+   Trener wybiera plan i dzień, klient widzi tylko wynik. *@
+@if (_on && (_assigned is not null || (CanEdit && Editable)))
+{
+    <div class="spd @(_assigned is null ? "is-empty" : "")">
+        <div class="spd-head">
+            <span class="spd-ic"><i class="bi bi-clipboard-check"></i></span>
+            <div class="min-w-0 flex-grow-1">
+                @if (_assigned is { } a)
+                {
+                    <small>Na tej wizycie</small>
+                    <b>@a.DayLabel</b>
+                    <span class="spd-sub">@a.PlanName · @a.ExerciseCount ćw.</span>
+                    @if (_rotated is not null) { <span class="spd-ok"><i class="bi bi-check2"></i>@_rotated</span> }
+                }
+                else
+                {
+                    <small>Plan na wizytę</small>
+                    <span class="spd-sub">Nie wybrano dnia — klient zobaczy go przy wizycie w aplikacji.</span>
+                }
+            </div>
+            @if (CanEdit && Editable && !_editing)
+            {
+                <button type="button" class="btn btn-sm btn-outline-primary" @onclick="StartEditAsync">@(_assigned is null ? "Wybierz" : "Zmień")</button>
+            }
+        </div>
+
+        @if (_editing)
+        {
+            @if (_plans.Count == 0)
+            {
+                <p class="spd-sub mt-2 mb-0">Klient nie ma jeszcze planu. <a href="@($"/plans/new?klient={Session.ClientId}")">Utwórz plan</a></p>
+            }
+            else
+            {
+                <div class="spd-form">
+                    <select class="form-select form-select-sm" aria-label="Plan" value="@_planId" @onchange="OnPlanChangedAsync">
+                        @foreach (var p in _plans)
+                        {
+                            <option value="@p.Id">@p.Name@(p.Use == PlanUse.Solo ? " (samodzielny)" : "")</option>
+                        }
+                    </select>
+                    @if (_days.Count > 0)
+                    {
+                        <div class="spd-days" role="radiogroup" aria-label="Dzień planu">
+                            @foreach (var d in _days)
+                            {
+                                var on = d.Id == _dayId;
+                                <button type="button" role="radio" aria-checked="@(on ? "true" : "false")" class="spd-day @(on ? "on" : "")" @onclick="() => _dayId = d.Id">@DayName(d)</button>
+                            }
+                        </div>
+                    }
+                    else
+                    {
+                        <p class="spd-sub mb-0">Ten plan nie ma jeszcze dni.</p>
+                    }
+                    @if (_days.Count > 1)
+                    {
+                        <label class="form-check spd-rotate">
+                            <input type="checkbox" class="form-check-input" @bind="_rotate" />
+                            <span class="form-check-label">Rozpisz kolejne dni na następne wizyty <span class="spd-sub d-inline">(@string.Join(" → ", RotationPreview()))</span></span>
+                        </label>
+                    }
+                    @if (_error is not null) { <div class="text-danger small">@_error</div> }
+                    <div class="spd-actions">
+                        @if (_assigned is not null)
+                        {
+                            <button type="button" class="btn btn-sm btn-link text-danger me-auto px-0" disabled="@_busy" @onclick="() => SaveAsync(null)">Wyczyść</button>
+                        }
+                        <button type="button" class="btn btn-sm btn-light" disabled="@_busy" @onclick="() => _editing = false">Anuluj</button>
+                        <button type="button" class="btn btn-sm btn-primary" disabled="@(_busy || _dayId is null)" @onclick="() => SaveAsync(_dayId)">Zapisz</button>
+                    </div>
+                </div>
+            }
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public SessionDto Session { get; set; } = null!;
+    /// <summary>Trener/admin może zmieniać; klient tylko widzi.</summary>
+    [Parameter] public bool CanEdit { get; set; }
+
+    private bool Editable => Session.Status is SessionStatus.Scheduled or SessionStatus.AwaitingPackage;
+
+    private bool _on;
+    private int _loadedFor;
+    private SessionPlanDayDto? _assigned;
+    private bool _editing, _busy;
+    private string? _error;
+    private List<TrainingPlanListItemDto> _plans = [];
+    private List<PlanDayEditDto> _days = [];
+    private int? _planId, _dayId;
+    private bool _rotate;
+    private string? _rotated;
+
+    private IEnumerable<string> RotationPreview()
+    {
+        var i = Math.Max(0, _days.FindIndex(d => d.Id == _dayId));
+        for (var k = 0; k < 3; k++) yield return DayName(_days[(i + k) % _days.Count]);
+        yield return "…";
+    }
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (Session is null || Session.Id == _loadedFor) return;
+        _loadedFor = Session.Id;
+        _editing = false; _error = null; _assigned = null; _rotated = null; _rotate = false;
+        _on = Entitlements.IsAllowed("TrainingPlansEnabled");
+        if (!_on) return;
+        try { _assigned = (await PlanService.GetSessionPlanDaysAsync([Session.Id])).GetValueOrDefault(Session.Id); }
+        catch { _assigned = null; }
+    }
+
+    private async Task StartEditAsync()
+    {
+        _error = null;
+        _plans = (await PlanService.GetClientPlansAsync(Session.ClientId)).Where(p => !p.IsTemplate).ToList();
+        _planId = _assigned?.PlanId is { } ap && _plans.Any(p => p.Id == ap) ? ap
+            : (_plans.FirstOrDefault(p => p.Use != PlanUse.Solo) ?? _plans.FirstOrDefault())?.Id;
+        await LoadDaysAsync();
+        _editing = true;
+    }
+
+    private async Task OnPlanChangedAsync(ChangeEventArgs e)
+    {
+        _planId = int.TryParse(e.Value?.ToString(), out var id) ? id : null;
+        await LoadDaysAsync();
+    }
+
+    private async Task LoadDaysAsync()
+    {
+        _days = [];
+        _dayId = null;
+        if (_planId is not { } pid) return;
+        var plan = await PlanService.GetForWorkoutAsync(Session.ClientId, pid);
+        _days = plan?.Days.OrderBy(d => d.Order).ToList() ?? [];
+        _dayId = _assigned is { } a && a.PlanId == pid ? a.PlanDayId : _days.FirstOrDefault()?.Id;
+    }
+
+    private async Task SaveAsync(int? dayId)
+    {
+        _busy = true; _error = null;
+        try
+        {
+            var user = (await AuthState.GetAuthenticationStateAsync()).User;
+            var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+            var isAdmin = user.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+            _rotated = null;
+            if (dayId is { } d && _rotate && _days.Count > 1)
+            {
+                var n = await PlanService.RotateUpcomingAsync(userId, isAdmin, Session.Id, d);
+                if (n > 1) _rotated = $"Ustawiono dni na {n} {PTScheduler.Web.Services.AssistantTipsService.Plural(n, "wizytę", "wizyty", "wizyt")} po kolei.";
+            }
+            else if (!await PlanService.AssignSessionDayAsync(userId, isAdmin, Session.Id, dayId))
+            {
+                _error = "Nie udało się zapisać — ta wizyta albo plan należą do innego trenera.";
+                return;
+            }
+            _assigned = dayId is null ? null : (await PlanService.GetSessionPlanDaysAsync([Session.Id])).GetValueOrDefault(Session.Id);
+            _editing = false;
+        }
+        catch { _error = "Nie udało się zapisać. Spróbuj jeszcze raz."; }
+        finally { _busy = false; }
+    }
+
+    private static string DayName(PlanDayEditDto d) => string.IsNullOrWhiteSpace(d.Label) ? $"Dzień {d.Order + 1}" : d.Label;
+}
