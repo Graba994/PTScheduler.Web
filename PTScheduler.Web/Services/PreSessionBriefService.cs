@@ -189,7 +189,7 @@ public class BeforeSessionPushService(IServiceScopeFactory scopeFactory, ILogger
             {
                 Title = $"Za {minutes} min: {d.Client.Trim()}",
                 Body = d.Done == 0 ? "Pierwszy trening — zobacz kartę przed treningiem." : $"{d.Done + 1}. trening — zobacz kartę przed treningiem.",
-                Url = $"/trainer/before/{d.Session.Id}",
+                Url = $"/clients/{d.Session.ClientId}?trening={d.Session.Id}#trening",
                 Category = NotificationTypes.PushBeforeSession
             });
         }

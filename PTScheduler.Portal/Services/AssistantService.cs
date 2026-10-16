@@ -55,6 +55,7 @@ public partial class AssistantService(
         - Używaj form neutralnych płciowo: nie zgaduj płci trenera ani klientów. Zamiast „zrobiłeś/zrobiłaś” pisz „udało się”, „masz”, „warto”.
         - Korzystaj wyłącznie z podanych faktów. Nie wymyślaj liczb, imion, dat ani kwot.
         - Znaczniki w nawiasach kwadratowych, np. [klient], przepisz dokładnie bez zmian.
+        - Gdy w faktach nie ma imienia, pisz bez imienia. Nigdy nie wspominaj, że czegoś brakuje w danych, i nie wstawiaj znaczników, których nie ma w faktach.
         - Bądź ciepły, z lekkim humorem, bez przesady; najwyżej jedno emoji.
         - Chwal konkretnie. Przypominaj bez wywierania presji.
         - Nie udzielaj porad medycznych, dietetycznych ani prawnych.
@@ -70,6 +71,7 @@ public partial class AssistantService(
         - Pisz po polsku, w drugiej osobie, najwyżej 3 krótkie zdania (do 320 znaków).
         - Używaj form neutralnych płciowo: nie pisz „zrobiłeś/zrobiłaś”; pisz „masz”, „udało się”, „Twój wynik”.
         - Korzystaj wyłącznie z podanych faktów. Nie wymyślaj liczb, ćwiczeń ani dat. Nie oceniaj wyglądu ani wagi.
+        - Gdy w faktach nie ma imienia, pisz bez imienia. Nigdy nie wspominaj, że czegoś brakuje w danych, i nie wstawiaj znaczników, których nie ma w faktach.
         - Chwal konkretnie (np. ćwiczenie i przyrost w kg), motywuj spokojnie, bez wykrzykników na siłę; najwyżej jedno emoji.
         - Nie udzielaj porad medycznych ani dietetycznych i nie zmieniaj planu — to rola trenera.
         - Nie przedstawiaj się, nie dodawaj powitania ani podpisu. Zwróć tylko treść.
@@ -248,7 +250,8 @@ public partial class AssistantService(
         var name = nameOverride ?? (forAdmin
             ? (await settings.GetAsync(K.LeoName) is { Length: > 0 } ln ? ln.Trim() : DefaultLeoName)
             : (await settings.GetAsync(K.AssistantName) is { Length: > 0 } n ? n.Trim() : DefaultName));
-        var system = (promptOverride ?? (forClient ? await GetClientPromptAsync() : forAdmin ? await GetLeoPromptAsync() : await GetPromptAsync())).Replace("{NAZWA}", name);
+        var system = (promptOverride ?? (forClient ? await GetClientPromptAsync() : forAdmin ? await GetLeoPromptAsync() : await GetPromptAsync())).Replace("{NAZWA}", name)
+            + AlwaysRules;
         var factsJson = JsonSerializer.Serialize(facts, new JsonSerializerOptions { Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping });
         var longLimit = LongKinds.TryGetValue(kind, out var l) ? l : (int?)null;
         var user = $"""
@@ -441,13 +444,34 @@ public partial class AssistantService(
         return end > max / 2 ? cut[..(end + 1)] : cut[..cut.LastIndexOf(' ')] + "…";
     }
 
-    /// <summary>Każda liczba z odpowiedzi musi wystąpić w faktach, a każdy znacznik [..] z faktów — w odpowiedzi.</summary>
-    private static bool IsFaithful(string text, string source)
+    /// <summary>
+    /// Każda liczba z odpowiedzi musi wystąpić w faktach, a każdy znacznik [..] z faktów — w odpowiedzi.
+    /// Odrzucamy też znaczniki wymyślone przez AI („[imię]”) i komentarze o brakach („nie podałeś imienia”).
+    /// </summary>
+    public static bool IsFaithful(string text, string source)
     {
         var allowed = Numbers().Matches(source).Select(m => Normalize(m.Value)).ToHashSet();
         if (Numbers().Matches(text).Any(m => !allowed.Contains(Normalize(m.Value)))) return false;
+        if (AnyBracket().Matches(text).Any(m => !source.Contains(m.Value, StringComparison.Ordinal))) return false;
+        if (MetaComments.Any(m => text.Contains(m, StringComparison.OrdinalIgnoreCase))) return false;
         return Placeholders().Matches(source).Select(m => m.Value).Distinct().All(text.Contains);
     }
+
+    /// <summary>Doklejane do każdego promptu (także własnego z Panelu) — chronią przed „[klient] … nie podałeś imienia”.</summary>
+    private const string AlwaysRules = """
+
+
+        Zawsze obowiązuje:
+        - Znaczniki w nawiasach kwadratowych z faktów (np. [klient]) przepisz dokładnie, a innych nie twórz.
+        - Gdy nie znasz imienia, pisz bez imienia. Nie komentuj braków w danych i nie zwracaj się do autora faktów.
+        """;
+
+    /// <summary>Uwagi AI o samych danych zamiast treści dla czytelnika.</summary>
+    private static readonly string[] MetaComments =
+    [
+        "nie podał", "nie podano", "nie podałaś", "brak imienia", "nie znam imienia", "bez imienia", "imię klienta",
+        "w faktach", "z faktów", "brak danych o", "nie mam informacji", "nie wiem, jak"
+    ];
 
     /// <summary>„62,50” i „62.5” to ta sama liczba; zera końcowe obcinamy tylko po przecinku („10” zostaje „10”).</summary>
     private static string Normalize(string number)
@@ -458,6 +482,7 @@ public partial class AssistantService(
 
     [GeneratedRegex(@"\d+(?:[.,]\d+)?")] private static partial Regex Numbers();
     [GeneratedRegex(@"\[[a-ząćęłńóśźż]+\]")] private static partial Regex Placeholders();
+    [GeneratedRegex(@"\[[^\]\s]{1,30}\]")] private static partial Regex AnyBracket();
     [GeneratedRegex(@"\s{2,}")] private static partial Regex MultiSpace();
 
     /// <summary>Przykładowe komunikaty Leo do testu w Panelu — te same rodzaje, które liczy LeoService.</summary>

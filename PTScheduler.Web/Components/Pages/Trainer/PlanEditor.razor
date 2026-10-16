@@ -362,6 +362,9 @@ else
             if (QueryHelpers.ParseQuery(uri.Query).TryGetValue("template", out var t) && t == "1")
                 isTemplate = true;
             _plan = new PlanEditDto { Name = "", IsTemplate = isTemplate, Days = [] };
+            // Z profilu klienta („Utwórz plan”) — klient od razu wybrany.
+            if (QueryHelpers.ParseQuery(uri.Query).TryGetValue("klient", out var k) && int.TryParse(k, out var cid) && _clients.Any(c => c.Id == cid))
+                _plan.ClientId = cid;
         }
         _loading = false;
     }

@@ -56,7 +56,8 @@ public class PlatformAssistantService(IHttpClientFactory httpFactory, ILogger<Pl
             using var req = Request(HttpMethod.Post, "assistant/phrase");
             req.Content = JsonContent.Create(new { kind, facts, fallback, audience });
             using var resp = await Client(30).SendAsync(req);
-            if (resp.IsSuccessStatusCode && await resp.Content.ReadFromJsonAsync<PhraseResponse>() is { Text.Length: > 0 } r)
+            if (resp.IsSuccessStatusCode && await resp.Content.ReadFromJsonAsync<PhraseResponse>() is { Text.Length: > 0 } r
+                && Domain.Rules.AiTextGuard.IsClean(r.Text, string.Join(" ", facts.Values) + " " + fallback))
             {
                 if (_phrases.Count > 2000) _phrases.Clear();
                 _phrases[cacheKey] = (r.Text, today);

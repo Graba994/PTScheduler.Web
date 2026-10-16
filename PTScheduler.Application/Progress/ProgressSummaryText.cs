@@ -18,11 +18,22 @@ public static class ProgressSummaryText
     {
         var facts = BaseFacts(p);
         var parts = new List<string> { Intro(p, "Masz za sobą już") };
+        if (p.TotalMinutes >= 60) parts.Add($"To {Hours(p.TotalMinutes)} pracy nad sobą.");
         var top = p.Strength.Take(2).Select(s => $"{s.Exercise}: {N(s.FromKg)} → {N(s.ToKg)} kg").ToList();
-        if (top.Count > 0) parts.Add(string.Join(", ", top) + ".");
+        if (top.Count > 0) parts.Add("Siła rośnie — " + string.Join(", ", top) + ".");
         if (Body(p) is { } body) parts.Add(Capitalize(body) + ".");
-        if (top.Count == 0 && Body(p) is null) parts.Add("Tak trzymać — każdy trening się liczy.");
+        if (p.WeekStreak >= 3) parts.Add($"Trenujesz {p.WeekStreak} {Plural(p.WeekStreak, "tydzień", "tygodnie", "tygodni")} z rzędu — świetna regularność.");
+        else if (top.Count == 0 && Body(p) is null) parts.Add("Tak trzymać — każdy trening się liczy.");
         return new(facts, string.Join(" ", parts));
+    }
+
+    /// <summary>„12 godzin” / „1,5 godziny” — łączny czas treningów.</summary>
+    public static string Hours(int minutes)
+    {
+        var h = Math.Round(minutes / 60m * 2, MidpointRounding.AwayFromZero) / 2; // co pół godziny
+        if (h % 1 != 0) return $"{N(h)} godziny";
+        var whole = (int)h;
+        return $"{whole} {Plural(whole, "godzina", "godziny", "godzin")}";
     }
 
     public static Summary ForTrainer(ClientProgressDto p)
@@ -55,6 +66,8 @@ public static class ProgressSummaryText
         }
         if (p.WeightFromKg is { } wf && p.WeightToKg is { } wt) f["masa_ciala_kg"] = $"{N(wf)} → {N(wt)} ({Signed(wt - wf)})";
         if (p.WaistFromCm is { } af && p.WaistToCm is { } at) f["talia_cm"] = $"{N(af)} → {N(at)} ({Signed(at - af)})";
+        if (p.TotalMinutes >= 60) f["laczny_czas_treningow"] = Hours(p.TotalMinutes);
+        if (p.WeekStreak >= 2) f["tygodnie_z_rzedu"] = p.WeekStreak.ToString();
         f["obecnosci_30_dni"] = p.Attended30.ToString();
         f["nieobecnosci_30_dni"] = p.Missed30.ToString();
         return f;

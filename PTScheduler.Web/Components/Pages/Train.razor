@@ -21,6 +21,7 @@
 @inject ILoggerFactory LoggerFactory
 @inject PTScheduler.Web.Services.WorkoutCompanionService Companion
 @inject PTScheduler.Web.Services.MedalService MedalSvc
+@inject Microsoft.AspNetCore.Identity.UserManager<PTScheduler.Infrastructure.Data.ApplicationUser> UserManager
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Trenuj" />
@@ -30,8 +31,23 @@
 <ChildContent>
 
 <div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
-    <h4 class="page-title mb-0"><i class="bi bi-lightning-charge-fill me-2" style="color:var(--c-primary)"></i>Trenuj</h4>
+    <h4 class="page-title mb-0"><i class="bi bi-lightning-charge-fill me-2" style="color:var(--c-primary)"></i>@(_liveFor is null ? "Trenuj" : "Trening na żywo")</h4>
+    @if (_liveFor is not null)
+    {
+        <a class="btn btn-sm btn-outline-secondary" href="@($"/clients/{_clientId}")"><i class="bi bi-person me-1"></i>Profil klienta</a>
+    }
 </div>
+@if (_liveFor is not null)
+{
+    <div class="tr-live" role="status">
+        <span class="tr-live-dot" aria-hidden="true"></span>
+        <div><b>Prowadzisz trening: @_liveFor</b><small>Serie zapisują się w dzienniku klienta — klient zobaczy je w swojej aplikacji i dostanie podsumowanie.</small></div>
+    </div>
+}
+@if (_liveDenied)
+{
+    <div class="alert alert-warning">Ten klient nie jest na Twojej liście — trening na żywo prowadzi jego trener.</div>
+}
 
 @if (_clientId is null)
 {
@@ -276,6 +292,12 @@ else
 
 @code {
     private int? _clientId;
+    // Trening na żywo: trener prowadzi trening klienta (?klient=ID[&plan=ID&dzien=ID]) — zapis trafia do dziennika klienta.
+    [SupplyParameterFromQuery(Name = "klient")] public int? LiveClientId { get; set; }
+    [SupplyParameterFromQuery(Name = "plan")] public int? LivePlanId { get; set; }
+    [SupplyParameterFromQuery(Name = "dzien")] public int? LiveDayId { get; set; }
+    private string? _liveFor;
+    private bool _liveDenied;
     private string _storeKey = "";
     private List<TrainingPlanListItemDto> _plans = [];
     private List<WorkoutHistoryItemDto> _history = [];
@@ -296,7 +318,8 @@ else
     private async Task MedalsSeenAsync()
     {
         _newMedals = [];
-        if (_clientId is { } id) await MedalSvc.MarkSeenAsync(id);
+        // Medale „widzi” klient — trener prowadzący trening ich nie odhacza.
+        if (_clientId is { } id && _liveFor is null) await MedalSvc.MarkSeenAsync(id);
     }
     private WorkoutJournalDayDto? _historyDay;
     private SurveyResponseDto? _historySurvey;
@@ -332,7 +355,14 @@ else
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
         var userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
-        var client = await ClientService.GetClientByUserIdAsync(userId);
+        ClientDto? client;
+        if (LiveClientId is { } liveId && !auth.User.IsInRole(Roles.Client))
+        {
+            client = await ClientService.GetClientAsync(liveId);
+            if (client is null || !await MayLeadAsync(auth.User, userId, client)) { _liveDenied = true; return; }
+            _liveFor = client.FullName;
+        }
+        else client = await ClientService.GetClientByUserIdAsync(userId);
         if (client is null) return;
         _clientId = client.Id;
         _trainerUserId = client.TrainerUserId;
@@ -349,7 +379,8 @@ else
             _scrollTop = false;
             try { await JS.InvokeVoidAsync("window.scrollTo", 0, 0); } catch { /* best-effort */ }
         }
-        if (!firstRender || _clientId is null || _draftLoaded) return;
+        // Raz, gdy klient jest już wczytany (pierwszy render bywa wcześniej niż koniec OnInitializedAsync).
+        if (_clientId is null || _draftLoaded) return;
         _draftLoaded = true;
         try
         {
@@ -382,8 +413,31 @@ else
                 await PersistDraftAsync();
                 StateHasChanged();
             }
+            else await AutoStartLiveAsync();
         }
         catch (Exception ex) { LoggerFactory.CreateLogger("Train").LogError(ex, "Nie udało się wczytać trwającego treningu."); }
+    }
+
+    /// <summary>Trening na żywo prowadzi administrator, trener klienta albo asystent tego trenera.</summary>
+    private async Task<bool> MayLeadAsync(System.Security.Claims.ClaimsPrincipal user, string userId, ClientDto client)
+    {
+        if (user.IsInRole(Roles.Admin)) return true;
+        if (user.IsInRole(Roles.Trainer)) return client.TrainerUserId == userId;
+        if (user.IsInRole(Roles.Subordinate))
+            return (await UserManager.FindByIdAsync(userId))?.SupervisorId is { } boss && boss == client.TrainerUserId;
+        return false;
+    }
+
+    /// <summary>Z profilu klienta „Zacznij trening na żywo” z wybranym dniem planu — od razu lista ćwiczeń.</summary>
+    private async Task AutoStartLiveAsync()
+    {
+        if (_liveFor is null || _draft is not null || LivePlanId is not { } planId || LiveDayId is not { } dayId) return;
+        await SelectPlan(planId);
+        if (_selectedPlan?.Days.FirstOrDefault(d => d.Id == dayId) is { } day)
+        {
+            await StartDay(day);
+            StateHasChanged();
+        }
     }
 
     private static WorkoutDraft? Deserialize(string json)

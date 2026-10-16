@@ -23,6 +23,10 @@ public sealed class ClientProgressDto
     /// <summary>Ostatnie 30 dni: odbyte treningi i nieobecności (w tym późne odwołania).</summary>
     public int Attended30 { get; init; }
     public int Missed30 { get; init; }
+    /// <summary>Łączny czas odbytych treningów (minuty, z rodzaju treningu).</summary>
+    public int TotalMinutes { get; init; }
+    /// <summary>Ile tygodni z rzędu (do bieżącego włącznie) jest co najmniej jeden odbyty trening.</summary>
+    public int WeekStreak { get; init; }
     public List<PlanInsightDto> Insights { get; init; } = [];
 
     /// <summary>Jest o czym mówić: kilka treningów albo zapisane ćwiczenia z co najmniej dwóch dni.</summary>

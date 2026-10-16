@@ -85,6 +85,9 @@
         {
             var path = "/" + Nav.ToBaseRelativePath(Nav.Uri);
             if (path.StartsWith("/my/documents", StringComparison.OrdinalIgnoreCase)) return;
+            // Na pulpicie dokumenty czekają w spokojnej karcie (ClientDocumentsCard) zamiast okna na całą stronę.
+            var bare = path.Split('?', '#')[0].TrimEnd('/');
+            if (bare is "" or "/app") return;
 
             var user = (await AuthState.GetAuthenticationStateAsync()).User;
             if (!user.IsInRole(PTScheduler.Domain.Constants.Roles.Client)) return;

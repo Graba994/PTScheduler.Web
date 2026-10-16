@@ -3,6 +3,7 @@
 @inject PTScheduler.Web.Services.PreSessionBriefService Briefs
 @inject AuthenticationStateProvider AuthState
 @inject PTScheduler.Web.Services.RetentionService RetentionSvc
+@inject NavigationManager Nav
 @rendermode PTScheduler.Web.RenderModes.Server
 
 @* Karta „przed treningiem” — otwierana z powiadomienia 15 minut przed wizytą albo z listy dzisiejszych treningów. *@
@@ -155,6 +156,8 @@ else
         var user = (await AuthState.GetAuthenticationStateAsync()).User;
         var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
         _card = await Briefs.GetAsync(SessionId, userId, user.IsInRole(PTScheduler.Domain.Constants.Roles.Admin));
+        // Karta „przed treningiem” mieszka teraz w profilu klienta (panel „Trening”) — stare linki z powiadomień prowadzą tam.
+        if (_card is not null) { Nav.NavigateTo($"/clients/{_card.ClientId}?trening={SessionId}#trening", replace: true); return; }
         _insights = _card is null ? null : await RetentionSvc.GetInsightsAsync(_card.ClientId);
         _loading = false;
     }

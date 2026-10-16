@@ -36,10 +36,14 @@ else
             }
         </div>
 
-        <div class="prg-summary @(ForTrainer && _mascot is not null ? "with-mascot" : "")">
+        <div class="prg-summary @(ForTrainer && _mascot is not null ? "with-mascot" : "") @(ForTrainer ? "" : "prg-praise")">
             @if (ForTrainer && _mascot is not null)
             {
                 <img src="@_mascot" alt="" width="40" height="40" />
+            }
+            else if (!ForTrainer)
+            {
+                <span class="prg-praise-ic" aria-hidden="true"><i class="bi bi-stars"></i></span>
             }
             <p class="mb-0">
                 @if (ForTrainer && _mascotName is not null)
@@ -52,6 +56,14 @@ else
 
         <div class="prg-tiles">
             <div><b>@(p.CompletedSessions > 0 ? p.CompletedSessions : p.WorkoutDays)</b><span>@(p.CompletedSessions > 0 ? ProgressSummaryText.Plural(p.CompletedSessions, "trening", "treningi", "treningów") : "dni z zapisem")</span></div>
+            @if (p.TotalMinutes >= 60)
+            {
+                <div><b>@ProgressSummaryText.Hours(p.TotalMinutes).Split(' ')[0] h</b><span>łącznie na treningach</span></div>
+            }
+            @if (p.WeekStreak >= 2)
+            {
+                <div><b>@p.WeekStreak</b><span>@ProgressSummaryText.Plural(p.WeekStreak, "tydzień", "tygodnie", "tygodni") z rzędu</span></div>
+            }
             @if (p.WeightFromKg is { } wf && p.WeightToKg is { } wt)
             {
                 <div><b>@Signed(wt - wf) kg</b><span>masa ciała</span></div>

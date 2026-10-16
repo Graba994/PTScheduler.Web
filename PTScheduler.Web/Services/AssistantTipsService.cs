@@ -37,14 +37,14 @@ public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFact
         var soon = await db.Sessions.AsNoTracking()
             .Where(s => s.TrainerUserId == userId && s.Status == SessionStatus.Scheduled && s.StartTime > now && s.StartTime <= now.AddMinutes(60))
             .OrderBy(s => s.StartTime)
-            .Select(s => new { s.Id, s.StartTime, s.Client.FirstName })
+            .Select(s => new { s.Id, s.ClientId, s.StartTime, s.Client.FirstName })
             .FirstOrDefaultAsync();
         if (soon is not null)
         {
             var minutes = Math.Max(1, (int)Math.Round((soon.StartTime - now).TotalMinutes));
             tips.Add(new($"before-{soon.Id}", "przed_treningiem", "hello", 100,
-                $"Za {minutes} min: [klient]. Zerknij na kartę — ostatni trening, uwagi i plan na dziś.",
-                new() { ["klient"] = "[klient]", ["minuty"] = minutes.ToString() }, "Karta", $"/trainer/before/{soon.Id}",
+                $"Za {minutes} min: [klient]. Zerknij na profil — plan na dziś, ostatni trening i uwagi.",
+                new() { ["klient"] = "[klient]", ["minuty"] = minutes.ToString() }, "Karta", $"/clients/{soon.ClientId}?trening={soon.Id}#trening",
                 Placeholders: new() { ["[klient]"] = string.IsNullOrWhiteSpace(soon.FirstName) ? "kolejny trening" : soon.FirstName.Trim() }));
         }
 
@@ -96,8 +96,8 @@ public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFact
                 $"{ending} {Plural(ending, "klientowi kończy", "klientom kończy", "klientom kończy")} się pakiet — dobry moment, żeby zaproponować kolejny.",
                 new() { ["liczba_klientow"] = ending.ToString() }, "Klienci", "/clients"));
 
-        // Kolejne 10 treningów klienta w ostatnim tygodniu.
-        var weekAgo = now.AddDays(-7);
+        // Kolejne 10 treningów klienta — świętujemy najwyżej 3 dni (karta na pulpicie i tak pokazuje to raz).
+        var weekAgo = now.AddDays(-3);
         var milestones = await sessions.Where(s => s.Status == SessionStatus.Completed && s.StartTime <= now)
             .GroupBy(s => s.ClientId)
             .Select(g => new { ClientId = g.Key, Total = g.Count(), Before = g.Count(s => s.StartTime < weekAgo) })

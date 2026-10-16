@@ -51,6 +51,10 @@
                         {
                             <a class="btn btn-sm btn-outline-primary atc-act" href="@t.ActionHref">@t.ActionLabel</a>
                         }
+                        @if (t.Mood != "remind")
+                        {
+                            <button type="button" class="atc-x" title="Ukryj — już wiem" aria-label="Ukryj" @onclick="() => HideAsync(t)"><i class="bi bi-x-lg"></i></button>
+                        }
                     </li>
                 }
             </ul>
@@ -101,8 +105,11 @@
             var config = await Platform.GetConfigAsync();
             if (config is not { Enabled: true } || config.Icons.Count == 0) return;
             var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
-            _tips = (await Tips.GetTipsAsync(userId, isAdmin))
+            var all = await Tips.GetTipsAsync(userId, isAdmin);
+            _seen = await LoadSeenAsync();
+            _tips = all.Where(t => !IsStale(t))
                 .OrderBy(t => t.Mood == "remind" ? 0 : t.Mood == "celebrate" ? 2 : 1).ThenByDescending(t => t.Priority).ToList();
+            await SaveSeenAsync();
             _folded = await JS.InvokeAsync<string?>("localStorage.getItem", FoldKey) == "1";
             _config = config;
             _loaded = true;
@@ -112,6 +119,47 @@
         {
             // Karta jest dodatkiem — przy błędzie po prostu jej nie ma.
         }
+    }
+
+    // Pochwały i ciekawostki pokazujemy raz: od pierwszego wyświetlenia mija doba i znikają (albo od razu po „×”).
+    // Sprawy do załatwienia zostają, dopóki są aktualne — liczą się z danych.
+    private const string SeenKey = "pt-ai-today-seen";
+    private Dictionary<string, string> _seen = [];
+
+    private bool IsStale(PTScheduler.Web.Services.AssistantTipsService.Tip t)
+    {
+        if (t.Mood == "remind") return false;
+        var now = DateTime.UtcNow;
+        if (!_seen.TryGetValue(t.Key, out var first)) { _seen[t.Key] = now.ToString("O"); return false; }
+        if (first == "x") return true;
+        return DateTime.TryParse(first, null, System.Globalization.DateTimeStyles.RoundtripKind, out var at) && now - at > TimeSpan.FromHours(20);
+    }
+
+    private async Task<Dictionary<string, string>> LoadSeenAsync()
+    {
+        try
+        {
+            var json = await JS.InvokeAsync<string?>("localStorage.getItem", SeenKey);
+            var map = string.IsNullOrEmpty(json) ? [] : System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(json) ?? [];
+            // Porządki: wpisy starsze niż 30 dni nie są już potrzebne.
+            var cutoff = DateTime.UtcNow.AddDays(-30);
+            return map.Where(kv => kv.Value == "x" || !DateTime.TryParse(kv.Value, null, System.Globalization.DateTimeStyles.RoundtripKind, out var d) || d > cutoff)
+                .Take(300).ToDictionary(kv => kv.Key, kv => kv.Value);
+        }
+        catch (Exception ex) when (ex is JSException or System.Text.Json.JsonException) { return []; }
+    }
+
+    private async Task SaveSeenAsync()
+    {
+        try { await JS.InvokeVoidAsync("localStorage.setItem", SeenKey, System.Text.Json.JsonSerializer.Serialize(_seen)); }
+        catch (JSException) { }
+    }
+
+    private async Task HideAsync(PTScheduler.Web.Services.AssistantTipsService.Tip t)
+    {
+        _seen[t.Key] = "x";
+        _tips.Remove(t);
+        await SaveSeenAsync();
     }
 
     private static string Text(PTScheduler.Web.Services.AssistantTipsService.Tip t)

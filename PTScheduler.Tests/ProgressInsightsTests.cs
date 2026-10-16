@@ -92,7 +92,7 @@ public class ProgressSummaryTextTests
     public void Client_Summary_Lists_Facts_With_Polish_Formatting()
     {
         var s = PTScheduler.Application.Progress.ProgressSummaryText.ForClient(Sample());
-        s.Fallback.Should().Be("Masz za sobą już 10 treningów (od 1 września 2026). Wyciskanie sztangi: 60 → 70 kg, Przysiad: 80 → 90 kg. Masa ciała −2,1 kg.");
+        s.Fallback.Should().Be("Masz za sobą już 10 treningów (od 1 września 2026). Siła rośnie — Wyciskanie sztangi: 60 → 70 kg, Przysiad: 80 → 90 kg. Masa ciała −2,1 kg.");
         s.Facts["cwiczenie_1_kg"].Should().Be("60 → 70 (+10)");
         s.Facts["masa_ciala_kg"].Should().Be("82,5 → 80,4 (−2,1)");
     }

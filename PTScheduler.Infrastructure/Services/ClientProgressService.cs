@@ -22,6 +22,8 @@ public class ClientProgressService(IDbContextFactory<ApplicationDbContext> dbFac
         var completed = db.Sessions.AsNoTracking().Where(s => s.ClientId == clientId && s.Status == SessionStatus.Completed);
         var completedCount = await completed.CountAsync();
         var firstSession = await completed.MinAsync(s => (DateTime?)s.StartTime);
+        var totalMinutes = await completed.SumAsync(s => (int?)s.SessionType.DurationMinutes) ?? 0;
+        var completedDates = await completed.Where(s => s.StartTime >= now.AddDays(-7 * 53)).Select(s => s.StartTime).ToListAsync();
 
         var monthAgo = now.AddDays(-30);
         var recent = await db.Sessions.AsNoTracking()
@@ -94,7 +96,9 @@ public class ClientProgressService(IDbContextFactory<ApplicationDbContext> dbFac
             WaistToCm = waists.Count >= 2 ? waists[^1] : null,
             Attended30 = recent.Count(r => r.Status == SessionStatus.Completed),
             Missed30 = recent.Count(r => r.Status == SessionStatus.NoShow || (r.Status == SessionStatus.Cancelled && r.IsLateCancellation)),
-            Insights = insights.Take(6).ToList()
+            Insights = insights.Take(6).ToList(),
+            TotalMinutes = totalMinutes,
+            WeekStreak = ProgressSummaryWeeks.Streak(completedDates.Select(DateOnly.FromDateTime), DateOnly.FromDateTime(now))
         };
     }
 }
