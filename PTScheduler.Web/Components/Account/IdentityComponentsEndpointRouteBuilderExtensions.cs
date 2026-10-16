@@ -67,10 +67,14 @@ namespace Microsoft.AspNetCore.Routing
 
             accountGroup.MapPost("/SwitchBack", async (
                 ClaimsPrincipal user,
+                HttpContext context,
                 [FromServices] AccountSwitchService switcher) =>
             {
                 var error = await switcher.SwitchBackAsync(user);
-                return TypedResults.LocalRedirect(error is null ? "~/app" : "~/Account/Login");
+                // Opcjonalny powrót na konkretną stronę (np. z „Pierwszych ustawień” do Zarządzanie → E-maile).
+                var back = context.Request.HasFormContentType ? context.Request.Form["returnUrl"].ToString() : "";
+                var target = back.StartsWith('/') && !back.StartsWith("//") && !back.StartsWith("/\\") ? "~" + back : "~/app";
+                return TypedResults.LocalRedirect(error is null ? target : "~/Account/Login");
             }).RequireAuthorization();
 
             accountGroup.MapPost("/PasskeyCreationOptions", async (

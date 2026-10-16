@@ -1,0 +1,237 @@
+@page "/witaj"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer")]
+@rendermode PTScheduler.Web.RenderModes.Server
+@using PTScheduler.Domain.Rules
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Web.Components.Layout
+@inject IEmailSettingsService MailSettings
+@inject IBrandingService Branding
+@inject PTScheduler.Infrastructure.Services.PlatformEmailProvider PlatformMail
+@inject SetupGuide Guide
+@inject IPermissionService Permission
+@inject AuthenticationStateProvider AuthState
+@inject Microsoft.AspNetCore.Identity.UserManager<PTScheduler.Infrastructure.Data.ApplicationUser> UserManager
+@inject NavigationManager Nav
+
+@* Pierwsze wejście z kreatora Hantly: kilka decyzji raz, a dobrze — każdy krok można pominąć.
+   Krok 1: kto wysyła e-maile do klientów (Hantly w imieniu studia albo własna skrzynka).
+   Krok 2: co jeszcze warto zrobić na start (z listy „Pierwsze kroki”). *@
+
+<AppTitle Page="Pierwsze ustawienia" />
+
+<div class="fs">
+    <div class="fs-top">
+        <div class="fs-eyebrow"><i class="bi bi-stars"></i>Pierwsze ustawienia · ok. 2 minuty</div>
+        <div class="fs-dots" aria-label="Postęp">
+            @for (var i = 1; i <= TotalSteps; i++)
+            {
+                <span class="@(i < _step ? "done" : i == _step ? "on" : "")"></span>
+            }
+        </div>
+        <a class="fs-skip-all" href="/app?witaj=1">Pomiń wszystko<i class="bi bi-x-lg"></i></a>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    }
+    else if (_step == 1 && _canMail)
+    {
+        <section class="fs-card" aria-labelledby="fs-mail-title">
+            <h1 id="fs-mail-title">Kto wysyła e-maile do Twoich klientów?</h1>
+            <p class="fs-lead">Przypomnienia o treningach, potwierdzenia zapisów, zaproszenia i rachunki. Zmienisz to w każdej chwili w Zarządzanie → E-maile.</p>
+
+            <div class="fs-choices" role="radiogroup">
+                @if (_platform)
+                {
+                    <button type="button" role="radio" aria-checked="@(_choice == "hantly" ? "true" : "false")" class="fs-choice @(_choice == "hantly" ? "on" : "")" @onclick='() => _choice = "hantly"'>
+                        <span class="fs-choice-ic"><i class="bi bi-send-check"></i></span>
+                        <span class="fs-choice-txt">
+                            <b>Hantly wysyła w Twoim imieniu <em>polecane</em></b>
+                            <small>Działa od razu, bez konfiguracji. Nadawcą jest nazwa Twojego studia, a odpowiedzi klientów trafiają na Twój adres.</small>
+                        </span>
+                        <i class="bi @(_choice == "hantly" ? "bi-check-circle-fill" : "bi-circle") fs-radio"></i>
+                    </button>
+                }
+                <button type="button" role="radio" aria-checked="@(_choice == "own" ? "true" : "false")" class="fs-choice @(_choice == "own" ? "on" : "")" @onclick='() => _choice = "own"'>
+                    <span class="fs-choice-ic"><i class="bi bi-envelope-at"></i></span>
+                    <span class="fs-choice-txt">
+                        <b>Mój własny adres e-mail</b>
+                        <small>Maile wychodzą z Twojej skrzynki (Gmail, WP, Onet, firmowa). Potrzebne hasło aplikacji — przeprowadzimy Cię krok po kroku.</small>
+                    </span>
+                    <i class="bi @(_choice == "own" ? "bi-check-circle-fill" : "bi-circle") fs-radio"></i>
+                </button>
+            </div>
+
+            @if (_choice == "hantly")
+            {
+                <div class="fs-detail">
+                    <label class="form-label fw-semibold" for="fs-reply">Odpowiedzi klientów trafią na</label>
+                    <input id="fs-reply" type="email" class="form-control @(_replyProblem is not null ? "is-invalid" : "")" @bind="_replyTo" @bind:after="CheckReply" placeholder="twoj@@email.pl" autocomplete="email" />
+                    @if (_replyProblem is not null) { <div class="invalid-feedback d-block">@_replyProblem</div> }
+                    <div class="fs-preview" aria-label="Tak klient zobaczy e-mail">
+                        <div class="fs-preview-head">
+                            <span class="fs-preview-av">@Initials</span>
+                            <div><b>@_studio</b><small>do: klient · Odpowiedz → @(string.IsNullOrWhiteSpace(_replyTo) ? "brak" : _replyTo)</small></div>
+                        </div>
+                        <div class="fs-preview-subj">Przypomnienie: jutro trening o 18:00</div>
+                        <div class="fs-preview-foot">Wiadomość od <b>@_studio</b>, wysłana przez Hantly. Odpowiedz na tę wiadomość — trafi prosto do Ciebie.</div>
+                    </div>
+                </div>
+            }
+            else if (_choice == "own")
+            {
+                <div class="fs-detail fs-detail-own">
+                    <p><i class="bi bi-info-circle me-1"></i>Skrzynkę podłączysz w kilka minut: wybierasz dostawcę, wpisujesz adres i hasło aplikacji, a my wysyłamy próbny e-mail. Do czasu podłączenia maile wysyła Hantly w imieniu studia — klienci niczego nie tracą.</p>
+                </div>
+            }
+
+            @if (_error is not null) { <div class="alert alert-danger py-2 mt-3">@_error</div> }
+
+            <div class="fs-nav">
+                <button type="button" class="btn btn-link text-muted" @onclick="NextStep">Pomiń ten krok</button>
+                @if (_choice == "own" && _isAdmin)
+                {
+                    <a class="btn btn-primary btn-lg" href="/admin/email"><i class="bi bi-envelope-at me-1"></i>Podłącz skrzynkę</a>
+                }
+                else if (_choice == "own")
+                {
+                    @* Pocztę ustawia konto administratora studia — wracamy na nie i od razu otwieramy E-maile. *@
+                    <form action="Account/SwitchBack" method="post" class="m-0">
+                        <AntiforgeryToken />
+                        <input type="hidden" name="returnUrl" value="/admin/email" />
+                        <button type="submit" class="btn btn-primary btn-lg"><i class="bi bi-envelope-at me-1"></i>Podłącz skrzynkę</button>
+                    </form>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-primary btn-lg" disabled="@(_saving || _choice is null)" @onclick="SaveMailAsync">
+                        @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        Zapisz i dalej<i class="bi bi-arrow-right ms-1"></i>
+                    </button>
+                }
+            </div>
+        </section>
+    }
+    else if (_step <= TotalSteps)
+    {
+        <section class="fs-card" aria-labelledby="fs-next-title">
+            @if (_mailSaved)
+            {
+                <div class="alert alert-success py-2"><i class="bi bi-check2-circle me-1"></i>Zapisane — maile wysyła Hantly jako <b>@_studio</b>, odpowiedzi trafią na <b>@_replyTo</b>.</div>
+            }
+            <h1 id="fs-next-title">Jeszcze kilka rzeczy na dobry start</h1>
+            <p class="fs-lead">Każdą zrobisz teraz albo później — lista czeka też w Zarządzanie → Pierwsze kroki.</p>
+            @if (_todo.Count == 0)
+            {
+                <div class="fs-alldone"><i class="bi bi-trophy"></i>Wszystko gotowe! Aplikacja jest przygotowana dla klientów.</div>
+            }
+            else
+            {
+                <ul class="fs-todo">
+                    @foreach (var s in _todo)
+                    {
+                        <li>
+                            <span class="fs-todo-ic"><i class="bi @s.Icon"></i></span>
+                            <span class="fs-todo-txt"><b>@s.Title</b><small>@s.Hint</small></span>
+                            <a class="btn btn-sm btn-outline-primary" href="@s.Href">Ustaw</a>
+                        </li>
+                    }
+                </ul>
+            }
+            @if (_done.Count > 0)
+            {
+                <div class="fs-done-list"><span>Już zrobione:</span>@foreach (var s in _done) { <span><i class="bi bi-check-circle-fill"></i>@s.Title</span> }</div>
+            }
+            <div class="fs-nav">
+                @if (_canMail) { <button type="button" class="btn btn-link text-muted" @onclick="() => _step = 1"><i class="bi bi-arrow-left me-1"></i>Wróć</button> } else { <span></span> }
+                <a class="btn btn-primary btn-lg" href="/app?witaj=1">Przejdź do aplikacji<i class="bi bi-arrow-right ms-1"></i></a>
+            </div>
+        </section>
+    }
+</div>
+
+@code {
+    private bool _loading = true;
+    private int _step = 1;
+    private int TotalSteps => _canMail ? 2 : 1;
+
+    private bool _canMail;
+    private bool _isAdmin;
+    private bool _platform;
+    private string? _choice;
+    private string _replyTo = "";
+    private string? _replyProblem;
+    private string _studio = "Twoje studio";
+    private bool _saving;
+    private bool _mailSaved;
+    private string? _error;
+
+    private List<SetupStep> _todo = [];
+    private List<SetupStep> _done = [];
+
+    private string Initials => string.Concat(_studio.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(w => char.ToUpperInvariant(w[0])));
+
+    protected override async Task OnInitializedAsync()
+    {
+        var principal = (await AuthState.GetAuthenticationStateAsync()).User;
+        var me = await UserManager.GetUserAsync(principal);
+        // Pocztę studia ustawia właściciel: administrator albo jego profil trenera (wejście z kreatora).
+        _isAdmin = principal.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+        _canMail = _isAdmin
+                   || principal.HasClaim(c => c.Type == PTScheduler.Web.Services.AccountSwitchService.OriginalUserClaim);
+
+        if (_canMail)
+        {
+            var mail = await MailSettings.GetAsync();
+            _platform = await PlatformMail.GetStatusAsync() is not null;
+            var own = mail.IsEnabled && !string.IsNullOrWhiteSpace(mail.SmtpHost);
+            _choice = own ? "own" : _platform ? "hantly" : "own";
+            _replyTo = mail.ReplyTo ?? me?.Email ?? "";
+            // Ta sama nazwa, którą zobaczy klient jako nadawcę (własna nazwa nadawcy albo nazwa studia).
+            if (!string.IsNullOrWhiteSpace(mail.FromName) && mail.FromName != "PTScheduler") _studio = mail.FromName;
+            else try { _studio = (await Branding.GetAsync()).CompanyName ?? _studio; } catch { }
+        }
+        else _step = 2;
+
+        if (me is not null)
+        {
+            var access = await AdminAccess.LoadAsync(AuthState, Permission);
+            var setup = await Guide.GetAsync(me.Id, access);
+            _todo = setup.Steps.Where(s => !s.Done).ToList();
+            _done = setup.Steps.Where(s => s.Done).ToList();
+        }
+        _loading = false;
+    }
+
+    private void CheckReply() => _replyProblem = string.IsNullOrWhiteSpace(_replyTo) ? null : EmailRules.Problem(_replyTo);
+
+    private void NextStep() { _error = null; _step++; }
+
+    private async Task SaveMailAsync()
+    {
+        _error = null;
+        CheckReply();
+        if (_replyProblem is not null) return;
+        _saving = true;
+        try
+        {
+            var mail = await MailSettings.GetAsync();
+            mail.ReplyTo = string.IsNullOrWhiteSpace(_replyTo) ? null : EmailRules.Normalize(_replyTo);
+            // Hantly wysyła: własna skrzynka wyłączona, nadawcą zostaje nazwa studia.
+            mail.IsEnabled = false;
+            if (string.IsNullOrWhiteSpace(mail.FromName) || mail.FromName == "PTScheduler") mail.FromName = _studio;
+            mail.Password = ""; // puste = bez zmiany zapisanego hasła
+            await MailSettings.SaveAsync(mail);
+            _replyTo = mail.ReplyTo ?? "";
+            _mailSaved = true;
+            _step = 2;
+        }
+        catch (Exception)
+        {
+            _error = "Nie udało się zapisać. Spróbuj jeszcze raz albo pomiń — ustawisz to później w Zarządzanie → E-maile.";
+        }
+        finally { _saving = false; }
+    }
+}

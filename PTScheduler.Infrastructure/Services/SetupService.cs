@@ -132,6 +132,15 @@ public class SetupService(
         return new SetupPrefillDto(state.CompanyName, state.Email, state.FirstName, state.LastName, state.Phone, state.SetupMode);
     }
 
+    /// <summary>Maile wysyłane przez platformę: odpowiedzi klientów trafiają do właściciela, dopóki nie ustawi inaczej.</summary>
+    private static async Task DefaultReplyToAsync(ApplicationDbContext db, string email)
+    {
+        if (!email.Contains('@')) return;
+        var mail = await db.EmailSettings.FirstOrDefaultAsync();
+        if (mail is null) { mail = new EmailSettings { Id = 1 }; db.EmailSettings.Add(mail); }
+        if (string.IsNullOrWhiteSpace(mail.ReplyTo)) mail.ReplyTo = email;
+    }
+
     public async Task<SetupBootstrapResult> BootstrapAsync(SetupBootstrapDto dto)
     {
         var email = dto.OwnerEmail?.Trim() ?? "";
@@ -178,6 +187,7 @@ public class SetupService(
                 await ApplyOfferAsync(db, dto, "");
                 state.OfferApplied = true;
             }
+            await DefaultReplyToAsync(db, email);
             branding.OnboardingJson = JsonSerializer.Serialize(state);
             await db.SaveChangesAsync();
             await ApplySiteAsync(dto.SiteTemplate, company);
@@ -222,6 +232,7 @@ public class SetupService(
         var trainer = await EnsureTrainerProfileAsync(owner);
         state.TrainerUserId = trainer?.Id;
 
+        await DefaultReplyToAsync(db, email);
         branding.SetupCompleted = true;
         branding.SetupMode = dto.SetupMode ?? "self";
         branding.SetupCompletedAt = DateTime.UtcNow;

@@ -66,7 +66,7 @@ public class SmtpEmailService(
 
         if (s.Provider == "Platform")
         {
-            await platformEmail.SendAsync(toAddress, toName, subject, htmlBody, s.FromName, s.ReplyTo);
+            await platformEmail.SendAsync(toAddress, toName, subject, Domain.Rules.PlatformMailNote.Append(htmlBody, s.FromName, s.ReplyTo), s.FromName, s.ReplyTo);
             return;
         }
 
@@ -88,7 +88,7 @@ public class SmtpEmailService(
             // Własna skrzynka nie działa — mail wychodzi awaryjnie przez serwer platformy (klient nie traci przypomnienia).
             if (await platformEmail.GetStatusAsync() is null) throw;
             logger.LogWarning(ex, "Własna skrzynka nie wysłała maila do {To} — wysyłam przez serwer platformy.", toAddress);
-            await platformEmail.SendAsync(toAddress, toName, subject, htmlBody, s.FromName, s.FromAddress);
+            await platformEmail.SendAsync(toAddress, toName, subject, Domain.Rules.PlatformMailNote.Append(htmlBody, s.FromName, s.FromAddress), s.FromName, s.FromAddress);
         }
     }
 

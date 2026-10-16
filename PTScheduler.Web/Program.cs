@@ -784,7 +784,8 @@ app.MapGet("/account/welcome",
             [new Claim(PTScheduler.Web.Services.AccountSwitchService.OriginalUserClaim, owner.Id)]);
     else
         await signIn.SignInAsync(owner, isPersistent: true);
-    return Results.Redirect("/app?witaj=1");
+    // Najpierw krótkie „Pierwsze ustawienia” (poczta do klientów, co jeszcze na start) — każdy krok można pominąć.
+    return Results.Redirect("/witaj");
 });
 
 // Internal endpoint for the portal to push a new entitlements JSON without
