@@ -113,6 +113,21 @@ public class MessageDraftService(
                 .SumAsync(p => (int?)(p.TotalSessions - p.UsedSessions)) ?? 0;
             facts["pozostale_wejscia"] = Math.Max(0, left).ToString();
         }
+        if (purpose is DraftPurpose.Payment)
+        {
+            var debt = (await PTScheduler.Infrastructure.Services.DebtService.LoadAsync(db, now, null, clientId)).FirstOrDefault();
+            if (debt is not null)
+            {
+                var sessions = debt.Items.Where(i => i.Kind == "session").ToList();
+                var parts = new List<string>();
+                if (sessions.Count == 1) parts.Add($"za trening {sessions[0].At:d.MM}");
+                else if (sessions.Count > 1) parts.Add($"za {sessions.Count} treningi ({string.Join(", ", sessions.Take(4).Select(s => s.At.ToString("d.MM")))})");
+                parts.AddRange(debt.Items.Where(i => i.Kind == "package").Select(i => "za " + i.Label.Replace("Pakiet", "pakiet")));
+                var forWhat = string.Join(" i ", parts);
+                facts["za_co"] = forWhat.Length > 150 ? forWhat[..147] + "…" : forWhat;
+                if (debt.Total > 0 && !debt.HasUnknownAmount) facts["kwota"] = debt.Total.ToString("0.##");
+            }
+        }
         if (purpose is DraftPurpose.Congrats)
             facts["liczba_treningow"] = (await db.Sessions.CountAsync(s => s.ClientId == clientId && s.Status == SessionStatus.Completed)).ToString();
         return facts;

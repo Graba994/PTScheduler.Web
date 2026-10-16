@@ -15,6 +15,8 @@ public enum DraftPurpose
     Congrats,
     /// <summary>Przypomnienie o treningach z planu w aplikacji.</summary>
     PlanReminder,
+    /// <summary>Uprzejme przypomnienie o zaległej płatności.</summary>
+    Payment,
 }
 
 /// <summary>

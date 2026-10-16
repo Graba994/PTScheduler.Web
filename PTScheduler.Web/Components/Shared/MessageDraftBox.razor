@@ -8,12 +8,15 @@
 @* Szkic wiadomości do klienta w stylu trenera: wybór celu → szkic (AI albo szablon) → poprawka → czat / WhatsApp / SMS / kopiuj.
    Poprawione i wysłane szkice uczą asystenta stylu trenera. *@
 <div class="md-box">
-    <div class="md-purposes" role="group" aria-label="Cel wiadomości">
-        @foreach (var p in Purposes)
-        {
-            <button type="button" class="md-chip @(p == _purpose ? "on" : "")" @onclick="() => PickAsync(p)" disabled="@_busy">@MessageTemplates.Label(p)</button>
-        }
-    </div>
+    @if (!Fixed)
+    {
+        <div class="md-purposes" role="group" aria-label="Cel wiadomości">
+            @foreach (var p in Purposes)
+            {
+                <button type="button" class="md-chip @(p == _purpose ? "on" : "")" @onclick="() => PickAsync(p)" disabled="@_busy">@MessageTemplates.Label(p)</button>
+            }
+        </div>
+    }
     @if (_draft is null)
     {
         <button type="button" class="btn btn-sm btn-primary mt-2" @onclick="GenerateAsync" disabled="@_busy">
@@ -52,8 +55,13 @@
     [Parameter, EditorRequired] public int ClientId { get; set; }
     [Parameter] public string? Phone { get; set; }
     [Parameter] public DraftPurpose Purpose { get; set; } = DraftPurpose.Comeback;
+    /// <summary>Jeden cel bez wyboru (np. przypomnienie o płatności na liście zaległości).</summary>
+    [Parameter] public bool Fixed { get; set; }
+    /// <summary>Od razu przygotuj szkic po otwarciu.</summary>
+    [Parameter] public bool AutoDraft { get; set; }
 
-    private static readonly DraftPurpose[] Purposes = Enum.GetValues<DraftPurpose>();
+    // Przypomnienie o płatności ma swoje miejsce (Zaległości) — w ogólnym wyborze go nie pokazujemy.
+    private static readonly DraftPurpose[] Purposes = Enum.GetValues<DraftPurpose>().Where(p => p != DraftPurpose.Payment).ToArray();
     private DraftPurpose _purpose;
     private PTScheduler.Web.Services.MessageDraftService.Draft? _draft;
     private string _text = "";
@@ -70,6 +78,7 @@
         var user = (await AuthState.GetAuthenticationStateAsync()).User;
         _userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
         _isAdmin = user.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+        if (AutoDraft) await GenerateAsync();
     }
 
     private async Task PickAsync(DraftPurpose p)

@@ -21,6 +21,7 @@ public static partial class MessageTemplates
         DraftPurpose.Wellbeing => "Samopoczucie i ból",
         DraftPurpose.Congrats => "Gratulacje postępów",
         DraftPurpose.PlanReminder => "Plan w aplikacji",
+        DraftPurpose.Payment => "Przypomnienie o płatności",
         _ => purpose.ToString(),
     };
 
@@ -32,6 +33,9 @@ public static partial class MessageTemplates
         var hello = formal ? $"{greeting}!" : $"{greeting} {ClientTag}!";
         facts.TryGetValue("pozostale_wejscia", out var left);
         facts.TryGetValue("liczba_treningow", out var count);
+        facts.TryGetValue("za_co", out var forWhat);
+        facts.TryGetValue("kwota", out var amount);
+        var due = (string.IsNullOrEmpty(forWhat) ? "" : $" {forWhat}") + (string.IsNullOrEmpty(amount) ? "" : $" ({amount} zł)");
 
         var body = (purpose, formal) switch
         {
@@ -51,6 +55,8 @@ public static partial class MessageTemplates
                 + " Widać postęp, tak trzymamy 💪",
             (DraftPurpose.PlanReminder, false) => "Plan czeka w aplikacji — nawet krótki trening się liczy. Daj znać, jeśli coś trzeba w nim zmienić.",
             (DraftPurpose.PlanReminder, true) => "Plan czeka w aplikacji — nawet krótki trening się liczy. Proszę dać znać, jeśli coś trzeba w nim zmienić.",
+            (DraftPurpose.Payment, false) => $"Przypominam o płatności{due}. Możesz zapłacić gotówką na treningu albo przelewem — jak Ci wygodniej. Dzięki! 🙂",
+            (DraftPurpose.Payment, true) => $"Uprzejmie przypominam o płatności{due}. Można zapłacić gotówką na treningu lub przelewem. Dziękuję! 🙂",
             _ => "Jak się masz? Daj znać, kiedy się widzimy.",
         };
 

@@ -177,6 +177,7 @@ builder.Services.AddScoped<PTScheduler.Web.Services.AssistantTipsService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.MorningBriefService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.PreSessionBriefService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.WorkoutNoteDraftService>();
+builder.Services.AddScoped<PTScheduler.Infrastructure.Services.DebtService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.RetentionService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.MessageDraftService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.WorkoutCompanionService>();
