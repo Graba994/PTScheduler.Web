@@ -1,0 +1,34 @@
+@inject PTScheduler.Web.Services.AssistantTipsService Tips
+@inject AuthenticationStateProvider AuthState
+
+@* Które ciche propozycje asystent może pokazywać (Powiadomienia i „Asystent i AI”). *@
+<ul class="acct-ideas-list">
+    @foreach (var (kind, label) in PTScheduler.Web.Services.TrainerProposalsService.Kinds)
+    {
+        var k = kind;
+        <li>
+            <span>@label</span>
+            <div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" role="switch" aria-label="@label" checked="@(!_muted.Contains(k))" @onchange="e => ToggleAsync(k, e)" /></div>
+        </li>
+    }
+</ul>
+
+@code {
+    private HashSet<string> _muted = [];
+    private string _userId = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        _userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        try { _muted = await Tips.GetMutedAsync(_userId); } catch { _muted = []; }
+    }
+
+    private async Task ToggleAsync(string kind, ChangeEventArgs e)
+    {
+        var on = e.Value is true || (e.Value is string v && v == "true");
+        await Tips.SetMutedAsync(_userId, kind, !on);
+        if (on) _muted.Remove(kind); else _muted.Add(kind);
+        PTScheduler.Web.Services.TrainerProposalsService.Invalidate(_userId);
+    }
+}

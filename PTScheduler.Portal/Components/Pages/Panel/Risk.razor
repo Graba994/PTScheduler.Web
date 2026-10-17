@@ -1,0 +1,103 @@
+@page "/panel/ryzyko"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject LeoService Leo
+@inject AssistantService Assistant
+@rendermode InteractiveServer
+
+@* Trenerzy zagrożeni odejściem: punkty z prostych sygnałów (LeoService.ScoreRisk), powody, co zrobić i szkic wiadomości. *@
+
+<PageTitle>Zagrożeni odejściem — Hantly Portal</PageTitle>
+
+<PanelHeader Title="Zagrożeni odejściem" Icon="bi-heart-pulse" IconClass="pp-tone-danger"
+             Subtitle="Trenerzy, u których widać sygnały odejścia: rezygnacja, zaległości, brak aktywności, brak aktywacji, spadek treningów, niska ocena. Odezwij się, zanim zrezygnują.">
+    <Actions>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="LoadAsync"><i class="bi bi-arrow-clockwise me-1"></i>Odśwież</button>
+    </Actions>
+</PanelHeader>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_risks.Count == 0)
+{
+    <PanelCard>
+        <div class="pp-empty">
+            <img src="@PuppyArt.DataUri("happy")" alt="" width="96" height="96" />
+            <div class="pp-empty-title">Nikt nie wygląda na zagrożonego</div>
+            <p>Leo sprawdza codziennie: rezygnacje, zaległe rachunki, brak aktywności, aktywację, spadek liczby treningów i oceny aplikacji.</p>
+        </div>
+    </PanelCard>
+}
+else
+{
+    <div class="pp-stats">
+        <StatTile Label="Wysokie ryzyko" Value="@_risks.Count(r => r.High).ToString()" Meta="@($"{LeoService.RiskHigh}+ punktów")" Icon="bi-exclamation-octagon" Tone="danger" />
+        <StatTile Label="Średnie ryzyko" Value="@_risks.Count(r => !r.High).ToString()" Meta="@($"{LeoService.RiskMedium}–{LeoService.RiskHigh - 1} punktów")" Icon="bi-exclamation-triangle" Tone="warn" />
+    </div>
+
+    <div class="d-flex flex-column gap-3">
+        @foreach (var r in _risks)
+        {
+            <section class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex flex-wrap align-items-start gap-2 justify-content-between">
+                        <div>
+                            <a class="fw-semibold fs-6" href="/panel/tenants/@r.TenantId">@r.Name</a>
+                            <span class="pp-chip @(r.High ? "pp-tone-danger" : "pp-tone-warn") ms-1">@r.Score pkt · @r.Level</span>
+                            <div class="small text-muted">@r.Slug · plan @r.PlanId@(string.IsNullOrWhiteSpace(r.OwnerName) ? "" : $" · {r.OwnerName}")</div>
+                        </div>
+                        <div class="d-flex gap-2 flex-wrap">
+                            @if (!string.IsNullOrWhiteSpace(r.Phone))
+                            {
+                                <a class="btn btn-sm btn-outline-secondary" href="tel:@r.Phone"><i class="bi bi-telephone me-1"></i>@r.Phone</a>
+                            }
+                            <a class="btn btn-sm btn-outline-secondary" href="mailto:@r.OwnerEmail"><i class="bi bi-envelope me-1"></i>E-mail</a>
+                        </div>
+                    </div>
+                    <ul class="small mt-2 mb-2 ps-3">
+                        @foreach (var reason in r.Reasons) { <li>@reason</li> }
+                    </ul>
+                    <div class="pp-callout mb-2"><i class="bi bi-lightbulb"></i><div>@r.Suggestion</div></div>
+                    <LeoDraft To="@r.OwnerEmail" Label="Szkic wiadomości" Generate="() => DraftAsync(r)" />
+                </div>
+            </section>
+        }
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private List<LeoService.Risk> _risks = [];
+
+    protected override Task OnInitializedAsync() => LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        _risks = await Leo.GetRisksAsync();
+        _loading = false;
+    }
+
+    private Task<AssistantService.Draft> DraftAsync(LeoService.Risk r)
+    {
+        var facts = new Dictionary<string, string>
+        {
+            ["powody"] = string.Join("; ", r.Reasons),
+            ["sugestia"] = r.Suggestion,
+            ["plan"] = r.PlanId,
+        };
+        var body = $"""
+            Dzień dobry,
+
+            chcemy upewnić się, że aplikacja dobrze Ci służy. Czy wszystko działa tak, jak potrzebujesz? Jeśli czegoś brakuje albo coś przeszkadza, daj znać — chętnie pomożemy, także w krótkiej rozmowie telefonicznej.
+
+            Pozdrawiamy
+            Zespół {"{MARKA}"}
+            """;
+        return Assistant.DraftReplyAsync("ryzyko",
+            "Trener może niedługo zrezygnować z platformy. Napisz życzliwą, nienachalną wiadomość: zapytaj, jak idzie, zaproponuj pomoc związaną z powodami. Nie wymieniaj wprost „ryzyka odejścia” ani punktów.",
+            facts, "Jak idzie praca z aplikacją?", body);
+    }
+}

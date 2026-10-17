@@ -1,0 +1,157 @@
+@page "/my/workouts"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Logging
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@attribute [Authorize(Roles = Roles.Client + "," + Roles.Admin + "," + Roles.Trainer + "," + Roles.Subordinate)]
+@inject IWorkoutLogService WorkoutLog
+@inject IClientService ClientService
+@inject ISurveyService Surveys
+@inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
+@inject ILoggerFactory LoggerFactory
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Moje postępy" />
+
+<FeatureGate Flag="TrainingPlansEnabled" Title="Moduł treningowy" ShowUpgrade="false">
+<Description>Moduł treningowy nie jest dostępny w pakiecie Twojego trenera.</Description>
+<ChildContent>
+
+<div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <h4 class="page-title mb-0"><i class="bi bi-graph-up-arrow me-2" style="color:var(--c-primary)"></i>Moje postępy</h4>
+</div>
+
+@if (_clientId is null)
+{
+    <div class="alert alert-warning"><i class="bi bi-info-circle me-2"></i>Twoje konto nie jest jeszcze powiązane z profilem klienta.</div>
+}
+else if (_loading)
+{
+    <div class="text-center text-muted py-5"><div class="spinner-border"></div></div>
+}
+else if (_volume.Count == 0 && _journal.Count == 0)
+{
+    <div class="alert alert-secondary"><i class="bi bi-inbox me-2"></i>Brak zapisanych treningów. Zacznij od zakładki „Trenuj".</div>
+}
+else
+{
+    <div class="row g-3">
+        <div class="col-12 col-lg-7">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h6 class="text-muted mb-2"><i class="bi bi-activity me-1"></i>Objętość w czasie (kg, 90 dni)</h6>
+                    <div style="position:relative;height:240px"><canvas id="volChart"></canvas></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-12 col-lg-5">
+            <div class="card h-100">
+                <div class="card-body">
+                    <h6 class="text-muted mb-2"><i class="bi bi-pie-chart me-1"></i>Objętość na partie (90 dni)</h6>
+                    @if (_muscles.Count == 0)
+                    {
+                        <div class="text-muted small py-4 text-center">Brak danych.</div>
+                    }
+                    else
+                    {
+                        <div style="position:relative;height:240px"><canvas id="muscleChart"></canvas></div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+
+    @if (_records.Count > 0)
+    {
+        <h6 class="text-muted mt-4 mb-2"><i class="bi bi-trophy me-1"></i>Rekordy</h6>
+        <div class="row g-2">
+            @foreach (var r in _records)
+            {
+                <div class="col-6 col-md-4 col-xl-3">
+                    <div class="card h-100">
+                        <div class="card-body py-2">
+                            <div class="fw-semibold small text-truncate" title="@r.ExerciseName">@r.ExerciseName</div>
+                            <div class="mt-1"><span class="fs-5 fw-bold">@r.MaxWeight.ToString("0.##")</span> <span class="text-muted small">kg × @r.RepsAtMax</span></div>
+                            <div class="text-muted" style="font-size:.7rem">najlepsza seria: @r.BestSetVolume.ToString("0") kg obj.</div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    @if (_journal.Count > 0)
+    {
+        <h6 class="text-muted mt-4 mb-2"><i class="bi bi-journal-text me-1"></i>Dziennik</h6>
+        <WorkoutJournal ClientId="_clientId.Value" Days="_journal" AsTrainer="false" CurrentUserId="@_userId"
+                        Surveys="_surveys" RateLinks="_surveysEnabled" />
+    }
+}
+</ChildContent>
+</FeatureGate>
+
+@code {
+    private int? _clientId;
+    private bool _loading = true;
+    private bool _rendered;
+    private List<VolumePointDto> _volume = [];
+    private List<MuscleVolumeDto> _muscles = [];
+    private List<PersonalRecordDto> _records = [];
+    private List<WorkoutJournalDayDto> _journal = [];
+    private string _userId = string.Empty;
+    private Dictionary<DateOnly, PTScheduler.Application.Surveys.SurveyResponseDto> _surveys = [];
+    private bool _surveysEnabled;
+
+    private static readonly string[] Palette =
+    [
+        "#0284C7", "#F59E0B", "#10B981", "#EF4444", "#8B5CF6", "#EC4899",
+        "#14B8A6", "#F97316", "#6366F1", "#84CC16", "#06B6D4", "#A855F7",
+        "#22C55E", "#EAB308", "#3B82F6", "#F43F5E", "#64748B"
+    ];
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        var client = await ClientService.GetClientByUserIdAsync(_userId);
+        if (client is null) { _loading = false; return; }
+        _clientId = client.Id;
+        try
+        {
+            _volume = await WorkoutLog.GetVolumeOverTimeAsync(_clientId.Value);
+            _muscles = await WorkoutLog.GetVolumeByMuscleAsync(_clientId.Value);
+            _records = await WorkoutLog.GetPersonalRecordsAsync(_clientId.Value);
+            _journal = await WorkoutLog.GetJournalAsync(_clientId.Value);
+            _surveysEnabled = (await Surveys.GetTemplateAsync(PTScheduler.Domain.Enums.SurveyKind.PostWorkout)).IsEnabled;
+            _surveys = await Surveys.GetPostWorkoutByDateAsync(_clientId.Value, 120);
+        }
+        catch (Exception ex) { LoggerFactory.CreateLogger("MyWorkouts").LogError(ex, "Błąd ładowania postępów."); }
+        _loading = false;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_clientId is null || _loading || _rendered) return;
+        if (_volume.Count == 0 && _muscles.Count == 0) return;
+        _rendered = true;
+        try
+        {
+            if (_volume.Count > 0)
+            {
+                var labels = _volume.Select(p => p.Date.ToString("dd.MM")).ToArray();
+                var data = _volume.Select(p => Math.Round(p.Volume)).ToArray();
+                await JS.InvokeVoidAsync("PTChart.renderLine", "volChart", labels, data, "Objętość", "kg");
+            }
+            if (_muscles.Count > 0)
+            {
+                var labels = _muscles.Select(m => m.Label).ToArray();
+                var data = _muscles.Select(m => Math.Round(m.Volume)).ToArray();
+                var colors = _muscles.Select((_, i) => Palette[i % Palette.Length]).ToArray();
+                await JS.InvokeVoidAsync("PTChart.renderDoughnut", "muscleChart", labels, data, colors);
+            }
+        }
+        catch (Exception ex) { LoggerFactory.CreateLogger("MyWorkouts").LogError(ex, "Błąd renderowania wykresów."); }
+    }
+}

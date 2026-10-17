@@ -1,0 +1,108 @@
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject IHttpContextAccessor HttpContextAccessor
+@inject PTScheduler.Web.Services.PlatformLegalService PlatformLegal
+@inject PTScheduler.Web.Services.AccountSwitchService Switcher
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Dokumenty platformy (regulamin, umowa powierzenia danych, polityka prywatności) do akceptacji przez właściciela
+   studia — przy pierwszym logowaniu, gdy aplikację założył administrator Portalu, i po każdej zmianie dokumentów. *@
+@if (_status is { Pending.Count: > 0 } status)
+{
+    <div class="health-gate-backdrop">
+        <div class="card doc-gate-card shadow-lg" role="dialog" aria-modal="true" aria-labelledby="legalGateTitle">
+            <div class="card-body p-4 d-flex flex-column gap-3">
+                <div class="d-flex align-items-center gap-3">
+                    <div class="doc-gate-icon"><i class="bi bi-file-earmark-text"></i></div>
+                    <div class="flex-grow-1">
+                        <div class="text-muted small">@status.PlatformName · do akceptacji</div>
+                        <h5 class="fw-bold mb-0" id="legalGateTitle">@(_declined ? "Bez akceptacji nie możesz dalej korzystać z aplikacji" : "Zasady korzystania z aplikacji")</h5>
+                    </div>
+                </div>
+                @if (_declined)
+                {
+                    <p class="mb-0">Te dokumenty są umową między Tobą a @status.PlatformName. Jeśli ich nie akceptujesz, możesz zrezygnować z subskrypcji — dane klientów wyeksportujesz w ciągu 30 dni od końca umowy.</p>
+                    <div class="d-flex flex-column flex-sm-row gap-2 justify-content-end">
+                        <a class="btn btn-outline-secondary" href="/admin/subscription">Zarządzaj subskrypcją</a>
+                        <button class="btn btn-primary" @onclick="() => _declined = false">Wróć do dokumentów</button>
+                    </div>
+                }
+                else
+                {
+                    <p class="mb-0 text-muted">Przeczytaj dokumenty i potwierdź je, żeby dalej korzystać z aplikacji. Każdy otworzysz, wydrukujesz albo zapiszesz jako PDF.</p>
+                    <ul class="list-group">
+                        @foreach (var d in status.Pending)
+                        {
+                            <li class="list-group-item d-flex align-items-center justify-content-between gap-2">
+                                <span><i class="bi bi-file-earmark-text me-2 text-primary"></i>@d.Title <small class="text-muted">· wersja @d.Version</small></span>
+                                <a class="btn btn-sm btn-outline-primary" href="@d.Url" target="_blank" rel="noopener">Czytaj <i class="bi bi-box-arrow-up-right ms-1"></i></a>
+                            </li>
+                        }
+                    </ul>
+                    <label class="form-check d-flex gap-2 align-items-start">
+                        <input class="form-check-input mt-1" type="checkbox" @bind="_checked" />
+                        <span class="form-check-label small">Akceptuję Regulamin wraz z Umową powierzenia przetwarzania danych osobowych (załącznik nr 1) i potwierdzam zapoznanie się z Polityką prywatności.</span>
+                    </label>
+                    @if (_error is not null)
+                    {
+                        <div class="alert alert-danger py-2 small mb-0">@_error</div>
+                    }
+                    <div class="d-flex flex-column flex-sm-row gap-2 justify-content-end">
+                        <button class="btn btn-outline-secondary" disabled="@_busy" @onclick="() => _declined = true">Nie akceptuję</button>
+                        <button class="btn btn-primary" disabled="@(!_checked || _busy)" @onclick="AcceptAsync">
+                            <i class="bi bi-check-lg me-1"></i>@(_busy ? "Zapisuję…" : "Akceptuję")
+                        </button>
+                    </div>
+                }
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [PersistentState] public string? ClientIp { get; set; }
+    [PersistentState] public string? ClientAgent { get; set; }
+
+    private PTScheduler.Web.Services.PlatformLegalService.Status? _status;
+    private string? _email;
+    private bool _checked;
+    private bool _declined;
+    private bool _busy;
+    private string? _error;
+
+    protected override void OnInitialized()
+    {
+        // Prerendering ma żądanie HTTP — zapamiętujemy IP i przeglądarkę jako dowód akceptacji.
+        var ctx = HttpContextAccessor.HttpContext;
+        ClientIp ??= ctx?.Request.Headers["X-Forwarded-For"].ToString().Split(',')[0].Trim() is { Length: > 0 } fwd ? fwd : ctx?.Connection.RemoteIpAddress?.ToString();
+        ClientAgent ??= ctx?.Request.Headers.UserAgent.ToString();
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var path = "/" + Nav.ToBaseRelativePath(Nav.Uri);
+            if (path.StartsWith("/admin/subscription", StringComparison.OrdinalIgnoreCase) || path.StartsWith("/admin/upgrade", StringComparison.OrdinalIgnoreCase)) return;
+            var user = (await AuthState.GetAuthenticationStateAsync()).User;
+            if (await Switcher.GetOwnerActorAsync(user) is not { } owner) return;
+            _email = owner.Email;
+            _status = await PlatformLegal.PendingAsync();
+            if (_status is { Pending.Count: > 0 }) StateHasChanged();
+        }
+        catch { } // Nie blokujemy aplikacji, gdy Portal nie odpowiada.
+    }
+
+    private async Task AcceptAsync()
+    {
+        if (_status is null || string.IsNullOrEmpty(_email)) return;
+        _busy = true;
+        _error = null;
+        if (await PlatformLegal.AcceptAsync(_email, _status.Pending.Select(d => d.Key), ClientIp, ClientAgent))
+            _status = null;
+        else
+            _error = "Nie udało się zapisać akceptacji. Spróbuj ponownie za chwilę.";
+        _busy = false;
+    }
+}

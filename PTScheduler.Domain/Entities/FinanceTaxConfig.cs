@@ -27,4 +27,24 @@ public class FinanceTaxConfig
     public bool InvoiceNumberingEnabled { get; set; }
     public string InvoicePrefix { get; set; } = "FV";
     public int InvoiceNextNumber { get; set; } = 1;
+
+    public string? SellerNip { get; set; }
+    public string? SellerAddress { get; set; }
+    public string? SellerCity { get; set; }
+    public string? SellerPostalCode { get; set; }
+
+    /// <summary>Pełna nazwa sprzedawcy (firma) — wymagana na fakturze i w KSeF.</summary>
+    public string? SellerName { get; set; }
+
+    /// <summary>Podstawa zwolnienia z VAT, gdy VAT wyłączony (np. „art. 113 ust. 1 ustawy o VAT”).</summary>
+    public string? VatExemptBasis { get; set; }
+
+    // ── KSeF ─────────────────────────────────────────────────────────────
+    public bool KsefEnabled { get; set; }
+    /// <summary>„test” | „demo” | „production”.</summary>
+    public string KsefEnvironment { get; set; } = "test";
+    /// <summary>Opcjonalny adres API nadpisujący domyślny dla środowiska.</summary>
+    public string? KsefApiUrl { get; set; }
+    /// <summary>Token KSeF zaszyfrowany Data Protection (nigdy w postaci jawnej).</summary>
+    public string? KsefTokenProtected { get; set; }
 }

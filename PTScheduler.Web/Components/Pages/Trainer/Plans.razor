@@ -1,0 +1,235 @@
+@page "/plans"
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Logging
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@attribute [Authorize(Roles = Roles.Admin + "," + Roles.Trainer + "," + Roles.Subordinate)]
+@inject ITrainingPlanService PlanService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@inject ILoggerFactory LoggerFactory
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Plany treningowe" />
+
+<FeatureGate Flag="TrainingPlansEnabled" RequiredPlan="Pro" Title="Moduł treningowy">
+
+<div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <h4 class="page-title mb-0"><i class="bi bi-list-check me-2" style="color:var(--c-primary)"></i>Plany treningowe</h4>
+    <div class="d-flex gap-2">
+        <a href="/plans/new" class="btn btn-sm btn-primary"><i class="bi bi-plus-lg me-1"></i>Nowy plan</a>
+        <a href="/plans/new?template=1" class="btn btn-sm btn-outline-primary"><i class="bi bi-bookmark-plus me-1"></i>Nowy szablon</a>
+    </div>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center text-muted py-5"><div class="spinner-border"></div></div>
+}
+else if (_plans.Count == 0)
+{
+    <div class="alert alert-secondary"><i class="bi bi-inbox me-2"></i>Brak planów. Zacznij od „Nowy plan" lub „Nowy szablon".</div>
+}
+else
+{
+    var q = _query.Trim();
+    bool Match(TrainingPlanListItemDto p) => q.Length == 0
+        || p.Name.Contains(q, StringComparison.CurrentCultureIgnoreCase)
+        || (p.ClientName?.Contains(q, StringComparison.CurrentCultureIgnoreCase) ?? false);
+    var templates = _plans.Where(p => p.IsTemplate && Match(p)).ToList();
+    var archivedCount = _plans.Count(p => !p.IsTemplate && p.IsArchived);
+    var groups = _plans.Where(p => !p.IsTemplate && (_showArchived || !p.IsArchived) && Match(p))
+        .GroupBy(p => p.ClientId)
+        .OrderBy(g => g.Key is null).ThenBy(g => g.First().ClientName)
+        .ToList();
+
+    <div class="pl-toolbar">
+        <div class="pl-search">
+            <i class="bi bi-search"></i>
+            <input type="search" class="form-control" placeholder="Szukaj planu lub klienta…" aria-label="Szukaj planu lub klienta" @bind="_query" @bind:event="oninput" />
+        </div>
+        @if (archivedCount > 0)
+        {
+            <button type="button" class="pl-chip @(_showArchived ? "on" : "")" aria-pressed="@(_showArchived ? "true" : "false")" @onclick="() => _showArchived = !_showArchived">
+                <i class="bi bi-archive"></i>Zakończone <span>@archivedCount</span>
+            </button>
+        }
+    </div>
+
+    @if (templates.Count > 0)
+    {
+        <h6 class="text-muted mb-2"><i class="bi bi-bookmark-star me-2"></i>Szablony <span class="badge bg-light text-dark border">@templates.Count</span></h6>
+        <div class="row g-2 mb-4">
+            @foreach (var p in templates) { @PlanCard(p) }
+        </div>
+    }
+    @if (groups.Count > 0)
+    {
+        <h6 class="text-muted mb-2"><i class="bi bi-person-check me-2"></i>Plany klientów <span class="badge bg-light text-dark border">@groups.Count @PTScheduler.Web.Services.AssistantTipsService.Plural(groups.Count, "klient", "klientów", "klientów")</span></h6>
+        <div class="pl-groups">
+            @foreach (var g in groups)
+            {
+                var items = g.OrderBy(p => p.IsArchived).ThenBy(p => p.SortOrder).ThenByDescending(p => p.CreatedAt).ToList();
+                var name = g.Key is null ? "Nieprzypisane" : g.First().ClientName ?? "Klient";
+                var open = q.Length > 0 || items.Count <= GroupPreview || _expanded.Contains(g.Key ?? 0);
+                <section class="pl-group">
+                    <header class="pl-group-head">
+                        <span class="pl-avatar @(g.Key is null ? "none" : "")">@(g.Key is null ? "?" : Initials(name))</span>
+                        <div class="min-w-0 flex-grow-1">
+                            @if (g.Key is { } cid)
+                            {
+                                <a class="pl-group-name" href="@($"/clients/{cid}")">@name</a>
+                            }
+                            else
+                            {
+                                <span class="pl-group-name">@name</span>
+                            }
+                            <small>@items.Count @PTScheduler.Web.Services.AssistantTipsService.Plural(items.Count, "plan", "plany", "planów")@(items.Count > 1 && g.Key is not null ? " · kolejność jak u klienta" : "")</small>
+                        </div>
+                        @if (g.Key is { } cid2)
+                        {
+                            <a class="pl-add" href="@($"/plans/new?klient={cid2}")" title="Nowy plan dla: @name" aria-label="Nowy plan dla: @name"><i class="bi bi-plus-lg"></i></a>
+                        }
+                    </header>
+                    <ul class="pl-rows">
+                        @foreach (var p in open ? items : items.Take(GroupPreview))
+                        {
+                            <li class="pl-row @(p.IsArchived ? "is-archived" : "")">
+                                <a class="pl-row-main" href="@($"/plans/edit/{p.Id}")">
+                                    <b>@p.Name</b>
+                                    <span class="cpl-meta">
+                                        @if (p.IsArchived)
+                                        {
+                                            <span class="cpl-use"><i class="bi bi-archive"></i>zakończony</span>
+                                        }
+                                        else
+                                        {
+                                            <span class="cpl-use @PTScheduler.Web.Services.PlanUseText.Css(p.Use)"><i class="bi @PTScheduler.Web.Services.PlanUseText.Icon(p.Use)"></i>@PTScheduler.Web.Services.PlanUseText.Short(p.Use)</span>
+                                        }
+                                        <span>@p.DayCount @PTScheduler.Web.Services.AssistantTipsService.Plural(p.DayCount, "dzień", "dni", "dni") · @p.ExerciseCount ćw.</span>
+                                    </span>
+                                </a>
+                                <div class="pl-row-actions">
+                                    <a href="@($"/plans/{p.Id}/pdf")" target="_blank" rel="noopener" title="PDF do druku" aria-label="PDF do druku"><i class="bi bi-file-earmark-pdf"></i></a>
+                                    <button type="button" title="Duplikuj" aria-label="Duplikuj" @onclick="() => Duplicate(p)"><i class="bi bi-files"></i></button>
+                                    @if (p.ClientId is not null)
+                                    {
+                                        <button type="button" title="@(p.IsArchived ? "Przywróć" : "Zakończ — schowaj u klienta")" aria-label="@(p.IsArchived ? "Przywróć" : "Zakończ")" disabled="@_busy" @onclick="() => ArchiveAsync(p, !p.IsArchived)"><i class="bi @(p.IsArchived ? "bi-arrow-counterclockwise" : "bi-archive")"></i></button>
+                                    }
+                                    <button type="button" class="danger" title="Usuń" aria-label="Usuń" @onclick="() => Delete(p)"><i class="bi bi-trash"></i></button>
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                    @if (!open)
+                    {
+                        <button type="button" class="pl-more" @onclick="() => _expanded.Add(g.Key ?? 0)">Pokaż wszystkie (@items.Count)<i class="bi bi-chevron-down"></i></button>
+                    }
+                    else if (items.Count > GroupPreview && q.Length == 0)
+                    {
+                        <button type="button" class="pl-more" @onclick="() => _expanded.Remove(g.Key ?? 0)">Zwiń<i class="bi bi-chevron-up"></i></button>
+                    }
+                </section>
+            }
+        </div>
+    }
+    @if (templates.Count == 0 && groups.Count == 0)
+    {
+        <div class="alert alert-secondary"><i class="bi bi-search me-2"></i>Nic nie pasuje do „@q”.</div>
+    }
+}
+</FeatureGate>
+
+@code {
+    private string _userId = string.Empty;
+    private List<TrainingPlanListItemDto> _plans = [];
+    private bool _loading = true;
+    private bool _isAdmin;
+    private bool _busy;
+    private bool _showArchived;
+    private string _query = string.Empty;
+    private readonly HashSet<int> _expanded = [];
+    private const int GroupPreview = 4;
+
+    private static string Initials(string name)
+    {
+        var parts = name.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        return string.Concat(parts.Take(2).Select(x => char.ToUpperInvariant(x[0])));
+    }
+
+    private async Task ArchiveAsync(TrainingPlanListItemDto p, bool archived)
+    {
+        _busy = true;
+        try { await PlanService.SetArchivedAsync(_userId, _isAdmin, p.Id, archived); p.IsArchived = archived; }
+        catch (Exception ex) { await JS.InvokeVoidAsync("alert", ex.Message); }
+        finally { _busy = false; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
+        _isAdmin = auth.User.IsInRole(Roles.Admin);
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _loading = true;
+        try { _plans = await PlanService.GetPlansAsync(_userId, _isAdmin); }
+        catch (Exception ex) { LoggerFactory.CreateLogger("Plans").LogError(ex, "Błąd ładowania planów."); _plans = []; }
+        _loading = false;
+    }
+
+    private RenderFragment PlanCard(TrainingPlanListItemDto p) =>@<div class="col-12 col-md-6 col-xl-4">
+        <div class="card h-100">
+            <div class="card-body d-flex flex-column py-2">
+                <div class="d-flex justify-content-between align-items-start gap-2">
+                    <div class="fw-semibold">@p.Name</div>
+                    @if (p.IsTemplate)
+                    {
+                        <span class="badge bg-info-subtle text-info-emphasis border">szablon</span>
+                    }
+                    else if (!string.IsNullOrWhiteSpace(p.ClientName))
+                    {
+                        <span class="badge bg-primary-subtle text-primary-emphasis border"><i class="bi bi-person me-1"></i>@p.ClientName</span>
+                    }
+                    else
+                    {
+                        <span class="badge bg-light text-dark border">nieprzypisany</span>
+                    }
+                </div>
+                <div class="text-muted small mt-1 mb-2">
+                    <i class="bi bi-calendar3 me-1"></i>@p.DayCount @PTScheduler.Web.Services.AssistantTipsService.Plural(p.DayCount, "dzień", "dni", "dni")
+                    <span class="mx-1">·</span>
+                    <i class="bi pt-ico-dumbbell me-1"></i>@p.ExerciseCount ćwiczeń
+                </div>
+                <div class="mt-auto d-flex gap-1">
+                    <a href="@($"/plans/edit/{p.Id}")" class="btn btn-sm btn-outline-primary flex-grow-1"><i class="bi bi-pencil me-1"></i>Edytuj</a>
+                    <a href="@($"/plans/{p.Id}/pdf")" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary" title="Pobierz PDF do druku"><i class="bi bi-file-earmark-pdf"></i></a>
+                    <button class="btn btn-sm btn-outline-secondary" title="Duplikuj" @onclick="() => Duplicate(p)"><i class="bi bi-files"></i></button>
+                    <button class="btn btn-sm btn-outline-danger" title="Usuń" @onclick="() => Delete(p)"><i class="bi bi-trash"></i></button>
+                </div>
+            </div>
+        </div>
+    </div>;
+
+    private async Task Duplicate(TrainingPlanListItemDto p)
+    {
+        try
+        {
+            var newId = await PlanService.DuplicateAsync(_userId, p.Id, asTemplate: p.IsTemplate, isAdmin: _isAdmin);
+            Nav.NavigateTo($"/plans/edit/{newId}");
+        }
+        catch (Exception ex) { await JS.InvokeVoidAsync("alert", ex.Message); }
+    }
+
+    private async Task Delete(TrainingPlanListItemDto p)
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", $"Usunąć plan „{p.Name}\"?")) return;
+        try { await PlanService.DeletePlanAsync(_userId, p.Id, _isAdmin); await LoadAsync(); }
+        catch (Exception ex) { await JS.InvokeVoidAsync("alert", ex.Message); }
+    }
+}

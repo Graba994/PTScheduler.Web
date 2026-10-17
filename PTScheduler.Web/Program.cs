@@ -1,7 +1,10 @@
+using System.Security.Claims;
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.Components.Authorization;
+using Microsoft.AspNetCore.DataProtection;
 using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.RateLimiting;
+using Microsoft.EntityFrameworkCore;
 using PTScheduler.Application;
 using PTScheduler.Application.DTOs;
 using PTScheduler.Application.Interfaces;
@@ -12,11 +15,40 @@ using PTScheduler.Web.Components;
 using PTScheduler.Web.Components.Account;
 using PTScheduler.Web.Services;
 
-// Npgsql 6+ requires DateTime parameters for timestamptz columns to be Kind=Utc by default.
-// This app stores LOCAL time (DateTime.Now is the convention; CreatedAt/StartTime/etc).
-// The legacy switch lets Npgsql accept any DateTime kind, treating Unspecified/Local as local time.
-// Must be set BEFORE the data source is built, hence the very top of Program.cs.
+// ─── Konwencja czasu ─────────────────────────────────────────────────────────
+// Pełny opis: PTScheduler.Application/Interfaces/IAppClock.cs
+//
+// W aplikacji współistnieją dwie kategorie czasu i NIE WOLNO ich porównywać:
+//
+//   1. INSTANT — moment w czasie. Znaczniki: CreatedAt, PaidAt, Timestamp
+//      w audycie. Kolumna timestamptz, Kind=Utc, źródło: IAppClock.UtcNow.
+//
+//   2. ZEGAR ŚCIENNY — godzina widziana przez człowieka. Session.StartTime,
+//      terminy ważności. Kind=Unspecified, źródło: IAppClock.LocalNow.
+//      Session.StartTime ma już kolumnę timestamp without time zone.
+//
+// Nigdy nie używaj DateTime.Now w warstwach Infrastructure/Application —
+// zwraca czas maszyny, który w kontenerze jest UTC i nie ma związku ze
+// strefą studia. Właściwe jest wstrzyknięcie IAppClock.
+//
+// Przełącznik poniżej jest ŚWIADOMYM DŁUGIEM. Pozostałe pola zegara ściennego
+// (Coupon.ValidFrom/ValidUntil, IntroSessionConfig.PromoValidUntil,
+// SessionPackage.ExpiresAt, CourseEnrollment.StartsAt/ExpiresAt) nadal mają
+// kolumny timestamptz, a przychodzą z date-pickerów jako Kind=Unspecified.
+// Bez tego przełącznika Npgsql odrzuciłby ich zapis.
+// Usunąć dopiero po przeniesieniu ich na timestamp without time zone.
+// Musi być ustawiony PRZED zbudowaniem data source — stąd sam początek pliku.
 AppContext.SetSwitch("Npgsql.EnableLegacyTimestampBehavior", true);
+
+// Polska kultura dla całej aplikacji: nazwy miesięcy i dni w UI i mailach
+// („28 wrz”, „czwartek, 1 października”), przecinek dziesiętny w kwotach.
+// Kontener nie ma LANG, więc bez tego wszystko formatowało się po angielsku
+// (np. „28 SEP” u klienta, „Thursday, 01 October” w przypomnieniach).
+// Uwaga: wartości wstawiane do CSS/JS formatuj niezależnie od kultury
+// (FormattableString.Invariant), inaczej „12,5px” zepsuje styl.
+var plCulture = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
+System.Globalization.CultureInfo.DefaultThreadCurrentCulture = plCulture;
+System.Globalization.CultureInfo.DefaultThreadCurrentUICulture = plCulture;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -25,7 +57,30 @@ builder.Configuration.AddJsonFile("connections.json", optional: true, reloadOnCh
 builder.Services.AddRazorComponents()
     .AddInteractiveServerComponents();
 
+// Raise the Blazor Server circuit's SignalR receive limit so file uploads
+// (logo, favicon, course covers) aren't truncated — the 32 KB default cut
+// larger images in half.
+builder.Services.Configure<Microsoft.AspNetCore.SignalR.HubOptions>(options =>
+{
+    options.MaximumReceiveMessageSize = 10 * 1024 * 1024; // 10 MB
+});
+
+// Surface real error details on the circuit so failures show a message
+// instead of a silent "circuit terminated" during diagnosis.
+builder.Services.Configure<Microsoft.AspNetCore.Components.Server.CircuitOptions>(options =>
+{
+    // Szczegóły wyjątków w przeglądarce tylko w trybie deweloperskim — na produkcji
+    // ujawniały nazwy tabel, ścieżki i treść zapytań.
+    options.DetailedErrors = builder.Environment.IsDevelopment();
+    // Aplikacja działa głównie jako PWA: telefon usypia kartę/aplikację, a
+    // przeglądarka zamraża schowane zakładki. Dłuższe podtrzymanie rozłączonego
+    // obwodu pozwala po powrocie wznowić stan bez przeładowania strony
+    // (domyślnie 3 minuty). Po tym czasie stan i tak da się wznowić (Blazor.resumeCircuit).
+    options.DisconnectedCircuitRetentionPeriod = TimeSpan.FromMinutes(30);
+});
+
 builder.Services.AddCascadingAuthenticationState();
+builder.Services.AddHttpContextAccessor();
 builder.Services.AddScoped<IdentityRedirectManager>();
 builder.Services.AddScoped<AuthenticationStateProvider, IdentityRevalidatingAuthenticationStateProvider>();
 
@@ -35,6 +90,50 @@ builder.Services.AddAuthentication(options =>
         options.DefaultSignInScheme = IdentityConstants.ExternalScheme;
     })
     .AddIdentityCookies();
+
+// ─── Sesja logowania: trwała i odizolowana per tenant ───────────────────────
+// Portal i tenanci mogą działać pod tym samym hostem na różnych portach
+// (np. 192.168.0.220:8081 i :9001). Przeglądarka NIE rozróżnia ciasteczek po
+// porcie, więc przy domyślnej nazwie `.AspNetCore.Identity.Application`
+// aplikacje nadpisywały sobie nawzajem ciasteczko logowania i wylogowywały
+// użytkownika przy przełączaniu zakładek. Nazwy zawierają więc slug tenanta.
+var cookieScope = System.Text.RegularExpressions.Regex.Replace(
+    Environment.GetEnvironmentVariable("TENANT_SLUG") ?? "", "[^A-Za-z0-9_-]", "");
+if (cookieScope.Length == 0) cookieScope = "app";
+
+// Klucze szyfrujące ciasteczka trzymamy w bazie tenanta (tabela
+// DataProtectionKeys), a nie w systemie plików kontenera — inaczej każde
+// odtworzenie kontenera przy aktualizacji wylogowywało wszystkich.
+builder.Services.AddDataProtection()
+    .SetApplicationName($"PTScheduler.Web.{cookieScope}")
+    .PersistKeysToDbContext<ApplicationDbContext>();
+
+builder.Services.ConfigureApplicationCookie(options =>
+{
+    options.Cookie.Name = $".PTS.{cookieScope}.Auth";
+    // PWA ma nie wylogowywać: 30 dni, odnawiane przy każdym użyciu.
+    options.ExpireTimeSpan = TimeSpan.FromDays(30);
+    options.SlidingExpiration = true;
+});
+builder.Services.AddAntiforgery(options => options.Cookie.Name = $".PTS.{cookieScope}.AF");
+// Odświeżanie ciasteczka (znacznik bezpieczeństwa) buduje tożsamość od nowa — znacznik
+// „przełączono z konta X” trzeba przenieść, inaczej po chwili zniknąłby przycisk powrotu.
+builder.Services.Configure<SecurityStampValidatorOptions>(options =>
+{
+    // „Wyloguj ze wszystkich innych urządzeń” (Moje konto) działa najpóźniej po 5 minutach.
+    options.ValidationInterval = TimeSpan.FromMinutes(5);
+    options.OnRefreshingPrincipal = ctx =>
+    {
+        var from = ctx.CurrentPrincipal?.FindFirst(PTScheduler.Web.Services.AccountSwitchService.OriginalUserClaim);
+        if (from is not null && ctx.NewPrincipal?.Identity is System.Security.Claims.ClaimsIdentity id)
+            id.AddClaim(new System.Security.Claims.Claim(from.Type, from.Value));
+        return Task.CompletedTask;
+    };
+});
+builder.Services.AddScoped<PTScheduler.Web.Services.AccountSwitchService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.AdminDashboardService>();
+builder.Services.AddMemoryCache();
+builder.Services.AddScoped<PTScheduler.Web.Services.UpsellService>();
 
 builder.Services.AddApplication();
 builder.Services.AddInfrastructure(builder.Configuration, builder.Environment.ContentRootPath);
@@ -52,40 +151,139 @@ builder.Services.AddIdentityCore<ApplicationUser>(options =>
     .AddRoles<IdentityRole>()
     .AddEntityFrameworkStores<ApplicationDbContext>()
     .AddSignInManager()
+    .AddClaimsPrincipalFactory<PTScheduler.Web.Services.AppClaimsPrincipalFactory>()
     .AddErrorDescriber<PolishIdentityErrorDescriber>()
-    .AddDefaultTokenProviders();
+    .AddPasswordValidator<PTScheduler.Web.Security.WeakPasswordValidator>()
+    .AddDefaultTokenProviders()
+    .AddTokenProvider<PTScheduler.Web.Components.Account.ClientInviteTokenProvider<ApplicationUser>>(
+        PTScheduler.Application.Interfaces.ClientInvite.TokenProvider);
 
 builder.Services.AddScoped<IEmailSender<ApplicationUser>, PTScheduler.Web.Components.Account.IdentityEmailSender>();
+builder.Services.AddSingleton<PTScheduler.Web.Security.NewDeviceLoginNotifier>();
+builder.Services.AddHttpClient(PTScheduler.Web.Security.WeakPasswordValidator.HttpClientName, c =>
+{
+    c.DefaultRequestHeaders.Add("Add-Padding", "true"); // odpowiedź tej samej długości — nie zdradza, czy było trafienie
+    c.DefaultRequestHeaders.UserAgent.ParseAdd("PTScheduler-password-check");
+});
 builder.Services.AddSingleton<IWebRootPathProvider, WebRootPathProvider>();
 builder.Services.AddScoped<PTScheduler.Web.Services.HintStateService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.ToastService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.ClientNav>();
+builder.Services.AddSingleton<PTScheduler.Web.Services.EntitlementService>();
+builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformInfoService>();
+builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformLegalService>();
+builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformAssistantService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.AssistantTipsService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.SlotInviteService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.TrainerProposalsService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.MorningBriefService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.PreSessionBriefService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.WorkoutNoteDraftService>();
+builder.Services.AddScoped<PTScheduler.Infrastructure.Services.DebtService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.AttentionService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.RetentionService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.MessageDraftService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.WorkoutCompanionService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.MedalService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.MedalBackgroundService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.ClientRecapService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.ClientRecapBackgroundService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.BeforeSessionPushService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.MorningBriefBackgroundService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.SetupGuide>();
 builder.Services.AddHostedService<SessionReminderService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.EntitlementSyncService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.PackageReminderService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.AutomationBackgroundService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.KsefStatusService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.OffPackageHoldService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.SessionAutoCompleteService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.MembershipBillingService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.ReferralRewardService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.CalendarSyncService>();
+builder.Services.AddSingleton<PTScheduler.Web.Services.ExerciseCatalogSync>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.WgerCatalogRefreshService>();
 
 // Tracks whether DB is reachable. Mutated at startup and via /db-error/retry.
 builder.Services.AddSingleton<StartupHealth>();
+
+// Aplikacja stoi za reverse proxy (Nginx Proxy Manager). Bez tego RemoteIpAddress
+// to adres proxy — limit logowań obejmował całe studio naraz — a Scheme to http,
+// co psuło adresy zwrotne (OAuth). Ufamy wyłącznie proxy z sieci prywatnych.
+builder.Services.Configure<Microsoft.AspNetCore.Builder.ForwardedHeadersOptions>(o =>
+{
+    o.ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+                       | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto
+                       | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedHost;
+    o.KnownIPNetworks.Clear();
+    o.KnownProxies.Clear();
+    foreach (var net in new[] { "10.0.0.0/8", "172.16.0.0/12", "192.168.0.0/16", "127.0.0.0/8", "::1/128", "fc00::/7" })
+        o.KnownIPNetworks.Add(System.Net.IPNetwork.Parse(net));
+});
 
 builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
     {
+        if (ctx.Request.Method != "POST") return RateLimitPartition.GetNoLimiter("unlimited");
         var path = ctx.Request.Path.Value ?? "";
-        if (ctx.Request.Method == "POST" &&
-            (path.StartsWith("/Account/Login", StringComparison.OrdinalIgnoreCase) ||
-             path.StartsWith("/Account/Register", StringComparison.OrdinalIgnoreCase)))
-        {
-            var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
-            return RateLimitPartition.GetFixedWindowLimiter(ip, _ => new FixedWindowRateLimiterOptions
+        var ip = ctx.Connection.RemoteIpAddress?.ToString() ?? "unknown";
+
+        // E-maile na żądanie (reset hasła, ponowne potwierdzenie): mało prób, długie okno —
+        // nikt nie zasypie cudzej skrzynki ani nie wyśle nam rachunku za SMTP.
+        if (AuthRateLimits.IsEmailTrigger(path))
+            return RateLimitPartition.GetFixedWindowLimiter($"mail:{ip}", _ => new FixedWindowRateLimiterOptions
             {
-                PermitLimit = 10,
-                Window = TimeSpan.FromMinutes(1)
+                PermitLimit = AuthRateLimits.EmailPermit,
+                Window = AuthRateLimits.EmailWindow
             });
-        }
+
+        // Logowanie, kod weryfikacji dwuetapowej, kod zapasowy, rejestracja, zaproszenie, nowe hasło:
+        // zgadywanie 6-cyfrowego kodu czy hasła z jednego adresu kończy się po kilku próbach na minutę.
+        if (AuthRateLimits.IsCredentialAttempt(path))
+            return RateLimitPartition.GetFixedWindowLimiter($"auth:{ip}", _ => new FixedWindowRateLimiterOptions
+            {
+                PermitLimit = AuthRateLimits.AuthPermit,
+                Window = AuthRateLimits.AuthWindow
+            });
+
         return RateLimitPartition.GetNoLimiter("unlimited");
     });
+    options.OnRejected = async (ctx, token) =>
+    {
+        ctx.HttpContext.Response.ContentType = "text/html; charset=utf-8";
+        await ctx.HttpContext.Response.WriteAsync(
+            "<!doctype html><meta charset=utf-8><meta name=viewport content='width=device-width'>" +
+            "<div style='font-family:system-ui;max-width:420px;margin:15vh auto;padding:0 16px;text-align:center'>" +
+            "<h2>Za dużo prób</h2><p>Odczekaj chwilę i spróbuj ponownie.</p><p><a href='javascript:history.back()'>Wróć</a></p></div>", token);
+    };
 });
 
 var app = builder.Build();
+
+StudioClock.Use(app.Services.GetRequiredService<IAppClock>());
+
+app.UseForwardedHeaders();
+
+// Nagłówki bezpieczeństwa: strona nie da się osadzić w ramce na cudzej domenie (clickjacking),
+// przeglądarka nie zgaduje typów plików, adres nie wycieka do obcych stron, a funkcje urządzenia
+// są ograniczone do tego, czego aplikacja używa (aparat do zdjęć, mikrofon tylko dla nas).
+app.Use(async (ctx, next) =>
+{
+    ctx.Response.OnStarting(() =>
+    {
+        var h = ctx.Response.Headers;
+        h["X-Content-Type-Options"] = "nosniff";
+        h["X-Frame-Options"] = "SAMEORIGIN";
+        h["Referrer-Policy"] = "strict-origin-when-cross-origin";
+        h["Permissions-Policy"] = "camera=(self), microphone=(self), geolocation=(), payment=(), usb=(), interest-cohort=()";
+        if (!h.ContainsKey("Content-Security-Policy"))
+            h["Content-Security-Policy"] = "frame-ancestors 'self'; base-uri 'self'; object-src 'none'";
+        return Task.CompletedTask;
+    });
+    await next();
+});
 
 // Run migrations + seed. On failure: log and flag the app as DB-degraded — DO NOT crash.
 var startupHealth = app.Services.GetRequiredService<StartupHealth>();
@@ -124,8 +322,43 @@ app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages:
 if (Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") != "true")
     app.UseHttpsRedirection();
 
+app.UseRequestLocalization(new RequestLocalizationOptions
+{
+    DefaultRequestCulture = new Microsoft.AspNetCore.Localization.RequestCulture(plCulture),
+    SupportedCultures = [plCulture],
+    SupportedUICultures = [plCulture],
+});
 app.UseRateLimiter();
 app.UseAntiforgery();
+
+// Wymuszona zmiana hasła tylko dla konta administratora (hasło startowe z instalacji albo
+// Portalu daje pełną kontrolę nad aplikacją). Klienci i trenerzy dostają przypomnienie na
+// pulpicie i w powiadomieniach — bez blokowania, np. ankiety zdrowotnej po pierwszym logowaniu.
+app.Use(async (ctx, next) =>
+{
+    if (ctx.User.Identity?.IsAuthenticated == true
+        && ctx.User.IsInRole(PTScheduler.Domain.Constants.Roles.Admin)
+        && ctx.User.HasClaim(PTScheduler.Web.Services.AppClaimsPrincipalFactory.MustChangePasswordClaim, "1")
+        && !PTScheduler.Web.Services.AccountSwitchService.IsSwitched(ctx.User)
+        // Wejście z Portalu: operator nie zna hasła tego konta i nie powinien go zmieniać za trenera.
+        && !ctx.User.HasClaim(c => c.Type == PTScheduler.Web.Services.AccountSwitchService.PortalAdminClaim)
+        && HttpMethods.IsGet(ctx.Request.Method))
+    {
+        var path = ctx.Request.Path;
+        var allowed = path.StartsWithSegments("/Account/Manage/ChangePassword")
+            || path.StartsWithSegments("/Account/Logout")
+            || path.StartsWithSegments("/Account/Login")
+            || path.StartsWithSegments("/_blazor") || path.StartsWithSegments("/_framework")
+            || path.StartsWithSegments("/_content") || path.StartsWithSegments("/internal")
+            || path.StartsWithSegments("/health") || Path.HasExtension(path.Value);
+        if (!allowed)
+        {
+            ctx.Response.Redirect("/Account/Manage/ChangePassword?forced=1");
+            return;
+        }
+    }
+    await next();
+});
 
 // DB-error landing page — pure HTML, no Blazor / Identity / DB dependencies, so it
 // works even when half the stack is broken.
@@ -135,21 +368,24 @@ app.MapGet("/db-error", (StartupHealth h, IHostEnvironment env) =>
 // Manual retry — re-runs migrations + seed. On success flips the flag and redirects to /.
 app.MapGet("/db-error/retry", async (StartupHealth h, IServiceProvider sp, ILogger<Program> log) =>
 {
+    // Ponowna inicjalizacja (migracje + seed) tylko, gdy baza faktycznie jest
+    // niedostępna — wcześniej każdy mógł ją odpalać w kółko.
+    if (h.DatabaseAvailable) return Results.Redirect("/");
     await TryInitializeDatabaseAsync(sp, h, log, isStartup: false);
     return h.DatabaseAvailable ? Results.Redirect("/") : Results.Redirect("/db-error");
 });
 
-// Backup download endpoint (admin only)
+// Backup download endpoint (konto techniczne — jak strona /admin/backup)
 app.MapGet("/admin/backup/download", async (
     PTScheduler.Application.Interfaces.IBackupService backupService,
     HttpContext ctx) =>
 {
-    if (!ctx.User.IsInRole(PTScheduler.Domain.Constants.Roles.Admin))
+    if (!ctx.User.IsInRole(PTScheduler.Domain.Constants.Roles.Root))
         return Results.Forbid();
 
     var data = await backupService.ExportAsync();
     return Results.File(data, "application/octet-stream",
-        $"ptscheduler_backup_{DateTime.Now:yyyyMMdd_HHmmss}.sql");
+        $"ptscheduler_backup_{StudioClock.Now:yyyyMMdd_HHmmss}.sql");
 }).RequireAuthorization();
 
 // Monthly client report (PDF) — Admin / Trainer / Subordinate
@@ -158,6 +394,8 @@ app.MapGet("/reports/client/{clientId:int}/monthly", async (
     int year,
     int month,
     PTScheduler.Application.Interfaces.IClientReportService reportService,
+    PTScheduler.Web.Services.EntitlementService entitlements,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
     HttpContext ctx) =>
 {
     var u = ctx.User;
@@ -166,8 +404,20 @@ app.MapGet("/reports/client/{clientId:int}/monthly", async (
        || u.IsInRole(PTScheduler.Domain.Constants.Roles.Subordinate)))
         return Results.Forbid();
 
+    if (!entitlements.IsAllowed("ClientReports"))
+        return Results.StatusCode(403);
+
     if (year < 2000 || year > 2100 || month < 1 || month > 12)
         return Results.BadRequest("Nieprawidłowy rok lub miesiąc.");
+
+    // Trener widzi raporty tylko swoich klientów (admin — wszystkich).
+    if (!u.IsInRole(PTScheduler.Domain.Constants.Roles.Admin))
+    {
+        var userId = u.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var owns = await db.Clients.AnyAsync(c => c.Id == clientId && c.TrainerUserId == userId);
+        if (!owns) return Results.NotFound();
+    }
 
     try
     {
@@ -180,16 +430,264 @@ app.MapGet("/reports/client/{clientId:int}/monthly", async (
     }
 }).RequireAuthorization();
 
+// Plan treningowy w PDF (logo i kolory studia) — trener swoich planów, klient swoich, admin wszystkich.
+// Przyciski w powiadomieniach push (service worker): podpisany token ważny 3 dni, tylko dla odbiorcy.
+app.MapPost("/api/push/act", async (
+    PushActRequest body,
+    HttpContext ctx,
+    PTScheduler.Application.Interfaces.IPushActionTokens tokens,
+    PTScheduler.Application.Interfaces.IOffPackageService offPackage,
+    PTScheduler.Application.Interfaces.IChatService chat,
+    IDbContextFactory<ApplicationDbContext> dbFactory) =>
+{
+    var userId = ctx.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+    var t = string.IsNullOrEmpty(body?.Token) ? null : tokens.Read(body.Token);
+    if (t is null || userId is null || t.UserId != userId)
+        return Results.Json(new { ok = false, message = "Ten przycisk wygasł — otwórz aplikację.", url = "/dzis" });
+    var isAdmin = ctx.User.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+    try
+    {
+        switch (t.Kind)
+        {
+            case "approve":
+            {
+                await using var db = await dbFactory.CreateDbContextAsync();
+                var owner = await db.Sessions.Where(s => s.Id == t.TargetId).Select(s => s.TrainerUserId).FirstOrDefaultAsync();
+                if (owner is null || (!isAdmin && owner != userId)) return Results.Json(new { ok = false, message = "Nie znaleziono wizyty.", url = "/sessions" });
+                await offPackage.ApproveAsync(t.TargetId, userId);
+                return Results.Json(new { ok = true, message = "Termin zaakceptowany — klient dostał potwierdzenie.", url = "/sessions" });
+            }
+            case "reply" when !string.IsNullOrWhiteSpace(t.Arg):
+            {
+                if (!await chat.CanAccessAsync(t.TargetId, userId, isAdmin)) return Results.Json(new { ok = false, message = "Brak dostępu do tej rozmowy.", url = "/chat" });
+                var r = await chat.SendAsync(t.TargetId, userId, fromStaff: true, t.Arg);
+                return Results.Json(new { ok = r.Ok, message = r.Ok ? $"Wysłano: „{t.Arg}”" : r.Error, url = $"/chat?client={t.TargetId}" });
+            }
+        }
+    }
+    catch (InvalidOperationException ex) { return Results.Json(new { ok = false, message = ex.Message, url = "/sessions" }); }
+    return Results.Json(new { ok = false, message = "Nieznana akcja.", url = "/app" });
+}).RequireAuthorization();
+
+app.MapGet("/plans/{planId:int}/pdf", async (
+    int planId,
+    PTScheduler.Application.Interfaces.ITrainingPlanPdfService planPdf,
+    PTScheduler.Web.Services.EntitlementService entitlements,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    HttpContext ctx) =>
+{
+    if (!entitlements.IsAllowed("TrainingPlansEnabled")) return Results.StatusCode(403);
+    var u = ctx.User;
+    if (!u.IsInRole(PTScheduler.Domain.Constants.Roles.Admin))
+    {
+        var userId = u.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var plan = await db.TrainingPlans.AsNoTracking()
+            .Where(p => p.Id == planId)
+            .Select(p => new { p.TrainerUserId, p.ClientId, ClientTrainer = p.Client != null ? p.Client.TrainerUserId : null, ClientUser = p.Client != null ? p.Client.ApplicationUserId : null })
+            .FirstOrDefaultAsync();
+        var allowed = plan is not null && (
+            ((u.IsInRole(PTScheduler.Domain.Constants.Roles.Trainer) || u.IsInRole(PTScheduler.Domain.Constants.Roles.Subordinate))
+                && (plan.TrainerUserId == userId || plan.ClientTrainer == userId))
+            || (u.IsInRole(PTScheduler.Domain.Constants.Roles.Client) && plan.ClientId is not null && plan.ClientUser == userId));
+        if (!allowed) return Results.NotFound();
+    }
+    var pdf = await planPdf.GenerateAsync(planId);
+    return pdf is { } f ? Results.File(f.Bytes, "application/pdf", f.FileName) : Results.NotFound();
+}).RequireAuthorization();
+
+// Link polecający: zapamiętuje kod w ciasteczku na 30 dni i prowadzi na stronę trenera.
+// Kod trafia do polecenia przy rejestracji albo rezerwacji pierwszej wizyty.
+app.MapGet("/r/{code}", async (
+    string code,
+    PTScheduler.Application.Interfaces.IReferralService referrals,
+    PTScheduler.Web.Services.EntitlementService entitlements,
+    HttpContext ctx) =>
+{
+    if (entitlements.IsAllowed("ReferralProgram") && await referrals.IsValidCodeAsync(code))
+    {
+        ctx.Response.Cookies.Append("pt_ref", code.Trim().ToUpperInvariant(), new CookieOptions
+        {
+            MaxAge = TimeSpan.FromDays(30),
+            SameSite = SameSiteMode.Lax,
+            Secure = ctx.Request.IsHttps,
+            HttpOnly = true,
+            IsEssential = true
+        });
+    }
+    return Results.Redirect("/");
+});
+
+// Bon podarunkowy w PDF: kupujący albo personel studia.
+app.MapGet("/vouchers/{id:int}/pdf", async (
+    int id,
+    PTScheduler.Application.Interfaces.IGiftVoucherService vouchers,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    HttpContext ctx) =>
+{
+    var u = ctx.User;
+    var isStaff = u.IsInRole(PTScheduler.Domain.Constants.Roles.Admin) || u.IsInRole(PTScheduler.Domain.Constants.Roles.Trainer)
+        || u.IsInRole(PTScheduler.Domain.Constants.Roles.Subordinate);
+    if (!isStaff)
+    {
+        var userId = u.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier);
+        await using var db = await dbFactory.CreateDbContextAsync();
+        if (!await db.GiftVouchers.AnyAsync(v => v.Id == id && v.BuyerUserId == userId)) return Results.NotFound();
+    }
+    try
+    {
+        var (bytes, fileName) = await vouchers.GeneratePdfAsync(id);
+        return Results.File(bytes, "application/pdf", fileName);
+    }
+    catch (InvalidOperationException) { return Results.NotFound(); }
+}).RequireAuthorization();
+
+// Zdjęcia sylwetki: pliki leżą w branding/_private (blokowanym dla plików statycznych),
+// więc jedyna droga do nich to ten endpoint — tylko dla klienta, jego trenera i admina.
+app.MapGet("/photos/{id:int}", async (
+    int id,
+    string? thumb,
+    PTScheduler.Application.Interfaces.IProgressPhotoService photos,
+    HttpContext ctx) =>
+{
+    var file = await photos.GetFileAsync(id, thumbnail: thumb is "1" or "true");
+    if (file is null) return Results.NotFound();
+    var userId = ctx.User.FindFirstValue(System.Security.Claims.ClaimTypes.NameIdentifier) ?? "";
+    var isAdmin = ctx.User.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+    if (!await photos.CanAccessAsync(file.Value.ClientId, userId, isAdmin)) return Results.NotFound();
+
+    ctx.Response.Headers.CacheControl = "private, max-age=86400";
+    return Results.File(file.Value.Path, "image/webp");
+}).RequireAuthorization();
+
+// Subskrypcja kalendarza trenera (Google/Apple/Outlook): wszystkie wizyty w jednym pliku ICS.
+// Bez logowania — kalendarze nie wysyłają ciasteczek — więc dostęp wyłącznie po sekretnym
+// tokenie z TrainerConfig. Nowy token (Kalendarz → „W telefonie”) unieważnia stary link.
+app.MapGet("/calendar/feed/{token}.ics", async (
+    string token,
+    ITrainerConfigService trainerConfig,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    IAppClock clock,
+    IBrandingService branding) =>
+{
+    var trainerUserId = await trainerConfig.FindTrainerByCalendarFeedTokenAsync(token);
+    if (trainerUserId is null) return Results.NotFound();
+
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var from = clock.LocalNow.Date.AddDays(-60);
+    var to = clock.LocalNow.Date.AddDays(366);
+    var sessions = await db.Sessions.AsNoTracking()
+        .Where(s => s.TrainerUserId == trainerUserId && s.StartTime >= from && s.StartTime < to)
+        .Select(s => new
+        {
+            s.Id, s.StartTime, s.Status, s.MeetingUrl,
+            TypeName = s.SessionType.Name, s.SessionType.DurationMinutes,
+            s.Client.FirstName, s.Client.LastName, s.Client.Phone
+        })
+        .ToListAsync();
+
+    string company;
+    try { company = (await branding.GetAsync()).CompanyName ?? "PTScheduler"; }
+    catch { company = "PTScheduler"; }
+
+    var events = sessions.Select(s =>
+    {
+        var start = DateTime.SpecifyKind(clock.ToUtc(s.StartTime), DateTimeKind.Utc);
+        var client = $"{s.FirstName} {s.LastName}".Trim();
+        var cancelled = s.Status is PTScheduler.Domain.Enums.SessionStatus.Cancelled;
+        var description = string.Join("\n", new[]
+        {
+            $"Klient: {client}",
+            string.IsNullOrWhiteSpace(s.Phone) ? null : $"Telefon: {s.Phone}",
+            string.IsNullOrWhiteSpace(s.MeetingUrl) ? null : $"Spotkanie online: {s.MeetingUrl}",
+            s.Status == PTScheduler.Domain.Enums.SessionStatus.AwaitingPackage ? "Czeka na pakiet" : null
+        }.Where(l => l is not null));
+        return new CalendarLinks.FeedEvent(
+            Uid: $"session-{s.Id}@{company.Replace(" ", "")}.ptscheduler",
+            StartUtc: start,
+            EndUtc: start.AddMinutes(s.DurationMinutes > 0 ? s.DurationMinutes : 60),
+            Title: cancelled ? $"[Odwołana] {s.TypeName} — {client}" : $"{s.TypeName} — {client}",
+            Description: description,
+            Location: null,
+            Url: s.MeetingUrl,
+            Cancelled: cancelled);
+    });
+
+    var ics = CalendarLinks.BuildFeed($"{company} — wizyty", events);
+    return Results.File(ics, "text/calendar; charset=utf-8");
+});
+
+// Kalendarz klienta (Moje konto → „Moje treningi w kalendarzu”): wizyty klienta w pliku ICS.
+// Kalendarze nie wysyłają ciasteczek — dostęp po sekretnym tokenie; „Nowy link” unieważnia stary.
+app.MapGet("/calendar/my/{token}.ics", async (
+    string token,
+    PTScheduler.Application.Interfaces.IAccountService accounts,
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    IAppClock clock,
+    IBrandingService branding) =>
+{
+    var userId = await accounts.FindUserByCalendarTokenAsync(token);
+    if (userId is null) return Results.NotFound();
+
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var from = clock.LocalNow.Date.AddDays(-60);
+    var to = clock.LocalNow.Date.AddDays(366);
+    var sessions = await db.Sessions.AsNoTracking()
+        .Where(s => s.Client.ApplicationUserId == userId && s.StartTime >= from && s.StartTime < to)
+        .Select(s => new { s.Id, s.StartTime, s.Status, s.MeetingUrl, s.TrainerUserId, TypeName = s.SessionType.Name, s.SessionType.DurationMinutes })
+        .ToListAsync();
+    var trainerIds = sessions.Select(s => s.TrainerUserId).Distinct().ToList();
+    var trainers = await db.Users.AsNoTracking().Where(u => trainerIds.Contains(u.Id))
+        .ToDictionaryAsync(u => u.Id, u => (u.FirstName + " " + u.LastName).Trim());
+
+    string company;
+    try { company = (await branding.GetAsync()).CompanyName ?? "PTScheduler"; }
+    catch { company = "PTScheduler"; }
+
+    var events = sessions.Select(s =>
+    {
+        var start = DateTime.SpecifyKind(clock.ToUtc(s.StartTime), DateTimeKind.Utc);
+        var cancelled = s.Status is PTScheduler.Domain.Enums.SessionStatus.Cancelled;
+        var trainer = trainers.GetValueOrDefault(s.TrainerUserId);
+        var description = string.Join("\n", new[]
+        {
+            string.IsNullOrWhiteSpace(trainer) ? null : $"Trener: {trainer}",
+            string.IsNullOrWhiteSpace(s.MeetingUrl) ? null : $"Spotkanie online: {s.MeetingUrl}",
+            s.Status == PTScheduler.Domain.Enums.SessionStatus.AwaitingPackage ? "Czeka na opłacenie pakietu" : null
+        }.Where(l => l is not null));
+        return new CalendarLinks.FeedEvent(
+            Uid: $"my-session-{s.Id}@{company.Replace(" ", "")}.ptscheduler",
+            StartUtc: start,
+            EndUtc: start.AddMinutes(s.DurationMinutes > 0 ? s.DurationMinutes : 60),
+            Title: cancelled ? $"[Odwołany] {s.TypeName} — {company}" : $"{s.TypeName} — {company}",
+            Description: description,
+            Location: null,
+            Url: s.MeetingUrl,
+            Cancelled: cancelled);
+    });
+
+    var ics = CalendarLinks.BuildFeed($"{company} — moje treningi", events);
+    return Results.File(ics, "text/calendar; charset=utf-8");
+});
+
+// Zdjęcia profilowe (prywatny katalog). Tylko dla zalogowanych — Id użytkownika to GUID.
+app.MapGet("/avatars/{userId}.webp", (string userId, HttpContext ctx, PTScheduler.Application.Interfaces.IAccountService accounts) =>
+{
+    var path = accounts.AvatarFilePath(userId);
+    if (path is null) return Results.NotFound();
+    ctx.Response.Headers.CacheControl = "private, max-age=604800"; // adres zmienia się (?v=) przy nowym zdjęciu
+    return Results.File(path, "image/webp");
+}).RequireAuthorization();
+
 // Dynamic PWA manifest — reads branding from DB so name/theme follow admin settings.
 // Served as application/manifest+json; browsers prefer .webmanifest over .json.
-app.MapGet("/manifest.webmanifest", async (PTScheduler.Application.Interfaces.IBrandingService branding) =>
+app.MapGet("/manifest.webmanifest", async (HttpContext ctx, IWebHostEnvironment env, PTScheduler.Application.Interfaces.IBrandingService branding) =>
 {
     AppBrandingDto? b = null;
     try { b = await branding.GetAsync(); } catch { /* DB down — use safe defaults */ }
 
     var name      = b?.CompanyName ?? "PTScheduler";
     var short_    = string.IsNullOrWhiteSpace(b?.PwaShortName) ? name : b.PwaShortName;
-    var color     = ThemeColor(b?.ThemeName);
     var customIcon = b?.PwaIconPath;
 
     // Custom icon goes first (browser picks the best-fit); fall back to built-in set.
@@ -205,9 +703,24 @@ app.MapGet("/manifest.webmanifest", async (PTScheduler.Application.Interfaces.IB
         new { src = "/icons/icon-512.png", sizes = "512x512", type = "image/png" },
         new { src = "/icons/icon-512-maskable.png", sizes = "512x512", type = "image/png", purpose = "maskable" },
     };
-    var icons = string.IsNullOrEmpty(customIcon)
-        ? defaultIcons
-        : (object[])[ new { src = customIcon, sizes = "512x512", type = "image/png", purpose = "any maskable" }, ..defaultIcons ];
+    // Własna ikona: przy wgraniu przeskalowana do prawdziwych 512×512 i 192×192 (pwa-icon.png + pwa-icon-192.png),
+    // więc deklarujemy dokładne rozmiary — inaczej Chrome potrafi uznać aplikację za nieinstalowalną.
+    // SVG deklarujemy jako „any”, a rastrowe ikony zapasowe zostają dla wymogów instalacji.
+    object[] icons;
+    if (string.IsNullOrEmpty(customIcon))
+        icons = defaultIcons;
+    else if (customIcon.EndsWith("/pwa-icon.png", StringComparison.OrdinalIgnoreCase)
+             && File.Exists(Path.Combine(env.WebRootPath, "branding", "pwa-icon-192.png")))
+        icons =
+        [
+            new { src = "/branding/pwa-icon-192.png", sizes = "192x192", type = "image/png", purpose = "any" },
+            new { src = customIcon, sizes = "512x512", type = "image/png", purpose = "any" },
+            new { src = "/icons/icon-512-maskable.png", sizes = "512x512", type = "image/png", purpose = "maskable" }
+        ];
+    else if (customIcon.EndsWith(".svg", StringComparison.OrdinalIgnoreCase))
+        icons = [ new { src = customIcon, sizes = "any", type = "image/svg+xml", purpose = "any" }, ..defaultIcons ];
+    else
+        icons = defaultIcons; // stary plik w nieznanym rozmiarze — wgraj ikonę ponownie, żeby jej użyć
 
     var shortcutIcon = string.IsNullOrEmpty(customIcon) ? "/icons/icon-96.png" : customIcon;
 
@@ -218,13 +731,16 @@ app.MapGet("/manifest.webmanifest", async (PTScheduler.Application.Interfaces.IB
         short_name = short_,
         description = "System rezerwacji dla trenera personalnego",
         lang    = "pl",
-        start_url = "/",
+        start_url = "/app",
         scope   = "/",
         display = "standalone",
-        background_color = color,
-        theme_color = color,
+        // Tło ekranu startowego i paski systemowe jasne jak aplikacja (w trybie ciemnym kolor ustawia strona przez meta theme-color).
+        background_color = "#ffffff",
+        theme_color = "#ffffff",
         orientation = "any",
         prefer_related_applications = false,
+        // Pozwala stronie sprawdzić (getInstalledRelatedApps), że aplikacja jest już zainstalowana — wtedy nie namawiamy ponownie.
+        related_applications = new[] { new { platform = "webapp", url = $"{ctx.Request.Scheme}://{ctx.Request.Host}/manifest.webmanifest" } },
         icons,
         shortcuts = new object[]
         {
@@ -237,6 +753,21 @@ app.MapGet("/manifest.webmanifest", async (PTScheduler.Application.Interfaces.IB
         }
     };
     return Results.Json(manifest, contentType: "application/manifest+json");
+});
+
+// Pliki ustawień (JSON) i katalog prywatny leżą na wolumenie branding, ale nie mogą
+// być serwowane statycznie — trzymały m.in. klucz Bunny i token Google.
+app.Use(async (ctx, next) =>
+{
+    var path = ctx.Request.Path.Value ?? "";
+    if (path.StartsWith("/branding/", StringComparison.OrdinalIgnoreCase)
+        && (path.Contains("/" + PTScheduler.Infrastructure.Services.PrivateStorage.DirectoryName, StringComparison.OrdinalIgnoreCase)
+            || path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)))
+    {
+        ctx.Response.StatusCode = StatusCodes.Status404NotFound;
+        return;
+    }
+    await next();
 });
 
 // MapStaticAssets handles build-time assets with fingerprinting/caching;
@@ -255,9 +786,388 @@ app.MapGet("/health", (StartupHealth h) => Results.Json(new
     timestamp = DateTime.Now.ToString("o")
 }));
 
+// Wejście prosto po publikacji aplikacji w Portalu: jednorazowy token (ważny 30 minut) loguje
+// właściciela bez wpisywania hasła, które przed chwilą ustawił w kreatorze.
+// „Zarządzaj subskrypcją” (Zarządzanie → Plan): Portal tworzy link do portalu klienta Stripe —
+// karta, faktury, roczne rozliczenie, anulowanie. Tylko administrator studia.
+app.MapGet("/admin/subscription", async (HttpContext ctx) =>
+{
+    var portalUrl = Environment.GetEnvironmentVariable("PORTAL_URL");
+    var slug = Environment.GetEnvironmentVariable("TENANT_SLUG");
+    var secret = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+    if (string.IsNullOrEmpty(portalUrl) || string.IsNullOrEmpty(slug) || string.IsNullOrEmpty(secret))
+        return Results.Redirect("/admin/upgrade");
+    try
+    {
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        using var req = new HttpRequestMessage(HttpMethod.Post, $"{portalUrl.TrimEnd('/')}/api/internal/tenants/{Uri.EscapeDataString(slug)}/billing/portal")
+        {
+            Content = JsonContent.Create(new { returnUrl = $"{ctx.Request.Scheme}://{ctx.Request.Host}/admin/upgrade" })
+        };
+        req.Headers.Add("X-Internal-Secret", secret);
+        using var resp = await http.SendAsync(req);
+        var body = await resp.Content.ReadFromJsonAsync<Dictionary<string, string?>>();
+        if (resp.IsSuccessStatusCode && body?.GetValueOrDefault("url") is { Length: > 0 } url) return Results.Redirect(url);
+    }
+    catch (Exception ex) { app.Logger.LogWarning(ex, "Nie udało się otworzyć portalu subskrypcji."); }
+    return Results.Redirect("/admin/upgrade?subskrypcja=blad");
+}).RequireAuthorization(new Microsoft.AspNetCore.Authorization.AuthorizeAttribute { Roles = PTScheduler.Domain.Constants.Roles.Admin });
+
+app.MapGet("/account/welcome",
+    async (string? token, ISetupService setup, UserManager<ApplicationUser> users, SignInManager<ApplicationUser> signIn) =>
+{
+    var ownerId = await setup.RedeemWelcomeTokenAsync(token);
+    var owner = ownerId is null ? null : await users.FindByIdAsync(ownerId);
+    if (owner is null) return Results.Redirect("/Account/Login?witaj=1");
+    // Od razu na profil trenera (tam ustawia się godziny pracy i przyjmuje zapisy); „Wróć” prowadzi
+    // na konto administratora — tak samo jak przy ręcznym przełączeniu konta.
+    var trainerId = await setup.GetTrainerProfileIdAsync();
+    var trainer = trainerId is null ? null : await users.FindByIdAsync(trainerId);
+    if (trainer is not null)
+        await signIn.SignInWithClaimsAsync(trainer, isPersistent: true,
+            [new Claim(PTScheduler.Web.Services.AccountSwitchService.OriginalUserClaim, owner.Id)]);
+    else
+        await signIn.SignInAsync(owner, isPersistent: true);
+    // Najpierw krótkie „Pierwsze ustawienia” (poczta do klientów, co jeszcze na start) — każdy krok można pominąć.
+    return Results.Redirect("/witaj");
+});
+
+// Internal endpoint for the portal to push a new entitlements JSON without
+// restarting the container. Protected by a shared secret env var
+// TENANT_INTERNAL_SECRET — the portal sends it in the X-Internal-Secret header.
+app.MapPost("/internal/entitlements/reload",
+    async (HttpContext ctx, PTScheduler.Web.Services.EntitlementService svc) =>
+{
+    if (!InternalSecretMatches(ctx)) return Results.NotFound();
+
+    using var reader = new StreamReader(ctx.Request.Body);
+    var json = await reader.ReadToEndAsync();
+    svc.ReplaceFromJson(json);
+    return Results.Ok(new { plan = svc.Current.Name });
+});
+
+// Dane z kreatora rejestracji w Portalu: konto właściciela (gotowy skrót hasła), kolor,
+// strona główna z szablonu i oferta. Trener nie przechodzi już /setup drugi raz.
+app.MapPost("/internal/setup/bootstrap",
+    async (HttpContext ctx, ISetupService setup) =>
+{
+    if (!InternalSecretMatches(ctx)) return Results.NotFound();
+    var dto = await ctx.Request.ReadFromJsonAsync<SetupBootstrapDto>();
+    if (dto is null) return Results.BadRequest();
+    try
+    {
+        var result = await setup.BootstrapAsync(dto);
+        return Results.Json(new { completed = result.Completed, message = result.Message });
+    }
+    catch (InvalidOperationException ex)
+    {
+        return Results.Json(new { completed = false, message = ex.Message }, statusCode: 409);
+    }
+});
+
+// Wejście administratora Portalu (Hantly) jednym kliknięciem: Portal podpisuje krótki, jednorazowy
+// token sekretem tej instancji. Logujemy konto techniczne (Root) albo — z przełączeniem — właściciela
+// studia; dalej działa zwykłe przełączanie kont. Każde wejście trafia do historii zmian.
+app.MapGet("/sso/portal", async (HttpContext ctx, string? t,
+    Microsoft.Extensions.Caching.Memory.IMemoryCache cache,
+    UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager,
+    IAuditLogService audit, ILogger<Program> log) =>
+{
+    var secret = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+    var slug = Environment.GetEnvironmentVariable("TENANT_SLUG");
+    if (string.IsNullOrWhiteSpace(secret) || string.IsNullOrWhiteSpace(slug)) return Results.NotFound();
+
+    var sso = PTScheduler.Application.Security.PortalSsoToken.Validate(t ?? "", secret, slug, DateTimeOffset.UtcNow);
+    // Każdy token tylko raz — ponowne otwarcie tego samego linku (historia, podgląd w komunikatorze) nic nie da.
+    if (sso is null || cache.TryGetValue("sso:" + sso.Nonce, out _))
+    {
+        log.LogWarning("Odrzucono wejście z Portalu (token nieważny, wygasły albo użyty) z {Ip}.", ctx.Connection.RemoteIpAddress);
+        return Results.Redirect("/Account/Login?sso=expired");
+    }
+    Microsoft.Extensions.Caching.Memory.CacheExtensions.Set(cache, "sso:" + sso.Nonce, true, TimeSpan.FromSeconds(PTScheduler.Application.Security.PortalSsoToken.MaxLifetimeSeconds * 2));
+
+    var roots = await userManager.GetUsersInRoleAsync(PTScheduler.Domain.Constants.Roles.Root);
+    var root = roots.OrderBy(u => u.Email).FirstOrDefault();
+    if (root is null) return Results.Redirect("/Account/Login?sso=noroot");
+
+    var portalClaim = new Claim(AccountSwitchService.PortalAdminClaim, sso.AdminEmail);
+    ApplicationUser target = root;
+    if (sso.Target == "owner")
+    {
+        var owner = (await userManager.GetUsersInRoleAsync(PTScheduler.Domain.Constants.Roles.Admin))
+            .Where(u => roots.All(r => r.Id != u.Id)).OrderBy(u => u.Email).FirstOrDefault();
+        if (owner is not null) target = owner;
+    }
+    await signInManager.SignOutAsync();
+    if (target.Id == root.Id)
+        await signInManager.SignInWithClaimsAsync(root, isPersistent: false, [portalClaim]);
+    else
+        await signInManager.SignInWithClaimsAsync(target, isPersistent: false, [new Claim(AccountSwitchService.OriginalUserClaim, root.Id), portalClaim]);
+
+    try
+    {
+        await audit.LogAsync(root.Id, root.Email ?? "", PTScheduler.Domain.Constants.Roles.Root, "PortalSso", "User", target.Id,
+            $"Wejście z Portalu Hantly: {sso.AdminEmail}{(target.Id == root.Id ? "" : $" — jako {target.Email}")}", PTScheduler.Domain.Enums.AuditSeverity.Warning);
+    }
+    catch (Exception ex) { log.LogWarning(ex, "Nie udało się zapisać wejścia z Portalu w historii zmian."); }
+    return Results.Redirect("/app"); // pulpit (strona główna „/” to publiczna strona trenera)
+});
+
+// Krótki link z SMS-a lub wiadomości (np. zaproszenie na wolne okienko): liczymy kliknięcie i przekierowujemy
+// wyłącznie na ścieżkę w tej aplikacji. Wygasły albo nieznany — strona główna.
+app.MapGet("/l/{code}", async (string code, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+{
+    if (code.Length is < 4 or > 16) return Results.Redirect("/");
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var link = await db.ShortLinks.FirstOrDefaultAsync(l => l.Code == code);
+    if (link is null || (link.ExpiresAt is { } exp && exp < DateTime.UtcNow) || !PTScheduler.Application.Messaging.ShortLinks.IsSafeTarget(link.TargetPath))
+        return Results.Redirect("/");
+    link.Clicks++;
+    link.LastClickAt = DateTime.UtcNow;
+    await db.SaveChangesAsync();
+    return Results.Redirect(link.TargetPath);
+}).AllowAnonymous();
+
+app.MapGet("/internal/metrics",
+    async (HttpContext ctx, IDbContextFactory<ApplicationDbContext> dbFactory,
+        PTScheduler.Application.Interfaces.IEmailService email, PTScheduler.Application.Interfaces.IEmailSettingsService emailSettings,
+        PTScheduler.Application.Interfaces.IAppClock clock) =>
+{
+    if (!InternalSecretMatches(ctx)) return Results.NotFound();
+
+    await using var db = dbFactory.CreateDbContext();
+    var clientsCount = await db.Clients.CountAsync();
+    var activeClients = await db.Clients.CountAsync(c => c.Status == PTScheduler.Domain.Enums.ClientStatus.Active);
+    var sessionsTotal = await db.Sessions.CountAsync();
+    var sessionsThisMonth = await db.Sessions.CountAsync(s =>
+        s.StartTime >= new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1));
+    var packagesActive = await db.SessionPackages.CountAsync(p =>
+        p.Status == PTScheduler.Domain.Enums.PackageStatus.Active);
+    var ordersTotal = await db.Orders.CountAsync();
+    var revenue = await db.Orders
+        .Where(o => o.Status == PTScheduler.Domain.Enums.OrderStatus.Paid)
+        .SumAsync(o => (decimal?)o.Amount) ?? 0;
+    var mailSettings = await emailSettings.GetAsync();
+
+    // Aktywność do analiz Leo w Portalu — same sumy, żadnych danych klientów. Wizyty liczone w czasie lokalnym (jak w kalendarzu).
+    var localNow = clock.LocalNow;
+    var weekAgo = localNow.AddDays(-7);
+    var monthAgo = localNow.AddDays(-30);
+    var utcMonthAgo = DateTime.UtcNow.AddDays(-30);
+    var lastWeek = await db.Sessions.Where(s => s.StartTime >= weekAgo && s.StartTime < localNow)
+        .GroupBy(s => s.Status).Select(g => new { g.Key, Count = g.Count() }).ToListAsync();
+    int Week(PTScheduler.Domain.Enums.SessionStatus st) => lastWeek.FirstOrDefault(x => x.Key == st)?.Count ?? 0;
+    var activeClients30 = await db.Sessions.Where(s => s.StartTime >= monthAgo && s.StartTime < localNow
+            && s.Status == PTScheduler.Domain.Enums.SessionStatus.Completed)
+        .Select(s => s.ClientId).Distinct().CountAsync();
+    var upcoming7 = await db.Sessions.CountAsync(s => s.StartTime >= localNow && s.StartTime < localNow.AddDays(7)
+        && (s.Status == PTScheduler.Domain.Enums.SessionStatus.Scheduled || s.Status == PTScheduler.Domain.Enums.SessionStatus.AwaitingPackage));
+    var revenue30 = await db.Orders.Where(o => o.Status == PTScheduler.Domain.Enums.OrderStatus.Paid && (o.PaidAt ?? o.CreatedAt) >= utcMonthAgo)
+        .SumAsync(o => (decimal?)o.Amount) ?? 0;
+    var fromDay = DateOnly.FromDateTime(monthAgo);
+    var workouts30 = await db.WorkoutLogs.Where(l => l.WorkoutDate >= fromDay).Select(l => new { l.ClientId, l.WorkoutDate }).Distinct().CountAsync();
+    var messages30 = await db.ChatMessages.CountAsync(m => m.SentAt >= utcMonthAgo);
+    var plans = await db.TrainingPlans.CountAsync(p => !p.IsArchived && !p.IsTemplate);
+
+    return Results.Json(new
+    {
+        clients = clientsCount,
+        activeClients,
+        sessionsTotal,
+        sessionsThisMonth,
+        packagesActive,
+        ordersTotal,
+        revenue,
+        // Poczta: „platform” (serwer platformy), „own” (własna skrzynka trenera), „none”; przy awarii własnej — od kiedy i co.
+        mailMode = await email.GetDeliveryModeAsync(),
+        mailOwnErrorAt = mailSettings.OwnFailing(DateTime.UtcNow) ? mailSettings.LastErrorAt : null,
+        mailOwnError = mailSettings.OwnFailing(DateTime.UtcNow) ? mailSettings.LastError : null,
+        mailFallbacks = mailSettings.FallbackCount,
+        activeClients30,
+        sessions7 = Week(PTScheduler.Domain.Enums.SessionStatus.Completed) + Week(PTScheduler.Domain.Enums.SessionStatus.Scheduled),
+        cancelled7 = Week(PTScheduler.Domain.Enums.SessionStatus.Cancelled),
+        noShow7 = Week(PTScheduler.Domain.Enums.SessionStatus.NoShow),
+        upcoming7,
+        revenue30,
+        workouts30,
+        messages30,
+        plans,
+        timestamp = DateTime.UtcNow.ToString("o")
+    });
+});
+
+app.MapGet("/internal/admin-info",
+    async (HttpContext ctx, UserManager<ApplicationUser> userManager) =>
+{
+    if (!InternalSecretMatches(ctx)) return Results.NotFound();
+
+    var admin = await FindManagedAdminAsync(userManager, ctx.Request.Query["account"]);
+    if (admin is null) return Results.Json(new { found = false });
+
+    return Results.Json(new
+    {
+        found = true,
+        isRoot = await userManager.IsInRoleAsync(admin, PTScheduler.Domain.Constants.Roles.Root),
+        email = admin.Email,
+        firstName = admin.FirstName,
+        lastName = admin.LastName,
+        emailConfirmed = admin.EmailConfirmed,
+        lockoutEnd = admin.LockoutEnd?.ToString("o")
+    });
+});
+
+app.MapPost("/internal/admin-reset",
+    async (HttpContext ctx, UserManager<ApplicationUser> userManager) =>
+{
+    if (!InternalSecretMatches(ctx)) return Results.NotFound();
+
+    using var reader = new StreamReader(ctx.Request.Body);
+    var body = await reader.ReadToEndAsync();
+    using var doc = System.Text.Json.JsonDocument.Parse(body);
+    var root = doc.RootElement;
+
+    var newPassword = root.TryGetProperty("password", out var p) ? p.GetString() : null;
+    var newEmail = root.TryGetProperty("email", out var e) ? e.GetString() : null;
+    var account = root.TryGetProperty("account", out var a) ? a.GetString() : null;
+
+    var admin = await FindManagedAdminAsync(userManager, account);
+    if (admin is null) return Results.Json(new { success = false, error = "Brak konta admin" });
+
+    if (!string.IsNullOrWhiteSpace(newEmail) && newEmail != admin.Email)
+    {
+        admin.Email = newEmail;
+        admin.NormalizedEmail = newEmail.ToUpperInvariant();
+        admin.UserName = newEmail;
+        admin.NormalizedUserName = newEmail.ToUpperInvariant();
+        var emailResult = await userManager.UpdateAsync(admin);
+        if (!emailResult.Succeeded)
+            return Results.Json(new { success = false, error = string.Join(", ", emailResult.Errors.Select(x => x.Description)) });
+    }
+
+    if (!string.IsNullOrWhiteSpace(newPassword))
+    {
+        var token = await userManager.GeneratePasswordResetTokenAsync(admin);
+        var passResult = await userManager.ResetPasswordAsync(admin, token, newPassword);
+        if (!passResult.Succeeded)
+            return Results.Json(new { success = false, error = string.Join(", ", passResult.Errors.Select(x => x.Description)) });
+        // Hasło nadane z Portalu zna operator platformy — trener ustawi własne po zalogowaniu.
+        admin.MustChangePassword = true;
+        await userManager.UpdateAsync(admin);
+    }
+
+    if (admin.LockoutEnd is not null)
+    {
+        await userManager.SetLockoutEndDateAsync(admin, null);
+        await userManager.ResetAccessFailedCountAsync(admin);
+    }
+
+    return Results.Json(new { success = true, email = admin.Email });
+});
+
+app.MapGet("/internal/last-activity",
+    async (HttpContext ctx, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+{
+    if (!InternalSecretMatches(ctx)) return Results.NotFound();
+
+    await using var db = dbFactory.CreateDbContext();
+    var lastSession = await db.Sessions
+        .OrderByDescending(s => s.CreatedAt)
+        .Select(s => s.CreatedAt)
+        .FirstOrDefaultAsync();
+    var lastClient = await db.Clients
+        .OrderByDescending(c => c.CreatedAt)
+        .Select(c => c.CreatedAt)
+        .FirstOrDefaultAsync();
+    var lastOrder = await db.Orders
+        .OrderByDescending(o => o.CreatedAt)
+        .Select(o => o.CreatedAt)
+        .FirstOrDefaultAsync();
+
+    var dates = new[] { lastSession, lastClient, lastOrder }
+        .Where(d => d != default)
+        .ToList();
+
+    return Results.Json(new
+    {
+        lastActivity = dates.Count > 0 ? dates.Max().ToString("o") : null as string,
+        lastSession = lastSession != default ? lastSession.ToString("o") : null,
+        lastClient = lastClient != default ? lastClient.ToString("o") : null,
+        lastOrder = lastOrder != default ? lastOrder.ToString("o") : null,
+        timestamp = DateTime.UtcNow.ToString("o")
+    });
+});
+
+// Google Meet OAuth callback — exchanges the authorization code for a refresh token.
+// Wymaga zalogowanego admina/trenera i jednorazowego „state” wygenerowanego w panelu —
+// bez tego każdy mógł podpiąć tu własne konto Google i przejąć linki do spotkań.
+app.MapGet("/api/google-meet/callback", async (HttpContext ctx, PTScheduler.Application.Interfaces.IGoogleMeetService meet) =>
+{
+    var code = ctx.Request.Query["code"].ToString();
+    var state = ctx.Request.Query["state"].ToString();
+    if (string.IsNullOrEmpty(code))
+        return Results.Redirect("/admin/google-meet?meet=error&msg=" + Uri.EscapeDataString("Google nie przekazał kodu autoryzacji."));
+
+    var (ok, error) = await meet.ExchangeCodeAsync(code, state);
+    return ok
+        ? Results.Redirect("/admin/google-meet?meet=ok")
+        : Results.Redirect("/admin/google-meet?meet=error&msg=" + Uri.EscapeDataString(error ?? "Nieznany błąd."));
+}).RequireAuthorization(p => p.RequireRole(PTScheduler.Domain.Constants.Roles.Admin, PTScheduler.Domain.Constants.Roles.Trainer));
+
+// Gateway notify (webhook): verifies the payment and fulfils the order.
+// Route carries the provider key, e.g. /payments/payu/notify, /payments/p24/notify.
+app.MapPost("/payments/{provider}/notify",
+    async (string provider, HttpContext ctx, PTScheduler.Application.Interfaces.IPaymentService payments) =>
+{
+    using var reader = new StreamReader(ctx.Request.Body);
+    var body = await reader.ReadToEndAsync();
+    var headers = ctx.Request.Headers.ToDictionary(h => h.Key, h => h.Value.ToString(), StringComparer.OrdinalIgnoreCase);
+    var result = await payments.HandleNotifyAsync(provider, body, headers);
+    // Autopay oczekuje HTTP 200 z XML (CONFIRMED / NOTCONFIRMED) także wtedy, gdy nie przyjmujemy powiadomienia.
+    if (result.Body is not null) return Results.Content(result.Body, result.ContentType ?? "text/plain", System.Text.Encoding.UTF8);
+    return result.Ok ? Results.Ok() : Results.BadRequest();
+});
+
+// Autopay: powrót klienta z bramki (adres ustawiany w panelu Autopay). Status płatności przychodzi osobno w ITN,
+// więc tylko prowadzimy na stronę zamówienia, która pokazuje jego aktualny stan.
+app.MapGet("/payments/autopay/return", (HttpContext ctx) =>
+{
+    var orderId = PTScheduler.Infrastructure.Services.Payments.AutopayProtocol.SafeOrderId(ctx.Request.Query["OrderID"].ToString());
+    return Results.Redirect(orderId is null ? "/app" : $"/payment/success?order={orderId}");
+});
+
 app.Run();
 
 // ---- helpers ----
+
+// Portal zarządza kontem właściciela studia (domyślnie) albo kontem technicznym (account=root).
+// Przed kreatorem /setup właściciela jeszcze nie ma — wtedy jedynym kontem jest root.
+static async Task<ApplicationUser?> FindManagedAdminAsync(UserManager<ApplicationUser> userManager, string? account)
+{
+    if (string.Equals(account, "root", StringComparison.OrdinalIgnoreCase))
+        return (await userManager.GetUsersInRoleAsync(PTScheduler.Domain.Constants.Roles.Root)).FirstOrDefault();
+    return await DbInitializer.FindOwnerAdminAsync(userManager)
+        ?? (await userManager.GetUsersInRoleAsync(PTScheduler.Domain.Constants.Roles.Admin)).FirstOrDefault();
+}
+
+// Wywołania Portal → tenant. Brak sekretu albo zły nagłówek = 404 (nie zdradzamy,
+// że endpoint istnieje). Porównanie w stałym czasie.
+static bool InternalSecretMatches(HttpContext ctx)
+{
+    var expected = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+    if (string.IsNullOrEmpty(expected)) return false;
+    var provided = ctx.Request.Headers["X-Internal-Secret"].ToString();
+    return System.Security.Cryptography.CryptographicOperations.FixedTimeEquals(
+        System.Text.Encoding.UTF8.GetBytes(provided), System.Text.Encoding.UTF8.GetBytes(expected));
+}
+
+// Własna ikona PWA może być JPG/WebP — zły typ w manifeście psuje wybór ikony w Chrome.
+static string IconMimeType(string path) => Path.GetExtension(path).ToLowerInvariant() switch
+{
+    ".jpg" or ".jpeg" => "image/jpeg",
+    ".webp" => "image/webp",
+    ".svg" => "image/svg+xml",
+    _ => "image/png"
+};
 
 static bool IsAllowedWhenDbDown(string path) =>
        path.StartsWith("/db-error", StringComparison.OrdinalIgnoreCase)
@@ -290,6 +1200,8 @@ static async Task TryInitializeDatabaseAsync(IServiceProvider services, StartupH
 
         await DbInitializer.SeedSessionTypesAsync(db);
         await DbInitializer.SeedPermissionsAsync(db);
+        await DbInitializer.SeedExerciseCatalogAsync(db);
+        await DbInitializer.AssignOrphanClientsAsync(db);
 
         var wasDown = !health.DatabaseAvailable;
         health.DatabaseAvailable = true;
@@ -320,6 +1232,24 @@ static string RenderDbErrorPage(StartupHealth h, bool isDev)
         ? $@"<div class=""tech-row""><div class=""tech-label"">Stack trace</div><pre>{stack}</pre></div>"
         : "";
     var failedAt = h.FailedAt == default ? "—" : h.FailedAt.ToString("dd.MM.yyyy HH:mm:ss");
+
+    // Szczegóły techniczne tylko w trybie deweloperskim — na produkcji treść
+    // błędu bazy (host, użytkownik) nie może trafić do anonimowego odwiedzającego.
+    var adminBlock = isDev ? $@"
+        <details class=""admin"">
+            <summary>Informacje dla administratora</summary>
+            <div class=""tech"">
+                <div class=""tech-row"">
+                    <div class=""tech-label"">Komunikat błędu</div>
+                    <div class=""tech-value"">{msg}</div>
+                </div>
+                <div class=""tech-row"">
+                    <div class=""tech-label"">Czas wystąpienia</div>
+                    <div class=""tech-value"">{failedAt}</div>
+                </div>
+                {stackBlock}
+            </div>
+        </details>" : "";
 
     return $@"<!doctype html>
 <html lang=""pl"">
@@ -396,43 +1326,12 @@ static string RenderDbErrorPage(StartupHealth h, bool isDev)
             <a href=""/"" class=""btn btn-ghost"">Strona główna</a>
         </div>
 
-        <details class=""admin"">
-            <summary>Informacje dla administratora</summary>
-            <div class=""tech"">
-                <div class=""tech-row"">
-                    <div class=""tech-label"">Komunikat błędu</div>
-                    <div class=""tech-value"">{msg}</div>
-                </div>
-                <div class=""tech-row"">
-                    <div class=""tech-label"">Czas wystąpienia</div>
-                    <div class=""tech-value"">{failedAt}</div>
-                </div>
-                {stackBlock}
-            </div>
-        </details>
+        {adminBlock}
     </div>
 </body>
 </html>";
 }
 
-static string ThemeColor(string? theme)
-{
-    var t = theme ?? "ocean";
-    if (t.EndsWith("-dark", StringComparison.Ordinal)) t = t[..^5];
-    return t switch
-    {
-        "forest"   => "#16A34A",
-        "sunset"   => "#EA580C",
-        "crimson"  => "#DC2626",
-        "lavender" => "#9333EA",
-        "slate"    => "#475569",
-        "rose"     => "#E11D48",
-        "teal"     => "#0D9488",
-        "amber"    => "#D97706",
-        "indigo"   => "#4F46E5",
-        _          => "#0284C7",
-    };
-}
 
 public sealed class StartupHealth
 {
@@ -441,3 +1340,5 @@ public sealed class StartupHealth
     public string? DatabaseErrorDetail { get; set; }
     public DateTime FailedAt { get; set; }
 }
+
+internal sealed record PushActRequest(string? Token);

@@ -1,0 +1,85 @@
+@page "/trainer/retencja"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer")]
+@using PTScheduler.Domain.Rules
+@using PTScheduler.Application.Messaging
+@inject PTScheduler.Web.Services.RetentionService RetentionSvc
+@inject AuthenticationStateProvider AuthState
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Klienci, którzy mogą odejść: powody z reguł (przerwa, rzadsze treningi, odwołania, koniec pakietu, samopoczucie),
+   co zrobić i szkic wiadomości w stylu trenera. *@
+
+<AppTitle Page="Mogą odejść" />
+
+<div class="rt-wrap">
+    <AttentionTabs Current="risks" />
+    <div class="rt-head">
+        <div>
+            <h1 class="rt-title"><i class="bi bi-heart-pulse"></i>Klienci, którzy mogą odejść</h1>
+            <p class="rt-sub">Asystent patrzy na przerwy, rzadsze treningi, odwołania, koniec pakietu i samopoczucie z ankiet. Krótka wiadomość we właściwym momencie często wystarczy.</p>
+        </div>
+        <a class="btn btn-sm btn-outline-secondary" href="/trainer/styl"><i class="bi bi-pen me-1"></i>Mój styl wiadomości</a>
+    </div>
+
+    @if (_loading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    }
+    else if (_risks.Count == 0)
+    {
+        <div class="rt-empty">
+            <i class="bi bi-emoji-smile"></i>
+            <div class="fw-semibold">Nikt nie wygląda na zagrożonego</div>
+            <p class="mb-0">Wszyscy aktywni klienci trenują regularnie albo mają zaplanowane wizyty. Tak trzymać!</p>
+        </div>
+    }
+    else
+    {
+        <div class="rt-stats">
+            <div><b>@_risks.Count(r => r.Result.IsHigh)</b><span>wysokie ryzyko</span></div>
+            <div><b>@_risks.Count(r => !r.Result.IsHigh)</b><span>średnie ryzyko</span></div>
+        </div>
+        <div class="rt-list">
+            @foreach (var r in _risks)
+            {
+                var top = r.Result.Top!;
+                <section class="rt-card @(r.Result.IsHigh ? "high" : "")">
+                    <div class="rt-card-head">
+                        <div>
+                            <a class="rt-name" href="@($"/clients/{r.ClientId}")">@r.Name</a>
+                            <span class="rt-pill @(r.Result.IsHigh ? "high" : "")">@(r.Result.IsHigh ? "wysokie" : "średnie") · @r.Result.Score pkt</span>
+                        </div>
+                        <button type="button" class="btn btn-sm @(_open == r.ClientId ? "btn-secondary" : "btn-primary")" @onclick="() => Toggle(r.ClientId)">
+                            <i class="bi bi-chat-heart me-1"></i>@(_open == r.ClientId ? "Zamknij" : "Napisz")
+                        </button>
+                    </div>
+                    <ul class="rt-reasons">
+                        @foreach (var reason in r.Result.Reasons) { <li>@reason.Text</li> }
+                    </ul>
+                    <div class="rt-tip"><i class="bi bi-lightbulb"></i>@top.Suggestion</div>
+                    @if (_open == r.ClientId)
+                    {
+                        <MessageDraftBox ClientId="r.ClientId" Phone="@r.Phone" Purpose="top.Purpose" />
+                    }
+                </section>
+            }
+        </div>
+    }
+</div>
+
+@code {
+    private List<PTScheduler.Web.Services.RetentionService.ClientRisk> _risks = [];
+    private bool _loading = true;
+    private int _open;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        // Właściciel studia widzi wszystkich klientów, trener — swoich.
+        _risks = await RetentionSvc.GetRisksAsync(user.IsInRole(PTScheduler.Domain.Constants.Roles.Admin) ? null : userId);
+        _loading = false;
+    }
+
+    private void Toggle(int clientId) => _open = _open == clientId ? 0 : clientId;
+}

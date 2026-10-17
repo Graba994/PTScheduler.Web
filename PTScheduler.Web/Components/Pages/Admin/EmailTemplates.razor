@@ -4,9 +4,25 @@
 @using PTScheduler.Application.Interfaces
 @inject IEmailTemplateService TemplateService
 @inject IBrandingService BrandingService
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@inject EntitlementService Entitlements
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Szablony email" />
+
+@if (!Entitlements.IsAllowed("CustomEmailTemplates"))
+{
+    <div class="page-header">
+        <h4 class="page-title"><i class="bi bi-file-earmark-richtext-fill me-2" style="color:var(--c-primary)"></i>Szablony email</h4>
+    </div>
+    <FeatureGate Flag="CustomEmailTemplates" RequiredPlan="Pro"
+                 Title="Własne szablony email są dostępne w planie Pro">
+        <Description>
+            Personalizuj treść wiadomości wysyłanych do klientów (potwierdzenia rezerwacji, przypomnienia, faktury). Odblokuj w planie <strong>Pro</strong> lub wyższym.
+        </Description>
+    </FeatureGate>
+}
+else
+{
 
 <div class="cal-shell">
     <div class="cal-topbar">
@@ -230,6 +246,8 @@
     </div>
 </div>
 
+}
+
 @code {
     private List<EmailTemplateDto>? templates;
     private EmailTemplateDto? selected;
@@ -389,6 +407,11 @@
         ["ExpiresRow"] = "<tr><td style=\"padding:8px 0;color:#6b7280;font-size:14px\">Ważny do</td><td style=\"padding:8px 0;font-size:14px;font-weight:600\">31.12.2025</td></tr>",
         ["Price"] = "<strong>150,00 zł</strong>",
         ["SetPasswordLink"] = "#",
+        ["InviteLink"] = "#",
+        ["Remaining"] = "2 treningi",
+        ["ShopLink"] = "#",
+        ["ShopButton"] = "Kup kolejny pakiet",
+        ["ValidDays"] = "7",
         ["AccentColor"] = t.AccentColor,
         ["UserName"] = "Jan Kowalski",
         ["ResetLink"] = "#",

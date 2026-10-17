@@ -1,0 +1,72 @@
+@page "/pakiety-koncza"
+@using Microsoft.AspNetCore.Authorization
+@using PTScheduler.Domain.Constants
+@attribute [Authorize(Roles = Roles.Admin + "," + Roles.Trainer)]
+@inject PTScheduler.Web.Services.AttentionService Attention
+@inject AuthenticationStateProvider AuthState
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Kończące się pakiety: ostatnie wejście albo ważność do tygodnia. Przy osobie „Zaproponuj kolejny” — szkic w stylu trenera. *@
+
+<AppTitle Page="Kończą się pakiety" />
+
+<div class="dbt">
+    <AttentionTabs Current="packages" />
+    <header class="dbt-head">
+        <h4 class="mb-0 fw-bold"><i class="bi bi-box-seam me-2"></i>Kończą się pakiety</h4>
+    </header>
+
+    @if (_loading)
+    {
+        <div class="text-center text-muted py-5"><div class="spinner-border"></div></div>
+    }
+    else if (_list.Count == 0)
+    {
+        <div class="dbt-empty">
+            <i class="bi bi-emoji-smile"></i>
+            <b>Nikomu nie kończy się pakiet</b>
+            <span>Pokażę tu osoby z ostatnim wejściem albo pakietem ważnym jeszcze najwyżej tydzień.</span>
+        </div>
+    }
+    else
+    {
+        <ul class="dbt-list">
+            @foreach (var p in _list)
+            {
+                <li class="dbt-card">
+                    <div class="dbt-card-head">
+                        <a class="dbt-name" href="@($"/clients/{p.ClientId}?tab=packages")">@p.Name</a>
+                        <span class="dbt-age">@p.PackageName</span>
+                        <span class="dbt-sum">@(p.Left == 0 ? "koniec" : p.Left == 1 ? "ostatnie wejście" : $"{p.Left} wejścia")</span>
+                    </div>
+                    @if (p.ExpiresAt is { } exp)
+                    {
+                        <div class="small text-muted">Ważny do @exp.ToLocalTime().ToString("d.MM")</div>
+                    }
+                    @if (_open == p.ClientId)
+                    {
+                        <MessageDraftBox ClientId="p.ClientId" Phone="@p.Phone" Purpose="PTScheduler.Domain.Rules.DraftPurpose.Package" Fixed="true" AutoDraft="true" />
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-primary dbt-remind" @onclick="() => _open = p.ClientId"><i class="bi bi-chat-heart me-1"></i>Zaproponuj kolejny</button>
+                    }
+                </li>
+            }
+        </ul>
+    }
+</div>
+
+@code {
+    private List<PTScheduler.Web.Services.AttentionService.EndingPackage> _list = [];
+    private bool _loading = true;
+    private int? _open;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        try { _list = await Attention.EndingPackagesAsync(userId, user.IsInRole(Roles.Admin)); } catch { _list = []; }
+        _loading = false;
+    }
+}

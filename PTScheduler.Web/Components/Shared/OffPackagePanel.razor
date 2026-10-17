@@ -1,0 +1,99 @@
+@* Wizyta poza pakietem w panelu trenera: prośba do akceptacji, płatność online w toku,
+   trening do rozliczenia u trenera albo dawna wizyta „bez pakietu”. *@
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Enums
+@inject IOffPackageService OffPackage
+@inject AuthenticationStateProvider AuthState
+
+@if (Session.AwaitingApproval)
+{
+    <div class="opp opp-request">
+        <div class="opp-head"><i class="bi bi-hand-index-thumb"></i><b>Prośba o termin</b></div>
+        <div class="opp-text">Klient nie ma tego treningu w pakiecie i chce zapłacić u Ciebie (gotówką albo przelewem). Potwierdź termin albo go odrzuć — klient dostanie powiadomienie.</div>
+        @if (CanManage)
+        {
+            @if (_rejecting)
+            {
+                <input class="form-control form-control-sm mb-2" placeholder="Powód (opcjonalnie), np. ten termin mam zajęty" @bind="_reason" />
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-light flex-grow-1" @onclick="() => _rejecting = false">Wstecz</button>
+                    <button class="btn btn-sm btn-danger flex-grow-1" @onclick="RejectAsync" disabled="@_busy">Odrzuć prośbę</button>
+                </div>
+            }
+            else
+            {
+                <div class="d-flex gap-2">
+                    <button class="btn btn-sm btn-success flex-grow-1" @onclick="ApproveAsync" disabled="@_busy"><i class="bi bi-check-lg me-1"></i>Akceptuj termin</button>
+                    <button class="btn btn-sm btn-outline-danger" @onclick="() => _rejecting = true" disabled="@_busy">Odrzuć</button>
+                </div>
+            }
+        }
+    </div>
+}
+else if (Session.HoldUntil is { } hold && Session.Status == SessionStatus.AwaitingPackage)
+{
+    <div class="opp opp-online">
+        <div class="opp-head"><i class="bi bi-credit-card"></i><b>Klient płaci online</b></div>
+        <div class="opp-text">Termin trzymamy do @hold.ToLocalTime().ToString("HH:mm"). Jeśli klient nie zapłaci, termin sam wróci do grafiku.</div>
+    </div>
+}
+else if (Session.UnpaidAtTrainer)
+{
+    <div class="opp opp-unpaid">
+        <div class="opp-head"><i class="bi bi-cash-coin"></i><b>Do rozliczenia u Ciebie</b></div>
+        <div class="opp-text">Trening spoza pakietu — klient płaci przy treningu. Odhacz, gdy dostaniesz pieniądze.</div>
+        @if (CanManage) { <PaidButtons Busy="_busy" OnPaid="MarkPaidAsync" /> }
+    </div>
+}
+else if (Session.PaidAt is { } paid && Session.OffPackagePayment is not null)
+{
+    <div class="opp opp-paid">
+        <i class="bi bi-check-circle-fill"></i>
+        <span>Opłacone@(string.IsNullOrEmpty(Session.PaidVia) ? "" : $" ({Session.PaidVia})") · @paid.ToLocalTime().ToString("dd.MM HH:mm")</span>
+    </div>
+}
+else if (Session.Status == SessionStatus.AwaitingPackage)
+{
+    <div class="opp opp-unpaid">
+        <div class="opp-head"><i class="bi bi-exclamation-triangle-fill"></i><b>Klient nie ma aktywnego pakietu</b></div>
+        <div class="opp-text">Termin jest zarezerwowany, ale nieopłacony. Dopisz klientowi pakiet — albo odhacz płatność, jeśli rozliczyliście się inaczej.</div>
+        @if (CanManage) { <PaidButtons Busy="_busy" OnPaid="MarkPaidAsync" /> }
+    </div>
+}
+@if (!string.IsNullOrEmpty(_error))
+{
+    <div class="alert alert-danger py-2 small">@_error</div>
+}
+
+@code {
+    [Parameter, EditorRequired] public SessionDto Session { get; set; } = default!;
+    [Parameter] public bool CanManage { get; set; } = true;
+    [Parameter] public EventCallback OnChanged { get; set; }
+
+    private bool _busy;
+    private bool _rejecting;
+    private string? _reason;
+    private string? _error;
+
+    private async Task<string> ActorAsync() =>
+        (await AuthState.GetAuthenticationStateAsync()).User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+
+    private Task ApproveAsync() => RunAsync(async a => await OffPackage.ApproveAsync(Session.Id, a));
+    private Task RejectAsync() => RunAsync(async a => await OffPackage.RejectAsync(Session.Id, a, _reason));
+    private Task MarkPaidAsync(string via) => RunAsync(async a => await OffPackage.MarkPaidAsync(Session.Id, a, via));
+
+    private async Task RunAsync(Func<string, Task> action)
+    {
+        _busy = true; _error = null;
+        try
+        {
+            await action(await ActorAsync());
+            _rejecting = false; _reason = null;
+            await OnChanged.InvokeAsync();
+        }
+        catch (Exception ex) { _error = ex.Message; }
+        finally { _busy = false; }
+    }
+}

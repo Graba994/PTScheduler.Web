@@ -1,22 +1,50 @@
 ﻿@page "/clients"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
 @inject IClientService ClientService
+@inject EntitlementService Entitlements
 @inject NavigationManager Nav
 @inject AuthenticationStateProvider AuthState
+@inject PlatformAssistantService Assistant
+@using PTScheduler.Application.Import
 @using Microsoft.AspNetCore.Components.Authorization
+@using Microsoft.AspNetCore.Components.Forms
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Constants
 @using PTScheduler.Domain.Enums
-@rendermode Microsoft.AspNetCore.Components.Web.RenderMode.InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Klienci" />
 
+<SetupGuideBar />
+
 <div class="d-flex justify-content-between align-items-center mb-3 flex-wrap gap-2">
-    <h4 class="mb-0"><i class="bi bi-people-fill me-2"></i>Klienci</h4>
-    <a href="/clients/new" class="btn btn-primary btn-sm flex-shrink-0">
-        <i class="bi bi-person-plus-fill me-1"></i>Dodaj klienta
-    </a>
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+        <h4 class="mb-0"><i class="bi bi-people-fill me-2"></i>Klienci</h4>
+        @if (Entitlements.Current.MaxClients != int.MaxValue && clients is not null)
+        {
+            <span class="badge @(clients.Count >= Entitlements.Current.MaxClients ? "bg-warning text-dark" : "bg-primary-subtle text-primary-emphasis")">
+                @clients.Count / @Entitlements.Current.MaxClients w planie @Entitlements.Current.Name
+            </span>
+        }
+    </div>
+    @if (Entitlements.Current.MaxClients != int.MaxValue && clients is not null && clients.Count >= Entitlements.Current.MaxClients)
+    {
+        <a href="/upgrade" class="btn btn-warning btn-sm flex-shrink-0">
+            <i class="bi bi-arrow-up-circle me-1"></i>Zwiększ limit
+        </a>
+    }
+    else
+    {
+        <div class="d-flex gap-2 flex-shrink-0">
+            <button class="btn btn-outline-primary btn-sm" @onclick="() => _showImport = true">
+                <i class="bi bi-upload me-1"></i>Importuj klientów
+            </button>
+            <a href="/clients/new" class="btn btn-primary btn-sm">
+                <i class="bi bi-person-plus-fill me-1"></i>Dodaj klienta
+            </a>
+        </div>
+    }
 </div>
 
 @if (clients is null)
@@ -118,9 +146,137 @@ else
     <div class="text-muted small mt-3">Łącznie: @Filtered.Count() klientów</div>
 }
 
+@if (_showImport)
+{
+    <div class="modal d-block" tabindex="-1" style="background:rgba(0,0,0,.45)" role="dialog" aria-modal="true" aria-labelledby="imp-title">
+        <div class="modal-dialog modal-dialog-centered modal-lg modal-dialog-scrollable">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="imp-title"><i class="bi bi-upload me-2"></i>Importuj klientów</h5>
+                    <button type="button" class="btn-close" aria-label="Zamknij" @onclick="CloseImport"></button>
+                </div>
+                <div class="modal-body">
+                    @if (_importResult is not null)
+                    {
+                        <div class="d-flex gap-3 mb-3">
+                            <div class="text-center">
+                                <div class="fw-bold fs-4 text-success">@_importResult.Imported</div>
+                                <div class="small text-muted">dodanych</div>
+                            </div>
+                            <div class="text-center">
+                                <div class="fw-bold fs-4 text-warning">@_importResult.Skipped</div>
+                                <div class="small text-muted">pominiętych</div>
+                            </div>
+                        </div>
+                        @if (_importResult.Imported > 0) { <p class="small text-muted">Dodani klienci dostali e-mail z zaproszeniem do aplikacji.</p> }
+                        @if (_importResult.Errors.Count > 0)
+                        {
+                            <div class="small" style="max-height:200px;overflow-y:auto">
+                                @foreach (var e in _importResult.Errors)
+                                {
+                                    <div class="text-muted mb-1"><i class="bi bi-dot"></i>@e</div>
+                                }
+                            </div>
+                        }
+                    }
+                    else if (_impTable is null)
+                    {
+                        <div class="imp-ways">
+                            <label class="imp-way">
+                                <i class="bi bi-file-earmark-spreadsheet"></i>
+                                <b>Plik z Excela lub arkusza</b>
+                                <small>CSV (zapisz jako CSV) — separator nie ma znaczenia</small>
+                                <InputFile accept=".csv,.txt,text/csv,text/plain" OnChange="HandleImportFile" class="form-control form-control-sm mt-2" />
+                            </label>
+                            <label class="imp-way">
+                                <i class="bi bi-phone"></i>
+                                <b>Kontakty z telefonu</b>
+                                <small>Plik .vcf — iPhone: iCloud → Kontakty → Eksportuj vCard; Android: Kontakty → Eksportuj</small>
+                                <InputFile accept=".vcf,text/vcard,text/x-vcard" OnChange="HandleImportFile" class="form-control form-control-sm mt-2" />
+                            </label>
+                        </div>
+                        <div class="imp-or"><span>albo wklej</span></div>
+                        <textarea class="form-control" rows="4" placeholder="Zaznacz wiersze w Excelu lub Arkuszach Google, skopiuj i wklej tutaj (z nagłówkami albo bez)." aria-label="Wklejone dane klientów" @bind="_impText" @bind:event="oninput"></textarea>
+                        <div class="d-flex justify-content-end mt-2">
+                            <button type="button" class="btn btn-primary btn-sm" disabled="@string.IsNullOrWhiteSpace(_impText)" @onclick="() => Analyze(_impText ?? string.Empty)">Dalej</button>
+                        </div>
+                        @if (_importError is not null) { <div class="alert alert-danger small mt-3 py-2 mb-0">@_importError</div> }
+                    }
+                    else
+                    {
+                        var ok = _impCandidates.Count(c => c.Problem is null);
+                        <p class="small text-muted mb-2">Sprawdź, co jest w której kolumnie — dopasowaliśmy je automatycznie. Klienci dostaną e-mail z zaproszeniem do aplikacji.</p>
+                        <div class="imp-map">
+                            @for (var i = 0; i < _impTable.Headers.Count; i++)
+                            {
+                                var col = i;
+                                <label class="imp-map-col">
+                                    <span title="@_impTable.Headers[col]">@_impTable.Headers[col]</span>
+                                    <select class="form-select form-select-sm" value="@(_impMap.TryGetValue(col, out var f) ? f.ToString() : nameof(ImportField.Skip))" @onchange="e => SetField(col, e.Value?.ToString())">
+                                        @foreach (var (field, label) in FieldLabels)
+                                        {
+                                            <option value="@field">@label</option>
+                                        }
+                                    </select>
+                                </label>
+                            }
+                        </div>
+                        @if (_aiOn && _impTable.Source != "vcf" && (!ClientImportParser.HasName(_impMap) || !_impMap.ContainsValue(ImportField.Email)))
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-primary mt-2" disabled="@_impAiBusy" @onclick="AiMapAsync">
+                                @if (_impAiBusy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-stars me-1"></i> }Dopasuj kolumny z asystentem
+                            </button>
+                            <span class="small text-muted ms-1">— asystent widzi tylko nazwy kolumn, bez danych klientów.</span>
+                        }
+                        <div class="imp-sum">
+                            <span class="ok"><b>@ok</b> gotowych do dodania</span>
+                            @if (_impCandidates.Count > ok) { <span class="warn"><b>@(_impCandidates.Count - ok)</b> do pominięcia</span> }
+                        </div>
+                        <div class="table-responsive">
+                            <table class="table table-sm imp-table">
+                                <thead><tr><th>Imię i nazwisko</th><th>E-mail</th><th>Telefon</th><th></th></tr></thead>
+                                <tbody>
+                                    @foreach (var c in _impCandidates.Take(8))
+                                    {
+                                        <tr class="@(c.Problem is null ? "" : "is-bad")">
+                                            <td>@c.FirstName @c.LastName</td>
+                                            <td>@c.Email</td>
+                                            <td>@c.Phone</td>
+                                            <td>@if (c.Problem is null) { <i class="bi bi-check2 text-success" aria-label="OK"></i> } else { <small>@c.Problem</small> }</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                        @if (_impCandidates.Count > 8) { <div class="small text-muted">…i @(_impCandidates.Count - 8) więcej</div> }
+                    }
+                </div>
+                <div class="modal-footer">
+                    @if (_impTable is not null && _importResult is null)
+                    {
+                        <button class="btn btn-light btn-sm me-auto" @onclick="() => { _impTable = null; _impCandidates = []; }">Wstecz</button>
+                        <button class="btn btn-primary btn-sm" disabled="@(_importing || !_impCandidates.Any(c => c.Problem is null))" @onclick="ImportCandidatesAsync">
+                            @if (_importing) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                            Dodaj @_impCandidates.Count(c => c.Problem is null) @AssistantTipsService.Plural(_impCandidates.Count(c => c.Problem is null), "klienta", "klientów", "klientów")
+                        </button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-secondary btn-sm" @onclick="CloseImport">Zamknij</button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 @code {
     private List<ClientDto>? clients;
     private string search = string.Empty;
+    private bool _showImport;
+    private bool _importing;
+    private string? _importError;
+    private CsvImportResult? _importResult;
 
     private void HandleCardKeyDown(KeyboardEventArgs e, int clientId)
     {
@@ -139,6 +295,119 @@ else
         var isAdmin = auth.User.IsInRole(Roles.Admin);
         var trainerUserId = isAdmin ? null : auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         clients = await ClientService.GetClientsAsync(trainerUserId);
+    }
+
+    private string? _impText;
+    private ImportTable? _impTable;
+    private Dictionary<int, ImportField> _impMap = [];
+    private List<ImportCandidate> _impCandidates = [];
+    private bool _aiOn, _impAiBusy;
+
+    private static readonly (ImportField Field, string Label)[] FieldLabels =
+    [
+        (ImportField.Skip, "— pomiń —"), (ImportField.FullName, "Imię i nazwisko"), (ImportField.FirstName, "Imię"),
+        (ImportField.LastName, "Nazwisko"), (ImportField.Email, "E-mail"), (ImportField.Phone, "Telefon"),
+        (ImportField.Goal, "Cel / uwagi"), (ImportField.BirthDate, "Data urodzenia")
+    ];
+
+    private async Task HandleImportFile(InputFileChangeEventArgs e)
+    {
+        _importError = null;
+        try
+        {
+            using var reader = new StreamReader(e.File.OpenReadStream(5 * 1024 * 1024), System.Text.Encoding.UTF8);
+            Analyze(await reader.ReadToEndAsync());
+        }
+        catch (Exception ex) { _importError = $"Nie udało się odczytać pliku: {ex.Message}"; }
+        try { _aiOn = (await Assistant.GetConfigAsync())?.Ai == true; } catch { _aiOn = false; }
+    }
+
+    private void Analyze(string text)
+    {
+        _importError = null;
+        var table = ClientImportParser.Parse(text);
+        if (table.Rows.Count == 0) { _importError = "Nie znaleźliśmy żadnych wierszy z danymi."; return; }
+        _impTable = table;
+        _impMap = ClientImportParser.GuessMapping(table);
+        _impCandidates = ClientImportParser.Build(table, _impMap);
+        _ = LoadAiFlagAsync();
+    }
+
+    private async Task LoadAiFlagAsync()
+    {
+        try { _aiOn = (await Assistant.GetConfigAsync())?.Ai == true; } catch { _aiOn = false; }
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void SetField(int col, string? value)
+    {
+        if (_impTable is null || !Enum.TryParse<ImportField>(value, out var field)) return;
+        // Jedno pole = jedna kolumna: wybór przenosi pole z poprzedniej kolumny.
+        foreach (var k in _impMap.Where(m => m.Value == field && m.Key != col).Select(m => m.Key).ToList()) _impMap.Remove(k);
+        if (field == ImportField.Skip) _impMap.Remove(col); else _impMap[col] = field;
+        _impCandidates = ClientImportParser.Build(_impTable, _impMap);
+    }
+
+    /// <summary>Asystent dopasowuje kolumny po samych nagłówkach (bez danych klientów).</summary>
+    private async Task AiMapAsync()
+    {
+        if (_impTable is null) return;
+        _impAiBusy = true;
+        try
+        {
+            var headers = string.Join("; ", _impTable.Headers.Select((h, i) => $"{i + 1}={h}"));
+            if (headers.Length > 158) headers = headers[..158];
+            var facts = new Dictionary<string, string>
+            {
+                ["naglowki"] = headers,
+                ["pola"] = "imie, nazwisko, imie_i_nazwisko, email, telefon, cel, data_urodzenia",
+                ["format_odpowiedzi"] = "numer=pole; numer=pole",
+            };
+            var text = await Assistant.PhraseAsync($"import-{headers.GetHashCode()}", "mapowanie_kolumn", facts, "brak", true);
+            foreach (System.Text.RegularExpressions.Match m in System.Text.RegularExpressions.Regex.Matches(text.ToLowerInvariant(),
+                         @"(\d+)\s*[=:\-–]\s*(imie_i_nazwisko|imię i nazwisko|imie i nazwisko|imie|imię|nazwisko|e-?mail|telefon|cel|data_urodzenia|data urodzenia)"))
+            {
+                var col = int.Parse(m.Groups[1].Value) - 1;
+                if (col < 0 || col >= _impTable.Headers.Count) continue;
+                var field = m.Groups[2].Value switch
+                {
+                    "imie_i_nazwisko" or "imię i nazwisko" or "imie i nazwisko" => ImportField.FullName,
+                    "imie" or "imię" => ImportField.FirstName,
+                    "nazwisko" => ImportField.LastName,
+                    "email" or "e-mail" => ImportField.Email,
+                    "telefon" => ImportField.Phone,
+                    "cel" => ImportField.Goal,
+                    _ => ImportField.BirthDate,
+                };
+                SetField(col, field.ToString());
+            }
+        }
+        catch { }
+        finally { _impAiBusy = false; }
+    }
+
+    private async Task ImportCandidatesAsync()
+    {
+        _importing = true;
+        try
+        {
+            var auth = await AuthState.GetAuthenticationStateAsync();
+            var isAdmin = auth.User.IsInRole(Roles.Admin);
+            var trainerUserId = isAdmin ? null : auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+            // Zaimportowani klienci trafiają do trenera, który importuje (u administratora — bez trenera, jak dotąd).
+            _importResult = await ClientService.ImportCandidatesAsync(_impCandidates, trainerUserId);
+            clients = await ClientService.GetClientsAsync(trainerUserId);
+        }
+        catch (Exception ex) { _importError = $"Błąd importu: {ex.Message}"; }
+        finally { _importing = false; }
+    }
+
+    private void CloseImport()
+    {
+        _showImport = false;
+        _impTable = null; _impCandidates = []; _impText = null;
+        _importResult = null;
+        _importError = null;
     }
 }
 

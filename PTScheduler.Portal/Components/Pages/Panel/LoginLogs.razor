@@ -1,0 +1,181 @@
+@page "/panel/login-logs"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject SiteSettingsService Settings
+@inject PanelStatusService Status
+@rendermode InteractiveServer
+
+<PageTitle>Logi logowań — Hantly Portal</PageTitle>
+
+<PanelHeader Title="Logi logowań" Icon="bi-journal-text" IconClass="pp-icon-cyan" BackHref="/panel/setup" BackLabel="Konfiguracja platformy" Subtitle="Kto i kiedy logował się do Portalu. Nieudane próby z jednego adresu mogą oznaczać zgadywanie hasła.">
+    <Actions>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="Load"><i class="bi bi-arrow-clockwise me-1"></i>Odśwież</button>
+        <button class="btn btn-sm btn-outline-danger" @onclick="() => _confirmPurge = true" title="Usuwa wpisy starsze niż 30 dni"><i class="bi bi-trash3 me-1"></i>Wyczyść stare</button>
+    </Actions>
+</PanelHeader>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    @* Licznik na pasku u góry: nieudane próby od ostatniego sprawdzenia (najwyżej z 24 h). *@
+    <div class="ll-ack @(_newFails > 0 ? "has-new" : "")" role="status">
+        <i class="bi @(_newFails > 0 ? "bi-shield-exclamation" : "bi-shield-check")"></i>
+        <div class="min-w-0 flex-grow-1">
+            @if (_newFails > 0)
+            {
+                <b>@_newFails @PanelUi.Plural(_newFails, "nowa nieudana próba", "nowe nieudane próby", "nowych nieudanych prób")</b>
+                <span>@(_topIp is { } ip ? $"Najwięcej z adresu {ip.Ip} ({ip.Count}). " : "")Jeśli to Ty albo ktoś z zespołu pomylił hasło — oznacz jako sprawdzone, a licznik na pasku się wyzeruje.</span>
+            }
+            else
+            {
+                <b>Nic nowego</b>
+                <span>@(_ackAt is { } a ? $"Ostatnio sprawdzone {a.ToLocalTime():dd.MM.yyyy HH:mm}." : "Brak nieudanych prób w ostatnich 24 godzinach.")</span>
+            }
+        </div>
+        @if (_newFails > 0)
+        {
+            <button class="btn btn-sm btn-primary" disabled="@_busy" @onclick="AcknowledgeAsync"><i class="bi bi-check2-all me-1"></i>Oznacz jako sprawdzone</button>
+        }
+    </div>
+
+    @if (_confirmPurge)
+    {
+        <div class="alert alert-warning d-flex align-items-center gap-2 flex-wrap small">
+            <span class="me-auto">Usunąć wpisy starsze niż 30 dni? Nowsze zostają (także te z ostatniej doby).</span>
+            <button class="btn btn-sm btn-light" @onclick="() => _confirmPurge = false">Anuluj</button>
+            <button class="btn btn-sm btn-danger" disabled="@_busy" @onclick="PurgeAsync">Usuń</button>
+        </div>
+    }
+    @if (_msg is not null) { <div class="alert alert-success small py-2">@_msg</div> }
+
+    <div class="pp-stats">
+        <StatTile Label="Udane logowania" Value="@_successCount.ToString()" Icon="bi-check-circle" Tone="ok" />
+        <StatTile Label="Nieudane próby" Value="@_failCount.ToString()" Icon="bi-x-circle" Tone="@(_failCount > 0 ? "danger" : "muted")" />
+        <StatTile Label="Blokady konta" Value="@_lockoutCount.ToString()" Meta="po kilku nieudanych próbach z rzędu" Icon="bi-lock" Tone="@(_lockoutCount > 0 ? "warn" : "muted")" />
+    </div>
+
+    <div class="card border-0 shadow-sm">
+        <div class="table-responsive">
+            <table class="table table-sm table-hover align-middle mb-0 small">
+                <thead class="table-light">
+                    <tr>
+                        <th>Data</th>
+                        <th>Email</th>
+                        <th>Wynik</th>
+                        <th>IP</th>
+                        <th>Przeglądarka</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var log in _logs)
+                    {
+                        <tr class="@(!log.Success ? "table-danger" : "")">
+                            <td class="text-nowrap">@log.CreatedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm:ss")</td>
+                            <td class="font-monospace">@log.Email</td>
+                            <td>
+                                @if (!log.Success && IsNew(log)) { <span class="badge bg-dark me-1">nowe</span> }
+                                @if (log.Success)
+                                {
+                                    <span class="badge bg-success">OK</span>
+                                }
+                                else if (log.FailureReason == "locked_out")
+                                {
+                                    <span class="badge bg-warning text-dark">Zablokowany</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-danger">Błąd</span>
+                                }
+                            </td>
+                            <td class="font-monospace text-muted">@(log.IpAddress ?? "—")</td>
+                            <td class="text-muted" style="max-width:300px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">
+                                @(ShortenUA(log.UserAgent))
+                            </td>
+                        </tr>
+                    }
+                </tbody>
+            </table>
+        </div>
+
+        @if (_logs.Count == 0)
+        {
+            <p class="text-muted text-center py-3">Brak logów.</p>
+        }
+    </div>
+}
+
+@code {
+    private List<LoginLog> _logs = [];
+    private bool _loading = true;
+    private int _successCount;
+    private int _failCount;
+    private int _lockoutCount;
+    private DateTime? _ackAt;
+    private int _newFails;
+    private (string Ip, int Count)? _topIp;
+    private bool _busy, _confirmPurge;
+    private string? _msg;
+
+    private DateTime CountFrom => _ackAt is { } a && a > DateTime.UtcNow.AddHours(-24) ? a : DateTime.UtcNow.AddHours(-24);
+    private bool IsNew(LoginLog l) => l.CreatedAt >= CountFrom;
+
+    private async Task AcknowledgeAsync()
+    {
+        _busy = true;
+        await Settings.SetAsync(SiteSettingsService.Keys.LoginFailuresAckAt, DateTime.UtcNow.ToString("o"));
+        await Status.GetAsync(refresh: true);
+        _msg = "Oznaczone jako sprawdzone — licznik na pasku wyzerowany. Nowe nieudane próby znów się pojawią.";
+        await Load();
+        _busy = false;
+    }
+
+    private async Task PurgeAsync()
+    {
+        _busy = true;
+        await using var db = DbFactory.CreateDbContext();
+        var cutoff = DateTime.UtcNow.AddDays(-30);
+        var removed = await db.LoginLogs.Where(l => l.CreatedAt < cutoff).ExecuteDeleteAsync();
+        _confirmPurge = false;
+        _msg = removed > 0 ? $"Usunięto {removed} {PanelUi.Plural(removed, "wpis", "wpisy", "wpisów")} starszych niż 30 dni." : "Nie było wpisów starszych niż 30 dni.";
+        await Load();
+        _busy = false;
+    }
+
+    protected override async Task OnInitializedAsync() => await Load();
+
+    private async Task Load()
+    {
+        _loading = true;
+        await using var db = DbFactory.CreateDbContext();
+        _logs = await db.LoginLogs
+            .AsNoTracking()
+            .OrderByDescending(l => l.CreatedAt)
+            .Take(200)
+            .ToListAsync();
+
+        _successCount = _logs.Count(l => l.Success);
+        _failCount = _logs.Count(l => !l.Success && l.FailureReason != "locked_out");
+        _lockoutCount = _logs.Count(l => l.FailureReason == "locked_out");
+        var ack = await Settings.GetAsync(SiteSettingsService.Keys.LoginFailuresAckAt);
+        _ackAt = DateTime.TryParse(ack, null, System.Globalization.DateTimeStyles.RoundtripKind, out var at) ? at.ToUniversalTime() : null;
+        var from = CountFrom;
+        var fresh = await db.LoginLogs.AsNoTracking().Where(l => !l.Success && l.CreatedAt >= from).Select(l => l.IpAddress).ToListAsync();
+        _newFails = fresh.Count;
+        _topIp = fresh.Where(ip => ip != null).GroupBy(ip => ip!).OrderByDescending(g => g.Count()).Select(g => ((string Ip, int Count)?)(g.Key, g.Count())).FirstOrDefault();
+        _loading = false;
+    }
+
+    private static string ShortenUA(string? ua)
+    {
+        if (string.IsNullOrEmpty(ua)) return "—";
+        if (ua.Contains("Firefox")) return "Firefox";
+        if (ua.Contains("Edg/")) return "Edge";
+        if (ua.Contains("Chrome")) return "Chrome";
+        if (ua.Contains("Safari")) return "Safari";
+        return ua.Length > 50 ? ua[..47] + "..." : ua;
+    }
+}

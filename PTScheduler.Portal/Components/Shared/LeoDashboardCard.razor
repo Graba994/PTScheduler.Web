@@ -1,0 +1,174 @@
+@inject LeoService Leo
+@inject AssistantService Assistant
+@inject IJSRuntime JS
+
+@* Leo na Pulpicie: wszystko, co teraz liczy LeoService, w jednej karcie — sprawy do zrobienia, powody do radości
+   i informacje (np. kto wysyła maile przez naszą skrzynkę). Teksty jak w dymku: reguły, AI najwyżej je przeredaguje. *@
+@if (_config is not null && _items is not null)
+{
+    var todo = _items.Count(i => i.Tip.IsTodo);
+    <section class="leo-card @(_folded ? "is-folded" : "")" aria-label="@($"{_config.Name}: co się dzieje")">
+        <div class="leo-card-head">
+            <div class="leo-card-pup" aria-hidden="true">
+                @if (_animated)
+                {
+                    <span class="leo-anim leo-stage-@_stage leo-mood-@Mood">@((MarkupString)Svg)</span>
+                }
+                else
+                {
+                    <img src="@Icon" alt="" width="72" height="72" />
+                }
+            </div>
+            <div class="leo-card-intro">
+                <div class="leo-card-title">@_config.Name: co się dzieje</div>
+                <p class="leo-card-summary">@Summary()</p>
+            </div>
+            <button type="button" class="leo-card-fold" @onclick="ToggleFoldAsync" aria-expanded="@(_folded ? "false" : "true")"
+                    title="@(_folded ? "Rozwiń" : "Zwiń — Pulpit to zapamięta")">
+                <i class="bi @(_folded ? "bi-chevron-down" : "bi-chevron-up")"></i><span>@(_folded ? "Rozwiń" : "Zwiń")</span>
+            </button>
+        </div>
+        @if (!_folded)
+        {
+            <ul class="leo-card-list">
+                @foreach (var item in _showAll ? _items : _items.Take(VisibleCount))
+                {
+                    <li class="leo-item pp-tone-@Tone(item.Tip.Mood)">
+                        <span class="leo-item-icon"><i class="bi @MoodIcon(item.Tip.Mood)"></i></span>
+                        <div class="leo-item-body">
+                            <span class="leo-item-tag">@Tag(item.Tip.Mood)</span>
+                            <p>@item.Text</p>
+                        </div>
+                        @if (item.Tip.ActionHref is not null)
+                        {
+                            <a class="btn btn-sm @(item.Tip.IsTodo ? "btn-primary" : "btn-outline-secondary") leo-item-action" href="@item.Tip.ActionHref">@item.Tip.ActionLabel</a>
+                        }
+                    </li>
+                }
+            </ul>
+            @if (_items.Count > VisibleCount)
+            {
+                <button type="button" class="leo-card-more" @onclick="() => _showAll = !_showAll">
+                    @(_showAll ? "Pokaż mniej" : $"Pokaż wszystko ({_items.Count})")
+                    <i class="bi @(_showAll ? "bi-chevron-up" : "bi-chevron-down")"></i>
+                </button>
+            }
+            @if (todo == 0 && _items.All(i => !i.Tip.IsPraise))
+            {
+                <p class="leo-card-foot">Gdy coś się wydarzy, napiszę tu i w dymku w rogu ekranu.</p>
+            }
+        }
+    </section>
+}
+
+@code {
+    private sealed class Item(LeoService.Tip tip, string text)
+    {
+        public LeoService.Tip Tip { get; } = tip;
+        public string Text { get; set; } = text;
+    }
+
+    private const string FoldKey = "pp-leo-card-folded";
+    // Własny przedrostek id — w rogu ekranu jest drugi animowany Leo.
+    private static readonly string Svg = PuppyArt.AnimatedSvg("leoc");
+
+    private AssistantService.Config? _config;
+    private List<Item>? _items;
+    private bool _folded;
+    // Najpilniejsze na górze; reszta po kliknięciu, żeby karta nie zasłaniała Pulpitu.
+    private const int VisibleCount = 6;
+    private bool _showAll;
+    private bool _animated;
+    private string _stage = "sit";
+
+    private string Mood => _items?.FirstOrDefault()?.Tip.Mood ?? "happy";
+
+    private string Icon => _config!.Icons.TryGetValue(Mood, out var uri) ? uri : _config.Icons.Values.FirstOrDefault() ?? "";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var config = await Assistant.GetLeoConfigAsync();
+            if (!config.Enabled) return;
+            try { _folded = await JS.InvokeAsync<string?>("localStorage.getItem", FoldKey) == "1"; }
+            catch (JSException) { }
+
+            var tips = await Leo.GetTipsAsync();
+            var items = new List<Item>();
+            foreach (var tip in tips) items.Add(new(tip, await Leo.PhraseAsync(tip, useAi: false)));
+            _config = config;
+            _items = items;
+            _animated = config.Icons.All(i => i.Value == PuppyArt.DataUri(i.Key));
+            StateHasChanged();
+
+            if (_animated)
+            {
+                await Task.Delay(620);
+                _stage = "idle";
+                StateHasChanged();
+            }
+            // Teksty od AI dochodzą po kolei (z pamięcią na dzień w LeoService) — do tego czasu widać tekst z reguł.
+            if (!config.Ai) return;
+            foreach (var item in items)
+            {
+                item.Text = await Leo.PhraseAsync(item.Tip, useAi: true);
+                StateHasChanged();
+            }
+        }
+        catch (Exception ex) when (ex is JSDisconnectedException or TaskCanceledException or InvalidOperationException)
+        {
+            // Karta jest dodatkiem — gdy coś się nie uda, Pulpit działa bez niej.
+        }
+    }
+
+    private async Task ToggleFoldAsync()
+    {
+        _folded = !_folded;
+        try
+        {
+            if (_folded) await JS.InvokeVoidAsync("localStorage.setItem", FoldKey, "1");
+            else await JS.InvokeVoidAsync("localStorage.removeItem", FoldKey);
+        }
+        catch (JSException) { }
+    }
+
+    private string Summary()
+    {
+        var todo = _items!.Count(i => i.Tip.IsTodo);
+        var praise = _items!.Count(i => i.Tip.IsPraise);
+        var other = _items!.Count - todo - praise;
+        var parts = new List<string>();
+        if (todo > 0) parts.Add($"{todo} {PanelUi.Plural(todo, "sprawa do zrobienia", "sprawy do zrobienia", "spraw do zrobienia")}");
+        if (praise > 0) parts.Add($"{praise} {PanelUi.Plural(praise, "powód do radości", "powody do radości", "powodów do radości")}");
+        if (other > 0 && todo + praise > 0) parts.Add($"{other} {PanelUi.Plural(other, "informacja", "informacje", "informacji")}");
+        return parts.Count == 0
+            ? "Spokojnie — nic pilnego. Oto, co wiem:"
+            : string.Join(", ", parts) + (todo > 0 ? ". Najpierw to, co pilne:" : ".");
+    }
+
+    private static string Tone(string mood) => mood switch
+    {
+        "remind" => "warn",
+        "celebrate" => "ok",
+        "think" => "info",
+        _ => "muted"
+    };
+
+    private static string Tag(string mood) => mood switch
+    {
+        "remind" => "Do zrobienia",
+        "celebrate" => "Powód do radości",
+        "think" => "Warto wiedzieć",
+        _ => "Na spokojnie"
+    };
+
+    private static string MoodIcon(string mood) => mood switch
+    {
+        "remind" => "bi-exclamation-lg",
+        "celebrate" => "bi-stars",
+        "think" => "bi-lightbulb",
+        _ => "bi-emoji-smile"
+    };
+}

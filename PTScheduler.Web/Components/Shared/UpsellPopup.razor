@@ -1,0 +1,46 @@
+@* Okienko, gdy coś się kończy (SMS-y, miejsce na wideo, limit klientów). Pokazuje się raz dziennie
+   (gdy już się skończyło) albo raz na kilka dni (gdy niedługo się skończy) — zamknięcie zapamiętuje
+   przeglądarka (js/upsell.js). *@
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Web.Services
+@inject UpsellService Upsell
+@inject NavigationManager Nav
+
+@if (_notice is not null)
+{
+    <div class="ups-pop" data-upsell-key="@_key" hidden role="dialog" aria-modal="true" aria-labelledby="ups-pop-title">
+        <div class="ups-pop-card ups-@_notice.Level">
+            <button type="button" class="btn-close ups-pop-x" aria-label="Zamknij" data-upsell-close></button>
+            <div class="ups-pop-ic"><i class="bi @_notice.Icon"></i></div>
+            <h5 id="ups-pop-title">@_notice.Title</h5>
+            <p>@_notice.Text</p>
+            <div class="ups-pop-actions">
+                <a href="@_notice.CtaHref" class="btn btn-primary" data-upsell-close>@_notice.CtaLabel</a>
+                <button type="button" class="btn btn-link" data-upsell-close>Przypomnij później</button>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private HttpContext? HttpContext { get; set; }
+
+    private UpsellNotice? _notice;
+    private string _key = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _notice = null;
+        var user = HttpContext?.User;
+        if (user is null || (!user.IsInRole(Roles.Admin) && !user.IsInRole(Roles.Trainer))) return;
+        if (AccountSwitchService.IsSwitched(user)) return;
+        var path = Nav.ToBaseRelativePath(Nav.Uri);
+        if (path.StartsWith("admin/sklep", StringComparison.OrdinalIgnoreCase) || path.StartsWith("admin/upgrade", StringComparison.OrdinalIgnoreCase)) return;
+
+        try { _notice = (await Upsell.GetAsync()).FirstOrDefault(n => n.IsUrgent); } catch { }
+        if (_notice is null) return;
+        // Klucz zmienia się co dzień (skończyło się) albo co 3 dni (kończy się) — wtedy okienko wraca.
+        var day = DateTime.UtcNow.DayOfYear;
+        _key = $"{_notice.Key}-{DateTime.UtcNow.Year}-{(_notice.Level == "critical" ? day : day / 3)}";
+    }
+}

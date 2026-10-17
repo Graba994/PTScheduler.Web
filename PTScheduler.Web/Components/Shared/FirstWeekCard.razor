@@ -1,0 +1,89 @@
+@using Microsoft.EntityFrameworkCore
+@using PTScheduler.Domain.Enums
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@inject EntitlementService Entitlements
+@inject IJSRuntime JS
+
+@* „Pierwszy tydzień” na ekranie Dziś: praktyczne kroki do pierwszych prawdziwych treningów w aplikacji
+   (konfiguracja studia to osobne „Pierwsze kroki”). Kroki odhaczają się same; kartę można schować. *@
+@if (_steps is { } steps && !_hidden && steps.Any(s => !s.Done))
+{
+    var done = steps.Count(s => s.Done);
+    <section class="fw" aria-labelledby="fw-title">
+        <div class="fw-head">
+            <span class="fw-ic" aria-hidden="true"><i class="bi bi-flag"></i></span>
+            <div class="min-w-0 flex-grow-1">
+                <h6 id="fw-title">Pierwszy tydzień z aplikacją</h6>
+                <small>@done z @steps.Count — każdy krok odhaczy się sam.</small>
+            </div>
+            <button type="button" class="fw-hide" @onclick="HideAsync" title="Schowaj" aria-label="Schowaj listę"><i class="bi bi-x-lg"></i></button>
+        </div>
+        <div class="fw-bar" aria-hidden="true"><span style="width:@(done * 100 / steps.Count)%"></span></div>
+        <ol class="fw-steps">
+            @foreach (var s in steps)
+            {
+                <li class="@(s.Done ? "done" : "")">
+                    <a href="@s.Href">
+                        <i class="bi @(s.Done ? "bi-check-circle-fill" : s.Icon)"></i>
+                        <span><b>@s.Title</b><small>@s.Hint</small></span>
+                        @if (!s.Done) { <i class="bi bi-chevron-right fw-go"></i> }
+                    </a>
+                </li>
+            }
+        </ol>
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public string UserId { get; set; } = "";
+    [Parameter] public bool IsAdmin { get; set; }
+
+    private sealed record Step(string Title, string Hint, string Href, string Icon, bool Done);
+    private List<Step>? _steps;
+    private bool _hidden = true;
+    private const string HideKey = "hantly-first-week-hidden";
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try { _hidden = await JS.InvokeAsync<string?>("localStorage.getItem", HideKey) == "1"; } catch { _hidden = false; }
+        if (_hidden) return;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var clients = db.Clients.Where(c => IsAdmin || c.TrainerUserId == UserId);
+        var clientIds = clients.Select(c => c.Id);
+        var clientCount = await clients.CountAsync();
+        // Stare konto z historią nie potrzebuje samouczka.
+        if (clientCount >= 15 && await db.Sessions.CountAsync(s => clientIds.Contains(s.ClientId) && s.Status == SessionStatus.Completed) >= 30)
+        {
+            _hidden = true; return;
+        }
+        var plansOn = Entitlements.IsAllowed("TrainingPlansEnabled");
+        var steps = new List<Step>
+        {
+            new("Dodaj swoich klientów", "Z Excela, z kontaktów w telefonie albo ręcznie", "/clients", "bi-people", clientCount >= 3),
+            new("Zaplanuj pierwszą wizytę", "Klient dostanie potwierdzenie i przypomnienie", "/calendar?nowa=1", "bi-calendar-plus",
+                await db.Sessions.AnyAsync(s => clientIds.Contains(s.ClientId))),
+            new("Klient w aplikacji", "Gdy ktoś napisze, zapisze trening albo wypełni ankietę",  "/clients",  "bi-phone",
+                await db.ChatMessages.AnyAsync(m => !m.FromStaff && clientIds.Contains(m.ClientId))
+                || await db.SurveyResponses.AnyAsync(r => clientIds.Contains(r.ClientId))
+                || await db.WorkoutLogs.AnyAsync(l => clientIds.Contains(l.ClientId))),
+        };
+        if (plansOn)
+        {
+            steps.Add(new("Przypisz pierwszy plan", "Klient zobaczy go w aplikacji, Ty — na wizycie", "/plans/new", "bi-clipboard-check",
+                await db.TrainingPlans.AnyAsync(p => p.ClientId != null && clientIds.Contains(p.ClientId!.Value))));
+            steps.Add(new("Poprowadź trening na żywo", "Z ekranu Dziś: „Prowadź trening”", "/dzis", "bi-play-circle",
+                await db.WorkoutLogs.AnyAsync(l => clientIds.Contains(l.ClientId))));
+        }
+        steps.Add(new("Włącz powiadomienia na telefonie", "Nowe rezerwacje i wiadomości z przyciskami", "/Account/Manage/Notifications", "bi-bell",
+            await db.PushSubscriptions.AnyAsync(p => p.UserId == UserId)));
+        _steps = steps;
+        StateHasChanged();
+    }
+
+    private async Task HideAsync()
+    {
+        _hidden = true;
+        try { await JS.InvokeVoidAsync("localStorage.setItem", HideKey, "1"); } catch { }
+    }
+}

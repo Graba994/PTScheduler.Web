@@ -16,6 +16,10 @@ public class SessionPackage
     public int SessionTypeId { get; set; }
     public SessionType SessionType { get; set; } = null!;
 
+    /// <summary>Pakiet dla pary: druga osoba, która korzysta z tego pakietu na wspólnych treningach.</summary>
+    public int? PartnerClientId { get; set; }
+    public Client? PartnerClient { get; set; }
+
     public int TotalSessions { get; set; }
     public int UsedSessions { get; set; } = 0;
 
@@ -31,6 +35,12 @@ public class SessionPackage
     public PackageStatus Status { get; set; } = PackageStatus.Active;
 
     public bool IsHidden { get; set; }
+
+    /// <summary>Kiedy klient dostał przypomnienie „zostały Ci 1–2 treningi” (raz na pakiet).</summary>
+    public DateTime? LowCreditsNotifiedAt { get; set; }
+
+    /// <summary>Kiedy klient dostał przypomnienie o zbliżającym się wygaśnięciu pakietu (raz na pakiet).</summary>
+    public DateTime? ExpiryNotifiedAt { get; set; }
 
     public ICollection<Session> Sessions { get; set; } = [];
 }

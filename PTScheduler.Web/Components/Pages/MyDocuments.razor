@@ -1,0 +1,153 @@
+@page "/my/documents"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Client")]
+@inject IClientDocumentService DocumentSvc
+@inject IClientService ClientService
+@inject IAppClock Clock
+@inject AuthenticationStateProvider AuthState
+@inject IHttpContextAccessor HttpContextAccessor
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Moje dokumenty" />
+
+<div class="mb-3">
+    <h4 class="mb-1 fw-bold"><i class="bi bi-file-earmark-text me-2"></i>Moje dokumenty</h4>
+    <div class="text-muted small">Regulamin i zgody od Twojego trenera. Zgody możesz w każdej chwili wycofać albo udzielić ich ponownie.</div>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_docs.Count == 0)
+{
+    <div class="card border-0 shadow-sm">
+        <div class="card-body text-center py-5 text-muted">
+            <i class="bi bi-file-earmark-check display-6 d-block mb-2"></i>
+            Trener nie dodał jeszcze żadnych dokumentów.
+        </div>
+    </div>
+}
+else
+{
+    @if (_message is not null)
+    {
+        <div class="alert @(_messageOk ? "alert-success" : "alert-danger") py-2 small">@_message</div>
+    }
+    <div class="d-flex flex-column gap-3">
+        @foreach (var d in _docs)
+        {
+            var doc = d;
+            var required = doc.Kind == DocumentKinds.Required;
+            var open = _openId == doc.DocumentId;
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex align-items-start gap-3">
+                        <div class="doc-gate-icon"><i class="bi @(required ? "bi-file-earmark-check" : "bi-person-check")"></i></div>
+                        <div class="flex-grow-1 min-w-0">
+                            <div class="fw-semibold">@doc.Title</div>
+                            <div class="small text-muted">@(required ? "Dokument do akceptacji" : "Zgoda — dobrowolna")</div>
+                            <div class="mt-2">
+                                @if (doc.Pending)
+                                {
+                                    <span class="badge bg-warning-subtle text-warning-emphasis"><i class="bi bi-hourglass-split me-1"></i>@(doc.DecidedVersion is null ? "Czeka na Twoją decyzję" : "Nowa wersja — czeka na decyzję")</span>
+                                }
+                                else if (doc.Accepted == true)
+                                {
+                                    <span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-check-circle me-1"></i>@(required ? "Zaakceptowano" : "Wyrażono zgodę") @FormatDate(doc.DecidedAtUtc)</span>
+                                }
+                                else
+                                {
+                                    <span class="badge bg-secondary-subtle text-secondary-emphasis"><i class="bi bi-x-circle me-1"></i>Brak zgody · @FormatDate(doc.DecidedAtUtc)</span>
+                                }
+                            </div>
+                        </div>
+                        <button class="btn btn-sm btn-outline-secondary flex-shrink-0" @onclick="() => Toggle(doc.DocumentId)">
+                            @(open ? "Zwiń" : "Czytaj")
+                        </button>
+                    </div>
+                    @if (open || doc.Pending)
+                    {
+                        <div class="doc-content mt-3">@doc.Content</div>
+                    }
+                    <div class="d-flex flex-wrap gap-2 justify-content-end mt-3">
+                        @if (required)
+                        {
+                            @if (doc.Pending)
+                            {
+                                <button class="btn btn-primary btn-sm" disabled="@_busy" @onclick="() => Decide(doc, true)"><i class="bi bi-check-lg me-1"></i>Akceptuję</button>
+                            }
+                        }
+                        else if (doc.Pending)
+                        {
+                            <button class="btn btn-outline-secondary btn-sm" disabled="@_busy" @onclick="() => Decide(doc, false)">Nie zgadzam się</button>
+                            <button class="btn btn-primary btn-sm" disabled="@_busy" @onclick="() => Decide(doc, true)"><i class="bi bi-check-lg me-1"></i>Zgadzam się</button>
+                        }
+                        else if (doc.Accepted == true)
+                        {
+                            <button class="btn btn-outline-danger btn-sm" disabled="@_busy" @onclick="() => Decide(doc, false)">Wycofaj zgodę</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-primary btn-sm" disabled="@_busy" @onclick="() => Decide(doc, true)">Wyrażam zgodę</button>
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [PersistentState] public string? ClientIp { get; set; }
+
+    private List<ClientDocumentStatusDto> _docs = [];
+    private int _clientId;
+    private int? _openId;
+    private bool _loading = true, _busy, _messageOk;
+    private string? _message;
+
+    protected override async Task OnInitializedAsync()
+    {
+        ClientIp ??= HttpContextAccessor.HttpContext?.Connection.RemoteIpAddress?.ToString();
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        var client = await ClientService.GetClientByUserIdAsync(userId);
+        if (client is not null)
+        {
+            _clientId = client.Id;
+            _docs = await DocumentSvc.GetForClientAsync(client.Id);
+        }
+        _loading = false;
+    }
+
+    private void Toggle(int id) => _openId = _openId == id ? null : id;
+
+    private async Task Decide(ClientDocumentStatusDto doc, bool accepted)
+    {
+        _busy = true;
+        _message = null;
+        try
+        {
+            await DocumentSvc.DecideAsync(_clientId, doc.DocumentId, accepted, ClientIp);
+            _docs = await DocumentSvc.GetForClientAsync(_clientId);
+            _messageOk = true;
+            _message = accepted ? $"Zapisano: {doc.Title} — zaakceptowano." : $"Zapisano: {doc.Title} — bez zgody.";
+        }
+        catch (Exception ex) when (ex is InvalidOperationException or ArgumentException)
+        {
+            _messageOk = false;
+            _message = ex.Message;
+        }
+        finally
+        {
+            _busy = false;
+        }
+    }
+
+    private string FormatDate(DateTime? utc) =>
+        utc is DateTime d ? Clock.ToWallClock(d).ToString("d MMMM yyyy, HH:mm", new System.Globalization.CultureInfo("pl-PL")) : "";
+}

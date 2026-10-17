@@ -24,6 +24,23 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
             ClientCancelledSession = prefs.ClientCancelledSession,
             NewClientPending = prefs.NewClientPending,
             ExpiringPackages = prefs.ExpiringPackages,
+            TrainerMessages = prefs.TrainerMessages,
+            ShowHints = prefs.ShowHints,
+            PushReminders = prefs.PushReminders,
+            PushSessions = prefs.PushSessions,
+            PushPackages = prefs.PushPackages,
+            PushMessages = prefs.PushMessages,
+            PushTrainerMessages = prefs.PushTrainerMessages,
+            PushMedals = prefs.PushMedals,
+            MonthlySummary = prefs.MonthlySummary,
+            PushMonthlySummary = prefs.PushMonthlySummary,
+            PushClientActivity = prefs.PushClientActivity,
+            MorningBrief = prefs.MorningBrief,
+            PushMorningBrief = prefs.PushMorningBrief,
+            MorningBriefHour = prefs.MorningBriefHour,
+            PushBeforeSession = prefs.PushBeforeSession,
+            SmsReminders = prefs.SmsReminders,
+            SmsTrainerMessages = prefs.SmsTrainerMessages,
         };
     }
 
@@ -44,6 +61,23 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
         prefs.ClientCancelledSession = dto.ClientCancelledSession;
         prefs.NewClientPending = dto.NewClientPending;
         prefs.ExpiringPackages = dto.ExpiringPackages;
+        prefs.TrainerMessages = dto.TrainerMessages;
+        prefs.ShowHints = dto.ShowHints;
+        prefs.PushReminders = dto.PushReminders;
+        prefs.PushSessions = dto.PushSessions;
+        prefs.PushPackages = dto.PushPackages;
+        prefs.PushMessages = dto.PushMessages;
+        prefs.PushTrainerMessages = dto.PushTrainerMessages;
+        prefs.PushMedals = dto.PushMedals;
+        prefs.MonthlySummary = dto.MonthlySummary;
+        prefs.PushMonthlySummary = dto.PushMonthlySummary;
+        prefs.PushClientActivity = dto.PushClientActivity;
+        prefs.MorningBrief = dto.MorningBrief;
+        prefs.PushMorningBrief = dto.PushMorningBrief;
+        prefs.MorningBriefHour = Math.Clamp(dto.MorningBriefHour, 5, 11);
+        prefs.PushBeforeSession = dto.PushBeforeSession;
+        prefs.SmsReminders = dto.SmsReminders;
+        prefs.SmsTrainerMessages = dto.SmsTrainerMessages;
         await db.SaveChangesAsync();
     }
 
@@ -59,7 +93,21 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
             NotificationTypes.ClientCancelledSession => prefs.ClientCancelledSession,
             NotificationTypes.NewClientPending => prefs.NewClientPending,
             NotificationTypes.ExpiringPackages => prefs.ExpiringPackages,
+            NotificationTypes.TrainerMessages => prefs.TrainerMessages,
             NotificationTypes.SessionReminders => prefs.SessionReminders,
+            NotificationTypes.PushReminders => prefs.PushReminders,
+            NotificationTypes.PushSessions => prefs.PushSessions,
+            NotificationTypes.PushPackages => prefs.PushPackages,
+            NotificationTypes.PushMessages => prefs.PushMessages,
+            NotificationTypes.PushTrainerMessages => prefs.PushTrainerMessages,
+            NotificationTypes.PushMedals => prefs.PushMedals,
+            NotificationTypes.MonthlySummary => prefs.MonthlySummary,
+            NotificationTypes.PushMonthlySummary => prefs.PushMonthlySummary,
+            NotificationTypes.PushClientActivity => prefs.PushClientActivity,
+            NotificationTypes.PushMorningBrief => prefs.PushMorningBrief,
+            NotificationTypes.PushBeforeSession => prefs.PushBeforeSession,
+            NotificationTypes.SmsReminders => prefs.SmsReminders,
+            NotificationTypes.SmsTrainerMessages => prefs.SmsTrainerMessages,
             _ => true
         };
     }

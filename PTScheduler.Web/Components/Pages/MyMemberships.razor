@@ -1,0 +1,209 @@
+@page "/my/memberships"
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Memberships
+@using PTScheduler.Domain.Enums
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = PTScheduler.Domain.Constants.Roles.Client)]
+@inject IMembershipService MembershipService
+@inject IClientService ClientService
+@inject IPaymentService PaymentService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject EntitlementService Entitlements
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Moje karnety" />
+
+<div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <h4 class="page-title mb-0"><i class="bi bi-arrow-repeat me-2" style="color:var(--c-primary)"></i>Moje karnety</h4>
+    <a href="/packages" class="btn btn-sm btn-outline-primary"><i class="bi bi-bag me-1"></i>Sklep</a>
+</div>
+
+@if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else if (_memberships.Count == 0)
+{
+    <div class="empty-state">
+        <div class="empty-state-icon">🔁</div>
+        <div class="empty-state-title">Nie masz karnetu</div>
+        <div class="empty-state-desc">Karnet to stała liczba treningów co miesiąc w stałej cenie. Sprawdź ofertę w sklepie albo zapytaj trenera.</div>
+        <a href="/packages" class="btn btn-primary btn-sm">Zobacz karnety</a>
+    </div>
+}
+else
+{
+    @if (_message is not null)
+    {
+        <div class="alert @(_messageOk ? "alert-success" : "alert-danger") small py-2">@_message</div>
+    }
+    @foreach (var m in _memberships)
+    {
+        var current = m.Periods.FirstOrDefault();
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="d-flex justify-content-between align-items-start flex-wrap gap-2">
+                    <div>
+                        <div class="fw-semibold">@m.PlanName</div>
+                        <div class="small text-muted">@m.SessionsPerPeriod sesji · @m.Price.ToString("0.00") @m.Currency za okres</div>
+                    </div>
+                    <span class="badge @StatusCss(m.Status)">@StatusLabel(m)</span>
+                </div>
+
+                @if (current is not null && m.Status != MembershipStatus.Cancelled)
+                {
+                    <div class="mt-2 small">
+                        Bieżący okres: <strong>@current.PeriodStart.ToString("dd.MM") – @current.PeriodEnd.ToString("dd.MM.yyyy")</strong>,
+                        wykorzystano <strong>@current.SessionsUsed z @current.SessionsTotal</strong> sesji.
+                    </div>
+                }
+
+                @foreach (var due in m.Periods.Where(p => p.Status == MembershipPeriodStatus.Due))
+                {
+                    <div class="alert alert-warning small py-2 mt-2 mb-0">
+                        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+                            <span>
+                                Do zapłaty <strong>@due.Amount.ToString("0.00") @m.Currency</strong> za okres
+                                @due.PeriodStart.ToString("dd.MM") – @due.PeriodEnd.ToString("dd.MM") (termin @due.DueDate.ToString("dd.MM")).
+                            </span>
+                            @if (_options.Count > 0)
+                            {
+                                <button class="btn btn-sm btn-primary" @onclick="() => _payFor = due">Zapłać online</button>
+                            }
+                        </div>
+                    </div>
+                }
+
+                @if (m.Status is MembershipStatus.Active or MembershipStatus.PastDue)
+                {
+                    <div class="mt-3">
+                        @if (m.CancelAtPeriodEnd)
+                        {
+                            <span class="small text-muted me-2">Karnet zakończy się @m.NextBillingDate.AddDays(-1).ToString("dd.MM.yyyy").</span>
+                            <button class="btn btn-sm btn-outline-primary" @onclick="() => ResumeAsync(m.Id)">Jednak kontynuuję</button>
+                        }
+                        else if (_confirmCancelId == m.Id)
+                        {
+                            <span class="small me-2">Zakończyć karnet z końcem bieżącego okresu?</span>
+                            <button class="btn btn-sm btn-danger" @onclick="() => CancelAsync(m.Id)">Tak, zakończ</button>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmCancelId = null">Nie</button>
+                        }
+                        else
+                        {
+                            <span class="small text-muted me-2">Następny okres od @m.NextBillingDate.ToString("dd.MM.yyyy").</span>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmCancelId = m.Id">Zrezygnuj</button>
+                        }
+                    </div>
+                }
+            </div>
+        </div>
+    }
+}
+
+@if (_payFor is not null)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.45)">
+        <div class="modal-dialog modal-dialog-centered modal-sm">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h6 class="modal-title">Zapłać @_payFor.Amount.ToString("0.00") zł</h6>
+                    <button type="button" class="btn-close" @onclick="() => _payFor = null"></button>
+                </div>
+                <div class="modal-body d-grid gap-2">
+                    @foreach (var opt in _options)
+                    {
+                        <button class="pay-option" @onclick="() => PayAsync(opt.Key)" disabled="@_busy">
+                            <i class="bi @opt.Icon"></i><span>@opt.Name</span>
+                            <i class="bi bi-chevron-right ms-auto"></i>
+                        </button>
+                    }
+                    @if (_payError is not null) { <div class="alert alert-danger small py-2 mb-0">@_payError</div> }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private bool _loading = true;
+    private bool _busy;
+    private string _userId = "";
+    private string _email = "";
+    private int _clientId;
+    private List<MembershipDto> _memberships = [];
+    private List<PaymentOptionDto> _options = [];
+    private MembershipPeriodDto? _payFor;
+    private string? _payError;
+    private int? _confirmCancelId;
+    private string? _message;
+    private bool _messageOk;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _email = auth.User.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value ?? auth.User.Identity?.Name ?? "";
+        var client = await ClientService.GetClientByUserIdAsync(_userId);
+        if (client is not null)
+        {
+            _clientId = client.Id;
+            _memberships = await MembershipService.GetClientMembershipsAsync(client.Id);
+        }
+        _options = (await PaymentService.GetEnabledOptionsAsync())
+            .Where(o => o.Key switch
+            {
+                "payu" => Entitlements.IsAllowed("IntegrationPayU"),
+                "p24" => Entitlements.IsAllowed("IntegrationPrzelewy24"),
+                _ => true
+            }).ToList();
+        _loading = false;
+    }
+
+    private async Task PayAsync(string providerKey)
+    {
+        if (_payFor is null) return;
+        _busy = true; _payError = null;
+        var res = await PaymentService.StartMembershipPeriodCheckoutAsync(_userId, _payFor.Id, providerKey, Nav.BaseUri, _email, string.Empty);
+        if (res.Ok && res.RedirectUrl is not null) { Nav.NavigateTo(res.RedirectUrl, forceLoad: true); return; }
+        _payError = res.Error ?? "Nie udało się rozpocząć płatności.";
+        _busy = false;
+    }
+
+    private async Task CancelAsync(int id)
+    {
+        if (!Owns(id)) return;
+        await MembershipService.CancelAsync(id, immediately: false);
+        _confirmCancelId = null;
+        _message = "Karnet zakończy się z końcem bieżącego okresu. Do tego czasu korzystasz z sesji jak dotąd."; _messageOk = true;
+        _memberships = await MembershipService.GetClientMembershipsAsync(_clientId);
+    }
+
+    private async Task ResumeAsync(int id)
+    {
+        if (!Owns(id)) return;
+        await MembershipService.ResumeCancelledAsync(id);
+        _message = "Rezygnacja cofnięta — karnet będzie odnawiany."; _messageOk = true;
+        _memberships = await MembershipService.GetClientMembershipsAsync(_clientId);
+    }
+
+    // Operacje wyłącznie na własnych karnetach (lista pochodzi z profilu klienta).
+    private bool Owns(int membershipId) => _memberships.Any(m => m.Id == membershipId);
+
+    private static string StatusCss(MembershipStatus s) => s switch
+    {
+        MembershipStatus.Active => "bg-success-subtle text-success-emphasis",
+        MembershipStatus.PastDue => "bg-danger-subtle text-danger-emphasis",
+        MembershipStatus.Paused => "bg-secondary-subtle text-secondary-emphasis",
+        _ => "bg-light text-muted border"
+    };
+
+    private static string StatusLabel(MembershipDto m) => m.Status switch
+    {
+        MembershipStatus.Active => m.CancelAtPeriodEnd ? "Aktywny — kończy się" : "Aktywny",
+        MembershipStatus.PastDue => "Zaległa płatność",
+        MembershipStatus.Paused => "Wstrzymany",
+        MembershipStatus.Pending => "Czeka na płatność",
+        _ => "Zakończony"
+    };
+}

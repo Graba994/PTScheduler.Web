@@ -1,0 +1,78 @@
+@implements IDisposable
+
+@* Asystent w kreatorze: maskotka i dymek z podpowiedzią do bieżącego kroku (teksty z BuilderGuide).
+   Przy nowej podpowiedzi maskotka podskakuje; „×” chowa dymek — maskotka zostaje i otwiera go z powrotem. *@
+@if (Line is not null)
+{
+    <div class="bd-guide @(_open ? "" : "is-closed")" role="status" aria-live="polite">
+        <button type="button" class="bd-guide-mascot" @onclick="Toggle" aria-expanded="@(_open ? "true" : "false")"
+                aria-label="@(_open ? $"Schowaj podpowiedzi — {Name}" : $"Pokaż podpowiedzi — {Name}")">
+            @if (_look?.AnimatedSvg is { } svg)
+            {
+                <span class="hm-live st-@_stage md-@Line.Mood">@((MarkupString)svg)</span>
+            }
+            else
+            {
+                <img src="@(_look?.IconUrl(Line.Mood) ?? $"/assistant/mascot/{Line.Mood}.png")" alt="" width="56" height="56" />
+            }
+        </button>
+        @if (_open)
+        {
+            <div class="bd-guide-bubble">
+                <div class="bd-guide-head">
+                    <b>@Name</b><span class="bd-guide-tag"><i class="bi bi-stars"></i>asystent</span>
+                    <button type="button" class="bd-guide-x" @onclick="Toggle" aria-label="Schowaj podpowiedzi"><i class="bi bi-x-lg"></i></button>
+                </div>
+                <p @key="Line.Text">@Line.Text</p>
+            </div>
+        }
+    </div>
+}
+
+@code {
+    [Parameter, EditorRequired] public BuilderGuide.Line? Line { get; set; }
+    [Parameter] public AssistantService.PublicLook? Look { get; set; }
+
+    private AssistantService.PublicLook? _look => Look;
+    private bool _open = true;
+    private string _stage = "enter";
+    private string? _lastText;
+    private int _version;
+    private CancellationTokenSource _cts = new();
+
+    public string Name => _look?.Name ?? AssistantService.DefaultName;
+
+    protected override void OnInitialized() => _ = StageAsync("enter", 1500);
+
+    protected override void OnParametersSet()
+    {
+        if (Line is null || Line.Text == _lastText) return;
+        var first = _lastText is null;
+        _lastText = Line.Text;
+        // Nowa podpowiedź (zmiana kroku albo reakcja na wpisane dane) — krótki podskok, przy radości salto.
+        if (!first && _stage is "idle" or "excited") _ = StageAsync(Line.Mood == "celebrate" ? "excited" : "land", Line.Mood == "celebrate" ? 1050 : 600);
+    }
+
+    private async Task StageAsync(string stage, int ms)
+    {
+        var v = ++_version;
+        _stage = stage;
+        await InvokeAsync(StateHasChanged);
+        try { await Task.Delay(ms, _cts.Token); } catch (TaskCanceledException) { return; }
+        if (v != _version) return;
+        _stage = "idle";
+        await InvokeAsync(StateHasChanged);
+    }
+
+    private void Toggle()
+    {
+        _open = !_open;
+        if (_open) _ = StageAsync("land", 600);
+    }
+
+    public void Dispose()
+    {
+        _cts.Cancel();
+        _cts.Dispose();
+    }
+}

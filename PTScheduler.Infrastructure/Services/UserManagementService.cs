@@ -11,37 +11,49 @@ public class UserManagementService(
     UserManager<ApplicationUser> userManager,
     IDbContextFactory<ApplicationDbContext> dbFactory) : IUserManagementService
 {
+    // Odczyty idą przez własny kontekst z fabryki, a nie przez UserManager: ten
+    // korzysta ze wspólnego DbContext obwodu Blazora i przy równoległych
+    // zapytaniach (strona + menu) rzucał „A second operation was started…”.
     public async Task<List<UserDto>> GetAllUsersAsync()
     {
-        var users = await userManager.Users
+        await using var db = dbFactory.CreateDbContext();
+        var users = await db.Users.AsNoTracking()
             .Include(u => u.Supervisor)
             .OrderBy(u => u.Email)
             .ToListAsync();
-
-        var result = new List<UserDto>();
-        foreach (var user in users)
-        {
-            var roles = await userManager.GetRolesAsync(user);
-            result.Add(MapToDto(user, roles.FirstOrDefault() ?? string.Empty));
-        }
-        return result;
+        var roles = await RoleByUserAsync(db, users.Select(u => u.Id).ToList());
+        return users.Select(u => MapToDto(u, roles.GetValueOrDefault(u.Id, string.Empty))).ToList();
     }
 
     public async Task<UserDto?> GetUserAsync(string id)
     {
-        var user = await userManager.Users
+        await using var db = dbFactory.CreateDbContext();
+        var user = await db.Users.AsNoTracking()
             .Include(u => u.Supervisor)
             .FirstOrDefaultAsync(u => u.Id == id);
-
         if (user is null) return null;
-        var roles = await userManager.GetRolesAsync(user);
-        return MapToDto(user, roles.FirstOrDefault() ?? string.Empty);
+        var roles = await RoleByUserAsync(db, [id]);
+        return MapToDto(user, roles.GetValueOrDefault(id, string.Empty));
     }
 
     public async Task<List<UserDto>> GetTrainersAsync()
     {
-        var trainers = await userManager.GetUsersInRoleAsync(Roles.Trainer);
+        await using var db = dbFactory.CreateDbContext();
+        var trainers = await (from u in db.Users.AsNoTracking()
+                              join ur in db.UserRoles on u.Id equals ur.UserId
+                              join r in db.Roles on ur.RoleId equals r.Id
+                              where r.Name == Roles.Trainer
+                              select u).ToListAsync();
         return trainers.Select(u => MapToDto(u, Roles.Trainer)).ToList();
+    }
+
+    private static async Task<Dictionary<string, string>> RoleByUserAsync(ApplicationDbContext db, List<string> userIds)
+    {
+        var rows = await (from ur in db.UserRoles
+                          join r in db.Roles on ur.RoleId equals r.Id
+                          where userIds.Contains(ur.UserId)
+                          select new { ur.UserId, r.Name }).ToListAsync();
+        return rows.GroupBy(x => x.UserId).ToDictionary(g => g.Key, g => g.Select(x => x.Name ?? "").OrderBy(n => n).First());
     }
 
     public async Task SetRoleAsync(string userId, string role)
@@ -61,6 +73,38 @@ public class UserManagementService(
             user.SupervisorId = null;
             await userManager.UpdateAsync(user);
         }
+    }
+
+    public async Task<SoloModeState> GetSoloModeAsync()
+    {
+        var trainers = await userManager.GetUsersInRoleAsync(Roles.Trainer);
+        var assistants = await userManager.GetUsersInRoleAsync(Roles.Subordinate);
+        if (trainers.Count != 1 || assistants.Count > 0) return new(false, false, null, null, null);
+        var t = trainers[0];
+        var enabled = await userManager.IsInRoleAsync(t, Roles.Admin);
+        return new(true, enabled, t.Id, $"{t.FirstName} {t.LastName}".Trim(), t.Email);
+    }
+
+    public async Task<(bool Ok, string? Error)> SetSoloModeAsync(bool on)
+    {
+        var state = await GetSoloModeAsync();
+        if (!state.Possible || state.TrainerId is null)
+            return (false, "Tryb „pracuję sam” działa, gdy w studiu jest jeden profil trenera i nie ma asystentów.");
+        var trainer = await userManager.FindByIdAsync(state.TrainerId);
+        if (trainer is null) return (false, "Nie znaleziono profilu trenera.");
+        if (on == state.Enabled) return (true, null);
+        if (!on)
+        {
+            // Bez drugiego administratora nikt nie mógłby już zmieniać ustawień studia.
+            var admins = await userManager.GetUsersInRoleAsync(Roles.Admin);
+            if (!admins.Any(a => a.Id != trainer.Id && (a.LockoutEnd is null || a.LockoutEnd < DateTimeOffset.UtcNow)))
+                return (false, "Najpierw utwórz osobne konto administratora — inaczej nikt nie zmieni ustawień studia.");
+        }
+        var result = on ? await userManager.AddToRoleAsync(trainer, Roles.Admin) : await userManager.RemoveFromRoleAsync(trainer, Roles.Admin);
+        if (!result.Succeeded) return (false, string.Join(" ", result.Errors.Select(e => e.Description)));
+        // Nowe uprawnienia obowiązują od następnego logowania na profil trenera.
+        await userManager.UpdateSecurityStampAsync(trainer);
+        return (true, null);
     }
 
     public async Task SetSupervisorAsync(string userId, string? supervisorId)
@@ -91,8 +135,14 @@ public class UserManagementService(
 
     public async Task<(bool Success, string? Error)> CreateUserAsync(CreateUserDto dto)
     {
-        if (await userManager.FindByEmailAsync(dto.Email) is not null)
-            return (false, $"Email '{dto.Email}' jest już zarejestrowany.");
+        dto.Email = Domain.Rules.EmailRules.Normalize(dto.Email);
+        if (Domain.Rules.EmailRules.Problem(dto.Email) is { } problem) return (false, problem);
+        if (await userManager.FindByEmailAsync(dto.Email) is { } existing)
+        {
+            var roles = await userManager.GetRolesAsync(existing);
+            var who = roles.Contains(Roles.Client) ? "klienta" : roles.Contains(Roles.Trainer) ? "trenera" : roles.Contains(Roles.Subordinate) ? "asystenta" : "administratora";
+            return (false, $"Adres {dto.Email} ma już konto {who} ({$"{existing.FirstName} {existing.LastName}".Trim()}). Jeden adres = jedno konto — użyj innego albo edytuj istniejące.");
+        }
 
         var user = new ApplicationUser
         {
@@ -100,7 +150,9 @@ public class UserManagementService(
             Email          = dto.Email,
             FirstName      = dto.FirstName,
             LastName       = dto.LastName,
-            EmailConfirmed = true
+            EmailConfirmed = true,
+            // Hasło startowe zna admin — użytkownik ustawi własne przy pierwszym logowaniu.
+            MustChangePassword = true
         };
 
         var result = await userManager.CreateAsync(user, dto.Password);
@@ -141,6 +193,11 @@ public class UserManagementService(
 
         await userManager.RemovePasswordAsync(user);
         var result = await userManager.AddPasswordAsync(user, newPassword);
+        if (result.Succeeded)
+        {
+            user.MustChangePassword = true;
+            await userManager.UpdateAsync(user);
+        }
 
         return result.Succeeded
             ? (true, null)

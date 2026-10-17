@@ -1,0 +1,206 @@
+@page "/clients/{ClientId:int}/ankieta/{Slug}"
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Surveys
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
+@attribute [Authorize(Roles = "Admin,Trainer,Subordinate")]
+@inject ISurveyService Surveys
+@inject IClientService ClientService
+@inject IAuditLogService AuditLog
+@inject IAppClock Clock
+@inject AuthenticationStateProvider AuthState
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Trener wypełnia ankietę razem z klientem na spotkaniu (np. na tablecie): te same pytania co w aplikacji klienta. *@
+
+<AppTitle Page="@(_template is null ? "Ankieta" : $"{_template.Name} — wspólnie")" />
+
+<div class="row justify-content-center">
+    <div class="col-12 col-md-10 col-lg-8">
+        @if (!_done)
+        {
+            <BackLink Href="@ReturnUrl" />
+        }
+        @if (_loading)
+        {
+            <div class="text-center text-muted py-5"><div class="spinner-border"></div></div>
+        }
+        else if (_error is not null)
+        {
+            <div class="alert alert-warning"><i class="bi bi-info-circle me-2"></i>@_error</div>
+            <a href="@ReturnUrl" class="btn btn-outline-primary">Wróć</a>
+        }
+        else if (_done)
+        {
+            <div class="card">
+                <div class="card-body p-4 text-center">
+                    <div class="mb-2" style="font-size:2.4rem;color:var(--c-success,#16A34A)"><i class="bi bi-check-circle-fill"></i></div>
+                    <h5 class="fw-bold">Zapisane</h5>
+                    <p class="text-muted small mb-4">
+                        Ankieta jest w profilu @_clientName z dopiskiem „wypełniona wspólnie z trenerem”. @(_flags > 0 ? $"Odpowiedzi wymagające uwagi: {_flags}." : "")
+                    </p>
+                    <a href="@ReturnUrl" class="btn btn-primary">Wróć do klienta</a>
+                </div>
+            </div>
+        }
+        else if (_template is not null)
+        {
+            <div class="st-banner">
+                <span class="st-banner-ic"><i class="bi bi-people-fill"></i></span>
+                <div>
+                    <b>Wypełniacie razem z: @_clientName</b>
+                    <span>Czytaj pytania na głos albo podaj tablet klientowi. Odpowiedzi zapiszą się w profilu klienta, jakby wypełnił ankietę sam.</span>
+                </div>
+            </div>
+
+            <div class="card st-card">
+                <div class="card-body p-4">
+                    <h4 class="fw-bold mb-1">
+                        <i class="bi @(_kind == SurveyKind.HealthIntake ? "bi-clipboard2-pulse" : "bi-emoji-smile") me-2" style="color:var(--c-primary)"></i>@_template.Name
+                    </h4>
+                    @if (_kind == SurveyKind.PostWorkout)
+                    {
+                        <div class="d-flex align-items-center gap-2 my-2 flex-wrap">
+                            <label class="small text-muted" for="st-date">Trening z dnia</label>
+                            <input id="st-date" type="date" class="form-control form-control-sm" style="max-width:170px"
+                                   value="@_workoutDate.ToString("yyyy-MM-dd")" max="@Clock.Today.ToString("yyyy-MM-dd")"
+                                   @onchange="OnDateChanged" />
+                        </div>
+                    }
+                    @if (_previousAt is { } prev)
+                    {
+                        <div class="alert alert-info small py-2">
+                            <i class="bi bi-clock-history me-1"></i>Ostatnio wypełniona @Clock.ToWallClock(prev).ToString("dd.MM.yyyy") — odpowiedzi są wpisane, możecie je razem zaktualizować.
+                        </div>
+                    }
+                    @* key: po zmianie dnia formularz ładuje odpowiedzi z tego dnia od nowa. *@
+                    <SurveyForm @key="_formKey" Template="_template" Submit="SubmitAsync" Initial="_initial"
+                                SubmitLabel="Zapisz ankietę klienta" ShowNumbers="@(_kind == SurveyKind.HealthIntake)"
+                                ConsentText="@(_kind == SurveyKind.HealthIntake ? ConsentText : null)" />
+                </div>
+            </div>
+        }
+    </div>
+</div>
+
+<style>
+    .st-banner {
+        display: flex; gap: .8rem; align-items: flex-start; padding: .9rem 1.1rem; margin-bottom: 1rem;
+        border-radius: 14px; border: 1px solid var(--c-primary); background: var(--c-primary-light);
+    }
+    .st-banner-ic {
+        width: 38px; height: 38px; border-radius: 10px; flex-shrink: 0; display: grid; place-items: center;
+        background: var(--c-primary); color: #fff;
+    }
+    .st-banner b { display: block; }
+    .st-banner span { font-size: .85rem; color: var(--bs-secondary-color); }
+    /* Większe pytania i przyciski — wygodniej, gdy klient patrzy na ekran trenera. */
+    .st-card .survey-question .form-label { font-size: 1.02rem; }
+    .st-card .survey-scale-btn { min-width: 2.6rem; min-height: 2.6rem; }
+</style>
+
+@code {
+    [Parameter] public int ClientId { get; set; }
+    [Parameter] public string Slug { get; set; } = string.Empty;
+    [SupplyParameterFromQuery(Name = "date")] public string? DateQuery { get; set; }
+
+    private string ReturnUrl => $"/clients/{ClientId}?tab=surveys";
+    private string ConsentText =>
+        $"{_clientName} wyraża zgodę na przetwarzanie podanych danych o stanie zdrowia przez trenera w celu bezpiecznego " +
+        "zaplanowania treningów (art. 9 ust. 2 lit. a RODO). Zaznacz tylko, jeśli klient zgodził się na to przy Tobie. " +
+        "Zgodę można w każdej chwili wycofać w profilu klienta — ankieta zostanie wtedy usunięta.";
+
+    private bool _loading = true;
+    private bool _done;
+    private string? _error;
+    private SurveyKind _kind;
+    private SurveyTemplateDto? _template;
+    private string _clientName = "klient";
+    private string _userId = string.Empty;
+    private string _userEmail = string.Empty;
+    private string _userRole = string.Empty;
+    private DateOnly _workoutDate;
+    private DateTime? _previousAt;
+    private Dictionary<string, SurveyAnswerInput>? _initial;
+    private int _formKey;
+    private int _flags;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _loading = true;
+        _kind = Slug switch { "zdrowie" => SurveyKind.HealthIntake, "po-treningu" => SurveyKind.PostWorkout, _ => (SurveyKind)(-1) };
+        if (!Enum.IsDefined(_kind)) { _error = "Nie ma takiej ankiety."; _loading = false; return; }
+
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _userEmail = auth.User.Identity?.Name ?? _userId;
+        var isAdmin = auth.User.IsInRole(Roles.Admin);
+        _userRole = isAdmin ? Roles.Admin : auth.User.IsInRole(Roles.Trainer) ? Roles.Trainer : Roles.Subordinate;
+
+        // Ten sam warunek co w profilu klienta: administrator albo trener prowadzący.
+        var client = await ClientService.GetClientAsync(ClientId);
+        if (client is null || (!isAdmin && client.TrainerUserId != _userId))
+        {
+            _error = "Nie znaleziono klienta albo nie masz do niego dostępu.";
+            _loading = false;
+            return;
+        }
+        _clientName = client.FullName;
+
+        _template = await Surveys.GetTemplateAsync(_kind);
+        _workoutDate = DateOnly.TryParse(DateQuery, System.Globalization.CultureInfo.InvariantCulture, out var d) ? d : Clock.Today;
+        await LoadInitialAsync();
+        _loading = false;
+    }
+
+    private async Task LoadInitialAsync()
+    {
+        _initial = null;
+        _previousAt = null;
+        if (_kind == SurveyKind.PostWorkout)
+        {
+            var existing = (await Surveys.GetPostWorkoutByDateAsync(ClientId, 400)).GetValueOrDefault(_workoutDate);
+            if (existing is not null) { _previousAt = existing.SubmittedAtUtc; _initial = ToInputs(existing); }
+        }
+        else
+        {
+            var last = await Surveys.GetLatestAsync(ClientId, SurveyKind.HealthIntake);
+            if (last is not null) { _previousAt = last.SubmittedAtUtc; _initial = ToInputs(last); }
+        }
+        _formKey++;
+    }
+
+    private async Task OnDateChanged(ChangeEventArgs e)
+    {
+        if (!DateOnly.TryParse(e.Value?.ToString(), System.Globalization.CultureInfo.InvariantCulture, out var d) || d > Clock.Today) return;
+        _workoutDate = d;
+        await LoadInitialAsync();
+    }
+
+    private async Task<List<string>> SubmitAsync(Dictionary<string, SurveyAnswerInput> answers)
+    {
+        var (errors, response) = await Surveys.SubmitAsync(ClientId, _kind, answers,
+            _kind == SurveyKind.PostWorkout ? _workoutDate : null,
+            healthDataConsent: _kind == SurveyKind.HealthIntake,
+            filledByStaffUserId: _userId);
+        if (errors.Count == 0)
+        {
+            _flags = response?.FlagCount ?? 0;
+            await AuditLog.LogAsync(_userId, _userEmail, _userRole, "SurveyFilledTogether", "SurveyResponse",
+                response?.Id.ToString(), $"Klient: {_clientName}, ankieta: {_template?.Name}");
+            _done = true;
+            await InvokeAsync(StateHasChanged);
+        }
+        return errors;
+    }
+
+    private static Dictionary<string, SurveyAnswerInput> ToInputs(SurveyResponseDto r) =>
+        r.Answers.ToDictionary(a => a.Key, a => new SurveyAnswerInput
+        {
+            Number = a.Number,
+            // Zgodę na dane o zdrowiu trzeba potwierdzić za każdym razem.
+            Bool = a.Type == SurveyQuestionType.YesNo && a.Key == "consent" ? null : a.Bool,
+            Text = a.Text,
+            Choices = [.. a.Choices]
+        });
+}
