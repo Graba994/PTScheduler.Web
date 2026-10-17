@@ -16,7 +16,15 @@
         <MessageDraftBox ClientId="ClientId" Phone="@Phone" Purpose="purpose" Fixed="true" AutoDraft="true" />
     </section>
 }
-@if (_extra is { } on && (on || ShowReminder))
+@if (_extra is true && !ShowReminder)
+{
+    @* Włączone wcześniej — jedna linijka z możliwością wyłączenia, bez całej karty. *@
+    <div class="cnc-line">
+        <i class="bi bi-alarm"></i><span>Dodatkowe przypomnienie 2 h przed wizytą: <b>włączone</b></span>
+        <button type="button" class="btn btn-link btn-sm p-0 ms-auto" disabled="@_busy" @onclick="TurnOffAsync">Wyłącz</button>
+    </div>
+}
+else if (_extra is { } on && ShowReminder)
 {
     <section class="cnc">
         <div class="cnc-head">
@@ -50,6 +58,13 @@
         _isAdmin = user.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
         _purpose = DraftQuery is "Comeback" or "Package" or "Congrats" or "Motivation" && Enum.TryParse<DraftPurpose>(DraftQuery, out var p) ? p : null;
         try { _extra = await Proposals.GetExtraReminderAsync(_userId, _isAdmin, ClientId); } catch { _extra = null; }
+    }
+
+    private async Task TurnOffAsync()
+    {
+        _busy = true;
+        try { if (await Proposals.SetExtraReminderAsync(_userId, _isAdmin, ClientId, false)) _extra = false; }
+        finally { _busy = false; }
     }
 
     private async Task ToggleAsync(ChangeEventArgs e)

@@ -53,3 +53,15 @@ document.addEventListener('click', e => {
 document.addEventListener('keydown', e => {
     if (e.key === 'Escape') document.querySelectorAll('details.qa[open]').forEach(d => d.removeAttribute('open'));
 });
+
+// Profil klienta na telefonie: karty przeglądu zwinięte do nagłówka (z najważniejszą liczbą), rozwijane dotknięciem.
+document.addEventListener('click', function (e) {
+    if (window.innerWidth >= 768) return;
+    var head = e.target.closest('.cp-overview .cp-card-title, .cp-overview .cp-card-head');
+    if (!head || e.target.closest('a, button, input, select, textarea, label')) return;
+    var card = head.closest('.cp-card');
+    if (!card) return;
+    card.classList.toggle('is-open');
+    var title = card.querySelector('.cp-card-title');
+    if (title) title.setAttribute('aria-expanded', card.classList.contains('is-open') ? 'true' : 'false');
+});

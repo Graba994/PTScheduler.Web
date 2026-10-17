@@ -35,7 +35,11 @@
             <CalendarFeedButton />
             @if (_canEdit) { <ScheduleViewSwitch Current="calendar" /> }
         </div>
-        <div class="cal-filters">
+        @* Na telefonie filtry schowane pod jednym przyciskiem — większość osób i tak patrzy na „Wszystkie”. *@
+        <button type="button" class="cal-filter-toggle @(IsAllActive ? "" : "on")" aria-expanded="@(_filtersOpen ? "true" : "false")" @onclick="() => _filtersOpen = !_filtersOpen">
+            <i class="bi bi-funnel"></i>Filtr@(IsAllActive ? "" : $": {_activeStatuses.Count}")<i class="bi @(_filtersOpen ? "bi-chevron-up" : "bi-chevron-down")"></i>
+        </button>
+        <div class="cal-filters @(_filtersOpen ? "is-open" : "")">
             <button class='cal-filter-chip chip-all @(IsAllActive ? "active" : "")'
                     @onclick='() => ToggleFilter("All")'>Wszystkie</button>
             <button class='cal-filter-chip chip-scheduled @(_activeStatuses.Contains("Scheduled") ? "active" : "")'
@@ -551,6 +555,8 @@
 </div>
 
 @code {
+    private bool _filtersOpen;
+
     private ElementReference _calendarEl;
     private IJSObjectReference? _module;
     private DotNetObjectReference<Calendar>? _ref;

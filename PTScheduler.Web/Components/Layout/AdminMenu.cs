@@ -101,7 +101,43 @@ public static class AdminMenu
             new("admin/package-offers", "bi-box-seam-fill", "Pakiety treningów",
                 "Np. 10 treningów w lepszej cenie",
                 "Pakiety klient kupuje online (albo dopisujesz je ręcznie). Aplikacja sama odlicza wykorzystane treningi i przypomina, gdy pakiet się kończy.",
-                Permissions.ManagePackages, StatusKey: "packages"),
+                Permissions.ManagePackages, StatusKey: "packages")
+        ]),
+        new("Sprzedaż i płatności", "bi-wallet2", "green",
+        [
+            new("admin/payments", "bi-credit-card-fill", "Płatności online",
+                "BLIK, karta i przelew na Twoje konto",
+                "Podłączasz swoje konto PayU albo Przelewy24 — pieniądze za pakiety i karnety trafiają prosto do Ciebie. Platforma nie pobiera prowizji od Twoich płatności.",
+                Permissions.ManagePayments, "PaymentsEnabled", "Starter", StatusKey: "payments")
+        ]),
+        new("Klienci i wiadomości", "bi-bell", "violet",
+        [
+            new("trainer/asystent", "bi-stars", "Asystent i AI",
+                "Styl wiadomości, pomysły, poranny brief",
+                "Jak asystent pisze szkice wiadomości w Twoim imieniu, które pomysły może proponować (wolne okienka, przerwy klientów, rekordy…), poranny brief i co dzieje się z danymi. Asystent tylko podpowiada — decyzja zawsze należy do Ciebie.",
+                OwnerOnly: true),
+            new("admin/automations", "bi-magic", "Automatyzacje",
+                "Powitanie, powroty, urodziny",
+                "Wiadomości, które aplikacja wysyła sama: seria powitalna dla nowych klientów, zaproszenie do powrotu po przerwie albo po końcu pakietu (z kuponem) i życzenia urodzinowe. Widzisz, kto dostał wiadomość i kto wrócił.",
+                Permissions.ManageClients),
+            new("admin/sms", "bi-chat-dots-fill", "Przypomnienia SMS",
+                "SMS dzień przed treningiem",
+                "Klient dostaje SMS-a dzień przed treningiem — mniej nieobecności. SMS-y idą z miesięcznego limitu planu i dodatków; jednorazowe doładowania czekają w odwodzie.",
+                Permissions.ManageSms, "SmsReminders", "Pro")
+        ]),
+        new("Twoja marka", "bi-palette", "pink",
+        [
+            new("admin/branding", "bi-palette-fill", "Wygląd",
+                "Logo, kolory i nazwa aplikacji",
+                "Klienci widzą aplikację z Twoim logo i w Twoich kolorach — także ikonę na ekranie telefonu po instalacji.",
+                Permissions.ManageBranding, StatusKey: "branding"),
+            new("admin/site", "bi-globe", "Twoja strona",
+                "Oferta, opinie i „Umów trening”",
+                "Publiczna strona pod Twoim adresem: kim jesteś, oferta, opinie i przycisk do umówienia pierwszego treningu. Link wrzucasz na Instagram i do wizytówki Google.",
+                Permissions.ManageBranding)
+        ]),
+        new("Więcej: oferta i sprzedaż", "bi-bag", "blue",
+        [
             new("admin/memberships", "bi-arrow-repeat", "Karnety miesięczne",
                 "Stała liczba treningów co miesiąc",
                 "Karnet odnawia się co miesiąc — np. 8 treningów za 640 zł. Dobre dla stałych klientów: płacą z góry, a Ty masz przewidywalny przychód.",
@@ -112,14 +148,7 @@ public static class AdminMenu
             new("admin/modules", "bi-toggles", "Funkcje aplikacji",
                 "Włącz albo ukryj moduły",
                 "Ukryj to, z czego nie korzystasz (np. kursy albo plany treningowe) — klienci zobaczą prostszą aplikację. Możesz to zmienić w każdej chwili.",
-                Permissions.ManageBranding)
-        ]),
-        new("Sprzedaż i płatności", "bi-wallet2", "green",
-        [
-            new("admin/payments", "bi-credit-card-fill", "Płatności online",
-                "BLIK, karta i przelew na Twoje konto",
-                "Podłączasz swoje konto PayU albo Przelewy24 — pieniądze za pakiety i karnety trafiają prosto do Ciebie. Platforma nie pobiera prowizji od Twoich płatności.",
-                Permissions.ManagePayments, "PaymentsEnabled", "Starter", StatusKey: "payments"),
+                Permissions.ManageBranding),
             new("admin/coupons", "bi-tag-fill", "Kupony rabatowe",
                 "Kody zniżkowe na pakiety",
                 "Np. kod WIOSNA20 na 20% zniżki. Ustawiasz limit użyć i datę ważności — dobre na promocje i dla nowych klientów.",
@@ -136,25 +165,13 @@ public static class AdminMenu
                 "Więcej SMS-ów i miejsca na wideo, pomoc",
                 "Dodatki do Twojego abonamentu: więcej SMS-ów, miejsca i transferu na wideo co miesiąc, pomoc przy konfiguracji. Płacisz tylko za to, czego potrzebujesz, i rezygnujesz jednym kliknięciem.",
                 OwnerOnly: true)
-        ]),
-        new("Klienci i powiadomienia", "bi-bell", "violet",
+        ], Advanced: true),
+        new("Więcej: klienci i wiadomości", "bi-envelope", "violet",
         [
-            new("trainer/asystent", "bi-stars", "Asystent i AI",
-                "Styl wiadomości, pomysły, poranny brief",
-                "Jak asystent pisze szkice wiadomości w Twoim imieniu, które pomysły może proponować (wolne okienka, przerwy klientów, rekordy…), poranny brief i co dzieje się z danymi. Asystent tylko podpowiada — decyzja zawsze należy do Ciebie.",
-                OwnerOnly: true),
-            new("admin/automations", "bi-magic", "Automatyzacje",
-                "Powitanie, powroty, urodziny",
-                "Wiadomości, które aplikacja wysyła sama: seria powitalna dla nowych klientów, zaproszenie do powrotu po przerwie albo po końcu pakietu (z kuponem) i życzenia urodzinowe. Widzisz, kto dostał wiadomość i kto wrócił.",
-                Permissions.ManageClients),
             new("admin/documents", "bi-file-earmark-check", "Dokumenty i zgody",
                 "Regulamin, wizerunek, oświadczenie zdrowotne",
                 "Klient akceptuje regulamin i zgody w aplikacji przy logowaniu — Ty widzisz, kto i kiedy to zrobił. Zmienisz treść? Możesz poprosić wszystkich o ponowną akceptację.",
                 Permissions.ManageClients),
-            new("admin/sms", "bi-chat-dots-fill", "Przypomnienia SMS",
-                "SMS dzień przed treningiem",
-                "Klient dostaje SMS-a dzień przed treningiem — mniej nieobecności. SMS-y idą z miesięcznego limitu planu i dodatków; jednorazowe doładowania czekają w odwodzie.",
-                Permissions.ManageSms, "SmsReminders", "Pro"),
             new("admin/email", "bi-envelope-fill", "E-maile",
                 "Nadawca i wysyłka wiadomości",
                 "Potwierdzenia rezerwacji, przypomnienia i faktury wychodzą e-mailem. Tu ustawiasz, od kogo przychodzą i sprawdzasz, czy wysyłka działa.",
@@ -175,18 +192,7 @@ public static class AdminMenu
                 "Zbieraj opinie na swoją stronę",
                 "Aplikacja poprosi klienta o opinię po kilku treningach i podsunie link do opinii w Google. Wybrane opinie pokażesz na swojej stronie.",
                 Permissions.ManageBranding)
-        ]),
-        new("Twoja marka", "bi-palette", "pink",
-        [
-            new("admin/branding", "bi-palette-fill", "Wygląd",
-                "Logo, kolory i nazwa aplikacji",
-                "Klienci widzą aplikację z Twoim logo i w Twoich kolorach — także ikonę na ekranie telefonu po instalacji.",
-                Permissions.ManageBranding, StatusKey: "branding"),
-            new("admin/site", "bi-globe", "Twoja strona",
-                "Oferta, opinie i „Umów trening”",
-                "Publiczna strona pod Twoim adresem: kim jesteś, oferta, opinie i przycisk do umówienia pierwszego treningu. Link wrzucasz na Instagram i do wizytówki Google.",
-                Permissions.ManageBranding)
-        ]),
+        ], Advanced: true),
         new("Integracje i treści", "bi-plug", "teal",
         [
             new("admin/google-calendar", "bi-calendar2-week-fill", "Kalendarz Google",
@@ -205,7 +211,7 @@ public static class AdminMenu
                 "Miejsce na filmy do kursów",
                 "Twoje filmy (lekcje, instruktaże ćwiczeń) — ile miejsca i transferu zostało w Twoim planie. Więcej dokupisz w Sklepie usług.",
                 Permissions.ManageCourses, "CoursesEnabled", "Pro", OwnerOnly: true)
-        ]),
+        ], Advanced: true),
         new("Zespół", "bi-people", "orange",
         [
             new("admin/users", "bi-people-fill", "Użytkownicy",
