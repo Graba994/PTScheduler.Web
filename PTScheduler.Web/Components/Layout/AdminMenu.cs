@@ -83,7 +83,7 @@ public static class AdminMenu
     /// <summary>Strony z atrybutem Authorize(Roles = "Admin,Trainer") — bez asystenta.</summary>
     public static readonly HashSet<string> AdminOrTrainer = new(StringComparer.OrdinalIgnoreCase)
     {
-        "admin/coupons", "admin/sklep", "admin/sms", "admin/google-meet", "admin/video", "admin/export", "trainer/intro-config", "admin/automations", "admin/documents"
+        "trainer/asystent", "admin/coupons", "admin/sklep", "admin/sms", "admin/google-meet", "admin/video", "admin/export", "trainer/intro-config", "admin/automations", "admin/documents"
     };
 
     public static readonly IReadOnlyList<AdminMenuGroup> Groups =
@@ -139,6 +139,10 @@ public static class AdminMenu
         ]),
         new("Klienci i powiadomienia", "bi-bell", "violet",
         [
+            new("trainer/asystent", "bi-stars", "Asystent i AI",
+                "Styl wiadomości, pomysły, poranny brief",
+                "Jak asystent pisze szkice wiadomości w Twoim imieniu, które pomysły może proponować (wolne okienka, przerwy klientów, rekordy…), poranny brief i co dzieje się z danymi. Asystent tylko podpowiada — decyzja zawsze należy do Ciebie.",
+                OwnerOnly: true),
             new("admin/automations", "bi-magic", "Automatyzacje",
                 "Powitanie, powroty, urodziny",
                 "Wiadomości, które aplikacja wysyła sama: seria powitalna dla nowych klientów, zaproszenie do powrotu po przerwie albo po końcu pakietu (z kuponem) i życzenia urodzinowe. Widzisz, kto dostał wiadomość i kto wrócił.",

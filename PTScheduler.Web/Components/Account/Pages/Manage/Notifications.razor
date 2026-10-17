@@ -4,7 +4,6 @@
 @inject IAuditLogService AuditLogService
 @inject EntitlementService Entitlements
 @inject PTScheduler.Web.Services.MorningBriefService MorningBrief
-@inject PTScheduler.Web.Services.AssistantTipsService Tips
 @inject Microsoft.AspNetCore.Identity.UserManager<PTScheduler.Infrastructure.Data.ApplicationUser> Users
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
@@ -90,16 +89,7 @@ else
         <section class="acct-ideas">
             <h6 class="fw-bold mb-1"><i class="bi bi-lightbulb me-1"></i>Pomysły od asystenta</h6>
             <p class="small text-muted mb-2">Ciche propozycje: nie wyskakują same, dziennie widać najwyżej dwie. Wyłącz te, które Ci nie pomagają.</p>
-            <ul class="acct-ideas-list">
-                @foreach (var (kind, label) in PTScheduler.Web.Services.TrainerProposalsService.Kinds)
-                {
-                    var k = kind;
-                    <li>
-                        <span>@label</span>
-                        <div class="form-check form-switch m-0"><input class="form-check-input" type="checkbox" role="switch" aria-label="@label" checked="@(!_mutedHints.Contains(k))" @onchange="e => ToggleIdeaAsync(k, e)" /></div>
-                    </li>
-                }
-            </ul>
+            <AssistantIdeasToggles />
         </section>
     }
     @if (_showSms)
@@ -138,19 +128,9 @@ else
         _columns = _showSms ? [Email, Push, Sms] : [Email, Push];
         _rows = isClient ? ClientRows() : StaffRows();
         _isStaff = !isClient && (user.IsInRole(Roles.Trainer) || _isAdminRole);
-        if (_isStaff) { try { _mutedHints = await Tips.GetMutedAsync(_userId); } catch { _mutedHints = []; } }
         _loading = false;
     }
 
-    private HashSet<string> _mutedHints = [];
-
-    private async Task ToggleIdeaAsync(string kind, ChangeEventArgs e)
-    {
-        var on = e.Value is true || (e.Value is string v && v == "true");
-        await Tips.SetMutedAsync(_userId, kind, !on);
-        if (on) _mutedHints.Remove(kind); else _mutedHints.Add(kind);
-        PTScheduler.Web.Services.TrainerProposalsService.Invalidate(_userId);
-    }
 
     private List<Row> ClientRows() =>
     [

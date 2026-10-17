@@ -687,7 +687,6 @@ app.MapGet("/manifest.webmanifest", async (HttpContext ctx, IWebHostEnvironment 
 
     var name      = b?.CompanyName ?? "PTScheduler";
     var short_    = string.IsNullOrWhiteSpace(b?.PwaShortName) ? name : b.PwaShortName;
-    var color     = ThemeColor(b?.ThemeName);
     var customIcon = b?.PwaIconPath;
 
     // Custom icon goes first (browser picks the best-fit); fall back to built-in set.
@@ -734,8 +733,9 @@ app.MapGet("/manifest.webmanifest", async (HttpContext ctx, IWebHostEnvironment 
         start_url = "/app",
         scope   = "/",
         display = "standalone",
-        background_color = color,
-        theme_color = color,
+        // Tło ekranu startowego i paski systemowe jasne jak aplikacja (w trybie ciemnym kolor ustawia strona przez meta theme-color).
+        background_color = "#ffffff",
+        theme_color = "#ffffff",
         orientation = "any",
         prefer_related_applications = false,
         // Pozwala stronie sprawdzić (getInstalledRelatedApps), że aplikacja jest już zainstalowana — wtedy nie namawiamy ponownie.
@@ -1331,24 +1331,6 @@ static string RenderDbErrorPage(StartupHealth h, bool isDev)
 </html>";
 }
 
-static string ThemeColor(string? theme)
-{
-    var t = theme ?? "ocean";
-    if (t.EndsWith("-dark", StringComparison.Ordinal)) t = t[..^5];
-    return t switch
-    {
-        "forest"   => "#16A34A",
-        "sunset"   => "#EA580C",
-        "crimson"  => "#DC2626",
-        "lavender" => "#9333EA",
-        "slate"    => "#475569",
-        "rose"     => "#E11D48",
-        "teal"     => "#0D9488",
-        "amber"    => "#D97706",
-        "indigo"   => "#4F46E5",
-        _          => "#0284C7",
-    };
-}
 
 public sealed class StartupHealth
 {
