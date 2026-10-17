@@ -63,6 +63,11 @@ public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<S
         var windowStart = clock.LocalNow.AddHours(23);
         var windowEnd   = clock.LocalNow.AddHours(25);
 
+        // Dodatkowe przypomnienie 2 h przed wizytą — tylko dla klientów, którym trener je włączył (po nieobecnościach).
+        // Okno 1,5–2,5 h przy cyklu co godzinę daje każdej wizycie dokładnie jedną szansę; znacznik chroni przed dublem.
+        try { await SendExtraRemindersAsync(db, clock, push, pushEnabled, smsService, smsEnabled, prefs, userManager, maxSmsPerMonth); }
+        catch (Exception ex) { logger.LogWarning(ex, "Dodatkowe przypomnienia 2 h przed wizytą nie poszły."); }
+
         var sessions = await db.Sessions
             .Include(s => s.Client)
             .Include(s => s.SessionType)
@@ -232,6 +237,49 @@ public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<S
             // i żaden późniejszy błąd (innej sesji, audytu) go nie cofnie.
             try { await db.SaveChangesAsync(); }
             catch (Exception ex) { logger.LogError(ex, "Failed to persist reminder markers for session {Id}", session.Id); }
+        }
+    }
+
+    private async Task SendExtraRemindersAsync(ApplicationDbContext db, IAppClock clock, IWebPushService push, bool pushEnabled,
+        ISmsService smsService, bool smsEnabled, INotificationPreferencesService prefs, UserManager<ApplicationUser> userManager, int maxSmsPerMonth)
+    {
+        if (!pushEnabled && !smsEnabled) return;
+        var from = clock.LocalNow.AddMinutes(90);
+        var to = clock.LocalNow.AddMinutes(150);
+        var due = await db.Sessions.Include(s => s.Client).Include(s => s.SessionType)
+            .Where(s => s.StartTime >= from && s.StartTime < to && s.Status == SessionStatus.Scheduled
+                && s.Client.ExtraReminder && s.ExtraReminderSentAt == null)
+            .ToListAsync();
+        foreach (var session in due)
+        {
+            session.ExtraReminderSentAt = DateTime.UtcNow;
+            var trainerName = ResolveName(await userManager.FindByIdAsync(session.TrainerUserId));
+            var delivered = false;
+            if (pushEnabled && await prefs.IsEnabledAsync(session.Client.ApplicationUserId, NotificationTypes.PushReminders))
+            {
+                try
+                {
+                    var report = await push.SendWithReportAsync(session.Client.ApplicationUserId, new PushMessageDto
+                    {
+                        Category = NotificationTypes.PushReminders,
+                        Title = $"Za 2 godziny trening o {session.StartTime:HH:mm}",
+                        Body = $"{session.SessionType.Name} u {trainerName}. Do zobaczenia!",
+                        Url = "/my"
+                    });
+                    delivered = report.Sent > 0;
+                }
+                catch (Exception ex) { logger.LogDebug(ex, "Session {Id}: extra push reminder failed.", session.Id); }
+            }
+            // Bez powiadomień w telefonie — SMS (jeśli klient się zgodził i jest w limicie).
+            if (!delivered && smsEnabled && !string.IsNullOrWhiteSpace(session.Client.Phone)
+                && await prefs.IsEnabledAsync(session.Client.ApplicationUserId, NotificationTypes.SmsReminders))
+            {
+                var text = PTScheduler.Application.Messaging.MessageTemplates.ForSms($"Przypomnienie: dziś o {session.StartTime:HH:mm} trening u {trainerName}. Do zobaczenia!");
+                var result = await smsService.SendReminderAsync(session.Client.Phone!, text, maxSmsPerMonth);
+                if (!result.Success) logger.LogInformation("Session {Id}: extra SMS reminder not sent — {Error}", session.Id, result.Error);
+            }
+            try { await db.SaveChangesAsync(); }
+            catch (Exception ex) { logger.LogError(ex, "Failed to persist extra reminder for session {Id}", session.Id); }
         }
     }
 

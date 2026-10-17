@@ -10,6 +10,8 @@ namespace PTScheduler.Application.Messaging;
 public static partial class MessageTemplates
 {
     public const string ClientTag = "[klient]";
+    /// <summary>Miejsce na link (krótki link do rezerwacji wstawiany przy wysyłce).</summary>
+    public const string LinkTag = "[link]";
 
     public sealed record Style(string Address, string Emoji, string? Greeting, string? Signature);
 
@@ -22,6 +24,7 @@ public static partial class MessageTemplates
         DraftPurpose.Congrats => "Gratulacje postępów",
         DraftPurpose.PlanReminder => "Plan w aplikacji",
         DraftPurpose.Payment => "Przypomnienie o płatności",
+        DraftPurpose.SlotInvite => "Zaproszenie na wolny termin",
         _ => purpose.ToString(),
     };
 
@@ -35,6 +38,9 @@ public static partial class MessageTemplates
         facts.TryGetValue("liczba_treningow", out var count);
         facts.TryGetValue("za_co", out var forWhat);
         facts.TryGetValue("kwota", out var amount);
+        facts.TryGetValue("termin", out var slot);
+        if (string.IsNullOrWhiteSpace(slot)) slot = "jutro";
+        var selfBooking = !facts.TryGetValue("rezerwacja", out var booking) || booking != "przez_trenera";
         var due = (string.IsNullOrEmpty(forWhat) ? "" : $" {forWhat}") + (string.IsNullOrEmpty(amount) ? "" : $" ({amount} zł)");
 
         var body = (purpose, formal) switch
@@ -57,6 +63,10 @@ public static partial class MessageTemplates
             (DraftPurpose.PlanReminder, true) => "Plan czeka w aplikacji — nawet krótki trening się liczy. Proszę dać znać, jeśli coś trzeba w nim zmienić.",
             (DraftPurpose.Payment, false) => $"Przypominam o płatności{due}. Możesz zapłacić gotówką na treningu albo przelewem — jak Ci wygodniej. Dzięki! 🙂",
             (DraftPurpose.Payment, true) => $"Uprzejmie przypominam o płatności{due}. Można zapłacić gotówką na treningu lub przelewem. Dziękuję! 🙂",
+            (DraftPurpose.SlotInvite, false) => $"Zwolniło mi się okienko: {slot}. Wpadniesz na trening? "
+                + (selfBooking ? $"Zarezerwujesz tutaj: {LinkTag} 🙂" : "Daj znać, to wpiszę Cię do grafiku 🙂"),
+            (DraftPurpose.SlotInvite, true) => $"Zwolnił mi się termin: {slot}. Zapraszam na trening — "
+                + (selfBooking ? $"rezerwacja tutaj: {LinkTag} 🙂" : "proszę dać znać, a wpiszę wizytę do grafiku 🙂"),
             _ => "Jak się masz? Daj znać, kiedy się widzimy.",
         };
 
@@ -65,6 +75,29 @@ public static partial class MessageTemplates
         if (!string.IsNullOrWhiteSpace(style.Signature)) text += $"\n{style.Signature.Trim()}";
         return text;
     }
+
+    /// <summary>
+    /// Wersja na SMS: bez emoji i polskich znaków (jeden SMS mieści wtedy 160 znaków zamiast 70), w jednej linii.
+    /// Link (jeśli jest) zawsze zostaje — skracamy treść przed nim.
+    /// </summary>
+    public static string ForSms(string text, int max = 300)
+    {
+        var t = Spaces().Replace(StripEmoji(text).Replace("\r", "").Replace('\n', ' '), " ").Trim();
+        t = new string(t.Select(Ascii).ToArray()).Replace("—", "-").Replace("–", "-").Replace("„", "\"").Replace("”", "\"");
+        if (t.Length <= max) return t;
+        var link = Url().Match(t);
+        if (!link.Success) return t[..(max - 1)].TrimEnd() + "…";
+        var rest = t.Remove(link.Index, link.Length).Trim();
+        var room = Math.Max(20, max - link.Length - 2);
+        return (rest.Length > room ? rest[..(room - 1)].TrimEnd() + "…" : rest) + " " + link.Value;
+    }
+
+    private static char Ascii(char c) => c switch
+    {
+        'ą' => 'a', 'ć' => 'c', 'ę' => 'e', 'ł' => 'l', 'ń' => 'n', 'ó' => 'o', 'ś' => 's', 'ź' => 'z', 'ż' => 'z',
+        'Ą' => 'A', 'Ć' => 'C', 'Ę' => 'E', 'Ł' => 'L', 'Ń' => 'N', 'Ó' => 'O', 'Ś' => 'S', 'Ź' => 'Z', 'Ż' => 'Z',
+        _ => c,
+    };
 
     /// <summary>Usuwa emoji (i zbędne spacje po nich).</summary>
     public static string StripEmoji(string text) => Spaces().Replace(Emoji().Replace(text, ""), " ").Trim();
@@ -134,6 +167,7 @@ public static partial class MessageTemplates
 
     [GeneratedRegex(@"[☀-➿️‍]|\uD83C[\uDF00-\uDFFF]|\uD83D[\uDC00-\uDEFF]|\uD83E[\uDD00-\uDEFF]")] private static partial Regex Emoji();
     [GeneratedRegex(@"[ \t]{2,}")] private static partial Regex Spaces();
+    [GeneratedRegex(@"https?://\S+")] private static partial Regex Url();
     [GeneratedRegex(@"[\w.+-]+@[\w-]+\.[\w.-]+")] private static partial Regex Mail();
     [GeneratedRegex(@"(?<!\d)(?:\+?48[ -]?)?\d{3}[ -]?\d{3}[ -]?\d{3}(?!\d)")] private static partial Regex Phone();
 }

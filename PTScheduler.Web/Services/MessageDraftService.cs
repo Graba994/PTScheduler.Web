@@ -99,6 +99,26 @@ public class MessageDraftService(
         return new(personal, ai, personal, purpose);
     }
 
+    /// <summary>
+    /// Szablon do wielu osób naraz (np. zaproszenie na wolne okienko): w stylu trenera, imię zostaje jako [klient],
+    /// a link jako [link] — podmieniane przy wysyłce osobno dla każdej osoby.
+    /// </summary>
+    public async Task<(string Text, bool FromAi)> TemplateAsync(string trainerUserId, DraftPurpose purpose, IReadOnlyDictionary<string, string> facts, bool useAi)
+    {
+        var style = await GetStyleAsync(trainerUserId);
+        var fallback = MessageTemplates.Build(purpose, new(style.Address, style.Emoji, style.Greeting, style.Signature), facts);
+        var aiFacts = new Dictionary<string, string>(facts);
+        if (style.Address != "pan") aiFacts["klient"] = MessageTemplates.ClientTag;
+        if (fallback.Contains(MessageTemplates.LinkTag)) aiFacts["link"] = MessageTemplates.LinkTag;
+        var examples = (await GetExamplesAsync(trainerUserId)).OrderByDescending(e => e.Source == "wzór").ThenByDescending(e => e.CreatedAt)
+            .Take(5).Select(e => e.Text).ToList();
+        var (text, ai) = await platform.DraftAsync(MessageTemplates.Label(purpose), aiFacts, fallback, style, examples, useAi);
+        // AI zgubiło link albo imię — wracamy do szablonu (link jest tu najważniejszy).
+        if (fallback.Contains(MessageTemplates.LinkTag) && !text.Contains(MessageTemplates.LinkTag)) return (fallback, false);
+        if (fallback.Contains(MessageTemplates.ClientTag) && !text.Contains(MessageTemplates.ClientTag)) return (fallback, false);
+        return (text, ai);
+    }
+
     private async Task<Dictionary<string, string>> FactsAsync(ApplicationDbContext db, int clientId, DraftPurpose purpose)
     {
         var facts = new Dictionary<string, string>();

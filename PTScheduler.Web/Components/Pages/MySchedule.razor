@@ -682,6 +682,26 @@ else
             }
         }
         loading = false;
+        await OpenFromInviteAsync();
+    }
+
+    // Link z zaproszenia trenera na wolne okienko: /my?termin=2026-10-18T10:00&typ=3 — od razu krok „Termin” z zaznaczoną godziną.
+    [SupplyParameterFromQuery(Name = "termin")] public string? InviteSlot { get; set; }
+    [SupplyParameterFromQuery(Name = "typ")] public int? InviteType { get; set; }
+
+    private async Task OpenFromInviteAsync()
+    {
+        if (client is not { AllowSelfBooking: true } || string.IsNullOrEmpty(client.TrainerUserId)) return;
+        if (!DateTime.TryParseExact(InviteSlot, "yyyy-MM-ddTHH:mm", System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.None, out var at) || at <= StudioClock.Now) return;
+        await OpenBooking();
+        selectedType = sessionTypes.FirstOrDefault(t => t.Id == InviteType) ?? sessionTypes.FirstOrDefault();
+        if (selectedType is null) return;
+        selectedDate = DateOnly.FromDateTime(at);
+        await GoToStep2();
+        selectedSlot = availableSlots.FirstOrDefault(s => s.Start == at);
+        if (selectedSlot is null)
+            bookingError = availableSlots.Count > 0 ? "Ta godzina jest już zajęta — wybierz inną z listy." : "Ten dzień jest już zajęty — wybierz inny.";
     }
 
     private async Task RefreshSessions()

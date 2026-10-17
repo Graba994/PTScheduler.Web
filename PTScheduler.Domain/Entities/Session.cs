@@ -60,6 +60,8 @@ public class Session
 
     /// <summary>Znacznik per-kanał dla SMS — analogicznie do e-maila.</summary>
     public DateTime? ReminderSmsSentAt { get; set; }
+    /// <summary>Dodatkowe przypomnienie 2 h przed wizytą (Client.ExtraReminder) — wysłane.</summary>
+    public DateTime? ExtraReminderSentAt { get; set; }
 
     /// <summary>
     /// Liczba cykli, w których wysyłka któregoś kanału zawiodła. Po przekroczeniu

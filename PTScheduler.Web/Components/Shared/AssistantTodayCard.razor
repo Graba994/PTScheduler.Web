@@ -51,6 +51,10 @@
                         {
                             <a class="btn btn-sm btn-outline-primary atc-act" href="@t.ActionHref">@t.ActionLabel</a>
                         }
+                        @if (t.Quiet)
+                        {
+                            <button type="button" class="atc-x" title="Nie proponuj tego" aria-label="Nie proponuj tego" @onclick="() => MuteAsync(t)"><i class="bi bi-bell-slash"></i></button>
+                        }
                         @if (t.Mood != "remind")
                         {
                             <button type="button" class="atc-x" title="Ukryj — już wiem" aria-label="Ukryj" @onclick="() => HideAsync(t)"><i class="bi bi-x-lg"></i></button>
@@ -153,6 +157,17 @@
     {
         try { await JS.InvokeVoidAsync("localStorage.setItem", SeenKey, System.Text.Json.JsonSerializer.Serialize(_seen)); }
         catch (JSException) { }
+    }
+
+    private async Task MuteAsync(PTScheduler.Web.Services.AssistantTipsService.Tip t)
+    {
+        try
+        {
+            var user = (await AuthState.GetAuthenticationStateAsync()).User;
+            await Tips.SetMutedAsync(user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "", t.Kind, true);
+        }
+        catch { }
+        _tips.RemoveAll(x => x.Kind == t.Kind);
     }
 
     private async Task HideAsync(PTScheduler.Web.Services.AssistantTipsService.Tip t)

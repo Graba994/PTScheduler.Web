@@ -604,6 +604,9 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Property<DateOnly?>("DateOfBirth")
                         .HasColumnType("date");
 
+                    b.Property<bool>("ExtraReminder")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("FirstName")
                         .IsRequired()
                         .HasColumnType("text");
@@ -2522,6 +2525,9 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("ExtraReminderSentAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime?>("HoldUntil")
                         .HasColumnType("timestamp with time zone");
 
@@ -2822,6 +2828,87 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.ToTable("SessionTypes");
                 });
 
+            modelBuilder.Entity("PTScheduler.Domain.Entities.ShortLink", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("Clicks")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Code")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("ExpiresAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastClickAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TargetPath")
+                        .IsRequired()
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Code")
+                        .IsUnique();
+
+                    b.ToTable("ShortLinks");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.SlotInvitation", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Channel")
+                        .IsRequired()
+                        .HasMaxLength(10)
+                        .HasColumnType("character varying(10)");
+
+                    b.Property<int>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("SentAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<int?>("ShortLinkId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("SlotEnd")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("SlotStart")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TrainerUserId")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ShortLinkId");
+
+                    b.HasIndex("ClientId", "SentAt");
+
+                    b.HasIndex("TrainerUserId", "SlotStart");
+
+                    b.ToTable("SlotInvitations");
+                });
+
             modelBuilder.Entity("PTScheduler.Domain.Entities.SmsSettings", b =>
                 {
                     b.Property<int>("Id")
@@ -3007,6 +3094,9 @@ namespace PTScheduler.Infrastructure.Migrations
 
                     b.Property<int>("LateCancellationPolicy")
                         .HasColumnType("integer");
+
+                    b.Property<string>("MutedHints")
+                        .HasColumnType("text");
 
                     b.Property<bool>("NoShowChargesSession")
                         .HasColumnType("boolean");
@@ -4010,6 +4100,24 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Navigation("Client");
 
                     b.Navigation("SessionType");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.SlotInvitation", b =>
+                {
+                    b.HasOne("PTScheduler.Domain.Entities.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.HasOne("PTScheduler.Domain.Entities.ShortLink", "ShortLink")
+                        .WithMany()
+                        .HasForeignKey("ShortLinkId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Client");
+
+                    b.Navigation("ShortLink");
                 });
 
             modelBuilder.Entity("PTScheduler.Domain.Entities.SurveyResponse", b =>

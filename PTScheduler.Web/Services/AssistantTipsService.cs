@@ -13,15 +13,19 @@ namespace PTScheduler.Web.Services;
 /// AI (przez Portal) najwyżej przeredaguje tekst zapasowy; liczby zawsze pochodzą stąd.
 /// </summary>
 public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFactory, IAppClock clock, RetentionService retention,
-    IEmailSettingsService emailSettings)
+    IEmailSettingsService emailSettings, TrainerProposalsService proposals)
 {
     private static readonly CultureInfo Pl = CultureInfo.GetCultureInfo("pl-PL");
 
     /// <param name="Key">Klucz do zamykania („nie pokazuj dziś”); przy <paramref name="Once"/> zamknięcie jest na stałe.</param>
     /// <param name="Placeholders">Znaczniki podmieniane po stronie aplikacji (imiona klientów nie trafiają do AI).</param>
+    /// <param name="Quiet">Cicha propozycja: nie otwiera dymka sama, nie liczy się w kropce, można ją wyłączyć na stałe.</param>
     public sealed record Tip(string Key, string Kind, string Mood, int Priority, string Fallback,
         Dictionary<string, string> Facts, string? ActionLabel, string? ActionHref, bool Once = false,
-        Dictionary<string, string>? Placeholders = null);
+        Dictionary<string, string>? Placeholders = null, bool Quiet = false);
+
+    /// <summary>Najwyżej tyle cichych propozycji dziennie — reszta poczeka (asystent ma podpowiadać, nie zasypywać).</summary>
+    public const int QuietPerDay = 2;
 
     public async Task<List<Tip>> GetTipsAsync(string userId, bool studioWide)
     {
@@ -87,11 +91,17 @@ public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFact
         }
 
         // Pakiety, w których zostało najwyżej jedno wejście.
-        var ending = await db.SessionPackages.AsNoTracking()
+        var endingIds = await db.SessionPackages.AsNoTracking()
             .Where(p => p.Status == PackageStatus.Active && !p.IsHidden && p.TotalSessions > 0
                 && p.TotalSessions - p.UsedSessions <= 1 && (studioWide || p.Client.TrainerUserId == userId))
-            .Select(p => p.ClientId).Distinct().CountAsync();
-        if (ending > 0)
+            .Select(p => new { p.ClientId, p.Client.FirstName }).Distinct().Take(50).ToListAsync();
+        var ending = endingIds.Select(e => e.ClientId).Distinct().Count();
+        if (ending == 1)
+            tips.Add(new($"packages-{endingIds[0].ClientId}", "pakiety", "think", 55,
+                "[klient] kończy się pakiet — dobry moment, żeby zaproponować kolejny. Przygotuję wiadomość w Twoim stylu.",
+                new() { ["klient"] = "[klient]" }, "Napisz", $"/clients/{endingIds[0].ClientId}?szkic=Package",
+                Placeholders: new() { ["[klient]"] = string.IsNullOrWhiteSpace(endingIds[0].FirstName) ? "Klientowi" : endingIds[0].FirstName.Trim() }));
+        else if (ending > 1)
             tips.Add(new("packages", "pakiety", "think", 55,
                 $"{ending} {Plural(ending, "klientowi kończy", "klientom kończy", "klientom kończy")} się pakiet — dobry moment, żeby zaproponować kolejny.",
                 new() { ["liczba_klientow"] = ending.ToString() }, "Klienci", "/clients"));
@@ -172,7 +182,39 @@ public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFact
                 "Jutro grafik jest jeszcze pusty. Może podeślesz klientom link do zapisów?",
                 [], "Grafik", "/calendar"));
 
+        // Ciche propozycje (bez wyłączonych przez trenera), najwyżej dwie dziennie — najważniejsze pierwsze.
+        try
+        {
+            var muted = await GetMutedAsync(userId);
+            var quiet = (await proposals.GetAsync(userId, studioWide, risks.Select(r => r.ClientId).ToHashSet()))
+                .Where(t => !muted.Contains(t.Kind)).OrderByDescending(t => t.Priority).Take(QuietPerDay).ToList();
+            if (quiet.Any(t => t.Kind == "zaleglosci")) tips.RemoveAll(t => t.Kind == "niezaplacone");
+            if (quiet.Any(t => t.Kind == "okienko")) tips.RemoveAll(t => t.Kind == "pusty_grafik");
+            tips.AddRange(quiet);
+        }
+        catch (Exception) { /* propozycje są dodatkiem */ }
+
         return tips.OrderByDescending(t => t.Priority).ToList();
+    }
+
+    /// <summary>Rodzaje propozycji wyłączone przez trenera („Nie proponuj tego”).</summary>
+    public async Task<HashSet<string>> GetMutedAsync(string userId)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var raw = await db.TrainerConfigs.AsNoTracking().Where(c => c.TrainerUserId == userId).Select(c => c.MutedHints).FirstOrDefaultAsync();
+        return (raw ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet();
+    }
+
+    public async Task SetMutedAsync(string userId, string kind, bool muted)
+    {
+        if (!TrainerProposalsService.Kinds.Any(k => k.Kind == kind)) return;
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var cfg = await db.TrainerConfigs.FirstOrDefaultAsync(c => c.TrainerUserId == userId);
+        if (cfg is null) db.TrainerConfigs.Add(cfg = new PTScheduler.Domain.Entities.TrainerConfig { TrainerUserId = userId });
+        var set = (cfg.MutedHints ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet();
+        if (muted) set.Add(kind); else set.Remove(kind);
+        cfg.MutedHints = set.Count == 0 ? null : string.Join(",", set.Order());
+        await db.SaveChangesAsync();
     }
 
     /// <summary>Polska odmiana: 1 trening, 2–4 treningi, 5+ treningów (12–14 zawsze w trzeciej formie).</summary>

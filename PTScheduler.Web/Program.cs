@@ -174,6 +174,8 @@ builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformInfoService>();
 builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformLegalService>();
 builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformAssistantService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.AssistantTipsService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.SlotInviteService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.TrainerProposalsService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.MorningBriefService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.PreSessionBriefService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.WorkoutNoteDraftService>();
@@ -909,6 +911,21 @@ app.MapGet("/sso/portal", async (HttpContext ctx, string? t,
     catch (Exception ex) { log.LogWarning(ex, "Nie udało się zapisać wejścia z Portalu w historii zmian."); }
     return Results.Redirect("/app"); // pulpit (strona główna „/” to publiczna strona trenera)
 });
+
+// Krótki link z SMS-a lub wiadomości (np. zaproszenie na wolne okienko): liczymy kliknięcie i przekierowujemy
+// wyłącznie na ścieżkę w tej aplikacji. Wygasły albo nieznany — strona główna.
+app.MapGet("/l/{code}", async (string code, IDbContextFactory<ApplicationDbContext> dbFactory) =>
+{
+    if (code.Length is < 4 or > 16) return Results.Redirect("/");
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var link = await db.ShortLinks.FirstOrDefaultAsync(l => l.Code == code);
+    if (link is null || (link.ExpiresAt is { } exp && exp < DateTime.UtcNow) || !PTScheduler.Application.Messaging.ShortLinks.IsSafeTarget(link.TargetPath))
+        return Results.Redirect("/");
+    link.Clicks++;
+    link.LastClickAt = DateTime.UtcNow;
+    await db.SaveChangesAsync();
+    return Results.Redirect(link.TargetPath);
+}).AllowAnonymous();
 
 app.MapGet("/internal/metrics",
     async (HttpContext ctx, IDbContextFactory<ApplicationDbContext> dbFactory,

@@ -26,6 +26,8 @@ public class Client
     public bool AllowSelfBooking { get; set; } = false;
     /// <summary>Zaufany klient: rezerwacja z płatnością u trenera bez akceptacji i bez limitu nieopłaconych wizyt.</summary>
     public bool TrustedForDeferredPayment { get; set; }
+    /// <summary>Dodatkowe przypomnienie 2 godziny przed wizytą (dla osób, którym zdarzają się nieobecności).</summary>
+    public bool ExtraReminder { get; set; }
     public DateTime? TermsAcceptedAt { get; set; }
 
     public ICollection<Session> Sessions { get; set; } = [];

@@ -17,6 +17,8 @@ public enum DraftPurpose
     PlanReminder,
     /// <summary>Uprzejme przypomnienie o zaległej płatności.</summary>
     Payment,
+    /// <summary>Zaproszenie na wolne okienko w grafiku trenera.</summary>
+    SlotInvite,
 }
 
 /// <summary>

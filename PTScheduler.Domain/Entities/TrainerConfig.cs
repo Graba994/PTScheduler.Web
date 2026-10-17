@@ -45,4 +45,7 @@ public class TrainerConfig
     /// Null = subskrypcja jeszcze niewłączona. Zmiana tokenu unieważnia stary link.
     /// </summary>
     public string? CalendarFeedToken { get; set; }
+
+    /// <summary>Rodzaje propozycji asystenta wyłączone przez trenera („Nie proponuj tego”), po przecinku.</summary>
+    public string? MutedHints { get; set; }
 }

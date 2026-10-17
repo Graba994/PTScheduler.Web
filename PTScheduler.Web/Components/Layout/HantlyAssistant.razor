@@ -23,6 +23,10 @@
                     }
                     <button type="button" class="hantly-x" aria-label="Zamknij tę podpowiedź" title="Nie pokazuj jej dziś" @onclick="DismissAsync"><i class="bi bi-x-lg"></i></button>
                 </div>
+                @if (tip.Quiet)
+                {
+                    <span class="hantly-idea"><i class="bi bi-lightbulb"></i>Pomysł — możesz go pominąć</span>
+                }
                 <p class="hantly-text">@(_text ?? "…")</p>
                 <div class="hantly-actions">
                     @if (tip.ActionHref is not null)
@@ -35,6 +39,11 @@
                     }
                     <button type="button" class="btn btn-sm btn-link hantly-mute" @onclick="ToggleMuteAsync">@(_muted ? "Włącz podpowiedzi" : "Wycisz")</button>
                 </div>
+                @if (tip.Quiet)
+                {
+                    <button type="button" class="hantly-never" @onclick="MuteKindAsync"><i class="bi bi-bell-slash me-1"></i>Nie proponuj tego</button>
+                }
+                @if (_note is not null) { <div class="hantly-note">@_note</div> }
             </div>
         }
         <button type="button" class="hantly-btn" aria-label="@($"{_config.Name} — podpowiedzi")" aria-expanded="@(_open ? "true" : "false")" @onclick="ToggleAsync">
@@ -109,8 +118,9 @@
 
     private string Today => Clock.Today.ToString("yyyy-MM-dd");
 
-    /// <summary>Ile podpowiedzi jeszcze nie przeczytano — to pokazuje cyfra przy maskotce.</summary>
-    private int Unseen => _tips.Count(t => !IsSeen(t));
+    /// <summary>Ile podpowiedzi jeszcze nie przeczytano — to pokazuje cyfra przy maskotce. Ciche propozycje się nie liczą.</summary>
+    private int Unseen => _tips.Count(t => !t.Quiet && !IsSeen(t));
+    private string? _note;
 
     // Podpis treści: gdy zmienią się liczby (np. więcej nieopłaconych), podpowiedź znów liczy się jako nowa.
     private string SeenMark(PTScheduler.Web.Services.AssistantTipsService.Tip tip) =>
@@ -151,7 +161,7 @@
             }
             if (!_muted && Unseen > 0 && !OnDashboard)
             {
-                _index = _tips.FindIndex(t => !IsSeen(t));
+                _index = _tips.FindIndex(t => !t.Quiet && !IsSeen(t));
                 await PhraseCurrentAsync();
                 _open = true;
                 StateHasChanged();
@@ -197,6 +207,7 @@
     private async Task NextAsync()
     {
         if (_index >= _tips.Count - 1) return;
+        _note = null;
         _index++;
         if (!_muted) _ = StageAsync("excited", 1000);
         await PhraseCurrentAsync();
@@ -212,6 +223,24 @@
             if (_index >= _tips.Count) _index = Math.Max(0, _tips.Count - 1);
         }
         _open = false;
+    }
+
+    /// <summary>„Nie proponuj tego” — wyłącza ten rodzaj propozycji na stałe (wraca w Moje konto → Powiadomienia).</summary>
+    private async Task MuteKindAsync()
+    {
+        if (Current is not { Quiet: true } tip) return;
+        try
+        {
+            var user = (await AuthState.GetAuthenticationStateAsync()).User;
+            var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+            await Tips.SetMutedAsync(userId, tip.Kind, true);
+        }
+        catch { /* najwyżej pokaże się jeszcze raz */ }
+        _tips.RemoveAll(t => t.Kind == tip.Kind);
+        if (_index >= _tips.Count) _index = Math.Max(0, _tips.Count - 1);
+        _note = "Dobrze, nie będę tego proponować. Włączysz to z powrotem w Moje konto → Powiadomienia.";
+        if (_tips.Count == 0) { _open = false; return; }
+        await PhraseCurrentAsync();
     }
 
     private async Task ToggleMuteAsync()

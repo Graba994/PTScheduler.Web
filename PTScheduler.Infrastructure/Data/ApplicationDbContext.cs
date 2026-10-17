@@ -81,6 +81,8 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<SurveyResponse> SurveyResponses => Set<SurveyResponse>();
     public DbSet<CalendarConnection> CalendarConnections => Set<CalendarConnection>();
     public DbSet<CalendarBusyBlock> CalendarBusyBlocks => Set<CalendarBusyBlock>();
+    public DbSet<ShortLink> ShortLinks => Set<ShortLink>();
+    public DbSet<SlotInvitation> SlotInvitations => Set<SlotInvitation>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -322,6 +324,20 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             e.Property(x => x.Greeting).HasMaxLength(40);
             e.Property(x => x.Signature).HasMaxLength(80);
             e.Property(x => x.Notes).HasMaxLength(300);
+        });
+        builder.Entity<ShortLink>(e =>
+        {
+            e.HasIndex(x => x.Code).IsUnique();
+            e.Property(x => x.Code).HasMaxLength(16);
+            e.Property(x => x.TargetPath).HasMaxLength(500);
+        });
+        builder.Entity<SlotInvitation>(e =>
+        {
+            e.HasIndex(x => new { x.ClientId, x.SentAt });
+            e.HasIndex(x => new { x.TrainerUserId, x.SlotStart });
+            e.Property(x => x.Channel).HasMaxLength(10);
+            e.HasOne(x => x.Client).WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(x => x.ShortLink).WithMany().HasForeignKey(x => x.ShortLinkId).OnDelete(DeleteBehavior.SetNull);
         });
         builder.Entity<TrainerStyleExample>(e =>
         {
