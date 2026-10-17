@@ -107,8 +107,8 @@
                             {
                                 case "mark":
                                     <span class="td-close-why">nie oznaczono</span>
-                                    <button type="button" class="btn btn-sm btn-outline-success" disabled="@_busy" @onclick="() => SetStatusAsync(v.S, SessionStatus.Completed)">Ukończona</button>
-                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => _confirmNoShow = v.S.Id">Nieobecność</button>
+                                    <button type="button" class="btn btn-sm btn-outline-success" disabled="@_busy" @onclick="() => SetStatusAsync(v.S, SessionStatus.Completed)">Zakończ</button>
+                                    <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" title="Można cofnąć przyciskiem „Przywróć”" @onclick="() => SetStatusAsync(v.S, SessionStatus.NoShow)">Nieobecność</button>
                                     break;
                                 case "pay":
                                     <span class="td-close-why">płatność na miejscu</span>
@@ -192,42 +192,17 @@
                                 </div>
                             </div>
                         }
-                        @if (_confirmNoShow == s.Id)
-                        {
-                            <div class="td-confirm">
-                                <span>Oznaczyć nieobecność @s.ClientName?</span>
-                                <button type="button" class="btn btn-sm btn-light" @onclick="() => _confirmNoShow = null">Nie</button>
-                                <button type="button" class="btn btn-sm btn-warning" disabled="@_busy" @onclick="() => SetStatusAsync(s, SessionStatus.NoShow)">Tak, nieobecność</button>
-                            </div>
-                        }
-
-                        <div class="td-actions">
-                            @if (open && _plansOn)
-                            {
-                                <a class="btn btn-sm btn-primary" href="@LiveHref(v)"><i class="bi bi-play-circle-fill me-1"></i>Prowadź trening</a>
-                            }
-                            @if (open && s.StartTime <= _now.AddHours(2))
-                            {
-                                <button type="button" class="btn btn-sm btn-outline-success" disabled="@_busy" @onclick="() => SetStatusAsync(s, SessionStatus.Completed)"><i class="bi bi-check2 me-1"></i>Ukończona</button>
-                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => _confirmNoShow = s.Id"><i class="bi bi-person-x me-1"></i>Nieobecność</button>
-                            }
-                            @if (s.Status == SessionStatus.NoShow)
-                            {
-                                <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@_busy" @onclick="() => RestoreAsync(s)"><i class="bi bi-arrow-counterclockwise me-1"></i>Cofnij nieobecność</button>
-                            }
-                            <button type="button" class="td-icon" title="Notatka" aria-label="Notatka" @onclick="() => OpenNoteAsync(s, false)"><i class="bi bi-pencil-square"></i></button>
-                            @if (v.Card?.Phone is { Length: > 0 } phone)
-                            {
-                                <a class="td-icon" href="@($"tel:{phone}")" title="Zadzwoń" aria-label="Zadzwoń"><i class="bi bi-telephone"></i></a>
-                            }
-                            <a class="td-icon" href="@($"/chat?client={s.ClientId}")" title="Wiadomość" aria-label="Wiadomość"><i class="bi bi-chat-dots"></i></a>
-                            @if (_cardsLoaded && !s.IsPair && s.Status != SessionStatus.NoShow && !_hasFuture.Contains(s.ClientId))
-                            {
-                                <button type="button" class="td-rebook" disabled="@_busy" title="Ten sam rodzaj i godzina za tydzień" @onclick="() => RebookAsync(s)">
-                                    <i class="bi bi-arrow-repeat"></i>Umów za tydzień <small>@s.StartTime.AddDays(7).ToString("ddd d.MM", Pl)</small>
-                                </button>
-                            }
-                        </div>
+                        <VisitActionBar Session="s" Day="v.Day ?? Proposed(v)" Phone="@v.Card?.Phone" OnChanged="r => OnVisitChanged(v, r)">
+                            <ExtraContent>
+                                <button type="button" class="vab-btn icon" title="Notatka" aria-label="Notatka" @onclick="() => OpenNoteAsync(s, false)"><i class="bi bi-pencil-square"></i><span>Notatka</span></button>
+                                @if (_cardsLoaded && !s.IsPair && s.Status is not (SessionStatus.NoShow or SessionStatus.Cancelled) && !_hasFuture.Contains(s.ClientId))
+                                {
+                                    <button type="button" class="td-rebook" disabled="@_busy" title="Ten sam rodzaj i godzina za tydzień" @onclick="() => RebookAsync(s)">
+                                        <i class="bi bi-arrow-repeat"></i>Umów za tydzień <small>@s.StartTime.AddDays(7).ToString("ddd d.MM", Pl)</small>
+                                    </button>
+                                }
+                            </ExtraContent>
+                        </VisitActionBar>
                         @if (_rebookConflict == s.Id)
                         {
                             <div class="td-confirm"><span>Ten termin za tydzień jest zajęty.</span><a class="btn btn-sm btn-outline-primary" href="@($"/calendar?klient={s.ClientId}")">Wybierz inny w kalendarzu</a></div>
@@ -275,7 +250,7 @@
     private bool _loading = true, _cardsLoaded, _busy, _isAdmin, _plansOn;
     private string _userId = "";
     private string? _daySummary, _mascot, _error, _noteText;
-    private int? _noteFor, _confirmNoShow;
+    private int? _noteFor;
     private readonly Dictionary<int, string> _flash = [];
     private HashSet<int> _logged = [], _noted = [], _hasFuture = [];
     private int? _rebookConflict;
@@ -426,10 +401,6 @@
         return days >= 2 && days <= 6 ? $"{days} dni temu" : d.ToString("d.MM");
     }
 
-    private string LiveHref(Visit v) => v.Day is { } d
-        ? $"/train?klient={v.S.ClientId}&plan={d.PlanId}&dzien={d.PlanDayId}"
-        : $"/clients/{v.S.ClientId}?trening={v.S.Id}";
-
     private static string StatusText(SessionStatus s) => s switch
     {
         SessionStatus.Completed => "ukończona",
@@ -440,7 +411,7 @@
 
     private async Task OpenNoteAsync(SessionDto s, bool withDraft)
     {
-        _noteFor = s.Id; _noteText = ""; _confirmNoShow = null;
+        _noteFor = s.Id; _noteText = "";
         if (withDraft) await DraftAsync(s);
     }
 
@@ -514,7 +485,6 @@
         try
         {
             await SessionService.UpdateStatusAsync(s.Id, status, includePartner: status == SessionStatus.Completed);
-            _confirmNoShow = null;
             await RefreshAsync(s.Id, status == SessionStatus.Completed ? "Wizyta ukończona." : "Zapisano nieobecność.");
         }
         catch (Exception ex) when (ex is InvalidOperationException) { _error = ex.Message; }
@@ -522,13 +492,18 @@
         finally { _busy = false; }
     }
 
-    private async Task RestoreAsync(SessionDto s)
+    /// <summary>Bez wybranego dnia — proponowany kolejny dzień planu (ten z karty), żeby trening startował od razu.</summary>
+    private static SessionPlanDayDto? Proposed(Visit v) => v.Card is { PlanId: { } pid, PlanDayId: { } did } c
+        ? new SessionPlanDayDto(v.S.Id, pid, did, c.PlanName ?? "", c.PlanDayLabel ?? "", c.PlanToday.Count)
+        : null;
+
+    private void OnVisitChanged(Visit v, (SessionDto Session, string Message) r)
     {
-        _busy = true; _error = null;
-        try { await SessionService.RestoreAsync(s.Id); await RefreshAsync(s.Id, "Przywrócono wizytę."); }
-        catch (Exception ex) when (ex is InvalidOperationException) { _error = ex.Message; }
-        catch { _error = "Nie udało się przywrócić wizyty."; }
-        finally { _busy = false; }
+        v.S = r.Session;
+        _flash[v.S.Id] = r.Message;
+        _nextId = _day == _today
+            ? _visits.FirstOrDefault(x => x.S.Status is SessionStatus.Scheduled or SessionStatus.AwaitingPackage && x.S.EndTime > _now)?.S.Id
+            : null;
     }
 
     private async Task RefreshAsync(int sessionId, string message)

@@ -29,7 +29,7 @@ public class PreSessionBriefService(
         string? PlanName, string? PlanDayLabel, int? PlanId, List<ExerciseLine> PlanToday,
         List<ProgressionSuggestionDto> Progression, List<PlanInsightDto> Insights,
         List<(DateTime At, string Text)> Notes, string Summary, string? Mascot, string? MascotName,
-        int? PackageLeft = null, bool SummaryFromAi = false);
+        int? PackageLeft = null, bool SummaryFromAi = false, int? PlanDayId = null);
 
     /// <summary>Karta dla treningu — null, gdy go nie ma albo nie należy do tego trenera.</summary>
     public async Task<Card?> GetAsync(int sessionId, string userId, bool isAdmin)
@@ -105,6 +105,7 @@ public class PreSessionBriefService(
             })
             .FirstOrDefaultAsync();
         string? dayLabel = null;
+        int? dayId = null;
         var planToday = new List<ExerciseLine>();
         if (plan is { Days.Count: > 0 })
         {
@@ -112,6 +113,7 @@ public class PreSessionBriefService(
             var idx = plan.Days.FindIndex(d => d.Id == lastDayId);
             var day = plan.Days.FirstOrDefault(d => d.Id == chosenDayId) ?? plan.Days[(idx + 1) % plan.Days.Count];
             dayLabel = string.IsNullOrWhiteSpace(day.Label) ? $"Dzień {plan.Days.IndexOf(day) + 1}" : day.Label;
+            dayId = day.Id;
             planToday = day.Exercises.Select(e => new ExerciseLine(e.NamePl,
                 $"{e.Sets} × {e.Reps ?? "—"}" + (e.TargetWeightKg is decimal kg and > 0 ? $" · {kg:0.##} kg" : ""))).ToList();
         }
@@ -153,7 +155,7 @@ public class PreSessionBriefService(
             summary,
             config is { Enabled: true } ? config.Icons.GetValueOrDefault(healthNotes.Count > 0 ? "think" : "hello") : null,
             config is { Enabled: true } ? config.Name : null,
-            s.Package?.Left, config?.Ai == true && rawSummary != fallback);
+            s.Package?.Left, config?.Ai == true && rawSummary != fallback, dayId);
     }
 
 }

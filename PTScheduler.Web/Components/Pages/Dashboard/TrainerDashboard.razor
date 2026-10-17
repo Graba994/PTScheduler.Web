@@ -3,6 +3,7 @@
 @using PTScheduler.Domain.Enums
 @using PTScheduler.Domain.Constants
 @inject ISessionService SessionService
+@inject ITrainingPlanService PlanDays
 @inject IClientService ClientService
 @inject ISessionPackageService PackageService
 @inject IClientAttentionService Attention
@@ -175,8 +176,8 @@ else
         <div class="col-12 col-lg-5">
             <div class="card h-100">
                 <div class="card-header d-flex align-items-center justify-content-between">
-                    <span><i class="bi bi-sun me-2"></i>Dziś — @StudioClock.Now.ToString("dd MMMM")</span>
-                    <span class="badge" style="background:var(--c-primary-light);color:var(--c-primary)">@_today.Count</span>
+                    <span><i class="bi bi-sun me-2"></i>Dziś — @StudioClock.Now.ToString("dd MMMM") <span class="badge ms-1" style="background:var(--c-primary-light);color:var(--c-primary)">@_today.Count</span></span>
+                    <a href="/dzis" class="btn btn-sm btn-link p-0 text-decoration-none">Mój dzień <i class="bi bi-arrow-right"></i></a>
                 </div>
                 <div class="card-body p-0">
                     @if (!_today.Any())
@@ -193,30 +194,25 @@ else
                         <div class="list-group list-group-flush">
                             @foreach (var s in _today)
                             {
-                                <div class="list-group-item d-flex align-items-center gap-3 px-3 py-2">
-                                    <div class="text-center flex-shrink-0" style="min-width:48px">
-                                        <div class="fw-bold" style="font-size:1rem;color:var(--c-primary)">@s.StartTime.ToString("HH:mm")</div>
-                                        <div class="text-muted" style="font-size:.7rem">@s.DurationMinutes min</div>
+                                <div class="list-group-item px-3 py-2 dash-visit">
+                                    <div class="d-flex align-items-center gap-3">
+                                        <div class="text-center flex-shrink-0" style="min-width:48px">
+                                            <div class="fw-bold" style="font-size:1rem;color:var(--c-primary)">@s.StartTime.ToString("HH:mm")</div>
+                                            <div class="text-muted" style="font-size:.7rem">@s.DurationMinutes min</div>
+                                        </div>
+                                        <div class="flex-grow-1 overflow-hidden">
+                                            <a href="@($"/clients/{s.ClientId}")" class="fw-semibold text-truncate d-block text-body text-decoration-none" style="font-size:.875rem">@s.DisplayName</a>
+                                            <div class="text-muted text-truncate" style="font-size:.75rem">@s.SessionTypeName@(_todayDays.GetValueOrDefault(s.Id) is { } pd ? $" · {pd.DayLabel}" : "")</div>
+                                        </div>
+                                        @if (!string.IsNullOrEmpty(s.MeetingUrl))
+                                        {
+                                            <a href="@s.MeetingUrl" target="_blank" class="btn btn-sm btn-outline-primary meet-btn" title="Google Meet"><i class="bi bi-camera-video-fill"></i></a>
+                                        }
+                                        <span class="badge rounded-pill @StatusBadge(s.Status)" style="font-size:.65rem">@StatusLabel(s.Status)</span>
                                     </div>
-                                    <div class="flex-grow-1 overflow-hidden">
-                                        <div class="fw-semibold text-truncate" style="font-size:.875rem">@s.DisplayName</div>
-                                        <div class="text-muted" style="font-size:.75rem">@s.SessionTypeName</div>
+                                    <div class="dash-visit-actions">
+                                        <VisitActionBar Session="s" Day="_todayDays.GetValueOrDefault(s.Id)" Compact="true" OnChanged="r => OnTodayChanged(r)" />
                                     </div>
-                                    @if (s.Status == SessionStatus.Scheduled)
-                                    {
-                                        <a href="@($"/clients/{s.ClientId}?trening={s.Id}#trening")" class="btn btn-sm btn-outline-primary meet-btn" title="Przed treningiem: plan na dziś i uwagi"><i class="bi bi-clipboard2-pulse"></i></a>
-                                    }
-                                    @if (!string.IsNullOrEmpty(s.MeetingUrl))
-                                    {
-                                        <a href="@s.MeetingUrl" target="_blank" class="btn btn-sm btn-outline-primary meet-btn" title="Google Meet" @onclick:stopPropagation>
-                                            <i class="bi bi-camera-video-fill"></i>
-                                        </a>
-                                    }
-                                    <AddToCalendarButton Title="@($"{s.SessionTypeName} — {s.ClientName}")"
-                                                          StartTime="s.StartTime" DurationMinutes="s.DurationMinutes"
-                                                          Location="@(s.MeetingUrl ?? "")" Uid="@($"session-{s.Id}")"
-                                                          ButtonClass="btn btn-sm btn-outline-secondary meet-btn" Compact="true" />
-                                    <span class="badge rounded-pill @StatusBadge(s.Status)" style="font-size:.65rem">@StatusLabel(s.Status)</span>
                                 </div>
                             }
                         </div>
@@ -370,6 +366,13 @@ else
 
     private bool _loaded;
     private List<SessionDto> _today = [];
+    private Dictionary<int, PTScheduler.Application.DTOs.SessionPlanDayDto> _todayDays = [];
+
+    private void OnTodayChanged((SessionDto Session, string Message) r)
+    {
+        var i = _today.FindIndex(x => x.Id == r.Session.Id);
+        if (i >= 0) _today[i] = r.Session;
+    }
     private List<SessionDto> _upcoming = [];
     private List<SessionDto> _awaiting = [];
     private List<ExpiringPackageDto> _expiring = [];
@@ -401,6 +404,7 @@ else
 
             // Trening w parze to dwie wizyty — na pulpicie pokazujemy go raz („Ola + Piotr”).
             _today    = (await SessionService.GetSessionsAsync(todayStart, todayEnd, TrainerUserId)).Where(s => !s.IsPairFollower).ToList();
+            try { _todayDays = _today.Count == 0 ? [] : await PlanDays.GetSessionPlanDaysAsync(_today.Select(x => x.Id).ToList()); } catch { _todayDays = []; }
             _upcoming = (await SessionService.GetUpcomingAsync(trainerUserId: TrainerUserId, count: 8))
                             .Where(s => s.StartTime.Date > StudioClock.Now.Date && !s.IsPairFollower).ToList();
             _awaiting = await SessionService.GetAwaitingPackageAsync(TrainerUserId);

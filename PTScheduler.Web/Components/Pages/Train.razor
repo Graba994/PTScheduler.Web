@@ -10,6 +10,7 @@
 @using PTScheduler.Domain.Rules
 @attribute [Authorize(Roles = Roles.Client + "," + Roles.Admin + "," + Roles.Trainer + "," + Roles.Subordinate)]
 @inject ITrainingPlanService PlanService
+@inject ISessionService Sessions
 @inject IWorkoutLogService WorkoutLog
 @inject IWorkoutSessionService Session
 @inject IClientService ClientService
@@ -34,15 +35,22 @@
     <h4 class="page-title mb-0"><i class="bi bi-lightning-charge-fill me-2" style="color:var(--c-primary)"></i>@(_liveFor is null ? "Trenuj" : "Trening na żywo")</h4>
     @if (_liveFor is not null)
     {
-        <a class="btn btn-sm btn-outline-secondary" href="@($"/clients/{_clientId}")"><i class="bi bi-person me-1"></i>Profil klienta</a>
+        <div class="d-flex gap-2">
+            <a class="btn btn-sm btn-outline-secondary" href="/dzis"><i class="bi bi-sun me-1"></i>Wróć do dnia</a>
+            <a class="btn btn-sm btn-outline-secondary" href="@($"/clients/{_clientId}")"><i class="bi bi-person-vcard me-1"></i>Profil klienta</a>
+        </div>
     }
 </div>
 @if (_liveFor is not null)
 {
     <div class="tr-live" role="status">
         <span class="tr-live-dot" aria-hidden="true"></span>
-        <div><b>Prowadzisz trening: @_liveFor</b><small>Serie zapisują się w dzienniku klienta — klient zobaczy je w swojej aplikacji i dostanie podsumowanie.</small></div>
+        <div><b>Prowadzisz trening: @_liveFor</b><small>Serie zapisują się w dzienniku klienta — klient zobaczy je w swojej aplikacji i dostanie podsumowanie.@(LiveSessionId is not null ? " Po „Zakończ trening” wizyta oznaczy się jako ukończona." : "")</small></div>
     </div>
+    @if (_visitDone is not null)
+    {
+        <div class="alert alert-success d-flex align-items-center gap-2 flex-wrap small"><i class="bi bi-check2-circle"></i><span class="me-auto">@_visitDone</span><a class="btn btn-sm btn-success" href="/dzis">Wróć do dnia</a></div>
+    }
 }
 @if (_liveDenied)
 {
@@ -211,7 +219,15 @@ else
     {
         @if (_plans.Count == 0)
         {
-            <div class="alert alert-secondary"><i class="bi bi-inbox me-2"></i>Nie masz jeszcze przypisanego planu treningowego.</div>
+            @if (_liveFor is not null)
+            {
+                <div class="alert alert-secondary d-flex align-items-center gap-2 flex-wrap"><i class="bi bi-inbox"></i><span class="me-auto">@_liveFor nie ma jeszcze planu — utwórz go, a trening zaczniesz od razu.</span>
+                    <a class="btn btn-sm btn-primary" href="@($"/plans/new?klient={_clientId}")"><i class="bi bi-plus-lg me-1"></i>Utwórz plan</a></div>
+            }
+            else
+            {
+                <div class="alert alert-secondary"><i class="bi bi-inbox me-2"></i>Nie masz jeszcze przypisanego planu treningowego.</div>
+            }
         }
         else
         {
@@ -316,6 +332,9 @@ else
     [SupplyParameterFromQuery(Name = "klient")] public int? LiveClientId { get; set; }
     [SupplyParameterFromQuery(Name = "plan")] public int? LivePlanId { get; set; }
     [SupplyParameterFromQuery(Name = "dzien")] public int? LiveDayId { get; set; }
+    /// <summary>Wizyta, z której trener zaczął trening (Dziś, Pulpit) — po zakończeniu treningu staje się „ukończona”.</summary>
+    [SupplyParameterFromQuery(Name = "wizyta")] public int? LiveSessionId { get; set; }
+    private string? _visitDone;
     private string? _liveFor;
     private bool _liveDenied;
     private string _storeKey = "";
@@ -676,6 +695,20 @@ else
         }
     }
 
+    /// <summary>Trening na żywo z wizyty: wizyta (i para) staje się „ukończona”, jeśli była zaplanowana i należy do tego klienta.</summary>
+    private async Task CompleteVisitAsync()
+    {
+        if (_liveFor is null || LiveSessionId is not { } sid || _clientId is null) return;
+        try
+        {
+            var visit = await Sessions.GetSessionAsync(sid);
+            if (visit is null || visit.ClientId != _clientId || visit.Status is not (PTScheduler.Domain.Enums.SessionStatus.Scheduled or PTScheduler.Domain.Enums.SessionStatus.AwaitingPackage)) return;
+            await Sessions.UpdateStatusAsync(sid, PTScheduler.Domain.Enums.SessionStatus.Completed, includePartner: true);
+            _visitDone = $"Wizyta {visit.StartTime:HH:mm} oznaczona jako ukończona.";
+        }
+        catch (Exception ex) { LoggerFactory.CreateLogger("Train").LogWarning(ex, "Nie udało się oznaczyć wizyty {Id} jako ukończonej.", sid); }
+    }
+
     private async Task Finish()
     {
         if (_draft is null || _clientId is null) return;
@@ -707,6 +740,7 @@ else
                 }).ToList()
             };
             var saved = await WorkoutLog.LogWorkoutAsync(_clientId.Value, dto);
+            await CompleteVisitAsync();
             var minutes = (int)Math.Clamp(Math.Round((Clock.LocalNow - _draft.StartedAt).TotalMinutes), 5, 300);
             var workoutDate = _draft.Date;
             await ClearDraftStore();
