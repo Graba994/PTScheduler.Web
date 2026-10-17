@@ -105,7 +105,10 @@
         _timer = new PeriodicTimer(TimeSpan.FromSeconds(45));
         _ = RefreshLoopAsync(_cts.Token);
         NpmHealth.Changed += OnNpmChanged;
+        Status.Changed += OnStatusChanged;
     }
+
+    private void OnStatusChanged(PanelStatusService.Snapshot s) { _s = s; _ = InvokeAsync(StateHasChanged); }
 
     private void OnNpmChanged() => _ = InvokeAsync(StateHasChanged);
 
@@ -155,6 +158,7 @@
     public ValueTask DisposeAsync()
     {
         NpmHealth.Changed -= OnNpmChanged;
+        Status.Changed -= OnStatusChanged;
         _cts?.Cancel();
         _timer?.Dispose();
         _cts?.Dispose();

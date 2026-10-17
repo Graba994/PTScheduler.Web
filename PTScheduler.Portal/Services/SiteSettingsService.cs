@@ -120,6 +120,8 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string RequireAdmin2fa = "require_admin_2fa";
         /// <summary>Adres, dla którego odzyskiwanie dostępu (Portal__RecoverAdmin) już zadziałało — drugi raz nie resetujemy.</summary>
         public const string RecoverAdminUsed = "recover_admin_used";
+        /// <summary>Chwila (UTC, ISO 8601), od której pasek liczy nieudane logowania — „Oznacz jako sprawdzone” w logach logowań.</summary>
+        public const string LoginFailuresAckAt = "login_failures_ack_at";
         public const string LegalCompany = "legal_company";
         public const string LegalAddress = "legal_address";
         public const string LegalNip = "legal_nip";

@@ -37,6 +37,9 @@ public class PanelStatusService(
     private readonly SemaphoreSlim _lock = new(1, 1);
     private Snapshot? _cached;
 
+    /// <summary>Po wymuszonym odświeżeniu (np. „Oznacz jako sprawdzone”) — pasek przerysowuje się od razu.</summary>
+    public event Action<Snapshot>? Changed;
+
     public async Task<Snapshot> GetAsync(bool refresh = false)
     {
         if (!refresh && _cached is { } c && DateTime.UtcNow - c.TakenAt < CacheFor) return c;
@@ -44,7 +47,9 @@ public class PanelStatusService(
         try
         {
             if (!refresh && _cached is { } c2 && DateTime.UtcNow - c2.TakenAt < CacheFor) return c2;
-            return _cached = await BuildAsync();
+            _cached = await BuildAsync();
+            if (refresh) Changed?.Invoke(_cached);
+            return _cached;
         }
         finally { _lock.Release(); }
     }
@@ -84,7 +89,12 @@ public class PanelStatusService(
             .Where(p => p.Status == PaymentRecordStatus.Paid && p.CreatedAt >= todayUtc)
             .SumAsync(p => (decimal?)p.Amount) ?? 0m;
         var failedToday = await db.PaymentRecords.CountAsync(p => p.Status == PaymentRecordStatus.Failed && p.CreatedAt >= todayUtc);
-        var failedLogins = await db.LoginLogs.CountAsync(l => !l.Success && l.CreatedAt >= now.AddHours(-24));
+        // Nieudane logowania z 24 h, ale tylko po ostatnim „Oznacz jako sprawdzone”.
+        var failedSince = now.AddHours(-24);
+        var ack = await db.SiteSettings.AsNoTracking().Where(s => s.Key == SiteSettingsService.Keys.LoginFailuresAckAt).Select(s => s.Value).FirstOrDefaultAsync();
+        if (DateTime.TryParse(ack, null, System.Globalization.DateTimeStyles.RoundtripKind, out var ackAt) && ackAt.ToUniversalTime() > failedSince)
+            failedSince = ackAt.ToUniversalTime();
+        var failedLogins = await db.LoginLogs.CountAsync(l => !l.Success && l.CreatedAt >= failedSince);
 
         bool dockerOk = false;
         int running = 0, total = 0;
