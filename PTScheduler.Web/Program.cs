@@ -912,7 +912,8 @@ app.MapGet("/sso/portal", async (HttpContext ctx, string? t,
 
 app.MapGet("/internal/metrics",
     async (HttpContext ctx, IDbContextFactory<ApplicationDbContext> dbFactory,
-        PTScheduler.Application.Interfaces.IEmailService email, PTScheduler.Application.Interfaces.IEmailSettingsService emailSettings) =>
+        PTScheduler.Application.Interfaces.IEmailService email, PTScheduler.Application.Interfaces.IEmailSettingsService emailSettings,
+        PTScheduler.Application.Interfaces.IAppClock clock) =>
 {
     if (!InternalSecretMatches(ctx)) return Results.NotFound();
 
@@ -930,6 +931,26 @@ app.MapGet("/internal/metrics",
         .SumAsync(o => (decimal?)o.Amount) ?? 0;
     var mailSettings = await emailSettings.GetAsync();
 
+    // Aktywność do analiz Leo w Portalu — same sumy, żadnych danych klientów. Wizyty liczone w czasie lokalnym (jak w kalendarzu).
+    var localNow = clock.LocalNow;
+    var weekAgo = localNow.AddDays(-7);
+    var monthAgo = localNow.AddDays(-30);
+    var utcMonthAgo = DateTime.UtcNow.AddDays(-30);
+    var lastWeek = await db.Sessions.Where(s => s.StartTime >= weekAgo && s.StartTime < localNow)
+        .GroupBy(s => s.Status).Select(g => new { g.Key, Count = g.Count() }).ToListAsync();
+    int Week(PTScheduler.Domain.Enums.SessionStatus st) => lastWeek.FirstOrDefault(x => x.Key == st)?.Count ?? 0;
+    var activeClients30 = await db.Sessions.Where(s => s.StartTime >= monthAgo && s.StartTime < localNow
+            && s.Status == PTScheduler.Domain.Enums.SessionStatus.Completed)
+        .Select(s => s.ClientId).Distinct().CountAsync();
+    var upcoming7 = await db.Sessions.CountAsync(s => s.StartTime >= localNow && s.StartTime < localNow.AddDays(7)
+        && (s.Status == PTScheduler.Domain.Enums.SessionStatus.Scheduled || s.Status == PTScheduler.Domain.Enums.SessionStatus.AwaitingPackage));
+    var revenue30 = await db.Orders.Where(o => o.Status == PTScheduler.Domain.Enums.OrderStatus.Paid && (o.PaidAt ?? o.CreatedAt) >= utcMonthAgo)
+        .SumAsync(o => (decimal?)o.Amount) ?? 0;
+    var fromDay = DateOnly.FromDateTime(monthAgo);
+    var workouts30 = await db.WorkoutLogs.Where(l => l.WorkoutDate >= fromDay).Select(l => new { l.ClientId, l.WorkoutDate }).Distinct().CountAsync();
+    var messages30 = await db.ChatMessages.CountAsync(m => m.SentAt >= utcMonthAgo);
+    var plans = await db.TrainingPlans.CountAsync(p => !p.IsArchived && !p.IsTemplate);
+
     return Results.Json(new
     {
         clients = clientsCount,
@@ -944,6 +965,15 @@ app.MapGet("/internal/metrics",
         mailOwnErrorAt = mailSettings.OwnFailing(DateTime.UtcNow) ? mailSettings.LastErrorAt : null,
         mailOwnError = mailSettings.OwnFailing(DateTime.UtcNow) ? mailSettings.LastError : null,
         mailFallbacks = mailSettings.FallbackCount,
+        activeClients30,
+        sessions7 = Week(PTScheduler.Domain.Enums.SessionStatus.Completed) + Week(PTScheduler.Domain.Enums.SessionStatus.Scheduled),
+        cancelled7 = Week(PTScheduler.Domain.Enums.SessionStatus.Cancelled),
+        noShow7 = Week(PTScheduler.Domain.Enums.SessionStatus.NoShow),
+        upcoming7,
+        revenue30,
+        workouts30,
+        messages30,
+        plans,
         timestamp = DateTime.UtcNow.ToString("o")
     });
 });

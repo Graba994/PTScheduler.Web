@@ -113,6 +113,12 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string LeoInsightSurvey = "leo_insight_survey";
         public const string LeoInsightMeetings = "leo_insight_meetings";
         public const string LeoInsightFeedback = "leo_insight_feedback";
+        /// <summary>„Głos klientów” — wnioski z ankiety, spotkań, ocen i zgłoszeń razem (JSON jak wyżej).</summary>
+        public const string LeoInsightVoice = "leo_insight_voice";
+        /// <summary>"true" — tygodniowy raport biznesowy w poniedziałek (o godzinie porannego raportu).</summary>
+        public const string LeoWeeklyEnabled = "leo_weekly_enabled";
+        /// <summary>Poniedziałek ostatniego raportu tygodniowego (yyyy-MM-dd).</summary>
+        public const string LeoWeeklySentOn = "leo_weekly_sent_on";
 
         // Dane do dokumentów prawnych (regulamin, polityka prywatności, umowa powierzenia)
         public const string BrandName = "brand_name";
@@ -244,6 +250,7 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         [Keys.LeoAnimation] = "wave",
         [Keys.LeoReportEnabled] = "true",
         [Keys.LeoReportHour] = "7",
+        [Keys.LeoWeeklyEnabled] = "true",
     };
 
     public async Task<string> GetAsync(string key)

@@ -189,7 +189,7 @@ public class LeoReportService(
     }
 }
 
-/// <summary>Co 10 minut sprawdza, czy minęła godzina porannego raportu (czas warszawski) i czy dziś już poszedł.</summary>
+/// <summary>Co 10 minut sprawdza, czy minęła godzina porannego raportu (czas warszawski) i czy dziś już poszedł; w poniedziałek także tygodniowego.</summary>
 public class LeoReportBackgroundService(IServiceScopeFactory scopes, ILogger<LeoReportBackgroundService> logger) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken ct)
@@ -209,15 +209,26 @@ public class LeoReportBackgroundService(IServiceScopeFactory scopes, ILogger<Leo
         if (local.Hour is < 5 or >= 12) return;
         using var scope = scopes.CreateScope();
         var settings = scope.ServiceProvider.GetRequiredService<SiteSettingsService>();
-        var s = await settings.GetAllAsync(K.LeoReportEnabled, K.LeoReportHour, K.LeoReportSentOn, K.LeoEnabled);
-        if (s[K.LeoReportEnabled] == "false" || s[K.LeoEnabled] == "false") return;
+        var s = await settings.GetAllAsync(K.LeoReportEnabled, K.LeoReportHour, K.LeoReportSentOn, K.LeoEnabled, K.LeoWeeklyEnabled, K.LeoWeeklySentOn);
+        if (s[K.LeoEnabled] == "false") return;
         var hour = int.TryParse(s[K.LeoReportHour], out var h) ? Math.Clamp(h, 5, 11) : 7;
         var today = local.ToString("yyyy-MM-dd");
-        if (local.Hour < hour || s[K.LeoReportSentOn] == today) return;
+        if (local.Hour < hour) return;
 
         // Najpierw znacznik — przy błędzie wysyłki raport nie pójdzie dwa razy (spróbujemy jutro).
-        await settings.SetAsync(K.LeoReportSentOn, today);
-        if (await scope.ServiceProvider.GetRequiredService<LeoReportService>().SendAsync() is { } error)
-            logger.LogInformation("Poranny raport Leo nie wysłany: {Error}", error);
+        if (s[K.LeoReportEnabled] != "false" && s[K.LeoReportSentOn] != today)
+        {
+            await settings.SetAsync(K.LeoReportSentOn, today);
+            if (await scope.ServiceProvider.GetRequiredService<LeoReportService>().SendAsync() is { } error)
+                logger.LogInformation("Poranny raport Leo nie wysłany: {Error}", error);
+        }
+
+        // W poniedziałek także raport tygodniowy (o tej samej godzinie).
+        if (local.DayOfWeek == DayOfWeek.Monday && s[K.LeoWeeklyEnabled] != "false" && s[K.LeoWeeklySentOn] != today)
+        {
+            await settings.SetAsync(K.LeoWeeklySentOn, today);
+            if (await scope.ServiceProvider.GetRequiredService<LeoWeeklyReport>().SendAsync() is { } error)
+                logger.LogInformation("Tygodniowy raport Leo nie wysłany: {Error}", error);
+        }
     }
 }

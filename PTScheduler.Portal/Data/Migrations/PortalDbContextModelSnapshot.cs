@@ -2012,16 +2012,43 @@ namespace PTScheduler.Portal.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<long>("Id"));
 
+                    b.Property<int?>("ActiveClients30")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("Cancelled7")
+                        .HasColumnType("integer");
+
                     b.Property<int>("Clients")
                         .HasColumnType("integer");
 
                     b.Property<DateOnly>("Date")
                         .HasColumnType("date");
 
+                    b.Property<int?>("Messages30")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("NoShow7")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("Plans")
+                        .HasColumnType("integer");
+
+                    b.Property<decimal?>("Revenue30")
+                        .HasColumnType("numeric");
+
+                    b.Property<int?>("Sessions7")
+                        .HasColumnType("integer");
+
                     b.Property<int>("SessionsTotal")
                         .HasColumnType("integer");
 
                     b.Property<int>("TenantId")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("Upcoming7")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("Workouts30")
                         .HasColumnType("integer");
 
                     b.HasKey("Id");

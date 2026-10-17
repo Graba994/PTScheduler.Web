@@ -304,9 +304,14 @@ public partial class AssistantService(
         var text = string.Join('\n', result.Text.Replace("\r", "").Split('\n')
             .Select(l => l.Trim().Replace("**", "")).Where(l => l.Length > 0 && !l.StartsWith('#')));
         if (text.Length > 3000) text = text[..3000] + "…";
-        var allowed = Numbers().Matches(json).Select(m => Normalize(m.Value)).ToHashSet();
-        var unverified = Numbers().Matches(text).Select(m => m.Value).Where(v => !allowed.Contains(Normalize(v))).Distinct().Take(10).ToList();
-        return new(text, true, null, unverified, DateTime.UtcNow);
+        return new(text, true, null, UnverifiedNumbers(text, json), DateTime.UtcNow);
+    }
+
+    /// <summary>Liczby z tekstu AI, których nie ma w danych źródłowych (do sprawdzenia przez administratora).</summary>
+    public static List<string> UnverifiedNumbers(string text, string source)
+    {
+        var allowed = Numbers().Matches(source).Select(m => Normalize(m.Value)).ToHashSet();
+        return Numbers().Matches(text).Select(m => m.Value).Where(v => !allowed.Contains(Normalize(v))).Distinct().Take(10).ToList();
     }
 
     /// <summary>Szkic odpowiedzi e-mail do trenera (zgłoszenie, opinia, ryzyko odejścia) z kategorią.</summary>

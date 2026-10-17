@@ -62,6 +62,15 @@ public class GrowthService(IServiceScopeFactory scopes, IConfiguration config, I
                 if (snapshot is null) db.TenantMetricSnapshots.Add(snapshot = new TenantMetricSnapshot { TenantId = t.Id, Date = today });
                 snapshot.Clients = m.Clients;
                 snapshot.SessionsTotal = m.SessionsTotal;
+                snapshot.ActiveClients30 = m.ActiveClients30;
+                snapshot.Sessions7 = m.Sessions7;
+                snapshot.Cancelled7 = m.Cancelled7;
+                snapshot.NoShow7 = m.NoShow7;
+                snapshot.Upcoming7 = m.Upcoming7;
+                snapshot.Revenue30 = m.Revenue30;
+                snapshot.Workouts30 = m.Workouts30;
+                snapshot.Messages30 = m.Messages30;
+                snapshot.Plans = m.Plans;
                 if (t.ActivatedAt is null && m.Clients >= ActivationClients && m.SessionsTotal >= 1)
                 {
                     t.ActivatedAt = DateTime.UtcNow;
@@ -77,7 +86,9 @@ public class GrowthService(IServiceScopeFactory scopes, IConfiguration config, I
     }
 
     private sealed record Metrics(int Clients, int SessionsTotal,
-        string? MailMode = null, DateTime? MailOwnErrorAt = null, string? MailOwnError = null, int? MailFallbacks = null);
+        string? MailMode = null, DateTime? MailOwnErrorAt = null, string? MailOwnError = null, int? MailFallbacks = null,
+        int? ActiveClients30 = null, int? Sessions7 = null, int? Cancelled7 = null, int? NoShow7 = null, int? Upcoming7 = null,
+        decimal? Revenue30 = null, int? Workouts30 = null, int? Messages30 = null, int? Plans = null);
 
     /// <summary>Poczta trenera: tryb (nasza / własna skrzynka) i błędy własnej — dla Leo i karty trenera.
     /// Zmianę trybu zapisujemy w historii, żeby Leo mógł o niej powiedzieć.</summary>

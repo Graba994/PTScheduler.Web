@@ -111,6 +111,8 @@ builder.Services.AddScoped<AssistantService>();
 builder.Services.AddScoped<LeoService>();
 builder.Services.AddScoped<LeoInsights>();
 builder.Services.AddScoped<LeoReportService>();
+builder.Services.AddScoped<LeoAnalytics>();
+builder.Services.AddScoped<LeoWeeklyReport>();
 builder.Services.AddHostedService<LeoReportBackgroundService>();
 builder.Services.AddSingleton<FunnelService>();
 builder.Services.AddHostedService<GrowthService>();
