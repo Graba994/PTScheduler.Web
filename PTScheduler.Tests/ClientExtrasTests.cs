@@ -2,7 +2,7 @@ using System.Text;
 using FluentAssertions;
 using PTScheduler.Application.DTOs;
 using PTScheduler.Application.Finance;
-using PTScheduler.Application.Packages;
+using PTScheduler.Application.Shop;
 using PTScheduler.Application.Scheduling;
 using Xunit;
 

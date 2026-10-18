@@ -206,7 +206,7 @@ public class PackageReminderService(IServiceScopeFactory scopeFactory, ILogger<P
                     continue;
                 }
 
-                var offer = PTScheduler.Application.Packages.RebuyOffer.Match(offers, pkg.Name, pkg.SessionTypeId, pkg.TotalSessions, pkg.PartnerClientId != null);
+                var offer = PTScheduler.Application.Shop.RebuyOffer.Match(offers, pkg.Name, pkg.SessionTypeId, pkg.TotalSessions, pkg.PartnerClientId != null);
                 var link = offer is null ? "/packages" : $"/packages?kup={offer.Id}";
                 var sent = false;
 
