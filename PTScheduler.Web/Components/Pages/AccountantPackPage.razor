@@ -1,0 +1,198 @@
+@page "/finance/ksiegowa"
+@using Microsoft.AspNetCore.Authorization
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Application.Finance
+@attribute [Authorize(Roles = Roles.Admin + "," + Roles.Trainer)]
+@inject AccountantPackService Packs
+@inject PTScheduler.Application.Interfaces.IAppClock Clock
+@inject AuthenticationStateProvider AuthState
+@inject EntitlementService Entitlements
+@inject IJSRuntime JS
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Paczka dla księgowej: miesiąc → podsumowanie → ZIP (CSV + PDF) albo e-mail z linkiem. Właściciel może włączyć wysyłkę co miesiąc. *@
+
+<AppTitle Page="Paczka dla księgowej" />
+
+<div class="acc">
+    <BackLink Href="/finance" Label="Finanse" />
+    <header>
+        <h4 class="mb-1 fw-bold"><i class="bi bi-calculator me-2"></i>Paczka dla księgowej</h4>
+        <p class="acc-sub">Wpływy z miesiąca w jednym pliku: CSV do Excela i PDF. Pobierz albo wyślij księgowej linkiem.</p>
+    </header>
+
+    @if (!Entitlements.IsAllowed("FinancialReports"))
+    {
+        <FeatureGate Flag="FinancialReports" RequiredPlan="Starter" Title="Paczka dla księgowej jest w planie Starter">
+            <Description>Zestawienia miesięczne i wysyłka do księgowej są częścią raportów finansowych.</Description>
+        </FeatureGate>
+    }
+    else
+    {
+        <section class="acc-card">
+            <div class="acc-month">
+                <button type="button" class="btn btn-sm btn-light" aria-label="Poprzedni miesiąc" @onclick="() => ShiftAsync(-1)"><i class="bi bi-chevron-left"></i></button>
+                <b>@AccountantPack.MonthLabel(_year, _month)</b>
+                <button type="button" class="btn btn-sm btn-light" aria-label="Następny miesiąc" disabled="@IsCurrentMonth" @onclick="() => ShiftAsync(1)"><i class="bi bi-chevron-right"></i></button>
+            </div>
+
+            @if (_pack is null)
+            {
+                <div class="text-center text-muted py-4"><div class="spinner-border spinner-border-sm"></div></div>
+            }
+            else
+            {
+                <div class="acc-stats">
+                    <div><small>Płatności online</small><b>@AccountantPack.Money(_pack.Total(AccountantPack.Online), _pack.Currency)</b></div>
+                    <div><small>Opłacone u trenera</small><b>@AccountantPack.Money(_pack.Total(AccountantPack.AtTrainer), _pack.Currency)</b></div>
+                    <div class="is-main"><small>Wpływy razem</small><b>@AccountantPack.Money(_pack.Received, _pack.Currency)</b></div>
+                    <div><small>Faktury</small><b>@_pack.Invoices</b></div>
+                </div>
+                var unpaidCount = _pack.InGroup(AccountantPack.Unpaid).Count();
+                @if (unpaidCount > 0)
+                {
+                    <p class="small text-muted mb-0"><i class="bi bi-info-circle me-1"></i>Nieopłacone pakiety sprzedane w tym miesiącu: @unpaidCount. W pliku są osobno, poza sumą.</p>
+                }
+                @if (IsCurrentMonth)
+                {
+                    <p class="small text-warning-emphasis mb-0"><i class="bi bi-hourglass-split me-1"></i>Miesiąc jeszcze trwa — zestawienie się zmieni.</p>
+                }
+
+                <div class="acc-actions">
+                    <button type="button" class="btn btn-primary btn-sm" disabled="@_busy" @onclick='() => DownloadAsync("zip")'><i class="bi bi-file-earmark-zip me-1"></i>Pobierz paczkę (ZIP)</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@_busy" @onclick='() => DownloadAsync("csv")'><i class="bi bi-filetype-csv me-1"></i>CSV</button>
+                    <button type="button" class="btn btn-outline-secondary btn-sm" disabled="@_busy" @onclick='() => DownloadAsync("pdf")'><i class="bi bi-filetype-pdf me-1"></i>PDF</button>
+                </div>
+
+                @if (_pack.Rows.Count > 0)
+                {
+                    <details class="acc-rows">
+                        <summary>Pokaż pozycje (@_pack.Rows.Count)</summary>
+                        <div class="table-responsive">
+                            <table class="table table-sm align-middle mb-0">
+                                <thead><tr><th>Data</th><th>Grupa</th><th>Opis</th><th>Klient</th><th class="text-end">Kwota</th></tr></thead>
+                                <tbody>
+                                    @foreach (var r in _pack.Rows.OrderBy(r => r.Group == AccountantPack.Unpaid).ThenBy(r => r.Date))
+                                    {
+                                        <tr class="@(r.Group == AccountantPack.Unpaid ? "text-muted" : "")">
+                                            <td class="text-nowrap">@r.Date.ToString("dd.MM")</td>
+                                            <td class="small">@r.Group</td>
+                                            <td>@r.Description @if (!string.IsNullOrEmpty(r.Invoice)) { <span class="badge bg-light text-dark border ms-1">@r.Invoice</span> }</td>
+                                            <td>@r.Client</td>
+                                            <td class="text-end text-nowrap">@r.Amount.ToString("N2")</td>
+                                        </tr>
+                                    }
+                                </tbody>
+                            </table>
+                        </div>
+                    </details>
+                }
+            }
+        </section>
+
+        <section class="acc-card">
+            <b><i class="bi bi-envelope me-1"></i>Wyślij księgowej</b>
+            <p class="small text-muted mb-0">Dostanie podsumowanie i link do paczki, ważny @AccountantPackService.LinkDays dni (bez logowania i bez zakładania konta).</p>
+            <div class="acc-send">
+                <input type="email" class="form-control form-control-sm" placeholder="adres@biuro-rachunkowe.pl" @bind="_email" @bind:event="oninput" />
+                <button type="button" class="btn btn-sm btn-primary" disabled="@(_busy || string.IsNullOrWhiteSpace(_email))" @onclick="SendAsync">Wyślij za @AccountantPack.MonthLabel(_year, _month)</button>
+            </div>
+            @if (_isOwner)
+            {
+                <label class="form-check form-switch mb-0">
+                    <input type="checkbox" class="form-check-input" checked="@_auto" @onchange="AutoChangedAsync" />
+                    <span class="form-check-label small">Wysyłaj co miesiąc automatycznie (1.–5. dnia, za poprzedni miesiąc)</span>
+                </label>
+                @if (_lastSent is not null) { <small class="text-muted">Ostatnio wysłano automatycznie: @_lastSent</small> }
+            }
+            @if (_msg is not null) { <div class="small @(_msgOk ? "text-success" : "text-danger")">@_msg</div> }
+        </section>
+    }
+</div>
+
+@code {
+    private int _year, _month;
+    private AccountantPack.Pack? _pack;
+    private string? _trainerScope;
+    private bool _isOwner, _busy, _auto, _msgOk;
+    private string? _email, _msg, _lastSent;
+
+    private bool IsCurrentMonth => _year == Clock.Today.Year && _month == Clock.Today.Month;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        _isOwner = user.IsInRole(Roles.Admin);
+        // Właściciel widzi całe studio; trener — tylko swoich klientów.
+        _trainerScope = _isOwner ? null : user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
+        (_year, _month) = AccountantPack.PreviousMonth(Clock.Today);
+        if (!Entitlements.IsAllowed("FinancialReports")) return;
+        var s = await Packs.GetSettingsAsync();
+        _email = s.Email;
+        _auto = s.AutoSend;
+        _lastSent = s.LastSentMonth;
+        await LoadAsync();
+    }
+
+    private async Task LoadAsync()
+    {
+        _pack = null;
+        _pack = await Packs.BuildAsync(_year, _month, _trainerScope);
+    }
+
+    private async Task ShiftAsync(int months)
+    {
+        var d = new DateOnly(_year, _month, 1).AddMonths(months);
+        if (d > new DateOnly(Clock.Today.Year, Clock.Today.Month, 1)) return;
+        (_year, _month) = (d.Year, d.Month);
+        _msg = null;
+        await LoadAsync();
+    }
+
+    private async Task DownloadAsync(string kind)
+    {
+        if (_pack is null) return;
+        _busy = true;
+        try
+        {
+            var (bytes, ext) = kind switch
+            {
+                "csv" => (AccountantPack.Csv(_pack), "csv"),
+                "pdf" => (Packs.Pdf(_pack), "pdf"),
+                _ => (Packs.Zip(_pack), "zip")
+            };
+            await JS.InvokeVoidAsync("PTExport.downloadCsv", $"{_pack.FileStem}.{ext}", bytes);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task SendAsync()
+    {
+        _busy = true; _msg = null;
+        try
+        {
+            var to = _email!.Trim();
+            if (!System.Net.Mail.MailAddress.TryCreate(to, out _)) { _msgOk = false; _msg = "To nie wygląda na adres e-mail."; return; }
+            var (ok, error) = await Packs.SendAsync(_year, _month, _trainerScope, to);
+            _msgOk = ok;
+            _msg = ok ? $"Wysłano na {to}." : error;
+            // Zapamiętujemy adres (tylko właściciel — to ustawienie studia).
+            if (ok && _isOwner) await Packs.SaveSettingsAsync(to, _auto);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task AutoChangedAsync(ChangeEventArgs e)
+    {
+        var on = e.Value is true;
+        _msg = null;
+        try
+        {
+            await Packs.SaveSettingsAsync(_email, on);
+            _auto = on;
+            _msgOk = true;
+            _msg = on ? "Włączone — zestawienie pójdzie samo na początku każdego miesiąca." : "Wyłączone.";
+        }
+        catch (ArgumentException ex) { _auto = false; _msgOk = false; _msg = ex.Message; }
+    }
+}

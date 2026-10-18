@@ -62,6 +62,8 @@ public class Session
     public DateTime? ReminderSmsSentAt { get; set; }
     /// <summary>Dodatkowe przypomnienie 2 h przed wizytą (Client.ExtraReminder) — wysłane.</summary>
     public DateTime? ExtraReminderSentAt { get; set; }
+    /// <summary>Kiedy po odwołaniu tej wizyty sprawdziliśmy, kogo zawiadomić o wolnym terminie (raz).</summary>
+    public DateTime? FreedNotifiedAt { get; set; }
 
     /// <summary>
     /// Liczba cykli, w których wysyłka któregoś kanału zawiodła. Po przekroczeniu

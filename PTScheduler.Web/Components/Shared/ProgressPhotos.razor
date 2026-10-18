@@ -3,6 +3,7 @@
 @using PTScheduler.Domain.Enums
 @inject IProgressPhotoService PhotoService
 @inject IAppClock Clock
+@inject IJSRuntime JS
 
 @* Zdjęcia sylwetki klienta — widoczne tylko dla klienta i jego trenera. *@
 <div class="card mb-3">
@@ -10,6 +11,12 @@
         <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-2">
             <h6 class="mb-0 fw-semibold"><i class="bi bi-camera me-2"></i>Zdjęcia sylwetki</h6>
             <div class="d-flex gap-2">
+                @if (FirstLast() is not null && !_compareMode)
+                {
+                    <button class="btn btn-sm btn-outline-primary" @onclick="ShowFirstLast" title="Pierwsze i ostatnie zdjęcie z tego samego ujęcia">
+                        <i class="bi bi-images me-1"></i>Przed i po
+                    </button>
+                }
                 @if (_photos.Count >= 2)
                 {
                     <button class="btn btn-sm @(_compareMode ? "btn-secondary" : "btn-outline-secondary")" @onclick="ToggleCompare">
@@ -150,6 +157,20 @@
                         </figure>
                     }
                 </div>
+                <div class="modal-footer py-2 justify-content-between">
+                    <span class="small text-muted">
+                        @if (_imgMsg is not null) { @_imgMsg }
+                        else if (IsStaff) { <span><i class="bi bi-shield-lock me-1"></i>Publikuj tylko za zgodą klienta.</span> }
+                        else { <span>Jeden obraz z datami — do zapisania albo wysłania.</span> }
+                    </span>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-outline-secondary" disabled="@_imgBusy" @onclick='() => BuildImageAsync("save")'><i class="bi bi-download me-1"></i>Zapisz obraz</button>
+                        @if (!IsStaff)
+                        {
+                            <button class="btn btn-sm btn-primary" disabled="@_imgBusy" @onclick='() => BuildImageAsync("share")'><i class="bi bi-share me-1"></i>Udostępnij</button>
+                        }
+                    </div>
+                </div>
             </div>
         </div>
     </div>
@@ -236,6 +257,45 @@
     {
         _compare = null;
         _selected.Clear();
+        _imgMsg = null;
+    }
+
+    // „Przed i po”: najstarsze i najnowsze zdjęcie z ujęcia, które ma najwięcej zdjęć (min. 2, różne dni).
+    private (ProgressPhotoDto Before, ProgressPhotoDto After)? FirstLast()
+    {
+        var pose = _photos.GroupBy(p => p.Pose)
+            .Where(g => g.Select(p => p.TakenOn).Distinct().Count() >= 2)
+            .OrderByDescending(g => g.Count()).FirstOrDefault();
+        if (pose is null) return null;
+        var ordered = pose.OrderBy(p => p.TakenOn).ThenBy(p => p.Id).ToList();
+        return (ordered[0], ordered[^1]);
+    }
+
+    private void ShowFirstLast() { _imgMsg = null; _compare = FirstLast(); }
+
+    private bool _imgBusy;
+    private string? _imgMsg;
+
+    private async Task BuildImageAsync(string mode)
+    {
+        if (_compare is not { } pair) return;
+        _imgBusy = true; _imgMsg = null;
+        try
+        {
+            var days = pair.After.TakenOn.DayNumber - pair.Before.TakenOn.DayNumber;
+            var result = await JS.InvokeAsync<string>("PTPhotoCompare.build", pair.Before.Url, pair.After.Url,
+                $"Przed · {pair.Before.TakenOn:d MMM yyyy}", $"Po · {pair.After.TakenOn:d MMM yyyy}",
+                days > 0 ? $"{days} dni" : "", $"przed-i-po-{pair.After.TakenOn:yyyy-MM-dd}.jpg", mode);
+            _imgMsg = result switch
+            {
+                "saved" => "Obraz zapisany w pobranych plikach.",
+                "shared" => "Udostępniono.",
+                "cancelled" => null,
+                _ => "Nie udało się przygotować obrazu. Spróbuj ponownie."
+            };
+        }
+        catch (JSException) { _imgMsg = "Nie udało się przygotować obrazu. Spróbuj ponownie."; }
+        finally { _imgBusy = false; }
     }
 
     private async Task DeleteAsync()

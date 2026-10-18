@@ -337,6 +337,64 @@ public class EmailTemplateService(
             "Przypomnienia o pakietach wyłączysz w ustawieniach konta → Powiadomienia.",
             ["ClientName", "PackageName", "Remaining", "ShopLink", "ShopButton", "TrainerName", "CompanyName", "AccentColor"]),
 
+        ["package-rebuy"] = new(
+            "package-rebuy", "Pakiet wykorzystany — kup ponownie", "bi-arrow-repeat",
+            "Pakiet {{PackageName}} wykorzystany — kontynuujemy?",
+            "Brawo, pakiet za Tobą! 🎉",
+            """
+            <p style="color:#374151;font-size:15px">Cześć <strong>{{ClientName}}</strong>!</p>
+            <p style="color:#374151;font-size:15px">Właśnie wykorzystano ostatni trening z pakietu <strong>{{PackageName}}</strong>. Jeśli chcesz trenować dalej w tym samym rytmie, ten sam pakiet kupisz jednym kliknięciem.</p>
+            <div style="text-align:center;margin:24px 0">
+              <a href="{{ShopLink}}" style="background:{{AccentColor}};color:white;text-decoration:none;padding:12px 32px;border-radius:6px;font-weight:600;font-size:15px;display:inline-block">{{ShopButton}}</a>
+            </div>
+            <p style="color:#6b7280;font-size:13px">Trener: {{TrainerName}}</p>
+            """,
+            "#16A34A",
+            "Przypomnienia o pakietach wyłączysz w ustawieniach konta → Powiadomienia.",
+            ["ClientName", "PackageName", "ShopLink", "ShopButton", "TrainerName", "CompanyName", "AccentColor"]),
+
+        ["slot-freed"] = new(
+            "slot-freed", "Zwolnił się termin", "bi-calendar-check",
+            "Zwolnił się termin: {{SessionDate}}",
+            "Zwolnił się termin 🎯",
+            """
+            <p style="color:#374151;font-size:15px">Cześć <strong>{{ClientName}}</strong>!</p>
+            <p style="color:#374151;font-size:15px">Ktoś odwołał wizytę i zwolnił się termin w godzinach, które Cię interesują:</p>
+            <div style="background:#f3f4f6;border-radius:8px;padding:16px;margin:20px 0">
+              <p style="margin:6px 0"><strong>📅 Termin:</strong> {{SessionDate}}</p>
+              <p style="margin:6px 0"><strong>💪 Trening:</strong> {{SessionType}}</p>
+            </div>
+            <div style="text-align:center;margin:24px 0">
+              <a href="{{BookLink}}" style="background:{{AccentColor}};color:white;text-decoration:none;padding:12px 32px;border-radius:6px;font-weight:600;font-size:15px;display:inline-block">Zarezerwuj</a>
+            </div>
+            <p style="color:#6b7280;font-size:13px">Kto pierwszy, ten lepszy — termin może szybko zniknąć.</p>
+            """,
+            "#0284C7",
+            "Te powiadomienia wyłączysz w aplikacji: „Mój grafik” → „Daj znać, gdy zwolni się termin”.",
+            ["ClientName", "SessionDate", "SessionType", "BookLink", "CompanyName", "AccentColor"]),
+
+        ["accountant-pack"] = new(
+            "accountant-pack", "Paczka dla księgowej", "bi-calculator",
+            "Zestawienie za {{Month}} — {{Seller}}",
+            "Zestawienie za {{Month}}",
+            """
+            <p style="color:#374151;font-size:15px">Dzień dobry,</p>
+            <p style="color:#374151;font-size:15px">pod linkiem poniżej jest zestawienie wpływów za <strong>{{Month}}</strong> ({{Seller}}): plik CSV do Excela i PDF.</p>
+            <div style="background:#f3f4f6;border-radius:8px;padding:16px;margin:20px 0">
+              <p style="margin:6px 0"><strong>Płatności online:</strong> {{OnlineTotal}}</p>
+              <p style="margin:6px 0"><strong>Opłacone u trenera:</strong> {{AtTrainerTotal}}</p>
+              <p style="margin:6px 0"><strong>Wpływy razem:</strong> {{ReceivedTotal}}</p>
+              <p style="margin:6px 0"><strong>Wystawione faktury:</strong> {{InvoiceCount}}</p>
+            </div>
+            <div style="text-align:center;margin:24px 0">
+              <a href="{{DownloadLink}}" style="background:{{AccentColor}};color:white;text-decoration:none;padding:12px 32px;border-radius:6px;font-weight:600;font-size:15px;display:inline-block">Pobierz zestawienie (ZIP)</a>
+            </div>
+            <p style="color:#6b7280;font-size:13px">Link działa {{ValidDays}} dni i nie wymaga logowania — prosimy go nie przekazywać dalej.</p>
+            """,
+            "#0F766E",
+            "Wiadomość wysłana na prośbę {{Seller}}.",
+            ["Month", "Seller", "OnlineTotal", "AtTrainerTotal", "ReceivedTotal", "InvoiceCount", "DownloadLink", "ValidDays", "CompanyName", "AccentColor"]),
+
         ["package-expiring"] = new(
             "package-expiring", "Wygasający pakiet", "bi-calendar-x",
             "Twój pakiet wygasa {{ExpiresAt}}",

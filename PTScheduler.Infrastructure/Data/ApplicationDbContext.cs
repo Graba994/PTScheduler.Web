@@ -83,6 +83,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<CalendarBusyBlock> CalendarBusyBlocks => Set<CalendarBusyBlock>();
     public DbSet<ShortLink> ShortLinks => Set<ShortLink>();
     public DbSet<SlotInvitation> SlotInvitations => Set<SlotInvitation>();
+    public DbSet<SlotWatch> SlotWatches => Set<SlotWatch>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -331,6 +332,12 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             e.Property(x => x.Code).HasMaxLength(16);
             e.Property(x => x.TargetPath).HasMaxLength(500);
         });
+        builder.Entity<SlotWatch>(e =>
+        {
+            e.HasIndex(x => x.ClientId).IsUnique();
+            e.HasOne(x => x.Client).WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
+        });
+
         builder.Entity<SlotInvitation>(e =>
         {
             e.HasIndex(x => new { x.ClientId, x.SentAt });

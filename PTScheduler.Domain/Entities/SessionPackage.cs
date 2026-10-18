@@ -42,5 +42,8 @@ public class SessionPackage
     /// <summary>Kiedy klient dostał przypomnienie o zbliżającym się wygaśnięciu pakietu (raz na pakiet).</summary>
     public DateTime? ExpiryNotifiedAt { get; set; }
 
+    /// <summary>Kiedy klient dostał „Kup ponownie” po ostatnim treningu z pakietu (raz na pakiet).</summary>
+    public DateTime? RebuyNotifiedAt { get; set; }
+
     public ICollection<Session> Sessions { get; set; } = [];
 }

@@ -181,6 +181,9 @@ builder.Services.AddScoped<PTScheduler.Web.Services.PreSessionBriefService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.WorkoutNoteDraftService>();
 builder.Services.AddScoped<PTScheduler.Infrastructure.Services.DebtService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.AttentionService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.WeekTemplateService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.SlotWatchService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.AccountantPackService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.RetentionService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.MessageDraftService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.WorkoutCompanionService>();
@@ -194,6 +197,8 @@ builder.Services.AddScoped<PTScheduler.Web.Services.SetupGuide>();
 builder.Services.AddHostedService<SessionReminderService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.EntitlementSyncService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.PackageReminderService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.SlotWatchNotifier>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.AccountantPackSender>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.AutomationBackgroundService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.KsefStatusService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.OffPackageHoldService>();
@@ -926,6 +931,15 @@ app.MapGet("/l/{code}", async (string code, IDbContextFactory<ApplicationDbConte
     link.LastClickAt = DateTime.UtcNow;
     await db.SaveChangesAsync();
     return Results.Redirect(link.TargetPath);
+}).AllowAnonymous();
+
+// „Paczka dla księgowej”: link z e-maila (podpisany, ważny 14 dni) — ZIP z CSV i PDF bez logowania.
+app.MapGet("/ksiegowa/{token}", async (string token, PTScheduler.Web.Services.AccountantPackService packs) =>
+{
+    if (token.Length > 2000 || !packs.TryReadLink(token, out var year, out var month, out var trainer))
+        return Results.Content("<!doctype html><meta charset=utf-8><title>Link wygasł</title><p style='font-family:sans-serif;padding:2rem'>Ten link wygasł albo jest niepoprawny. Poproś o nowe zestawienie.</p>", "text/html; charset=utf-8", statusCode: 410);
+    var pack = await packs.BuildAsync(year, month, trainer);
+    return Results.File(packs.Zip(pack), "application/zip", $"{pack.FileStem}.zip");
 }).AllowAnonymous();
 
 app.MapGet("/internal/metrics",

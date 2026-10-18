@@ -15,6 +15,7 @@ namespace PTScheduler.Web.Services;
 /// trwały znacznik w SessionPackage (LowCreditsNotifiedAt / ExpiryNotifiedAt).
 /// Kanały: e-mail (jeśli skonfigurowany i w planie) oraz push. Szanuje moduł
 /// „Przypomnienia o pakietach” i preferencję klienta ExpiringPackages.
+/// Po ostatnim treningu z pakietu — jedno „Kup ponownie” z przyciskiem, który otwiera płatność za ten sam pakiet.
 /// </summary>
 public class PackageReminderService(IServiceScopeFactory scopeFactory, ILogger<PackageReminderService> logger) : BackgroundService
 {
@@ -54,6 +55,9 @@ public class PackageReminderService(IServiceScopeFactory scopeFactory, ILogger<P
         var clock = sp.GetRequiredService<IAppClock>();
         var utcNow = clock.UtcNow;
         var expiryCutoff = utcNow.AddDays(AttentionRules.ExpiringDaysClient);
+
+        try { await SendRebuyAsync(sp, db, clock, emailEnabled, pushEnabled); }
+        catch (Exception ex) { logger.LogError(ex, "Package rebuy cycle failed"); }
 
         var candidates = await db.SessionPackages
             .Include(p => p.Client)
@@ -157,6 +161,104 @@ public class PackageReminderService(IServiceScopeFactory scopeFactory, ILogger<P
             catch (Exception ex)
             {
                 logger.LogError(ex, "Package {Id}: reminder processing failed.", pkg.Id);
+            }
+        }
+    }
+
+    /// <summary>
+    /// „Kup ponownie”: pakiet wykorzystany, ostatni trening z niego odbył się w ciągu 3 dni, a klient nie ma innego
+    /// aktywnego pakietu. Push z przyciskiem (e-mail tylko, gdy push nie dotarł). Raz na pakiet — RebuyNotifiedAt.
+    /// </summary>
+    private async Task SendRebuyAsync(IServiceProvider sp, ApplicationDbContext db, IAppClock clock, bool emailEnabled, bool pushEnabled)
+    {
+        var offers = await sp.GetRequiredService<IPackageOfferService>().GetActiveOffersAsync();
+        if (offers.Count == 0) return; // Nie ma czego kupić — nie ma o czym przypominać.
+
+        var now = clock.LocalNow;
+        var since = now.AddDays(-3);
+        var used = await db.SessionPackages
+            .Include(p => p.Client)
+            .Where(p => p.Status == PackageStatus.Depleted && p.RebuyNotifiedAt == null && !p.IsHidden
+                     && p.Client.Status == ClientStatus.Active
+                     && p.Sessions.Any(s => s.Status != SessionStatus.Cancelled)
+                     && p.Sessions.Where(s => s.Status != SessionStatus.Cancelled).Max(s => s.StartTime) <= now
+                     && p.Sessions.Where(s => s.Status != SessionStatus.Cancelled).Max(s => s.StartTime) >= since
+                     && !db.SessionPackages.Any(o => o.ClientId == p.ClientId && o.Id != p.Id
+                                                  && o.Status == PackageStatus.Active && o.TotalSessions > o.UsedSessions))
+            .ToListAsync();
+        if (used.Count == 0) return;
+
+        var userManager = sp.GetRequiredService<UserManager<ApplicationUser>>();
+        var prefs = sp.GetRequiredService<INotificationPreferencesService>();
+        var templates = sp.GetRequiredService<IEmailTemplateService>();
+        var emailService = sp.GetRequiredService<IEmailService>();
+        var push = sp.GetRequiredService<IWebPushService>();
+
+        foreach (var pkg in used)
+        {
+            try
+            {
+                var userId = pkg.Client.ApplicationUserId;
+                if (string.IsNullOrEmpty(userId) || !await prefs.IsEnabledAsync(userId, NotificationTypes.ExpiringPackages))
+                {
+                    pkg.RebuyNotifiedAt = clock.UtcNow;
+                    await db.SaveChangesAsync();
+                    continue;
+                }
+
+                var offer = PTScheduler.Application.Packages.RebuyOffer.Match(offers, pkg.Name, pkg.SessionTypeId, pkg.TotalSessions, pkg.PartnerClientId != null);
+                var link = offer is null ? "/packages" : $"/packages?kup={offer.Id}";
+                var sent = false;
+
+                if (pushEnabled)
+                {
+                    try
+                    {
+                        var report = await push.SendWithReportAsync(userId, new PushMessageDto
+                        {
+                            Category = NotificationTypes.PushPackages,
+                            Title = "Pakiet wykorzystany 🎉",
+                            Body = $"To był ostatni trening z pakietu „{pkg.Name}”. Trenujemy dalej?",
+                            Url = link,
+                            Actions = [new PushActionDto { Action = "rebuy", Title = offer is null ? "Wybierz pakiet" : "Kup ponownie", Url = link }]
+                        });
+                        sent = report.Sent > 0;
+                    }
+                    catch (Exception ex) { logger.LogWarning(ex, "Package {Id}: rebuy push failed.", pkg.Id); }
+                }
+
+                if (!sent && emailEnabled)
+                {
+                    var user = await userManager.FindByIdAsync(userId);
+                    if (!string.IsNullOrEmpty(user?.Email))
+                    {
+                        try
+                        {
+                            var trainer = string.IsNullOrEmpty(pkg.Client.TrainerUserId) ? null : await userManager.FindByIdAsync(pkg.Client.TrainerUserId);
+                            var trainerName = trainer is null ? "" : $"{trainer.FirstName} {trainer.LastName}".Trim();
+                            var (subject, html) = await templates.RenderAsync("package-rebuy", new Dictionary<string, string>
+                            {
+                                ["ClientName"] = pkg.Client.FirstName,
+                                ["PackageName"] = pkg.Name,
+                                ["ShopLink"] = AppUrls.Absolute(link),
+                                ["ShopButton"] = offer is null ? "Wybierz pakiet" : "Kup ponownie",
+                                ["TrainerName"] = string.IsNullOrEmpty(trainerName) ? "Twój trener" : trainerName
+                            });
+                            await emailService.SendAsync(user.Email, $"{pkg.Client.FirstName} {pkg.Client.LastName}".Trim(), subject, html);
+                            sent = true;
+                        }
+                        catch (Exception ex) { logger.LogWarning(ex, "Package {Id}: rebuy email failed.", pkg.Id); }
+                    }
+                }
+
+                // Bez żadnego kanału (brak urządzeń i e-maila) też zamykamy — to jednorazowa, miła wiadomość, nie windykacja.
+                pkg.RebuyNotifiedAt = clock.UtcNow;
+                await db.SaveChangesAsync();
+                if (sent) logger.LogInformation("Package {Id}: rebuy offer sent to client {ClientId}.", pkg.Id, pkg.ClientId);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Package {Id}: rebuy processing failed.", pkg.Id);
             }
         }
     }

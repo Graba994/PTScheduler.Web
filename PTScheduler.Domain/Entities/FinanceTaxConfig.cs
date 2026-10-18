@@ -47,4 +47,10 @@ public class FinanceTaxConfig
     public string? KsefApiUrl { get; set; }
     /// <summary>Token KSeF zaszyfrowany Data Protection (nigdy w postaci jawnej).</summary>
     public string? KsefTokenProtected { get; set; }
+
+    /// <summary>„Paczka dla księgowej”: adres księgowej i czy wysyłać co miesiąc (link do pobrania, 1.–5. dnia).</summary>
+    public string? AccountantEmail { get; set; }
+    public bool AccountantAutoSend { get; set; }
+    /// <summary>Ostatnio wysłany automatycznie miesiąc, np. „2026-09” — żeby nie wysłać dwa razy.</summary>
+    public string? AccountantLastSentMonth { get; set; }
 }

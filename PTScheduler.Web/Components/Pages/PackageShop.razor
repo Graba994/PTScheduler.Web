@@ -381,7 +381,13 @@ else
         _plans = await MembershipService.GetPlansAsync(onlyActive: true, onlyShop: true);
         _regular = _offers.Where(o => !o.IsFeatured).ToList();
         _loading = false;
+
+        // „Kup ponownie” z powiadomienia: od razu okno płatności za ten sam pakiet.
+        if (Kup is int kupId && !_isStaff && _paymentsEnabled && _offers.FirstOrDefault(o => o.Id == kupId) is { } again)
+            await Buy(again);
     }
+
+    [SupplyParameterFromQuery(Name = "kup")] public int? Kup { get; set; }
 
     // Pakiet dla pary: partner podpowiedziany z par, albo wpisany e-mail / telefon.
     private int? _clientId;
