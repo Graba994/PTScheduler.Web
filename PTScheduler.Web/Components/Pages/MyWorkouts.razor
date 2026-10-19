@@ -42,7 +42,7 @@ else
             <div class="card h-100">
                 <div class="card-body">
                     <h6 class="text-muted mb-2"><i class="bi bi-activity me-1"></i>Objętość w czasie (kg, 90 dni)</h6>
-                    <div style="position:relative;height:240px"><canvas id="volChart"></canvas></div>
+                    <div style="position:relative;height:240px"><canvas id="volChart" data-empty="Objętość narysuje się po pierwszych zapisanych treningach."></canvas></div>
                 </div>
             </div>
         </div>
@@ -50,14 +50,7 @@ else
             <div class="card h-100">
                 <div class="card-body">
                     <h6 class="text-muted mb-2"><i class="bi bi-pie-chart me-1"></i>Objętość na partie (90 dni)</h6>
-                    @if (_muscles.Count == 0)
-                    {
-                        <div class="text-muted small py-4 text-center">Brak danych.</div>
-                    }
-                    else
-                    {
-                        <div style="position:relative;height:240px"><canvas id="muscleChart"></canvas></div>
-                    }
+                    <div style="position:relative;height:240px"><canvas id="muscleChart" data-empty="Podział na partie pojawi się po pierwszych zapisanych treningach."></canvas></div>
                 </div>
             </div>
         </div>
@@ -138,13 +131,12 @@ else
         _rendered = true;
         try
         {
-            if (_volume.Count > 0)
+            // Bez danych wykres pokazuje animowany szkic (PTChart sam rozpoznaje pusty zbiór).
             {
                 var labels = _volume.Select(p => p.Date.ToString("dd.MM")).ToArray();
                 var data = _volume.Select(p => Math.Round(p.Volume)).ToArray();
                 await JS.InvokeVoidAsync("PTChart.renderLine", "volChart", labels, data, "Objętość", "kg");
             }
-            if (_muscles.Count > 0)
             {
                 var labels = _muscles.Select(m => m.Label).ToArray();
                 var data = _muscles.Select(m => Math.Round(m.Volume)).ToArray();

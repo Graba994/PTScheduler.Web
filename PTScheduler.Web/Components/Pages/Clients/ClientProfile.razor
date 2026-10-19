@@ -746,7 +746,7 @@ else if (client is not null)
                         }
                     </div>
                     <div style="height:200px;position:relative">
-                        <canvas id="meas-chart-@Id"></canvas>
+                        <canvas id="meas-chart-@Id" data-empty="Do wykresu potrzebne są co najmniej dwa pomiary."></canvas>
                     </div>
                 </div>
             }
@@ -2084,7 +2084,8 @@ else if (client is not null)
             .Where(p => p.Value.HasValue)
             .ToList();
 
-        if (points.Count < 2) return;
+        // Mniej niż 2 pomiary — PTChart pokaże animowany szkic zamiast pustej planszy.
+        if (points.Count < 2) points.Clear();
 
         await JS.InvokeVoidAsync("PTChart.renderLine",
             $"meas-chart-{Id}",

@@ -5655,10 +5655,14 @@ a.pl-group-name:hover { color: var(--c-primary); }
 /* Duży ekran: „Dziś” i „Okienka” na całą szerokość — karty w kolumnach zamiast wąskiej listy. */
 .fsl-grid { display: flex; flex-direction: column; gap: .9rem; }
 @media (min-width: 1200px) {
-    .td-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(460px, 1fr)); align-items: start; }
+    /* Kafelki zawsze równe: każdy wiersz ma wysokość najwyższej wizyty, a przyciski trzymają się dołu. */
+    .td-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(460px, 1fr)); grid-auto-rows: 1fr; align-items: stretch; }
+    .td-list > .td-visit { height: 100%; }
+    .td-list > .td-visit .td-body { height: 100%; }
+    .td-list > .td-visit .td-body > .vab { margin-top: auto; }
     .fsl-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); align-items: start; }
     .dbt-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(480px, 1fr)); align-items: start; }
-    .td-sum, .fsl-sub { max-width: 1100px; }
+    .fsl-sub { max-width: 1100px; }
 }
 
 /* „Pierwszy tydzień”: domyślnie jedna linijka z następnym krokiem */
@@ -5686,3 +5690,26 @@ a.pl-group-name:hover { color: var(--c-primary); }
 .pdb-row .btn { flex: 1 1 auto; white-space: nowrap; }
 .pdb-hide { font-size: .8rem; }
 .pdb-where { font-size: .74rem; color: var(--bs-secondary-color); display: flex; gap: .3rem; align-items: center; }
+
+/* Wykresy bez danych — animowany szkic (jak pusty wykres wagi), wspólny dla wszystkich wykresów */
+.ptc-empty { position: absolute; inset: 0; display: flex; flex-direction: column; align-items: center; justify-content: flex-end; gap: .2rem; padding: .75rem; text-align: center;
+    border-radius: 14px; overflow: hidden; animation: ptc-fade .4s ease-out both;
+    background: repeating-linear-gradient(0deg, transparent 0 29px, color-mix(in srgb, var(--bs-border-color) 65%, transparent) 29px 30px), var(--bs-tertiary-bg); }
+.ptc-empty svg { position: absolute; left: 10px; right: 10px; top: 12px; width: calc(100% - 20px); height: calc(100% - 78px); min-height: 60px; overflow: visible; }
+.ptc-empty-donut svg { left: 50%; width: auto; aspect-ratio: 1; transform: translateX(-50%); }
+.ptc-empty-text { position: relative; z-index: 1; display: flex; flex-direction: column; gap: .1rem; }
+.ptc-empty-text b { font-size: .9rem; }
+.ptc-empty-text small { color: var(--bs-secondary-color); font-size: .78rem; max-width: 36ch; }
+.ptc-e-line { fill: none; stroke: var(--c-primary); stroke-width: 3; stroke-linecap: round; stroke-linejoin: round; stroke-dasharray: 420; stroke-dashoffset: 420; opacity: .5; vector-effect: non-scaling-stroke; animation: ce-draw 3.2s ease-in-out infinite; }
+.ptc-e-dot { fill: var(--c-primary); opacity: 0; transform-box: fill-box; transform-origin: center; animation: ce-dot 3.2s ease-in-out infinite; }
+.ptc-e-dot.d2 { animation-delay: .9s; } .ptc-e-dot.d3 { animation-delay: 1.8s; }
+.ptc-e-bar { fill: color-mix(in srgb, var(--c-primary) 45%, transparent); transform-box: fill-box; transform-origin: bottom; animation: ptc-bar 2.6s ease-in-out infinite; }
+.ptc-e-ring-bg { fill: none; stroke: color-mix(in srgb, var(--bs-border-color) 80%, transparent); stroke-width: 12; }
+.ptc-e-ring { fill: none; stroke: var(--c-primary); stroke-width: 12; stroke-linecap: round; stroke-dasharray: 214; stroke-dashoffset: 214; opacity: .55; transform: rotate(-90deg); transform-origin: center; animation: ptc-ring 3s ease-in-out infinite; }
+@keyframes ptc-bar { 0% { transform: scaleY(.08); opacity: .35; } 45%, 75% { transform: scaleY(1); opacity: 1; } 100% { transform: scaleY(.08); opacity: .35; } }
+@keyframes ptc-ring { 0% { stroke-dashoffset: 214; } 60%, 80% { stroke-dashoffset: 40; } 100% { stroke-dashoffset: 214; } }
+@keyframes ptc-fade { from { opacity: 0; transform: translateY(4px); } }
+@media (prefers-reduced-motion: reduce) {
+    .ptc-empty, .ptc-e-line, .ptc-e-dot, .ptc-e-bar, .ptc-e-ring { animation: none; }
+    .ptc-e-line { stroke-dashoffset: 0; } .ptc-e-dot { opacity: .8; } .ptc-e-ring { stroke-dashoffset: 60; }
+}
