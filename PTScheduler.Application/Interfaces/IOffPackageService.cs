@@ -34,7 +34,7 @@ public interface IOffPackageService
     Task ApproveAsync(int sessionId, string actorUserId);
     Task RejectAsync(int sessionId, string actorUserId, string? reason);
     /// <summary>Trener odhacza płatność: „gotówka” albo „przelew”.</summary>
-    Task MarkPaidAsync(int sessionId, string actorUserId, string via);
+    Task MarkPaidAsync(int sessionId, string actorUserId, string via, bool hidden = false);
 
     /// <summary>Anuluje rezerwacje online, których nikt nie opłacił w 15 minut. Zwraca liczbę.</summary>
     Task<int> ExpireHoldsAsync();

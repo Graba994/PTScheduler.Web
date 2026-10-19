@@ -28,6 +28,8 @@ public class SessionPackage
     public bool IsPaid { get; set; } = false;
     public DateTime? PaidAt { get; set; }
     public string? PaymentReference { get; set; }
+    /// <summary>Jak zapłacono przy ręcznym „Opłacone”: gotówka, przelew, karta (online — przez bramkę).</summary>
+    public string? PaidVia { get; set; }
 
     public DateTime PurchasedAt { get; set; } = DateTime.UtcNow;
     public DateTime? ExpiresAt { get; set; }

@@ -8,7 +8,8 @@ public interface ISessionPackageService
     Task<List<SessionPackageDto>> GetAllPackagesAsync(string? trainerUserId = null);
     Task<SessionPackageDto?> GetPackageAsync(int id);
     Task<SessionPackageDto> CreatePackageAsync(CreateSessionPackageDto dto);
-    Task MarkPaidAsync(int packageId);
+    /// <param name="via">gotówka / przelew / karta; <paramref name="hidden"/> — do ukrytych finansów.</param>
+    Task MarkPaidAsync(int packageId, string? via = null, bool hidden = false);
     Task CancelPackageAsync(int packageId);
     Task DeductCreditAsync(int packageId);
     Task ReturnCreditAsync(int packageId);

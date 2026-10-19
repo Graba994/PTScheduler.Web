@@ -113,7 +113,7 @@
                                     break;
                                 case "pay":
                                     <span class="td-close-why">płatność na miejscu</span>
-                                    <PaidButtons Busy="_busy" OnPaid="via => MarkPaidAsync(v.S, via)" />
+                                    <PaidButtons Busy="_busy" OnPaid="c => MarkPaidAsync(v.S, c)" />
                                     break;
                                 default:
                                     <span class="td-close-why">bez notatki</span>
@@ -141,6 +141,7 @@
                         @if (isNext) { <span class="td-next">@(s.StartTime <= _now ? "teraz" : "następna")</span> }
                     </div>
                     <div class="td-body">
+                        @if (isNext) { <CountdownChip Start="s.StartTime" End="s.EndTime" /> }
                         <div class="td-who">
                             <a class="td-name" href="@($"/clients/{s.ClientId}")">@s.DisplayName</a>
                             <span class="td-status">@StatusText(s.Status)</span>
@@ -442,10 +443,10 @@
         finally { _busy = false; }
     }
 
-    private async Task MarkPaidAsync(SessionDto s, string via)
+    private async Task MarkPaidAsync(SessionDto s, PaidButtons.Choice c)
     {
         _busy = true; _error = null;
-        try { await OffPackage.MarkPaidAsync(s.Id, _userId, via); await RefreshAsync(s.Id, "Zapisano płatność."); }
+        try { await OffPackage.MarkPaidAsync(s.Id, _userId, c.Via, c.Hidden); await RefreshAsync(s.Id, $"Zapisano: {c.Via}, {c.Where}."); }
         catch (Exception ex) when (ex is InvalidOperationException) { _error = ex.Message; }
         catch { _error = "Nie udało się zapisać płatności."; }
         finally { _busy = false; }

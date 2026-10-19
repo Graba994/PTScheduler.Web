@@ -94,6 +94,8 @@ public class Session
     /// <summary>Kiedy trening poza pakietem został opłacony (UTC) i jak („online”, „gotówka”, „przelew”).</summary>
     public DateTime? PaidAt { get; set; }
     public string? PaidVia { get; set; }
+    /// <summary>Wpłata za trening poza pakietem w ukrytych finansach (nie wlicza się do raportów i paczki dla księgowej).</summary>
+    public bool IsHidden { get; set; }
 
     public ICollection<SessionInvitation> Invitations { get; set; } = [];
 }

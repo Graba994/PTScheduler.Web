@@ -151,7 +151,7 @@ public class BackupMaintenanceService(
         var adminEmail = s[SiteSettingsService.Keys.AdminNotificationEmail];
         // SMS tylko, gdy administrator włączył alarmy SMS w zakładce Alarmy.
         var phone = s[SiteSettingsService.Keys.ErrorAlertSms] == "true" ? s[SiteSettingsService.Keys.AdminNotificationPhone] : "";
-        var link = $"{(config.GetValue<string>("Portal:PublicUrl") ?? "").TrimEnd('/')}/panel/backups";
+        var link = $"{PortalUrls.Public(config)}/panel/backups";
         var prefix = test ? "[TEST] " : "";
         var sent = false;
 

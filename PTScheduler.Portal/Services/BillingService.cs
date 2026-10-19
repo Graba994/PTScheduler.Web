@@ -57,7 +57,7 @@ public class BillingService(
     public static string PeriodLabel(DateOnly period) =>
         Pl.TextInfo.ToTitleCase(Pl.DateTimeFormat.MonthNames[period.Month - 1]) + " " + period.Year;
 
-    private string PublicUrl => (config.GetValue<string>("Portal:PublicUrl") ?? "").TrimEnd('/');
+    private string PublicUrl => PortalUrls.Public(config);
     public string PayUrl(TenantBill bill) => $"{PublicUrl}/rachunek/{bill.PayToken}";
 
     // ── Ustawienia ──

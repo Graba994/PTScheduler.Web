@@ -64,11 +64,11 @@ public class AccountantPackService(IDbContextFactory<ApplicationDbContext> dbFac
             .ToListAsync();
         foreach (var p in packages.Where(p => (p.PaymentReference is null || !onlineRefs.Contains(p.PaymentReference)) && !membershipPackageIds.Contains(p.Id)))
             rows.Add(new Row(clock.ToWallClock(p.PaidAt!.Value), AtTrainer, "Pakiet", $"{p.Name} ({p.TotalSessions} tr.)",
-                $"{p.Client.FirstName} {p.Client.LastName}".Trim(), p.PricePerSession * p.TotalSessions, "PLN", "u trenera"));
+                $"{p.Client.FirstName} {p.Client.LastName}".Trim(), p.PricePerSession * p.TotalSessions, "PLN", PaidViaLabel(p.PaidVia)));
 
         // 3) Pojedyncze treningi poza pakietem opłacone u trenera.
         var sessions = await db.Sessions.AsNoTracking().Include(s => s.Client).Include(s => s.SessionType)
-            .Where(s => clientIds.Contains(s.ClientId) && s.PaidAt >= fromUtc && s.PaidAt < toUtc && s.PaidVia != "online")
+            .Where(s => clientIds.Contains(s.ClientId) && s.PaidAt >= fromUtc && s.PaidAt < toUtc && s.PaidVia != "online" && !s.IsHidden)
             .ToListAsync();
         foreach (var s in sessions.Where(s => s.SessionType.SinglePrice is > 0))
             rows.Add(new Row(clock.ToWallClock(s.PaidAt!.Value), AtTrainer, "Trening", $"{s.SessionType.Name} {s.StartTime:dd.MM HH:mm}",

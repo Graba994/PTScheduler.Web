@@ -201,6 +201,7 @@ else
                                             <div class="text-muted" style="font-size:.7rem">@s.DurationMinutes min</div>
                                         </div>
                                         <div class="flex-grow-1 overflow-hidden">
+                                            @if (s.Id == NextTodayId) { <CountdownChip Start="s.StartTime" End="s.EndTime" /> }
                                             <a href="@($"/clients/{s.ClientId}")" class="fw-semibold text-truncate d-block text-body text-decoration-none" style="font-size:.875rem">@s.DisplayName</a>
                                             <div class="text-muted text-truncate" style="font-size:.75rem">@s.SessionTypeName@(_todayDays.GetValueOrDefault(s.Id) is { } pd ? $" · {pd.DayLabel}" : "")</div>
                                         </div>
@@ -371,6 +372,8 @@ else
 
     private bool _loaded;
     private List<SessionDto> _today = [];
+    // Najbliższa dzisiejsza wizyta, która jeszcze się nie skończyła — przy niej odliczanie.
+    private int? NextTodayId => _today.FirstOrDefault(s => s.Status is SessionStatus.Scheduled or SessionStatus.AwaitingPackage && s.EndTime > StudioClock.Now)?.Id;
     private Dictionary<int, PTScheduler.Application.DTOs.SessionPlanDayDto> _todayDays = [];
 
     private void OnTodayChanged((SessionDto Session, string Message) r)

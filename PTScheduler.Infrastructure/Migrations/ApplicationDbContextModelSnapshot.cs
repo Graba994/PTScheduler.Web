@@ -2543,6 +2543,9 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Property<DateTime?>("HoldUntil")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("IsHidden")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("IsLateCancellation")
                         .HasColumnType("boolean");
 
@@ -2706,6 +2709,9 @@ namespace PTScheduler.Infrastructure.Migrations
 
                     b.Property<DateTime?>("PaidAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PaidVia")
+                        .HasColumnType("text");
 
                     b.Property<int?>("PartnerClientId")
                         .HasColumnType("integer");

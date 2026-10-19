@@ -25,6 +25,7 @@ public class SessionPackageDto
     public bool IsPaid { get; set; }
     public DateTime? PaidAt { get; set; }
     public string? PaymentReference { get; set; }
+    public string? PaidVia { get; set; }
     public DateTime PurchasedAt { get; set; }
     public DateTime? ExpiresAt { get; set; }
     public PackageStatus Status { get; set; }

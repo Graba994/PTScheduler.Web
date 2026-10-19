@@ -122,7 +122,7 @@ public class ErrorAlertService(
         var s = await settings.GetAllAsync(SiteSettingsService.Keys.AdminNotificationEmail, SiteSettingsService.Keys.AdminNotificationPhone);
         var adminEmail = s[SiteSettingsService.Keys.AdminNotificationEmail];
         var phone = s[SiteSettingsService.Keys.AdminNotificationPhone];
-        var link = $"{(config.GetValue<string>("Portal:PublicUrl") ?? "").TrimEnd('/')}/panel/logs?c={Uri.EscapeDataString(scan.Container)}";
+        var link = $"{PortalUrls.Public(config)}/panel/logs?c={Uri.EscapeDataString(scan.Container)}";
         var sent = false;
 
         if (!test && scan.TenantSlug is not null)

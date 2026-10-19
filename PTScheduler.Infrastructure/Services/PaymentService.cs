@@ -526,6 +526,7 @@ public class PaymentService(
             IsPaid = true,
             PaidAt = now,
             PaymentReference = order.ExtOrderId,
+            PaidVia = "online",
             PurchasedAt = now,
             ExpiresAt = offer.ValidDays is int days ? now.AddDays(days) : null,
             Status = PackageStatus.Active,

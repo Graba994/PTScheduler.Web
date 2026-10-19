@@ -61,11 +61,11 @@
                                 <span class="dbt-item-amount">@(i.Amount is { } a ? a.ToString("N0") + " zł" : "bez ceny")</span>
                                 @if (i.Kind == "session")
                                 {
-                                    <PaidButtons Busy="_busy" OnPaid="via => MarkSessionAsync(i.Id, via)" />
+                                    <PaidButtons Busy="_busy" OnPaid="c => MarkSessionAsync(i.Id, c)" />
                                 }
                                 else
                                 {
-                                    <button type="button" class="btn btn-sm btn-success" disabled="@_busy" @onclick="() => MarkPackageAsync(i.Id)"><i class="bi bi-check2 me-1"></i>Opłacony</button>
+                                    <PaidButtons Busy="_busy" OnPaid="c => MarkPackageAsync(i.Id, c)" />
                                 }
                             </li>
                         }
@@ -110,19 +110,19 @@
         _loading = false;
     }
 
-    private async Task MarkSessionAsync(int sessionId, string via)
+    private async Task MarkSessionAsync(int sessionId, PaidButtons.Choice c)
     {
         _busy = true; _error = null; _status = null;
-        try { await OffPackage.MarkPaidAsync(sessionId, _userId, via); _status = "Zapisano płatność."; await LoadAsync(); }
+        try { await OffPackage.MarkPaidAsync(sessionId, _userId, c.Via, c.Hidden); _status = $"Zapisano: {c.Via}, {c.Where}."; await LoadAsync(); }
         catch (InvalidOperationException ex) { _error = ex.Message; }
         catch { _error = "Nie udało się zapisać płatności."; }
         finally { _busy = false; }
     }
 
-    private async Task MarkPackageAsync(int packageId)
+    private async Task MarkPackageAsync(int packageId, PaidButtons.Choice c)
     {
         _busy = true; _error = null; _status = null;
-        try { await Packages.MarkPaidAsync(packageId); _status = "Pakiet oznaczony jako opłacony."; await LoadAsync(); }
+        try { await Packages.MarkPaidAsync(packageId, c.Via, c.Hidden); _status = $"Pakiet opłacony: {c.Via}, {c.Where}."; await LoadAsync(); }
         catch (InvalidOperationException ex) { _error = ex.Message; }
         catch { _error = "Nie udało się zapisać płatności."; }
         finally { _busy = false; }

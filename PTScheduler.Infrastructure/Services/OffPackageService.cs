@@ -155,7 +155,7 @@ public class OffPackageService(
         await LogAsync(actorUserId, "Trainer", "OffPackageRejected", sessionId, why);
     }
 
-    public async Task MarkPaidAsync(int sessionId, string actorUserId, string via)
+    public async Task MarkPaidAsync(int sessionId, string actorUserId, string via, bool hidden = false)
     {
         await using var db = dbFactory.CreateDbContext();
         var s = await db.Sessions.FirstOrDefaultAsync(x => x.Id == sessionId)
@@ -164,12 +164,13 @@ public class OffPackageService(
         if (s.PaidAt is not null) return;
         s.PaidAt = DateTime.UtcNow;
         s.PaidVia = via;
+        s.IsHidden = hidden;
         s.OffPackagePayment ??= OffPackageRules.PayAtTrainer;
         s.HoldUntil = null;
         // Dawna wizyta „bez pakietu” — po opłacie jest zwykłym, potwierdzonym treningiem.
         if (s.Status == SessionStatus.AwaitingPackage) s.Status = SessionStatus.Scheduled;
         await db.SaveChangesAsync();
-        await LogAsync(actorUserId, "Trainer", "OffPackagePaid", sessionId, $"Opłacone: {via}");
+        await LogAsync(actorUserId, "Trainer", "OffPackagePaid", sessionId, $"Opłacone: {via}{(hidden ? " (ukryte finanse)" : "")}");
     }
 
     public async Task<int> ExpireHoldsAsync()

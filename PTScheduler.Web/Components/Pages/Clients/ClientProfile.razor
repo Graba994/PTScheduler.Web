@@ -596,14 +596,20 @@ else if (client is not null)
                                 <span class="badge @PackageBadge(pkg.Status)">@PackageLabel(pkg.Status)</span>
                                 @if (pkg.IsPaid)
                                 {
-                                    <span class="badge bg-success-subtle text-success">Opłacony</span>
+                                    <span class="badge bg-success-subtle text-success" title="@(pkg.IsHidden ? "W ukrytych finansach" : "W Finansach")">
+                                        Opłacony@(string.IsNullOrEmpty(pkg.PaidVia) ? "" : $" · {pkg.PaidVia}")@if (pkg.IsHidden) { <i class="bi bi-eye-slash ms-1"></i> }
+                                    </span>
                                 }
                                 else
                                 {
                                     <button class="badge bg-warning-subtle text-warning border-0"
-                                            style="cursor:pointer" title="Oznacz jako opłacony" @onclick="() => MarkPaid(pkg.Id)">
+                                            style="cursor:pointer" title="Oznacz jako opłacony" @onclick="() => _payFor = _payFor == pkg.Id ? null : pkg.Id">
                                         Nieopłacony ✓
                                     </button>
+                                }
+                                @if (_payFor == pkg.Id && !pkg.IsPaid)
+                                {
+                                    <div class="w-100 mt-2"><PaidButtons Busy="isBusy" OnPaid="c => MarkPaid(pkg.Id, c)" /></div>
                                 }
                                 <button class="btn btn-sm btn-link text-muted p-0 ms-1" title="Edytuj pakiet"
                                         @onclick="() => OpenEditPackage(pkg)">
@@ -2178,11 +2184,14 @@ else if (client is not null)
         finally { isBusy = false; }
     }
 
-    private async Task MarkPaid(int packageId)
+    private int? _payFor;
+
+    private async Task MarkPaid(int packageId, PaidButtons.Choice c)
     {
-        await PackageService.MarkPaidAsync(packageId);
+        await PackageService.MarkPaidAsync(packageId, c.Via, c.Hidden);
+        _payFor = null;
         await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "PackageMarkedPaid", "SessionPackage",
-            packageId.ToString(), $"Klient: {client?.FullName}");
+            packageId.ToString(), $"Klient: {client?.FullName}, {c.Via}{(c.Hidden ? ", ukryte finanse" : "")}");
         packages = await PackageService.GetPackagesAsync(Id);
         RefreshPanel();
     }

@@ -164,9 +164,45 @@ else
         </div>
     }
 
+    @if (_offPkg.Count > 0)
+    {
+        @* Pojedyncze treningi opłacone u trenera (przyciski „Gotówka / Przelew / Karta”) — kwota z ceny pojedynczego treningu. *@
+        <div class="card mb-3">
+            <div class="card-header py-2 d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <span class="fw-semibold" style="font-size:.875rem"><i class="bi bi-calendar-check me-2" style="color:var(--c-primary)"></i>Treningi poza pakietem — opłacone u trenera</span>
+                <span class="small text-muted">@_offPkg.Count · <b>@_offPkg.Sum(x => x.Amount).ToString("N0") zł</b></span>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0" style="font-size:.82rem">
+                    <thead><tr><th>Opłacono</th><th>Klient</th><th>Trening</th><th>Sposób</th><th class="text-end">Kwota</th>@if (_canViewHidden) { <th></th> }</tr></thead>
+                    <tbody>
+                        @foreach (var x in _offPkg.Take(_offPkgAll ? 500 : 10))
+                        {
+                            <tr>
+                                <td class="text-nowrap">@x.PaidAt.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                                <td><a href="/clients/@x.ClientId" class="text-decoration-none">@x.ClientName</a></td>
+                                <td>@x.SessionTypeName <span class="text-muted">· @x.StartTime.ToString("dd.MM HH:mm")</span></td>
+                                <td>@x.PaidVia</td>
+                                <td class="text-end text-nowrap">@(x.Amount > 0 ? x.Amount.ToString("N0") + " zł" : "bez ceny")</td>
+                                @if (_canViewHidden)
+                                {
+                                    <td class="text-end"><button class="btn btn-sm btn-link text-muted p-0" title="Przenieś do ukrytych finansów" @onclick="() => HideSessionAsync(x.SessionId)"><i class="bi bi-eye-slash"></i></button></td>
+                                }
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+            @if (_offPkg.Count > 10 && !_offPkgAll)
+            {
+                <div class="card-footer py-1 text-center"><button class="btn btn-sm btn-link" @onclick="() => _offPkgAll = true">Pokaż wszystkie (@_offPkg.Count)</button></div>
+            }
+        </div>
+    }
+
     @if (_taxConfig is not null && TaxCalculator.HasAnyOption(_taxConfig))
     {
-        var gross = _packages.Where(p => p.IsPaid).Sum(p => p.TotalPrice) + _onlineOrders.Sum(o => o.Amount);
+        var gross = _packages.Where(p => p.IsPaid).Sum(p => p.TotalPrice) + _onlineOrders.Sum(o => o.Amount) + _offPkg.Sum(x => x.Amount);
         var t = TaxCalculator.Compute(_taxConfig, gross, _months);
         <div class="card mb-3">
             <div class="card-header py-2 d-flex align-items-center justify-content-between">
@@ -828,6 +864,8 @@ else
     private List<SessionPackageDto> _allPackages = [];
     private List<SessionPackageDto> _unpaid = [];
     private List<OrderDto> _onlineOrders = [];
+    private List<OffPackagePaymentDto> _offPkg = [];
+    private bool _offPkgAll;
     private int? _downloadingReceiptId;
     private int? _downloadingInvoiceId;
     private bool _chartNeedsRender;
@@ -887,12 +925,19 @@ else
         _packages = _allPackages.Where(p => p.PurchasedAt >= from).ToList();
         _unpaid = _packages.Where(p => !p.IsPaid && p.Status != PackageStatus.Cancelled).ToList();
         _onlineOrders = await PaymentService.GetPaidOrdersAsync(from);
+        _offPkg = await FinanceService.GetOffPackagePaymentsAsync(from, _trainerUserId, hidden: false);
         _loaded = true;
         _chartNeedsRender = true;
     }
 
     private async Task ReloadOrdersAsync() =>
         _onlineOrders = await PaymentService.GetPaidOrdersAsync(DateTime.UtcNow.AddMonths(-_months));
+
+    private async Task HideSessionAsync(int sessionId)
+    {
+        await FinanceService.SetSessionHiddenAsync(sessionId, true);
+        await LoadDataAsync();
+    }
 
     private async Task HidePackageAsync(int packageId)
     {

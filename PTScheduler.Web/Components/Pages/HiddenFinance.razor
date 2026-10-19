@@ -136,9 +136,42 @@ else
         </div>
     </div>
 
+    @if (DisplaySessions.Count > 0)
+    {
+        <div class="card mb-3">
+            <div class="card-header py-2 d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <span class="fw-semibold" style="font-size:.875rem"><i class="bi bi-calendar-check me-2" style="color:var(--c-primary)"></i>Treningi poza pakietem — opłacone u trenera</span>
+                <span class="small text-muted">@DisplaySessions.Count · <b>@DisplaySessions.Sum(x => x.Amount).ToString("N0") zł</b></span>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0" style="font-size:.82rem">
+                    <thead><tr><th>Opłacono</th><th>Klient</th><th>Trening</th><th>Sposób</th><th class="text-end">Kwota</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var x in DisplaySessions)
+                        {
+                            <tr>
+                                <td class="text-nowrap">@x.PaidAt.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                                <td>@x.ClientName</td>
+                                <td>@x.SessionTypeName <span class="text-muted">· @x.StartTime.ToString("dd.MM HH:mm")</span></td>
+                                <td>@x.PaidVia @if (x.IsHidden) { <i class="bi bi-eye-slash text-muted ms-1" title="Ukryte"></i> }</td>
+                                <td class="text-end text-nowrap">@(x.Amount > 0 ? x.Amount.ToString("N0") + " zł" : "bez ceny")</td>
+                                <td class="text-end">
+                                    @if (x.IsHidden)
+                                    {
+                                        <button class="btn btn-sm btn-link p-0" title="Przywróć do zwykłych finansów" @onclick="() => UnhideSessionAsync(x.SessionId)"><i class="bi bi-eye"></i></button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
     @if (_taxConfig is not null && TaxCalculator.HasAnyOption(_taxConfig))
     {
-        var gross = _displayPackages.Where(p => p.IsPaid).Sum(p => p.TotalPrice);
+        var gross = _displayPackages.Where(p => p.IsPaid).Sum(p => p.TotalPrice) + DisplaySessions.Sum(x => x.Amount);
         var t = TaxCalculator.Compute(_taxConfig, gross, _months);
         <div class="card mb-3">
             <div class="card-header py-2 d-flex align-items-center justify-content-between">
@@ -616,7 +649,17 @@ else
             .Where(p => p.PurchasedAt >= from).ToList();
         _hiddenPackages = _allPackagesRaw.Where(p => p.IsHidden).ToList();
         _displayPackages = _viewMode == "all" ? _allPackagesRaw : _hiddenPackages;
+        _sessionsAll = await FinanceService.GetOffPackagePaymentsAsync(from, _trainerUserId, hidden: null);
         _chartNeedsRender = true;
+    }
+
+    private List<OffPackagePaymentDto> _sessionsAll = [];
+    private List<OffPackagePaymentDto> DisplaySessions => _viewMode == "all" ? _sessionsAll : _sessionsAll.Where(x => x.IsHidden).ToList();
+
+    private async Task UnhideSessionAsync(int sessionId)
+    {
+        await FinanceService.SetSessionHiddenAsync(sessionId, false);
+        await LoadDataAsync();
     }
 
     private async Task UnhidePackageAsync(int packageId)

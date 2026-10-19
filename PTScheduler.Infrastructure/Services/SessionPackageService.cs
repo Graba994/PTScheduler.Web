@@ -104,13 +104,15 @@ public class SessionPackageService(
         return (await GetPackageAsync(package.Id))!;
     }
 
-    public async Task MarkPaidAsync(int packageId)
+    public async Task MarkPaidAsync(int packageId, string? via = null, bool hidden = false)
     {
         await using var db = dbFactory.CreateDbContext();
         var p = await db.SessionPackages.FindAsync(packageId)
             ?? throw new InvalidOperationException("Pakiet nie istnieje.");
         p.IsPaid = true;
         p.PaidAt = DateTime.UtcNow;
+        if (!string.IsNullOrWhiteSpace(via)) p.PaidVia = via.Trim();
+        if (hidden) p.IsHidden = true;
         await db.SaveChangesAsync();
     }
 
@@ -292,6 +294,7 @@ public class SessionPackageService(
         IsPaid = p.IsPaid,
         PaidAt = p.PaidAt,
         PaymentReference = p.PaymentReference,
+        PaidVia = p.PaidVia,
         PurchasedAt = p.PurchasedAt,
         ExpiresAt = p.ExpiresAt,
         Status = p.Status,

@@ -18,6 +18,33 @@ public class FinanceService(IDbContextFactory<ApplicationDbContext> dbFactory) :
         await db.SaveChangesAsync();
     }
 
+    public async Task SetSessionHiddenAsync(int sessionId, bool hidden)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        await db.Sessions.Where(s => s.Id == sessionId).ExecuteUpdateAsync(u => u.SetProperty(s => s.IsHidden, hidden));
+    }
+
+    public async Task<List<OffPackagePaymentDto>> GetOffPackagePaymentsAsync(DateTime fromUtc, string? trainerUserId, bool? hidden)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var q = db.Sessions.AsNoTracking()
+            .Where(s => s.PaidAt != null && s.PaidAt >= fromUtc && s.PaidVia != null && s.PaidVia != "online" && s.Status != Domain.Enums.SessionStatus.Cancelled);
+        if (trainerUserId is not null) q = q.Where(s => s.TrainerUserId == trainerUserId);
+        if (hidden is bool h) q = q.Where(s => s.IsHidden == h);
+        return await q.OrderByDescending(s => s.PaidAt).Select(s => new OffPackagePaymentDto
+        {
+            SessionId = s.Id,
+            ClientId = s.ClientId,
+            ClientName = (s.Client.FirstName + " " + s.Client.LastName).Trim(),
+            SessionTypeName = s.SessionType.Name,
+            StartTime = s.StartTime,
+            PaidAt = s.PaidAt!.Value,
+            PaidVia = s.PaidVia,
+            Amount = s.SessionType.SinglePrice ?? 0,
+            IsHidden = s.IsHidden
+        }).ToListAsync();
+    }
+
     public async Task<bool> VerifyPinAsync(string pin)
     {
         await using var db = dbFactory.CreateDbContext();

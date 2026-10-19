@@ -9,28 +9,40 @@
 @if (_steps is { } steps && !_hidden && steps.Any(s => !s.Done))
 {
     var done = steps.Count(s => s.Done);
-    <section class="fw" aria-labelledby="fw-title">
+    var nextStep = steps.First(s => !s.Done);
+    <section class="fw @(_open ? "" : "is-compact")" aria-labelledby="fw-title">
         <div class="fw-head">
             <span class="fw-ic" aria-hidden="true"><i class="bi bi-flag"></i></span>
             <div class="min-w-0 flex-grow-1">
-                <h6 id="fw-title">Pierwszy tydzień z aplikacją</h6>
-                <small>@done z @steps.Count — każdy krok odhaczy się sam.</small>
+                <h6 id="fw-title">Pierwszy tydzień z aplikacją · @done z @steps.Count</h6>
+                @if (!_open)
+                {
+                    <a class="fw-next" href="@nextStep.Href">Następny krok: <b>@nextStep.Title</b> <i class="bi bi-arrow-right"></i></a>
+                }
+                else
+                {
+                    <small>Każdy krok odhaczy się sam.</small>
+                }
             </div>
-            <button type="button" class="fw-hide" @onclick="HideAsync" title="Schowaj" aria-label="Schowaj listę"><i class="bi bi-x-lg"></i></button>
+            <button type="button" class="btn btn-sm btn-link fw-toggle" @onclick="() => _open = !_open" aria-expanded="@_open">@(_open ? "Zwiń" : "Pokaż listę")</button>
+            <button type="button" class="btn btn-sm btn-link fw-never" @onclick="HideForeverAsync" title="Nie pokazuj więcej"><i class="bi bi-eye-slash"></i><span>Nie pokazuj więcej</span></button>
         </div>
         <div class="fw-bar" aria-hidden="true"><span style="width:@(done * 100 / steps.Count)%"></span></div>
-        <ol class="fw-steps">
-            @foreach (var s in steps)
-            {
-                <li class="@(s.Done ? "done" : "")">
-                    <a href="@s.Href">
-                        <i class="bi @(s.Done ? "bi-check-circle-fill" : s.Icon)"></i>
-                        <span><b>@s.Title</b><small>@s.Hint</small></span>
-                        @if (!s.Done) { <i class="bi bi-chevron-right fw-go"></i> }
-                    </a>
-                </li>
-            }
-        </ol>
+        @if (_open)
+        {
+            <ol class="fw-steps">
+                @foreach (var s in steps)
+                {
+                    <li class="@(s.Done ? "done" : "")">
+                        <a href="@s.Href">
+                            <i class="bi @(s.Done ? "bi-check-circle-fill" : s.Icon)"></i>
+                            <span><b>@s.Title</b><small>@s.Hint</small></span>
+                            @if (!s.Done) { <i class="bi bi-chevron-right fw-go"></i> }
+                        </a>
+                    </li>
+                }
+            </ol>
+        }
     </section>
 }
 
@@ -40,8 +52,10 @@
 
     private sealed record Step(string Title, string Hint, string Href, string Icon, bool Done);
     private List<Step>? _steps;
-    private bool _hidden = true;
+    private bool _hidden = true, _open;
     private const string HideKey = "hantly-first-week-hidden";
+    /// <summary>Znacznik w TrainerConfig.MutedHints — „Nie pokazuj więcej” działa na każdym urządzeniu.</summary>
+    private const string MutedKey = "pierwszy_tydzien";
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
@@ -49,6 +63,9 @@
         try { _hidden = await JS.InvokeAsync<string?>("localStorage.getItem", HideKey) == "1"; } catch { _hidden = false; }
         if (_hidden) return;
         await using var db = await DbFactory.CreateDbContextAsync();
+        var muted = await db.TrainerConfigs.AsNoTracking().Where(c => c.TrainerUserId == UserId).Select(c => c.MutedHints).FirstOrDefaultAsync();
+        if ((muted ?? "").Split(',', StringSplitOptions.TrimEntries).Contains(MutedKey)) { _hidden = true; return; }
+        _hidden = false;
         var clients = db.Clients.Where(c => IsAdmin || c.TrainerUserId == UserId);
         var clientIds = clients.Select(c => c.Id);
         var clientCount = await clients.CountAsync();
@@ -81,9 +98,16 @@
         StateHasChanged();
     }
 
-    private async Task HideAsync()
+    private async Task HideForeverAsync()
     {
         _hidden = true;
         try { await JS.InvokeVoidAsync("localStorage.setItem", HideKey, "1"); } catch { }
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var cfg = await db.TrainerConfigs.FirstOrDefaultAsync(c => c.TrainerUserId == UserId);
+        if (cfg is null) db.TrainerConfigs.Add(cfg = new PTScheduler.Domain.Entities.TrainerConfig { TrainerUserId = UserId });
+        var set = (cfg.MutedHints ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet();
+        set.Add(MutedKey);
+        cfg.MutedHints = string.Join(",", set.Order());
+        await db.SaveChangesAsync();
     }
 }

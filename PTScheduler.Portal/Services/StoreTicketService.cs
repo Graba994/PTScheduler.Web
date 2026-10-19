@@ -56,7 +56,7 @@ public class StoreTicketService(
         var emailOn = !string.IsNullOrWhiteSpace(adminEmail) && s[SiteSettingsService.Keys.NotifyTicketsEmail] != "false";
         var phone = s[SiteSettingsService.Keys.AdminNotificationPhone];
         var smsOn = !string.IsNullOrWhiteSpace(phone) && s[SiteSettingsService.Keys.NotifyTicketsSms] == "true";
-        var panelUrl = $"{(config.GetValue<string>("Portal:PublicUrl") ?? "").TrimEnd('/')}/panel/orders";
+        var panelUrl = $"{PortalUrls.Public(config)}/panel/orders";
 
         foreach (var o in orders)
         {
