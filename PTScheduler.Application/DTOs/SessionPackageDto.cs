@@ -26,6 +26,23 @@ public class SessionPackageDto
     public DateTime? PaidAt { get; set; }
     public string? PaymentReference { get; set; }
     public string? PaidVia { get; set; }
+    /// <summary>Pakiet z okresu karnetu (płatność zmienia się w Karnetach).</summary>
+    public bool IsMembership { get; set; }
+
+    /// <summary>
+    /// Skąd płatność, gdy nie wpisał jej trener: „online” (bramka), „voucher”, „nagroda” (polecenie), „karnet”.
+    /// Null = wpis ręczny — trener może go edytować w Finansach.
+    /// </summary>
+    public string? AutoPaymentSource =>
+        IsMembership ? "karnet"
+        : PaidVia == "online" ? "online"
+        : PaymentReference switch
+        {
+            null or "" => null,
+            var r when r.StartsWith("voucher:") => "voucher",
+            var r when r.StartsWith("referral:") => "nagroda",
+            _ => "online"
+        };
     public DateTime PurchasedAt { get; set; }
     public DateTime? ExpiresAt { get; set; }
     public PackageStatus Status { get; set; }

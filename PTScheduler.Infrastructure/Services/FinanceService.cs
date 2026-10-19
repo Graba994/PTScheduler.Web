@@ -45,6 +45,54 @@ public class FinanceService(IDbContextFactory<ApplicationDbContext> dbFactory) :
         }).ToListAsync();
     }
 
+    public static readonly string[] ManualMethods = ["gotówka", "przelew", "karta"];
+
+    public async Task UpdatePackagePaymentAsync(int packageId, ManualPaymentEdit edit)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var p = await db.SessionPackages.FirstOrDefaultAsync(x => x.Id == packageId)
+            ?? throw new InvalidOperationException("Pakiet nie istnieje.");
+        if (p.PaidVia == "online" || !string.IsNullOrEmpty(p.PaymentReference))
+            throw new InvalidOperationException("Ta płatność przyszła automatycznie — nie da się jej edytować.");
+        if (await db.MembershipPeriods.AnyAsync(x => x.PackageId == packageId))
+            throw new InvalidOperationException("To pakiet z karnetu — płatność zmienisz w Karnetach.");
+        if (edit.TotalPrice is decimal total)
+        {
+            if (total < 0) throw new InvalidOperationException("Wartość nie może być ujemna.");
+            p.PricePerSession = p.TotalSessions > 0 ? Math.Round(total / p.TotalSessions, 2) : total;
+        }
+        Apply(edit, paid => p.IsPaid = paid, at => p.PaidAt = at, via => p.PaidVia = via);
+        await db.SaveChangesAsync();
+    }
+
+    public async Task UpdateSessionPaymentAsync(int sessionId, ManualPaymentEdit edit)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var s = await db.Sessions.FirstOrDefaultAsync(x => x.Id == sessionId)
+            ?? throw new InvalidOperationException("Nie znaleziono wizyty.");
+        if (s.PaidVia == "online") throw new InvalidOperationException("Ta płatność przyszła automatycznie — nie da się jej edytować.");
+        Apply(edit, _ => { }, at => s.PaidAt = at, via => s.PaidVia = via);
+        if (!edit.IsPaid) s.IsHidden = false;
+        await db.SaveChangesAsync();
+    }
+
+    private static void Apply(ManualPaymentEdit edit, Action<bool> setPaid, Action<DateTime?> setAt, Action<string?> setVia)
+    {
+        if (!edit.IsPaid)
+        {
+            setPaid(false);
+            setAt(null);
+            setVia(null);
+            return;
+        }
+        var via = edit.Via?.Trim().ToLowerInvariant();
+        if (via is null || !ManualMethods.Contains(via)) throw new InvalidOperationException("Wybierz sposób płatności: gotówka, przelew albo karta.");
+        if (edit.PaidAtUtc is DateTime at && at > DateTime.UtcNow.AddDays(1)) throw new InvalidOperationException("Data płatności nie może być w przyszłości.");
+        setPaid(true);
+        setAt(edit.PaidAtUtc ?? DateTime.UtcNow);
+        setVia(via);
+    }
+
     public async Task<bool> VerifyPinAsync(string pin)
     {
         await using var db = dbFactory.CreateDbContext();

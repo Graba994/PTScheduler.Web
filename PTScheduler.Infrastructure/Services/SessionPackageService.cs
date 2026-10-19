@@ -29,7 +29,7 @@ public class SessionPackageService(
             .Where(p => p.ClientId == clientId || p.PartnerClientId == clientId)
             .OrderByDescending(p => p.PurchasedAt)
             .ToListAsync();
-        return list.Select(MapToDto).ToList();
+        return await WithMembershipFlagAsync(db, list.Select(MapToDto).ToList());
     }
 
     public async Task<List<SessionPackageDto>> GetAllPackagesAsync(string? trainerUserId = null)
@@ -44,7 +44,7 @@ public class SessionPackageService(
             .Where(p => trainerUserId == null || p.Client.TrainerUserId == trainerUserId)
             .OrderByDescending(p => p.PurchasedAt)
             .ToListAsync();
-        return list.Select(MapToDto).ToList();
+        return await WithMembershipFlagAsync(db, list.Select(MapToDto).ToList());
     }
 
     public async Task<SessionPackageDto?> GetPackageAsync(int id)
@@ -269,6 +269,18 @@ public class SessionPackageService(
         };
         var (subject, html) = await emailTemplateService.RenderAsync("package-assigned", vars);
         await emailService.SendAsync(clientUser.Email, clientName, subject, html);
+    }
+
+    // Pakiety z okresów karnetu: płatność zmienia się w Karnetach (żeby okres i pakiet się nie rozjechały).
+    private static async Task<List<SessionPackageDto>> WithMembershipFlagAsync(ApplicationDbContext db, List<SessionPackageDto> list)
+    {
+        if (list.Count == 0) return list;
+        var ids = list.Select(p => p.Id).ToList();
+        var fromMembership = (await db.MembershipPeriods.AsNoTracking()
+            .Where(x => x.PackageId != null && ids.Contains(x.PackageId.Value))
+            .Select(x => x.PackageId!.Value).ToListAsync()).ToHashSet();
+        foreach (var p in list) p.IsMembership = fromMembership.Contains(p.Id);
+        return list;
     }
 
     private static SessionPackageDto MapToDto(SessionPackage p) => new()

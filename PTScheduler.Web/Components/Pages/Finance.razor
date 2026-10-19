@@ -174,7 +174,7 @@ else
             </div>
             <div class="table-responsive">
                 <table class="table table-sm align-middle mb-0" style="font-size:.82rem">
-                    <thead><tr><th>Opłacono</th><th>Klient</th><th>Trening</th><th>Sposób</th><th class="text-end">Kwota</th>@if (_canViewHidden) { <th></th> }</tr></thead>
+                    <thead><tr><th>Opłacono</th><th>Klient</th><th>Trening</th><th>Płatność</th><th class="text-end">Kwota</th>@if (_canViewHidden) { <th></th> }</tr></thead>
                     <tbody>
                         @foreach (var x in _offPkg.Take(_offPkgAll ? 500 : 10))
                         {
@@ -182,7 +182,7 @@ else
                                 <td class="text-nowrap">@x.PaidAt.ToLocalTime().ToString("dd.MM.yyyy")</td>
                                 <td><a href="/clients/@x.ClientId" class="text-decoration-none">@x.ClientName</a></td>
                                 <td>@x.SessionTypeName <span class="text-muted">· @x.StartTime.ToString("dd.MM HH:mm")</span></td>
-                                <td>@x.PaidVia</td>
+                                <td><PaymentCell IsPaid="true" Via="@x.PaidVia" PaidAt="x.PaidAt" ShowDate="false" OnEdit="() => EditSession(x)" /></td>
                                 <td class="text-end text-nowrap">@(x.Amount > 0 ? x.Amount.ToString("N0") + " zł" : "bez ceny")</td>
                                 @if (_canViewHidden)
                                 {
@@ -532,7 +532,7 @@ else
                                 <th class="text-center">Sesje</th>
                                 <th class="text-end">Wartość</th>
                                 <th>Zakup</th>
-                                <th>Status</th>
+                                <th>Płatność</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -544,7 +544,7 @@ else
                                     <td class="text-center">@p.TotalSessions</td>
                                     <td class="text-end fw-semibold" style="color:var(--c-danger)">@p.TotalPrice.ToString("N0") zł</td>
                                     <td class="text-muted">@p.PurchasedAt.ToLocalTime().ToString("dd.MM.yyyy")</td>
-                                    <td><span class="badge @StatusCss(p.Status)">@StatusLabel(p.Status)</span></td>
+                                    <td><PaymentCell IsPaid="false" AutoSource="@p.AutoPaymentSource" OnEdit="() => EditPackage(p)" /></td>
                                 </tr>
                             }
                         </tbody>
@@ -739,6 +739,13 @@ else
         </div>
     }
 
+    @if (_payEdit is { } pe)
+    {
+        <PaymentEditModal Title="@pe.Title" Subtitle="@pe.Subtitle" IsPackage="pe.PackageId is not null" Sessions="pe.Sessions"
+                          IsPaid="pe.IsPaid" Via="@pe.Via" PaidAt="pe.PaidAt" TotalPrice="pe.Total"
+                          OnSave="SavePaymentAsync" OnClose="() => _payEdit = null" />
+    }
+
     <!-- Full history -->
     <div class="card">
         <div class="card-header py-2 d-flex flex-wrap gap-2 align-items-center">
@@ -760,6 +767,10 @@ else
                 <option value="paid">Opłacone</option>
                 <option value="unpaid">Nieopłacone</option>
             </select>
+        </div>
+        <div class="pay-legend">
+            <span><i class="bi bi-pencil"></i>Wpisy ręczne (gotówka, przelew, karta) możesz edytować albo cofnąć.</span>
+            <span><i class="bi bi-lock-fill"></i>Płatności online z bramki, vouchery i karnety są rozliczane automatycznie.</span>
         </div>
         <div class="table-responsive">
             <table class="table table-stack table-hover align-middle mb-0" style="font-size:.875rem">
@@ -810,22 +821,8 @@ else
                                 @(p.ExpiresAt.HasValue ? p.ExpiresAt.Value.ToLocalTime().ToString("dd.MM.yyyy") : "—")
                             </td>
                             <td>
-                                @if (p.IsPaid)
-                                {
-                                    <span class="badge bg-success"><i class="bi bi-check me-1"></i>Opłacony</span>
-                                    @if (p.PaidAt.HasValue)
-                                    {
-                                        <div class="text-muted" style="font-size:.7rem">@p.PaidAt.Value.ToLocalTime().ToString("dd.MM.yyyy")</div>
-                                    }
-                                }
-                                else if (p.Status != PackageStatus.Cancelled)
-                                {
-                                    <span class="badge bg-warning text-dark">Oczekuje</span>
-                                }
-                                else
-                                {
-                                    <span class="text-muted">—</span>
-                                }
+                                <PaymentCell IsPaid="p.IsPaid" Via="@p.PaidVia" PaidAt="p.PaidAt" AutoSource="@(p.IsPaid || p.IsMembership ? p.AutoPaymentSource : null)"
+                                             Cancelled="@(p.Status == PackageStatus.Cancelled)" OnEdit="() => EditPackage(p)" />
                             </td>
                             <td><span class="badge @StatusCss(p.Status)">@StatusLabel(p.Status)</span></td>
                             @if (_canViewHidden)
@@ -932,6 +929,31 @@ else
 
     private async Task ReloadOrdersAsync() =>
         _onlineOrders = await PaymentService.GetPaidOrdersAsync(DateTime.UtcNow.AddMonths(-_months));
+
+    // Edycja ręcznej płatności (pakiet albo trening poza pakietem).
+    private sealed record PayEdit(string Title, string Subtitle, int? PackageId, int? SessionId, int Sessions, bool IsPaid, string? Via, DateTime? PaidAt, decimal Total);
+    private PayEdit? _payEdit;
+
+    private void EditPackage(SessionPackageDto p) =>
+        _payEdit = new(p.IsPaid ? "Edytuj płatność" : "Oznacz wpłatę", $"{p.ClientName} · {p.Name}", p.Id, null, p.TotalSessions, p.IsPaid, p.PaidVia, p.PaidAt, p.TotalPrice);
+
+    private void EditSession(OffPackagePaymentDto x) =>
+        _payEdit = new("Edytuj płatność", $"{x.ClientName} · {x.SessionTypeName} {x.StartTime:dd.MM HH:mm}", null, x.SessionId, 0, true, x.PaidVia, x.PaidAt, x.Amount);
+
+    private async Task<string?> SavePaymentAsync(ManualPaymentEdit edit)
+    {
+        if (_payEdit is not { } pe) return null;
+        try
+        {
+            if (pe.PackageId is int pid) await FinanceService.UpdatePackagePaymentAsync(pid, edit);
+            else if (pe.SessionId is int sid) await FinanceService.UpdateSessionPaymentAsync(sid, edit);
+        }
+        catch (InvalidOperationException ex) { return ex.Message; }
+        _payEdit = null;
+        await LoadDataAsync();
+        StateHasChanged();
+        return null;
+    }
 
     private async Task HideSessionAsync(int sessionId)
     {

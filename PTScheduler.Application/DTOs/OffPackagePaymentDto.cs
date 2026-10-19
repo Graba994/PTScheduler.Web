@@ -13,3 +13,6 @@ public class OffPackagePaymentDto
     public decimal Amount { get; set; }
     public bool IsHidden { get; set; }
 }
+
+/// <summary>Edycja ręcznej płatności: opłacone czy nie, jak, kiedy (UTC) i — dla pakietu — łączna wartość.</summary>
+public sealed record ManualPaymentEdit(bool IsPaid, string? Via, DateTime? PaidAtUtc, decimal? TotalPrice = null);

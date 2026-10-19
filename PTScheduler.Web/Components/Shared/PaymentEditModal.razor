@@ -1,0 +1,128 @@
+@using PTScheduler.Application.DTOs
+
+@* Edycja ręcznie wpisanej płatności (pakiet albo trening poza pakietem): opłacone czy nie, sposób, data
+   i — dla pakietu — łączna wartość. Płatności z bramki są opłacone automatycznie i tu nie trafiają. *@
+<div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.45)" @onkeydown="OnKey">
+    <div class="modal-dialog modal-dialog-centered">
+        <div class="modal-content pem">
+            <div class="modal-header">
+                <div>
+                    <h6 class="modal-title mb-0">@Title</h6>
+                    @if (!string.IsNullOrWhiteSpace(Subtitle))
+                    {
+                        <div class="small text-muted">@Subtitle</div>
+                    }
+                </div>
+                <button type="button" class="btn-close" aria-label="Zamknij" @onclick="OnClose"></button>
+            </div>
+            <div class="modal-body">
+                <div class="pem-label">Status</div>
+                <div class="pem-seg" role="radiogroup" aria-label="Status płatności">
+                    <button type="button" role="radio" aria-checked="@(_paid ? "true" : "false")" class="pem-opt @(_paid ? "on paid" : "")" @onclick="() => _paid = true">
+                        <i class="bi bi-check-circle-fill"></i>Opłacone
+                    </button>
+                    <button type="button" role="radio" aria-checked="@(!_paid ? "true" : "false")" class="pem-opt @(!_paid ? "on unpaid" : "")" @onclick="() => _paid = false">
+                        <i class="bi bi-hourglass-split"></i>Nieopłacone
+                    </button>
+                </div>
+
+                @if (_paid)
+                {
+                    <div class="pem-label mt-3">Sposób</div>
+                    <div class="pem-seg">
+                        @foreach (var (key, label, icon) in Methods)
+                        {
+                            var k = key;
+                            <button type="button" class="pem-opt @(_via == k ? "on" : "")" @onclick="() => _via = k"><i class="bi @icon"></i>@label</button>
+                        }
+                    </div>
+                    <div class="pem-label mt-3">Data wpłaty</div>
+                    <input type="date" class="form-control form-control-sm" style="max-width:180px" @bind="_date" max="@DateTime.Today.ToString("yyyy-MM-dd")" />
+                }
+
+                @if (IsPackage)
+                {
+                    <div class="pem-label mt-3">Wartość pakietu</div>
+                    <div class="input-group input-group-sm" style="max-width:180px">
+                        <input type="number" min="0" step="1" class="form-control" @bind="_total" />
+                        <span class="input-group-text">zł</span>
+                    </div>
+                    @if (Sessions > 0)
+                    {
+                        <div class="small text-muted mt-1">@SessionsText · @((_total / Sessions).ToString("N2")) zł za trening</div>
+                    }
+                }
+
+                @if (_error is not null)
+                {
+                    <div class="alert alert-danger small py-2 mt-3 mb-0">@_error</div>
+                }
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-outline-secondary btn-sm" @onclick="OnClose">Anuluj</button>
+                <button type="button" class="btn btn-primary btn-sm" @onclick="SaveAsync" disabled="@_busy">
+                    @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                    Zapisz
+                </button>
+            </div>
+        </div>
+    </div>
+</div>
+
+@code {
+    private static readonly (string Key, string Label, string Icon)[] Methods =
+        [("gotówka", "Gotówka", "bi-cash"), ("przelew", "Przelew", "bi-bank"), ("karta", "Karta", "bi-credit-card")];
+
+    [Parameter, EditorRequired] public string Title { get; set; } = "";
+    [Parameter] public string? Subtitle { get; set; }
+    [Parameter] public bool IsPackage { get; set; }
+    [Parameter] public int Sessions { get; set; }
+    [Parameter] public bool IsPaid { get; set; }
+    [Parameter] public string? Via { get; set; }
+    /// <summary>Data wpłaty w UTC.</summary>
+    [Parameter] public DateTime? PaidAt { get; set; }
+    [Parameter] public decimal TotalPrice { get; set; }
+    /// <summary>Zapis; zwraca komunikat błędu albo null, gdy się udało.</summary>
+    [Parameter, EditorRequired] public Func<ManualPaymentEdit, Task<string?>> OnSave { get; set; } = default!;
+    [Parameter] public EventCallback OnClose { get; set; }
+
+    private bool _paid;
+    private string _via = "gotówka";
+    private DateTime _date = DateTime.Today;
+    private decimal _total;
+    private string? _error;
+    private bool _busy;
+
+    private string SessionsText => $"{Sessions} " + (Sessions == 1 ? "trening"
+        : Sessions % 10 >= 2 && Sessions % 10 <= 4 && (Sessions % 100 < 12 || Sessions % 100 > 14) ? "treningi" : "treningów");
+
+    protected override void OnInitialized()
+    {
+        // Przy nieopłaconym („Oznacz wpłatę”) od razu zaznaczone „Opłacone” — zostaje wybrać sposób i zapisać.
+        // Przy opłaconym to samo, a „Nieopłacone” cofa wpłatę.
+        _paid = true;
+        _via = Via is { Length: > 0 } v && Methods.Any(m => m.Key == v.ToLowerInvariant()) ? v.ToLowerInvariant() : "gotówka";
+        _date = (IsPaid && PaidAt is { } at ? at.ToLocalTime() : DateTime.Now).Date;
+        _total = Math.Round(TotalPrice, 2);
+    }
+
+    private async Task SaveAsync()
+    {
+        _busy = true;
+        _error = null;
+        try
+        {
+            // Dzisiejsza data = „teraz” (z godziną), inna — południe tego dnia, żeby strefa czasowa nie przesunęła dnia.
+            DateTime? at = !_paid ? null
+                : _date.Date == DateTime.Today ? DateTime.UtcNow
+                : DateTime.SpecifyKind(_date.Date.AddHours(12), DateTimeKind.Local).ToUniversalTime();
+            _error = await OnSave(new ManualPaymentEdit(_paid, _paid ? _via : null, at, IsPackage ? _total : null));
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task OnKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") await OnClose.InvokeAsync();
+    }
+}

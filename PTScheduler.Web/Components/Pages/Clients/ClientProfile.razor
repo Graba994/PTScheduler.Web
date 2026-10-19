@@ -5,6 +5,7 @@
 @inject IClientService ClientService
 @inject ISessionService SessionService
 @inject ISessionPackageService PackageService
+@inject IFinanceService FinanceService
 @inject IPairService PairService
 @inject IUserManagementService UserManagementService
 @inject IBodyMeasurementService MeasurementService
@@ -599,18 +600,15 @@ else if (client is not null)
                             </div>
                             <div class="d-flex gap-1 align-items-center flex-wrap">
                                 <span class="badge @PackageBadge(pkg.Status)">@PackageLabel(pkg.Status)</span>
-                                @if (pkg.IsPaid)
+                                @if (pkg.IsPaid && AutoFor(pkg) is null)
                                 {
-                                    <span class="badge bg-success-subtle text-success" title="@(pkg.IsHidden ? "W ukrytych finansach" : "W Finansach")">
-                                        Opłacony@(string.IsNullOrEmpty(pkg.PaidVia) ? "" : $" · {pkg.PaidVia}")@if (pkg.IsHidden) { <i class="bi bi-eye-slash ms-1"></i> }
-                                    </span>
+                                    <PaymentCell IsPaid="true" Via="@pkg.PaidVia" PaidAt="pkg.PaidAt" ShowDate="false" OnEdit="() => _payEdit = pkg" />
+                                    @if (pkg.IsHidden) { <i class="bi bi-eye-slash text-muted" title="W ukrytych finansach"></i> }
                                 }
                                 else
                                 {
-                                    <button class="badge bg-warning-subtle text-warning border-0"
-                                            style="cursor:pointer" title="Oznacz jako opłacony" @onclick="() => _payFor = _payFor == pkg.Id ? null : pkg.Id">
-                                        Nieopłacony ✓
-                                    </button>
+                                    <PaymentCell IsPaid="pkg.IsPaid" AutoSource="@AutoFor(pkg)" ShowDate="false" Cancelled="@(pkg.Status == PackageStatus.Cancelled)"
+                                                 OnEdit="() => _payFor = _payFor == pkg.Id ? null : pkg.Id" />
                                 }
                                 @if (_payFor == pkg.Id && !pkg.IsPaid)
                                 {
@@ -655,6 +653,12 @@ else if (client is not null)
                 }
             }
         </section>
+        @if (_payEdit is { } pe)
+        {
+            <PaymentEditModal Title="Edytuj płatność" Subtitle="@pe.Name" IsPackage="true" Sessions="pe.TotalSessions"
+                              IsPaid="pe.IsPaid" Via="@pe.PaidVia" PaidAt="pe.PaidAt" TotalPrice="pe.TotalPrice"
+                              OnSave="SavePackagePaymentAsync" OnClose="() => _payEdit = null" />
+        }
     }
 
     @if (_tab == "measurements")
@@ -2208,6 +2212,23 @@ else if (client is not null)
     }
 
     private int? _payFor;
+    private SessionPackageDto? _payEdit;
+
+    // Płatność automatyczna (bramka, voucher, nagroda, karnet) — bez edycji; nieopłacony karnet też idzie przez Karnety.
+    private static string? AutoFor(SessionPackageDto p) => p.IsPaid || p.IsMembership ? p.AutoPaymentSource : null;
+
+    private async Task<string?> SavePackagePaymentAsync(ManualPaymentEdit edit)
+    {
+        if (_payEdit is not { } pkg) return null;
+        try { await FinanceService.UpdatePackagePaymentAsync(pkg.Id, edit); }
+        catch (InvalidOperationException ex) { return ex.Message; }
+        await AuditLogService.LogAsync(currentUserId, currentUserEmail, currentUserRole, "PackagePaymentEdited", "SessionPackage",
+            pkg.Id.ToString(), $"Klient: {client?.FullName}, {(edit.IsPaid ? $"opłacony: {edit.Via}" : "cofnięta wpłata")}");
+        _payEdit = null;
+        packages = await PackageService.GetPackagesAsync(Id);
+        RefreshPanel();
+        return null;
+    }
 
     private async Task MarkPaid(int packageId, PaidButtons.Choice c)
     {
