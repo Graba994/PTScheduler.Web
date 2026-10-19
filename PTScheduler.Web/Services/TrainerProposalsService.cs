@@ -80,8 +80,8 @@ public class TrainerProposalsService(IDbContextFactory<ApplicationDbContext> dbF
         return tips;
     }
 
-    private static Dictionary<string, string> Name(string? first) =>
-        new() { ["[klient]"] = string.IsNullOrWhiteSpace(first) ? "Klient" : first.Trim() };
+    private static Dictionary<string, string> Name(string? first, string? last) =>
+        new() { ["[klient]"] = AssistantTipsService.ShortName(first, last, "Klient") };
 
     // ── Wolne okienka ──
     private async Task<IEnumerable<Tip>> SlotsAsync(string userId)
@@ -107,14 +107,14 @@ public class TrainerProposalsService(IDbContextFactory<ApplicationDbContext> dbF
         var rows = await db.Sessions.AsNoTracking()
             .Where(s => s.TrainerUserId == userId && s.StartTime >= since && s.StartTime < now && !s.Client.ExtraReminder
                 && (s.Status == SessionStatus.Completed || s.Status == SessionStatus.NoShow))
-            .Select(s => new { s.ClientId, s.StartTime, s.Status, s.Client.FirstName })
+            .Select(s => new { s.ClientId, s.StartTime, s.Status, s.Client.FirstName, s.Client.LastName })
             .ToListAsync();
         var upcoming = await db.Sessions.AsNoTracking()
             .Where(s => s.TrainerUserId == userId && s.StartTime >= now && s.StartTime < now.AddDays(14) && s.Status == SessionStatus.Scheduled)
             .Select(s => s.ClientId).Distinct().ToListAsync();
         var pick = rows.GroupBy(r => r.ClientId)
             .Where(g => upcoming.Contains(g.Key))
-            .Select(g => new { g.Key, g.First().FirstName, Missed = TrainerNudges.RecentNoShows(g.OrderByDescending(x => x.StartTime).Select(x => x.Status)) })
+            .Select(g => new { g.Key, g.First().FirstName, g.First().LastName, Missed = TrainerNudges.RecentNoShows(g.OrderByDescending(x => x.StartTime).Select(x => x.Status)) })
             .Where(x => x.Missed >= 2).OrderByDescending(x => x.Missed).FirstOrDefault();
         if (pick is null) return [];
         return
@@ -122,7 +122,7 @@ public class TrainerProposalsService(IDbContextFactory<ApplicationDbContext> dbF
             new($"noshow-{pick.Key}", "nieobecnosci", "think", 46,
                 $"[klient]: {pick.Missed} {AssistantTipsService.Plural(pick.Missed, "nieobecność", "nieobecności", "nieobecności")} na ostatnich 4 wizytach. Włączyć dodatkowe przypomnienie 2 godziny przed wizytą — tylko dla tej osoby?",
                 new() { ["klient"] = "[klient]", ["nieobecnosci"] = pick.Missed.ToString() }, "Włącz", $"/clients/{pick.Key}?przypomnienie=1",
-                Placeholders: Name(pick.FirstName), Quiet: true),
+                Placeholders: Name(pick.FirstName, pick.LastName), Quiet: true),
         ];
     }
 
@@ -135,7 +135,7 @@ public class TrainerProposalsService(IDbContextFactory<ApplicationDbContext> dbF
         var rows = await db.Sessions.AsNoTracking()
             .Where(s => s.TrainerUserId == userId && s.StartTime >= since && s.StartTime < now && s.Status == SessionStatus.Completed
                 && s.Client.Status == ClientStatus.Active)
-            .Select(s => new { s.ClientId, s.StartTime, s.Client.FirstName }).ToListAsync();
+            .Select(s => new { s.ClientId, s.StartTime, s.Client.FirstName, s.Client.LastName }).ToListAsync();
         var upcoming = (await db.Sessions.AsNoTracking()
             .Where(s => s.TrainerUserId == userId && s.StartTime >= now && (s.Status == SessionStatus.Scheduled || s.Status == SessionStatus.AwaitingPackage))
             .Select(s => s.ClientId).Distinct().ToListAsync()).ToHashSet();
@@ -144,7 +144,7 @@ public class TrainerProposalsService(IDbContextFactory<ApplicationDbContext> dbF
             {
                 var gap = TrainerNudges.MedianGapDays(g.Select(x => x.StartTime));
                 var since = (now.Date - g.Max(x => x.StartTime).Date).Days;
-                return new { g.Key, g.First().FirstName, Gap = gap, Since = since, Quiet = TrainerNudges.IsUnusuallyQuiet(gap, since, upcoming.Contains(g.Key)) };
+                return new { g.Key, g.First().FirstName, g.First().LastName, Gap = gap, Since = since, Quiet = TrainerNudges.IsUnusuallyQuiet(gap, since, upcoming.Contains(g.Key)) };
             })
             .Where(x => x.Quiet).OrderByDescending(x => x.Since / Math.Max(1, x.Gap ?? 1)).FirstOrDefault();
         if (best is null) return [];
@@ -154,7 +154,7 @@ public class TrainerProposalsService(IDbContextFactory<ApplicationDbContext> dbF
             new($"cisza-{best.Key}-{TrainerNudges.WeekStart(clock.Today):yyyyMMdd}", "cisza", "think", 44,
                 $"[klient] zwykle trenuje co {gapDays} {AssistantTipsService.Plural(gapDays, "dzień", "dni", "dni")}, a od ostatniej wizyty minęło {best.Since}. Krótka wiadomość? Przygotuję szkic w Twoim stylu.",
                 new() { ["klient"] = "[klient]", ["zwykle_co_dni"] = gapDays.ToString(), ["dni_od_wizyty"] = best.Since.ToString() },
-                "Napisz", $"/clients/{best.Key}?szkic=Comeback", Placeholders: Name(best.FirstName), Quiet: true),
+                "Napisz", $"/clients/{best.Key}?szkic=Comeback", Placeholders: Name(best.FirstName, best.LastName), Quiet: true),
         ];
     }
 
@@ -166,7 +166,7 @@ public class TrainerProposalsService(IDbContextFactory<ApplicationDbContext> dbF
         await using var db = await dbFactory.CreateDbContextAsync();
         var recent = await db.WorkoutLogs.AsNoTracking()
             .Where(l => l.WorkoutDate >= weekAgo && l.Client!.TrainerUserId == userId)
-            .Select(l => new { l.ClientId, l.ExerciseId, Name = l.Exercise!.NamePl, l.Client!.FirstName, Top = l.Sets.Max(s => (decimal?)s.WeightKg) ?? 0 })
+            .Select(l => new { l.ClientId, l.ExerciseId, Name = l.Exercise!.NamePl, l.Client!.FirstName, l.Client!.LastName, Top = l.Sets.Max(s => (decimal?)s.WeightKg) ?? 0 })
             .Where(x => x.Top > 0).ToListAsync();
         if (recent.Count == 0) return [];
         var pairs = recent.Select(r => new { r.ClientId, r.ExerciseId }).Distinct().ToList();
@@ -182,7 +182,7 @@ public class TrainerProposalsService(IDbContextFactory<ApplicationDbContext> dbF
             {
                 var top = g.Max(x => x.Top);
                 var prev = before.FirstOrDefault(b => b.ClientId == g.Key.ClientId && b.ExerciseId == g.Key.ExerciseId)?.Max ?? 0;
-                return new { g.Key.ClientId, g.First().Name, g.First().FirstName, Top = top, Prev = prev, Gain = prev > 0 ? (top - prev) / prev : 0 };
+                return new { g.Key.ClientId, g.First().Name, g.First().FirstName, g.First().LastName, Top = top, Prev = prev, Gain = prev > 0 ? (top - prev) / prev : 0 };
             })
             .Where(x => x.Prev > 0 && x.Gain >= 0.05m).OrderByDescending(x => x.Gain).FirstOrDefault();
         if (best is null) return [];
@@ -191,7 +191,7 @@ public class TrainerProposalsService(IDbContextFactory<ApplicationDbContext> dbF
             new($"postep-{best.ClientId}-{TrainerNudges.WeekStart(today):yyyyMMdd}", "postep", "celebrate", 42,
                 $"[klient] bije rekord: {best.Name} {best.Top:0.##} kg (było {best.Prev:0.##}). Dobry moment na zdjęcie postępów albo prośbę o opinię Google.",
                 new() { ["klient"] = "[klient]", ["cwiczenie"] = best.Name, ["kg"] = best.Top.ToString("0.##"), ["bylo_kg"] = best.Prev.ToString("0.##") },
-                "Profil", $"/clients/{best.ClientId}", Placeholders: Name(best.FirstName), Quiet: true),
+                "Profil", $"/clients/{best.ClientId}", Placeholders: Name(best.FirstName, best.LastName), Quiet: true),
         ];
     }
 
@@ -204,7 +204,7 @@ public class TrainerProposalsService(IDbContextFactory<ApplicationDbContext> dbF
         var sessions = await db.Sessions.AsNoTracking()
             .Where(s => s.TrainerUserId == userId && s.StartTime >= since && s.StartTime < now && s.Status == SessionStatus.Completed)
             .OrderByDescending(s => s.StartTime)
-            .Select(s => new { s.ClientId, s.StartTime, s.PlanDayId, s.Client.FirstName, Label = s.PlanDay != null ? s.PlanDay.Label : null, Order = s.PlanDay != null ? s.PlanDay.Order : 0, PlanId = s.PlanDay != null ? s.PlanDay.PlanId : 0 })
+            .Select(s => new { s.ClientId, s.StartTime, s.PlanDayId, s.Client.FirstName, s.Client.LastName, Label = s.PlanDay != null ? s.PlanDay.Label : null, Order = s.PlanDay != null ? s.PlanDay.Order : 0, PlanId = s.PlanDay != null ? s.PlanDay.PlanId : 0 })
             .ToListAsync();
         foreach (var g in sessions.GroupBy(s => s.ClientId))
         {
@@ -225,7 +225,7 @@ public class TrainerProposalsService(IDbContextFactory<ApplicationDbContext> dbF
                 new($"plan-{g.Key}-{first.PlanDayId}", "plan_stoi", "think", 40,
                     $"[klient] robi „{day}” już {streak.Count} razy z rzędu, a ciężary stoją w miejscu. Może czas na nowy blok?",
                     new() { ["klient"] = "[klient]", ["dzien_planu"] = day, ["razy"] = streak.Count.ToString() },
-                    "Plan", $"/plans/edit/{first.PlanId}", Once: true, Placeholders: Name(first.FirstName), Quiet: true),
+                    "Plan", $"/plans/edit/{first.PlanId}", Once: true, Placeholders: Name(first.FirstName, first.LastName), Quiet: true),
             ];
         }
         return [];

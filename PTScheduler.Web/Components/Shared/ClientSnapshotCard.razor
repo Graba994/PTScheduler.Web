@@ -31,7 +31,18 @@
             <div class="cs-points">
                 @foreach (var point in s.Points)
                 {
-                    <span class="cs-point @point.Tone"><i class="bi @(point.Tone switch { "good" => "bi-check-circle-fill", "bad" => "bi-exclamation-circle-fill", _ => "bi-info-circle-fill" })"></i>@point.Text</span>
+                    var icon = point.Tone switch { "good" => "bi-check-circle-fill", "bad" => "bi-exclamation-circle-fill", _ => "bi-info-circle-fill" };
+                    var kind = point.Kind;
+                    if (OnPoint.HasDelegate && Linked.Contains(kind))
+                    {
+                        <button type="button" class="cs-point cs-point-link @point.Tone" @onclick="() => OnPoint.InvokeAsync(kind)" title="Pokaż szczegóły">
+                            <i class="bi @icon"></i>@point.Text<i class="bi bi-arrow-right-short cs-go"></i>
+                        </button>
+                    }
+                    else
+                    {
+                        <span class="cs-point @point.Tone"><i class="bi @icon"></i>@point.Text</span>
+                    }
                 }
             </div>
             @if (_text is null)
@@ -45,6 +56,10 @@
 
 @code {
     [Parameter, EditorRequired] public int ClientId { get; set; }
+    /// <summary>Klik w obserwację, która ma szczegóły gdzie indziej w profilu (np. „plan” → wnioski w Aktywności).</summary>
+    [Parameter] public EventCallback<string> OnPoint { get; set; }
+
+    private static readonly HashSet<string> Linked = ["plan"];
 
     private ClientSnapshotResult? _snapshot;
     private string? _text;

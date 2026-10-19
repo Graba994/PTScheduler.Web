@@ -41,7 +41,7 @@ public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFact
         var soon = await db.Sessions.AsNoTracking()
             .Where(s => s.TrainerUserId == userId && s.Status == SessionStatus.Scheduled && s.StartTime > now && s.StartTime <= now.AddMinutes(60))
             .OrderBy(s => s.StartTime)
-            .Select(s => new { s.Id, s.ClientId, s.StartTime, s.Client.FirstName })
+            .Select(s => new { s.Id, s.ClientId, s.StartTime, s.Client.FirstName, s.Client.LastName })
             .FirstOrDefaultAsync();
         if (soon is not null)
         {
@@ -49,7 +49,7 @@ public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFact
             tips.Add(new($"before-{soon.Id}", "przed_treningiem", "hello", 100,
                 $"Za {minutes} min: [klient]. Zerknij na profil — plan na dziś, ostatni trening i uwagi.",
                 new() { ["klient"] = "[klient]", ["minuty"] = minutes.ToString() }, "Karta", $"/clients/{soon.ClientId}?trening={soon.Id}#trening",
-                Placeholders: new() { ["[klient]"] = string.IsNullOrWhiteSpace(soon.FirstName) ? "kolejny trening" : soon.FirstName.Trim() }));
+                Placeholders: new() { ["[klient]"] = ShortName(soon.FirstName, soon.LastName, "kolejny trening") }));
         }
 
         // Własna skrzynka nie działa — maile idą awaryjnie przez serwer platformy (widzi właściciel studia, który ma ustawienia poczty).
@@ -94,13 +94,13 @@ public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFact
         var endingIds = await db.SessionPackages.AsNoTracking()
             .Where(p => p.Status == PackageStatus.Active && !p.IsHidden && p.TotalSessions > 0
                 && p.TotalSessions - p.UsedSessions <= 1 && (studioWide || p.Client.TrainerUserId == userId))
-            .Select(p => new { p.ClientId, p.Client.FirstName }).Distinct().Take(50).ToListAsync();
+            .Select(p => new { p.ClientId, p.Client.FirstName, p.Client.LastName }).Distinct().Take(50).ToListAsync();
         var ending = endingIds.Select(e => e.ClientId).Distinct().Count();
         if (ending == 1)
             tips.Add(new($"packages-{endingIds[0].ClientId}", "pakiety", "think", 55,
                 "[klient] kończy się pakiet — dobry moment, żeby zaproponować kolejny. Przygotuję wiadomość w Twoim stylu.",
                 new() { ["klient"] = "[klient]" }, "Napisz", $"/clients/{endingIds[0].ClientId}?szkic=Package",
-                Placeholders: new() { ["[klient]"] = string.IsNullOrWhiteSpace(endingIds[0].FirstName) ? "Klientowi" : endingIds[0].FirstName.Trim() }));
+                Placeholders: new() { ["[klient]"] = ShortName(endingIds[0].FirstName, endingIds[0].LastName, "Klientowi") }));
         else if (ending > 1)
             tips.Add(new("packages", "pakiety", "think", 55,
                 $"{ending} {Plural(ending, "klientowi kończy", "klientom kończy", "klientom kończy")} się pakiet — dobry moment, żeby zaproponować kolejny.",
@@ -118,15 +118,15 @@ public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFact
         if (reached.Count > 0)
         {
             var ids = reached.Select(r => r.ClientId).ToList();
-            var names = await db.Clients.AsNoTracking().Where(c => ids.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => c.FirstName);
+            var names = await db.Clients.AsNoTracking().Where(c => ids.Contains(c.Id)).ToDictionaryAsync(c => c.Id, c => new { c.FirstName, c.LastName });
             foreach (var (clientId, count) in reached)
             {
-                if (!names.TryGetValue(clientId, out var name) || string.IsNullOrWhiteSpace(name)) continue;
+                if (!names.TryGetValue(clientId, out var name) || string.IsNullOrWhiteSpace(name.FirstName)) continue;
                 tips.Add(new($"milestone-{clientId}-{count}", "kamien_milowy", "celebrate", 50,
                     $"[klient] ma za sobą już {count} treningów! 🎉",
                     new() { ["klient"] = "[klient]", ["liczba_treningow"] = count.ToString() },
                     "Profil", $"/clients/{clientId}", Once: true,
-                    Placeholders: new() { ["[klient]"] = name.Trim() }));
+                    Placeholders: new() { ["[klient]"] = ShortName(name.FirstName, name.LastName, "Klient") }));
             }
         }
 
@@ -218,6 +218,14 @@ public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFact
     }
 
     /// <summary>Polska odmiana: 1 trening, 2–4 treningi, 5+ treningów (12–14 zawsze w trzeciej formie).</summary>
+    /// <summary>Imię z inicjałem nazwiska („Hubert K.”) — dwie osoby o tym samym imieniu nie mylą się w podpowiedziach.</summary>
+    public static string ShortName(string? first, string? last, string fallback)
+    {
+        if (string.IsNullOrWhiteSpace(first)) return fallback;
+        var initial = string.IsNullOrWhiteSpace(last) ? "" : $" {char.ToUpperInvariant(last.Trim()[0])}.";
+        return first.Trim() + initial;
+    }
+
     public static string Plural(int n, string one, string few, string many) =>
         n == 1 ? one : n % 10 is >= 2 and <= 4 && n % 100 is < 12 or > 14 ? few : many;
 }

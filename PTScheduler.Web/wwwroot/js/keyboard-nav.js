@@ -65,3 +65,18 @@ document.addEventListener('click', function (e) {
     var title = card.querySelector('.cp-card-title');
     if (title) title.setAttribute('aria-expanded', card.classList.contains('is-open') ? 'true' : 'false');
 });
+
+// Przewinięcie do sekcji, która może dopiero się wczytywać (np. karta ładująca dane po zmianie zakładki).
+window.PTScrollTo = function (id) {
+    let tries = 0;
+    (function attempt() {
+        const el = document.getElementById(id);
+        if (el) {
+            el.classList.add('pt-flash');
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            setTimeout(() => el.classList.remove('pt-flash'), 1600);
+        } else if (tries++ < 30) {
+            setTimeout(attempt, 100);
+        }
+    })();
+};

@@ -53,7 +53,7 @@ public static class ProgressInsights
 
     /// <summary>
     /// Odstępstwa od planu na podstawie ostatnich treningów (od najnowszego). Każdy wzorzec musi
-    /// wystąpić co najmniej w 2 z 3 ostatnich treningów — pojedynczy słabszy dzień to nie problem.
+    /// wystąpić co najmniej w 2 z 3 ostatnich treningów, w tym w najnowszym — pojedynczy słabszy dzień to nie problem.
     /// </summary>
     public static List<PlanInsight> Analyze(PlannedTarget plan, IReadOnlyList<ExerciseDay> newestFirst)
     {
@@ -62,7 +62,9 @@ public static class ProgressInsights
         if (recent.Count < 2) return result;
         var range = ProgressionRules.ParseReps(plan.Reps);
 
-        bool Pattern(Func<ExerciseDay, bool> test) => recent.Count(test) >= 2;
+        // Wzorzec musi być też widoczny w najnowszym treningu — jeśli klient już dogonił plan, nie ma czego poprawiać
+        // (a tekst z liczbami z ostatniego treningu nie brzmiałby „27,5 kg zamiast zaplanowanych 27,5 kg”).
+        bool Pattern(Func<ExerciseDay, bool> test) => test(recent[0]) && recent.Count(test) >= 2;
 
         if (range is { } r1 && Pattern(d => d.Sets.Count >= 2 && d.Sets[^1].Reps < r1.Min && d.Sets[0].Reps >= r1.Min))
         {

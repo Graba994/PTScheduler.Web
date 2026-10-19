@@ -227,7 +227,7 @@ else if (client is not null)
     {
         <ClientNudgeCard ClientId="Id" Phone="@client.Phone" />
         <ClientTrainingPanel ClientId="Id" PlansOn="_plansOn" SessionId="TreningQuery" Highlight="TreningQuery is not null" />
-        <ClientSnapshotCard ClientId="Id" />
+        <ClientSnapshotCard ClientId="Id" OnPoint="ShowSnapshotPoint" />
         <ClientRetentionCard ClientId="Id" Phone="@client.Phone" />
         <div class="cp-grid cp-overview">
             <div class="cp-col">
@@ -377,8 +377,10 @@ else if (client is not null)
                             @foreach (var w in _weeks)
                             {
                                 <div class="cp-week" title="@($"Tydzień od {w.Start:dd.MM}: {w.Count} {Plural(w.Count, "trening", "treningi", "treningów")}")">
-                                    <span class="cp-week-n">@(w.Count > 0 ? w.Count : "")</span>
-                                    <span class="cp-week-bar @(w.Count == 0 ? "zero" : "")" style="height:@(Math.Max(6, w.Count * 100 / Math.Max(1, _weeksMax)))%"></span>
+                                    <span class="cp-week-track">
+                                        <span class="cp-week-n">@(w.Count > 0 ? w.Count : "")</span>
+                                        <span class="cp-week-bar @(w.Count == 0 ? "zero" : "")" style="height:calc((100% - 1.2rem) * @(Math.Max(4, w.Count * 100 / Math.Max(1, _weeksMax))) / 100)"></span>
+                                    </span>
                                     <span class="cp-week-lab">@w.Start.ToString("dd.MM")</span>
                                 </div>
                             }
@@ -1959,6 +1961,16 @@ else if (client is not null)
         return dob > today.AddYears(-age) ? age - 1 : age;
     }
 
+    private string? _scrollTo;
+
+    // „W skrócie” → szczegóły: wnioski o planie są w karcie postępów na zakładce Aktywność.
+    private void ShowSnapshotPoint(string kind)
+    {
+        if (kind != "plan") return;
+        SelectTab("activity");
+        _scrollTo = "plan-wnioski";
+    }
+
     private void SelectTab(string tab)
     {
         _tab = tab;
@@ -2011,6 +2023,13 @@ else if (client is not null)
         {
             _chartNeedsRender = false;
             await RenderChart();
+        }
+
+        if (_scrollTo is { } target)
+        {
+            _scrollTo = null;
+            try { await JS.InvokeVoidAsync("PTScrollTo", target); }
+            catch (JSException) { }
         }
     }
 

@@ -61,11 +61,19 @@ public static class ClientSnapshot
             facts["najwiekszy_postep"] = $"{best.Exercise} +{N(best.DeltaKg)} kg";
             points.Add(new("sila", "good", $"Ciężary rosną — największy postęp: {best.Exercise} +{N(best.DeltaKg)} kg."));
         }
-        var stuck = p?.Insights.Select(i => i.Exercise).Distinct().Count() ?? 0;
+        var stuckNames = p?.Insights.Select(i => i.Exercise).Distinct().ToList() ?? [];
+        var stuck = stuckNames.Count;
         if (stuck > 0)
         {
             facts["cwiczenia_do_poprawy"] = stuck.ToString();
-            points.Add(new("plan", "info", $"{stuck} {Plural(stuck, "ćwiczenie wymaga", "ćwiczenia wymagają", "ćwiczeń wymaga")} uwagi w planie."));
+            // Konkretnie, które ćwiczenia: wykonanie odbiega od planu (mniej serii, niższy ciężar, powtórzenia poza zakresem).
+            var named = stuck switch
+            {
+                1 => stuckNames[0],
+                2 or 3 => string.Join(", ", stuckNames.Take(stuck - 1)) + " i " + stuckNames[^1],
+                _ => $"{stuckNames[0]}, {stuckNames[1]} i {stuck - 2} {Plural(stuck - 2, "inne", "inne", "innych")}"
+            };
+            points.Add(new("plan", "info", $"Wykonanie odbiega od planu: {named} — zobacz, co poprawić."));
         }
         if (p?.WeightFromKg is { } wf && p.WeightToKg is { } wt && Math.Abs(wt - wf) >= 1)
         {

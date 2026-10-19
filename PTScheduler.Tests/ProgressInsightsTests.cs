@@ -58,6 +58,15 @@ public class ProgressInsightsTests
     }
 
     [Fact]
+    public void Problem_Already_Fixed_In_Newest_Workout_Is_Not_Flagged()
+    {
+        // Dwa starsze treningi poniżej celu, ostatni już z pełnym ciężarem i seriami — nie ma czego poprawiać.
+        var plan = new PlannedTarget(4, "4-6", 27.5m, null);
+        ProgressInsights.Analyze(plan, [Day(1, 27.5m, 5, 6, 5, 4), Day(4, 25, 6, 6, 5), Day(8, 25, 6, 5, 5)])
+            .Should().BeEmpty();
+    }
+
+    [Fact]
     public void Detects_Stagnation_Over_Four_Workouts()
     {
         var plan = new PlannedTarget(3, "8-12", 50, null);
