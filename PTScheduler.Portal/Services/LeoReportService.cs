@@ -20,7 +20,8 @@ public class LeoReportService(
     AssistantService assistant,
     AiService ai,
     EmailService email,
-    IConfiguration config)
+    IConfiguration config,
+    IWebHostEnvironment env)
 {
     private static readonly CultureInfo Pl = CultureInfo.GetCultureInfo("pl-PL");
 
@@ -93,14 +94,17 @@ public class LeoReportService(
         if (!force && await settings.GetAsync(K.LeoReportEnabled) == "false") return "Raport wyłączony.";
         var to = await RecipientAsync();
         if (to is null) return "Brak adresu administratora — wpisz go w ustawieniach raportu.";
-        var root = (config.GetValue<string>("Portal:PublicUrl") is { Length: > 0 } pub ? pub : baseUrl ?? "").TrimEnd('/');
+        var root = (config.GetValue<string>("Portal:PublicUrl") is { Length: > 0 } pub ? pub : baseUrl ?? "https://hantly.pl").TrimEnd('/');
         var report = await BuildAsync();
         var version = await assistant.IconsVersionAsync(AssistantService.Leo);
-        var html = RenderHtml(report, root, version);
+        // Grafika Leo w środku wiadomości (cid:) — widać ją od razu, także bez publicznego adresu Portalu.
+        var png = await assistant.EmailImageAsync(Mood(report), env.WebRootPath, AssistantService.Leo);
+        var html = RenderHtml(report, root, version, png is null ? null : "cid:leo");
         var subject = report.Todo.Count > 0
             ? $"{report.Leo.Name}: {report.Todo.Count} {LeoService.Plural(report.Todo.Count, "sprawa", "sprawy", "spraw")} na dziś"
             : $"{report.Leo.Name}: spokojny poranek";
-        var (ok, error) = await email.SendAsync(to, subject, html, fromNameOverride: $"{report.Leo.Name} · Panel");
+        var (ok, error) = await email.SendAsync(to, subject, html, fromNameOverride: $"{report.Leo.Name} · Panel",
+            images: png is { } p ? [new EmailService.InlineImage("leo", p.Data, p.ContentType)] : null);
         return ok ? null : error ?? "Nie udało się wysłać e-maila.";
     }
 
@@ -113,10 +117,12 @@ public class LeoReportService(
         return text;
     }
 
-    public static string RenderHtml(Report r, string root, string version)
+    public static string Mood(Report r) => r.Todo.Count > 0 ? "remind" : r.Praise.Count > 0 ? "celebrate" : "hello";
+
+    /// <param name="imgSrc">Adres grafiki Leo (np. <c>cid:leo</c> przy obrazku w wiadomości); bez niego — PNG z Portalu.</param>
+    public static string RenderHtml(Report r, string root, string version, string? imgSrc = null)
     {
-        var mood = r.Todo.Count > 0 ? "remind" : r.Praise.Count > 0 ? "celebrate" : "hello";
-        var img = $"{root}/assistant/leo/{mood}.png?v={version}";
+        var img = imgSrc ?? $"{root}/assistant/leo/{Mood(r)}.png?v={version}";
         var day = r.LocalDay.ToString("dddd, d MMMM", Pl);
         var sb = new StringBuilder();
         sb.Append("""<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>""");

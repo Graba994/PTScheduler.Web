@@ -5,10 +5,13 @@ namespace PTScheduler.Portal.Services;
 
 public class EmailService(SiteSettingsService settings, ILogger<EmailService> logger)
 {
+    /// <summary>Obrazek dołączony do wiadomości (w HTML: <c>src="cid:{ContentId}"</c>) — widać go bez pobierania z sieci.</summary>
+    public sealed record InlineImage(string ContentId, byte[] Data, string ContentType);
+
     /// <param name="fromNameOverride">Nazwa nadawcy (np. studio trenera); adres zostaje adresem platformy.</param>
     /// <param name="replyTo">Adres odpowiedzi — przy poczcie trenera jego własny e-mail.</param>
     public async Task<(bool Success, string? Error)> SendAsync(string toEmail, string subject, string htmlBody,
-        string? fromNameOverride = null, string? replyTo = null, string? toName = null)
+        string? fromNameOverride = null, string? replyTo = null, string? toName = null, IReadOnlyList<InlineImage>? images = null)
     {
         try
         {
@@ -48,6 +51,19 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                 Body = htmlBody,
                 IsBodyHtml = true
             };
+            if (images is { Count: > 0 })
+            {
+                // HTML z obrazkami w środku (multipart/related): nie zależy od publicznego adresu Portalu ani od blokady obrazków z sieci.
+                mail.Body = "";
+                var view = AlternateView.CreateAlternateViewFromString(htmlBody, System.Text.Encoding.UTF8, "text/html");
+                foreach (var img in images)
+                    view.LinkedResources.Add(new LinkedResource(new MemoryStream(img.Data), img.ContentType)
+                    {
+                        ContentId = img.ContentId,
+                        TransferEncoding = System.Net.Mime.TransferEncoding.Base64
+                    });
+                mail.AlternateViews.Add(view);
+            }
             mail.To.Add(string.IsNullOrWhiteSpace(toName) ? new MailAddress(toEmail) : new MailAddress(toEmail, toName));
             if (!string.IsNullOrWhiteSpace(replyTo)) mail.ReplyToList.Add(new MailAddress(replyTo));
 

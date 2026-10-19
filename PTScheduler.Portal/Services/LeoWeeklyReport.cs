@@ -14,7 +14,7 @@ namespace PTScheduler.Portal.Services;
 /// Liczby z reguł (<see cref="LeoAnalytics"/>), AI pisze najwyżej wstęp.
 /// </summary>
 public class LeoWeeklyReport(IDbContextFactory<PortalDbContext> dbFactory, LeoAnalytics analytics, LeoReportService daily,
-    AssistantService assistant, EmailService email, SiteSettingsService settings, IConfiguration config)
+    AssistantService assistant, EmailService email, SiteSettingsService settings, IConfiguration config, IWebHostEnvironment env)
 {
     private static readonly CultureInfo Pl = CultureInfo.GetCultureInfo("pl-PL");
 
@@ -78,22 +78,28 @@ public class LeoWeeklyReport(IDbContextFactory<PortalDbContext> dbFactory, LeoAn
         if (!force && await settings.GetAsync(K.LeoWeeklyEnabled) == "false") return "Raport tygodniowy wyłączony.";
         var to = await daily.RecipientAsync();
         if (to is null) return "Brak adresu administratora — wpisz go w ustawieniach raportu.";
-        var root = (config.GetValue<string>("Portal:PublicUrl") is { Length: > 0 } pub ? pub : baseUrl ?? "").TrimEnd('/');
+        var root = (config.GetValue<string>("Portal:PublicUrl") is { Length: > 0 } pub ? pub : baseUrl ?? "https://hantly.pl").TrimEnd('/');
         var report = await BuildAsync();
         var version = await assistant.IconsVersionAsync(AssistantService.Leo);
         var subject = $"{report.Leo.Name}: tydzień {report.From:dd.MM}–{report.To:dd.MM}"
             + (report.Overview.Warnings.Count > 0 ? $" · {report.Overview.Warnings.Count} {LeoService.Plural(report.Overview.Warnings.Count, "ostrzeżenie", "ostrzeżenia", "ostrzeżeń")}" : "");
-        var (ok, error) = await email.SendAsync(to, subject, RenderHtml(report, root, version), fromNameOverride: $"{report.Leo.Name} · Panel");
+        var png = await assistant.EmailImageAsync(Mood(report), env.WebRootPath, AssistantService.Leo);
+        var (ok, error) = await email.SendAsync(to, subject, RenderHtml(report, root, version, png is null ? null : "cid:leo"),
+            fromNameOverride: $"{report.Leo.Name} · Panel",
+            images: png is { } p ? [new EmailService.InlineImage("leo", p.Data, p.ContentType)] : null);
         return ok ? null : error ?? "Nie udało się wysłać e-maila.";
     }
 
     private static string E(string s) => WebUtility.HtmlEncode(s);
 
-    public static string RenderHtml(Weekly r, string root, string version)
+    public static string Mood(Weekly r) =>
+        r.Overview.Warnings.Any(w => w.Severity >= 3) ? "remind" : r.Sessions.Up || r.Registrations.Up ? "celebrate" : "hello";
+
+    /// <param name="imgSrc">Adres grafiki Leo (np. <c>cid:leo</c> przy obrazku w wiadomości); bez niego — PNG z Portalu.</param>
+    public static string RenderHtml(Weekly r, string root, string version, string? imgSrc = null)
     {
         var o = r.Overview;
-        var mood = o.Warnings.Any(w => w.Severity >= 3) ? "remind" : r.Sessions.Up || r.Registrations.Up ? "celebrate" : "hello";
-        var img = $"{root}/assistant/leo/{mood}.png?v={version}";
+        var img = imgSrc ?? $"{root}/assistant/leo/{Mood(r)}.png?v={version}";
         var sb = new StringBuilder();
         sb.Append("""<!doctype html><html lang="pl"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"></head>""");
         sb.Append("""<body style="margin:0;padding:24px 12px;background:#F6F1E7;font-family:-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:#1F2937">""");
