@@ -61,6 +61,8 @@ public class SmtpEmailService(
 
     public async Task SendAsync(string toAddress, string toName, string subject, string htmlBody)
     {
+        // Klienci z danych demo (konta testowe) — nic nie wysyłamy na zmyślone adresy.
+        if (Application.Demo.DemoScenarios.IsDemoEmail(toAddress)) return;
         var s = await ResolveAsync();
         if (s is null) return;
 

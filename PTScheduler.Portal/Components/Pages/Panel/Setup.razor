@@ -71,11 +71,18 @@ else
             SiteSettingsService.Keys.SmtpHost, SiteSettingsService.Keys.PlatformSmsApiToken,
             SiteSettingsService.Keys.PlatformBunnyLibraryId, SiteSettingsService.Keys.PlatformBunnyApiKey,
             SiteSettingsService.Keys.StripeSecretKey, SiteSettingsService.Keys.PayuPosId, SiteSettingsService.Keys.P24MerchantId, SiteSettingsService.Keys.AutopayServiceId,
-            SiteSettingsService.Keys.BackupDir, SiteSettingsService.Keys.PlatformGoogleClientId);
+            SiteSettingsService.Keys.BackupDir, SiteSettingsService.Keys.PlatformGoogleClientId,
+            SiteSettingsService.Keys.AiEnabled, SiteSettingsService.Keys.AiApiKey,
+            SiteSettingsService.Keys.LegalCompany, SiteSettingsService.Keys.LegalNip, SiteSettingsService.Keys.LegalAddress);
         bool Has(string key) => !string.IsNullOrWhiteSpace(s.GetValueOrDefault(key));
+        bool plans, services;
         await using (var db = await DbFactory.CreateDbContextAsync())
+        {
             _isolationOk = !await db.Tenants.AnyAsync(t => (t.InternalSecret == null || t.InternalSecret == "")
                 && t.Status != TenantStatus.Destroyed && t.Status != TenantStatus.Pending);
+            plans = await db.Plans.AnyAsync(p => p.IsActive);
+            services = await db.ServiceItems.AnyAsync(i => i.IsActive);
+        }
 
         _groups =
         [
@@ -96,6 +103,16 @@ else
                     Has(SiteSettingsService.Keys.PlatformBunnyLibraryId) && Has(SiteSettingsService.Keys.PlatformBunnyApiKey)),
                 new("Google Calendar i Meet", "Klient OAuth platformy — trener tylko klika „Połącz z Google”.", "bi-google", "/panel/setup/services#google",
                     Has(SiteSettingsService.Keys.PlatformGoogleClientId), Optional: true)
+            ]),
+            // Ustawiane raz i rzadko zmieniane — dlatego nie ma ich na pasku bocznym.
+            new("Oferta i treści",
+            [
+                new("Plany cenowe", "Pakiety dla trenerów: ceny, limity, funkcje i okres próbny.", "bi-tags", "/panel/plans", plans),
+                new("Katalog usług", "Usługi, dodatki i pakiety, które trenerzy kupują w Sklepie.", "bi-shop", "/panel/services", services),
+                new("Dokumenty prawne", "Regulamin, polityka prywatności i umowa powierzenia z danymi firmy.", "bi-file-earmark-text", "/panel/dokumenty",
+                    Has(SiteSettingsService.Keys.LegalCompany) && Has(SiteSettingsService.Keys.LegalNip) && Has(SiteSettingsService.Keys.LegalAddress)),
+                new("Asystent, Leo i AI", "Maskotka trenerów, agent Portalu, klucz AI i włączniki funkcji AI.", "bi-emoji-smile", "/panel/asystent",
+                    s.GetValueOrDefault(SiteSettingsService.Keys.AiEnabled) == "true" && Has(SiteSettingsService.Keys.AiApiKey), Optional: true)
             ]),
             new("Płatności",
             [

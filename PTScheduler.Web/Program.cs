@@ -186,6 +186,7 @@ builder.Services.AddScoped<PTScheduler.Web.Services.SlotWatchService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.AccountantPackService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.PlanGeneratorService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.CommunityExerciseClient>();
+builder.Services.AddScoped<PTScheduler.Web.Services.DemoScenarioService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.RetentionService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.MessageDraftService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.WorkoutCompanionService>();
@@ -851,6 +852,31 @@ app.MapPost("/internal/entitlements/reload",
     var json = await reader.ReadToEndAsync();
     svc.ReplaceFromJson(json);
     return Results.Ok(new { plan = svc.Current.Name });
+});
+
+// Dane testowe (scenariusze „kilka miesięcy pracy”) — tylko z Portalu, który pozwala na to wyłącznie kontom testowym.
+// W aplikacji trenera nie ma do tego przycisku; bez sekretu instancji endpoint „nie istnieje” (404).
+app.MapGet("/internal/demo", (HttpContext ctx, PTScheduler.Web.Services.DemoScenarioService demo, PTScheduler.Web.Services.EntitlementService ent) =>
+{
+    if (!InternalSecretMatches(ctx)) return Results.NotFound();
+    var s = demo.GetStatus();
+    return Results.Json(new
+    {
+        loaded = s.Loaded, scenario = s.Scenario, scenarioName = s.ScenarioName, loadedAt = s.LoadedAt, counts = s.Counts, plan = ent.Current.Name,
+        scenarios = PTScheduler.Application.Demo.DemoScenarios.All.Select(x => new { key = x.Key, name = x.Name, description = x.Description, months = x.Months, clients = x.Clients })
+    });
+});
+app.MapPost("/internal/demo/load", async (HttpContext ctx, PTScheduler.Web.Services.DemoScenarioService demo, string scenario, int? seed) =>
+{
+    if (!InternalSecretMatches(ctx)) return Results.NotFound();
+    var r = await demo.LoadAsync(scenario, seed, ctx.RequestAborted);
+    return Results.Json(new { ok = r.Ok, message = r.Message, counts = r.Counts, skipped = r.Skipped, logins = r.Logins }, statusCode: r.Ok ? 200 : 409);
+});
+app.MapPost("/internal/demo/clear", async (HttpContext ctx, PTScheduler.Web.Services.DemoScenarioService demo) =>
+{
+    if (!InternalSecretMatches(ctx)) return Results.NotFound();
+    var r = await demo.ClearAsync();
+    return Results.Json(new { ok = r.Ok, message = r.Message, counts = r.Counts }, statusCode: r.Ok ? 200 : 409);
 });
 
 // Dane z kreatora rejestracji w Portalu: konto właściciela (gotowy skrót hasła), kolor,

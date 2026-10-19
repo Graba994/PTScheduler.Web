@@ -240,11 +240,7 @@ public static class AdminMenu
             new("admin/settings", "bi-database-fill", "Baza danych",
                 "Połączenie z bazą (instalacja własna)",
                 "Ustawienia bazy danych dla instalacji na własnym serwerze.",
-                Permissions.ManageBackup, HideWhenManaged: true, RootOnly: true),
-            new("admin/demo", "bi-database-fill-gear", "Dane demo i reset",
-                "Przykładowe dane do wypróbowania",
-                "Wgraj przykładowych klientów i wizyty, żeby zobaczyć aplikację w akcji — albo wyczyść je przed startem.",
-                Permissions.ManageBackup, RootOnly: true)
+                Permissions.ManageBackup, HideWhenManaged: true, RootOnly: true)
         ], Advanced: true)
     ];
 
@@ -283,7 +279,6 @@ public static class AdminMenu
         ["admin/backup"] = "backup przywracanie",
         ["admin/export"] = "csv excel pobierz rodo",
         ["admin/audit-logs"] = "logi dziennik zdarzeń",
-        ["admin/demo"] = "przykładowe dane wyczyść",
         ["Account/Manage"] = "hasło e-mail profil dwuetapowe 2fa",
     };
 

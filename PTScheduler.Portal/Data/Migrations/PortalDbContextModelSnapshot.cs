@@ -1826,6 +1826,9 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<bool?>("IsHealthy")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("IsTestAccount")
+                        .HasColumnType("boolean");
+
                     b.Property<DateTime?>("LastActivityAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -1937,6 +1940,9 @@ namespace PTScheduler.Portal.Data.Migrations
 
                     b.Property<string>("StripeSubscriptionId")
                         .HasColumnType("text");
+
+                    b.Property<DateTime?>("TestAccountSince")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<DateTime?>("TrialEndsAt")
                         .HasColumnType("timestamp with time zone");

@@ -14,6 +14,7 @@
 @inject TenantMailRelay MailRelay
 @inject AddonService AddonSvc
 @inject UpdateService UpdateSvc
+@inject TenantDemoService DemoSvc
 @rendermode InteractiveServer
 
 <PageTitle>@(_tenant?.CompanyName ?? "Trener") — Hantly Portal</PageTitle>
@@ -1162,6 +1163,119 @@ else
             </div>
         </div>
 
+        <!-- Konto testowe i dane demo -->
+        <div class="col-12 @TabCls("test")">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <h2 class="pp-card-title pp-card-title-icon mb-2"><span class="pp-icon pp-icon-sm pp-tone-warn"><i class="bi bi-cone-striped"></i></span>Konto testowe</h2>
+                    <p class="small text-muted mb-3">
+                        Tylko konta testowe mogą dostać dane demo — „kilka miesięcy pracy trenera” z klientami, wizytami, płatnościami i treningami.
+                        Trener nie widzi tej opcji i nie włączy jej sam. Klienci demo mają adresy w domenie <code>.invalid</code>, więc nie dostaną żadnych e-maili.
+                    </p>
+                    <div class="form-check form-switch mb-1">
+                        <input class="form-check-input" type="checkbox" role="switch" id="testAcc" checked="@_tenant!.IsTestAccount" @onchange="ToggleTestAccountAsync" disabled="@_demoBusy" />
+                        <label class="form-check-label fw-semibold" for="testAcc">To jest konto testowe</label>
+                    </div>
+                    @if (_tenant.IsTestAccount && _tenant.TestAccountSince is { } since)
+                    {
+                        <div class="small text-muted">Oznaczone @since.ToLocalTime().ToString("d.MM.yyyy HH:mm").</div>
+                    }
+                    @if (!_tenant.IsTestAccount && !string.IsNullOrEmpty(_tenant.StripeSubscriptionId))
+                    {
+                        <div class="alert alert-warning py-2 small mt-2 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>Ten trener ma aktywną subskrypcję — to wygląda na prawdziwe konto. Nie oznaczaj go jako testowego.</div>
+                    }
+                </div>
+            </div>
+        </div>
+        @if (_tenant!.IsTestAccount)
+        {
+            <div class="col-12 @TabCls("test")">
+                <div class="card border-0 shadow-sm">
+                    <div class="card-body">
+                        <div class="d-flex align-items-center gap-2 flex-wrap mb-2">
+                            <h2 class="pp-card-title pp-card-title-icon mb-0 me-auto"><span class="pp-icon pp-icon-sm"><i class="bi bi-database-fill-gear"></i></span>Dane demo</h2>
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="LoadDemoStateAsync" disabled="@_demoBusy"><i class="bi bi-arrow-clockwise me-1"></i>Odśwież</button>
+                        </div>
+                        @if (_demo is null)
+                        {
+                            <div class="text-muted small"><span class="spinner-border spinner-border-sm me-1"></span>Sprawdzam instancję…</div>
+                        }
+                        else if (!_demo.Reachable)
+                        {
+                            <div class="alert alert-warning py-2 small mb-0">@_demo.Error</div>
+                        }
+                        else
+                        {
+                            <div class="small mb-3">
+                                Pakiet instancji: <b>@_demo.Plan</b> — zakres danych dopasuje się do niego (np. kursy tylko w pakiecie z kursami).
+                                @if (_demo.Loaded)
+                                {
+                                    <span class="pp-chip pp-tone-ok ms-1"><i class="bi bi-check-lg"></i>załadowane: @_demo.ScenarioName (@_demo.LoadedAt?.ToLocalTime().ToString("d.MM HH:mm"))</span>
+                                }
+                            </div>
+                            <div class="demo-grid">
+                                @foreach (var sc in _demo.Scenarios)
+                                {
+                                    <button type="button" class="demo-opt @(_demoScenario == sc.Key ? "on" : "")" @onclick="() => _demoScenario = sc.Key" disabled="@_demoBusy">
+                                        <span class="d-flex align-items-baseline gap-2"><b>@sc.Name</b><small class="text-muted ms-auto">@sc.Months mies. · @sc.Clients klientów</small></span>
+                                        <small>@sc.Description</small>
+                                    </button>
+                                }
+                            </div>
+                            <div class="d-flex flex-wrap gap-2 mt-3 align-items-center">
+                                <button class="btn btn-primary btn-sm" @onclick="LoadDemoAsync" disabled="@(_demoBusy || string.IsNullOrEmpty(_demoScenario))">
+                                    @if (_demoBusy && _demoAction == "load") { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                    <i class="bi bi-magic me-1"></i>@(_demo.Loaded ? "Zastąp danymi z wybranego scenariusza" : "Załaduj dane demo")
+                                </button>
+                                @if (_demo.Loaded)
+                                {
+                                    <button class="btn btn-outline-danger btn-sm" @onclick="ClearDemoAsync" disabled="@_demoBusy">
+                                        @if (_demoBusy && _demoAction == "clear") { <span class="spinner-border spinner-border-sm me-1"></span> }
+                                        <i class="bi bi-trash me-1"></i>Usuń dane demo
+                                    </button>
+                                }
+                                @if (_demoBusy && _demoAction == "load") { <span class="small text-muted">Generuję miesiące pracy — przy dużym scenariuszu to może potrwać 1–2 minuty.</span> }
+                            </div>
+                            <div class="small text-muted mt-2">Usuwane są wyłącznie dane demo (klienci <code>@@demo.invalid</code> i to, co dodał generator) — ustawienia i konto trenera zostają.</div>
+
+                            @if (_demoOutcome is { } o)
+                            {
+                                <div class="alert @(o.Ok ? "alert-success" : "alert-danger") py-2 small mt-3 mb-2">@o.Message</div>
+                                @if (o.Counts.Count > 0)
+                                {
+                                    <div class="pp-chips mb-2">
+                                        @foreach (var (k, v) in o.Counts.OrderByDescending(c => c.Value))
+                                        {
+                                            <span class="pp-chip pp-tone-info"><b>@v</b>&nbsp;@k</span>
+                                        }
+                                    </div>
+                                }
+                                @if (o.Logins.Count > 0)
+                                {
+                                    <div class="small"><b>Logowanie do kont demo:</b>
+                                        <ul class="mb-1">@foreach (var l in o.Logins) { <li><code>@l</code></li> }</ul>
+                                    </div>
+                                }
+                                @if (o.Skipped.Count > 0)
+                                {
+                                    <div class="small text-muted"><b>Pominięte przez pakiet lub limity:</b> @string.Join("; ", o.Skipped).</div>
+                                }
+                            }
+                            else if (_demo.Loaded && _demo.Counts.Count > 0)
+                            {
+                                <div class="pp-chips mt-3">
+                                    @foreach (var (k, v) in _demo.Counts.OrderByDescending(c => c.Value))
+                                    {
+                                        <span class="pp-chip pp-tone-info"><b>@v</b>&nbsp;@k</span>
+                                    }
+                                </div>
+                            }
+                        }
+                    </div>
+                </div>
+            </div>
+        }
+
         <!-- Delete section -->
         <div class="col-12 @TabCls("infra")">
             <div class="card border-0 shadow-sm border-danger">
@@ -1278,12 +1392,62 @@ else
         ("overview", "Przegląd", "bi-grid"),
         ("infra", "Infrastruktura", "bi-hdd-network"),
         ("billing", "Rozliczenia", "bi-credit-card"),
-        ("history", "Historia", "bi-clock-history")
+        ("history", "Historia", "bi-clock-history"),
+        ("test", "Konto testowe", "bi-cone-striped")
     ];
     private string _tab = "overview";
     private bool _overviewLoaded;
 
     private string TabCls(string tab) => _tab == tab ? "" : "d-none";
+
+    // ── Konto testowe i dane demo ──
+    private TenantDemoService.State? _demo;
+    private TenantDemoService.Outcome? _demoOutcome;
+    private string? _demoScenario = "rozwoj";
+    private bool _demoBusy;
+    private string? _demoAction;
+
+    private async Task ToggleTestAccountAsync(ChangeEventArgs e)
+    {
+        var on = e.Value is true;
+        await DemoSvc.SetTestAccountAsync(Id, on);
+        _tenant!.IsTestAccount = on;
+        _tenant.TestAccountSince = on ? DateTime.UtcNow : null;
+        _demoOutcome = null;
+        if (on) await LoadDemoStateAsync();
+    }
+
+    private async Task LoadDemoStateAsync()
+    {
+        if (_tenant is not { IsTestAccount: true }) return;
+        _demo = null;
+        StateHasChanged();
+        _demo = await DemoSvc.GetAsync(_tenant);
+        if (_demo.Loaded && _demo.Scenario is { } s) _demoScenario = s;
+    }
+
+    private async Task LoadDemoAsync()
+    {
+        if (string.IsNullOrEmpty(_demoScenario)) return;
+        _demoBusy = true; _demoAction = "load"; _demoOutcome = null;
+        try
+        {
+            _demoOutcome = await DemoSvc.LoadAsync(Id, _demoScenario);
+            _demo = await DemoSvc.GetAsync(_tenant!);
+        }
+        finally { _demoBusy = false; _demoAction = null; }
+    }
+
+    private async Task ClearDemoAsync()
+    {
+        _demoBusy = true; _demoAction = "clear"; _demoOutcome = null;
+        try
+        {
+            _demoOutcome = await DemoSvc.ClearAsync(Id);
+            _demo = await DemoSvc.GetAsync(_tenant!);
+        }
+        finally { _demoBusy = false; _demoAction = null; }
+    }
 
     /// <summary>Stan instancji jednym zdaniem — jak baner na stronie Aktualizacje.</summary>
     private (string Tone, string Icon, string Title, string Text) Hero()
@@ -1312,6 +1476,7 @@ else
         _tab = tab;
         if (tab == "overview") await LoadOverviewAsync();
         if (tab == "history" && _tenantEvents is null) await LoadEvents();
+        if (tab == "test" && _demo is null) await LoadDemoStateAsync();
     }
 
     // Konto admina i metryki wczytują się same przy wejściu na „Przegląd”.

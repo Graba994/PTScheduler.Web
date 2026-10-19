@@ -51,6 +51,7 @@ public class PlatformEmailProvider(IHttpClientFactory httpFactory, ILogger<Platf
     /// <summary>Wysyła przez Portal. Rzuca wyjątek z czytelnym opisem, gdy się nie uda.</summary>
     public async Task SendAsync(string to, string toName, string subject, string html, string fromName, string? replyTo)
     {
+        if (Application.Demo.DemoScenarios.IsDemoEmail(to)) return;
         using var http = httpFactory.CreateClient();
         http.Timeout = TimeSpan.FromSeconds(30);
         using var req = PlatformConnection.Request(HttpMethod.Post, PlatformConnection.TenantApi("/mail"));

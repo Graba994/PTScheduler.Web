@@ -88,6 +88,13 @@ public class Tenant
     /// <summary>Kiedy ostatnio udało się odczytać aktywność — bez świeżego odczytu nie zawieszamy za bezczynność.</summary>
     public DateTime? LastActivityCheckedAt { get; set; }
 
+    /// <summary>
+    /// Konto testowe (ustawia tylko administrator platformy): pozwala ładować dane demo — „kilka miesięcy pracy”.
+    /// Prawdziwe konta trenerów nigdy tego nie mają; trener nie widzi tej opcji.
+    /// </summary>
+    public bool IsTestAccount { get; set; }
+    public DateTime? TestAccountSince { get; set; }
+
     // ── Wideo: osobna biblioteka Bunny Stream tej instancji (zakładana przez Portal) ──
     public string? BunnyLibraryId { get; set; }
     [System.Text.Json.Serialization.JsonIgnore]
