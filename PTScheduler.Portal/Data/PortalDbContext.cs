@@ -42,6 +42,8 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<AiUsageLog> AiUsageLogs => Set<AiUsageLog>();
     public DbSet<TenantMetricSnapshot> TenantMetricSnapshots => Set<TenantMetricSnapshot>();
     public DbSet<LegalAcceptance> LegalAcceptances => Set<LegalAcceptance>();
+    public DbSet<InboxThread> InboxThreads => Set<InboxThread>();
+    public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -139,6 +141,33 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.HasIndex(p => p.ExternalPaymentId);
             e.HasOne(p => p.Tenant).WithMany().HasForeignKey(p => p.TenantId);
             e.HasOne(p => p.ServiceOrder).WithMany().HasForeignKey(p => p.ServiceOrderId);
+        });
+
+        b.Entity<InboxThread>(e =>
+        {
+            e.HasIndex(x => new { x.Folder, x.LastAt });
+            e.HasIndex(x => new { x.Counterpart, x.SubjectKey });
+            e.Property(x => x.Subject).HasMaxLength(300);
+            e.Property(x => x.SubjectKey).HasMaxLength(300);
+            e.Property(x => x.Counterpart).HasMaxLength(320);
+            e.Property(x => x.CounterpartName).HasMaxLength(200);
+            e.Property(x => x.Snippet).HasMaxLength(200);
+            e.Property(x => x.Folder).HasConversion<string>().HasMaxLength(16);
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.SetNull);
+        });
+
+        b.Entity<InboxMessage>(e =>
+        {
+            e.HasIndex(x => x.ThreadId);
+            e.HasIndex(x => x.MessageId);
+            e.Property(x => x.MessageId).HasMaxLength(500);
+            e.Property(x => x.InReplyTo).HasMaxLength(500);
+            e.Property(x => x.FromAddress).HasMaxLength(320);
+            e.Property(x => x.FromName).HasMaxLength(200);
+            e.Property(x => x.ToAddress).HasMaxLength(320);
+            e.Property(x => x.Subject).HasMaxLength(300);
+            e.Property(x => x.SentBy).HasMaxLength(320);
+            e.HasOne(x => x.Thread).WithMany(t => t.Messages).HasForeignKey(x => x.ThreadId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<AppFeedback>(e =>

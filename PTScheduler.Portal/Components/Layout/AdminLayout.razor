@@ -30,6 +30,13 @@
             <NavLink href="/panel" Match="NavLinkMatch.All" class="portal-nav-item" title="Pulpit">
                 <i class="bi bi-speedometer2"></i><span class="portal-label">Pulpit</span>
             </NavLink>
+            <NavLink href="/panel/poczta" class="portal-nav-item" title="Poczta">
+                <i class="bi bi-envelope"></i><span class="portal-label">Poczta</span>
+                @if (_mail > 0)
+                {
+                    <span class="portal-dot" title="@($"Nieprzeczytane wątki: {_mail}")"></span>
+                }
+            </NavLink>
             <NavLink href="/panel/tenants" class="portal-nav-item" title="Trenerzy">
                 <i class="bi bi-people"></i><span class="portal-label">Trenerzy</span>
             </NavLink>
@@ -142,6 +149,7 @@
 
 @code {
     private int _todo;
+    private int _mail;
 
     // Zgłoszenia ze sklepu czekające na zespół (nowe, zaakceptowane, w realizacji).
     protected override async Task OnInitializedAsync()
@@ -155,5 +163,12 @@
                   || o.Status == PTScheduler.Portal.Entities.ServiceOrderStatus.InProgress);
         }
         catch { _todo = 0; } // menu nie może się wywrócić przez bazę
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            _mail = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.CountAsync(db.InboxThreads,
+                t => t.Folder == PTScheduler.Portal.Entities.InboxFolder.Inbox && t.Unread > 0);
+        }
+        catch { _mail = 0; }
     }
 }

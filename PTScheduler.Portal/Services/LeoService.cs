@@ -121,6 +121,13 @@ public class LeoService(IDbContextFactory<PortalDbContext> dbFactory, SiteSettin
                 new() { ["trener"] = "[trener]" }, "Zobacz", $"/panel/tenants/{t.Id}",
                 new() { ["[trener]"] = Display(t.CompanyName, t.Slug) }));
 
+        // Poczta: nieprzeczytane wątki na adresie kontaktowym (spam pomijamy).
+        var mail = await db.InboxThreads.CountAsync(t => t.Folder == InboxFolder.Inbox && t.Unread > 0);
+        if (mail > 0)
+            tips.Add(new("mail", "poczta", "remind", 88,
+                $"{mail} {Plural(mail, "nieprzeczytana wiadomość czeka", "nieprzeczytane wiadomości czekają", "nieprzeczytanych wiadomości czeka")} w Poczcie. Mogę przygotować szkice odpowiedzi.",
+                new() { ["liczba_wiadomosci"] = mail.ToString() }, "Poczta", "/panel/poczta"));
+
         // Do przejrzenia: nowe opinie, odpowiedzi w ankiecie, test pamięci nazwy po spotkaniach.
         var unread = await db.AppFeedbacks.CountAsync(f => !f.IsRead);
         if (unread > 0)

@@ -11,7 +11,8 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
     /// <param name="fromNameOverride">Nazwa nadawcy (np. studio trenera); adres zostaje adresem platformy.</param>
     /// <param name="replyTo">Adres odpowiedzi — przy poczcie trenera jego własny e-mail.</param>
     public async Task<(bool Success, string? Error)> SendAsync(string toEmail, string subject, string htmlBody,
-        string? fromNameOverride = null, string? replyTo = null, string? toName = null, IReadOnlyList<InlineImage>? images = null)
+        string? fromNameOverride = null, string? replyTo = null, string? toName = null, IReadOnlyList<InlineImage>? images = null,
+        string? fromAddressOverride = null, IReadOnlyDictionary<string, string>? headers = null)
     {
         try
         {
@@ -31,7 +32,8 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             var port = int.TryParse(s[SiteSettingsService.Keys.SmtpPort], out var p) ? p : 587;
             var user = s[SiteSettingsService.Keys.SmtpUser];
             var pass = s[SiteSettingsService.Keys.SmtpPass];
-            var from = string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.SmtpFrom]) ? user : s[SiteSettingsService.Keys.SmtpFrom];
+            var from = !string.IsNullOrWhiteSpace(fromAddressOverride) ? fromAddressOverride.Trim()
+                : string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.SmtpFrom]) ? user : s[SiteSettingsService.Keys.SmtpFrom];
             var fromName = !string.IsNullOrWhiteSpace(fromNameOverride) ? fromNameOverride
                 : string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.SmtpFromName]) ? "Hantly" : s[SiteSettingsService.Keys.SmtpFromName];
             var ssl = s[SiteSettingsService.Keys.SmtpSsl] == "true";
@@ -66,6 +68,9 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             }
             mail.To.Add(string.IsNullOrWhiteSpace(toName) ? new MailAddress(toEmail) : new MailAddress(toEmail, toName));
             if (!string.IsNullOrWhiteSpace(replyTo)) mail.ReplyToList.Add(new MailAddress(replyTo));
+            // Np. In-Reply-To / References przy odpowiedzi z Poczty — wiadomość trafia do tego samego wątku u odbiorcy.
+            foreach (var (name, value) in headers ?? new Dictionary<string, string>())
+                if (!string.IsNullOrWhiteSpace(value) && !value.Contains('\r') && !value.Contains('\n')) mail.Headers.Add(name, value);
 
             await smtp.SendMailAsync(mail);
             logger.LogInformation("Email sent to {To}: {Subject}", toEmail, subject);

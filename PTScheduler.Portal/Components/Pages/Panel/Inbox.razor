@@ -1,0 +1,509 @@
+@page "/panel/poczta"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@implements IDisposable
+@inject InboxService InboxSvc
+@inject NavigationManager Nav
+@inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
+@rendermode InteractiveServer
+
+@* Poczta w Panelu: wiadomości wysłane na adres kontaktowy (Brevo → webhook), wątki, odpowiedzi ze szkicem od Leo.
+   HTML z e-maili pokazujemy tylko w odizolowanej ramce (bez skryptów, obrazki z sieci dopiero po kliknięciu). *@
+
+<PageTitle>Poczta — Hantly Portal</PageTitle>
+
+<PanelHeader Title="Poczta" Icon="bi-envelope" IconClass="pp-tone-info"
+             Subtitle="@($"Wiadomości wysłane na {_cfg?.Address}. Odpowiadasz stąd — rozmowa zostaje w jednym miejscu.")">
+    <Actions>
+        <button class="btn btn-sm btn-primary" @onclick="OpenCompose"><i class="bi bi-pencil-square me-1"></i>Nowa wiadomość</button>
+        <button class="btn btn-sm @(_showSettings ? "btn-secondary" : "btn-outline-secondary")" @onclick="() => _showSettings = !_showSettings"><i class="bi bi-gear me-1"></i>Ustawienia</button>
+        <button class="btn btn-sm btn-outline-secondary" @onclick="RefreshAsync" aria-label="Odśwież"><i class="bi bi-arrow-clockwise"></i></button>
+    </Actions>
+</PanelHeader>
+
+@if (_cfg is null)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    @if (_showSettings || NeverReceived)
+    {
+        <PanelCard Title="Odbiór poczty przez Brevo" Icon="bi-plug" IconClass="pp-tone-info"
+                   Subtitle="@(NeverReceived ? "Jeszcze nic nie przyszło. Trzy kroki i e-maile na adres kontaktowy pojawią się tutaj." : $"Ostatnia wiadomość: {Ago(_cfg.LastReceivedAt!.Value)}")">
+            <ol class="ibx-steps">
+                <li>
+                    <b>Adres skrzynki</b>
+                    <div class="ibx-row">
+                        <input class="form-control form-control-sm" type="email" @bind="_address" aria-label="Adres skrzynki" />
+                    </div>
+                    <small>Na ten adres piszą ludzie (stopka strony, panel trenera). Z niego też wychodzą odpowiedzi, jeśli to ta sama domena co nadawca platformy w Brevo.</small>
+                </li>
+                <li>
+                    <b>Rekordy MX domeny</b>
+                    <small>
+                        U rejestratora domeny ustaw MX dla domeny skrzynki (<code>@InboxParsing.Domain(_address)</code>) na serwery odbioru Brevo.
+                        Dokumentacja Brevo (Inbound Parsing) podaje: <code>inbound1.sendinblue.com</code> (priorytet 10) i <code>inbound2.sendinblue.com</code> (priorytet 20) —
+                        jeśli Brevo pokaże inne, wpisz te z Brevo. Uwaga: od tej chwili cała poczta na tę domenę trafia tutaj. Wolisz zostawić obecną skrzynkę?
+                        Użyj subdomeny (np. <code>poczta.@InboxParsing.Domain(_address)</code>) i ustaw przekierowanie z kontakt@@ na adres w tej subdomenie.
+                        Wysyłki przez Brevo to nie zmienia (SPF i DKIM zostają).
+                    </small>
+                </li>
+                <li>
+                    <b>Webhook w Brevo</b>
+                    <div class="ibx-row">
+                        <input class="form-control form-control-sm font-monospace" readonly value="@_webhook" aria-label="Adres webhooka" />
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="CopyWebhookAsync"><i class="bi bi-clipboard"></i></button>
+                    </div>
+                    <small>Najprościej: wpisz klucz API Brevo (SMTP &amp; API → API Keys) i kliknij „Utwórz w Brevo”. Klucz służy też do pobierania załączników; trzymamy go zaszyfrowany.</small>
+                    <div class="ibx-row">
+                        <input class="form-control form-control-sm" type="password" placeholder="@(_cfg.HasApiKey ? "klucz zapisany — wpisz nowy, by zmienić" : "xkeysib-…")" @bind="_apiKey" aria-label="Klucz API Brevo" autocomplete="off" />
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="SaveApiKeyAsync" disabled="@string.IsNullOrWhiteSpace(_apiKey)">Zapisz klucz</button>
+                    </div>
+                    <div class="ibx-row">
+                        <input class="form-control form-control-sm" placeholder="domena odbioru, np. hantly.pl" @bind="_webhookDomain" aria-label="Domena odbioru" />
+                        <button class="btn btn-sm btn-primary" @onclick="CreateWebhookAsync" disabled="@(!_cfg.HasApiKey || _busy)">Utwórz w Brevo</button>
+                    </div>
+                    <button class="btn btn-sm btn-link px-0" @onclick="RegenerateAsync">Wygeneruj nowy adres webhooka</button>
+                    <small class="d-block">Adres zawiera tajny klucz — bez niego nikt nie wrzuci wiadomości do Poczty. Po zmianie trzeba zaktualizować webhook w Brevo.</small>
+                </li>
+            </ol>
+            <div class="ibx-notify">
+                <b>Powiadomienia o nowej wiadomości</b>
+                <label class="form-check form-switch mb-0">
+                    <input type="checkbox" class="form-check-input" @bind="_notifyEmail" />
+                    <span class="form-check-label">E-mail na @(string.IsNullOrWhiteSpace(_cfg.AdminEmail) ? "adres administratora (ustaw w Alarmach)" : _cfg.AdminEmail)</span>
+                </label>
+                <label class="form-check form-switch mb-0">
+                    <input type="checkbox" class="form-check-input" @bind="_notifySms" />
+                    <span class="form-check-label">SMS na @(string.IsNullOrWhiteSpace(_cfg.AdminPhone) ? "numer administratora (ustaw w Alarmach)" : _cfg.AdminPhone)</span>
+                </label>
+                <small>Jedno powiadomienie na wątek, dopóki go nie otworzysz. E-mail na adres w tej samej domenie co skrzynka pomijamy — wróciłby do Poczty.</small>
+            </div>
+            <div class="d-flex gap-2 align-items-center flex-wrap mt-2">
+                <button class="btn btn-sm btn-primary" @onclick="SaveSettingsAsync" disabled="@_busy">Zapisz ustawienia</button>
+                @if (_settingsMsg is not null) { <span class="small @(_settingsOk ? "text-success" : "text-danger")">@_settingsMsg</span> }
+            </div>
+        </PanelCard>
+    }
+
+    @if (_compose)
+    {
+        <PanelCard Title="Nowa wiadomość" Icon="bi-pencil-square">
+            <Actions><button class="btn-close" aria-label="Zamknij" @onclick="() => _compose = false"></button></Actions>
+            <ChildContent>
+                <div class="d-flex flex-column gap-2">
+                    <input class="form-control form-control-sm" type="email" placeholder="Do: adres e-mail" @bind="_cTo" aria-label="Odbiorca" />
+                    <input class="form-control form-control-sm" placeholder="Temat" maxlength="200" @bind="_cSubject" aria-label="Temat" />
+                    <textarea class="form-control form-control-sm" rows="7" placeholder="Treść" @bind="_cBody" aria-label="Treść"></textarea>
+                    <div class="d-flex gap-2 align-items-center">
+                        <button class="btn btn-sm btn-primary" @onclick="SendComposeAsync" disabled="@_busy"><i class="bi bi-send me-1"></i>Wyślij</button>
+                        @if (_composeMsg is not null) { <span class="small text-danger">@_composeMsg</span> }
+                    </div>
+                </div>
+            </ChildContent>
+        </PanelCard>
+    }
+
+    <div class="ibx @(_open is not null ? "has-open" : "")">
+        <section class="ibx-list" aria-label="Wątki">
+            <div class="ibx-tools">
+                <div class="pp-seg" role="tablist">
+                    <button class="@(_folder == InboxFolder.Inbox ? "active" : "")" @onclick="() => ShowFolderAsync(InboxFolder.Inbox)">
+                        Odebrane @if (Count(InboxFolder.Inbox) > 0) { <span class="ibx-badge">@Count(InboxFolder.Inbox)</span> }
+                    </button>
+                    <button class="@(_folder == InboxFolder.Archived ? "active" : "")" @onclick="() => ShowFolderAsync(InboxFolder.Archived)">Archiwum</button>
+                    <button class="@(_folder == InboxFolder.Spam ? "active" : "")" @onclick="() => ShowFolderAsync(InboxFolder.Spam)">Spam</button>
+                </div>
+                <input class="form-control form-control-sm" type="search" placeholder="Szukaj" @bind="_search" @bind:after="LoadListAsync" aria-label="Szukaj w poczcie" />
+            </div>
+            @if (_threads.Count == 0)
+            {
+                <div class="pp-empty">
+                    <i class="bi bi-inbox"></i>
+                    <div class="pp-empty-title">@(_folder switch { InboxFolder.Spam => "Spam jest pusty", InboxFolder.Archived => "Archiwum jest puste", _ => "Brak wiadomości" })</div>
+                    @if (_folder == InboxFolder.Inbox && NeverReceived) { <p>Gdy ustawisz odbiór (powyżej), e-maile na @_cfg.Address pojawią się tutaj.</p> }
+                    @if (_folder == InboxFolder.Spam) { <p>Wiadomości oznaczone przez Brevo jako spam. Same znikają po 30 dniach.</p> }
+                </div>
+            }
+            else
+            {
+                <ul class="ibx-threads">
+                    @foreach (var t in _threads)
+                    {
+                        <li>
+                            <button class="ibx-thread @(t.Unread > 0 ? "is-unread" : "") @(_open?.Id == t.Id ? "is-active" : "")" @onclick="() => OpenAsync(t.Id)">
+                                <span class="ibx-who">
+                                    @if (t.Unread > 0) { <span class="ibx-dot" aria-label="nieprzeczytane"></span> }
+                                    <b>@(t.CounterpartName ?? t.Counterpart)</b>
+                                    <time>@Short(t.LastAt)</time>
+                                </span>
+                                <span class="ibx-subj">@t.Subject</span>
+                                <span class="ibx-snip">
+                                    @if (t.Tenant is { } tn) { <span class="pp-chip pp-tone-ok">@tn.CompanyName</span> }
+                                    @t.Snippet
+                                </span>
+                            </button>
+                        </li>
+                    }
+                </ul>
+            }
+        </section>
+
+        <section class="ibx-view" aria-label="Wiadomość">
+            @if (_open is null)
+            {
+                <div class="pp-empty d-none d-lg-block">
+                    <i class="bi bi-envelope-open"></i>
+                    <div class="pp-empty-title">Wybierz wątek z listy</div>
+                </div>
+            }
+            else
+            {
+                <div class="ibx-view-head">
+                    <button class="btn btn-sm btn-light d-lg-none" @onclick="CloseThread"><i class="bi bi-arrow-left"></i></button>
+                    <div class="min-w-0 flex-grow-1">
+                        <h2>@_open.Subject</h2>
+                        <div class="ibx-meta">
+                            @(_open.CounterpartName is { } n ? $"{n} · " : "")<a href="mailto:@_open.Counterpart">@_open.Counterpart</a>
+                            @if (_open.Tenant is { } tn) { <a class="pp-chip pp-tone-ok ms-1" href="/panel/tenants/@tn.Id">trener: @tn.CompanyName</a> }
+                        </div>
+                    </div>
+                    <div class="ibx-actions">
+                        @if (_open.Folder == InboxFolder.Inbox)
+                        {
+                            <button class="btn btn-sm btn-outline-secondary" title="Archiwizuj" @onclick="() => MoveAsync(InboxFolder.Archived)"><i class="bi bi-archive"></i></button>
+                            <button class="btn btn-sm btn-outline-secondary" title="To spam" @onclick="() => MoveAsync(InboxFolder.Spam)"><i class="bi bi-slash-circle"></i></button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-sm btn-outline-secondary" title="Przenieś do Odebranych" @onclick="() => MoveAsync(InboxFolder.Inbox)"><i class="bi bi-inbox"></i></button>
+                        }
+                        <button class="btn btn-sm btn-outline-secondary" title="Oznacz jako nieprzeczytane" @onclick="MarkUnreadAsync"><i class="bi bi-envelope"></i></button>
+                        @if (_confirmDelete)
+                        {
+                            <button class="btn btn-sm btn-danger" @onclick="DeleteAsync">Usuń wątek</button>
+                            <button class="btn btn-sm btn-light" @onclick="() => _confirmDelete = false">Nie</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-sm btn-outline-danger" title="Usuń" @onclick="() => _confirmDelete = true"><i class="bi bi-trash"></i></button>
+                        }
+                    </div>
+                </div>
+
+                <div class="ibx-msgs">
+                    @foreach (var m in _open.Messages)
+                    {
+                        var showHtml = _htmlFor.Contains(m.Id);
+                        <article class="ibx-msg @(m.Incoming ? "" : "is-out")">
+                            <header>
+                                <b>@(m.Incoming ? (m.FromName ?? m.FromAddress) : "Ty")</b>
+                                @if (!m.Incoming && m.SentBy is { } by) { <span class="text-muted small">(@by)</span> }
+                                <time>@ContainerLogService.ToLocal(m.At).ToString("d MMM yyyy, HH:mm", Pl)</time>
+                            </header>
+                            @if (showHtml && !string.IsNullOrEmpty(m.Html))
+                            {
+                                <iframe class="ibx-frame" sandbox="allow-popups allow-popups-to-escape-sandbox" referrerpolicy="no-referrer" title="Oryginał wiadomości"
+                                        srcdoc="@InboxParsing.SafeSrcDoc(m.Html, _imagesFor.Contains(m.Id))"></iframe>
+                                <div class="ibx-msg-tools">
+                                    <button class="btn btn-sm btn-link px-0" @onclick="() => _htmlFor.Remove(m.Id)">Pokaż sam tekst</button>
+                                    @if (!_imagesFor.Contains(m.Id))
+                                    {
+                                        <button class="btn btn-sm btn-link" @onclick="() => _imagesFor.Add(m.Id)">Pokaż obrazki z sieci</button>
+                                    }
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="ibx-text">@(string.IsNullOrWhiteSpace(m.Text) ? "(pusta wiadomość)" : m.Text)</div>
+                                @if (!string.IsNullOrEmpty(m.Html))
+                                {
+                                    <div class="ibx-msg-tools"><button class="btn btn-sm btn-link px-0" @onclick="() => _htmlFor.Add(m.Id)">Pokaż oryginał</button></div>
+                                }
+                            }
+                            @if (Attachments(m) is { Count: > 0 } atts)
+                            {
+                                <ul class="ibx-atts">
+                                    @for (var i = 0; i < atts.Count; i++)
+                                    {
+                                        var a = atts[i];
+                                        <li>
+                                            <i class="bi bi-paperclip"></i>
+                                            @if (_cfg.HasApiKey && !string.IsNullOrEmpty(a.Token))
+                                            {
+                                                <a href="/panel/poczta/zalacznik/@m.Id/@i" target="_blank" rel="noopener">@a.Name</a>
+                                            }
+                                            else { <span>@a.Name</span> }
+                                            <small>@Size(a.Size)</small>
+                                        </li>
+                                    }
+                                    @if (!_cfg.HasApiKey) { <li class="text-muted small">Pobieranie załączników działa po zapisaniu klucza API Brevo w ustawieniach.</li> }
+                                </ul>
+                            }
+                        </article>
+                    }
+                </div>
+
+                <div class="ibx-reply">
+                    @if (_draftInfo is not null)
+                    {
+                        <div class="ibx-draft-info">
+                            <img src="@PuppyArt.DataUri("think")" alt="" width="24" height="24" />
+                            <span class="pp-chip pp-tone-info">@_draftInfo.Category</span>
+                            <span class="small text-muted">@(_draftInfo.FromAi ? "szkic od AI — przeczytaj i popraw przed wysłaniem" : "szablon (bez AI)")</span>
+                        </div>
+                    }
+                    <textarea class="form-control" rows="6" placeholder="Napisz odpowiedź do @_open.Counterpart" @bind="_reply" @bind:event="oninput" aria-label="Odpowiedź"></textarea>
+                    <div class="d-flex gap-2 flex-wrap align-items-center">
+                        <button class="btn btn-sm btn-primary" @onclick="ReplyAsync" disabled="@(_busy || string.IsNullOrWhiteSpace(_reply))"><i class="bi bi-send me-1"></i>Wyślij odpowiedź</button>
+                        <button class="btn btn-sm btn-outline-primary" @onclick="DraftAsync" disabled="@_busy">
+                            @if (_drafting) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-magic me-1"></i> }
+                            Szkic od Leo
+                        </button>
+                        @if (_replyMsg is not null) { <span class="small @(_replyOk ? "text-success" : "text-danger")">@_replyMsg</span> }
+                    </div>
+                </div>
+            }
+        </section>
+    </div>
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "w")] public int? ThreadQuery { get; set; }
+    private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
+
+    private InboxService.Config? _cfg;
+    private Dictionary<InboxFolder, int> _counts = [];
+    private InboxFolder _folder = InboxFolder.Inbox;
+    private string? _search;
+    private List<InboxThread> _threads = [];
+    private InboxThread? _open;
+    private readonly HashSet<int> _htmlFor = [];
+    private readonly HashSet<int> _imagesFor = [];
+    private bool _busy, _drafting, _confirmDelete, _showSettings, _compose, _replyOk, _settingsOk;
+    private string _reply = "";
+    private string? _replyMsg, _settingsMsg, _composeMsg;
+    private AssistantService.Draft? _draftInfo;
+    private string _address = "", _webhook = "", _webhookDomain = "";
+    private string? _apiKey;
+    private bool _notifyEmail, _notifySms;
+    private string _cTo = "", _cSubject = "", _cBody = "";
+    private string _adminEmail = "";
+    private Timer? _timer;
+
+    private bool NeverReceived => _cfg?.LastReceivedAt is null && _counts.Values.Sum() == 0 && _threads.Count == 0;
+    private int Count(InboxFolder f) => _counts.GetValueOrDefault(f);
+
+    protected override async Task OnInitializedAsync()
+    {
+        _adminEmail = (await AuthState.GetAuthenticationStateAsync()).User.Identity?.Name ?? "admin";
+        await LoadConfigAsync();
+        await LoadListAsync();
+        if (ThreadQuery is int id) await OpenAsync(id);
+        // Co minutę odświeżamy listę (nowe wiadomości), bez ruszania otwartego wątku i pisanej odpowiedzi.
+        _timer = new Timer(_ => InvokeAsync(async () => { await LoadListAsync(); StateHasChanged(); }), null, TimeSpan.FromMinutes(1), TimeSpan.FromMinutes(1));
+    }
+
+    public void Dispose() => _timer?.Dispose();
+
+    private async Task LoadConfigAsync()
+    {
+        _cfg = await InboxSvc.GetConfigAsync();
+        _address = _cfg.Address;
+        _notifyEmail = _cfg.NotifyEmail;
+        _notifySms = _cfg.NotifySms;
+        _webhook = await InboxSvc.WebhookUrlAsync(Nav.BaseUri);
+        if (string.IsNullOrEmpty(_webhookDomain)) _webhookDomain = InboxParsing.Domain(_address);
+    }
+
+    private async Task LoadListAsync()
+    {
+        _counts = await InboxSvc.CountsAsync();
+        _threads = await InboxSvc.ListAsync(_folder, _search);
+    }
+
+    private async Task RefreshAsync()
+    {
+        await LoadListAsync();
+        if (_open is not null) _open = await InboxSvc.OpenAsync(_open.Id);
+    }
+
+    private async Task ShowFolderAsync(InboxFolder f)
+    {
+        _folder = f;
+        _open = null;
+        await LoadListAsync();
+    }
+
+    private async Task OpenAsync(int id)
+    {
+        _open = await InboxSvc.OpenAsync(id);
+        _reply = "";
+        _replyMsg = null;
+        _draftInfo = null;
+        _confirmDelete = false;
+        _htmlFor.Clear();
+        _imagesFor.Clear();
+        if (_open is not null && _open.Folder != _folder) _folder = _open.Folder;
+        await LoadListAsync();
+    }
+
+    private void CloseThread() => _open = null;
+
+    private async Task MoveAsync(InboxFolder f)
+    {
+        if (_open is null) return;
+        await InboxSvc.MoveAsync(_open.Id, f);
+        _open = null;
+        await LoadListAsync();
+    }
+
+    private async Task MarkUnreadAsync()
+    {
+        if (_open is null) return;
+        await InboxSvc.MarkUnreadAsync(_open.Id);
+        _open = null;
+        await LoadListAsync();
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_open is null) return;
+        await InboxSvc.DeleteAsync(_open.Id);
+        _open = null;
+        await LoadListAsync();
+    }
+
+    private async Task DraftAsync()
+    {
+        if (_open is null) return;
+        _busy = _drafting = true;
+        try
+        {
+            _draftInfo = await InboxSvc.DraftAsync(_open.Id);
+            _reply = _draftInfo.Body;
+        }
+        finally { _busy = _drafting = false; }
+    }
+
+    private async Task ReplyAsync()
+    {
+        if (_open is null) return;
+        _busy = true;
+        _replyMsg = null;
+        try
+        {
+            var (ok, error) = await InboxSvc.ReplyAsync(_open.Id, _reply, _adminEmail);
+            _replyOk = ok;
+            _replyMsg = ok ? "Wysłane." : error;
+            if (ok)
+            {
+                _reply = "";
+                _draftInfo = null;
+                _open = await InboxSvc.OpenAsync(_open.Id);
+                await LoadListAsync();
+            }
+        }
+        finally { _busy = false; }
+    }
+
+    private void OpenCompose()
+    {
+        _compose = true;
+        _composeMsg = null;
+    }
+
+    private async Task SendComposeAsync()
+    {
+        _busy = true;
+        try
+        {
+            var (ok, error, id) = await InboxSvc.ComposeAsync(_cTo, _cSubject, _cBody, _adminEmail);
+            if (!ok) { _composeMsg = error; return; }
+            _compose = false;
+            _cTo = _cSubject = _cBody = "";
+            _folder = InboxFolder.Inbox;
+            if (id is int tid) await OpenAsync(tid);
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveSettingsAsync()
+    {
+        _busy = true;
+        try
+        {
+            await InboxSvc.SaveConfigAsync(_address, _notifyEmail, _notifySms);
+            await LoadConfigAsync();
+            _settingsOk = true;
+            _settingsMsg = "Zapisane.";
+        }
+        catch (ArgumentException ex) { _settingsOk = false; _settingsMsg = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task SaveApiKeyAsync()
+    {
+        await InboxSvc.SetApiKeyAsync(_apiKey);
+        _apiKey = null;
+        await LoadConfigAsync();
+        _settingsOk = true;
+        _settingsMsg = "Klucz zapisany.";
+    }
+
+    private async Task CreateWebhookAsync()
+    {
+        _busy = true;
+        try
+        {
+            var error = await InboxSvc.CreateBrevoWebhookAsync(_webhookDomain, Nav.BaseUri);
+            _settingsOk = error is null;
+            _settingsMsg = error ?? $"Webhook utworzony. Gdy MX domeny {_webhookDomain} wskaże Brevo, wiadomości zaczną tu spływać.";
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task RegenerateAsync()
+    {
+        await InboxSvc.RegenerateSecretAsync();
+        await LoadConfigAsync();
+        _settingsOk = true;
+        _settingsMsg = "Nowy adres gotowy — zaktualizuj go w Brevo (albo kliknij „Utwórz w Brevo”).";
+    }
+
+    private async Task CopyWebhookAsync()
+    {
+        try { await JS.InvokeVoidAsync("navigator.clipboard.writeText", _webhook); _settingsOk = true; _settingsMsg = "Skopiowane."; }
+        catch (JSException) { _settingsOk = false; _settingsMsg = "Zaznacz adres i skopiuj ręcznie."; }
+    }
+
+    private static List<InboxParsing.Attachment> Attachments(InboxMessage m)
+    {
+        if (string.IsNullOrEmpty(m.AttachmentsJson)) return [];
+        try { return System.Text.Json.JsonSerializer.Deserialize<List<InboxParsing.Attachment>>(m.AttachmentsJson) ?? []; }
+        catch (System.Text.Json.JsonException) { return []; }
+    }
+
+    private static string Size(long bytes)
+    {
+        if (bytes <= 0) return "";
+        if (bytes < 1024 * 1024) return $"{Math.Max(1, bytes / 1024)} KB";
+        return $"{bytes / 1024d / 1024d:0.0} MB";
+    }
+
+    private static string Short(DateTime utc)
+    {
+        var local = ContainerLogService.ToLocal(utc);
+        var today = BillingService.LocalNow.Date;
+        return local.Date == today ? local.ToString("HH:mm") : local.Year == today.Year ? local.ToString("d MMM", Pl) : local.ToString("dd.MM.yyyy");
+    }
+
+    private static string Ago(DateTime utc)
+    {
+        var d = DateTime.UtcNow - utc;
+        return d.TotalMinutes < 2 ? "przed chwilą" : d.TotalHours < 1 ? $"{(int)d.TotalMinutes} min temu"
+            : d.TotalDays < 1 ? $"{(int)d.TotalHours} godz. temu" : ContainerLogService.ToLocal(utc).ToString("d MMM yyyy, HH:mm", Pl);
+    }
+}

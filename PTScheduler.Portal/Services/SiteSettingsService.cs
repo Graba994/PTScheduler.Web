@@ -75,6 +75,18 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string NotifyTicketsEmail = "notify_tickets_email";
         /// <summary>"true" włącza SMS-y o nowych zgłoszeniach (przez konto SMS platformy).</summary>
         public const string NotifyTicketsSms = "notify_tickets_sms";
+        /// <summary>Poczta w Panelu: adres, na który piszą ludzie (np. kontakt@hantly.pl).</summary>
+        public const string InboxAddress = "inbox_address";
+        /// <summary>Tajna część adresu webhooka odbioru poczty (Brevo Inbound Parsing).</summary>
+        public const string InboxSecret = "inbox_secret";
+        /// <summary>Klucz API Brevo (zaszyfrowany) — pobieranie załączników i zakładanie webhooka.</summary>
+        public const string InboxBrevoApiKey = "inbox_brevo_api_key";
+        /// <summary>"false" wyłącza e-mail do administratora o nowej wiadomości.</summary>
+        public const string InboxNotifyEmail = "inbox_notify_email";
+        /// <summary>"true" włącza SMS do administratora o nowej wiadomości.</summary>
+        public const string InboxNotifySms = "inbox_notify_sms";
+        /// <summary>Kiedy przyszła ostatnia wiadomość (UTC, ISO) — stan odbioru w ustawieniach.</summary>
+        public const string InboxLastReceivedAt = "inbox_last_received_at";
         /// <summary>Dane sprzedawcy w nagłówku PDF oferty trenera (nazwa, adres, NIP, konto — wiele linii).</summary>
         public const string OfferSellerDetails = "offer_seller_details";
 

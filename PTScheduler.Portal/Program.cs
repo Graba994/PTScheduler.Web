@@ -111,6 +111,7 @@ builder.Services.AddScoped<AssistantService>();
 builder.Services.AddScoped<LeoService>();
 builder.Services.AddScoped<LeoInsights>();
 builder.Services.AddScoped<LeoReportService>();
+builder.Services.AddScoped<InboxService>();
 builder.Services.AddScoped<LeoAnalytics>();
 builder.Services.AddScoped<LeoWeeklyReport>();
 builder.Services.AddHostedService<LeoReportBackgroundService>();
@@ -973,6 +974,32 @@ app.MapPost("/api/internal/tenants/{slug}/legal/accept", async (
     if (keys.Count > 0) await legal.RecordAsync(tenant.Id, body.Email, keys, body.Ip, body.UserAgent, "aplikacja");
     return Results.Ok();
 });
+
+// Poczta w Panelu: Brevo (Inbound Parsing) przekazuje tu e-maile wysłane na adres kontaktowy.
+// Adres zawiera tajny ciąg z ustawień — bez niego 404. Brevo ponawia przy błędzie, duplikaty odsiewamy po Message-ID.
+app.MapPost("/api/inbound/brevo/{secret}", async (string secret, HttpRequest req, InboxService inbox) =>
+{
+    if (!await inbox.SecretMatchesAsync(secret)) return Results.NotFound();
+    if (req.ContentLength is > 30_000_000) return Results.StatusCode(StatusCodes.Status413PayloadTooLarge);
+    System.Text.Json.JsonDocument doc;
+    try { doc = await System.Text.Json.JsonDocument.ParseAsync(req.Body); }
+    catch (System.Text.Json.JsonException) { return Results.BadRequest(); }
+    using (doc)
+    {
+        var added = await inbox.ReceiveAsync(doc.RootElement);
+        return Results.Ok(new { received = added });
+    }
+}).AllowAnonymous().DisableAntiforgery();
+
+// Załącznik z Poczty — pobierany z Brevo w chwili kliknięcia, tylko dla administratora, zawsze jako plik do zapisania.
+app.MapGet("/panel/poczta/zalacznik/{messageId:int}/{index:int}", async (int messageId, int index, InboxService inbox) =>
+{
+    if (await inbox.AttachmentAsync(messageId, index) is not { } file) return Results.NotFound();
+    var type = file.ContentType.Contains("html", StringComparison.OrdinalIgnoreCase) || file.ContentType.Contains("svg", StringComparison.OrdinalIgnoreCase)
+        || file.ContentType.Contains("xml", StringComparison.OrdinalIgnoreCase) || file.ContentType.Contains("javascript", StringComparison.OrdinalIgnoreCase)
+        ? "application/octet-stream" : file.ContentType;
+    return Results.File(file.Data, type, file.Name);
+}).RequireAuthorization(p => p.RequireRole("Admin"));
 
 // Ikona nastroju maskotki do e-maili (PNG — Gmail i Outlook nie wyświetlają SVG). Publiczna, bez danych.
 app.MapGet("/assistant/mascot/{mood}.png", async (string mood, AssistantService assistant, IWebHostEnvironment env, HttpContext ctx) =>

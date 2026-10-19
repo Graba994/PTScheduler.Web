@@ -464,6 +464,131 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.ToTable("GoogleCalendarGrants");
                 });
 
+            modelBuilder.Entity("PTScheduler.Portal.Entities.InboxMessage", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("At")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("AttachmentsJson")
+                        .HasColumnType("text");
+
+                    b.Property<string>("FromAddress")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<string>("FromName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Html")
+                        .HasColumnType("text");
+
+                    b.Property<string>("InReplyTo")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<bool>("Incoming")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("MessageId")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
+                    b.Property<string>("SentBy")
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<double?>("SpamScore")
+                        .HasColumnType("double precision");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("Text")
+                        .HasColumnType("text");
+
+                    b.Property<int>("ThreadId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ToAddress")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("MessageId");
+
+                    b.HasIndex("ThreadId");
+
+                    b.ToTable("InboxMessages");
+                });
+
+            modelBuilder.Entity("PTScheduler.Portal.Entities.InboxThread", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Counterpart")
+                        .IsRequired()
+                        .HasMaxLength(320)
+                        .HasColumnType("character varying(320)");
+
+                    b.Property<string>("CounterpartName")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Folder")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)");
+
+                    b.Property<DateTime>("LastAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Snippet")
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<string>("Subject")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<string>("SubjectKey")
+                        .IsRequired()
+                        .HasMaxLength(300)
+                        .HasColumnType("character varying(300)");
+
+                    b.Property<int?>("TenantId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Unread")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("TenantId");
+
+                    b.HasIndex("Counterpart", "SubjectKey");
+
+                    b.HasIndex("Folder", "LastAt");
+
+                    b.ToTable("InboxThreads");
+                });
+
             modelBuilder.Entity("PTScheduler.Portal.Entities.InviteCode", b =>
                 {
                     b.Property<int>("Id")
@@ -2390,6 +2515,27 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Navigation("Tenant");
                 });
 
+            modelBuilder.Entity("PTScheduler.Portal.Entities.InboxMessage", b =>
+                {
+                    b.HasOne("PTScheduler.Portal.Entities.InboxThread", "Thread")
+                        .WithMany("Messages")
+                        .HasForeignKey("ThreadId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Thread");
+                });
+
+            modelBuilder.Entity("PTScheduler.Portal.Entities.InboxThread", b =>
+                {
+                    b.HasOne("PTScheduler.Portal.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Tenant");
+                });
+
             modelBuilder.Entity("PTScheduler.Portal.Entities.PaymentRecord", b =>
                 {
                     b.HasOne("PTScheduler.Portal.Entities.ServiceOrder", "ServiceOrder")
@@ -2576,6 +2722,11 @@ namespace PTScheduler.Portal.Data.Migrations
                         .IsRequired();
 
                     b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("PTScheduler.Portal.Entities.InboxThread", b =>
+                {
+                    b.Navigation("Messages");
                 });
 
             modelBuilder.Entity("PTScheduler.Portal.Entities.Plan", b =>
