@@ -44,6 +44,9 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<LegalAcceptance> LegalAcceptances => Set<LegalAcceptance>();
     public DbSet<InboxThread> InboxThreads => Set<InboxThread>();
     public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
+    public DbSet<TenantVideo> TenantVideos => Set<TenantVideo>();
+    public DbSet<TenantVideoFolder> TenantVideoFolders => Set<TenantVideoFolder>();
+    public DbSet<CommunityExercise> CommunityExercises => Set<CommunityExercise>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -141,6 +144,45 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.HasIndex(p => p.ExternalPaymentId);
             e.HasOne(p => p.Tenant).WithMany().HasForeignKey(p => p.TenantId);
             e.HasOne(p => p.ServiceOrder).WithMany().HasForeignKey(p => p.ServiceOrderId);
+        });
+
+        b.Entity<TenantVideo>(e =>
+        {
+            e.HasIndex(x => x.VideoGuid).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.Kind });
+            e.Property(x => x.VideoGuid).HasMaxLength(64);
+            e.Property(x => x.Kind).HasMaxLength(20);
+            e.Property(x => x.Title).HasMaxLength(200);
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<TenantVideoFolder>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.Kind }).IsUnique();
+            e.Property(x => x.Kind).HasMaxLength(20);
+            e.Property(x => x.CollectionId).HasMaxLength(64);
+        });
+
+        b.Entity<CommunityExercise>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.SourceExerciseId }).IsUnique();
+            e.HasIndex(x => new { x.Hidden, x.NamePl });
+            e.Property(x => x.NamePl).HasMaxLength(200);
+            e.Property(x => x.NameEn).HasMaxLength(200);
+            e.Property(x => x.Description).HasMaxLength(4000);
+            e.Property(x => x.PrimaryMuscles).HasMaxLength(300);
+            e.Property(x => x.SecondaryMuscles).HasMaxLength(300);
+            e.Property(x => x.Category).HasMaxLength(40);
+            e.Property(x => x.Level).HasMaxLength(20);
+            e.Property(x => x.Equipment).HasMaxLength(60);
+            e.Property(x => x.Force).HasMaxLength(20);
+            e.Property(x => x.Mechanic).HasMaxLength(20);
+            e.Property(x => x.Tracking).HasMaxLength(30);
+            e.Property(x => x.ImageUrls).HasMaxLength(2000);
+            e.Property(x => x.VideoType).HasMaxLength(20);
+            e.Property(x => x.VideoRef).HasMaxLength(500);
+            e.Property(x => x.AuthorName).HasMaxLength(200);
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
 
         b.Entity<InboxThread>(e =>

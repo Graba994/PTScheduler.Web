@@ -12,6 +12,7 @@ public class TenantService(
     SiteSettingsService settings,
     NpmService npm,
     BunnyPlatformService bunny,
+    VideoHubService videoHub,
     IConfiguration config,
     ILogger<TenantService> logger)
 {
@@ -313,6 +314,8 @@ public class TenantService(
             try { await docker.RemoveContainerAsync(dbName); } catch (Exception ex) { logger.LogWarning(ex, "Nie udało się usunąć {Container} przy usuwaniu tenanta {Slug}.", dbName, tenant.Slug); }
             await docker.RemoveTenantResourcesAsync(tenant.Slug);
 
+            // Filmy z centralnej biblioteki, foldery trenera i jego ćwiczenia w Społeczności (oraz stara osobna biblioteka).
+            try { await videoHub.DeleteAllAsync(tenant); } catch (Exception ex) { logger.LogWarning(ex, "Nie udało się usunąć wideo tenanta {Slug}.", tenant.Slug); }
             await bunny.DeleteLibraryAsync(tenant);
 
             if (!string.IsNullOrWhiteSpace(tenant.Domain))

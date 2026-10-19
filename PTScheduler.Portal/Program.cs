@@ -84,6 +84,8 @@ builder.Services.AddScoped<EmailService>();
 builder.Services.AddScoped<StripeService>();
 builder.Services.AddScoped<CreditService>();
 builder.Services.AddScoped<BunnyPlatformService>();
+builder.Services.AddScoped<VideoHubService>();
+builder.Services.AddScoped<CommunityExerciseService>();
 builder.Services.AddScoped<GoogleOAuthBroker>();
 builder.Services.AddScoped<TenantMailRelay>();
 builder.Services.AddScoped<StoreTicketService>();
@@ -1363,7 +1365,7 @@ app.MapGet("/api/credits/{slug}", async (
     var balances = await creditService.GetBalancesAsync(tenant.Id);
     var sms = await creditService.GetSmsStatusAsync(tenant.Id);
     var platformBunnyConfigured = await db.Set<SiteSetting>()
-        .AnyAsync(s => s.Key == "platform_bunny_account_key" && s.Value != null && s.Value != "");
+        .AnyAsync(s => s.Key == SiteSettingsService.Keys.PlatformBunnyLibraryId && s.Value != null && s.Value != "");
 
     return Results.Json(new
     {
@@ -1565,20 +1567,20 @@ app.MapGet("/api/credits/{slug}/bunny", async (
     string slug,
     HttpContext ctx,
     IDbContextFactory<PortalDbContext> dbFactory,
-    IConfiguration config,
-    BunnyPlatformService bunny) =>
+    IConfiguration config) =>
 {
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
     if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
 
-    // Tylko własna biblioteka instancji. Wspólnej biblioteki nie udostępniamy — jej klucz
-    // pozwalałby każdemu trenerowi oglądać i usuwać filmy pozostałych.
-    var library = await bunny.EnsureLibraryAsync(tenant.Id, ctx.RequestAborted);
-    return library is null
-        ? Results.Json(new { enabled = false })
-        : Results.Json(new { enabled = true, apiKey = library.ApiKey, libraryId = library.LibraryId, cdnHostname = library.CdnHostname });
+    // Zgodność ze starszymi aplikacjami: tylko istniejąca osobna biblioteka (nowych już nie zakładamy).
+    // Nowe filmy trafiają do centralnej biblioteki przez /api/internal/tenants/{slug}/video — klucz zostaje w Portalu.
+    if (string.IsNullOrEmpty(tenant.BunnyLibraryId) || string.IsNullOrEmpty(tenant.BunnyLibraryApiKey))
+        return Results.Json(new { enabled = false });
+    return Results.Json(new { enabled = true, apiKey = tenant.BunnyLibraryApiKey, libraryId = tenant.BunnyLibraryId, cdnHostname = tenant.BunnyCdnHostname });
 });
+
+app.MapVideoHub();
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()

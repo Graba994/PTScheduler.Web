@@ -212,7 +212,7 @@ public static class PlanGeneratorRules
                 h is null ? $"{slot.Label} · nowe" : $"{slot.Label} · znane ({h.TimesDone}×)", h is not null);
         if (h is null || h.LastWeightKg <= 0m)
         {
-            var why = h is null ? $"{slot.Label} · nowe — dobierz ciężar na pierwszym treningu" : $"{slot.Label} · masa ciała, ostatnio {h.LastReps} powt.";
+            var why = h is null ? $"{slot.Label} · nowe — dobierz ciężar na pierwszym treningu" : $"{slot.Label} · własnym ciężarem ciała, ostatnio {h.LastReps} powt.";
             return new Pick(c.Id, c.Name, sets, reps, null, null, rest, why, h is not null);
         }
         var weight = NextWeight(h, c, reps, out var how);

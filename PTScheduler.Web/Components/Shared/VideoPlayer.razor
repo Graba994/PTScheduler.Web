@@ -27,14 +27,11 @@ else if (ShowPlaceholder)
 
     protected override async Task OnParametersSetAsync()
     {
-        if (!string.IsNullOrWhiteSpace(BunnyVideoId))
+        // Odnośnik „{biblioteka}/{guid}” z centralnej biblioteki; sam GUID — dawny film ze starej biblioteki.
+        if (!string.IsNullOrWhiteSpace(BunnyVideoId) && await Bunny.EmbedUrlAsync(BunnyVideoId) is { } embed)
         {
-            var s = await Bunny.GetSettingsAsync();
-            if (!string.IsNullOrEmpty(s.LibraryId))
-            {
-                _src = $"https://iframe.mediadelivery.net/embed/{s.LibraryId}/{BunnyVideoId}";
-                return;
-            }
+            _src = embed;
+            return;
         }
         _src = VideoEmbed.ToEmbed(Url);
     }

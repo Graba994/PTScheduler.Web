@@ -123,16 +123,16 @@ else
             <section class="card border-0 shadow-sm h-100">
                 <div class="card-body">
                     <div class="d-flex align-items-start justify-content-between gap-2">
-                        <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm"><i class="bi bi-camera-video"></i></span>Wideo — osobne biblioteki</h2>
-                        <span class="badge bg-light text-dark border">@_libraries z @_total</span>
+                        <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm"><i class="bi bi-camera-video"></i></span>Wideo — foldery trenerów</h2>
+                        <span class="badge bg-light text-dark border">@_folders z @_total</span>
                     </div>
                     <p class="small text-muted mb-2">
-                        Każdy trener dostaje własną bibliotekę Bunny (zakładaną przy pierwszym filmie) i jej klucz — nie widzi filmów innych.
-                        Wspólnej biblioteki nie udostępniamy.
+                        Jedna biblioteka Bunny, w niej osobne foldery każdego trenera. Klucz zostaje w Portalu — trener przesyła film
+                        z jednorazowym podpisem, a usunąć i podejrzeć może tylko swoje filmy (rejestr w Portalu).
                     </p>
                     @if (!_bunnyAccount)
                     {
-                        <div class="small text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Brak klucza konta Bunny — <a href="/panel/setup/services#video">ustaw go</a>, inaczej wideo jest wyłączone.</div>
+                        <div class="small text-warning"><i class="bi bi-exclamation-triangle me-1"></i>Brak biblioteki Bunny — <a href="/panel/setup/services#video">ustaw ją</a>, inaczej wideo jest wyłączone.</div>
                     }
                 </div>
             </section>
@@ -179,7 +179,7 @@ else
     private DockerService.ResourceLimits _webLimits = new(0, 0, 0), _dbLimits = new(0, 0, 0);
     private int _mailLimit;
     private List<(string Name, int Count)> _mailTop = [];
-    private int _libraries;
+    private int _libraries, _folders;
     private bool _bunnyAccount;
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
@@ -194,7 +194,8 @@ else
         _total = tenants.Count;
         _missingSecrets = tenants.Where(t => string.IsNullOrEmpty(t.InternalSecret)).Select(t => t.Slug).ToList();
         _libraries = tenants.Count(t => !string.IsNullOrEmpty(t.BunnyLibraryId));
-        _bunnyAccount = !string.IsNullOrWhiteSpace(await Settings.GetAsync(SiteSettingsService.Keys.PlatformBunnyAccountKey));
+        _bunnyAccount = !string.IsNullOrWhiteSpace(await Settings.GetAsync(SiteSettingsService.Keys.PlatformBunnyLibraryId));
+        _folders = await db.TenantVideoFolders.Select(f => f.TenantId).Distinct().CountAsync();
 
         _webLimits = Docker.LimitsFor(database: false);
         _dbLimits = Docker.LimitsFor(database: true);

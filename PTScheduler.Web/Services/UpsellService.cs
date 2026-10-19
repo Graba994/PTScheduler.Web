@@ -21,7 +21,6 @@ public sealed class UpsellService(
     EntitlementService entitlements,
     ISmsService sms,
     IBunnyService bunny,
-    ICourseService courses,
     IMemoryCache cache,
     ILogger<UpsellService> logger)
 {
@@ -89,12 +88,11 @@ public sealed class UpsellService(
 
         await Safe(async () =>
         {
-            if (!plan.CoursesEnabled || plan.MaxVideoStorageGB is <= 0 or int.MaxValue) return;
-            var (_, used, maxBytes) = await entitlements.CheckVideoStorageAsync(courses);
-            var cdn = plan.VideoProvider == "bunny" ? await bunny.GetCentralizedStatusAsync() : null;
-            var total = maxBytes + (long)((cdn?.StorageCredits ?? 0) * 1024 * 1024 * 1024);
-            if (total <= 0) return;
-            var pct = (int)(100 * used / total);
+            if (plan.VideoProvider != "bunny" || plan.MaxVideoStorageGB is <= 0 or int.MaxValue) return;
+            // Limit i zajęte miejsce liczy Portal (pakiet + dodatki + dokupione GB).
+            var video = await bunny.GetStatusAsync();
+            if (!video.Enabled || video.QuotaBytes is <= 0 or long.MaxValue) return;
+            var pct = (int)(100 * video.UsedBytes / video.QuotaBytes);
             if (pct >= 95)
                 list.Add(new("video-full", "critical", "bi-camera-reels-fill", $"Miejsce na wideo zajęte w {Math.Min(pct, 100)}%",
                     "Nowe filmy się nie zmieszczą. Dodaj miejsce do abonamentu — lekcje i instruktaże będą dalej działać.",

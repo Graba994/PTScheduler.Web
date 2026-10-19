@@ -1,5 +1,7 @@
 using System.Net.Http;
+using System.Net.Http.Headers;
 using System.Net.Http.Json;
+using System.Text;
 using System.Text.Json;
 using PTScheduler.Application.DTOs;
 using PTScheduler.Application.Interfaces;
@@ -7,244 +9,252 @@ using Microsoft.Extensions.Logging;
 
 namespace PTScheduler.Infrastructure.Services;
 
+/// <summary>
+/// Wideo przez Portal: centralna biblioteka Bunny Stream z folderem trenera. Aplikacja nie zna klucza biblioteki —
+/// Portal tworzy film (sprawdzając opłacony limit) i daje podpis przesyłania, a plik idzie prosto do Bunny protokołem TUS.
+/// </summary>
 public class BunnyService(IWebRootPathProvider webRoot, IHttpClientFactory httpFactory, ILogger<BunnyService> logger)
     : IBunnyService
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web) { WriteIndented = true };
-    private static readonly HttpClient PortalHttp = new() { Timeout = TimeSpan.FromSeconds(15) };
+    private const string TusEndpoint = "https://video.bunnycdn.com/tusupload";
+    private const int ChunkBytes = 16 * 1024 * 1024;
+    private static readonly TimeSpan StatusTtl = TimeSpan.FromMinutes(2);
+    private static VideoHubStatus? _status;
+    private static DateTime _statusAt;
 
-    private string? PortalUrl => Environment.GetEnvironmentVariable("PORTAL_URL");
-    private string? TenantSlug => Environment.GetEnvironmentVariable("TENANT_SLUG");
-    private string? InternalSecret => Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+    private static string? PortalUrl => Environment.GetEnvironmentVariable("PORTAL_URL");
+    private static string? TenantSlug => Environment.GetEnvironmentVariable("TENANT_SLUG");
+    private static string? InternalSecret => Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+    private static bool Managed => !string.IsNullOrEmpty(PortalUrl) && !string.IsNullOrEmpty(TenantSlug);
 
-    private string FilePath => PrivateStorage.SettingsFile(webRoot, "bunny-settings.json");
-
-    public async Task<BunnySettingsDto> GetSettingsAsync()
+    public async Task<VideoHubStatus> GetStatusAsync(bool refresh = false)
     {
+        if (!Managed) return VideoHubStatus.Off with { LegacyLibraryId = LocalLegacyLibrary() };
+        if (!refresh && _status is not null && DateTime.UtcNow - _statusAt < StatusTtl) return _status;
         try
         {
-            if (File.Exists(FilePath))
+            using var resp = await Http(15).SendAsync(Request(HttpMethod.Get, "video"));
+            if (resp.IsSuccessStatusCode)
             {
-                await using var fs = File.OpenRead(FilePath);
-                var dto = await JsonSerializer.DeserializeAsync<BunnySettingsDto>(fs);
-                if (dto is not null && !string.IsNullOrWhiteSpace(dto.ApiKey))
-                    return dto;
+                var e = await resp.Content.ReadFromJsonAsync<JsonElement>();
+                _status = new VideoHubStatus(
+                    e.GetProperty("enabled").GetBoolean(),
+                    Str(e, "reason"),
+                    Str(e, "libraryId"),
+                    e.GetProperty("quotaBytes").GetInt64(),
+                    e.GetProperty("usedBytes").GetInt64(),
+                    e.GetProperty("videos").GetInt32(),
+                    Str(e, "legacyLibraryId") ?? LocalLegacyLibrary());
+                _statusAt = DateTime.UtcNow;
+                return _status;
             }
+            logger.LogWarning("Portal: stan wideo niedostępny ({Status}).", (int)resp.StatusCode);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException)
         {
-            logger.LogWarning(ex, "Nie udało się wczytać ustawień Bunny z {Path} — próbuję ustawień platformy.", FilePath);
+            logger.LogWarning(ex, "Portal: stan wideo niedostępny.");
         }
-
-        var platform = await FetchPlatformBunnySettingsAsync();
-        if (platform is not null)
-            return platform;
-
-        return new BunnySettingsDto();
+        return _status ?? new VideoHubStatus(false, "Nie udało się połączyć z platformą — spróbuj za chwilę.", null, 0, 0, 0, LocalLegacyLibrary());
     }
 
-    public async Task SaveSettingsAsync(BunnySettingsDto dto)
+    public async Task<(bool Ok, string? VideoRef, string? Error)> UploadAsync(string title, string kind, Stream file, long sizeBytes,
+        IProgress<long>? progress = null, CancellationToken ct = default)
     {
-        Directory.CreateDirectory(PrivateStorage.Root(webRoot));
-        await using var fs = File.Create(FilePath);
-        await JsonSerializer.SerializeAsync(fs, dto, JsonOptions);
-    }
-
-    public async Task<(bool Ok, string Message)> TestConnectionAsync(BunnySettingsDto dto)
-    {
-        if (string.IsNullOrWhiteSpace(dto.ApiKey) || string.IsNullOrWhiteSpace(dto.LibraryId))
-            return (false, "Uzupełnij API key i Library ID.");
-
+        if (!Managed) return (false, null, VideoHubStatus.Off.Reason);
+        string guid, libraryId, signature;
+        long expires;
         try
         {
-            var http = httpFactory.CreateClient();
-            var req = new HttpRequestMessage(HttpMethod.Get,
-                $"https://video.bunnycdn.com/library/{dto.LibraryId}/videos?itemsPerPage=1");
-            req.Headers.Add("AccessKey", dto.ApiKey);
-            using var resp = await http.SendAsync(req);
+            var create = Request(HttpMethod.Post, "video");
+            create.Content = JsonContent.Create(new { title, kind, sizeBytes });
+            using var resp = await Http(40).SendAsync(create, ct);
+            var body = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
             if (!resp.IsSuccessStatusCode)
-            {
-                var body = await resp.Content.ReadAsStringAsync();
-                return (false, $"HTTP {(int)resp.StatusCode}: {body}");
-            }
-            return (true, "Połączenie OK.");
+                return (false, null, Str(body, "error") ?? "Platforma nie przyjęła filmu — spróbuj ponownie.");
+            guid = body.GetProperty("videoId").GetString()!;
+            libraryId = body.GetProperty("libraryId").GetString()!;
+            signature = body.GetProperty("signature").GetString()!;
+            expires = body.GetProperty("expires").GetInt64();
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            logger.LogWarning(ex, "Portal: nie utworzono filmu.");
+            return (false, null, "Nie udało się połączyć z platformą — spróbuj za chwilę.");
+        }
+
+        try
+        {
+            await TusUploadAsync(libraryId, guid, signature, expires, title, file, sizeBytes, progress, ct);
+            _status = null; // zajęte miejsce się zmieniło
+            return (true, VideoRef.Make(libraryId, guid), null);
         }
         catch (Exception ex)
         {
-            return (false, ex.Message);
+            logger.LogWarning(ex, "Bunny: przesyłanie filmu {Guid} nie powiodło się.", guid);
+            // Nieudany film nie może zajmować opłaconego miejsca.
+            await DeleteAsync(VideoRef.Make(libraryId, guid));
+            return (false, null, ex is OperationCanceledException ? "Przesyłanie przerwane." : "Przesyłanie nie powiodło się — sprawdź połączenie i spróbuj ponownie.");
         }
     }
 
-    public async Task<(bool Ok, string? VideoId, string? Error)> CreateAndUploadAsync(
-        string title, Stream file, CancellationToken ct = default)
+    /// <summary>Przesyłanie TUS do Bunny: utworzenie (POST) i kolejne części (PATCH) z podpisem tylko dla tego filmu.</summary>
+    private async Task TusUploadAsync(string libraryId, string guid, string signature, long expires, string title, Stream file, long size,
+        IProgress<long>? progress, CancellationToken ct)
     {
-        var s = await GetSettingsAsync();
-        if (string.IsNullOrWhiteSpace(s.ApiKey) || string.IsNullOrWhiteSpace(s.LibraryId))
-            return (false, null, "Bunny.net nie skonfigurowany.");
-
-        try
+        var http = Http(600);
+        void Auth(HttpRequestMessage r)
         {
-            var http = httpFactory.CreateClient();
-
-            var createReq = new HttpRequestMessage(HttpMethod.Post,
-                $"https://video.bunnycdn.com/library/{s.LibraryId}/videos")
-            {
-                Content = JsonContent.Create(new { title })
-            };
-            createReq.Headers.Add("AccessKey", s.ApiKey);
-            using var createResp = await http.SendAsync(createReq, ct);
-            if (!createResp.IsSuccessStatusCode)
-            {
-                var b = await createResp.Content.ReadAsStringAsync(ct);
-                return (false, null, $"Create failed: {b}");
-            }
-
-            var created = await createResp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
-            var guid = created.GetProperty("guid").GetString();
-            if (string.IsNullOrEmpty(guid)) return (false, null, "Brak GUID w odpowiedzi.");
-
-            var uploadReq = new HttpRequestMessage(HttpMethod.Put,
-                $"https://video.bunnycdn.com/library/{s.LibraryId}/videos/{guid}")
-            {
-                Content = new StreamContent(file)
-            };
-            uploadReq.Headers.Add("AccessKey", s.ApiKey);
-            using var uploadResp = await http.SendAsync(uploadReq, ct);
-            if (!uploadResp.IsSuccessStatusCode)
-            {
-                var b = await uploadResp.Content.ReadAsStringAsync(ct);
-                return (false, guid, $"Upload failed: {b}");
-            }
-
-            return (true, guid, null);
+            r.Headers.Add("AuthorizationSignature", signature);
+            r.Headers.Add("AuthorizationExpire", expires.ToString());
+            r.Headers.Add("VideoId", guid);
+            r.Headers.Add("LibraryId", libraryId);
+            r.Headers.Add("Tus-Resumable", "1.0.0");
         }
-        catch (Exception ex)
+
+        using var create = new HttpRequestMessage(HttpMethod.Post, TusEndpoint);
+        Auth(create);
+        create.Headers.Add("Upload-Length", size.ToString());
+        create.Headers.Add("Upload-Metadata", $"filetype {B64("video/mp4")},title {B64(title)}");
+        create.Content = new ByteArrayContent([]);
+        using var created = await http.SendAsync(create, ct);
+        if (!created.IsSuccessStatusCode || created.Headers.Location is null)
+            throw new HttpRequestException($"TUS: utworzenie odrzucone ({(int)created.StatusCode}).");
+        var location = created.Headers.Location.IsAbsoluteUri ? created.Headers.Location : new Uri(new Uri(TusEndpoint), created.Headers.Location);
+
+        var buffer = new byte[ChunkBytes];
+        long offset = 0;
+        while (offset < size)
         {
-            return (false, null, ex.Message);
+            var read = 0;
+            while (read < buffer.Length)
+            {
+                var n = await file.ReadAsync(buffer.AsMemory(read, buffer.Length - read), ct);
+                if (n == 0) break;
+                read += n;
+            }
+            if (read == 0) throw new IOException("Plik skończył się wcześniej niż zapowiadany rozmiar.");
+
+            using var patch = new HttpRequestMessage(HttpMethod.Patch, location);
+            Auth(patch);
+            patch.Headers.Add("Upload-Offset", offset.ToString());
+            patch.Content = new ByteArrayContent(buffer, 0, read);
+            patch.Content.Headers.ContentType = new MediaTypeHeaderValue("application/offset+octet-stream");
+            using var resp = await http.SendAsync(patch, ct);
+            if (!resp.IsSuccessStatusCode) throw new HttpRequestException($"TUS: część odrzucona ({(int)resp.StatusCode}).");
+            offset = resp.Headers.TryGetValues("Upload-Offset", out var v) && long.TryParse(v.FirstOrDefault(), out var o) ? o : offset + read;
+            progress?.Report(offset);
         }
     }
 
-    public async Task<(bool Ok, string? Error)> DeleteAsync(string videoId)
+    public async Task<(bool Ok, string? Error)> DeleteAsync(string videoRef)
     {
-        var s = await GetSettingsAsync();
-        if (string.IsNullOrWhiteSpace(s.ApiKey) || string.IsNullOrWhiteSpace(s.LibraryId))
-            return (false, "Bunny.net nie skonfigurowany.");
-
+        if (!Managed) return (false, VideoHubStatus.Off.Reason);
         try
         {
-            var http = httpFactory.CreateClient();
-            var req = new HttpRequestMessage(HttpMethod.Delete,
-                $"https://video.bunnycdn.com/library/{s.LibraryId}/videos/{videoId}");
-            req.Headers.Add("AccessKey", s.ApiKey);
-            using var resp = await http.SendAsync(req);
-            if (!resp.IsSuccessStatusCode)
-            {
-                var b = await resp.Content.ReadAsStringAsync();
-                return (false, $"HTTP {(int)resp.StatusCode}: {b}");
-            }
-            return (true, null);
+            using var resp = await Http(30).SendAsync(Request(HttpMethod.Delete, $"video/{Uri.EscapeDataString(VideoRef.Guid(videoRef))}"));
+            _status = null;
+            if (resp.IsSuccessStatusCode) return (true, null);
+            return resp.StatusCode == System.Net.HttpStatusCode.NotFound
+                ? (false, "Ten film nie należy do Twojej aplikacji albo został już usunięty.")
+                : (false, "Nie udało się usunąć filmu — spróbuj ponownie.");
         }
-        catch (Exception ex) { return (false, ex.Message); }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            return (false, "Nie udało się połączyć z platformą — spróbuj za chwilę.");
+        }
     }
 
-    public async Task<BunnyVideoInfo?> GetVideoInfoAsync(string videoId)
+    public async Task<BunnyVideoInfo?> GetVideoInfoAsync(string videoRef)
     {
-        var s = await GetSettingsAsync();
-        if (string.IsNullOrWhiteSpace(s.ApiKey) || string.IsNullOrWhiteSpace(s.LibraryId))
-            return null;
-
+        if (!Managed) return null;
         try
         {
-            var http = httpFactory.CreateClient();
-            var req = new HttpRequestMessage(HttpMethod.Get,
-                $"https://video.bunnycdn.com/library/{s.LibraryId}/videos/{videoId}");
-            req.Headers.Add("AccessKey", s.ApiKey);
-            using var resp = await http.SendAsync(req);
+            using var resp = await Http(15).SendAsync(Request(HttpMethod.Get, $"video/{Uri.EscapeDataString(VideoRef.Guid(videoRef))}"));
             if (!resp.IsSuccessStatusCode) return null;
-
             var e = await resp.Content.ReadFromJsonAsync<JsonElement>();
             return new BunnyVideoInfo
             {
-                VideoId = videoId,
-                Title = e.TryGetProperty("title", out var t) ? t.GetString() ?? "" : "",
-                StorageSize = e.TryGetProperty("storageSize", out var ss) ? ss.GetInt64() : 0,
-                Length = e.TryGetProperty("length", out var l) ? l.GetInt32() : 0,
-                Status = e.TryGetProperty("status", out var st) ? st.GetInt32() : 0
+                VideoId = e.GetProperty("videoId").GetString() ?? "",
+                Title = Str(e, "title") ?? "",
+                StorageSize = e.GetProperty("sizeBytes").GetInt64(),
+                Length = e.GetProperty("length").GetInt32(),
+                Status = e.GetProperty("status").GetInt32()
             };
         }
-        catch { return null; }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException) { return null; }
     }
 
-    public string BuildEmbedUrl(string videoId)
+    public async Task<List<VideoItem>> ListAsync()
     {
-        var settings = GetSettingsAsync().GetAwaiter().GetResult();
-        return $"https://iframe.mediadelivery.net/embed/{settings.LibraryId}/{videoId}";
-    }
-
-    public async Task<CentralizedCdnStatus?> GetCentralizedStatusAsync()
-    {
-        if (string.IsNullOrEmpty(PortalUrl) || string.IsNullOrEmpty(TenantSlug))
-            return null;
-
+        if (!Managed) return [];
         try
         {
-            using var req = new HttpRequestMessage(HttpMethod.Get,
-                $"{PortalUrl.TrimEnd('/')}/api/credits/{TenantSlug}");
-            if (!string.IsNullOrEmpty(InternalSecret))
-                req.Headers.TryAddWithoutValidation("X-Internal-Secret", InternalSecret);
-
-            var resp = await PortalHttp.SendAsync(req);
-            if (!resp.IsSuccessStatusCode) return null;
-
-            var body = await resp.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(body);
-            var root = doc.RootElement;
-
-            return new CentralizedCdnStatus(
-                PlatformCdnEnabled: root.GetProperty("platformCdnEnabled").GetBoolean(),
-                StorageCredits: root.GetProperty("cdnStorageGb").GetDecimal(),
-                BandwidthCredits: root.GetProperty("cdnBandwidthGb").GetDecimal());
+            var status = await GetStatusAsync();
+            using var resp = await Http(15).SendAsync(Request(HttpMethod.Get, "video/list"));
+            if (!resp.IsSuccessStatusCode) return [];
+            var items = await resp.Content.ReadFromJsonAsync<JsonElement>();
+            return items.EnumerateArray().Select(e => new VideoItem(
+                VideoRef.Make(status.LibraryId ?? "", e.GetProperty("videoId").GetString()!),
+                e.GetProperty("kind").GetString() ?? "",
+                e.GetProperty("title").GetString() ?? "",
+                e.GetProperty("sizeBytes").GetInt64(),
+                e.GetProperty("createdAt").GetDateTime())).ToList();
         }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to fetch centralized CDN status from portal");
-            return null;
-        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException) { return []; }
     }
 
-    private async Task<BunnySettingsDto?> FetchPlatformBunnySettingsAsync()
+    public async Task<(bool Ok, int Removed, string? Error)> DeleteAllAsync()
     {
-        if (string.IsNullOrEmpty(PortalUrl) || string.IsNullOrEmpty(TenantSlug))
-            return null;
-
+        if (!Managed) return (true, 0, null);
         try
         {
-            using var req = new HttpRequestMessage(HttpMethod.Get,
-                $"{PortalUrl.TrimEnd('/')}/api/credits/{TenantSlug}/bunny");
-            if (!string.IsNullOrEmpty(InternalSecret))
-                req.Headers.TryAddWithoutValidation("X-Internal-Secret", InternalSecret);
-
-            var resp = await PortalHttp.SendAsync(req);
-            if (!resp.IsSuccessStatusCode) return null;
-
-            var body = await resp.Content.ReadAsStringAsync();
-            using var doc = JsonDocument.Parse(body);
-            var root = doc.RootElement;
-
-            if (!root.GetProperty("enabled").GetBoolean()) return null;
-
-            return new BunnySettingsDto
-            {
-                Enabled = true,
-                ApiKey = root.GetProperty("apiKey").GetString(),
-                LibraryId = root.GetProperty("libraryId").GetString(),
-                CdnHostname = root.TryGetProperty("cdnHostname", out var h) ? h.GetString() : null
-            };
+            using var resp = await Http(300).SendAsync(Request(HttpMethod.Delete, "video"));
+            _status = null;
+            if (!resp.IsSuccessStatusCode) return (false, 0, "Platforma nie usunęła filmów — spróbuj ponownie.");
+            var e = await resp.Content.ReadFromJsonAsync<JsonElement>();
+            return (true, e.GetProperty("removed").GetInt32(), null);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException)
         {
-            logger.LogWarning(ex, "Failed to fetch platform Bunny settings from portal");
-            return null;
+            return (false, 0, "Nie udało się połączyć z platformą — spróbuj za chwilę.");
         }
     }
+
+    public async Task<string?> EmbedUrlAsync(string? videoRef)
+    {
+        if (string.IsNullOrWhiteSpace(videoRef)) return null;
+        var (lib, _) = VideoRef.Parse(videoRef);
+        return VideoRef.Embed(videoRef, lib is null ? (await GetStatusAsync()).LegacyLibraryId : null);
+    }
+
+    /// <summary>Biblioteka ze starej, ręcznej konfiguracji trenera — tylko do odtwarzania dawnych filmów.</summary>
+    private string? LocalLegacyLibrary()
+    {
+        try
+        {
+            var path = PrivateStorage.SettingsFile(webRoot, "bunny-settings.json");
+            if (!File.Exists(path)) return null;
+            return JsonSerializer.Deserialize<BunnySettingsDto>(File.ReadAllText(path))?.LibraryId;
+        }
+        catch (Exception ex) when (ex is IOException or JsonException or UnauthorizedAccessException) { return null; }
+    }
+
+    private static HttpRequestMessage Request(HttpMethod method, string path)
+    {
+        var req = new HttpRequestMessage(method, $"{PortalUrl!.TrimEnd('/')}/api/internal/tenants/{Uri.EscapeDataString(TenantSlug!)}/{path}");
+        if (!string.IsNullOrEmpty(InternalSecret)) req.Headers.TryAddWithoutValidation("X-Internal-Secret", InternalSecret);
+        return req;
+    }
+
+    private HttpClient Http(int seconds)
+    {
+        var http = httpFactory.CreateClient();
+        http.Timeout = TimeSpan.FromSeconds(seconds);
+        return http;
+    }
+
+    private static string? Str(JsonElement e, string name) =>
+        e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+
+    private static string B64(string s) => Convert.ToBase64String(Encoding.UTF8.GetBytes(s));
 }

@@ -12,6 +12,10 @@
 @inject IJSRuntime JS
 @inject ILoggerFactory LoggerFactory
 @inject PTScheduler.Web.Services.PlatformAssistantService Platform
+@inject PTScheduler.Web.Services.CommunityExerciseClient Community
+@inject IBunnyService Bunny
+@inject EntitlementService Entitlements
+@inject NavigationManager Nav
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Katalog ćwiczeń" />
@@ -28,12 +32,18 @@
     @foreach (var (scope, label, icon) in _scopes)
     {
         <li class="nav-item">
-            <button class="nav-link py-1 px-3 @(_filter.Scope == scope ? "active" : "")"
+            <button class="nav-link py-1 px-3 @(!_community && _filter.Scope == scope ? "active" : "")"
                     @onclick="() => SetScope(scope)">
                 <i class="bi @icon me-1"></i>@label
             </button>
         </li>
     }
+    <li class="nav-item">
+        <button class="nav-link py-1 px-3 @(_community ? "active" : "")" @onclick="OpenCommunity" title="Ćwiczenia udostępnione przez innych trenerów platformy">
+            <i class="bi bi-people me-1"></i>Społeczność
+            @if (!VideoPlan) { <i class="bi bi-lock-fill ms-1 small"></i> }
+        </button>
+    </li>
 </ul>
 
 <!-- Filtry -->
@@ -83,7 +93,75 @@
     </div>
 </div>
 
-@if (_loading)
+@if (_community)
+{
+    @if (!VideoPlan)
+    {
+        <div class="community-gate">
+            <i class="bi bi-people"></i>
+            <div>
+                <b>Społeczność jest w pakiecie z wideo</b>
+                <p class="mb-2">Wspólna baza ćwiczeń trenerów platformy — z filmami i opisami, gotowa do skopiowania do Twojego katalogu.
+                    Działa razem z hostingiem wideo, w ramach opłaconego miejsca.</p>
+                <a href="/admin/upgrade" class="btn btn-sm btn-primary">Zobacz pakiety</a>
+            </div>
+        </div>
+    }
+    else if (_communityLoading)
+    {
+        <div class="text-center text-muted py-5"><div class="spinner-border" role="status"></div></div>
+    }
+    else if (!_communityPage.Allowed)
+    {
+        <div class="alert alert-info small"><i class="bi bi-info-circle me-1"></i>Społeczność jest teraz niedostępna — spróbuj za chwilę.</div>
+    }
+    else if (_communityPage.Items.Count == 0)
+    {
+        <div class="alert alert-secondary"><i class="bi bi-people me-2"></i>Brak ćwiczeń dla tych filtrów. Udostępnij swoje — otwórz własne ćwiczenie i kliknij „Udostępnij społeczności”.</div>
+    }
+    else
+    {
+        <div class="text-muted small mb-2">@_communityPage.Items.Count ćwiczeń od trenerów platformy</div>
+        <div class="row g-3">
+            @foreach (var c in _communityPage.Items)
+            {
+                <div class="col-6 col-md-4 col-xl-3">
+                    <div class="card h-100 exercise-card" @onclick="() => _communityDetail = c" style="cursor:pointer">
+                        <div class="exercise-thumb">
+                            @if (c.Thumbnail is { } th)
+                            {
+                                <img src="@th" alt="@c.NamePl" loading="lazy" />
+                            }
+                            else
+                            {
+                                <div class="exercise-thumb-empty"><i class="bi pt-ico-dumbbell"></i></div>
+                            }
+                            @if (c.VideoType != "None")
+                            {
+                                <span class="badge-video"><i class="bi bi-play-circle-fill"></i></span>
+                            }
+                            @if (c.Mine)
+                            {
+                                <span class="badge bg-primary badge-mine">moje</span>
+                            }
+                        </div>
+                        <div class="card-body p-2">
+                            <div class="fw-semibold small text-truncate" title="@c.NamePl">@c.NamePl</div>
+                            <div class="text-muted text-truncate" style="font-size:.7rem">@(c.AuthorName ?? "Trener platformy")@(c.Copies > 0 ? $" · {c.Copies}× skopiowane" : "")</div>
+                            <div class="d-flex flex-wrap gap-1 mt-1">
+                                @foreach (var m in Muscles.Parse(c.PrimaryMuscles).Take(3))
+                                {
+                                    <span class="badge bg-light text-dark border">@Muscles.Label(m)</span>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            }
+        </div>
+    }
+}
+else if (_loading)
 {
     <div class="text-center text-muted py-5"><div class="spinner-border" role="status"></div></div>
 }
@@ -118,7 +196,7 @@ else
                         }
                         @if (e.IsMine)
                         {
-                            <span class="badge bg-primary badge-mine">moje</span>
+                            <span class="badge bg-primary badge-mine">@(_sharedIds.Contains(e.Id) ? "moje · w Społeczności" : "moje")</span>
                         }
                     </div>
                     <div class="card-body p-2">
@@ -191,7 +269,7 @@ else
                             }
                             else if (_detail.VideoType == ExerciseVideoType.Bunny && !string.IsNullOrWhiteSpace(_detail.VideoRef))
                             {
-                                <div class="alert alert-light border small mt-2 mb-0"><i class="bi bi-play-circle me-1"></i>Wideo Bunny: <code>@_detail.VideoRef</code></div>
+                                <div class="mt-2"><VideoPlayer BunnyVideoId="@_detail.VideoRef" ShowPlaceholder="false" /></div>
                             }
                             @if (_detail.VideoType == ExerciseVideoType.None && !_detail.IsMine)
                             {
@@ -302,8 +380,43 @@ else
                 </div>
                 @if (_detail.IsMine)
                 {
+                    @if (_shareOpen)
+                    {
+                        <div class="share-consent">
+                            <div class="fw-semibold mb-1"><i class="bi bi-people me-1"></i>Udostępnij „@_detail.NamePl” społeczności</div>
+                            <p class="small text-muted mb-2">Inni trenerzy platformy zobaczą to ćwiczenie (nazwę, opis, partie, zdjęcia i film) i będą mogli skopiować je do swojego katalogu.
+                                Twoje wskazówki dla klientów, plany i dane klientów nie są udostępniane. Wycofasz je w każdej chwili.</p>
+                            <label class="form-check small mb-1">
+                                <input type="checkbox" class="form-check-input" @bind="_shareConsent" />
+                                <span class="form-check-label">Zgadzam się na udostępnienie tego ćwiczenia innym trenerom platformy i mam prawa do zdjęć oraz filmu.</span>
+                            </label>
+                            <label class="form-check small mb-2">
+                                <input type="checkbox" class="form-check-input" @bind="_shareAuthor" />
+                                <span class="form-check-label">Pokaż nazwę mojego studia jako autora</span>
+                            </label>
+                            @if (_shareError is not null) { <div class="alert alert-danger py-1 small mb-2">@_shareError</div> }
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-primary" disabled="@(!_shareConsent || _shareBusy)" @onclick="ShareDetail">
+                                    @if (_shareBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }Udostępnij
+                                </button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => _shareOpen = false">Anuluj</button>
+                            </div>
+                        </div>
+                    }
                     <div class="modal-footer">
                         <button class="btn btn-sm btn-outline-danger me-auto" @onclick="() => DeleteDetail()"><i class="bi bi-trash me-1"></i>Usuń</button>
+                        @* Kopii ze Społeczności nie udostępniamy dalej jako własnych. *@
+                        @if (VideoPlan && CommunityAvailable && _detail.Attribution?.StartsWith("Społeczność") != true)
+                        {
+                            @if (_sharedIds.Contains(_detail.Id))
+                            {
+                                <button class="btn btn-sm btn-outline-secondary" disabled="@_shareBusy" @onclick="UnshareDetail"><i class="bi bi-people me-1"></i>Wycofaj ze Społeczności</button>
+                            }
+                            else if (!_shareOpen)
+                            {
+                                <button class="btn btn-sm btn-outline-success" @onclick="() => { _shareOpen = true; _shareConsent = false; _shareError = null; }"><i class="bi bi-people me-1"></i>Udostępnij społeczności</button>
+                            }
+                        }
                         <button class="btn btn-sm btn-outline-primary" @onclick="() => OpenEditFromDetail()"><i class="bi bi-pencil me-1"></i>Edytuj</button>
                     </div>
                 }
@@ -320,7 +433,7 @@ else
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@(_form.Id is null ? "Nowe ćwiczenie" : "Edytuj ćwiczenie")</h5>
-                    <button type="button" class="btn-close" @onclick="() => _showEdit = false"></button>
+                    <button type="button" class="btn-close" @onclick="CancelEdit"></button>
                 </div>
                 <div class="modal-body">
                     @if (!string.IsNullOrEmpty(_editError))
@@ -411,23 +524,52 @@ else
                             <label class="form-label">Zdjęcia (adresy URL, po jednym w wierszu)</label>
                             <textarea class="form-control" rows="2" @bind="_imagesText" placeholder="https://…/1.jpg"></textarea>
                         </div>
-                        <div class="col-6 col-md-4">
-                            <label class="form-label">Wideo</label>
+                        <div class="col-12 col-md-4">
+                            <label class="form-label">Film</label>
                             <select class="form-select" @bind="_form.VideoType">
                                 <option value="@ExerciseVideoType.None">brak</option>
-                                <option value="@ExerciseVideoType.YouTube">YouTube</option>
-                                <option value="@ExerciseVideoType.Bunny">Bunny</option>
+                                <option value="@ExerciseVideoType.YouTube">YouTube (link)</option>
+                                @if (VideoPlan || _form.VideoType == ExerciseVideoType.Bunny)
+                                {
+                                    <option value="@ExerciseVideoType.Bunny">Wgrany film</option>
+                                }
                                 <option value="@ExerciseVideoType.Url">Plik wideo (link)</option>
                             </select>
                         </div>
-                        <div class="col-6 col-md-8">
-                            <label class="form-label">Link/ID wideo</label>
-                            <input class="form-control" @bind="_form.VideoRef" placeholder="link YouTube, ID Bunny albo link do pliku .mp4" />
+                        <div class="col-12 col-md-8">
+                            @if (_form.VideoType == ExerciseVideoType.Bunny)
+                            {
+                                <label class="form-label">Plik</label>
+                                @if (!string.IsNullOrWhiteSpace(_form.VideoRef))
+                                {
+                                    <div class="d-flex align-items-center gap-2 mb-2 small"><i class="bi bi-camera-video text-primary"></i><span class="flex-grow-1">Film wgrany na platformę</span></div>
+                                }
+                                @if (_videoStatus is { Enabled: true })
+                                {
+                                    <InputFile OnChange="UploadExerciseVideo" accept="video/*" class="form-control form-control-sm" disabled="@_uploading" />
+                                    <div class="form-text">Folder „ćwiczenia” · wolne miejsce: @(_videoStatus.FreeBytes == long.MaxValue ? "bez limitu" : $"{_videoStatus.FreeBytes / (1024.0 * 1024 * 1024):0.##} GB")</div>
+                                    @if (_uploading)
+                                    {
+                                        <div class="progress mt-1" style="height:6px"><div class="progress-bar progress-bar-striped progress-bar-animated" style="width:@(UploadPct)%"></div></div>
+                                        <div class="form-text">Wgrywam… @UploadPct% — nie zamykaj okna.</div>
+                                    }
+                                }
+                                else if (_videoStatus is not null)
+                                {
+                                    <div class="form-text text-warning">@_videoStatus.Reason</div>
+                                }
+                                @if (_uploadMsg is not null) { <div class="small mt-1 @(_uploadError ? "text-danger" : "text-success")">@_uploadMsg</div> }
+                            }
+                            else if (_form.VideoType != ExerciseVideoType.None)
+                            {
+                                <label class="form-label">Link do filmu</label>
+                                <input class="form-control" @bind="_form.VideoRef" placeholder="@(_form.VideoType == ExerciseVideoType.YouTube ? "https://youtube.com/watch?v=…" : "https://…/film.mp4")" />
+                            }
                         </div>
                     </div>
                 </div>
                 <div class="modal-footer">
-                    <button class="btn btn-outline-secondary" @onclick="() => _showEdit = false">Anuluj</button>
+                    <button class="btn btn-outline-secondary" @onclick="CancelEdit">Anuluj</button>
                     <button class="btn btn-primary" @onclick="Save" disabled="@_saving">
                         @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
                         Zapisz
@@ -438,7 +580,69 @@ else
     </div>
 }
 
+@* ---------- Ćwiczenie ze Społeczności ---------- *@
+@if (_communityDetail is { } cd)
+{
+    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.5)" @onclick="() => _communityDetail = null">
+        <div class="modal-dialog modal-dialog-centered modal-lg" @onclick:stopPropagation="true">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title">@cd.NamePl
+                        <small class="d-block text-muted fw-normal" style="font-size:.8rem"><i class="bi bi-people me-1"></i>@(cd.AuthorName ?? "Trener platformy")</small>
+                    </h5>
+                    <button type="button" class="btn-close" @onclick="() => _communityDetail = null" aria-label="Zamknij"></button>
+                </div>
+                <div class="modal-body">
+                    <div class="row g-3">
+                        <div class="col-12 col-md-5">
+                            @if (cd.Thumbnail is { } img)
+                            {
+                                <img src="@img" class="img-fluid rounded border mb-2" alt="@cd.NamePl" />
+                            }
+                            @if (cd.VideoType == "Bunny")
+                            {
+                                <VideoPlayer BunnyVideoId="@cd.VideoRef" ShowPlaceholder="false" />
+                            }
+                            else if (cd.VideoType == "YouTube" && YtEmbed(cd.VideoRef) is { } cyt)
+                            {
+                                <div class="ratio ratio-16x9"><iframe src="@cyt" title="Wideo" allowfullscreen loading="lazy"></iframe></div>
+                            }
+                        </div>
+                        <div class="col-12 col-md-7">
+                            <div class="d-flex flex-wrap gap-1 mb-2">
+                                @foreach (var m in Muscles.Parse(cd.PrimaryMuscles))
+                                {
+                                    <span class="badge bg-primary">@Muscles.Label(m)</span>
+                                }
+                                @if (!string.IsNullOrWhiteSpace(cd.Equipment)) { <span class="badge bg-secondary">@cd.Equipment</span> }
+                            </div>
+                            <div class="small" style="white-space:pre-line">@(cd.Description ?? "Brak opisu.")</div>
+                        </div>
+                    </div>
+                    @if (_copyMsg is not null) { <div class="alert alert-success py-2 small mt-3 mb-0">@_copyMsg</div> }
+                </div>
+                <div class="modal-footer">
+                    @if (cd.Mine)
+                    {
+                        <span class="small text-muted me-auto">To Twoje ćwiczenie.</span>
+                    }
+                    else
+                    {
+                        <span class="small text-muted me-auto">Kopia trafi do „Moje” — możesz ją potem zmieniać. Film zostaje u autora.</span>
+                        <button class="btn btn-sm btn-primary" disabled="@_copyBusy" @onclick="() => CopyFromCommunity(cd)">
+                            @if (_copyBusy) { <span class="spinner-border spinner-border-sm me-1"></span> }<i class="bi bi-plus-lg me-1"></i>Dodaj do moich
+                        </button>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
 <style>
+    .community-gate { display:flex; gap:1rem; align-items:flex-start; padding:1.25rem; border-radius:16px; border:1.5px dashed var(--bs-border-color); background:var(--bs-tertiary-bg); }
+    .community-gate > i { font-size:2rem; color:var(--c-primary); }
+    .share-consent { margin:0 1rem 0; padding:.85rem 1rem; border-radius:12px; background:color-mix(in srgb, var(--c-primary) 6%, var(--bs-body-bg)); border:1px solid color-mix(in srgb, var(--c-primary) 25%, var(--bs-border-color)); }
     .exercise-card { transition: box-shadow .15s, transform .15s; }
     .exercise-card:hover { box-shadow: 0 .5rem 1rem rgba(0,0,0,.12); transform: translateY(-2px); }
     .exercise-thumb { position: relative; aspect-ratio: 4/3; background: var(--bs-tertiary-bg, #f1f3f5); overflow: hidden; border-top-left-radius: var(--bs-card-inner-border-radius); border-top-right-radius: var(--bs-card-inner-border-radius); }
@@ -486,6 +690,145 @@ else
         }
         finally { _ownBusy = false; }
     }
+    // ── Społeczność, wgrywanie filmów ──
+    private bool _community;
+    private bool _communityLoading;
+    private PTScheduler.Web.Services.CommunityExerciseClient.Page _communityPage = new(false, [], []);
+    private PTScheduler.Web.Services.CommunityExerciseClient.Item? _communityDetail;
+    private HashSet<int> _sharedIds = [];
+    private bool _copyBusy;
+    private string? _copyMsg;
+    private bool _shareOpen;
+    private bool _shareConsent;
+    private bool _shareAuthor = true;
+    private bool _shareBusy;
+    private string? _shareError;
+    private VideoHubStatus? _videoStatus;
+    private bool _uploading;
+    private bool _uploadError;
+    private string? _uploadMsg;
+    private long _uploadTotal, _uploadDone;
+    private string? _uploadedUnsaved;
+    private int UploadPct => _uploadTotal > 0 ? (int)(100 * _uploadDone / _uploadTotal) : 0;
+
+    /// <summary>Wgrywanie filmów i Społeczność — tylko w pakiecie z wideo (Bunny).</summary>
+    private bool VideoPlan => Entitlements.Current.VideoProvider == "bunny" && Entitlements.Current.MaxVideoStorageGB > 0;
+    private static bool CommunityAvailable => PTScheduler.Web.Services.CommunityExerciseClient.Available;
+
+    private async Task OpenCommunity()
+    {
+        _community = true;
+        await LoadCommunityAsync();
+    }
+
+    private async Task LoadCommunityAsync()
+    {
+        if (!VideoPlan) return;
+        _communityLoading = true;
+        _communityPage = await Community.SearchAsync(_filter.Search, _filter.Muscle is { } m ? Muscles.ToCsv([m]) : null);
+        _sharedIds = _communityPage.Shared.ToHashSet();
+        _communityLoading = false;
+    }
+
+    private async Task CopyFromCommunity(PTScheduler.Web.Services.CommunityExerciseClient.Item item)
+    {
+        _copyBusy = true;
+        _copyMsg = null;
+        try
+        {
+            var c = await Community.CopyAsync(item.Id);
+            if (c is null) { _copyMsg = "Nie udało się skopiować — spróbuj ponownie."; return; }
+            var dto = new SaveExerciseDto
+            {
+                NamePl = c.NamePl,
+                NameEn = c.NameEn,
+                DescriptionPl = c.Description,
+                PrimaryMuscles = Muscles.Parse(c.PrimaryMuscles).ToList(),
+                SecondaryMuscles = Muscles.Parse(c.SecondaryMuscles).ToList(),
+                Category = Enum.TryParse<ExerciseCategory>(c.Category, out var cat) ? cat : ExerciseCategory.Strength,
+                Level = Enum.TryParse<ExerciseLevel>(c.Level, out var lvl) ? lvl : ExerciseLevel.Beginner,
+                Equipment = c.Equipment,
+                ImageUrls = c.ImageUrls.Split(',', StringSplitOptions.RemoveEmptyEntries).ToList(),
+                VideoType = Enum.TryParse<ExerciseVideoType>(c.VideoType, out var vt) ? vt : ExerciseVideoType.None,
+                VideoRef = c.VideoRef,
+                Tracking = Enum.TryParse<ExerciseTracking>(c.Tracking, out var tr) ? tr : ExerciseTracking.WeightReps,
+                Attribution = c.AuthorName is { } a ? $"Społeczność: {a}" : "Społeczność trenerów"
+            };
+            await Catalog.CreateAsync(_userId, dto);
+            _copyMsg = $"Dodano „{c.NamePl}” do Twoich ćwiczeń.";
+        }
+        catch (Exception ex)
+        {
+            LoggerFactory.CreateLogger("Exercises").LogError(ex, "Błąd kopiowania ze Społeczności.");
+            _copyMsg = "Nie udało się skopiować — spróbuj ponownie.";
+        }
+        finally { _copyBusy = false; }
+    }
+
+    private async Task ShareDetail()
+    {
+        if (_detail is null || !_shareConsent) return;
+        _shareBusy = true;
+        _shareError = null;
+        var images = _detail.ImageUrls.Select(u => Uri.TryCreate(u, UriKind.Absolute, out var abs) ? abs.ToString() : new Uri(new Uri(Nav.BaseUri), u.TrimStart('/')).ToString()).ToList();
+        var (ok, err) = await Community.ShareAsync(new(_detail.Id, _detail.NamePl, _detail.NameEn,
+            string.IsNullOrWhiteSpace(_detail.DescriptionPl) ? _detail.TrainerDescription : _detail.DescriptionPl,
+            _detail.PrimaryMuscles, _detail.SecondaryMuscles, _detail.Category.ToString(), _detail.Level.ToString(), _detail.Equipment,
+            _detail.Force, _detail.Mechanic, _detail.Tracking.ToString(), images, _detail.VideoType.ToString(), _detail.VideoRef, _shareAuthor, true));
+        _shareBusy = false;
+        if (!ok) { _shareError = err; return; }
+        _sharedIds.Add(_detail.Id);
+        _shareOpen = false;
+    }
+
+    private async Task UnshareDetail()
+    {
+        if (_detail is null) return;
+        _shareBusy = true;
+        if (await Community.UnshareAsync(_detail.Id)) _sharedIds.Remove(_detail.Id);
+        _shareBusy = false;
+    }
+
+    private async Task UploadExerciseVideo(InputFileChangeEventArgs e)
+    {
+        _uploadMsg = null; _uploadError = false;
+        var f = e.File;
+        const long max = 4L * 1024 * 1024 * 1024;
+        if (f.Size > max) { _uploadMsg = "Plik jest za duży — najwięcej 4 GB."; _uploadError = true; return; }
+        if (_videoStatus is { } v && v.FreeBytes < f.Size) { _uploadMsg = "Brak miejsca na platformie — dokup miejsce w Sklepie albo usuń niepotrzebne filmy."; _uploadError = true; return; }
+        _uploading = true; _uploadTotal = f.Size; _uploadDone = 0;
+        try
+        {
+            await using var stream = f.OpenReadStream(max);
+            var progress = new Progress<long>(done => { _uploadDone = done; _ = InvokeAsync(StateHasChanged); });
+            var title = string.IsNullOrWhiteSpace(_form.NamePl) ? Path.GetFileNameWithoutExtension(f.Name) : _form.NamePl;
+            var (ok, videoRef, err) = await Bunny.UploadAsync(title, VideoKinds.Exercises, stream, f.Size, progress);
+            if (!ok || videoRef is null) { _uploadMsg = err ?? "Przesyłanie nie powiodło się."; _uploadError = true; return; }
+            // Wcześniej wgrany, niezapisany film zwalnia miejsce.
+            if (_uploadedUnsaved is not null) await Bunny.DeleteAsync(_uploadedUnsaved);
+            _uploadedUnsaved = videoRef;
+            _form.VideoRef = videoRef;
+            _uploadMsg = "Wgrano — film będzie gotowy za kilka minut. Zapisz ćwiczenie.";
+            _videoStatus = await Bunny.GetStatusAsync(refresh: true);
+        }
+        catch (Exception ex) { _uploadMsg = ex.Message; _uploadError = true; }
+        finally { _uploading = false; }
+    }
+
+    private async Task CancelEdit()
+    {
+        // Film wgrany do ćwiczenia, którego nie zapisano, nie może zajmować opłaconego miejsca.
+        if (_uploadedUnsaved is not null) { await Bunny.DeleteAsync(_uploadedUnsaved); _uploadedUnsaved = null; }
+        _showEdit = false;
+    }
+
+    private async Task EnsureVideoStatusAsync()
+    {
+        _uploadMsg = null;
+        _uploadedUnsaved = null;
+        if (VideoPlan && _videoStatus is null) _videoStatus = await Bunny.GetStatusAsync();
+    }
+
     private readonly ExerciseFilterDto _filter = new();
     private List<ExerciseListItemDto> _items = [];
     private List<string> _equipment = [];
@@ -516,6 +859,8 @@ else
         _userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? string.Empty;
         _equipment = await Catalog.GetEquipmentOptionsAsync(_userId);
         await LoadAsync();
+        // Znaczek „w Społeczności” przy własnych ćwiczeniach.
+        if (VideoPlan && CommunityAvailable) _sharedIds = (await Community.SearchAsync(null, null)).Shared.ToHashSet();
     }
 
     private async Task LoadAsync()
@@ -530,9 +875,9 @@ else
         _loading = false;
     }
 
-    private async Task SetScope(ExerciseCatalogScope s) { _filter.Scope = s; await LoadAsync(); }
-    private async Task OnSearchInput(ChangeEventArgs e) { _filter.Search = e.Value?.ToString(); await LoadAsync(); }
-    private async Task OnMuscleChange(ChangeEventArgs e) { _filter.Muscle = Enum.TryParse<MuscleGroup>(e.Value?.ToString(), out var m) ? m : null; await LoadAsync(); }
+    private async Task SetScope(ExerciseCatalogScope s) { _community = false; _filter.Scope = s; await LoadAsync(); }
+    private async Task OnSearchInput(ChangeEventArgs e) { _filter.Search = e.Value?.ToString(); await (_community ? LoadCommunityAsync() : LoadAsync()); }
+    private async Task OnMuscleChange(ChangeEventArgs e) { _filter.Muscle = Enum.TryParse<MuscleGroup>(e.Value?.ToString(), out var m) ? m : null; await (_community ? LoadCommunityAsync() : LoadAsync()); }
     private async Task OnCategoryChange(ChangeEventArgs e) { _filter.Category = Enum.TryParse<ExerciseCategory>(e.Value?.ToString(), out var c) ? c : null; await LoadAsync(); }
     private async Task OnLevelChange(ChangeEventArgs e) { _filter.Level = Enum.TryParse<ExerciseLevel>(e.Value?.ToString(), out var l) ? l : null; await LoadAsync(); }
     private async Task OnEquipmentChange(ChangeEventArgs e) { var v = e.Value?.ToString(); _filter.Equipment = string.IsNullOrEmpty(v) ? null : v; await LoadAsync(); }
@@ -566,17 +911,19 @@ else
         if (card is not null) card.IsFavorite = _detail.IsFavorite;
     }
 
-    private void OpenCreate()
+    private async Task OpenCreate()
     {
         _form = new SaveExerciseDto();
         _imagesText = string.Empty;
         _editError = null;
+        await EnsureVideoStatusAsync();
         _showEdit = true;
     }
 
-    private void OpenEditFromDetail()
+    private async Task OpenEditFromDetail()
     {
         if (_detail is null) return;
+        await EnsureVideoStatusAsync();
         _form = new SaveExerciseDto
         {
             Id = _detail.Id,
@@ -605,9 +952,9 @@ else
         Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Scheme == Uri.UriSchemeHttps;
 
     /// <summary>Ćwiczenie z katalogu jako własne — np. żeby dodać do niego film z YouTube.</summary>
-    private void CopyDetailAsMine()
+    private async Task CopyDetailAsMine()
     {
-        OpenEditFromDetail();
+        await OpenEditFromDetail();
         _form.Id = null;
     }
 
@@ -632,8 +979,13 @@ else
         _saving = true;
         try
         {
+            var previous = _form.Id is int id ? (await Catalog.GetAsync(_userId, id))?.VideoRef : null;
+            if (_form.VideoType != ExerciseVideoType.Bunny && _uploadedUnsaved is not null) { await Bunny.DeleteAsync(_uploadedUnsaved); _form.VideoRef = null; }
             if (_form.Id is null) await Catalog.CreateAsync(_userId, _form);
             else await Catalog.UpdateAsync(_userId, _form);
+            // Zastąpiony film z platformy zwalnia miejsce (Portal usuwa tylko filmy tej aplikacji).
+            if (previous is not null && previous != _form.VideoRef && previous.Contains('/')) await Bunny.DeleteAsync(previous);
+            _uploadedUnsaved = null;
             _showEdit = false;
             await LoadAsync();
         }
@@ -651,7 +1003,11 @@ else
         if (!await JS.InvokeAsync<bool>("confirm", $"Usunąć ćwiczenie „{_detail.NamePl}\"?")) return;
         try
         {
-            await Catalog.DeleteAsync(_userId, _detail.Id);
+            var video = _detail.VideoType == ExerciseVideoType.Bunny ? _detail.VideoRef : null;
+            var id = _detail.Id;
+            await Catalog.DeleteAsync(_userId, id);
+            if (_sharedIds.Contains(id)) { await Community.UnshareAsync(id); _sharedIds.Remove(id); }
+            if (video is not null && video.Contains('/')) await Bunny.DeleteAsync(video);
             CloseDetail();
             await LoadAsync();
         }

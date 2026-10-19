@@ -7,7 +7,7 @@ using PTScheduler.Infrastructure.Data;
 
 namespace PTScheduler.Infrastructure.Services;
 
-public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IWebRootPathProvider webRoot) : ICourseService
+public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IWebRootPathProvider webRoot, IBunnyService bunny) : ICourseService
 {
     public async Task<List<CourseDto>> GetCoursesAsync(bool includeUnpublished = true)
     {
@@ -97,8 +97,36 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IW
         await using var db = dbFactory.CreateDbContext();
         var c = await db.Courses.FirstOrDefaultAsync(x => x.Id == id);
         if (c is null) return;
+        var videos = await db.Lessons.Where(l => l.Module.CourseId == id && l.BunnyVideoId != null).Select(l => l.BunnyVideoId!).ToListAsync();
         db.Courses.Remove(c);
         await db.SaveChangesAsync();
+        await DeleteVideosAsync(videos);
+    }
+
+    /// <summary>
+    /// RODO — usuwa wszystkie kursy (moduły, lekcje, quizy, zapisy, okładki) i ich filmy z platformy.
+    /// Zwraca liczbę usuniętych kursów.
+    /// </summary>
+    public async Task<int> DeleteAllCoursesAsync()
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var videos = await db.Lessons.Where(l => l.BunnyVideoId != null).Select(l => l.BunnyVideoId!).ToListAsync();
+        var count = await db.Courses.CountAsync();
+        db.CourseEnrollments.RemoveRange(db.CourseEnrollments);
+        db.Courses.RemoveRange(db.Courses);
+        await db.SaveChangesAsync();
+        var dir = Path.Combine(webRoot.WebRootPath, "branding", "courses");
+        if (Directory.Exists(dir))
+            foreach (var f in Directory.GetFiles(dir)) File.Delete(f);
+        await DeleteVideosAsync(videos);
+        return count;
+    }
+
+    /// <summary>Filmy usuniętych lekcji znikają z platformy, żeby zwolnić opłacone miejsce (tylko filmy z centralnej biblioteki).</summary>
+    private async Task DeleteVideosAsync(IEnumerable<string> videoRefs)
+    {
+        foreach (var r in videoRefs.Where(r => r.Contains('/')).Distinct())
+            await bunny.DeleteAsync(r);
     }
 
     public async Task<List<CourseEnrollmentDto>> GetEnrollmentsAsync(int courseId)
@@ -261,14 +289,6 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IW
         await db.SaveChangesAsync();
     }
 
-    public async Task<long> GetVideoStorageUsedBytesAsync()
-    {
-        await using var db = dbFactory.CreateDbContext();
-        return await db.Lessons
-            .Where(l => l.BunnyVideoSizeBytes != null)
-            .SumAsync(l => l.BunnyVideoSizeBytes!.Value);
-    }
-
     // ---- Course content: modules + lessons ----
 
     public async Task<List<ModuleDto>> GetContentAsync(int courseId)
@@ -334,8 +354,10 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IW
         await using var db = dbFactory.CreateDbContext();
         var m = await db.CourseModules.FirstOrDefaultAsync(x => x.Id == moduleId);
         if (m is null) return;
+        var videos = await db.Lessons.Where(l => l.ModuleId == moduleId && l.BunnyVideoId != null).Select(l => l.BunnyVideoId!).ToListAsync();
         db.CourseModules.Remove(m);
         await db.SaveChangesAsync();
+        await DeleteVideosAsync(videos);
     }
 
     public async Task MoveModuleAsync(int moduleId, int direction)
@@ -392,8 +414,10 @@ public class CourseService(IDbContextFactory<ApplicationDbContext> dbFactory, IW
         await using var db = dbFactory.CreateDbContext();
         var l = await db.Lessons.FirstOrDefaultAsync(x => x.Id == lessonId);
         if (l is null) return;
+        var video = l.BunnyVideoId;
         db.Lessons.Remove(l);
         await db.SaveChangesAsync();
+        if (video is not null) await DeleteVideosAsync([video]);
     }
 
     public async Task MoveLessonAsync(int lessonId, int direction)

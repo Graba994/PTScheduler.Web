@@ -2,7 +2,7 @@
 @layout AdminLayout
 @attribute [Authorize(Roles = "Admin")]
 @inject SiteSettingsService Settings
-@inject BunnyPlatformService Bunny
+@inject VideoHubService VideoHub
 @inject IDbContextFactory<PortalDbContext> DbFactory
 @inject GoogleOAuthBroker Google
 @inject NavigationManager Nav
@@ -52,27 +52,36 @@ else
         <div class="card-body">
             <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm"><i class="bi bi-camera-video"></i></span>Wideo (Bunny Stream)</h2>
             <p class="small text-muted">
-                Podaj klucz <strong>konta</strong> Bunny. Portal sam zakłada każdemu trenerowi osobną bibliotekę wideo przy pierwszym użyciu —
-                trener dostaje tylko klucz swojej biblioteki i nie widzi filmów innych.
+                Jedna biblioteka Bunny Stream dla wszystkich trenerów. Portal zakłada w niej każdemu trenerowi foldery (kolekcje)
+                <code>slug · kursy</code> i <code>slug · cwiczenia</code>. Klucz zostaje w Portalu — aplikacja trenera dostaje tylko jednorazowy podpis
+                przesłania jednego filmu, a usunąć może wyłącznie swoje filmy. Limit miejsca = pakiet z wideo + dodatki + dokupione GB.
             </p>
             <div class="row g-3 align-items-end">
-                <div class="col-md-8">
-                    <label class="form-label small fw-semibold" for="bunnyKey">Klucz konta (Account → API key)</label>
-                    <input id="bunnyKey" type="password" class="form-control font-monospace" @bind="_bunnyKey" placeholder="@(_bunnyKeySet ? "Zapisany — wpisz nowy, aby zmienić" : "")" autocomplete="off" />
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold" for="bunnyLib">Library ID</label>
+                    <input id="bunnyLib" class="form-control font-monospace" @bind="_bunnyLibrary" placeholder="np. 123456" autocomplete="off" />
                 </div>
-                <div class="col-md-4 d-flex gap-2">
-                    <button class="btn btn-primary btn-sm" @onclick="SaveBunnyAsync">Zapisz</button>
-                    <button class="btn btn-outline-secondary btn-sm" @onclick="TestBunnyAsync" disabled="@(!_bunnyKeySet && string.IsNullOrWhiteSpace(_bunnyKey))">Testuj</button>
+                <div class="col-md-5">
+                    <label class="form-label small fw-semibold" for="bunnyKey">Klucz API biblioteki</label>
+                    <input id="bunnyKey" type="password" class="form-control font-monospace" @bind="_bunnyKey" placeholder="@(_bunnyKeySet ? "Zapisany — wpisz nowy, aby zmienić" : "Stream → biblioteka → API")" autocomplete="off" />
+                </div>
+                <div class="col-md-4">
+                    <label class="form-label small fw-semibold" for="bunnyCdn">Host CDN <span class="fw-normal text-muted">(opcjonalnie)</span></label>
+                    <input id="bunnyCdn" class="form-control font-monospace" @bind="_bunnyCdn" placeholder="vz-xxxx.b-cdn.net" autocomplete="off" />
                 </div>
             </div>
+            <div class="d-flex flex-wrap gap-2 mt-3">
+                <button class="btn btn-primary btn-sm" @onclick="SaveBunnyAsync">Zapisz i sprawdź</button>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="TestBunnyAsync" disabled="@(string.IsNullOrWhiteSpace(_bunnyLibrary) || (!_bunnyKeySet && string.IsNullOrWhiteSpace(_bunnyKey)))">Testuj</button>
+            </div>
             <div class="small text-muted mt-3">
-                Biblioteki trenerów: <strong>@_librariesCount</strong> z @_tenantsCount.
-                @if (_legacyShared)
+                Filmy trenerów: <strong>@_videosCount</strong> · zajęte <strong>@VideoHubService.Gb(_videosBytes)</strong> · trenerzy z filmami: <strong>@_videoTenants</strong> z @_tenantsCount.
+                @if (_librariesCount > 0)
                 {
-                    <div class="alert alert-warning py-2 mt-2 mb-0">
-                        <i class="bi bi-exclamation-triangle me-1"></i>
-                        Jest ustawiona stara <em>wspólna</em> biblioteka — nie jest już udostępniana trenerom (każdy widziałby filmy pozostałych).
-                        Podaj klucz konta, żeby wideo działało.
+                    <div class="alert alert-light border py-2 mt-2 mb-0">
+                        <i class="bi bi-info-circle me-1"></i>
+                        @_librariesCount trenerów ma jeszcze starą, osobną bibliotekę — ich dawne filmy nadal się odtwarzają, nowe trafiają już do centralnej.
+                        Stara biblioteka znika przy „Usuń wszystkie dane wideo” u trenera albo przy usunięciu instancji.
                     </div>
                 }
             </div>
@@ -152,9 +161,11 @@ else
     private string _smsSender = "";
 
     private string _bunnyKey = "";
+    private string _bunnyLibrary = "";
+    private string _bunnyCdn = "";
     private bool _bunnyKeySet;
-    private bool _legacyShared;
-    private int _librariesCount, _tenantsCount;
+    private int _librariesCount, _tenantsCount, _videosCount, _videoTenants;
+    private long _videosBytes;
 
     private bool _shareSmtp;
     private bool _smtpConfigured;
@@ -172,14 +183,15 @@ else
     {
         var s = await Settings.GetAllAsync(
             SiteSettingsService.Keys.PlatformSmsApiToken, SiteSettingsService.Keys.PlatformSmsSenderName,
-            SiteSettingsService.Keys.PlatformBunnyAccountKey, SiteSettingsService.Keys.PlatformBunnyApiKey,
+            SiteSettingsService.Keys.PlatformBunnyLibraryId, SiteSettingsService.Keys.PlatformBunnyApiKey, SiteSettingsService.Keys.PlatformBunnyCdnHostname,
             SiteSettingsService.Keys.ShareSmtpWithTenants, SiteSettingsService.Keys.SmtpHost,
             SiteSettingsService.Keys.PlatformGoogleClientId, SiteSettingsService.Keys.PlatformGoogleClientSecret,
             SiteSettingsService.Keys.PlatformGoogleRedirectUri);
         _smsTokenSet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformSmsApiToken]);
         _smsSender = s[SiteSettingsService.Keys.PlatformSmsSenderName];
-        _bunnyKeySet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformBunnyAccountKey]);
-        _legacyShared = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformBunnyApiKey]) && !_bunnyKeySet;
+        _bunnyKeySet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformBunnyApiKey]);
+        _bunnyLibrary = s[SiteSettingsService.Keys.PlatformBunnyLibraryId];
+        _bunnyCdn = s[SiteSettingsService.Keys.PlatformBunnyCdnHostname];
         _shareSmtp = s[SiteSettingsService.Keys.ShareSmtpWithTenants] != "false";
         _smtpConfigured = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.SmtpHost]);
         _googleId = s[SiteSettingsService.Keys.PlatformGoogleClientId];
@@ -190,6 +202,9 @@ else
         await using var db = await DbFactory.CreateDbContextAsync();
         _tenantsCount = await db.Tenants.CountAsync(t => t.Status != TenantStatus.Destroyed);
         _librariesCount = await db.Tenants.CountAsync(t => t.BunnyLibraryId != null);
+        _videosCount = await db.TenantVideos.CountAsync();
+        _videosBytes = await db.TenantVideos.SumAsync(v => (long?)v.SizeBytes) ?? 0;
+        _videoTenants = await db.TenantVideos.Select(v => v.TenantId).Distinct().CountAsync();
         _googleGrants = await db.GoogleCalendarGrants.CountAsync();
         _loading = false;
     }
@@ -206,21 +221,22 @@ else
 
     private async Task SaveBunnyAsync()
     {
-        if (string.IsNullOrWhiteSpace(_bunnyKey)) { Show("Wpisz klucz konta Bunny.", false); return; }
-        var (ok, msg) = await Bunny.TestAccountKeyAsync(_bunnyKey.Trim());
+        if (string.IsNullOrWhiteSpace(_bunnyLibrary)) { Show("Wpisz Library ID biblioteki Bunny Stream.", false); return; }
+        var key = string.IsNullOrWhiteSpace(_bunnyKey) ? (await VideoHub.LibraryAsync())?.ApiKey : _bunnyKey.Trim();
+        if (string.IsNullOrWhiteSpace(key)) { Show("Wpisz klucz API biblioteki.", false); return; }
+        var (ok, msg) = await VideoHub.TestAsync(_bunnyLibrary, key);
         if (!ok) { Show(msg, false); return; }
-        await Settings.SetAsync(SiteSettingsService.Keys.PlatformBunnyAccountKey, _bunnyKey.Trim());
+        await VideoHub.SaveLibraryAsync(_bunnyLibrary, string.IsNullOrWhiteSpace(_bunnyKey) ? null : _bunnyKey, _bunnyCdn);
         _bunnyKey = "";
-        Show("Zapisano klucz konta Bunny — biblioteki trenerów będą zakładane automatycznie.", true);
+        Show("Zapisano bibliotekę — foldery trenerów powstaną przy pierwszym filmie.", true);
         await LoadAsync();
     }
 
     private async Task TestBunnyAsync()
     {
-        var key = string.IsNullOrWhiteSpace(_bunnyKey)
-            ? await Settings.GetAsync(SiteSettingsService.Keys.PlatformBunnyAccountKey)
-            : _bunnyKey.Trim();
-        var (ok, msg) = await Bunny.TestAccountKeyAsync(key);
+        var key = string.IsNullOrWhiteSpace(_bunnyKey) ? (await VideoHub.LibraryAsync())?.ApiKey : _bunnyKey.Trim();
+        if (string.IsNullOrWhiteSpace(key)) { Show("Wpisz klucz API biblioteki.", false); return; }
+        var (ok, msg) = await VideoHub.TestAsync(_bunnyLibrary, key);
         Show(msg, ok);
     }
 

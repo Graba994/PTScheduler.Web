@@ -199,7 +199,7 @@ public class PlanGeneratorService(IDbContextFactory<ApplicationDbContext> dbFact
             ["wiek"] = profile?.Age is int a ? $"{a / 10 * 10}–{a / 10 * 10 + 9}" : null,
             ["dni_w_tygodniu"] = o.DaysPerWeek,
             ["minut_na_trening"] = o.Minutes,
-            ["sprzet"] = o.Kit switch { G.Kit.Gym => "siłownia", G.Kit.Dumbbells => "hantle / dom", _ => "masa ciała" },
+            ["sprzet"] = o.Kit switch { G.Kit.Gym => "siłownia", G.Kit.Dumbbells => "hantle / dom", _ => "własnym ciężarem ciała (bez sprzętu)" },
             ["treningi_tygodniowo_ostatnio"] = profile?.SessionsPerWeek,
             ["urazy_obszary"] = profile?.HealthAreas,
             ["uwagi_trenera"] = InboxSafe(hint),
