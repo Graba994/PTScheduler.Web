@@ -105,6 +105,8 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         /// <summary>Klucz OpenRouter (zaszyfrowany Data Protection).</summary>
         public const string AiApiKey = "ai_api_key";
         public const string AiModel = "ai_model";
+        /// <summary>"true" — w aplikacji trenera „Zaproponuj plan” może dopracować propozycję przez AI (domyślnie wyłączone).</summary>
+        public const string AiPlanGenerator = "ai_plan_generator";
         public const string AiMonthlyBudgetUsd = "ai_monthly_budget_usd";
         /// <summary>Ceny awaryjne (USD za 1 mln tokenów) — gdy OpenRouter nie poda kosztu w odpowiedzi.</summary>
         public const string AiPriceInputPerM = "ai_price_input_per_m";

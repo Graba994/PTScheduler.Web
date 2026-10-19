@@ -184,6 +184,7 @@ builder.Services.AddScoped<PTScheduler.Web.Services.AttentionService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.WeekTemplateService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.SlotWatchService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.AccountantPackService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.PlanGeneratorService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.RetentionService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.MessageDraftService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.WorkoutCompanionService>();

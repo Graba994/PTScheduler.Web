@@ -324,6 +324,11 @@ else
                         <span class="form-check-label fw-semibold">AI pisze teksty asystenta</span>
                         <span class="d-block small text-muted">Wyłączone = gotowe teksty z aplikacji (asystent działa dalej).</span>
                     </label>
+                    <label class="form-check form-switch m-0">
+                        <input class="form-check-input" type="checkbox" @bind="_aiPlan" />
+                        <span class="form-check-label fw-semibold">Generator planów z AI</span>
+                        <span class="d-block small text-muted">W aplikacji trenera „Zaproponuj plan” może dopracować propozycję przez AI (na podstawie historii treningów, celu i ankiet; bez imion i danych kontaktowych). Wyłączone = propozycja z reguł. Trener zawsze zatwierdza plan.</span>
+                    </label>
                     <div>
                         <label class="form-label small fw-semibold" for="ai-key">Klucz API</label>
                         @if (_hasKey && !_editKey)
@@ -513,7 +518,7 @@ else
     private bool _trying;
     private AssistantService.Phrase? _tryResult;
 
-    private bool _aiEnabled;
+    private bool _aiEnabled, _aiPlan;
     private bool _hasKey;
     private bool _editKey;
     private string? _newKey;
@@ -551,6 +556,7 @@ else
         _adminEmail = s[K.AdminNotificationEmail];
         _leoPrompt = await Assistant.GetLeoPromptAsync();
         _aiEnabled = s[K.AiEnabled] == "true";
+        _aiPlan = await Settings.GetAsync(K.AiPlanGenerator) == "true";
         _model = s[K.AiModel];
         _budget = s[K.AiMonthlyBudgetUsd];
         _priceIn = s[K.AiPriceInputPerM];
@@ -726,6 +732,7 @@ else
         await Settings.SetManyAsync(new Dictionary<string, string>
         {
             [K.AiEnabled] = _aiEnabled ? "true" : "false",
+            [K.AiPlanGenerator] = _aiPlan ? "true" : "false",
             [K.AiModel] = _model.Trim(),
             [K.AiMonthlyBudgetUsd] = _budget.Replace(',', '.').Trim(),
             [K.AiPriceInputPerM] = _priceIn.Replace(',', '.').Trim(),

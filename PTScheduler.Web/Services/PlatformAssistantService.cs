@@ -13,8 +13,9 @@ public class PlatformAssistantService(IHttpClientFactory httpFactory, ILogger<Pl
     /// <param name="EmailIcons">Adresy PNG nastrojów w Portalu — do e-maili (data URI i SVG nie działają w Gmailu).</param>
     /// <param name="Layout">Układ widżetu: bubble, card, pill, peek.</param>
     /// <param name="AnimatedSvg">Animowany hantelek z Portalu (gdy animacja „live” i wbudowane ikony), inaczej null.</param>
+    /// <param name="PlanAi">Generator planów z AI — włącza administrator platformy (Portal → Asystent i AI).</param>
     public sealed record Config(bool Enabled, string Name, string Animation, bool Ai, Dictionary<string, string> Icons,
-        Dictionary<string, string>? EmailIcons = null, string Layout = "bubble", string? AnimatedSvg = null);
+        Dictionary<string, string>? EmailIcons = null, string Layout = "bubble", string? AnimatedSvg = null, bool PlanAi = false);
 
     private static readonly TimeSpan ConfigTtl = TimeSpan.FromMinutes(30);
     private Config? _config;
@@ -99,6 +100,21 @@ public class PlatformAssistantService(IHttpClientFactory httpFactory, ILogger<Pl
             logger.LogDebug(ex, "Szkic wiadomości z Portalu niedostępny — używam szablonu.");
         }
         return (fallback, false);
+    }
+
+    /// <summary>
+    /// Plan treningowy dopracowany przez AI (Portal). Wejście: JSON z faktami bez danych osobowych, szkicem z reguł
+    /// i listą dozwolonych ćwiczeń. Zwraca (tekst odpowiedzi, czy z AI) — sprawdza go <see cref="PlanGeneratorService"/>.
+    /// </summary>
+    public async Task<(string? Text, bool Ai)> PlanAsync(string payloadJson)
+    {
+        if (!PlatformInfoService.Configured) return (null, false);
+        using var req = Request(HttpMethod.Post, "assistant/plan");
+        req.Content = JsonContent.Create(new { payload = payloadJson });
+        using var resp = await Client(90).SendAsync(req);
+        if (!resp.IsSuccessStatusCode) return (null, false);
+        var r = await resp.Content.ReadFromJsonAsync<PhraseResponse>();
+        return (r?.Text, r?.Ai == true);
     }
 
     private HttpClient Client(int seconds)

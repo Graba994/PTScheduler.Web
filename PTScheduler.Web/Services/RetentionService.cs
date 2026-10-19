@@ -135,6 +135,14 @@ public class RetentionService(IDbContextFactory<ApplicationDbContext> dbFactory,
             .Select(e => new HealthPlanRules.PlanExercise(e.NamePl, e.PrimaryMuscles, e.SecondaryMuscles, e.Category)).ToList();
         if (exercises.Count == 0) return [];
 
+        var (notes, pregnancy, heart) = await HealthNotesAsync(clientId);
+        return HealthPlanRules.Check(notes, pregnancy, heart, exercises);
+    }
+
+    /// <summary>Notatki zdrowotne klienta: urazy i inne z ankiety zdrowotnej, miejsca bólu z ankiet po treningu (30 dni), ciąża i PAR-Q.</summary>
+    public async Task<(List<HealthPlanRules.Note> Notes, bool Pregnancy, bool Heart)> HealthNotesAsync(int clientId)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
         var notes = new List<HealthPlanRules.Note>();
         var pregnancy = false;
         var heart = false;
@@ -162,6 +170,6 @@ public class RetentionService(IDbContextFactory<ApplicationDbContext> dbFactory,
             if (answers.FirstOrDefault(a => a.Key == SurveyKeys.PainLocation)?.Text is { Length: > 0 } where)
                 notes.Add(new($"Po treningu {(p.WorkoutDate ?? DateOnly.FromDateTime(p.SubmittedAt)):dd.MM}", where));
         }
-        return HealthPlanRules.Check(notes, pregnancy, heart, exercises);
+        return (notes, pregnancy, heart);
     }
 }

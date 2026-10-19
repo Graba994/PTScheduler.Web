@@ -1033,7 +1033,24 @@ app.MapGet("/api/internal/tenants/{slug}/assistant", async (
     var version = await assistant.IconsVersionAsync();
     var emailIcons = MascotArt.Moods.ToDictionary(m => m.Key, m => $"{PublicBase(ctx)}/assistant/mascot/{m.Key}.png?v={version}");
     return Results.Json(new { enabled = c.Enabled, name = c.Name, animation = c.Animation, ai = c.Ai, icons = c.Icons, emailIcons,
-        layout = c.Layout, animatedSvg = c.AnimatedSvg });
+        layout = c.Layout, animatedSvg = c.AnimatedSvg, planAi = await assistant.PlanAiAvailableAsync(tenant) });
+});
+
+// „Zaproponuj plan” w aplikacji trenera — AI dopracowuje szkic z reguł (bez danych osobowych), aplikacja sprawdza wynik.
+app.MapPost("/api/internal/tenants/{slug}/assistant/plan", async (
+    string slug,
+    AssistantPlanRequest body,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    AssistantService assistant,
+    IConfiguration config) =>
+{
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    if (string.IsNullOrWhiteSpace(body.Payload) || body.Payload.Length > 60_000) return Results.BadRequest();
+    var r = await assistant.PlanAsync(tenant, body.Payload);
+    return Results.Json(new { text = r.Text, ai = r.FromAi, error = r.Error });
 });
 
 app.MapPost("/api/internal/tenants/{slug}/assistant/phrase", async (
@@ -1571,6 +1588,7 @@ app.Run();
 
 // Wspólna kontrola nagłówka X-Internal-Secret dla wywołań tenant → Portal.
 // Pusty sekret = odmowa (wcześniej oznaczał brak jakiejkolwiek kontroli).
+record AssistantPlanRequest(string? Payload);
 record AppFeedbackRequest(int Rating, string? Text, string? ContactEmail, string? AuthorEmail);
 record AssistantPhraseRequest(string Kind, Dictionary<string, string?>? Facts, string Fallback, string? Audience);
 record AssistantDraftRequest(string Purpose, Dictionary<string, string?>? Facts, string Fallback, string? Address, string? Emoji, string? Length,

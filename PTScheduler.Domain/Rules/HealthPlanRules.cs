@@ -81,6 +81,24 @@ public static class HealthPlanRules
         return flags;
     }
 
+    /// <summary>
+    /// Czy pojedyncze ćwiczenie koliduje z notatkami zdrowotnymi — dla generatora planu. Zwraca obszar (np. „Kolano”)
+    /// albo null. Te same słowa kluczowe co w <see cref="Check"/>.
+    /// </summary>
+    public static string? Conflict(IReadOnlyCollection<Note> notes, bool pregnancy, bool heart, PlanExercise exercise)
+    {
+        var one = new[] { exercise };
+        foreach (var note in notes.Where(n => !string.IsNullOrWhiteSpace(n.Text)))
+        {
+            var text = note.Text.ToLowerInvariant();
+            foreach (var area in Areas.Where(a => a.Keywords.Any(text.Contains)))
+                if (Matching(area, one).Count > 0) return area.Label;
+        }
+        if (pregnancy && Matching(Pregnancy, one).Count > 0) return Pregnancy.Label;
+        if (heart && Matching(Heart, one).Count > 0) return Heart.Label;
+        return null;
+    }
+
     private static List<string> Matching(Area area, IReadOnlyList<PlanExercise> plan) =>
         plan.Where(e =>
             {

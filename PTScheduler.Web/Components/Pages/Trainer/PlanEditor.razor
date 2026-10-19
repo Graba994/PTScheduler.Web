@@ -16,6 +16,8 @@
 @inject IJSRuntime JS
 @inject ILoggerFactory LoggerFactory
 @inject PTScheduler.Web.Services.WorkoutCompanionService Companion
+@inject PTScheduler.Web.Services.PlanGeneratorService Generator
+@inject PTScheduler.Web.Services.PlatformAssistantService PlatformAssistant
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Kreator planu" />
@@ -84,15 +86,9 @@ else
                 </div>
                 @if (!_plan.IsTemplate)
                 {
-                    <div class="col-12 col-md-4">
-                        <label class="form-label">Klient</label>
-                        <select class="form-select" @bind="_plan.ClientId">
-                            <option value="">— nieprzypisany —</option>
-                            @foreach (var c in _clients)
-                            {
-                                <option value="@c.Id">@c.FullName</option>
-                            }
-                        </select>
+                    <div class="col-12 col-md-8 col-lg-6">
+                        <label class="form-label">Podopieczny</label>
+                        <ClientPicker Clients="_clients" Value="_plan.ClientId" ValueChanged="OnClientChanged" />
                     </div>
                 }
                 <div class="col-12">
@@ -110,6 +106,190 @@ else
             </div>
         </div>
     </div>
+
+    @if (!_plan.IsTemplate && _plan.ClientId is int)
+    {
+        <div class="card pgen mb-3 @(_gen ? "open" : "")">
+            <div class="card-body">
+                <div class="pgen-head">
+                    <span class="pgen-ico"><i class="bi bi-stars"></i></span>
+                    <div class="flex-grow-1 min-w-0">
+                        <div class="fw-bold">Propozycja planu z historii</div>
+                        <div class="small text-muted">Z ostatnich treningów, RPE z ankiet, zdrowia i celu podopiecznego. Ty decydujesz, co trafi do planu.</div>
+                    </div>
+                    @if (_gen)
+                    {
+                        <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="() => _gen = false"><i class="bi bi-chevron-up me-1"></i>Zwiń</button>
+                    }
+                    else
+                    {
+                        <button type="button" class="btn btn-sm btn-primary" @onclick="OpenGeneratorAsync"><i class="bi bi-magic me-1"></i>Zaproponuj plan</button>
+                    }
+                </div>
+
+                @if (_gen)
+                {
+                    @if (_profile is null)
+                    {
+                        <div class="text-center text-muted py-3"><span class="spinner-border spinner-border-sm me-2"></span>Czytam historię…</div>
+                    }
+                    else
+                    {
+                        var p = _profile;
+                        <div class="pgen-facts mt-3">
+                            @if (!string.IsNullOrWhiteSpace(p.Goal))
+                            {
+                                <span class="pgen-fact"><i class="bi bi-bullseye"></i>@p.Goal</span>
+                            }
+                            <span class="pgen-fact"><i class="bi bi-calendar-week"></i>@p.SessionsPerWeek.ToString("0.#") treningu / tydz. (8 tyg.)</span>
+                            <span class="pgen-fact"><i class="bi bi-journal-check"></i>@p.WorkoutDays @(p.WorkoutDays == 1 ? "dzień" : "dni") z zapisanym treningiem</span>
+                            <span class="pgen-fact"><i class="bi bi-list-check"></i>@p.KnownExercises znanych ćwiczeń</span>
+                            @if (p.Age is int age)
+                            {
+                                <span class="pgen-fact"><i class="bi bi-person"></i>@age lat</span>
+                            }
+                            @foreach (var area in p.HealthAreas)
+                            {
+                                <span class="pgen-fact warn" title="Z ankiety zdrowotnej lub zgłoszonego bólu — kolidujące ćwiczenia pominiemy"><i class="bi bi-bandaid"></i>@area</span>
+                            }
+                        </div>
+
+                        <div class="pgen-form mt-3">
+                            <div>
+                                <span class="pgen-label">Dni w tygodniu</span>
+                                <div class="pgen-seg" role="radiogroup" aria-label="Dni w tygodniu">
+                                    @foreach (var n in GenDays)
+                                    {
+                                        <button type="button" role="radio" aria-checked="@(_genDays == n ? "true" : "false")" class="@(_genDays == n ? "on" : "")" @onclick="() => _genDays = n">@n</button>
+                                    }
+                                </div>
+                            </div>
+                            <div>
+                                <span class="pgen-label">Czas treningu</span>
+                                <div class="pgen-seg" role="radiogroup" aria-label="Czas treningu">
+                                    @foreach (var m in GenMinutes)
+                                    {
+                                        <button type="button" role="radio" aria-checked="@(_genMinutes == m ? "true" : "false")" class="@(_genMinutes == m ? "on" : "")" @onclick="() => _genMinutes = m">@m min</button>
+                                    }
+                                </div>
+                            </div>
+                            <div>
+                                <span class="pgen-label">Profil @(p.SuggestedFocus == _genFocus && p.SuggestedFocus != PlanGeneratorRules.Focus.General ? "· z celu podopiecznego" : "")</span>
+                                <div class="pgen-seg" role="radiogroup" aria-label="Profil planu">
+                                    @foreach (var f in Enum.GetValues<PlanGeneratorRules.Focus>())
+                                    {
+                                        <button type="button" role="radio" aria-checked="@(_genFocus == f ? "true" : "false")" class="@(_genFocus == f ? "on" : "")" @onclick="() => _genFocus = f">@PlanGeneratorRules.FocusLabel(f)</button>
+                                    }
+                                </div>
+                            </div>
+                            <div>
+                                <span class="pgen-label">Sprzęt</span>
+                                <div class="pgen-seg" role="radiogroup" aria-label="Sprzęt">
+                                    @foreach (var (kit, kitLabel) in GenKits)
+                                    {
+                                        <button type="button" role="radio" aria-checked="@(_genKit == kit ? "true" : "false")" class="@(_genKit == kit ? "on" : "")" @onclick="() => _genKit = kit">@kitLabel</button>
+                                    }
+                                </div>
+                            </div>
+                        </div>
+
+                        @if (_planAi)
+                        {
+                            <div class="pgen-ai mt-3">
+                                <input type="checkbox" class="form-check-input mt-1" id="gen-ai" @bind="_genAi" />
+                                <div class="flex-grow-1">
+                                    <label class="form-check-label fw-semibold" for="gen-ai"><i class="bi bi-stars me-1" style="color:var(--c-primary)"></i>Dopracuj z AI</label>
+                                    <div class="small text-muted">AI przejrzy historię ćwiczeń, ankiety i komentarze po treningach (bez imienia i danych kontaktowych) i ułoży plan. Wynik sprawdzamy, a Ty go akceptujesz.</div>
+                                    @if (_genAi)
+                                    {
+                                        <textarea class="form-control form-control-sm mt-2" rows="2" maxlength="300" @bind="_genHint" placeholder="Uwagi dla AI, np. więcej pośladków, bez skoków, w piątek krótko"></textarea>
+                                    }
+                                </div>
+                            </div>
+                        }
+
+                        <div class="d-flex flex-wrap gap-2 align-items-center mt-3">
+                            <button type="button" class="btn btn-primary" @onclick="ProposeAsync" disabled="@_genBusy">
+                                @if (_genBusy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi @(_genAi && _planAi ? "bi-stars" : "bi-magic") me-1"></i> }
+                                @(_genAi && _planAi ? "Wygeneruj z AI na podstawie historii ćwiczeń, ankiet i komentarzy" : "Zaproponuj z historii")
+                            </button>
+                            @if (_genBusy && _genAi && _planAi)
+                            {
+                                <span class="small text-muted">AI układa plan — to może potrwać do minuty.</span>
+                            }
+                        </div>
+
+                        @if (_proposal is { } prop)
+                        {
+                            var pl = prop.Plan;
+                            <hr class="my-3" />
+                            @if (pl.Days.Count == 0)
+                            {
+                                <div class="alert alert-warning py-2 mb-0">Nie udało się dobrać ćwiczeń dla tych ustawień — zmień sprzęt albo profil.</div>
+                            }
+                            else
+                            {
+                                <div class="d-flex align-items-start gap-2 flex-wrap mb-2">
+                                    <div class="flex-grow-1 min-w-0">
+                                        <div class="fw-bold">@pl.Name
+                                            @if (prop.FromAi)
+                                            {
+                                                <span class="badge bg-primary-subtle text-primary-emphasis ms-1"><i class="bi bi-stars me-1"></i>AI</span>
+                                            }
+                                            else
+                                            {
+                                                <span class="badge bg-light text-dark border ms-1">z historii</span>
+                                            }
+                                        </div>
+                                        <div class="small text-muted">@pl.Purpose</div>
+                                    </div>
+                                </div>
+                                @if (prop.AiNote is { } aiNote)
+                                {
+                                    <div class="alert alert-warning py-2 small mb-2"><i class="bi bi-info-circle me-1"></i>@aiNote</div>
+                                }
+                                @if (prop.AiRationale is { } why)
+                                {
+                                    <div class="pgen-note mb-2"><b><i class="bi bi-chat-square-text me-1"></i>Dlaczego tak:</b> @why</div>
+                                }
+                                @foreach (var note in pl.Notes)
+                                {
+                                    <div class="small text-muted mb-1"><i class="bi bi-exclamation-circle me-1"></i>@note</div>
+                                }
+                                <div class="pgen-prev mt-2">
+                                    @for (var pdi = 0; pdi < pl.Days.Count; pdi++)
+                                    {
+                                        var pday = pl.Days[pdi];
+                                        <div class="pgen-day" style="animation-delay:@(pdi * 70)ms">
+                                            <h6>@pday.Label</h6>
+                                            @foreach (var x in pday.Exercises)
+                                            {
+                                                <div class="pgen-ex">
+                                                    <div class="pgen-ex-top"><b>@x.Name</b><span>@Dose(x)</span></div>
+                                                    <div class="pgen-why @(x.Familiar ? "known" : "new")">@x.Why</div>
+                                                </div>
+                                            }
+                                        </div>
+                                    }
+                                </div>
+                                <div class="d-flex flex-wrap gap-2 align-items-center mt-3">
+                                    <button type="button" class="btn btn-success" @onclick="InsertProposalAsync" disabled="@_genBusy"><i class="bi bi-check2-circle me-1"></i>Wstaw do edytora</button>
+                                    <button type="button" class="btn btn-outline-secondary" @onclick="() => _proposal = null">Odrzuć</button>
+                                    <span class="small text-muted">
+                                        @if (_plan.Days.Any(d => d.Exercises.Count > 0))
+                                        {
+                                            <text>Zastąpi obecne dni w edytorze. </text>
+                                        }
+                                        Nic nie zapisze się samo — sprawdź i kliknij „Zapisz”.
+                                    </span>
+                                </div>
+                            }
+                        }
+                    }
+                }
+            </div>
+        </div>
+    }
 
     <!-- Dni -->
     @for (var di = 0; di < _plan.Days.Count; di++)
@@ -387,8 +567,112 @@ else
             // Z profilu klienta („Utwórz plan”) — klient od razu wybrany.
             if (QueryHelpers.ParseQuery(uri.Query).TryGetValue("klient", out var k) && int.TryParse(k, out var cid) && _clients.Any(c => c.Id == cid))
                 _plan.ClientId = cid;
+            // „Zaproponuj plan z historii” z listy planów lub profilu klienta.
+            if (QueryHelpers.ParseQuery(uri.Query).TryGetValue("propozycja", out var pr) && pr == "1" && !isTemplate)
+                _gen = true;
         }
         _loading = false;
+        try { _planAi = (await PlatformAssistant.GetConfigAsync())?.PlanAi == true; }
+        catch (Exception ex) { LoggerFactory.CreateLogger("PlanEditor").LogDebug(ex, "Ustawienia AI planów niedostępne."); }
+        if (_gen && _plan?.ClientId is int) await LoadProfileAsync();
+    }
+
+    // ── Propozycja planu z historii (opcjonalnie z AI) ──
+    private static readonly int[] GenDays = [1, 2, 3, 4, 5, 6];
+    private static readonly int[] GenMinutes = [30, 45, 60, 75, 90];
+    private static readonly (PlanGeneratorRules.Kit Kit, string Label)[] GenKits =
+    [
+        (PlanGeneratorRules.Kit.Gym, "Siłownia"),
+        (PlanGeneratorRules.Kit.Dumbbells, "Hantle / dom"),
+        (PlanGeneratorRules.Kit.Bodyweight, "Masa ciała")
+    ];
+
+    private bool _gen;
+    private bool _genBusy;
+    private bool _planAi;
+    private bool _genAi;
+    private string? _genHint;
+    private int _genDays = 3;
+    private int _genMinutes = 60;
+    private PlanGeneratorRules.Focus _genFocus;
+    private PlanGeneratorRules.Kit _genKit = PlanGeneratorRules.Kit.Gym;
+    private PTScheduler.Web.Services.PlanGeneratorService.Profile? _profile;
+    private PTScheduler.Web.Services.PlanGeneratorService.Proposal? _proposal;
+
+    private async Task OnClientChanged(int? id)
+    {
+        if (_plan is null) return;
+        _plan.ClientId = id;
+        _profile = null;
+        _proposal = null;
+        if (_gen && id is int) await LoadProfileAsync();
+    }
+
+    private async Task OpenGeneratorAsync()
+    {
+        _gen = true;
+        if (_profile is null || _profile.ClientId != _plan?.ClientId) await LoadProfileAsync();
+    }
+
+    private async Task LoadProfileAsync()
+    {
+        if (_plan?.ClientId is not int cid) return;
+        try
+        {
+            _profile = await Generator.ProfileAsync(cid);
+            if (_profile is null) { _gen = false; return; }
+            _genDays = _profile.SuggestedDays;
+            _genFocus = _profile.SuggestedFocus;
+        }
+        catch (Exception ex)
+        {
+            LoggerFactory.CreateLogger("PlanEditor").LogError(ex, "Historia klienta do propozycji planu niedostępna.");
+            _gen = false;
+            _error = "Nie udało się wczytać historii podopiecznego.";
+        }
+    }
+
+    private async Task ProposeAsync()
+    {
+        if (_plan?.ClientId is not int cid) return;
+        _genBusy = true;
+        _proposal = null;
+        try
+        {
+            var options = new PlanGeneratorRules.Options(_genDays, _genMinutes, _genFocus, _genKit);
+            _proposal = await Generator.ProposeAsync(cid, _userId, options, _genAi && _planAi, _genHint);
+        }
+        catch (Exception ex)
+        {
+            LoggerFactory.CreateLogger("PlanEditor").LogError(ex, "Błąd propozycji planu.");
+            _error = "Nie udało się przygotować propozycji. Spróbuj ponownie.";
+        }
+        finally { _genBusy = false; }
+    }
+
+    private async Task InsertProposalAsync()
+    {
+        if (_plan is null || _proposal is null || _plan.ClientId is not int cid) return;
+        _genBusy = true;
+        try
+        {
+            var pl = _proposal.Plan;
+            var meta = await Generator.MetaAsync(pl.Days.SelectMany(d => d.Exercises).Select(e => e.ExerciseId));
+            var dto = PTScheduler.Web.Services.PlanGeneratorService.ToEditDto(pl, cid, meta);
+            _plan.Days = dto.Days;
+            if (string.IsNullOrWhiteSpace(_plan.Name)) _plan.Name = dto.Name;
+            if (string.IsNullOrWhiteSpace(_plan.Purpose)) _plan.Purpose = dto.Purpose;
+            if (string.IsNullOrWhiteSpace(_plan.Notes)) _plan.Notes = dto.Notes;
+            _proposal = null;
+            _gen = false;
+        }
+        finally { _genBusy = false; }
+    }
+
+    private static string Dose(PlanGeneratorRules.Pick x)
+    {
+        var dose = x.DurationSeconds is int sec ? $"{x.Sets} × {sec} s" : $"{x.Sets} × {x.Reps ?? "—"}";
+        return x.WeightKg is decimal kg ? $"{dose} · {kg.ToString("0.##", System.Globalization.CultureInfo.GetCultureInfo("pl-PL"))} kg" : dose;
     }
 
     private void AddDay()

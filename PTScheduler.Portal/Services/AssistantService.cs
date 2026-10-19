@@ -238,6 +238,36 @@ public partial class AssistantService(
     /// </summary>
     /// <param name="audience">„trener” — głos maskotki (masterprompt); „klient” — podsumowanie dla klienta trenera;
     /// „admin” — agent Portalu (Leo) dla administratora platformy.</param>
+    /// <summary>Czy dla tego trenera „Zaproponuj plan” może korzystać z AI: włącznik generatora, AI i klucz.</summary>
+    public async Task<bool> PlanAiAvailableAsync(Tenant? tenant) =>
+        tenant?.AiOff != true && await settings.GetAsync(K.AiPlanGenerator) == "true" && await ai.UnavailableReasonAsync() is null;
+
+    /// <summary>
+    /// Plan treningowy dopracowany przez AI. Wejście z aplikacji trenera (bez danych osobowych): fakty, szkic z reguł,
+    /// historia ćwiczeń i lista dozwolonych ćwiczeń. Odpowiedź to JSON — aplikacja go sprawdza (dozwolone id, zakresy).
+    /// </summary>
+    public async Task<Phrase> PlanAsync(Tenant tenant, string payloadJson)
+    {
+        if (!await PlanAiAvailableAsync(tenant)) return new("", false, "Generator planów z AI jest wyłączony.");
+        const string system = """
+            Jesteś doświadczonym trenerem przygotowania motorycznego. Dopracuj szkic planu treningowego dla podopiecznego trenera personalnego.
+            Zasady:
+            - Używaj WYŁĄCZNIE ćwiczeń z listy "exercises" (pole id). Nie wymyślaj nowych.
+            - Szanuj liczbę dni w tygodniu i czas treningu z "facts". Omijaj obciążanie obszarów z "urazy_obszary".
+            - "surveys" to ankiety po treningach (skale 1–10, komentarze podopiecznego) i komentarze do treningów (trener ↔ podopieczny): wysokie RPE lub zakwasy, niska energia
+              albo słaby sen → lżej i mniej objętości; ból w danym miejscu → omiń to miejsce; prośby z komentarzy uwzględnij, gdy są rozsądne.
+            - Zacznij od ćwiczeń wielostawowych, potem akcesoria. Seria: 1–6, przerwa w sekundach 30–240.
+            - Ciężar (weightKg) podawaj tylko dla ćwiczeń z "history" — w okolicy ostatniego wyniku, z drobną progresją, gdy RPE było ≤ 7;
+              dla pozostałych zostaw null (trener dobierze na treningu).
+            - Pisz po polsku, formami neutralnymi płciowo (bez „zrobiłeś/zrobiłaś”). Bez porad medycznych i obietnic efektów.
+            Odpowiedz WYŁĄCZNIE poprawnym JSON-em, bez komentarzy, w formacie:
+            {"name":"…","purpose":"2–3 zdania dla podopiecznego, po co ten plan","rationale":"2–4 zdania dla trenera, co zmieniono względem szkicu i dlaczego","days":[{"label":"…","exercises":[{"id":123,"sets":3,"reps":"8-10","weightKg":60,"restSeconds":90,"note":"krótka wskazówka techniczna lub null"}]}]}
+            """;
+        var payload = payloadJson.Length > 24_000 ? payloadJson[..24_000] : payloadJson;
+        var result = await ai.CompleteAsync("plan", tenant.Id, system, payload, maxTokens: 1800);
+        return result.Text is { Length: > 0 } text ? new(text, true, null) : new("", false, result.Error ?? "AI nie odpowiedziało.");
+    }
+
     public async Task<Phrase> PhraseAsync(Tenant? tenant, string kind, Dictionary<string, string> facts, string fallback,
         bool ignoreSwitch = false, string? promptOverride = null, string? nameOverride = null, string audience = "trener")
     {
