@@ -5,7 +5,11 @@ using PTScheduler.Portal.Entities;
 
 namespace PTScheduler.Portal.Services;
 
-public sealed record MailRelayRequest(string To, string? ToName, string Subject, string Html, string? FromName, string? ReplyTo);
+public sealed record MailRelayRequest(string To, string? ToName, string Subject, string Html, string? FromName, string? ReplyTo,
+    List<MailRelayImage>? Images = null);
+
+/// <summary>Obrazek w środku wiadomości od instancji (base64, w HTML: <c>cid:{ContentId}</c>).</summary>
+public sealed record MailRelayImage(string ContentId, string ContentType, string Data);
 
 /// <summary>
 /// Poczta instancji trenerów przez SMTP platformy — Portal wysyła w ich imieniu.
@@ -55,6 +59,8 @@ public class TenantMailRelay(
         if (string.IsNullOrWhiteSpace(r.Subject) || string.IsNullOrEmpty(r.Html)) return (400, "Brak tematu albo treści.");
         if (r.Html.Length > MaxHtmlChars) return (400, "Wiadomość jest za duża.");
 
+        if (!TryImages(r.Images, out var images, out var imageError)) return (400, imageError);
+
         var limit = await GetDailyLimitAsync();
         var count = await ReserveAsync(tenant.Id);
         if (count > limit)
@@ -67,8 +73,35 @@ public class TenantMailRelay(
         var (ok, error) = await email.SendAsync(r.To.Trim(), Clean(r.Subject, 300), r.Html,
             fromNameOverride: Clean(r.FromName, 80) is { Length: > 0 } name ? name : tenant.CompanyName,
             replyTo: string.IsNullOrWhiteSpace(r.ReplyTo) ? null : r.ReplyTo.Trim(),
-            toName: Clean(r.ToName, 120));
+            toName: Clean(r.ToName, 120), images: images);
         return ok ? (200, null) : (502, error ?? "Serwer poczty odrzucił wiadomość.");
+    }
+
+    public const int MaxImages = 3;
+    public const int MaxImageBytes = 400 * 1024;
+    private static readonly string[] ImageTypes = ["image/png", "image/jpeg", "image/gif", "image/webp"];
+
+    /// <summary>Kontrola obrazków od instancji: najwyżej 3, każdy do 400 KB, tylko grafiki, prosty identyfikator.</summary>
+    public static bool TryImages(List<MailRelayImage>? input, out List<EmailService.InlineImage>? images, out string? error)
+    {
+        images = null;
+        error = null;
+        if (input is not { Count: > 0 }) return true;
+        if (input.Count > MaxImages) { error = "Za dużo obrazków w wiadomości."; return false; }
+        var list = new List<EmailService.InlineImage>();
+        foreach (var i in input)
+        {
+            if (string.IsNullOrWhiteSpace(i.ContentId) || i.ContentId.Length > 40 || !i.ContentId.All(c => char.IsAsciiLetterOrDigit(c) || c is '-' or '_' or '.'))
+            { error = "Nieprawidłowy identyfikator obrazka."; return false; }
+            if (!ImageTypes.Contains(i.ContentType)) { error = "Nieobsługiwany typ obrazka."; return false; }
+            byte[] data;
+            try { data = Convert.FromBase64String(i.Data ?? ""); }
+            catch (FormatException) { error = "Uszkodzony obrazek."; return false; }
+            if (data.Length == 0 || data.Length > MaxImageBytes) { error = "Obrazek jest za duży."; return false; }
+            list.Add(new EmailService.InlineImage(i.ContentId, data, i.ContentType));
+        }
+        images = list;
+        return true;
     }
 
     /// <summary>Atomowy licznik dnia (INSERT … ON CONFLICT) — równoległe wysyłki liczą się poprawnie.</summary>

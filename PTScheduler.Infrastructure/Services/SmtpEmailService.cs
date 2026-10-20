@@ -59,7 +59,10 @@ public class SmtpEmailService(
         return message;
     }
 
-    public async Task SendAsync(string toAddress, string toName, string subject, string htmlBody)
+    public Task SendAsync(string toAddress, string toName, string subject, string htmlBody) =>
+        SendAsync(toAddress, toName, subject, htmlBody, null);
+
+    public async Task SendAsync(string toAddress, string toName, string subject, string htmlBody, IReadOnlyList<Application.Interfaces.EmailInlineImage>? images)
     {
         // Klienci z danych demo (konta testowe) — nic nie wysyłamy na zmyślone adresy.
         if (Application.Demo.DemoScenarios.IsDemoEmail(toAddress)) return;
@@ -68,14 +71,14 @@ public class SmtpEmailService(
 
         if (s.Provider == "Platform")
         {
-            await platformEmail.SendAsync(toAddress, toName, subject, Domain.Rules.PlatformMailNote.Append(htmlBody, s.FromName, s.ReplyTo), s.FromName, s.ReplyTo);
+            await platformEmail.SendAsync(toAddress, toName, subject, Domain.Rules.PlatformMailNote.Append(htmlBody, s.FromName, s.ReplyTo), s.FromName, s.ReplyTo, images);
             return;
         }
 
         var message = NewMessage(s);
         message.To.Add(new MailboxAddress(toName, toAddress));
         message.Subject = subject;
-        message.Body = new TextPart("html") { Text = htmlBody };
+        message.Body = Body(htmlBody, images);
 
         try
         {
@@ -90,8 +93,21 @@ public class SmtpEmailService(
             // Własna skrzynka nie działa — mail wychodzi awaryjnie przez serwer platformy (klient nie traci przypomnienia).
             if (await platformEmail.GetStatusAsync() is null) throw;
             logger.LogWarning(ex, "Własna skrzynka nie wysłała maila do {To} — wysyłam przez serwer platformy.", toAddress);
-            await platformEmail.SendAsync(toAddress, toName, subject, Domain.Rules.PlatformMailNote.Append(htmlBody, s.FromName, s.FromAddress), s.FromName, s.FromAddress);
+            await platformEmail.SendAsync(toAddress, toName, subject, Domain.Rules.PlatformMailNote.Append(htmlBody, s.FromName, s.FromAddress), s.FromName, s.FromAddress, images);
         }
+    }
+
+    // HTML z obrazkami w środku wiadomości (multipart/related) — Gmail i Outlook pokazują je od razu.
+    public static MimeEntity Body(string html, IReadOnlyList<Application.Interfaces.EmailInlineImage>? images)
+    {
+        if (images is not { Count: > 0 }) return new TextPart("html") { Text = html };
+        var builder = new BodyBuilder { HtmlBody = html };
+        foreach (var img in images)
+        {
+            var part = builder.LinkedResources.Add(img.ContentId, img.Data, ContentType.Parse(img.ContentType));
+            part.ContentId = img.ContentId;
+        }
+        return builder.ToMessageBody();
     }
 
     public async Task<(bool Success, string? Error)> TestOwnAsync(Application.DTOs.EmailSettingsDto form, string testAddress)

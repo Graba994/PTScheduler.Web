@@ -49,13 +49,16 @@ public class PlatformEmailProvider(IHttpClientFactory httpFactory, ILogger<Platf
     }
 
     /// <summary>Wysyła przez Portal. Rzuca wyjątek z czytelnym opisem, gdy się nie uda.</summary>
-    public async Task SendAsync(string to, string toName, string subject, string html, string fromName, string? replyTo)
+    public async Task SendAsync(string to, string toName, string subject, string html, string fromName, string? replyTo,
+        IReadOnlyList<Application.Interfaces.EmailInlineImage>? images = null)
     {
         if (Application.Demo.DemoScenarios.IsDemoEmail(to)) return;
         using var http = httpFactory.CreateClient();
         http.Timeout = TimeSpan.FromSeconds(30);
         using var req = PlatformConnection.Request(HttpMethod.Post, PlatformConnection.TenantApi("/mail"));
-        req.Content = JsonContent.Create(new { to, toName, subject, html, fromName, replyTo });
+        // Obrazki w środku wiadomości (cid:) — Portal dołącza je do maila, bez linków do pobrania.
+        var inline = images?.Select(i => new { contentId = i.ContentId, contentType = i.ContentType, data = Convert.ToBase64String(i.Data) }).ToList();
+        req.Content = JsonContent.Create(new { to, toName, subject, html, fromName, replyTo, images = inline });
         using var resp = await http.SendAsync(req);
         if (resp.IsSuccessStatusCode) return;
 

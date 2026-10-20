@@ -28,6 +28,7 @@ public class MorningBriefService(
     INotificationPreferencesService prefs,
     IBrandingService branding,
     IAppClock clock,
+    IHttpClientFactory httpFactory,
     ILogger<MorningBriefService> logger)
 {
     private static readonly CultureInfo Pl = CultureInfo.GetCultureInfo("pl-PL");
@@ -122,7 +123,11 @@ public class MorningBriefService(
                 : "Twój dzień: sprawy do załatwienia";
             try
             {
-                await email.SendAsync(user.Email!, brief.FirstName, subject, RenderHtml(brief, config, studio));
+                // Maskotka w środku wiadomości (cid:) — jak w raporcie Leo w Portalu. Link do Portalu bywa
+                // adresem wewnętrznym albo blokowanym obrazkiem z sieci; dołączony obrazek widać od razu.
+                var image = await MascotImageAsync(config, brief);
+                await email.SendAsync(user.Email!, brief.FirstName, subject,
+                    RenderHtml(brief, config, studio, image is null ? null : "cid:hantly"), image is null ? null : [image]);
                 sent = true;
             }
             catch (Exception ex) { logger.LogWarning(ex, "Nie udało się wysłać porannego briefu do {User}.", user.Id); }
@@ -142,12 +147,36 @@ public class MorningBriefService(
         return sent;
     }
 
+    public static string Mood(Brief b) => b.Todo.Count > 0 ? "remind" : "hello";
+
+    /// <summary>PNG maskotki pobrany z Portalu (instancja widzi go po adresie wewnętrznym) — do dołączenia do maila.</summary>
+    private async Task<EmailInlineImage?> MascotImageAsync(PlatformAssistantService.Config? config, Brief b)
+    {
+        if (config?.EmailIcons?.GetValueOrDefault(Mood(b)) is not { Length: > 0 } url) return null;
+        try
+        {
+            using var http = httpFactory.CreateClient();
+            http.Timeout = TimeSpan.FromSeconds(10);
+            using var resp = await http.GetAsync(url);
+            var type = resp.Content.Headers.ContentType?.MediaType ?? "";
+            if (!resp.IsSuccessStatusCode || !type.StartsWith("image/") || type == "image/svg+xml") return null;
+            var data = await resp.Content.ReadAsByteArrayAsync();
+            return data.Length is > 0 and <= 400 * 1024 ? new EmailInlineImage("hantly", data, type) : null;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or UriFormatException or InvalidOperationException)
+        {
+            logger.LogDebug(ex, "Nie pobrano obrazka maskotki do briefu — zostaje link.");
+            return null;
+        }
+    }
+
     /// <summary>Szablon e-maila: tabele i style w linii (Gmail, Outlook), obrazek maskotki z Portalu.</summary>
-    public static string RenderHtml(Brief b, PlatformAssistantService.Config? config, string? studio)
+    /// <param name="imgSrc">Źródło obrazka maskotki (np. <c>cid:hantly</c> przy obrazku w wiadomości); bez niego — PNG z Portalu.</param>
+    public static string RenderHtml(Brief b, PlatformAssistantService.Config? config, string? studio, string? imgSrc = null)
     {
         static string E(string? s) => WebUtility.HtmlEncode(s ?? "");
         var name = config?.Name is { Length: > 0 } n ? n : "Hantly";
-        var mascot = config?.EmailIcons?.GetValueOrDefault(b.Todo.Count > 0 ? "remind" : "hello");
+        var mascot = imgSrc ?? config?.EmailIcons?.GetValueOrDefault(Mood(b));
         var appUrl = AppUrls.PublicBase() ?? "";
         var greeting = b.FirstName.Length > 0 ? $"Dzień dobry, {E(b.FirstName)}!" : "Dzień dobry!";
         var date = b.Day.ToString("dddd, d MMMM", Pl);
