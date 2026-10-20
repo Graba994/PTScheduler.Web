@@ -23,6 +23,27 @@
 
 <EditForm Model="_form" OnValidSubmit="Save" FormName="homepage">
     <div class="card border-0 shadow-sm mb-4">
+        <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-layout-text-window-reverse"></i></span>Szablon strony głównej</div>
+        <div class="card-body">
+            <div class="d-flex flex-column gap-2">
+                @foreach (var (key, name, description) in PTScheduler.Portal.Components.Pages.Home.Templates)
+                {
+                    var k = key;
+                    <label class="d-flex gap-2 align-items-start">
+                        <input type="radio" class="form-check-input mt-1" name="hometpl" checked="@(_form.HomeTemplate == k)" @onchange="() => _form.HomeTemplate = k" />
+                        <span>
+                            <b>@name</b>@if (k == "nowa") { <span class="badge text-bg-success ms-1">domyślny</span> }
+                            <a href="@($"/?szablon={k}")" target="_blank" rel="noopener" class="small ms-2">podgląd <i class="bi bi-box-arrow-up-right"></i></a>
+                            <br /><span class="text-muted small">@description</span>
+                        </span>
+                    </label>
+                }
+            </div>
+            <div class="form-text small mt-2">Teksty z sekcji Hero i CTA poniżej działają w obu szablonach.</div>
+        </div>
+    </div>
+
+    <div class="card border-0 shadow-sm mb-4">
         <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-rocket-takeoff"></i></span>Rejestracja trenerów</div>
         <div class="card-body">
             <p class="text-muted small mb-3">Trener buduje aplikację w kreatorze na <a href="/register" target="_blank">/register</a> (nazwa, specjalizacja, wygląd, oferta, konto) i klika „Opublikuj”.</p>
@@ -263,6 +284,7 @@
         public string Gateway { get; set; } = "auto";
         public decimal VerifyAmount { get; set; } = 1;
         public bool OnboardingEmails { get; set; } = true;
+        public string HomeTemplate { get; set; } = "nowa";
     }
 
     private List<string> _gateways = [];
@@ -285,8 +307,10 @@
             SiteSettingsService.Keys.RegistrationDailyLimit,
             SiteSettingsService.Keys.RegistrationGateway,
             SiteSettingsService.Keys.RegistrationVerifyAmount,
-            SiteSettingsService.Keys.OnboardingEmails);
+            SiteSettingsService.Keys.OnboardingEmails,
+            SiteSettingsService.Keys.HomeTemplate);
 
+        _form.HomeTemplate = s[SiteSettingsService.Keys.HomeTemplate] == "klasyczna" ? "klasyczna" : "nowa";
         _form.HeroBadge = s[SiteSettingsService.Keys.HeroBadge];
         _form.HeroTitle = s[SiteSettingsService.Keys.HeroTitle];
         _form.HeroSubtitle = s[SiteSettingsService.Keys.HeroSubtitle];
@@ -327,6 +351,7 @@
             [SiteSettingsService.Keys.RegistrationGateway] = _form.Gateway,
             [SiteSettingsService.Keys.RegistrationVerifyAmount] = Math.Max(1, _form.VerifyAmount).ToString(System.Globalization.CultureInfo.InvariantCulture),
             [SiteSettingsService.Keys.OnboardingEmails] = _form.OnboardingEmails ? "true" : "false",
+            [SiteSettingsService.Keys.HomeTemplate] = _form.HomeTemplate,
         });
 
         _saving = false;

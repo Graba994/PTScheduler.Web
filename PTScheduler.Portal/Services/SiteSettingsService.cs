@@ -17,6 +17,8 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string CtaTitle = "cta_title";
         public const string CtaSubtitle = "cta_subtitle";
         public const string CtaButton = "cta_button";
+        /// <summary>Szablon strony głównej: „nowa” (domyślnie) albo „klasyczna”.</summary>
+        public const string HomeTemplate = "home_template";
         public const string SmtpHost = "smtp_host";
         public const string SmtpPort = "smtp_port";
         public const string SmtpUser = "smtp_user";
