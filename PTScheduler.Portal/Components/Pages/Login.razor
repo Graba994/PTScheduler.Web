@@ -417,7 +417,8 @@
         // Już zalogowany administrator nie musi wpisywać hasła — od razu do Panelu.
         if (Http.User.Identity?.IsAuthenticated == true && Http.User.IsInRole("Admin") && Wylogowano is null)
         {
-            Nav.NavigateTo(ReturnUrl is { Length: > 1 } r && r.StartsWith('/') && !r.StartsWith("//") ? r : "/panel");
+            // Pełne wczytanie: Panel działa w innym trybie niż publiczna strona logowania (bez tego adres się zmieniał, a strona nie).
+            Nav.NavigateTo(ReturnUrl is { Length: > 1 } r && r.StartsWith('/') && !r.StartsWith("//") ? r : "/panel", forceLoad: true);
             return;
         }
         _trainerEmail = await TrainerAccounts.CurrentEmailAsync(Http);
