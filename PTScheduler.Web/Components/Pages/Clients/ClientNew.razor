@@ -42,7 +42,7 @@
                             <i class="bi bi-lock-fill me-1"></i>Osiągnięto limit klientów
                         </h6>
                         <p class="small mb-2">
-                            Twój plan <strong>@Entitlements.Current.Name</strong> pozwala na <strong>@_maxClients</strong> klientów, obecnie masz <strong>@_clientCount</strong>.
+                            Plan <strong>@Entitlements.Current.Name</strong> obejmuje <strong>@_maxClients</strong> klientów i wszystkie miejsca są zajęte — liczą się klienci wszystkich trenerów w studiu.
                         </p>
                         <a href="/upgrade" class="btn btn-sm btn-primary">
                             <i class="bi bi-arrow-up-circle me-1"></i>Zwiększ plan
@@ -152,7 +152,6 @@
     private bool isBusy;
     private string error = string.Empty;
     private bool _limitReached;
-    private int _clientCount;
     private int _maxClients;
     private bool _sendInvite = true;
 
@@ -177,9 +176,8 @@
 
     protected override async Task OnInitializedAsync()
     {
-        var (allowed, current, max) = await Entitlements.CheckClientLimitAsync();
+        var (allowed, _, max) = await Entitlements.CheckClientLimitAsync();
         _limitReached = !allowed;
-        _clientCount = current;
         _maxClients = max;
 
         var principal = (await AuthState.GetAuthenticationStateAsync()).User;
@@ -221,8 +219,8 @@
         if (_trainers is not null && string.IsNullOrEmpty(dto.TrainerUserId)) { error = "Wybierz trenera klienta."; return; }
 
         // Re-check right before the mutation to close the race window between page load and submit
-        var (allowed, current, max) = await Entitlements.CheckClientLimitAsync();
-        if (!allowed) { _limitReached = true; _clientCount = current; _maxClients = max; return; }
+        var (allowed, _, max) = await Entitlements.CheckClientLimitAsync();
+        if (!allowed) { _limitReached = true; _maxClients = max; return; }
 
         isBusy = true;
         try

@@ -55,4 +55,27 @@ public class FirstSetupRulesTests
     [InlineData(12, LateCancellationPolicy.Refund, true, "Trening możesz odwołać w każdej chwili, bez kosztów.")]
     public void Client_Cancellation_Text(int hours, LateCancellationPolicy late, bool noShow, string expected) =>
         FirstSetupRules.ClientCancellationText(hours, late, noShow).Should().Be(expected);
+
+    [Fact]
+    public void Client_Limit_Is_Silent_With_Room_Or_Unlimited()
+    {
+        FirstSetupRules.ClientLimitNote(10, 50, 10, true).Should().BeNull();
+        FirstSetupRules.ClientLimitNote(500, int.MaxValue, 3, false).Should().BeNull();
+    }
+
+    [Fact]
+    public void Client_Limit_Tells_A_Trainer_The_Whole_Studio_Counts()
+    {
+        // Trener ma 3 swoich klientów, ale studio jest pełne — bez wyjaśnienia „49 z 50” byłoby niezrozumiałe.
+        var note = FirstSetupRules.ClientLimitNote(50, 50, 3, false)!.Value;
+        note.Reached.Should().BeTrue();
+        note.Text.Should().Be("Plan studia obejmuje 50 klientów — liczą się klienci wszystkich trenerów (Twoich: 3) i wszystkie miejsca są zajęte. Kolejne osoby dodasz, gdy właściciel studia zmieni plan.");
+    }
+
+    [Theory]
+    [InlineData(50, 50, "Twój plan obejmuje 50 klientów i wszystkie miejsca są zajęte. Kolejne osoby dodasz po zmianie planu.", true)]
+    [InlineData(49, 50, "Twój plan obejmuje 50 klientów. Zostało 1 miejsce.", false)]
+    [InlineData(18, 20, "Twój plan obejmuje 20 klientów. Zostały 2 miejsca.", false)]
+    public void Client_Limit_For_The_Owner(int studio, int max, string text, bool reached) =>
+        FirstSetupRules.ClientLimitNote(studio, max, studio, true).Should().Be((text, reached));
 }

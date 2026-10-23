@@ -90,6 +90,23 @@ public static class FirstSetupRules
         return $"Trening odwołasz bez kosztów {hours}. {later}{noShow}";
     }
 
+    /// <summary>
+    /// Komunikat o limicie klientów w kroku „pierwszy klient”. Limit planu liczy wszystkich klientów studia, a trener
+    /// widzi tylko swoich — dlatego trenerowi mówimy wprost, że liczy się całe studio. Null, gdy miejsca jest dość.
+    /// </summary>
+    public static (string Text, bool Reached)? ClientLimitNote(int studioClients, int maxClients, int ownClients, bool isOwner)
+    {
+        if (maxClients == int.MaxValue) return null;
+        var left = maxClients - studioClients;
+        if (left > 3) return null;
+        var plan = isOwner
+            ? $"Twój plan obejmuje {maxClients} {Clients(maxClients)}"
+            : $"Plan studia obejmuje {maxClients} {Clients(maxClients)} — liczą się klienci wszystkich trenerów (Twoich: {ownClients})";
+        if (left <= 0)
+            return ($"{plan} i wszystkie miejsca są zajęte. " + (isOwner ? "Kolejne osoby dodasz po zmianie planu." : "Kolejne osoby dodasz, gdy właściciel studia zmieni plan."), true);
+        return ($"{plan}. {Plural(left, "Zostało", "Zostały", "Zostało")} {left} {Plural(left, "miejsce", "miejsca", "miejsc")}.", false);
+    }
+
     public static string DayName(DayOfWeek d) => d switch
     {
         DayOfWeek.Monday => "Poniedziałek", DayOfWeek.Tuesday => "Wtorek", DayOfWeek.Wednesday => "Środa",
@@ -104,4 +121,9 @@ public static class FirstSetupRules
 
     private static string Hours(int n) =>
         n == 1 ? "godziny" : "godzin";
+
+    private static string Clients(int n) => Plural(n, "klienta", "klientów", "klientów");
+
+    private static string Plural(int n, string one, string few, string many) =>
+        n == 1 ? one : n % 10 is >= 2 and <= 4 && n % 100 is not (>= 12 and <= 14) ? few : many;
 }

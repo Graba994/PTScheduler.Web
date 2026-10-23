@@ -123,18 +123,34 @@ public class PublicDemoService(
                 $"{baseUrl.TrimEnd('/')}/internal/demo/mode?on={(on ? "true" : "false")}&registerUrl={Uri.EscapeDataString(registerUrl)}");
             req.Headers.Add("X-Internal-Secret", secret);
             using var resp = await Http.SendAsync(req);
-            if (resp.StatusCode == System.Net.HttpStatusCode.NotFound) return (false, "Instancja nie obsługuje jeszcze trybu demo — zaktualizuj aplikację trenera.");
+            // Starsze instancje na nieznany POST odpowiadają 400 (strona „nie znaleziono” bez antiforgery), nowsze 404.
+            if (resp.StatusCode is System.Net.HttpStatusCode.NotFound or System.Net.HttpStatusCode.BadRequest)
+                return (false, await WhyRejectedAsync(tenant, baseUrl, secret));
             if (!resp.IsSuccessStatusCode) return (false, $"Instancja odpowiedziała {(int)resp.StatusCode}.");
             await using var db = await dbFactory.CreateDbContextAsync();
             db.TenantEvents.Add(new TenantEvent { TenantId = tenant.Id, EventType = on ? "public_demo_on" : "public_demo_off", Detail = on ? "Włączono publiczne demo" : "Wyłączono publiczne demo" });
             await db.SaveChangesAsync();
             return (true, "");
         }
-        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException)
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or InvalidOperationException or System.Text.Json.JsonException)
         {
             logger.LogWarning(ex, "Publiczne demo: nie udało się przełączyć trybu u {Slug}.", tenant.Slug);
             return (false, "Nie udało się połączyć z instancją: " + ex.Message);
         }
+    }
+
+    /// <summary>Odmowa trybu demo: starsza wersja aplikacji (brak „publicDemo” w /internal/demo) czy zły sekret.</summary>
+    private static async Task<string> WhyRejectedAsync(Tenant tenant, string baseUrl, string secret)
+    {
+        using var req = new HttpRequestMessage(HttpMethod.Get, $"{baseUrl.TrimEnd('/')}/internal/demo");
+        req.Headers.Add("X-Internal-Secret", secret);
+        using var resp = await Http.SendAsync(req);
+        if (!resp.IsSuccessStatusCode)
+            return $"Instancja odrzuciła polecenie ({(int)resp.StatusCode}) — sprawdź sekret instancji (TENANT_INTERNAL_SECRET).";
+        using var json = System.Text.Json.JsonDocument.Parse(await resp.Content.ReadAsStringAsync());
+        return json.RootElement.TryGetProperty("publicDemo", out _)
+            ? "Instancja odrzuciła polecenie trybu demo — sprawdź sekret instancji (TENANT_INTERNAL_SECRET)."
+            : $"Na instancji {tenant.Slug} działa starsza wersja aplikacji, bez trybu demo. Otwórz Trenerzy → {tenant.CompanyName} → „Wdróż najnowszą wersję”, a potem włącz demo jeszcze raz.";
     }
 
     private async Task<Tenant?> TenantAsync(int id)

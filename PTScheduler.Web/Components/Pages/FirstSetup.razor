@@ -314,13 +314,22 @@
                             }
                             else if (_clientCount > 0)
                             {
-                                <div class="wz-note"><i class="bi bi-people"></i>Masz już @_clientCount @ClientsWord(_clientCount) w aplikacji — możesz dodać kolejną osobę albo przejść dalej.</div>
+                                <div class="wz-note"><i class="bi bi-people"></i>Masz już @_clientCount @ClientsWord(_clientCount) w aplikacji@(_limitReached ? "." : " — możesz dodać kolejną osobę albo przejść dalej.")</div>
                             }
-                            @if (_limitReached)
+                            @if (LimitNote is { } limit)
                             {
-                                <div class="wz-note warn"><i class="bi bi-exclamation-circle"></i>Twój plan pozwala na @_maxClients klientów. Więcej osób dodasz po zmianie planu.</div>
+                                <div class="wz-note @(limit.Reached ? "warn" : "")">
+                                    <i class="bi @(limit.Reached ? "bi-exclamation-circle" : "bi-info-circle")"></i>
+                                    <span>
+                                        @limit.Text
+                                        @if (limit.Reached && _isOwner)
+                                        {
+                                            <a class="ms-1" href="/admin/upgrade">Porównaj plany</a>
+                                        }
+                                    </span>
+                                </div>
                             }
-                            else
+                            @if (!_limitReached)
                             {
                                 <div class="wz-form">
                                     <div class="wz-field">
@@ -341,7 +350,10 @@
                             }
                             @Error()
 
-                            <div class="wz-or"><span>albo</span></div>
+                            @if (!_limitReached)
+                            {
+                                <div class="wz-or"><span>albo</span></div>
+                            }
                             <div class="wz-alt">
                                 <div class="wz-alt-card">
                                     <i class="bi bi-link-45deg"></i>
@@ -514,8 +526,8 @@
     private string _cName = "", _cEmail = "", _cPhone = "";
     private bool _cInvite = true;
     private int _clientCount;
-    private bool _limitReached;
-    private int _maxClients;
+    private int _studioClients, _maxClients = int.MaxValue;
+    private bool _limitReached => _studioClients >= _maxClients;
     private readonly List<(string Name, string Note)> _added = [];
 
     private static readonly int[] Durations = [30, 45, 60, 75, 90, 120];
@@ -627,9 +639,7 @@
             _steps.Add("client");
             _clientCount = (await ClientService.GetClientsAsync(isAdmin ? null : _trainerId)).Count;
             if (_clientCount > 0) _saved.Add("client");
-            var (allowed, current, max) = await Entitlements.CheckClientLimitAsync();
-            _limitReached = !allowed;
-            _maxClients = max;
+            await RefreshLimitAsync();
         }
         _loading = false;
     }
@@ -854,8 +864,8 @@
         var name = _cName.Trim();
         if (name.Length == 0) { _error = "Podaj imię i nazwisko."; return; }
         if (EmailRules.Problem(_cEmail) is { } problem) { _error = problem; return; }
-        var (allowed, _, max) = await Entitlements.CheckClientLimitAsync();
-        if (!allowed) { _limitReached = true; _maxClients = max; return; }
+        await RefreshLimitAsync();
+        if (_limitReached) return;
         var space = name.IndexOf(' ');
         var dto = new CreateClientDto
         {
@@ -878,7 +888,9 @@
             }
             _added.Add((name, note));
             _saved.Add("client");
+            _clientCount++;
             _cName = _cEmail = _cPhone = "";
+            await RefreshLimitAsync();
         }
         catch (Exception)
         {
@@ -886,6 +898,12 @@
         }
         finally { _busy = false; }
     }
+
+    // Limit planu liczy wszystkich klientów studia, a _clientCount u trenera to tylko jego klienci.
+    private async Task RefreshLimitAsync() =>
+        (_, _studioClients, _maxClients) = await Entitlements.CheckClientLimitAsync();
+
+    private (string Text, bool Reached)? LimitNote => FirstSetupRules.ClientLimitNote(_studioClients, _maxClients, _clientCount, _isOwner);
 
     private async Task CopyAsync(string text)
     {

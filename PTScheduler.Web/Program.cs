@@ -328,6 +328,15 @@ else
     app.UseHsts();
 }
 app.UseStatusCodePagesWithReExecute("/not-found", createScopeForStatusCodePages: true);
+// Wywołania Portalu (/internal/…) dostają gołe kody. Inaczej 404 dla POST przechodzi na stronę /not-found,
+// tam brak tokenu antiforgery daje 400 i Portal nie odróżni starszej wersji od złego żądania.
+app.Use((ctx, next) =>
+{
+    if (ctx.Request.Path.StartsWithSegments("/internal")
+        && ctx.Features.Get<Microsoft.AspNetCore.Diagnostics.IStatusCodePagesFeature>() is { } pages)
+        pages.Enabled = false;
+    return next();
+});
 
 // Skip HTTPS redirect inside Docker container — handle TLS at reverse proxy level
 if (Environment.GetEnvironmentVariable("DOTNET_RUNNING_IN_CONTAINER") != "true")
