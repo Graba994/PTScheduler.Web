@@ -87,6 +87,7 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string NotifyTicketsEmail = "notify_tickets_email";
         /// <summary>"true" włącza SMS-y o nowych zgłoszeniach (przez konto SMS platformy).</summary>
         public const string NotifyTicketsSms = "notify_tickets_sms";
+        public const string NotifyBugsEmail = "notify_bugs_email";
         /// <summary>Poczta w Panelu: adres, na który piszą ludzie (np. kontakt@hantly.pl).</summary>
         public const string InboxAddress = "inbox_address";
         /// <summary>Tajna część adresu webhooka odbioru poczty (Brevo Inbound Parsing).</summary>

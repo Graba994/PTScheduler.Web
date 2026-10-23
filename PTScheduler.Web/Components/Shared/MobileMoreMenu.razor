@@ -6,6 +6,7 @@
 @inject PTScheduler.Web.Services.ClientNav ClientNavigation
 @inject PTScheduler.Web.Services.UpsellService Upsell
 @inject PTScheduler.Application.Interfaces.IAccountService AccountSvc
+@inject PTScheduler.Web.Services.BugReportService BugReports
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Domain.Constants
 @using System.Security.Claims
@@ -178,6 +179,23 @@
             </Authorized>
         </AuthorizeView>
 
+        @if (BugReports.IsAvailable)
+        {
+            <AuthorizeView Roles="Admin,Trainer,Subordinate">
+                <Authorized>
+                    <div class="mobile-sheet-section">
+                        <div class="mobile-sheet-label">Pomoc</div>
+                        <div class="mobile-sheet-grid">
+                            <button type="button" class="mobile-sheet-tile" @onclick="ReportBugAsync">
+                                <i class="bi bi-bug-fill"></i>
+                                <span>Zgłoś błąd</span>
+                            </button>
+                        </div>
+                    </div>
+                </Authorized>
+            </AuthorizeView>
+        }
+
         <AuthorizeView Roles="Client">
             <Authorized>
                 @* Sekcje, których nie ma na dolnym pasku (Pakiety, Kursy), i sprawy konta. *@
@@ -305,6 +323,15 @@
 
     private void ToggleSheet() => _sheetOpen = !_sheetOpen;
     private void CloseSheet() => _sheetOpen = false;
+
+    // Najpierw zamykamy arkusz (żeby nie wszedł na zrzut ekranu), potem bug-report.js robi zrzut i otwiera okno.
+    private async Task ReportBugAsync()
+    {
+        _sheetOpen = false;
+        StateHasChanged();
+        await Task.Yield();
+        try { await JS.InvokeVoidAsync("ptBug.open"); } catch (JSException) { }
+    }
 
     private async Task ToggleDarkAsync()
     {

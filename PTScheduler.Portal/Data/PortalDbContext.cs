@@ -26,6 +26,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<ServiceOrder> ServiceOrders => Set<ServiceOrder>();
     public DbSet<TenantCredit> TenantCredits => Set<TenantCredit>();
     public DbSet<AppFeedback> AppFeedbacks => Set<AppFeedback>();
+    public DbSet<BugReport> BugReports => Set<BugReport>();
     public DbSet<GoogleCalendarGrant> GoogleCalendarGrants => Set<GoogleCalendarGrant>();
     public DbSet<TenantMailCounter> TenantMailCounters => Set<TenantMailCounter>();
     public DbSet<TenantAddon> TenantAddons => Set<TenantAddon>();
@@ -219,6 +220,25 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.Property(x => x.ContactEmail).HasMaxLength(256);
             e.Property(x => x.PublicAuthor).HasMaxLength(120);
             e.HasIndex(x => x.CreatedAt);
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<BugReport>(e =>
+        {
+            e.Property(x => x.Comment).HasMaxLength(2000);
+            e.Property(x => x.PageUrl).HasMaxLength(500);
+            e.Property(x => x.PageTitle).HasMaxLength(200);
+            e.Property(x => x.AuthorEmail).HasMaxLength(256);
+            e.Property(x => x.AuthorName).HasMaxLength(120);
+            e.Property(x => x.AuthorRole).HasMaxLength(40);
+            e.Property(x => x.UserAgent).HasMaxLength(400);
+            e.Property(x => x.Viewport).HasMaxLength(40);
+            e.Property(x => x.AppVersion).HasMaxLength(80);
+            e.Property(x => x.ClientErrors).HasMaxLength(8000);
+            e.Property(x => x.ScreenshotType).HasMaxLength(20);
+            e.Property(x => x.AdminNote).HasMaxLength(2000);
+            e.Property(x => x.Status).HasConversion<string>().HasMaxLength(16);
+            e.HasIndex(x => new { x.Status, x.CreatedAt });
             e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
 

@@ -519,6 +519,28 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         }
     }
 
+    /// <summary>Nowe zgłoszenie błędu z aplikacji trenera — do administratora.</summary>
+    public string AdminBugReportEmailBody(int id, string tenant, string author, string? page, string comment, bool hasScreenshot, string link) => Shell($"""
+        <h1 style="color: #dc2626; font-size: 1.3rem;">Zgłoszenie błędu #{id}</h1>
+        <p><b>{WebUtility.HtmlEncode(tenant)}</b> · {WebUtility.HtmlEncode(author)}{(string.IsNullOrWhiteSpace(page) ? "" : $" · <code>{WebUtility.HtmlEncode(page)}</code>")}</p>
+        <p style="background: #fef2f2; border-radius: 10px; padding: 12px 14px; white-space: pre-wrap;">{WebUtility.HtmlEncode(comment)}</p>
+        <p style="color: #6b7280; font-size: 0.9rem;">{(hasScreenshot ? "Zrzut ekranu i szczegóły przeglądarki są w Panelu." : "Bez zrzutu ekranu — szczegóły przeglądarki są w Panelu.")}</p>
+        {Btn(link, "Otwórz zgłoszenie")}
+        """);
+
+    /// <summary>Do osoby, która zgłosiła błąd, gdy administrator oznaczy go jako naprawiony.</summary>
+    public string BugFixedEmailBody(string? name, string comment, string? note)
+    {
+        var quote = comment.Length > 300 ? comment[..297] + "…" : comment;
+        return Shell($"""
+            <h1 style="color: #059669; font-size: 1.3rem;">Naprawione — dzięki za zgłoszenie</h1>
+            <p>{(string.IsNullOrWhiteSpace(name) ? "Cześć!" : $"Cześć {WebUtility.HtmlEncode(name.Trim())},")}</p>
+            <p>błąd, który zgłoszono z aplikacji, jest już naprawiony. Poprawka trafi do aplikacji z najbliższą aktualizacją.</p>
+            <p style="background: #f3f4f6; border-radius: 10px; padding: 12px 14px; white-space: pre-wrap; color: #4b5563;">„{WebUtility.HtmlEncode(quote)}”</p>
+            {(string.IsNullOrWhiteSpace(note) ? "" : $"<p><b>Od nas:</b> {WebUtility.HtmlEncode(note)}</p>")}
+            """);
+    }
+
     /// <summary>Zaproszenie z Panelu (kod zaproszenia): link do kreatora z kodem i dłuższym okresem próbnym.</summary>
     public string InviteEmailBody(string? name, string code, string link, int extraDays) => Shell($"""
         <h1 style="color: #7c3aed; font-size: 1.35rem;">Zbuduj swoją aplikację w minutę</h1>

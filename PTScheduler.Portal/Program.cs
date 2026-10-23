@@ -92,6 +92,7 @@ builder.Services.AddHostedService<PublicDemoResetJob>();
 builder.Services.AddScoped<GoogleOAuthBroker>();
 builder.Services.AddScoped<TenantMailRelay>();
 builder.Services.AddScoped<StoreTicketService>();
+builder.Services.AddScoped<BugReportService>();
 builder.Services.AddScoped<AddonService>();
 builder.Services.AddHttpClient();
 builder.Services.AddScoped<StorePaymentService>();
@@ -957,6 +958,32 @@ app.MapPost("/api/internal/tenants/{slug}/feedback", async (
     await db.SaveChangesAsync();
     return Results.Ok();
 });
+
+// Zgłoszenie błędu z aplikacji trenera (przycisk „Zgłoś błąd”): komentarz, zrzut ekranu, kontekst strony.
+app.MapPost("/api/internal/tenants/{slug}/bug-reports", async (
+    string slug,
+    BugReportService.Incoming body,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    BugReportService bugs,
+    IConfiguration config) =>
+{
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    var (ok, error, id) = await bugs.SaveAsync(tenant, body);
+    if (!ok) return Results.BadRequest(new { error });
+    await bugs.NotifyAsync(id);
+    return Results.Ok(new { id });
+});
+
+// Zrzut ekranu ze zgłoszenia błędu — tylko dla administratora Portalu.
+app.MapGet("/panel/bledy/{id:int}/zrzut", async (int id, BugReportService bugs, HttpContext ctx) =>
+{
+    if (await bugs.ScreenshotAsync(id) is not { } shot) return Results.NotFound();
+    ctx.Response.Headers.CacheControl = "private, max-age=3600";
+    return Results.File(shot.Data, shot.Type);
+}).RequireAuthorization(p => p.RequireRole("Admin"));
 
 // Dokumenty prawne w aplikacji trenera: które aktualne wersje czekają na akceptację właściciela
 // (np. po zmianie regulaminu albo gdy aplikację założył administrator) i zapis akceptacji.

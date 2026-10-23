@@ -189,6 +189,7 @@ builder.Services.AddScoped<PTScheduler.Web.Services.CommunityExerciseClient>();
 builder.Services.AddScoped<PTScheduler.Web.Services.DemoScenarioService>();
 // Publiczne demo (włącza Portal): tryb pokazowy instancji i nakładki, które wtedy wstrzymują e-mail, SMS, push, płatności i KSeF.
 builder.Services.AddSingleton<PTScheduler.Web.Services.PublicDemoService>();
+builder.Services.AddSingleton<PTScheduler.Web.Services.BugReportService>();
 builder.Services.AddDemoGuards();
 builder.Services.AddScoped<PTScheduler.Web.Services.RetentionService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.MessageDraftService>();

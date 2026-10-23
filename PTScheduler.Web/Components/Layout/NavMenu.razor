@@ -4,6 +4,7 @@
 @inject PTScheduler.Web.Services.ClientNav ClientNavigation
 @inject NavigationManager Navigation
 @inject PTScheduler.Web.Services.UpsellService Upsell
+@inject PTScheduler.Web.Services.BugReportService BugReports
 
 <!-- Sidebar brand -->
 <a href="/app" class="sidebar-brand">
@@ -153,7 +154,15 @@
 <div class="sidebar-footer">
     <AuthorizeView>
         <Authorized>
-            <UserMenu Direction="up" ShowName="true" />
+            <div class="sidebar-footer-row">
+                <UserMenu Direction="up" ShowName="true" />
+                @if (BugReports.IsAvailable && (context.User.IsInRole(Roles.Admin) || context.User.IsInRole(Roles.Trainer) || context.User.IsInRole(Roles.Subordinate)))
+                {
+                    <button type="button" class="sidebar-bug" onclick="ptBug.open()" title="Zgłoś błąd" aria-label="Zgłoś błąd">
+                        <i class="bi bi-bug"></i>
+                    </button>
+                }
+            </div>
         </Authorized>
         <NotAuthorized>
             <NavLink class="sidebar-link" href="Account/Login">
