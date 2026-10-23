@@ -187,6 +187,9 @@ builder.Services.AddScoped<PTScheduler.Web.Services.AccountantPackService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.PlanGeneratorService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.CommunityExerciseClient>();
 builder.Services.AddScoped<PTScheduler.Web.Services.DemoScenarioService>();
+// Publiczne demo (włącza Portal): tryb pokazowy instancji i nakładki, które wtedy wstrzymują e-mail, SMS, push, płatności i KSeF.
+builder.Services.AddSingleton<PTScheduler.Web.Services.PublicDemoService>();
+builder.Services.AddDemoGuards();
 builder.Services.AddScoped<PTScheduler.Web.Services.RetentionService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.MessageDraftService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.WorkoutCompanionService>();
@@ -338,6 +341,25 @@ app.UseRequestLocalization(new RequestLocalizationOptions
 });
 app.UseRateLimiter();
 app.UseAntiforgery();
+
+// Publiczne demo: zablokowane ścieżki (konto, sklep, płatności, poczta, nowe konta…) nie przyjmują żądań wprost.
+// Strony aplikacji (GET /admin…, /Account/Manage…) pokazują zamiast treści informację z MainLayout;
+// wysłane formularze i strony logowania (rejestracja, reset hasła) kończą się przekierowaniem.
+app.Use(async (ctx, next) =>
+{
+    var path = ctx.Request.Path.Value ?? "";
+    if (PTScheduler.Domain.Rules.PublicDemoRules.IsBlockedPath(path)
+        && ctx.RequestServices.GetRequiredService<PTScheduler.Web.Services.PublicDemoService>().IsOn)
+    {
+        var inApp = path.StartsWith("/admin", StringComparison.OrdinalIgnoreCase) || path.StartsWith("/Account/Manage", StringComparison.OrdinalIgnoreCase);
+        if (!HttpMethods.IsGet(ctx.Request.Method) || !inApp)
+        {
+            ctx.Response.Redirect(inApp ? "/dzis" : "/Account/Login");
+            return;
+        }
+    }
+    await next();
+});
 
 // Wymuszona zmiana hasła tylko dla konta administratora (hasło startowe z instalacji albo
 // Portalu daje pełną kontrolę nad aplikacją). Klienci i trenerzy dostają przypomnienie na
@@ -856,13 +878,15 @@ app.MapPost("/internal/entitlements/reload",
 
 // Dane testowe (scenariusze „kilka miesięcy pracy”) — tylko z Portalu, który pozwala na to wyłącznie kontom testowym.
 // W aplikacji trenera nie ma do tego przycisku; bez sekretu instancji endpoint „nie istnieje” (404).
-app.MapGet("/internal/demo", (HttpContext ctx, PTScheduler.Web.Services.DemoScenarioService demo, PTScheduler.Web.Services.EntitlementService ent) =>
+app.MapGet("/internal/demo", (HttpContext ctx, PTScheduler.Web.Services.DemoScenarioService demo, PTScheduler.Web.Services.EntitlementService ent,
+    PTScheduler.Web.Services.PublicDemoService publicDemo) =>
 {
     if (!InternalSecretMatches(ctx)) return Results.NotFound();
     var s = demo.GetStatus();
     return Results.Json(new
     {
         loaded = s.Loaded, scenario = s.Scenario, scenarioName = s.ScenarioName, loadedAt = s.LoadedAt, counts = s.Counts, plan = ent.Current.Name,
+        publicDemo = publicDemo.IsOn,
         scenarios = PTScheduler.Application.Demo.DemoScenarios.All.Select(x => new { key = x.Key, name = x.Name, description = x.Description, months = x.Months, clients = x.Clients })
     });
 });
@@ -872,6 +896,50 @@ app.MapPost("/internal/demo/load", async (HttpContext ctx, PTScheduler.Web.Servi
     var r = await demo.LoadAsync(scenario, seed, ctx.RequestAborted);
     return Results.Json(new { ok = r.Ok, message = r.Message, counts = r.Counts, skipped = r.Skipped, logins = r.Logins }, statusCode: r.Ok ? 200 : 409);
 });
+// Publiczne demo: Portal włącza tryb pokazowy (blokady wysyłki, płatności i części stron, baner) na koncie testowym.
+app.MapPost("/internal/demo/mode", (HttpContext ctx, PTScheduler.Web.Services.PublicDemoService publicDemo,
+    PTScheduler.Web.Services.DemoScenarioService demo, bool on, string? registerUrl) =>
+{
+    if (!InternalSecretMatches(ctx)) return Results.NotFound();
+    publicDemo.Set(on, registerUrl);
+    var (trainer, client) = demo.GetDemoAccounts();
+    return Results.Json(new { ok = true, on = publicDemo.IsOn, trainer = trainer is not null, client = client is not null });
+});
+
+// Wejście gościa publicznego demo z hantly.pl: jednorazowy token od Portalu (jak /sso/portal, ale wyłącznie
+// cele „demo-trainer” / „demo-client” i tylko w trybie demo). Gość trafia na konto trenera albo klienta ze scenariusza.
+app.MapGet("/demo/start", async (HttpContext ctx, string? t,
+    Microsoft.Extensions.Caching.Memory.IMemoryCache cache, PTScheduler.Web.Services.PublicDemoService publicDemo,
+    PTScheduler.Web.Services.DemoScenarioService demo,
+    UserManager<ApplicationUser> userManager, SignInManager<ApplicationUser> signInManager, ILogger<Program> log) =>
+{
+    var secret = Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET");
+    var slug = Environment.GetEnvironmentVariable("TENANT_SLUG");
+    if (!publicDemo.IsOn || string.IsNullOrWhiteSpace(secret) || string.IsNullOrWhiteSpace(slug)) return Results.Redirect("/");
+
+    var sso = PTScheduler.Application.Security.PortalSsoToken.Validate(t ?? "", secret, slug, DateTimeOffset.UtcNow);
+    if (sso is null || !PTScheduler.Application.Security.PortalSsoToken.IsDemoTarget(sso.Target) || cache.TryGetValue("sso:" + sso.Nonce, out _))
+    {
+        // Stary albo już użyty link (np. z historii): po nowe wejście na hantly.pl, w tym samym widoku.
+        log.LogInformation("Odrzucono wejście do demo (token nieważny, wygasły albo użyty).");
+        var again = publicDemo.RegisterUrl.Replace("/register", "/demo");
+        return Results.Redirect(sso?.Target == PTScheduler.Application.Security.PortalSsoToken.DemoClient ? again + "?jako=klient" : again);
+    }
+    Microsoft.Extensions.Caching.Memory.CacheExtensions.Set(cache, "sso:" + sso.Nonce, true, TimeSpan.FromSeconds(PTScheduler.Application.Security.PortalSsoToken.MaxLifetimeSeconds * 2));
+
+    var asClient = sso.Target == PTScheduler.Application.Security.PortalSsoToken.DemoClient;
+    var (trainerId, clientId) = demo.GetDemoAccounts();
+    var user = await userManager.FindByIdAsync((asClient ? clientId : trainerId) ?? "");
+    // Starszy scenariusz bez zapisanych kont: pierwszy trener / pierwszy klient.
+    user ??= (await userManager.GetUsersInRoleAsync(asClient ? PTScheduler.Domain.Constants.Roles.Client : PTScheduler.Domain.Constants.Roles.Trainer))
+        .OrderBy(u => u.Email).FirstOrDefault();
+    if (user is null) return Results.Redirect("/");
+
+    await signInManager.SignOutAsync();
+    await signInManager.SignInAsync(user, isPersistent: false);
+    return Results.Redirect(asClient ? "/app" : "/dzis");
+}).AllowAnonymous();
+
 app.MapPost("/internal/demo/clear", async (HttpContext ctx, PTScheduler.Web.Services.DemoScenarioService demo) =>
 {
     if (!InternalSecretMatches(ctx)) return Results.NotFound();
@@ -912,7 +980,8 @@ app.MapGet("/sso/portal", async (HttpContext ctx, string? t,
 
     var sso = PTScheduler.Application.Security.PortalSsoToken.Validate(t ?? "", secret, slug, DateTimeOffset.UtcNow);
     // Każdy token tylko raz — ponowne otwarcie tego samego linku (historia, podgląd w komunikatorze) nic nie da.
-    if (sso is null || cache.TryGetValue("sso:" + sso.Nonce, out _))
+    // Token gościa demo nie otwiera konta technicznego ani właściciela.
+    if (sso is null || PTScheduler.Application.Security.PortalSsoToken.IsDemoTarget(sso.Target) || cache.TryGetValue("sso:" + sso.Nonce, out _))
     {
         log.LogWarning("Odrzucono wejście z Portalu (token nieważny, wygasły albo użyty) z {Ip}.", ctx.Connection.RemoteIpAddress);
         return Results.Redirect("/Account/Login?sso=expired");

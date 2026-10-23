@@ -5,7 +5,8 @@ using System.Text.Json;
 namespace PTScheduler.Application.Security;
 
 /// <summary>Kto i jako kto wchodzi z Portalu (po sprawdzeniu podpisu i ważności).</summary>
-/// <param name="Target">„root” — konto techniczne, „owner” — właściciel studia (przełączenie z konta technicznego).</param>
+/// <param name="Target">„root” — konto techniczne, „owner” — właściciel studia (przełączenie z konta technicznego),
+/// „demo-trainer” / „demo-client” — gość publicznego demo (tylko /demo/start, tylko w trybie demo).</param>
 public sealed record PortalSso(string Slug, string AdminEmail, string Target, string Nonce, DateTimeOffset ExpiresAt);
 
 /// <summary>
@@ -18,7 +19,11 @@ public sealed record PortalSso(string Slug, string AdminEmail, string Target, st
 public static class PortalSsoToken
 {
     public const int MaxLifetimeSeconds = 300;
-    public static readonly string[] Targets = ["root", "owner"];
+    public static readonly string[] Targets = ["root", "owner", DemoTrainer, DemoClient];
+    public const string DemoTrainer = "demo-trainer";
+    public const string DemoClient = "demo-client";
+
+    public static bool IsDemoTarget(string target) => target is DemoTrainer or DemoClient;
 
     public static byte[] Key(string secret) => SHA256.HashData(Encoding.UTF8.GetBytes("pt-sso:" + secret));
 

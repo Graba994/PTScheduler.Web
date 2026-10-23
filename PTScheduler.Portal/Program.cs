@@ -87,6 +87,8 @@ builder.Services.AddScoped<BunnyPlatformService>();
 builder.Services.AddScoped<VideoHubService>();
 builder.Services.AddScoped<CommunityExerciseService>();
 builder.Services.AddScoped<TenantDemoService>();
+builder.Services.AddScoped<PublicDemoService>();
+builder.Services.AddHostedService<PublicDemoResetJob>();
 builder.Services.AddScoped<GoogleOAuthBroker>();
 builder.Services.AddScoped<TenantMailRelay>();
 builder.Services.AddScoped<StoreTicketService>();
@@ -151,6 +153,14 @@ builder.Services.AddRateLimiter(o =>
     o.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
     o.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
     {
+        // Wejście do publicznego demo: każde tworzy jednorazowy token — limit na adres IP.
+        if (ctx.Request.Path.StartsWithSegments("/demo"))
+            return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter("demo:" + (ctx.Connection.RemoteIpAddress?.ToString() ?? "?"), _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 20,
+                Window = TimeSpan.FromMinutes(10),
+                QueueLimit = 0
+            });
         var slug = TenantApiSlug(ctx.Request.Path);
         return slug is null
             ? System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("other")
@@ -397,6 +407,15 @@ app.MapGet("/api/internal/git-config", async (HttpContext ctx, SiteSettingsServi
 
 // Wejście do aplikacji trenera jednym kliknięciem: token powstaje dopiero po kliknięciu, żyje 2 minuty
 // i działa raz; aplikacja trenera sprawdza go w /sso/portal. Wejście zapisujemy w historii trenera.
+// Publiczne demo: „Wypróbuj demo” na stronie głównej → jednorazowe wejście do instancji pokazowej
+// (?jako=klient — aplikacja klienta). Gdy demo jest wyłączone, wracamy na stronę główną.
+app.MapGet("/demo", async (string? jako, HttpContext ctx, PublicDemoService publicDemo) =>
+{
+    var url = await publicDemo.EntryUrlAsync(asClient: jako == "klient");
+    ctx.Response.Headers.CacheControl = "no-store";
+    return Results.Redirect(url ?? "/");
+});
+
 app.MapGet("/panel/wejdz/{id:int}", async (int id, string? jako, HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory,
     TenantService tenants, IConfiguration config, ILogger<Program> log) =>
 {

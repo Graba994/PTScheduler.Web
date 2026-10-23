@@ -32,8 +32,19 @@
             <p class="ld-sub">@HeroSubtitle</p>
             <div class="ld-ctas">
                 <a href="@_s("hero_cta_url", "/register")" class="lp-btn lp-btn-energy"><i class="bi bi-rocket-takeoff"></i>@_s("hero_cta", "Zbuduj swoją aplikację")</a>
-                <a href="#dzien" class="lp-btn lp-btn-ghost"><i class="bi bi-play-circle"></i>Zobacz ją w akcji</a>
+                @if (DemoOn)
+                {
+                    <a href="/demo" data-enhance-nav="false" class="lp-btn lp-btn-ghost"><i class="bi bi-play-circle"></i>Wypróbuj demo</a>
+                }
+                else
+                {
+                    <a href="#dzien" class="lp-btn lp-btn-ghost"><i class="bi bi-play-circle"></i>Zobacz ją w akcji</a>
+                }
             </div>
+            @if (DemoOn)
+            {
+                <p class="ld-demo-note"><i class="bi bi-hand-index-thumb"></i>Demo bez zakładania konta — kliknij i działaj na przykładowych danych. Albo <a href="/demo?jako=klient" data-enhance-nav="false">zobacz aplikację oczami klienta</a>.</p>
+            }
             <ul class="ld-trust">
                 <li><i class="bi bi-check-circle-fill"></i>Okres próbny za 0 zł</li>
                 <li><i class="bi bi-check-circle-fill"></i>Bez umowy i wypowiedzenia</li>
@@ -397,7 +408,13 @@
         <span class="ld-cta-mascot">@Mascot("celebrate")</span>
         <h2>@_s("cta_title", "Oddaj papierologię aplikacji. Wróć do trenowania.")</h2>
         <p>@_s("cta_subtitle", "Zbuduj aplikację w kilka minut i zaproś pierwszych klientów jeszcze dziś. Okres próbny jest za darmo.")</p>
-        <a href="/register" class="lp-btn lp-btn-energy"><i class="bi bi-rocket-takeoff"></i>@_s("cta_button", "Zbuduj swoją aplikację")</a>
+        <div class="ld-ctas ld-cta-btns">
+            <a href="/register" class="lp-btn lp-btn-energy"><i class="bi bi-rocket-takeoff"></i>@_s("cta_button", "Zbuduj swoją aplikację")</a>
+            @if (DemoOn)
+            {
+                <a href="/demo" data-enhance-nav="false" class="lp-btn lp-btn-ghost ld-ghost-dark"><i class="bi bi-play-circle"></i>Najpierw wypróbuj demo</a>
+            }
+        </div>
     </div>
 </section>
 
@@ -490,6 +507,9 @@
         }
     };
 
+    /// <summary>Publiczne demo włączone w Panelu (przycisk „Wypróbuj demo” → /demo).</summary>
+    private bool DemoOn => _s(SiteSettingsService.Keys.DemoEnabled) == "true";
+
     /// <summary>Własny tytuł z Panelu (gdy ktoś go zmienił) — inaczej tytuł tego szablonu.</summary>
     private string? CustomTitle =>
         _settings.TryGetValue(SiteSettingsService.Keys.HeroTitle, out var t) && !string.IsNullOrWhiteSpace(t) && t != SiteSettingsService.DefaultHeroTitle ? t : null;
@@ -525,7 +545,7 @@
         _settings = await Settings.GetAllAsync(
             SiteSettingsService.Keys.HeroTitle, SiteSettingsService.Keys.HeroSubtitle, SiteSettingsService.Keys.HeroCta,
             SiteSettingsService.Keys.HeroCtaUrl, SiteSettingsService.Keys.CtaTitle, SiteSettingsService.Keys.CtaSubtitle,
-            SiteSettingsService.Keys.CtaButton);
+            SiteSettingsService.Keys.CtaButton, SiteSettingsService.Keys.DemoEnabled);
 
         await using var db = DbFactory.CreateDbContext();
         _reviews = await db.AppFeedbacks.AsNoTracking()

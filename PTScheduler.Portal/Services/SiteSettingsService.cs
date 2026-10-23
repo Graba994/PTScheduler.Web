@@ -73,6 +73,16 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string OnboardingEmails = "onboarding_emails";
         /// <summary>Numer administratora na SMS-y o nowych zgłoszeniach ze sklepu.</summary>
         public const string AdminNotificationPhone = "admin_notification_phone";
+        /// <summary>Publiczne demo na hantly.pl: „true” — przycisk „Wypróbuj demo” i wejście /demo.</summary>
+        public const string DemoEnabled = "demo_enabled";
+        /// <summary>Id konta testowego, które służy jako demo.</summary>
+        public const string DemoTenantId = "demo_tenant_id";
+        /// <summary>Scenariusz danych demo wczytywany przy każdym resecie.</summary>
+        public const string DemoScenario = "demo_scenario";
+        /// <summary>Godzina nocnego resetu (czas polski, 0–23; „off” — bez resetu).</summary>
+        public const string DemoResetHour = "demo_reset_hour";
+        /// <summary>Kiedy ostatnio przywrócono dane demo (UTC, ISO).</summary>
+        public const string DemoLastReset = "demo_last_reset";
         /// <summary>"false" wyłącza e-maile o nowych zgłoszeniach (domyślnie włączone, gdy jest adres).</summary>
         public const string NotifyTicketsEmail = "notify_tickets_email";
         /// <summary>"true" włącza SMS-y o nowych zgłoszeniach (przez konto SMS platformy).</summary>

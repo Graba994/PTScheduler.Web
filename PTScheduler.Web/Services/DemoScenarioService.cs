@@ -61,6 +61,9 @@ public class DemoScenarioService(
         public List<int> TemplatePlanIds { get; set; } = [];
         public List<int> AvailabilityIds { get; set; } = [];
         public Dictionary<string, int> Counts { get; set; } = [];
+        /// <summary>Konta, na które wchodzą goście publicznego demo (trener i przykładowy klient).</summary>
+        public string? OwnerTrainerId { get; set; }
+        public string? SampleClientUserId { get; set; }
     }
 
     private string StatePath => PrivateStorage.SettingsFile(webRoot, "demo-state.json");
@@ -76,6 +79,13 @@ public class DemoScenarioService(
         Directory.CreateDirectory(PrivateStorage.Root(webRoot));
         if (s is null) { if (File.Exists(StatePath)) File.Delete(StatePath); return; }
         File.WriteAllText(StatePath, JsonSerializer.Serialize(s));
+    }
+
+    /// <summary>Konto trenera i przykładowego klienta z wczytanego scenariusza (dla wejścia do publicznego demo).</summary>
+    public (string? TrainerId, string? ClientUserId) GetDemoAccounts()
+    {
+        var s = ReadState();
+        return (s?.OwnerTrainerId, s?.SampleClientUserId);
     }
 
     public Status GetStatus()
@@ -305,6 +315,7 @@ public class DemoScenarioService(
                 Logins.Add($"Trener: {owner.Email} / {TeamPassword}");
             }
             _ownerTrainerId = owner.Id;
+            state.OwnerTrainerId = owner.Id;
             _trainers.Add(owner.Id);
 
             if (sc.TeamTrainers > 0)
@@ -453,7 +464,10 @@ public class DemoScenarioService(
             await db.SaveChangesAsync();
             Count("klienci", _people.Count);
             if (_people.FirstOrDefault(p => p.End is null) is { } sample)
+            {
                 Logins.Add($"Klient: {sample.User.Email} / {ClientPassword}");
+                state.SampleClientUserId = sample.User.Id;
+            }
         }
 
         // ── Wizyty ──────────────────────────────────────────────────────────────

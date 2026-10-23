@@ -5,6 +5,7 @@
 @using PTScheduler.Web.Services
 @inject UpsellService Upsell
 @inject NavigationManager Nav
+@inject PublicDemoService PublicDemo
 
 @if (_notice is not null)
 {
@@ -37,6 +38,7 @@
         var path = Nav.ToBaseRelativePath(Nav.Uri);
         if (path.StartsWith("admin/sklep", StringComparison.OrdinalIgnoreCase) || path.StartsWith("admin/upgrade", StringComparison.OrdinalIgnoreCase)) return;
 
+        if (PublicDemo.IsOn) return; // gość demo nie kupuje planu — okienko tylko by przeszkadzało
         try { _notice = (await Upsell.GetAsync()).FirstOrDefault(n => n.IsUrgent); } catch { }
         if (_notice is null) return;
         // Klucz zmienia się co dzień (skończyło się) albo co 3 dni (kończy się) — wtedy okienko wraca.

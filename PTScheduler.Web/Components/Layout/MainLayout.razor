@@ -1,6 +1,7 @@
 @inherits LayoutComponentBase
 @inject NavigationManager Nav
 @inject PTScheduler.Web.Services.ClientNav ClientNav
+@inject PTScheduler.Web.Services.PublicDemoService PublicDemo
 @using PTScheduler.Domain.Constants
 
 <div class="app-shell">
@@ -10,6 +11,7 @@
 
     <main class="app-main">
         <div class="app-content">
+            <DemoBanner />
             <SwitchedBanner />
             <AuthorizeView Roles="Client">
                 <Authorized><ClientTabs /></Authorized>
@@ -22,7 +24,16 @@
                 </AuthorizeView>
             }
             <ErrorBoundary @ref="_errorBoundary">
-                <ChildContent>@Body</ChildContent>
+                <ChildContent>
+                    @if (DemoBlocked)
+                    {
+                        <DemoBlocked />
+                    }
+                    else
+                    {
+                        @Body
+                    }
+                </ChildContent>
                 <ErrorContent>
                     <div class="text-center py-5">
                         <i class="bi bi-exclamation-triangle-fill text-warning" style="font-size:2.5rem"></i>
@@ -112,6 +123,9 @@
 </div>
 
 @code {
+    // Publiczne demo: strony konta, sklepu, płatności, poczty itd. są dla gości zablokowane (PublicDemoRules).
+    private bool DemoBlocked => PublicDemo.IsOn && PTScheduler.Domain.Rules.PublicDemoRules.IsBlockedPath(new Uri(Nav.Uri).AbsolutePath);
+
     private ErrorBoundary? _errorBoundary;
 
     private void RecoverError() => _errorBoundary?.Recover();

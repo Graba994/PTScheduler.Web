@@ -20,7 +20,7 @@ public static class TenantSso
         {
             s = slug,
             a = adminEmail,
-            t = target == "owner" ? "owner" : "root",
+            t = target is "owner" or "demo-trainer" or "demo-client" ? target : "root",
             e = now.AddSeconds(LifetimeSeconds).ToUnixTimeSeconds(),
             n = Convert.ToHexString(RandomNumberGenerator.GetBytes(16)),
         });
@@ -31,6 +31,9 @@ public static class TenantSso
     }
 
     public static string Url(string publicBase, string token) => $"{publicBase.TrimEnd('/')}/sso/portal?t={Uri.EscapeDataString(token)}";
+
+    /// <summary>Wejście gościa publicznego demo (instancja przyjmuje je tylko w trybie demo).</summary>
+    public static string DemoUrl(string publicBase, string token) => $"{publicBase.TrimEnd('/')}/demo/start?t={Uri.EscapeDataString(token)}";
 
     private static string B64Url(byte[] b) => Convert.ToBase64String(b).TrimEnd('=').Replace('+', '-').Replace('/', '_');
 }
