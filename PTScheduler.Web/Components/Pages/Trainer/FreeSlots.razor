@@ -1,0 +1,237 @@
+@page "/okienka"
+@using Microsoft.AspNetCore.Authorization
+@using PTScheduler.Application.Messaging
+@using PTScheduler.Domain.Constants
+@attribute [Authorize(Roles = Roles.Admin + "," + Roles.Trainer)]
+@inject SlotInviteService Invites
+@inject PlatformAssistantService Platform
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* „Wolne okienka”: wolne godziny w grafiku i klienci, którzy zwykle trenują o tej porze. Trener zaznacza, do kogo
+   napisać, poprawia wiadomość i wysyła — w aplikacji (z powiadomieniem) albo SMS-em z krótkim linkiem do rezerwacji.
+   Nic nie wychodzi samo; tę samą osobę zapraszamy najwyżej raz na kilka dni. *@
+
+<AppTitle Page="Wolne okienka" />
+
+<div class="fsl">
+    <AttentionTabs Current="slots" />
+    <header class="fsl-head">
+        <div>
+            <h4 class="mb-1 fw-bold"><i class="bi bi-calendar2-plus me-2"></i>Wolne okienka</h4>
+            <p class="fsl-sub">Wolne godziny na dziś i najbliższe dni oraz osoby, które zwykle trenują o tej porze. Wybierasz, do kogo napisać — nic nie wychodzi samo.</p>
+        </div>
+    </header>
+
+    @if (_loading)
+    {
+        <div class="text-center text-muted py-5"><div class="spinner-border"></div></div>
+    }
+    else if (_list.Count == 0)
+    {
+        <div class="dbt-empty">
+            <i class="bi bi-calendar-check"></i>
+            <b>Brak okienek do zapełnienia</b>
+            <span>Albo grafik jest pełny, albo nikt nie trenuje zwykle w wolnych godzinach. Zajrzę jutro.</span>
+        </div>
+    }
+    else
+    {
+        <div class="fsl-grid">
+        @foreach (var o in _list)
+        {
+            var key = Key(o);
+            var state = _state[key];
+            <section class="fsl-card">
+                <div class="fsl-card-head">
+                    <span class="fsl-ic"><i class="bi bi-clock"></i></span>
+                    <div class="min-w-0">
+                        <b class="fsl-when">@Cap(o.Label)</b>
+                        <span class="fsl-meta">@Hours(o.Window.Minutes) wolnego · @o.People.Count @AssistantTipsService.Plural(o.People.Count, "osoba pasuje", "osoby pasują", "osób pasuje")</span>
+                    </div>
+                </div>
+
+                @if (state.Results is { } results)
+                {
+                    <ul class="fsl-results">
+                        @foreach (var r in results)
+                        {
+                            <li class="@(r.App || r.Sms ? "ok" : "err")">
+                                <i class="bi @(r.App || r.Sms ? "bi-check-circle-fill" : "bi-exclamation-circle")"></i>
+                                <span><b>@r.Name</b> — @(r.App && r.Sms ? "wiadomość w aplikacji i SMS" : r.App ? "wiadomość w aplikacji" : r.Sms ? "SMS" : r.Error)</span>
+                            </li>
+                        }
+                    </ul>
+                    <p class="fsl-note">Gdy ktoś zarezerwuje, zobaczysz wizytę w kalendarzu. Kliknięcia w link widać niżej.</p>
+                }
+                else
+                {
+                    <ul class="fsl-people">
+                        @foreach (var p in o.People)
+                        {
+                            var pick = state.Picks[p.ClientId];
+                            <li class="fsl-person @(pick.On ? "on" : "")">
+                                <label class="fsl-check">
+                                    <input type="checkbox" class="form-check-input" checked="@pick.On" @onchange="e => pick.On = e.Value is true" />
+                                    <span class="min-w-0">
+                                        <b>@($"{p.FirstName} {p.LastName}".Trim())</b>
+                                        <small>@Why(p, o) · proponuję @p.SuggestedStart.ToString("HH:mm")@(p.SelfBooking ? "" : " · zapisy przez Ciebie, link otworzy czat")</small>
+                                    </span>
+                                </label>
+                                <div class="fsl-channels" role="group" aria-label="Jak wysłać">
+                                    <button type="button" class="fsl-ch @(pick.App ? "on" : "")" aria-pressed="@(pick.App ? "true" : "false")" @onclick="() => pick.App = !pick.App"><i class="bi bi-chat-dots"></i>W aplikacji</button>
+                                    <button type="button" class="fsl-ch @(pick.Sms ? "on" : "")" aria-pressed="@(pick.Sms ? "true" : "false")" disabled="@(!p.SmsAllowed)"
+                                            title="@(p.SmsAllowed ? "SMS z krótkim linkiem" : SmsOffReason(p))" @onclick="() => pick.Sms = !pick.Sms"><i class="bi bi-phone"></i>SMS</button>
+                                </div>
+                            </li>
+                        }
+                    </ul>
+
+                    <label class="fsl-label" for="@($"msg-{key}")">Wiadomość</label>
+                    <textarea id="@($"msg-{key}")" class="form-control" rows="4" @bind="state.Text" @bind:event="oninput" maxlength="900"></textarea>
+                    @if (o.People.FirstOrDefault(p => state.Picks[p.ClientId].On) is { } first && !string.IsNullOrWhiteSpace(state.Text))
+                    {
+                        <div class="fsl-preview"><span>Tak zobaczy to @first.FirstName:</span>@Render(state.Text, first.FirstName)</div>
+                    }
+                    <div class="fsl-hint">
+                        <span><code>[klient]</code> zamienię na imię, <code>[link]</code> na krótki link do rezerwacji z tym terminem.</span>
+                        @if (state.Picks.Values.Any(x => x.On && x.Sms))
+                        {
+                            var smsLen = MessageTemplates.ForSms(Sample(state.Text)).Length;
+                            <span class="@(smsLen > 160 ? "text-warning-emphasis" : "")">SMS: @smsLen znaków@(smsLen > 160 ? $" ({(smsLen + 152) / 153} wiadomości)" : "")</span>
+                        }
+                    </div>
+                    @if (state.Error is { } err) { <div class="text-danger small mt-1">@err</div> }
+                    <div class="fsl-actions">
+                        @if (_ai)
+                        {
+                            <button type="button" class="btn btn-sm btn-outline-secondary" disabled="@state.Busy" @onclick="() => RewriteAsync(o)"><i class="bi bi-stars me-1"></i>Napisz inaczej</button>
+                        }
+                        <button type="button" class="btn btn-sm btn-primary ms-auto" disabled="@(state.Busy || Selected(state) == 0)" @onclick="() => SendAsync(o)">
+                            @if (state.Busy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-send me-1"></i> }
+                            Zaproś @(Selected(state) > 0 ? $"({Selected(state)})" : "")
+                        </button>
+                    </div>
+                }
+            </section>
+        }
+        </div>
+    }
+
+    @if (_recent.Count > 0)
+    {
+        <section class="fsl-recent">
+            <h6 class="fw-bold mb-2">Ostatnie zaproszenia</h6>
+            <ul>
+                @foreach (var r in _recent)
+                {
+                    <li>
+                        <span class="min-w-0"><b>@r.Name</b> · @r.SlotStart.ToString("ddd d.MM, HH:mm") · @(r.Channel == "sms" ? "SMS" : "w aplikacji")</span>
+                        <span class="fsl-stat @(r.Booked ? "ok" : "")">@(r.Booked ? "zarezerwowano" : r.Clicks > 0 ? $"kliknięto ({r.Clicks})" : "bez kliknięcia")</span>
+                    </li>
+                }
+            </ul>
+        </section>
+    }
+</div>
+
+@code {
+    private sealed class Pick { public bool On; public bool App = true; public bool Sms; }
+    private sealed class State
+    {
+        public Dictionary<int, Pick> Picks = new();
+        public string Text = "";
+        public bool Busy;
+        public string? Error;
+        public List<SlotInviteService.SendResult>? Results;
+    }
+
+    private List<SlotInviteService.Opportunity> _list = [];
+    private List<(string Name, DateTime SlotStart, string Channel, int Clicks, bool Booked)> _recent = [];
+    private readonly Dictionary<string, State> _state = new();
+    private bool _loading = true, _ai, _isAdmin;
+    private string _userId = "";
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        _userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _isAdmin = user.IsInRole(Roles.Admin);
+        try { _ai = (await Platform.GetConfigAsync())?.Ai == true; } catch { _ai = false; }
+        try
+        {
+            _list = await Invites.GetAsync(_userId);
+            foreach (var o in _list)
+            {
+                var st = new State();
+                // Domyślnie zaznaczamy trzy najlepiej pasujące osoby — reszta do wyboru.
+                for (var i = 0; i < o.People.Count; i++) st.Picks[o.People[i].ClientId] = new Pick { On = i < 3 };
+                st.Text = (await Invites.TemplateAsync(_userId, o, o.People.Any(p => p.SelfBooking), false)).Text;
+                _state[Key(o)] = st;
+            }
+            _recent = await Invites.RecentAsync(_userId);
+        }
+        catch { _list = []; }
+        _loading = false;
+    }
+
+    private static string Key(SlotInviteService.Opportunity o) => o.Window.Start.ToString("yyyyMMddHHmm");
+    private static int Selected(State s) => s.Picks.Values.Count(p => p.On && (p.App || p.Sms));
+
+    private async Task RewriteAsync(SlotInviteService.Opportunity o)
+    {
+        var st = _state[Key(o)];
+        st.Busy = true; st.Error = null;
+        try
+        {
+            var (text, fromAi) = await Invites.TemplateAsync(_userId, o, o.People.Any(p => p.SelfBooking), true);
+            st.Text = text;
+            if (!fromAi) st.Error = "Asystent jest teraz niedostępny — zostaje szablon.";
+        }
+        catch { st.Error = "Nie udało się — zostaje obecna wiadomość."; }
+        finally { st.Busy = false; }
+    }
+
+    private async Task SendAsync(SlotInviteService.Opportunity o)
+    {
+        var st = _state[Key(o)];
+        if (string.IsNullOrWhiteSpace(st.Text)) { st.Error = "Wpisz wiadomość."; return; }
+        if (o.People.Any(p => p.SelfBooking && st.Picks[p.ClientId].On) && !st.Text.Contains(MessageTemplates.LinkTag))
+        {
+            st.Error = "Zostaw [link] w wiadomości — bez niego klient nie zarezerwuje jednym kliknięciem.";
+            return;
+        }
+        st.Busy = true; st.Error = null;
+        try
+        {
+            var picks = st.Picks.Where(x => x.Value.On && (x.Value.App || x.Value.Sms)).Select(x => (x.Key, x.Value.App, x.Value.Sms)).ToList();
+            st.Results = await Invites.SendAsync(_userId, _isAdmin, o, picks, st.Text.Trim(), Nav.BaseUri);
+            _recent = await Invites.RecentAsync(_userId);
+        }
+        catch { st.Error = "Nie udało się wysłać. Spróbuj jeszcze raz."; }
+        finally { st.Busy = false; }
+    }
+
+    private static string Why(SlotInviteService.Person p, SlotInviteService.Opportunity o)
+    {
+        var days = o.Window.Start.DayOfWeek switch
+        {
+            DayOfWeek.Monday => "w poniedziałki", DayOfWeek.Tuesday => "we wtorki", DayOfWeek.Wednesday => "w środy",
+            DayOfWeek.Thursday => "w czwartki", DayOfWeek.Friday => "w piątki", DayOfWeek.Saturday => "w soboty", _ => "w niedziele",
+        };
+        return $"o tej porze {p.Hits}× w ostatnich tygodniach" + (p.SameWeekday >= 2 ? $", w tym {p.SameWeekday}× {days}" : "");
+    }
+
+    private static string SmsOffReason(SlotInviteService.Person p) =>
+        string.IsNullOrWhiteSpace(p.Phone) ? "Brak numeru telefonu" : "SMS niedostępny (wyłączony w planie albo klient nie chce SMS-ów)";
+
+    private string Render(string text, string firstName) =>
+        text.Replace(MessageTemplates.ClientTag, firstName.Trim()).Replace(MessageTemplates.LinkTag, (AppUrls.PublicBase() ?? Nav.BaseUri.TrimEnd('/')) + "/l/…");
+
+    private static string Sample(string text) =>
+        text.Replace(MessageTemplates.ClientTag, "Ania").Replace(MessageTemplates.LinkTag, "https://twojadomena.pl/l/abc1234");
+
+    private static string Hours(int minutes) => minutes % 60 == 0 ? $"{minutes / 60} h" : $"{minutes / 60} h {minutes % 60} min";
+    private static string Cap(string s) => s.Length == 0 ? s : char.ToUpper(s[0]) + s[1..];
+}

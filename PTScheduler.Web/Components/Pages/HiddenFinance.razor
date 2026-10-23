@@ -1,8 +1,9 @@
 @page "/finance/hidden"
-@rendermode InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 @using Microsoft.AspNetCore.Authorization
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Finance
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Enums
 @using PTScheduler.Domain.Constants
@@ -13,6 +14,9 @@
 @inject AuthenticationStateProvider AuthState
 @inject NavigationManager Nav
 @attribute [Authorize(Roles = $"{Roles.Admin},{Roles.Trainer},{Roles.Subordinate}")]
+
+@* Znacznik: w finansach tło kafelków z monetami zamiast hantli (app.css). *@
+<span class="pt-finance-page" hidden></span>
 
 @if (!_authorized)
 {
@@ -132,9 +136,43 @@ else
         </div>
     </div>
 
-    @if (_taxConfig is not null && HasAnyTaxOption(_taxConfig))
+    @if (DisplaySessions.Count > 0)
     {
-        var t = ComputeTax(_displayPackages, _taxConfig, _months);
+        <div class="card mb-3">
+            <div class="card-header py-2 d-flex align-items-center justify-content-between flex-wrap gap-2">
+                <span class="fw-semibold" style="font-size:.875rem"><i class="bi bi-calendar-check me-2" style="color:var(--c-primary)"></i>Treningi poza pakietem — opłacone u trenera</span>
+                <span class="small text-muted">@DisplaySessions.Count · <b>@DisplaySessions.Sum(x => x.Amount).ToString("N0") zł</b></span>
+            </div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle mb-0" style="font-size:.82rem">
+                    <thead><tr><th>Opłacono</th><th>Klient</th><th>Trening</th><th>Sposób</th><th class="text-end">Kwota</th><th></th></tr></thead>
+                    <tbody>
+                        @foreach (var x in DisplaySessions)
+                        {
+                            <tr>
+                                <td class="text-nowrap">@x.PaidAt.ToLocalTime().ToString("dd.MM.yyyy")</td>
+                                <td>@x.ClientName</td>
+                                <td>@x.SessionTypeName <span class="text-muted">· @x.StartTime.ToString("dd.MM HH:mm")</span></td>
+                                <td>@x.PaidVia @if (x.IsHidden) { <i class="bi bi-eye-slash text-muted ms-1" title="Ukryte"></i> }</td>
+                                <td class="text-end text-nowrap">@(x.Amount > 0 ? x.Amount.ToString("N0") + " zł" : "bez ceny")</td>
+                                <td class="text-end">
+                                    @if (x.IsHidden)
+                                    {
+                                        <button class="btn btn-sm btn-link p-0" title="Przywróć do zwykłych finansów" @onclick="() => UnhideSessionAsync(x.SessionId)"><i class="bi bi-eye"></i></button>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    @if (_taxConfig is not null && TaxCalculator.HasAnyOption(_taxConfig))
+    {
+        var gross = _displayPackages.Where(p => p.IsPaid).Sum(p => p.TotalPrice) + DisplaySessions.Sum(x => x.Amount);
+        var t = TaxCalculator.Compute(_taxConfig, gross, _months);
         <div class="card mb-3">
             <div class="card-header py-2 d-flex align-items-center justify-content-between">
                 <span class="fw-semibold" style="font-size:.875rem">
@@ -611,7 +649,17 @@ else
             .Where(p => p.PurchasedAt >= from).ToList();
         _hiddenPackages = _allPackagesRaw.Where(p => p.IsHidden).ToList();
         _displayPackages = _viewMode == "all" ? _allPackagesRaw : _hiddenPackages;
+        _sessionsAll = await FinanceService.GetOffPackagePaymentsAsync(from, _trainerUserId, hidden: null);
         _chartNeedsRender = true;
+    }
+
+    private List<OffPackagePaymentDto> _sessionsAll = [];
+    private List<OffPackagePaymentDto> DisplaySessions => _viewMode == "all" ? _sessionsAll : _sessionsAll.Where(x => x.IsHidden).ToList();
+
+    private async Task UnhideSessionAsync(int sessionId)
+    {
+        await FinanceService.SetSessionHiddenAsync(sessionId, false);
+        await LoadDataAsync();
     }
 
     private async Task UnhidePackageAsync(int packageId)
@@ -630,57 +678,13 @@ else
         _showTaxSettings = false;
     }
 
-    private static bool HasAnyTaxOption(FinanceTaxConfigDto tc) =>
-        tc.VatEnabled || tc.IncomeTaxType != "none" || tc.ZusEnabled || tc.HealthInsuranceEnabled || tc.CostDeductionsEnabled;
-
-    private static (decimal Gross, decimal Vat, decimal Net, decimal IncomeTax, string TaxLabel, decimal Zus, decimal Health, decimal Costs, decimal Profit) ComputeTax(
-        List<SessionPackageDto> packages, FinanceTaxConfigDto tax, int months)
-    {
-        var gross = packages.Where(p => p.IsPaid).Sum(p => p.TotalPrice);
-        decimal vat = 0, net = gross;
-        if (tax.VatEnabled && tax.VatRate > 0)
-        {
-            vat = gross * tax.VatRate / (100 + tax.VatRate);
-            net = gross - vat;
-        }
-
-        decimal incomeTax = 0;
-        string taxLabel = "";
-        switch (tax.IncomeTaxType)
-        {
-            case "flat":
-                incomeTax = net * tax.FlatTaxRate / 100;
-                taxLabel = $"PIT liniowy ({tax.FlatTaxRate}%)";
-                break;
-            case "lump":
-                incomeTax = net * tax.LumpSumRate / 100;
-                taxLabel = $"Ryczałt ({tax.LumpSumRate}%)";
-                break;
-            case "scale":
-                if (net <= tax.ScaleTaxThreshold)
-                {
-                    incomeTax = net * tax.ScaleTaxRateLow / 100;
-                    taxLabel = $"Skala ({tax.ScaleTaxRateLow}%)";
-                }
-                else
-                {
-                    incomeTax = tax.ScaleTaxThreshold * tax.ScaleTaxRateLow / 100
-                                + (net - tax.ScaleTaxThreshold) * tax.ScaleTaxRateHigh / 100;
-                    taxLabel = $"Skala ({tax.ScaleTaxRateLow}%/{tax.ScaleTaxRateHigh}%)";
-                }
-                break;
-        }
-
-        var zus = tax.ZusEnabled ? tax.ZusMonthlyAmount * months : 0;
-        var health = tax.HealthInsuranceEnabled ? tax.HealthInsuranceMonthly * months : 0;
-        var costs = tax.CostDeductionsEnabled ? tax.MonthlyFixedCosts * months : 0;
-        return (gross, vat, net, incomeTax, taxLabel, zus, health, costs, net - incomeTax - zus - health - costs);
-    }
+    // Obliczenia podatkowe wydzielone do PTScheduler.Application.Finance.TaxCalculator
+    // (jedno źródło prawdy, wspólne z Finance, pokryte testami).
 
     private async Task RenderChartsAsync()
     {
         var monthSlots = Enumerable.Range(0, _months)
-            .Select(i => DateTime.Now.AddMonths(-(_months - 1 - i)))
+            .Select(i => StudioClock.Now.AddMonths(-(_months - 1 - i)))
             .Select(d => (Label: d.ToString("MM.yy"), Year: d.Year, Month: d.Month))
             .ToList();
 

@@ -1,0 +1,306 @@
+@page "/admin/google-calendar"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@inject IGoogleCalendarService Calendar
+@inject EntitlementService Entitlements
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@inject IAppClock Clock
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Kalendarz Google" />
+
+<div class="page-header mb-3">
+    <h4 class="page-title mb-0"><i class="bi bi-calendar2-week me-2" style="color:var(--c-primary)"></i>Kalendarz Google</h4>
+</div>
+
+@if (!Entitlements.IsAllowed("IntegrationGoogleMeet"))
+{
+    <FeatureGate Flag="IntegrationGoogleMeet" RequiredPlan="Pro" Title="Kalendarz Google jest dostępny w planie Pro">
+        <Description>
+            Wizyty same trafiają do Twojego kalendarza Google, a prywatne terminy z kalendarza blokują grafik — klienci nie zarezerwują godziny, w której masz już coś zaplanowane.
+        </Description>
+    </FeatureGate>
+}
+else if (_loading)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    @if (_message is not null)
+    {
+        <div class="alert @(_ok ? "alert-success" : "alert-warning") alert-dismissible py-2 small">
+            @_message
+            <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button>
+        </div>
+    }
+
+    @if (!_s.Connected)
+    {
+        <div class="card mb-3">
+            <div class="card-body p-4">
+                <div class="row g-4 align-items-center">
+                    <div class="col-lg-7">
+                        <h5 class="fw-semibold mb-3">Jeden kalendarz zamiast dwóch</h5>
+                        <ul class="list-unstyled d-flex flex-column gap-3 mb-4">
+                            <li class="d-flex gap-3">
+                                <i class="bi bi-box-arrow-in-right fs-5" style="color:var(--c-primary)"></i>
+                                <div><strong>Wizyty trafiają do Google.</strong> <span class="text-muted">Nowe, przeniesione i odwołane — kalendarz aktualizuje się sam, co kilka minut.</span></div>
+                            </li>
+                            <li class="d-flex gap-3">
+                                <i class="bi bi-slash-circle fs-5" style="color:var(--c-primary)"></i>
+                                <div><strong>Prywatne terminy blokują grafik.</strong> <span class="text-muted">Dentysta o 15:00? Klienci nie zarezerwują tej godziny. Aplikacja widzi tylko, że jesteś zajęty — bez tytułów i opisów.</span></div>
+                            </li>
+                            <li class="d-flex gap-3">
+                                <i class="bi bi-camera-video fs-5" style="color:var(--c-primary)"></i>
+                                <div><strong>Link Google Meet</strong> <span class="text-muted">do wizyt online — jeśli chcesz, dodamy go automatycznie.</span></div>
+                            </li>
+                        </ul>
+
+                        @if (!_s.Available)
+                        {
+                            <div class="alert alert-secondary small mb-0">
+                                @if (_s.Mode == "platform")
+                                {
+                                    <span><i class="bi bi-hourglass-split me-1"></i>Połączenie z Google nie jest jeszcze włączone na platformie. Napisz do obsługi — włączymy je po naszej stronie.</span>
+                                }
+                                else
+                                {
+                                    <span><i class="bi bi-info-circle me-1"></i>Najpierw połącz konto Google w <a href="/admin/google-meet">ustawieniach Google Meet</a> — synchronizacja użyje tego samego konta.</span>
+                                }
+                            </div>
+                        }
+                        else if (_s.Mode == "platform")
+                        {
+                            <button class="btn btn-primary btn-lg" @onclick="ConnectAsync" disabled="@_busy">
+                                <i class="bi bi-google me-2"></i>Połącz z Google
+                            </button>
+                            <div class="small text-muted mt-2">Zalogujesz się na stronie Google i zatwierdzisz dostęp do kalendarza. Możesz go cofnąć w każdej chwili.</div>
+                        }
+                        else
+                        {
+                            <button class="btn btn-primary btn-lg" @onclick="EnableOwnAsync" disabled="@_busy">
+                                <i class="bi bi-arrow-repeat me-2"></i>Włącz synchronizację
+                            </button>
+                            <div class="small text-muted mt-2">Użyjemy konta Google połączonego w ustawieniach Google Meet tej instalacji.</div>
+                        }
+                    </div>
+                    <div class="col-lg-5 d-none d-lg-block">
+                        <div class="gc-preview" aria-hidden="true">
+                            <div class="gc-row"><span>08:00</span><div class="gc-ev gc-ours">Trening personalny — Ola K.</div></div>
+                            <div class="gc-row"><span>10:00</span><div class="gc-ev gc-busy">Zajęte (z Google)</div></div>
+                            <div class="gc-row"><span>12:00</span><div class="gc-ev gc-ours">Konsultacja online · Meet</div></div>
+                            <div class="gc-row"><span>15:00</span><div class="gc-ev gc-busy">Zajęte (z Google)</div></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+    else
+    {
+        <div class="card mb-3">
+            <div class="card-body">
+                <div class="d-flex flex-wrap align-items-start justify-content-between gap-3">
+                    <div class="d-flex gap-3 align-items-center">
+                        <div class="gc-avatar"><i class="bi bi-google"></i></div>
+                        <div>
+                            <div class="fw-semibold">@(_s.GoogleEmail ?? (_s.Mode == "own" ? "Konto Google z ustawień Google Meet" : "Konto Google"))</div>
+                            <div class="small text-muted">
+                                @if (_s.NeedsReconnect)
+                                {
+                                    <span class="text-danger"><i class="bi bi-exclamation-octagon me-1"></i>Dostęp wygasł — połącz ponownie</span>
+                                }
+                                else if (_s.LastSyncAt is DateTime at)
+                                {
+                                    <span><i class="bi bi-check2-circle text-success me-1"></i>Ostatnia synchronizacja: @Clock.ToWallClock(at).ToString("d MMM, HH:mm")</span>
+                                }
+                                else
+                                {
+                                    <span><i class="bi bi-hourglass-split me-1"></i>Pierwsza synchronizacja za chwilę</span>
+                                }
+                            </div>
+                        </div>
+                    </div>
+                    <div class="d-flex flex-wrap gap-2">
+                        @if (_s.NeedsReconnect && _s.Mode == "platform")
+                        {
+                            <button class="btn btn-primary btn-sm" @onclick="ConnectAsync" disabled="@_busy"><i class="bi bi-google me-1"></i>Połącz ponownie</button>
+                        }
+                        else
+                        {
+                            <button class="btn btn-outline-primary btn-sm" @onclick="SyncNowAsync" disabled="@_busy">
+                                @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-arrow-repeat me-1"></i> }
+                                Synchronizuj teraz
+                            </button>
+                        }
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => _confirmDisconnect = true" disabled="@_busy">Odłącz</button>
+                    </div>
+                </div>
+
+                @if (_s.LastError is not null && !_s.NeedsReconnect)
+                {
+                    <div class="alert alert-warning small py-2 mt-3 mb-0"><i class="bi bi-exclamation-triangle me-1"></i>@_s.LastError</div>
+                }
+
+                @if (_confirmDisconnect)
+                {
+                    <div class="alert alert-light border small mt-3 mb-0 d-flex flex-wrap align-items-center gap-2">
+                        <span class="me-auto">Odłączyć kalendarz? Wydarzenia już dodane zostaną w Google, blokady z grafiku znikną.</span>
+                        <button class="btn btn-sm btn-danger" @onclick="DisconnectAsync">Odłącz</button>
+                        <button class="btn btn-sm btn-link" @onclick="() => _confirmDisconnect = false">Anuluj</button>
+                    </div>
+                }
+            </div>
+        </div>
+
+        <div class="card mb-3">
+            <div class="card-body">
+                <h6 class="fw-semibold mb-3">Co synchronizować</h6>
+                <div class="d-flex flex-column gap-3">
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="gcPush" @bind="_push" @bind:after="SaveOptionsAsync" />
+                        <label class="form-check-label" for="gcPush">Dodawaj moje wizyty do kalendarza Google</label>
+                        <div class="form-text">Od wczoraj do 60 dni do przodu. Zmiany terminu i odwołania też się przenoszą.</div>
+                    </div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="gcBlock" @bind="_block" @bind:after="SaveOptionsAsync" />
+                        <label class="form-check-label" for="gcBlock">Zajęte terminy z Google blokują mój grafik</label>
+                        <div class="form-text">
+                            Liczą się wydarzenia oznaczone jako „Zajęty”. Te ustawione na „Dostępny” (np. przypomnienia) nie blokują.
+                            @if (_s.BlockBusy && _s.UpcomingBusyBlocks > 0) { <span>Teraz blokujemy <strong>@_s.UpcomingBusyBlocks</strong> @Plural(_s.UpcomingBusyBlocks, "termin", "terminy", "terminów").</span> }
+                        </div>
+                    </div>
+                    <div class="form-check form-switch">
+                        <input class="form-check-input" type="checkbox" id="gcName" @bind="_showName" @bind:after="SaveOptionsAsync" />
+                        <label class="form-check-label" for="gcName">Imię i nazwisko klienta w tytule wydarzenia</label>
+                        <div class="form-text">Wyłącz, jeśli Twój kalendarz widzą inne osoby — w tytule zostanie sam rodzaj wizyty.</div>
+                    </div>
+                    @if (_s.Mode == "platform")
+                    {
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" id="gcMeet" @bind="_meet" @bind:after="SaveOptionsAsync" />
+                            <label class="form-check-label" for="gcMeet">Dodawaj link Google Meet do nowych wizyt</label>
+                            <div class="form-text">Dla treningów i konsultacji online. Klient dostaje link w e-mailu z potwierdzeniem.</div>
+                        </div>
+                    }
+                </div>
+            </div>
+        </div>
+    }
+}
+
+<style>
+    .gc-preview { border: 1px solid var(--bs-border-color); border-radius: 1rem; padding: 1rem; display: flex; flex-direction: column; gap: .6rem; background: var(--bs-body-bg); }
+    .gc-row { display: grid; grid-template-columns: 3rem 1fr; align-items: center; gap: .6rem; font-size: .8rem; color: var(--bs-secondary-color); font-variant-numeric: tabular-nums; }
+    .gc-ev { border-radius: .5rem; padding: .45rem .7rem; font-weight: 600; color: var(--bs-body-color); }
+    .gc-ours { background: color-mix(in srgb, var(--c-primary) 16%, transparent); border-left: 3px solid var(--c-primary); }
+    .gc-busy { background: repeating-linear-gradient(135deg, var(--bs-tertiary-bg) 0 8px, var(--bs-secondary-bg) 8px 16px); color: var(--bs-secondary-color); }
+    .gc-avatar { width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center; background: var(--bs-tertiary-bg); font-size: 1.2rem; color: var(--c-primary); }
+</style>
+
+@code {
+    [SupplyParameterFromQuery(Name = "google")] public string? GoogleResult { get; set; }
+
+    private bool _loading = true;
+    private bool _busy;
+    private bool _ok;
+    private bool _confirmDisconnect;
+    private string? _message;
+    private string _userId = "";
+    private CalendarConnectionDto _s = new();
+    private bool _push, _block, _showName, _meet;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        _userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        if (!Entitlements.IsAllowed("IntegrationGoogleMeet")) { _loading = false; return; }
+
+        switch (GoogleResult)
+        {
+            case "connected":
+                var (ok, error) = await Calendar.CompleteConnectAsync(_userId);
+                if (ok)
+                {
+                    var r = await Calendar.SyncAsync(_userId);
+                    Show(r.Ok
+                        ? "Połączono z Google. Wizyty są już w Twoim kalendarzu."
+                        : $"Połączono z Google, ale pierwsza synchronizacja się nie udała: {r.Error} Spróbujemy ponownie automatycznie.", r.Ok);
+                }
+                else Show(error ?? "Nie udało się połączyć z Google.", false);
+                break;
+            case "denied": Show("Połączenie anulowane — Google nie dostał zgody na dostęp do kalendarza.", false); break;
+            case "scope": Show("Zaznacz na stronie Google dostęp do kalendarza — bez tego synchronizacja nie zadziała.", false); break;
+            case "error": Show("Google nie potwierdził połączenia. Spróbuj ponownie za chwilę.", false); break;
+        }
+        if (GoogleResult is not null) Nav.NavigateTo("/admin/google-calendar", replace: true);
+
+        await LoadAsync();
+        _loading = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        _s = await Calendar.GetStatusAsync(_userId);
+        (_push, _block, _showName, _meet) = (_s.PushSessions, _s.BlockBusy, _s.ShowClientName, _s.CreateMeetLinks);
+    }
+
+    private async Task ConnectAsync()
+    {
+        _busy = true;
+        var (url, error) = await Calendar.StartConnectAsync(_userId, Nav.BaseUri.TrimEnd('/') + "/admin/google-calendar");
+        if (url is not null) { Nav.NavigateTo(url, forceLoad: true); return; }
+        Show(error ?? "Nie udało się rozpocząć łączenia z Google.", false);
+        _busy = false;
+    }
+
+    private async Task EnableOwnAsync()
+    {
+        _busy = true;
+        var (ok, error) = await Calendar.EnableOwnAccountAsync(_userId);
+        if (ok)
+        {
+            var r = await Calendar.SyncAsync(_userId);
+            Show(r.Ok ? "Synchronizacja włączona." : r.Error ?? "Synchronizacja włączona, ale pierwsza próba się nie udała.", r.Ok);
+        }
+        else Show(error ?? "Nie udało się włączyć synchronizacji.", false);
+        await LoadAsync();
+        _busy = false;
+    }
+
+    private async Task SyncNowAsync()
+    {
+        _busy = true;
+        var r = await Calendar.SyncAsync(_userId);
+        Show(r.Ok
+            ? $"Zsynchronizowano: dodane {r.Created}, zaktualizowane {r.Updated}, usunięte {r.Deleted}; zajętych terminów z Google: {r.BusyBlocks}."
+            : r.Error ?? "Synchronizacja nie powiodła się.", r.Ok);
+        await LoadAsync();
+        _busy = false;
+    }
+
+    private async Task SaveOptionsAsync()
+    {
+        await Calendar.SaveOptionsAsync(_userId, _push, _block, _showName, _meet);
+        await LoadAsync();
+        Show("Zapisano. Zmiany trafią do Google przy najbliższej synchronizacji.", true);
+    }
+
+    private async Task DisconnectAsync()
+    {
+        _busy = true;
+        await Calendar.DisconnectAsync(_userId);
+        _confirmDisconnect = false;
+        await LoadAsync();
+        Show("Kalendarz Google odłączony.", true);
+        _busy = false;
+    }
+
+    private void Show(string message, bool ok) { _message = message; _ok = ok; }
+
+    private static string Plural(int n, string one, string few, string many) =>
+        n == 1 ? one : n % 10 is >= 2 and <= 4 && n % 100 is < 12 or > 14 ? few : many;
+}

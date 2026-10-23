@@ -1,0 +1,26 @@
+@inject PTScheduler.Web.Services.EntitlementService Entitlements
+
+@* „+” szybkich akcji dla trenera: w menu bocznym (komputer) i na środku dolnego paska (telefon).
+   Zwykły <details> — działa bez obwodu Blazora; zamyka się po wyborze i po kliknięciu obok (keyboard-nav.js). *@
+<details class="qa @Css">
+    <summary aria-label="Szybko dodaj" title="Szybko dodaj">
+        <i class="bi bi-plus-lg"></i>@if (!string.IsNullOrEmpty(Label)) { <span>@Label</span> }
+    </summary>
+    <div class="qa-menu" role="menu">
+        <a role="menuitem" href="/calendar?nowa=1"><i class="bi bi-calendar-plus"></i><span>Nowa wizyta</span></a>
+        <a role="menuitem" href="/clients/new"><i class="bi bi-person-plus"></i><span>Nowy klient</span></a>
+        @if (Entitlements.IsAllowed("TrainingPlansEnabled"))
+        {
+            <a role="menuitem" href="/plans/new"><i class="bi bi-clipboard-plus"></i><span>Nowy plan</span></a>
+        }
+        <AuthorizeView Roles="Admin,Trainer" Context="qaOwner">
+            <a role="menuitem" href="/okienka"><i class="bi bi-calendar2-plus"></i><span>Zaproś na wolne okienko</span></a>
+        </AuthorizeView>
+        <a role="menuitem" href="/chat"><i class="bi bi-chat-dots"></i><span>Wiadomość</span></a>
+    </div>
+</details>
+
+@code {
+    [Parameter] public string? Css { get; set; }
+    [Parameter] public string? Label { get; set; }
+}

@@ -1,0 +1,637 @@
+@* Publiczna strona trenera złożona z widgetów (kreator w Zarządzanie → Twoja strona).
+   Renderowana statycznie; animacje to CSS + mały skrypt welcome.js (pojawianie się przy przewijaniu, liczniki). *@
+@using PTScheduler.Application.DTOs
+@using System.Globalization
+@using System.Text.RegularExpressions
+
+<HeadContent>
+    <link rel="stylesheet" href="/css/site-page.css" />
+    @if (!string.IsNullOrWhiteSpace(Content.SeoDescription))
+    {
+        <meta name="description" content="@Content.SeoDescription" />
+    }
+</HeadContent>
+
+<div class="sp sp-theme-@_theme.Key @(_theme.Dark ? "sp-dark" : "") @(Content.Animations ? "sp-anim" : "") @(Content.StickyCta && !IsAuthenticated ? "sp-has-sticky" : "")" style="@RootStyle">
+
+    <header class="sp-top">
+        <div class="sp-wrap sp-top-in">
+            <a href="/" class="sp-brand">
+                @if (!string.IsNullOrEmpty(LogoPath))
+                {
+                    <img src="@LogoPath" alt="@CompanyName" />
+                }
+                else
+                {
+                    <span class="sp-brand-mark">@Initials(CompanyName)</span>
+                }
+                <span>@CompanyName</span>
+            </a>
+            <nav class="sp-nav" aria-label="Sekcje strony">
+                @foreach (var (id, label) in NavLinks)
+                {
+                    <a href="#@id">@label</a>
+                }
+            </nav>
+            <div class="sp-top-cta">
+                @if (IsAuthenticated)
+                {
+                    <a href="/app" class="sp-btn sp-btn-primary sp-btn-sm">Moja aplikacja</a>
+                }
+                else
+                {
+                    <a href="/Account/Login" class="sp-btn sp-btn-ghost sp-btn-sm sp-login" aria-label="Zaloguj się">
+                        <svg class="sp-login-ico" viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>
+                        <span class="sp-login-txt">Zaloguj się</span>
+                    </a>
+                    <a href="@Safe(Content.StickyCtaUrl)" class="sp-btn sp-btn-primary sp-btn-sm" aria-label="@ShortCta">
+                        <span class="sp-cta-full">@ShortCta</span><span class="sp-cta-short">Umów się</span>
+                    </a>
+                }
+            </div>
+        </div>
+    </header>
+
+    <main>
+        @foreach (var b in Content.Blocks.Where(x => x.Visible))
+        {
+            <span id="b-@b.Id" class="sp-anchor"></span>
+            @RenderBlock(b)
+        }
+    </main>
+
+    <footer class="sp-foot">
+        <div class="sp-wrap sp-foot-in">
+            <span>@(Content.FooterText ?? $"© {DateTime.Now.Year} {CompanyName}")</span>
+            <span class="sp-foot-links">
+                <a href="/legal/terms">Regulamin</a>
+                <a href="/legal/privacy">Prywatność</a>
+                <a href="/legal/cookies">Cookies</a>
+            </span>
+            @if (PoweredBy is { } made)
+            {
+                <a class="sp-made" href="@made.BadgeUrl" target="_blank" rel="noopener" title="Aplikacja i strona dla trenerów">
+                    <span class="sp-made-dot" aria-hidden="true"></span>Zrobione w <b>@made.PlatformName</b>
+                </a>
+            }
+        </div>
+    </footer>
+
+    @if (Content.StickyCta && !IsAuthenticated)
+    {
+        <a href="@Safe(Content.StickyCtaUrl)" class="sp-sticky"><i class="bi bi-calendar-plus"></i>@Content.StickyCtaLabel</a>
+    }
+</div>
+
+@code {
+    [Parameter, EditorRequired] public SiteContentDto Content { get; set; } = new();
+    [Parameter] public string CompanyName { get; set; } = "Trener";
+    [Parameter] public string? LogoPath { get; set; }
+    [Parameter] public string? BrandAccent { get; set; }
+    [Parameter] public bool IsAuthenticated { get; set; }
+    [Parameter] public PTScheduler.Application.Marketing.PublicReviewsDto Reviews { get; set; } = new();
+    [Parameter] public List<PackageOfferDto> Offers { get; set; } = [];
+    [Parameter] public List<BookingDayDto> Slots { get; set; } = [];
+    /// <summary>Stopka „Zrobione w …” (null = nie pokazujemy).</summary>
+    [Parameter] public PTScheduler.Web.Services.PlatformInfoService.Info? PoweredBy { get; set; }
+
+    private static readonly CultureInfo Pl = new("pl-PL");
+    private SiteWidgets.ThemeInfo _theme = SiteWidgets.Themes[0];
+
+    protected override void OnParametersSet() => _theme = SiteWidgets.ThemeOf(Content.Theme);
+
+    private string Accent => !string.IsNullOrWhiteSpace(Content.AccentOverride) ? Content.AccentOverride!
+        : !string.IsNullOrEmpty(_theme.Accent) ? _theme.Accent
+        : !string.IsNullOrWhiteSpace(BrandAccent) ? BrandAccent! : "var(--c-primary, #0284c7)";
+
+    private string RootStyle =>
+        $"--sp-bg:{_theme.Bg};--sp-surface:{_theme.Surface};--sp-ink:{_theme.Ink};--sp-accent:{Accent};--sp-on-accent:{OnAccent(Accent)}";
+
+    private string ShortCta => Content.StickyCtaLabel.Length > 22 ? "Umów trening" : Content.StickyCtaLabel;
+
+    private IEnumerable<(string Id, string Label)> NavLinks => Content.Blocks.Where(b => b.Visible)
+        .Select(b => (Anchor(b), b.Type switch
+        {
+            "about" => "O mnie", "offer" => "Cennik", "testimonials" => "Opinie", "transformations" => "Efekty",
+            "contact" => "Kontakt", "faq" => "Pytania", _ => null
+        }))
+        .Where(x => x.Item2 is not null).DistinctBy(x => x.Item2).Take(5)!;
+
+    private static string Anchor(SiteBlock b) => b.Type switch
+    {
+        "about" => "o-mnie", "offer" => "cennik", "testimonials" => "opinie", "transformations" => "metamorfozy",
+        "contact" => "kontakt", "faq" => "pytania", "slots" => "terminy", _ => "s-" + b.Id
+    };
+
+    private static string SecClass(SiteBlock b) => $"sp-sec sp-bg-{b.Background} sp-w-{b.Type}";
+    private static string SecStyle(SiteBlock b) => b.Background == "image" && Img(b.BackgroundImageUrl) is { } u ? $"--sp-sec-img:url('{u}')" : "";
+
+    // Adresy tylko bezpieczne: strona, kotwica, http(s), telefon, e-mail.
+    private static string Safe(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return "#";
+        url = url.Trim();
+        return url.StartsWith('/') || url.StartsWith('#') || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            || url.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || url.StartsWith("tel:") || url.StartsWith("mailto:") ? url : "#";
+    }
+
+    private static string? Img(string? url) =>
+        string.IsNullOrWhiteSpace(url) ? null
+        : url.StartsWith("/branding/") || url.StartsWith("https://", StringComparison.OrdinalIgnoreCase) ? url.Replace("'", "%27") : null;
+
+    private static bool External(string? url) => url?.StartsWith("http", StringComparison.OrdinalIgnoreCase) == true;
+
+    private static IEnumerable<string> Paragraphs(string? text) =>
+        (text ?? "").Split("\n\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+
+    private static string Initials(string name) =>
+        string.Concat(name.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => char.ToUpper(p[0])));
+
+    // Kolor tekstu na tle akcentu: ciemny na jasnych akcentach (limonka, złoto), biały na ciemnych.
+    private static string OnAccent(string color)
+    {
+        var m = Regex.Match(color.Trim(), "^#([0-9a-fA-F]{6})$");
+        if (!m.Success) return "#ffffff";
+        var v = Convert.ToInt32(m.Groups[1].Value, 16);
+        double L(int c) { var s = c / 255.0; return s <= 0.03928 ? s / 12.92 : Math.Pow((s + 0.055) / 1.055, 2.4); }
+        var lum = 0.2126 * L((v >> 16) & 255) + 0.7152 * L((v >> 8) & 255) + 0.0722 * L(v & 255);
+        return lum > 0.45 ? "#0b0f17" : "#ffffff";
+    }
+
+    private static (double? Num, string Prefix, string Suffix) ParseStat(string? value)
+    {
+        value ??= "";
+        var m = Regex.Match(value, @"\d[\d\s.,]*");
+        if (!m.Success) return (null, "", value);
+        var digits = m.Value.Replace(" ", "").Replace(" ", "").TrimEnd('.', ',');
+        if (digits.Contains(',') || digits.Contains('.')) return (null, "", value); // ułamki zostawiamy bez licznika
+        return double.TryParse(digits, NumberStyles.Integer, CultureInfo.InvariantCulture, out var n)
+            ? (n, value[..m.Index], value[(m.Index + m.Length)..]) : (null, "", value);
+    }
+
+    private static string? VideoEmbed(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url)) return null;
+        var yt = Regex.Match(url, @"(?:youtube\.com/(?:watch\?v=|shorts/|embed/)|youtu\.be/)([\w-]{11})");
+        if (yt.Success) return $"https://www.youtube-nocookie.com/embed/{yt.Groups[1].Value}";
+        var vm = Regex.Match(url, @"vimeo\.com/(?:video/)?(\d+)");
+        return vm.Success ? $"https://player.vimeo.com/video/{vm.Groups[1].Value}" : null;
+    }
+
+    private static string Money(decimal v) => v.ToString("#,0.##", Pl) + " zł";
+
+    private RenderFragment Head(SiteBlock b, bool center = true) => __builder =>
+    {
+        if (string.IsNullOrWhiteSpace(b.Title) && string.IsNullOrWhiteSpace(b.Eyebrow)) return;
+        <div class="sp-head @(center ? "" : "sp-head-left")">
+            @if (!string.IsNullOrWhiteSpace(b.Eyebrow) && b.Type != "cta") { <span class="sp-eyebrow">@b.Eyebrow</span> }
+            @if (!string.IsNullOrWhiteSpace(b.Title)) { <h2 class="sp-h2">@b.Title</h2> }
+            @if (!string.IsNullOrWhiteSpace(b.Subtitle)) { <p class="sp-lead">@b.Subtitle</p> }
+        </div>
+    };
+
+    private RenderFragment RenderBlock(SiteBlock b) => __builder =>
+    {
+        switch (b.Type)
+        {
+            case "hero":
+                var heroImg = Img(b.ImageUrl);
+                var variant = b.Variant ?? "split";
+                <section id="start" class="sp-hero sp-hero-@variant @(variant == "full" ? "sp-on-dark" : "")" style="@(variant == "full" && heroImg is not null ? $"--sp-hero-img:url('{heroImg}')" : "")">
+                    <div class="sp-blobs" aria-hidden="true"><span></span><span></span><span></span></div>
+                    <div class="sp-wrap sp-hero-in">
+                        <div class="sp-hero-text">
+                            @if (!string.IsNullOrWhiteSpace(b.Eyebrow)) { <span class="sp-eyebrow sp-rise" style="--d:0">@b.Eyebrow</span> }
+                            <h1 class="sp-h1 sp-rise" style="--d:1">@b.Title</h1>
+                            @if (!string.IsNullOrWhiteSpace(b.Subtitle)) { <p class="sp-hero-sub sp-rise" style="--d:2">@b.Subtitle</p> }
+                            <div class="sp-hero-cta sp-rise" style="--d:3">
+                                @if (IsAuthenticated)
+                                {
+                                    <a href="/app" class="sp-btn sp-btn-primary sp-btn-lg">Otwórz aplikację <i class="bi bi-arrow-right"></i></a>
+                                }
+                                else
+                                {
+                                    <a href="@Safe(b.CtaUrl)" class="sp-btn sp-btn-primary sp-btn-lg sp-pulse">@b.CtaLabel <i class="bi bi-arrow-right"></i></a>
+                                    @if (!string.IsNullOrWhiteSpace(b.Cta2Label))
+                                    {
+                                        <a href="@Safe(b.Cta2Url)" class="sp-btn sp-btn-ghost sp-btn-lg">@b.Cta2Label</a>
+                                    }
+                                }
+                            </div>
+                            @if (Reviews.Count > 0)
+                            {
+                                <div class="sp-hero-proof sp-rise" style="--d:4">
+                                    <span class="sp-stars-mini">★★★★★</span>
+                                    <span><b>@Reviews.Average.ToString("0.0", Pl)</b> · @Reviews.Count @PlReviews(Reviews.Count)</span>
+                                </div>
+                            }
+                        </div>
+                        @if (variant == "split")
+                        {
+                            <div class="sp-hero-visual">
+                                @if (heroImg is not null)
+                                {
+                                    <div class="sp-hero-photo" style="background-image:url('@heroImg')"></div>
+                                }
+                                else
+                                {
+                                    @* Bez zdjęcia: podgląd aplikacji — pokazuje, jak wygodnie się trenuje. *@
+                                    <div class="sp-mock" aria-hidden="true">
+                                        <div class="sp-mock-head"><span class="sp-mock-av">@Initials(CompanyName)</span><div><b>Najbliższy trening</b><small>jutro, 18:00 · 60 min</small></div></div>
+                                        <div class="sp-mock-ring"><svg viewBox="0 0 36 36"><path d="M18 2.5a15.5 15.5 0 1 1 0 31 15.5 15.5 0 0 1 0-31" /><path class="fg" d="M18 2.5a15.5 15.5 0 1 1 0 31 15.5 15.5 0 0 1 0-31" /></svg><span>7/10<small>pakiet</small></span></div>
+                                        <div class="sp-mock-chart"><i style="--h:40%"></i><i style="--h:55%"></i><i style="--h:48%"></i><i style="--h:70%"></i><i style="--h:66%"></i><i style="--h:85%"></i><i style="--h:92%"></i></div>
+                                        <div class="sp-mock-btn">Zarezerwuj termin</div>
+                                    </div>
+                                }
+                                @foreach (var (it, i) in b.Items.Take(2).Select((x, i) => (x, i)))
+                                {
+                                    <div class="sp-float sp-float-@i"><i class="bi @(it.Icon ?? "bi-star-fill")"></i><div><b>@it.Title</b><small>@it.Text</small></div></div>
+                                }
+                            </div>
+                        }
+                    </div>
+                    @if (variant != "split" && b.Items.Count > 0)
+                    {
+                        <div class="sp-wrap sp-hero-badges">
+                            @foreach (var it in b.Items.Take(3))
+                            {
+                                <div class="sp-float sp-float-inline"><i class="bi @(it.Icon ?? "bi-star-fill")"></i><div><b>@it.Title</b><small>@it.Text</small></div></div>
+                            }
+                        </div>
+                    }
+                </section>
+                break;
+
+            case "marquee":
+                var words = b.Items.Where(i => !string.IsNullOrWhiteSpace(i.Title)).Select(i => i.Title!).ToList();
+                if (words.Count == 0) break;
+                <section class="sp-marquee sp-bg-@b.Background" aria-label="@string.Join(", ", words)">
+                    <div class="sp-marquee-track" aria-hidden="true">
+                        @for (var r = 0; r < 4; r++)
+                        {
+                            @foreach (var w in words)
+                            {
+                                <span>@w</span><i class="bi bi-asterisk"></i>
+                            }
+                        }
+                    </div>
+                </section>
+                break;
+
+            case "stats":
+                <section id="@Anchor(b)" class="@SecClass(b)" style="@SecStyle(b)">
+                    <div class="sp-wrap">
+                        @Head(b)
+                        <div class="sp-stats wp-reveal">
+                            @foreach (var (it, i) in b.Items.Select((x, i) => (x, i)))
+                            {
+                                var st = ParseStat(it.Value);
+                                <div class="sp-stat" style="--i:@i">
+                                    @if (st.Num is not null && Content.Animations)
+                                    {
+                                        <div class="sp-stat-v wp-count" data-count="@st.Num" data-prefix="@st.Prefix" data-suffix="@st.Suffix">@it.Value</div>
+                                    }
+                                    else
+                                    {
+                                        <div class="sp-stat-v">@it.Value</div>
+                                    }
+                                    <div class="sp-stat-l">@it.Title</div>
+                                </div>
+                            }
+                        </div>
+                    </div>
+                </section>
+                break;
+
+            case "benefits":
+                <section id="@Anchor(b)" class="@SecClass(b)" style="@SecStyle(b)">
+                    <div class="sp-wrap">
+                        @Head(b)
+                        <div class="@(b.Variant == "list" ? "sp-benefit-list" : "sp-benefits") wp-reveal">
+                            @foreach (var (it, i) in b.Items.Select((x, i) => (x, i)))
+                            {
+                                <article class="sp-benefit sp-stagger" style="--i:@i">
+                                    <span class="sp-benefit-ic"><i class="bi @(it.Icon ?? "bi-check2-circle")"></i></span>
+                                    <div>
+                                        <h3>@it.Title</h3>
+                                        <p>@it.Text</p>
+                                    </div>
+                                </article>
+                            }
+                        </div>
+                    </div>
+                </section>
+                break;
+
+            case "about":
+                var aboutImg = Img(b.ImageUrl);
+                <section id="@Anchor(b)" class="@SecClass(b)" style="@SecStyle(b)">
+                    <div class="sp-wrap sp-about @(b.Variant == "right" ? "sp-about-right" : "") wp-reveal">
+                        <div class="sp-about-media">
+                            @if (aboutImg is not null)
+                            {
+                                <div class="sp-about-photo" style="background-image:url('@aboutImg')"></div>
+                            }
+                            else
+                            {
+                                <div class="sp-about-photo sp-about-mono"><span>@Initials(CompanyName)</span></div>
+                            }
+                            <span class="sp-about-ring" aria-hidden="true"></span>
+                        </div>
+                        <div class="sp-about-body">
+                            @Head(b, center: false)
+                            @foreach (var p in Paragraphs(b.Text))
+                            {
+                                <p>@p</p>
+                            }
+                            @if (b.Items.Count > 0)
+                            {
+                                <div class="sp-chips">
+                                    @foreach (var it in b.Items.Where(x => !string.IsNullOrWhiteSpace(x.Title)))
+                                    {
+                                        <span><i class="bi bi-patch-check-fill"></i>@it.Title</span>
+                                    }
+                                </div>
+                            }
+                            @if (!string.IsNullOrWhiteSpace(b.CtaLabel))
+                            {
+                                <a href="@Safe(b.CtaUrl)" class="sp-btn sp-btn-primary">@b.CtaLabel</a>
+                            }
+                        </div>
+                    </div>
+                </section>
+                break;
+
+            case "transformations":
+                <section id="@Anchor(b)" class="@SecClass(b)" style="@SecStyle(b)">
+                    <div class="sp-wrap">
+                        @Head(b)
+                        <div class="sp-ba-grid wp-reveal">
+                            @foreach (var (it, i) in b.Items.Select((x, i) => (x, i)))
+                            {
+                                var before = Img(it.ImageUrl);
+                                var after = Img(it.ImageUrl2);
+                                <figure class="sp-ba sp-stagger" style="--i:@i;--pos:50%">
+                                    <div class="sp-ba-frame">
+                                        <div class="sp-ba-img sp-ba-before @(before is null ? "sp-ba-ph" : "")" style="@(before is not null ? $"background-image:url('{before}')" : "")"><span>Przed</span></div>
+                                        <div class="sp-ba-img sp-ba-after @(after is null ? "sp-ba-ph" : "")" style="@(after is not null ? $"background-image:url('{after}')" : "")"><span>Po</span></div>
+                                        <div class="sp-ba-handle" aria-hidden="true"><i class="bi bi-chevron-expand"></i></div>
+                                        <input type="range" min="0" max="100" value="50" aria-label="Porównaj przed i po"
+                                               oninput="this.closest('.sp-ba').style.setProperty('--pos', this.value + '%')" />
+                                    </div>
+                                    <figcaption><b>@it.Title</b>@if (!string.IsNullOrWhiteSpace(it.Text)) { <span>@it.Text</span> }</figcaption>
+                                </figure>
+                            }
+                        </div>
+                    </div>
+                </section>
+                break;
+
+            case "steps":
+                <section id="@Anchor(b)" class="@SecClass(b)" style="@SecStyle(b)">
+                    <div class="sp-wrap">
+                        @Head(b)
+                        <ol class="sp-steps wp-reveal">
+                            @foreach (var (it, i) in b.Items.Select((x, i) => (x, i)))
+                            {
+                                <li class="sp-stagger" style="--i:@i">
+                                    <span class="sp-step-n">@(i + 1)</span>
+                                    <h3>@it.Title</h3>
+                                    <p>@it.Text</p>
+                                </li>
+                            }
+                        </ol>
+                    </div>
+                </section>
+                break;
+
+            case "offer":
+                var live = b.UseLiveData && Offers.Count > 0;
+                <section id="@Anchor(b)" class="@SecClass(b)" style="@SecStyle(b)">
+                    <div class="sp-wrap">
+                        @Head(b)
+                        <div class="sp-prices wp-reveal">
+                            @if (live)
+                            {
+                                var featured = Offers.Any(o => o.IsFeatured);
+                                @foreach (var (o, i) in Offers.Take(6).Select((x, i) => (x, i)))
+                                {
+                                    var hot = featured ? o.IsFeatured : Offers.Count > 1 && i == 1;
+                                    <article class="sp-price sp-stagger @(hot ? "sp-price-hot" : "")" style="--i:@i">
+                                        @if (hot) { <span class="sp-price-badge">Najczęściej wybierany</span> }
+                                        <h3>@o.Name @if (o.IsForPair) { <span class="sp-pair">dla pary</span> }</h3>
+                                        <div class="sp-price-v">@Money(o.Price)</div>
+                                        @if (o.SessionsCount > 1) { <div class="sp-price-per">@Money(Math.Round(o.Price / o.SessionsCount, 0)) za trening</div> }
+                                        <ul>
+                                            <li><i class="bi bi-check2"></i>@o.SessionsCount × @o.SessionTypeName (@o.DurationMinutes min)</li>
+                                            @if (o.ValidDays is int d) { <li><i class="bi bi-check2"></i>Ważny @d dni</li> }
+                                            @if (!string.IsNullOrWhiteSpace(o.Description)) { <li><i class="bi bi-check2"></i>@o.Description</li> }
+                                            <li><i class="bi bi-check2"></i>Rezerwacja i płatność online</li>
+                                        </ul>
+                                        <a href="/packages" class="sp-btn @(hot ? "sp-btn-primary" : "sp-btn-ghost") sp-btn-block">Wybieram</a>
+                                    </article>
+                                }
+                            }
+                            else
+                            {
+                                @foreach (var (it, i) in b.Items.Select((x, i) => (x, i)))
+                                {
+                                    <article class="sp-price sp-stagger @(it.Highlight ? "sp-price-hot" : "")" style="--i:@i">
+                                        @if (!string.IsNullOrWhiteSpace(it.Badge)) { <span class="sp-price-badge">@it.Badge</span> }
+                                        <h3>@it.Title</h3>
+                                        <div class="sp-price-v">@it.Value</div>
+                                        @if (!string.IsNullOrWhiteSpace(it.Text)) { <div class="sp-price-per">@it.Text</div> }
+                                        <ul>
+                                            @foreach (var bl in it.Bullets.Where(x => !string.IsNullOrWhiteSpace(x)))
+                                            {
+                                                <li><i class="bi bi-check2"></i>@bl</li>
+                                            }
+                                        </ul>
+                                        <a href="@Safe(it.Url ?? "/book")" class="sp-btn @(it.Highlight ? "sp-btn-primary" : "sp-btn-ghost") sp-btn-block">Wybieram</a>
+                                    </article>
+                                }
+                            }
+                        </div>
+                    </div>
+                </section>
+                break;
+
+            case "slots":
+                <section id="@Anchor(b)" class="@SecClass(b)" style="@SecStyle(b)">
+                    <div class="sp-wrap">
+                        @Head(b)
+                        @if (Slots.Count > 0)
+                        {
+                            <div class="sp-slots wp-reveal">
+                                @foreach (var (day, i) in Slots.Take(5).Select((x, i) => (x, i)))
+                                {
+                                    <div class="sp-slot-day sp-stagger" style="--i:@i">
+                                        <div class="sp-slot-date"><b>@day.Date.ToString("ddd", Pl)</b><span>@day.Date.ToString("d MMM", Pl)</span></div>
+                                        <div class="sp-slot-times">
+                                            @foreach (var s in day.Slots.Take(4))
+                                            {
+                                                <a href="/book">@s.Label</a>
+                                            }
+                                            @if (day.Slots.Count > 4) { <a href="/book" class="sp-slot-more">+@(day.Slots.Count - 4)</a> }
+                                        </div>
+                                    </div>
+                                }
+                            </div>
+                            <p class="sp-slots-note"><span class="sp-live-dot"></span>Terminy na żywo z grafiku — rezerwacja zajmuje minutę.</p>
+                        }
+                        else
+                        {
+                            <div class="sp-slots-empty">
+                                <p>W tej chwili terminy uzupełniają się na bieżąco. Zostaw kontakt, a znajdziemy godzinę dla Ciebie.</p>
+                                <a href="/book" class="sp-btn sp-btn-primary">Zapytaj o termin</a>
+                            </div>
+                        }
+                    </div>
+                </section>
+                break;
+
+            case "testimonials":
+                var quotes = new List<(string Text, string Author, string? Badge, int? Rating)>();
+                if (b.UseLiveData) quotes.AddRange(Reviews.Items.Select(r => (r.Text ?? "", r.DisplayName, (string?)"klient", (int?)r.Rating)));
+                quotes.AddRange(b.Items.Where(x => !string.IsNullOrWhiteSpace(x.Text)).Select(x => (x.Text!, x.Title ?? "", x.Badge, (int?)null)));
+                quotes = quotes.Where(q => q.Text.Length > 0).ToList();
+                if (quotes.Count == 0) break;
+                var scroll = b.Variant != "grid" && quotes.Count >= 3;
+                <section id="@Anchor(b)" class="@SecClass(b)" style="@SecStyle(b)">
+                    <div class="sp-wrap">
+                        @Head(b)
+                        @if (Reviews.Count > 0 && b.UseLiveData)
+                        {
+                            <p class="sp-rating"><span class="sp-stars" style="--r:@((Reviews.Average / 5 * 100).ToString("0", CultureInfo.InvariantCulture))%">★★★★★</span><b>@Reviews.Average.ToString("0.0", Pl)</b> średnio z @Reviews.Count opinii klientów</p>
+                        }
+                    </div>
+                    <div class="@(scroll ? "sp-quotes-scroll" : "sp-wrap")">
+                        <div class="@(scroll ? "sp-quotes-track" : "sp-quotes wp-reveal")">
+                            @for (var r = 0; r < (scroll ? 2 : 1); r++)
+                            {
+                                @foreach (var (q, i) in quotes.Select((x, i) => (x, i)))
+                                {
+                                    <figure class="sp-quote sp-stagger" style="--i:@i" aria-hidden="@(r == 1 ? "true" : null)">
+                                        <div class="sp-quote-stars">@(new string('★', q.Rating ?? 5))</div>
+                                        <blockquote>„@q.Text”</blockquote>
+                                        <figcaption><span class="sp-quote-av">@Initials(q.Author)</span><b>@q.Author</b>@if (!string.IsNullOrWhiteSpace(q.Badge)) { <small>@q.Badge</small> }</figcaption>
+                                    </figure>
+                                }
+                            }
+                        </div>
+                    </div>
+                </section>
+                break;
+
+            case "gallery":
+                <section id="@Anchor(b)" class="@SecClass(b)" style="@SecStyle(b)">
+                    <div class="sp-wrap">
+                        @Head(b)
+                        <div class="sp-gallery wp-reveal">
+                            @foreach (var (it, i) in b.Items.Select((x, i) => (x, i)))
+                            {
+                                var g = Img(it.ImageUrl);
+                                <figure class="sp-g sp-stagger @(g is null ? "sp-g-ph" : "")" style="--i:@i;@(g is not null ? $"background-image:url('{g}')" : "")">
+                                    @if (g is null) { <i class="bi @(new[] { "bi-heart-pulse", "bi-lightning-charge", "bi-trophy", "bi-emoji-smile", "bi-fire", "bi-stopwatch" }[i % 6])"></i> }
+                                    @if (!string.IsNullOrWhiteSpace(it.Title)) { <figcaption>@it.Title</figcaption> }
+                                </figure>
+                            }
+                        </div>
+                    </div>
+                </section>
+                break;
+
+            case "video":
+                var embed = VideoEmbed(b.VideoUrl);
+                if (embed is null) break;
+                <section id="@Anchor(b)" class="@SecClass(b)" style="@SecStyle(b)">
+                    <div class="sp-wrap">
+                        @Head(b)
+                        <div class="sp-video wp-reveal">
+                            <iframe src="@embed" title="@(b.Title ?? "Film")" loading="lazy" allow="accelerometer; encrypted-media; gyroscope; picture-in-picture; fullscreen" allowfullscreen></iframe>
+                        </div>
+                    </div>
+                </section>
+                break;
+
+            case "faq":
+                <section id="@Anchor(b)" class="@SecClass(b)" style="@SecStyle(b)">
+                    <div class="sp-wrap sp-narrow">
+                        @Head(b)
+                        <div class="sp-faq wp-reveal">
+                            @foreach (var it in b.Items)
+                            {
+                                <details>
+                                    <summary>@it.Title<i class="bi bi-plus-lg"></i></summary>
+                                    <p>@it.Text</p>
+                                </details>
+                            }
+                        </div>
+                    </div>
+                </section>
+                break;
+
+            case "cta":
+                <section id="@Anchor(b)" class="sp-sec sp-w-cta">
+                    <div class="sp-wrap">
+                        <div class="sp-cta sp-bg-@b.Background wp-reveal" style="@SecStyle(b)">
+                            <div class="sp-cta-shine" aria-hidden="true"></div>
+                            @if (!string.IsNullOrWhiteSpace(b.Eyebrow)) { <span class="sp-urgency"><span class="sp-live-dot"></span>@b.Eyebrow</span> }
+                            <h2>@b.Title</h2>
+                            @if (!string.IsNullOrWhiteSpace(b.Text)) { <p>@b.Text</p> }
+                            <a href="@Safe(b.CtaUrl)" class="sp-btn sp-btn-invert sp-btn-lg sp-pulse">@b.CtaLabel <i class="bi bi-arrow-right"></i></a>
+                        </div>
+                    </div>
+                </section>
+                break;
+
+            case "contact":
+                <section id="@Anchor(b)" class="@SecClass(b)" style="@SecStyle(b)">
+                    <div class="sp-wrap">
+                        @Head(b)
+                        @if (!string.IsNullOrWhiteSpace(b.Text)) { <p class="sp-lead sp-center">@b.Text</p> }
+                        <div class="sp-contacts wp-reveal">
+                            @foreach (var (it, i) in b.Items.Select((x, i) => (x, i)))
+                            {
+                                var href = string.IsNullOrWhiteSpace(it.Url) ? null : Safe(it.Url);
+                                @if (href is not null)
+                                {
+                                    <a class="sp-contact sp-stagger" style="--i:@i" href="@href" target="@(External(href) ? "_blank" : null)" rel="@(External(href) ? "noopener" : null)">
+                                        <span class="sp-contact-ic"><i class="bi @(it.Icon ?? "bi-link-45deg")"></i></span>
+                                        <span><small>@it.Title</small><b>@it.Value</b></span>
+                                    </a>
+                                }
+                                else
+                                {
+                                    <div class="sp-contact sp-stagger" style="--i:@i">
+                                        <span class="sp-contact-ic"><i class="bi @(it.Icon ?? "bi-info-circle")"></i></span>
+                                        <span><small>@it.Title</small><b>@it.Value</b></span>
+                                    </div>
+                                }
+                            }
+                        </div>
+                    </div>
+                </section>
+                break;
+
+            default:
+                <section id="@Anchor(b)" class="@SecClass(b)" style="@SecStyle(b)">
+                    <div class="sp-wrap sp-narrow wp-reveal">
+                        @Head(b, center: false)
+                        @foreach (var p in Paragraphs(b.Text))
+                        {
+                            <p class="sp-text">@p</p>
+                        }
+                        @if (!string.IsNullOrWhiteSpace(b.CtaLabel))
+                        {
+                            <a href="@Safe(b.CtaUrl)" class="sp-btn sp-btn-primary">@b.CtaLabel</a>
+                        }
+                    </div>
+                </section>
+                break;
+        }
+    };
+
+    private static string PlReviews(int n) =>
+        n == 1 ? "opinia" : n % 10 is >= 2 and <= 4 && n % 100 is < 12 or > 14 ? "opinie" : "opinii";
+}

@@ -1,0 +1,279 @@
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Domain.Enums
+@inject PTScheduler.Web.Services.PreSessionBriefService Briefs
+@inject PTScheduler.Application.Interfaces.ITrainingPlanService PlanService
+@using Microsoft.EntityFrameworkCore
+@inject IDbContextFactory<PTScheduler.Infrastructure.Data.ApplicationDbContext> DbFactory
+@inject PTScheduler.Application.Interfaces.IAppClock Clock
+@inject AuthenticationStateProvider AuthState
+
+@* Profil klienta → „Trening”: najbliższa wizyta z podsumowaniem asystenta (dawna karta „przed treningiem”),
+   dzień planu do zrobienia (proponowany kolejny, do zmiany jednym kliknięciem) i start treningu na żywo. *@
+@if (_loaded)
+{
+    <section class="ctp @(Highlight ? "is-hl" : "")" id="trening" aria-labelledby="ctp-title">
+        <div class="ctp-head">
+            <span class="ctp-ic"><i class="bi bi-lightning-charge-fill"></i></span>
+            <div class="min-w-0 flex-grow-1">
+                <h6 id="ctp-title">@HeadTitle</h6>
+                <small>@HeadSub</small>
+            </div>
+            @if (_card is { } c)
+            {
+                <div class="ctp-chips">
+                    @if (c.PackageInfo is not null) { <span class="ctp-chip"><i class="bi bi-ticket-perforated"></i>@c.PackageInfo</span> }
+                    @if (c.UnpaidAtTrainer) { <span class="ctp-chip warn"><i class="bi bi-cash-coin"></i>Płatność u Ciebie</span> }
+                    @if (c.Number == 1 || c.Number % 10 == 0) { <span class="ctp-chip good"><i class="bi bi-stars"></i>@(c.Number == 1 ? "Pierwszy trening" : $"{c.Number}. trening — pogratuluj!")</span> }
+                </div>
+            }
+        </div>
+
+        @if (_card is { } card)
+        {
+            <div class="ctp-ai">
+                @if (card.Mascot is not null) { <img src="@card.Mascot" alt="" width="40" height="40" /> }
+                else { <span class="ctp-ai-ic" aria-hidden="true"><i class="bi bi-stars"></i></span> }
+                <p class="mb-0">@if (card.MascotName is not null) { <b>@card.MascotName </b> }@card.Summary</p>
+            </div>
+        }
+
+        <div class="ctp-grid">
+            <div class="ctp-col">
+                <div class="ctp-sub-title"><i class="bi bi-list-check"></i>Co dziś robimy</div>
+                @if (!PlansOn)
+                {
+                    <p class="ctp-muted">Plany treningowe są w wyższym planie aplikacji.</p>
+                }
+                else if (_plan is null)
+                {
+                    <div class="ctp-empty">
+                        <p>Klient nie ma jeszcze planu. Ułóż go raz — dni (np. „Góra”, „Dół”) będą się zmieniać same, po kolei.</p>
+                        <div class="d-flex flex-wrap gap-2">
+                            <a class="btn btn-sm btn-primary" href="@($"/plans/new?klient={ClientId}&propozycja=1")"><i class="bi bi-stars me-1"></i>Zaproponuj z historii</a>
+                            <a class="btn btn-sm btn-outline-primary" href="@($"/plans/new?klient={ClientId}")"><i class="bi bi-plus-lg me-1"></i>Pusty plan</a>
+                        </div>
+                    </div>
+                }
+                else
+                {
+                    @if (_plans.Count > 1)
+                    {
+                        <select class="form-select form-select-sm mb-2" aria-label="Plan" value="@_plan.Id" @onchange="PlanChangedAsync">
+                            @foreach (var p in _plans) { <option value="@p.Id">@p.Name</option> }
+                        </select>
+                    }
+                    <div class="ctp-days" role="tablist" aria-label="Dzień planu">
+                        @foreach (var d in _plan.Days)
+                        {
+                            <button type="button" role="tab" aria-selected="@(d.Id == _dayId ? "true" : "false")" class="ctp-day @(d.Id == _dayId ? "on" : "")" @onclick="() => _dayId = d.Id">
+                                @DayName(d)
+                                @if (d.Id == _assigned?.PlanDayId) { <em class="ctp-day-set">na wizytę</em> }
+                                else if (d.Id == _suggestedDayId) { <em>kolejny</em> }
+                            </button>
+                        }
+                    </div>
+                    @if (_plan.Days.FirstOrDefault(d => d.Id == _dayId) is { } day)
+                    {
+                        @if (day.Exercises.Count == 0)
+                        {
+                            <p class="ctp-muted">Ten dzień nie ma jeszcze ćwiczeń.</p>
+                        }
+                        else
+                        {
+                            <ol class="ctp-ex">
+                                @foreach (var e in day.Exercises.OrderBy(x => x.Order))
+                                {
+                                    <li><span>@e.ExerciseNamePl</span><b>@ExerciseDetail(e)</b></li>
+                                }
+                            </ol>
+                        }
+                        @if (_targetSessionId is not null)
+                        {
+                            <div class="ctp-assign @(day.Id == _assigned?.PlanDayId ? "on" : "")">
+                                @if (day.Id == _assigned?.PlanDayId)
+                                {
+                                    <i class="bi bi-calendar-check-fill"></i>
+                                    <span><b>Zaplanowane na wizytę @_targetAt?.ToString("dddd d.MM, HH:mm", Pl)</b><small>Klient widzi ten dzień przy wizycie w swojej aplikacji.</small></span>
+                                    <button type="button" class="btn btn-sm btn-link" disabled="@_saving" @onclick="() => AssignAsync(null)">Wyczyść</button>
+                                }
+                                else
+                                {
+                                    <i class="bi bi-calendar-plus"></i>
+                                    <span><b>Ten dzień na wizytę @_targetAt?.ToString("dddd d.MM, HH:mm", Pl)?</b><small>Klient zobaczy, co będziecie robić. Bez wyboru — kolejny dzień z planu.</small></span>
+                                    <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_saving" @onclick="() => AssignAsync(day.Id)">Ustaw na wizytę</button>
+                                }
+                            </div>
+                        }
+                        <div class="ctp-actions">
+                            <a class="btn btn-primary" href="@($"/train?klient={ClientId}&plan={_plan.Id}&dzien={day.Id}")"><i class="bi bi-play-circle-fill me-1"></i>Zacznij trening na żywo</a>
+                            <a class="btn btn-outline-secondary" href="@($"/plans/edit/{_plan.Id}")"><i class="bi bi-pencil me-1"></i>Edytuj plan</a>
+                        </div>
+                        <p class="ctp-hint">„Kolejny” to dzień po ostatnio zrobionym. @(_plan.Use == PlanUse.WithTrainer ? "Ten plan jest tylko na treningi z Tobą — w aplikacji klienta nie da się go zacząć bez wizyty." : "Między wizytami klient może też zrobić go w aplikacji (Trenuj).")</p>
+                    }
+                }
+            </div>
+
+            <div class="ctp-col">
+                @if (_card is { } k && (k.Progression.Count > 0 || k.Insights.Count > 0))
+                {
+                    <div class="ctp-sub-title"><i class="bi bi-graph-up-arrow"></i>Na dziś warto</div>
+                    <ul class="ctp-list">
+                        @foreach (var p in k.Progression) { <li><b>@p.ExerciseName:</b> @p.FromKg.ToString("0.##", Pl) → @p.SuggestedKg.ToString("0.##", Pl) kg <span class="ctp-muted">(@p.Reason)</span></li> }
+                        @foreach (var i in k.Insights) { <li><b>@i.Exercise:</b> @i.Recommendation</li> }
+                    </ul>
+                }
+                @if (_card is { HealthNotes.Count: > 0 } h)
+                {
+                    <div class="ctp-sub-title warn"><i class="bi bi-heart-pulse"></i>Zdrowie (ankieta@(h.HealthDate is { } hd ? $" · {hd:dd.MM}" : ""))</div>
+                    <ul class="ctp-list">@foreach (var n in h.HealthNotes) { <li>@n</li> }</ul>
+                }
+                <div class="ctp-sub-title"><i class="bi bi-clock-history"></i>Ostatni trening@(_lastDate is { } ld ? $" · {ld:dd.MM}" : "")</div>
+                @if (_last.Count == 0)
+                {
+                    <p class="ctp-muted">Brak zapisanych ćwiczeń.</p>
+                }
+                else
+                {
+                    <ul class="ctp-ex small">@foreach (var e in _last) { <li><span>@e.Name</span><b>@e.Detail</b></li> }</ul>
+                }
+                @if (_card is { } f && (f.LastFeeling.Count > 0 || !string.IsNullOrWhiteSpace(f.LastComment)))
+                {
+                    <div class="ctp-sub-title"><i class="bi bi-emoji-smile"></i>Po ostatnim treningu</div>
+                    <ul class="ctp-list">@foreach (var x in f.LastFeeling) { <li>@x</li> }</ul>
+                    @if (!string.IsNullOrWhiteSpace(f.LastComment)) { <p class="ctp-quote">„@f.LastComment”</p> }
+                }
+            </div>
+        </div>
+    </section>
+}
+
+@code {
+    [Parameter, EditorRequired] public int ClientId { get; set; }
+    [Parameter] public bool PlansOn { get; set; }
+    /// <summary>Konkretna wizyta (z powiadomienia „za 15 minut”); bez niej — najbliższa od teraz do końca jutra.</summary>
+    [Parameter] public int? SessionId { get; set; }
+    [Parameter] public bool Highlight { get; set; }
+
+    private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
+    private bool _loaded;
+    private PTScheduler.Web.Services.PreSessionBriefService.Card? _card;
+    private DateTime? _nextAt;
+    private List<TrainingPlanListItemDto> _plans = [];
+    private PlanEditDto? _plan;
+    private int? _dayId;
+    private int? _suggestedDayId;
+    private List<PTScheduler.Web.Services.PreSessionBriefService.ExerciseLine> _last = [];
+    private DateOnly? _lastDate;
+    private int _loadedFor = -1;
+
+    private string HeadTitle => _card is { } c
+        ? (c.Start.Date == Clock.LocalNow.Date ? $"Dziś o {c.Start:HH:mm}" : c.Start.Date == Clock.LocalNow.Date.AddDays(1) ? $"Jutro o {c.Start:HH:mm}" : c.Start.ToString("dddd, d MMMM, HH:mm", Pl))
+          + $" · {c.Type}"
+        : "Trening";
+    private string HeadSub => _card is { } c
+        ? (c.Number == 1 ? "Pierwszy trening — warto zacząć od rozmowy i testów." : $"{c.Number}. trening z Tobą")
+        : _nextAt is { } n ? $"Następna wizyta: {n.ToString("dddd, d MMMM, HH:mm", Pl)}" : "Brak zaplanowanej wizyty — trening możesz poprowadzić od razu.";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        if (_loadedFor == ClientId) return;
+        _loadedFor = ClientId;
+        try { await LoadAsync(); }
+        catch { /* panel jest pomocą — bez danych po prostu go nie ma */ }
+        _loaded = true;
+    }
+
+    private async Task LoadAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        var isAdmin = user.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+        var now = Clock.LocalNow;
+
+        await using (var db = await DbFactory.CreateDbContextAsync())
+        {
+            var upcoming = await db.Sessions.AsNoTracking()
+                .Where(s => s.ClientId == ClientId && s.Status == SessionStatus.Scheduled && s.StartTime >= now.AddHours(-2)
+                            && (isAdmin || s.TrainerUserId == userId))
+                .OrderBy(s => s.StartTime).Select(s => new { s.Id, s.StartTime }).FirstOrDefaultAsync();
+            var id = SessionId ?? (upcoming is { } u && u.StartTime < now.Date.AddDays(2) ? u.Id : (int?)null);
+            if (upcoming is not null && id is null) _nextAt = upcoming.StartTime;
+            if (id is { } sid) _card = await Briefs.GetAsync(sid, userId, isAdmin);
+            if (_card is not null && _card.ClientId != ClientId) _card = null;
+            // Wizyta, na którą można zaplanować dzień planu: ta z karty albo najbliższa w grafiku.
+            _targetSessionId = _card?.SessionId ?? upcoming?.Id;
+            _targetAt = _card?.Start ?? upcoming?.StartTime;
+            _userId = userId; _isAdmin = isAdmin;
+
+            // Ostatni trening i dzień planu, który był ostatnio — żeby zaproponować kolejny.
+            var lastLogs = await db.WorkoutLogs.AsNoTracking().Where(l => l.ClientId == ClientId)
+                .OrderByDescending(l => l.WorkoutDate).ThenByDescending(l => l.Id)
+                .Select(l => new { l.WorkoutDate, Name = l.Exercise!.NamePl, DayId = (int?)l.PlanExercise!.PlanDayId, Sets = l.Sets.Select(s => new { s.Reps, s.WeightKg }).ToList() })
+                .Take(30).ToListAsync();
+            if (lastLogs.Count > 0)
+            {
+                _lastDate = lastLogs[0].WorkoutDate;
+                _last = lastLogs.Where(l => l.WorkoutDate == _lastDate).Take(8)
+                    .Select(l => new PTScheduler.Web.Services.PreSessionBriefService.ExerciseLine(l.Name,
+                        $"{l.Sets.Count} × {string.Join("/", l.Sets.Select(s => s.Reps.ToString()))}"
+                        + (l.Sets.Select(s => s.WeightKg).DefaultIfEmpty(0).Max() is var kg and > 0 ? $" · {kg:0.##} kg" : ""))).ToList();
+            }
+            _lastDayId = lastLogs.Select(l => l.DayId).FirstOrDefault(d => d != null);
+        }
+
+        if (!PlansOn) return;
+        _plans = (await PlanService.GetClientPlansAsync(ClientId)).Where(p => !p.IsTemplate).ToList();
+        if (_targetSessionId is { } target)
+            _assigned = (await PlanService.GetSessionPlanDaysAsync([target])).GetValueOrDefault(target);
+        var planId = _assigned?.PlanId is { } ap && _plans.Any(p => p.Id == ap) ? ap
+            : _card?.PlanId is { } cp && _plans.Any(p => p.Id == cp) ? cp
+            // Na wizytę proponuj plan do pracy z trenerem — samodzielny tylko, gdy nie ma innego.
+            : (_plans.FirstOrDefault(p => p.Use != PTScheduler.Domain.Enums.PlanUse.Solo) ?? _plans.FirstOrDefault())?.Id;
+        if (planId is { } pid) await LoadPlanAsync(pid);
+    }
+
+    private int? _lastDayId;
+
+    private async Task LoadPlanAsync(int planId)
+    {
+        _plan = await PlanService.GetForWorkoutAsync(ClientId, planId);
+        if (_plan is null || _plan.Days.Count == 0) { _dayId = null; _suggestedDayId = null; return; }
+        var days = _plan.Days.OrderBy(d => d.Order).ToList();
+        var idx = days.FindIndex(d => d.Id == _lastDayId);
+        _suggestedDayId = days[(idx + 1) % days.Count].Id;
+        _dayId = _assigned is { } a && a.PlanId == planId ? a.PlanDayId : _suggestedDayId;
+    }
+
+    private int? _targetSessionId;
+    private DateTime? _targetAt;
+    private SessionPlanDayDto? _assigned;
+    private bool _saving;
+    private string _userId = "";
+    private bool _isAdmin;
+
+    private async Task AssignAsync(int? dayId)
+    {
+        if (_targetSessionId is not { } sid) return;
+        _saving = true;
+        try
+        {
+            if (await PlanService.AssignSessionDayAsync(_userId, _isAdmin, sid, dayId))
+                _assigned = dayId is null ? null : (await PlanService.GetSessionPlanDaysAsync([sid])).GetValueOrDefault(sid);
+        }
+        finally { _saving = false; }
+    }
+
+    private async Task PlanChangedAsync(ChangeEventArgs e)
+    {
+        if (int.TryParse(e.Value?.ToString(), out var id)) await LoadPlanAsync(id);
+    }
+
+    private string DayName(PlanDayEditDto d) => string.IsNullOrWhiteSpace(d.Label) ? $"Dzień {_plan!.Days.IndexOf(d) + 1}" : d.Label;
+
+    private static string ExerciseDetail(PlanExerciseEditDto e) => e.Tracking switch
+    {
+        ExerciseTracking.Time when e.TargetDurationSeconds is int sec => $"{e.Sets} × {sec} s",
+        ExerciseTracking.DistanceTime or ExerciseTracking.WeightDistance when e.TargetDistanceMeters is decimal m => $"{e.Sets} × {m:0.#} m",
+        _ => $"{e.Sets} × {e.Reps ?? "—"}" + (e.TargetWeightKg is decimal kg and > 0 ? $" · {kg:0.##} kg" : "")
+    };
+}

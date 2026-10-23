@@ -1,0 +1,233 @@
+@page "/admin/video"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer")]
+@using Microsoft.EntityFrameworkCore
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Enums
+@using PTScheduler.Infrastructure.Data
+@inject IBunnyService Bunny
+@inject ICourseService CourseService
+@inject EntitlementService Entitlements
+@inject IDbContextFactory<ApplicationDbContext> DbFactory
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Wideo" />
+
+<div class="page-header">
+    <h4 class="page-title"><i class="bi bi-camera-video-fill me-2" style="color:var(--c-primary)"></i>Wideo</h4>
+</div>
+
+@if (Entitlements.Current.VideoProvider != "bunny" || Entitlements.Current.MaxVideoStorageGB <= 0)
+{
+    <FeatureGate Flag="CoursesEnabled" RequiredPlan="Pro" Title="Hosting wideo jest w pakiecie z wideo">
+        <Description>
+            Własne filmy do kursów i ćwiczeń, folder na platformie i wspólna baza ćwiczeń są w wyższym planie.
+            Do tego czasu możesz osadzać filmy z YouTube.
+        </Description>
+    </FeatureGate>
+}
+else if (_status is null)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    @if (_message is not null)
+    {
+        <div class="alert @(_msgError ? "alert-danger" : "alert-success") alert-dismissible py-2 small">
+            @_message
+            <button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null" aria-label="Zamknij"></button>
+        </div>
+    }
+
+    @if (!_status.Enabled)
+    {
+        <div class="alert alert-info small"><i class="bi bi-hourglass-split me-1"></i>@_status.Reason</div>
+    }
+    else
+    {
+        <div class="vh-grid mb-3">
+            <section class="card vh-card">
+                <div class="card-body">
+                    <div class="d-flex align-items-center gap-3 mb-2">
+                        <span class="vh-ico"><i class="bi bi-cloud-upload"></i></span>
+                        <div class="flex-grow-1">
+                            <div class="text-muted small">Miejsce na filmy</div>
+                            <div class="fs-4 fw-bold" style="font-variant-numeric:tabular-nums">@Size(_status.UsedBytes) <span class="text-muted fs-6 fw-normal">z @Size(_status.QuotaBytes)</span></div>
+                        </div>
+                        <span class="badge rounded-pill @(_status.Percent >= 90 ? "text-bg-danger" : _status.Percent >= 70 ? "text-bg-warning" : "text-bg-success")">@_status.Percent%</span>
+                    </div>
+                    <div class="progress mb-2" style="height:8px" role="progressbar" aria-valuenow="@_status.Percent" aria-valuemin="0" aria-valuemax="100">
+                        <div class="progress-bar @(_status.Percent >= 90 ? "bg-danger" : _status.Percent >= 70 ? "bg-warning" : "bg-success")" style="width:@(_status.Percent)%"></div>
+                    </div>
+                    <div class="small text-muted mb-3">
+                        W pakiecie <strong>@(Entitlements.Current.MaxVideoStorageGB - Entitlements.Current.AddonVideoStorageGB) GB</strong>
+                        @if (Entitlements.Current.AddonVideoStorageGB > 0) { <span> + dodatki <strong>@Entitlements.Current.AddonVideoStorageGB GB</strong></span> }
+                        — liczymy rozmiar wgranego pliku, dokładnie tyle, ile opłacasz. Usunięty film od razu zwalnia miejsce.
+                    </div>
+                    <a href="/admin/sklep?dodatek=miejsce" class="btn btn-sm btn-outline-primary"><i class="bi bi-cart-plus me-1"></i>Dokup miejsce</a>
+                </div>
+            </section>
+            <section class="card vh-card">
+                <div class="card-body">
+                    <div class="d-flex align-items-center gap-3 mb-2">
+                        <span class="vh-ico"><i class="bi bi-folder2-open"></i></span>
+                        <div>
+                            <div class="text-muted small">Twój folder na platformie</div>
+                            <div class="fs-4 fw-bold">@_status.Videos @VideosWord(_status.Videos)</div>
+                        </div>
+                    </div>
+                    <ul class="small text-muted ps-3 mb-3">
+                        <li><b>Kursy</b> — filmy z lekcji (Kursy → lekcja → „Wgraj film”).</li>
+                        <li><b>Ćwiczenia</b> — własne instruktaże (Ćwiczenia → Twoje ćwiczenie → „Wgraj film”).</li>
+                        <li>Niczego nie konfigurujesz — hosting i odtwarzacz zapewnia platforma. Twoich filmów nie widzą inni trenerzy.</li>
+                    </ul>
+                    <a href="/admin/sklep?dodatek=transfer" class="btn btn-sm btn-outline-secondary"><i class="bi bi-speedometer2 me-1"></i>Więcej transferu</a>
+                </div>
+            </section>
+        </div>
+
+        <section class="card mb-3">
+            <div class="card-header d-flex align-items-center gap-2">
+                <i class="bi bi-collection-play"></i><span class="fw-semibold">Filmy</span>
+                <div class="ms-auto btn-group btn-group-sm" role="group" aria-label="Folder">
+                    @foreach (var (kind, label) in Folders)
+                    {
+                        <button type="button" class="btn @(_folder == kind ? "btn-primary" : "btn-outline-secondary")" @onclick="() => _folder = kind">@label</button>
+                    }
+                </div>
+            </div>
+            <div class="card-body p-0">
+                @if (VisibleVideos.Count == 0)
+                {
+                    <div class="text-muted small text-center py-4"><i class="bi bi-camera-video-off d-block fs-4 mb-1"></i>Brak filmów w tym folderze.</div>
+                }
+                else
+                {
+                    <div class="table-responsive">
+                        <table class="table table-sm align-middle mb-0">
+                            <thead><tr><th>Tytuł</th><th>Folder</th><th class="text-end">Rozmiar</th><th>Dodano</th><th></th></tr></thead>
+                            <tbody>
+                                @foreach (var v in VisibleVideos)
+                                {
+                                    <tr>
+                                        <td class="text-truncate" style="max-width:320px">@v.Title</td>
+                                        <td><span class="badge bg-light text-dark border">@(v.Kind == VideoKinds.Exercises ? "ćwiczenia" : "kursy")</span></td>
+                                        <td class="text-end" style="font-variant-numeric:tabular-nums">@Size(v.SizeBytes)</td>
+                                        <td class="small text-muted">@v.CreatedAt.ToLocalTime().ToString("d.MM.yyyy")</td>
+                                        <td class="text-end">
+                                            <button class="btn btn-sm btn-outline-danger" title="Usuń film" aria-label="@($"Usuń film {v.Title}")" disabled="@_busy" @onclick="() => DeleteVideo(v)"><i class="bi bi-trash"></i></button>
+                                        </td>
+                                    </tr>
+                                }
+                            </tbody>
+                        </table>
+                    </div>
+                }
+            </div>
+        </section>
+    }
+
+    <section class="card border-danger-subtle mb-3">
+        <div class="card-body">
+            <h6 class="text-danger mb-1"><i class="bi bi-shield-x me-1"></i>Usuń wszystkie moje dane wideo i kursy</h6>
+            <p class="small text-muted mb-2">
+                Prawo do usunięcia danych (RODO): kasujemy wszystkie Twoje filmy z platformy, foldery, kursy z lekcjami, quizami i zapisami klientów,
+                okładki kursów, filmy przypięte do Twoich ćwiczeń oraz ćwiczenia udostępnione Społeczności. Tego nie da się cofnąć.
+            </p>
+            @if (_confirmOpen)
+            {
+                <div class="d-flex flex-wrap gap-2 align-items-center">
+                    <input class="form-control form-control-sm" style="max-width:220px" placeholder="Wpisz USUŃ" @bind="_confirmText" @bind:event="oninput" aria-label="Potwierdzenie" />
+                    <button class="btn btn-sm btn-danger" disabled="@(_busy || _confirmText.Trim() != "USUŃ")" @onclick="DeleteAll">
+                        @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                        Usuń wszystko
+                    </button>
+                    <button class="btn btn-sm btn-outline-secondary" @onclick="() => { _confirmOpen = false; _confirmText = string.Empty; }">Anuluj</button>
+                </div>
+            }
+            else
+            {
+                <button class="btn btn-sm btn-outline-danger" @onclick="() => _confirmOpen = true">Chcę usunąć wszystkie dane wideo</button>
+            }
+        </div>
+    </section>
+}
+
+@code {
+    private VideoHubStatus? _status;
+    private List<VideoItem> _videos = [];
+    private string _folder = "";
+    private string? _message;
+    private bool _msgError;
+    private bool _busy;
+    private bool _confirmOpen;
+    private string _confirmText = string.Empty;
+
+    private static readonly (string Kind, string Label)[] Folders = [("", "Wszystkie"), (VideoKinds.Courses, "Kursy"), (VideoKinds.Exercises, "Ćwiczenia")];
+
+    private List<VideoItem> VisibleVideos => _folder == "" ? _videos : _videos.Where(v => v.Kind == _folder).ToList();
+
+    protected override async Task OnInitializedAsync() => await LoadAsync(false);
+
+    private async Task LoadAsync(bool refresh)
+    {
+        _status = await Bunny.GetStatusAsync(refresh);
+        _videos = _status.Enabled ? await Bunny.ListAsync() : [];
+    }
+
+    private async Task DeleteVideo(VideoItem v)
+    {
+        _busy = true;
+        var (ok, err) = await Bunny.DeleteAsync(v.VideoRef);
+        if (ok)
+        {
+            // Lekcje i ćwiczenia z tym filmem przestają go pokazywać.
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var guid = VideoRef.Guid(v.VideoRef);
+            await db.Lessons.Where(l => l.BunnyVideoId != null && l.BunnyVideoId.EndsWith(guid))
+                .ExecuteUpdateAsync(u => u.SetProperty(l => l.BunnyVideoId, (string?)null).SetProperty(l => l.BunnyVideoSizeBytes, (long?)null));
+            await db.Exercises.Where(e => e.VideoType == ExerciseVideoType.Bunny && e.VideoRef != null && e.VideoRef.EndsWith(guid))
+                .ExecuteUpdateAsync(u => u.SetProperty(e => e.VideoType, ExerciseVideoType.None).SetProperty(e => e.VideoRef, (string?)null));
+            Show($"Usunięto „{v.Title}” — miejsce zwolnione.", false);
+            await LoadAsync(true);
+        }
+        else Show(err ?? "Nie udało się usunąć filmu.", true);
+        _busy = false;
+    }
+
+    private async Task DeleteAll()
+    {
+        _busy = true;
+        try
+        {
+            var (ok, removed, err) = await Bunny.DeleteAllAsync();
+            if (!ok) { Show(err ?? "Nie udało się usunąć filmów.", true); return; }
+            var courses = await CourseService.DeleteAllCoursesAsync();
+            await using var db = await DbFactory.CreateDbContextAsync();
+            await db.Exercises.Where(e => e.VideoType == ExerciseVideoType.Bunny)
+                .ExecuteUpdateAsync(u => u.SetProperty(e => e.VideoType, ExerciseVideoType.None).SetProperty(e => e.VideoRef, (string?)null));
+            _confirmOpen = false;
+            _confirmText = string.Empty;
+            Show($"Usunięto: {removed} {VideosWord(removed)}, {courses} {(courses == 1 ? "kurs" : "kursów")} i udostępnione ćwiczenia.", false);
+            await LoadAsync(true);
+        }
+        finally { _busy = false; }
+    }
+
+    private void Show(string text, bool error) { _message = text; _msgError = error; }
+
+    private static string VideosWord(int n)
+    {
+        if (n == 1) return "film";
+        var d = n % 10;
+        var t = n % 100;
+        return d >= 2 && d <= 4 && (t < 12 || t > 14) ? "filmy" : "filmów";
+    }
+
+    private static string Size(long bytes)
+    {
+        if (bytes == long.MaxValue) return "bez limitu";
+        if (bytes < 1024L * 1024 * 1024) return $"{bytes / (1024.0 * 1024):0.#} MB";
+        return $"{bytes / (1024.0 * 1024 * 1024):0.##} GB";
+    }
+}

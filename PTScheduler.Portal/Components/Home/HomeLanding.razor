@@ -1,0 +1,558 @@
+@inject SiteSettingsService Settings
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject AssistantService Assistant
+
+@* Szablon „Nowa” strony głównej: sprzedażowa strona na prawdziwych ekranach i nagraniach z aplikacji
+   Zamiast zrzutów — zaprojektowane, animowane sceny (HomeScene) i podgląd aplikacji na żywo w hero (nazwa + kolor → /register).
+   Prawdziwe ekrany zostają tylko w sekcji aplikacji klienta (wwwroot/img/lp). Zachowanie: landing.js, wygląd: landing.css. *@
+<PageTitle>Hantly — aplikacja dla trenerów personalnych z asystentem AI</PageTitle>
+<HeadContent>
+    <meta name="description" content="Grafik i zapisy online, płatności, plany treningowe i aplikacja dla klientów pod Twoją marką. Asystent AI mówi, kto czeka, kto zalega i kto może odejść. Zacznij za darmo." />
+</HeadContent>
+
+<div class="ld">
+
+<!-- HERO -->
+<section class="ld-hero">
+    <div class="lp-container ld-hero-grid">
+        <div class="ld-hero-copy">
+            <a href="#ai" class="ld-pill">
+                <span class="ld-pill-mascot">@Mascot("hello")</span>
+                <span><b>Nowość:</b> @_look.Name — asystent AI, który pilnuje Twojego biznesu</span>
+                <i class="bi bi-arrow-right"></i>
+            </a>
+            @if (CustomTitle is { } title)
+            {
+                <h1>@title</h1>
+            }
+            else
+            {
+                <h1>Ty prowadzisz treningi.<br /><span class="ld-under">Hantly prowadzi resztę.</span></h1>
+            }
+            <p class="ld-sub">@HeroSubtitle</p>
+            <div class="ld-ctas">
+                <a href="@_s("hero_cta_url", "/register")" class="lp-btn lp-btn-energy"><i class="bi bi-rocket-takeoff"></i>@_s("hero_cta", "Zbuduj swoją aplikację")</a>
+                @if (DemoOn)
+                {
+                    <a href="/demo" data-enhance-nav="false" class="lp-btn lp-btn-ghost"><i class="bi bi-play-circle"></i>Wypróbuj demo</a>
+                }
+                else
+                {
+                    <a href="#dzien" class="lp-btn lp-btn-ghost"><i class="bi bi-play-circle"></i>Zobacz ją w akcji</a>
+                }
+            </div>
+            @if (DemoOn)
+            {
+                <p class="ld-demo-note"><i class="bi bi-hand-index-thumb"></i>Demo bez zakładania konta — kliknij i działaj na przykładowych danych. Albo <a href="/demo?jako=klient" data-enhance-nav="false">zobacz aplikację oczami klienta</a>.</p>
+            }
+            <ul class="ld-trust">
+                <li><i class="bi bi-check-circle-fill"></i>Okres próbny za 0 zł</li>
+                <li><i class="bi bi-check-circle-fill"></i>Bez umowy i wypowiedzenia</li>
+                <li><i class="bi bi-check-circle-fill"></i>Klienci nic nie instalują ze sklepu</li>
+                <li><i class="bi bi-check-circle-fill"></i>Dane na serwerach w Europie</li>
+            </ul>
+        </div>
+
+        <div class="ld-hero-stage ldl" data-ld-live>
+            <form class="ldl-form" action="/register" method="get" data-enhance="false">
+                <div class="ldl-form-k"><i class="bi bi-magic"></i>Sprawdź na żywo</div>
+                <label for="ldl-name">Jak nazywa się Twoje studio?</label>
+                <input id="ldl-name" name="nazwa" maxlength="40" autocomplete="organization" placeholder="np. Kasia Fit Studio" />
+                <div class="ldl-sw" role="radiogroup" aria-label="Kolor aplikacji">
+                    @foreach (var c in _heroColors)
+                    {
+                        <label class="ldl-swatch" style="--c1:@c.Hex;--c2:@c.Hex2" title="@c.Name">
+                            <input type="radio" name="kolor" value="@c.Key" checked="@(c.Key == _heroColors[0].Key)" data-hex="@c.Hex" data-hex2="@c.Hex2" />
+                            <span class="visually-hidden">@c.Name</span>
+                        </label>
+                    }
+                </div>
+                <button type="submit" class="lp-btn lp-btn-primary"><i class="bi bi-arrow-right-circle"></i>Zbuduj tę aplikację</button>
+                <small>Za darmo, bez karty. Kreator przeniesie nazwę i kolor.</small>
+            </form>
+            <div class="ldl-phone" style="--app:@_heroColors[0].Hex;--app2:@_heroColors[0].Hex2" aria-label="Podgląd aplikacji dla Twoich klientów">
+                <div class="ldl-scr">
+                    <div class="ldl-bar"><span>9:41</span><span><i class="bi bi-reception-4"></i><i class="bi bi-wifi"></i><i class="bi bi-battery-full"></i></span></div>
+                    <div class="ldl-head">
+                        <span class="ldl-mono" data-ldl-mono>KF</span>
+                        <span class="ldl-id"><b data-ldl-name>Kasia Fit Studio</b><small>Twoja aplikacja</small></span>
+                        <i class="bi bi-bell"></i>
+                    </div>
+                    <div class="ldl-hello">Cześć, Marta! 👋</div>
+                    <div class="ldl-next">
+                        <small>Najbliższy trening</small>
+                        <b>czwartek, 18:00</b>
+                        <span>Trening personalny · 60 min</span>
+                        <em><i class="bi bi-check2"></i>potwierdzony</em>
+                    </div>
+                    <div class="ldl-book"><i class="bi bi-calendar-plus"></i>Umów trening</div>
+                    <div class="ldl-list">
+                        <div><span class="ldl-ic"><i class="bi bi-lightning-charge-fill"></i></span><span><b>Trening personalny</b><small>60 min</small></span><strong>150 zł</strong></div>
+                        <div><span class="ldl-ic"><i class="bi bi-people-fill"></i></span><span><b>Trening w parze</b><small>60 min</small></span><strong>220 zł</strong></div>
+                        <div><span class="ldl-ic"><i class="bi bi-box-seam"></i></span><span><b>Pakiet 10 treningów</b><small>ważny 3 miesiące</small></span><strong>1 300 zł</strong></div>
+                    </div>
+                    <div class="ldl-tabs"><span class="on"><i class="bi bi-house-door-fill"></i>Start</span><span><i class="bi bi-calendar3"></i>Wizyty</span><span><i class="bi bi-lightning-charge"></i>Trening</span><span><i class="bi bi-chat"></i>Czat</span></div>
+                </div>
+            </div>
+            <div class="ld-toast ld-toast-1" aria-hidden="true"><span class="ld-toast-ic mint"><i class="bi bi-trophy-fill"></i></span><span><b>Nowy rekord klienta</b>Wiosłowanie hantlem — 29 kg</span></div>
+            <div class="ld-toast ld-toast-2" aria-hidden="true"><span class="ld-toast-ic violet"><i class="bi bi-cash-coin"></i></span><span><b>Wpłata odhaczona</b>150 zł · gotówka</span></div>
+            <div class="ld-toast ld-toast-3" aria-hidden="true"><span class="ld-toast-ic energy"><i class="bi bi-stars"></i></span><span><b>@_look.Name</b>3 osoby zwykle trenują o 16:00 — zaprosić?</span></div>
+        </div>
+    </div>
+
+    <div class="lp-container">
+        <ul class="ld-facts">
+            @if (_activeTrainers >= 20)
+            {
+                <li><b data-ld-count="@_activeTrainers">@_activeTrainers</b><span>trenerów już pracuje z Hantly</span></li>
+            }
+            else
+            {
+                <li><b>1</b><span>aplikacja zamiast Excela, WhatsAppa i zeszytu</span></li>
+            }
+            <li><b>0 zł</b><span>prowizji od płatności Twoich klientów</span></li>
+            <li><b>24/7</b><span>klienci zapisują się i płacą sami</span></li>
+            <li><b>5 min</b><span>do pierwszego zaproszenia klienta</span></li>
+        </ul>
+    </div>
+</section>
+
+<!-- PROBLEM → ROZWIĄZANIE -->
+<section class="ld-section" id="problem">
+    <div class="lp-container">
+        <div class="ld-head">
+            <div class="lp-eyebrow">Brzmi znajomo?</div>
+            <h2>Każda z tych rzeczy zabiera czas, za który nikt Ci nie płaci</h2>
+        </div>
+        <div class="ld-pains">
+            @foreach (var p in _pains)
+            {
+                <article class="ld-pain" data-ld-reveal>
+                    <span class="ld-pain-ic"><i class="bi @p.Icon"></i></span>
+                    <p class="ld-pain-before"><s>@p.Before</s></p>
+                    <p class="ld-pain-after"><i class="bi bi-arrow-return-right"></i>@p.After</p>
+                </article>
+            }
+        </div>
+    </div>
+</section>
+
+<!-- DZIEŃ Z HANTLY: prawdziwe ekrany, przewijana oś dnia -->
+<section class="ld-day" id="dzien" aria-labelledby="ld-day-title">
+    <div class="lp-container">
+        <div class="ld-head ld-head-dark">
+            <div class="lp-eyebrow">Jeden dzień z Hantly</div>
+            <h2 id="ld-day-title">Tak wygląda Twój dzień, kiedy aplikacja pracuje razem z Tobą</h2>
+            <p>Pięć chwil z prawdziwego dnia trenera. Tak działają w aplikacji ekran „Dziś”, zaległości, wolne okienka i aplikacja klienta.</p>
+        </div>
+        <div class="ld-day-grid" data-ld-story>
+            <ol class="ld-steps">
+                @for (var i = 0; i < _day.Length; i++)
+                {
+                    var step = _day[i];
+                    <li class="ld-step @(i == 0 ? "is-active" : "")" data-ld-step="@i">
+                        <div class="ld-step-time" aria-hidden="true"><i class="bi @step.Icon"></i></div>
+                        <h3><span class="ld-step-clock">@step.Time</span>@step.Title</h3>
+                        <p>@step.Text</p>
+                        <div class="ld-step-media">@DayMedia(step, false)</div>
+                    </li>
+                }
+            </ol>
+            <div class="ld-stage" aria-hidden="true">
+                <div class="ld-stage-inner">
+                    @for (var i = 0; i < _day.Length; i++)
+                    {
+                        <div class="ld-stage-item @(i == 0 ? "is-active" : "")" data-ld-stage="@i">@DayMedia(_day[i], true)</div>
+                    }
+                </div>
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- FUNKCJE: zakładki z prawdziwymi ekranami -->
+<section class="ld-section" id="funkcje">
+    <div class="lp-container">
+        <div class="ld-head">
+            <div class="lp-eyebrow">Funkcje</div>
+            <h2>Wszystko, czego potrzebuje trener — w jednej aplikacji</h2>
+            <p>Grafik, klienci, plany, pieniądze i statystyki rozmawiają ze sobą. Nic nie przepisujesz dwa razy.</p>
+        </div>
+        <div class="ld-tabs" data-ld-tabs>
+            <div class="ld-tablist" role="tablist" aria-label="Funkcje aplikacji">
+                @for (var i = 0; i < _features.Length; i++)
+                {
+                    var f = _features[i];
+                    <button type="button" role="tab" id="@($"ld-tab-{i}")" aria-controls="@($"ld-panel-{i}")" aria-selected="@(i == 0 ? "true" : "false")" tabindex="@(i == 0 ? 0 : -1)" class="ld-tab">
+                        <i class="bi @f.Icon"></i>@f.Name
+                    </button>
+                }
+            </div>
+            @for (var i = 0; i < _features.Length; i++)
+            {
+                var f = _features[i];
+                <div class="ld-panel" role="tabpanel" id="@($"ld-panel-{i}")" aria-labelledby="@($"ld-tab-{i}")" hidden="@(i != 0)">
+                    <div class="ld-panel-copy">
+                        <h3>@f.Title</h3>
+                        <ul>
+                            @foreach (var point in f.Points)
+                            {
+                                <li><i class="bi bi-check2"></i>@point</li>
+                            }
+                        </ul>
+                    </div>
+                    <div class="ld-scene-box">
+                        <HomeScene Name="@f.Scene" Alt="@f.Alt" AssistantName="@_look.Name" Mascot="@Mascot" />
+                    </div>
+                </div>
+            }
+        </div>
+    </div>
+</section>
+
+<!-- ASYSTENT AI -->
+<section class="ld-ai" id="ai" aria-labelledby="ld-ai-title">
+    <div class="lp-container ld-ai-grid">
+        <div class="ld-ai-copy">
+            <div class="ld-ai-who">
+                <span class="ld-ai-mascot">@Mascot("think")</span>
+                <div class="lp-eyebrow">Asystent AI w Twojej aplikacji</div>
+            </div>
+            <h2 id="ld-ai-title">@_look.Name mówi Ci, co jest ważne dziś. <span class="ld-grad">Zanim o to zapytasz.</span></h2>
+            <p>Asystent sam przegląda grafik, płatności, ankiety i treningi klientów. Każda podpowiedź ma przycisk, który od razu prowadzi do działania, a wiadomość do klienta asystent napisze w Twoim stylu.</p>
+
+            <ul class="ld-ai-trust">
+                <li><i class="bi bi-calculator"></i><span><b>AI nie zmyśla liczb.</b> Liczy je aplikacja, a każda liczba w tekście jest sprawdzana.</span></li>
+                <li><i class="bi bi-incognito"></i><span><b>Imiona klientów zostają u Ciebie.</b> Do AI trafiają same liczby i fakty.</span></li>
+                <li><i class="bi bi-hand-index-thumb"></i><span><b>AI podpowiada, Ty decydujesz.</b> Wszystko działa też bez AI — wyciszysz je jednym kliknięciem.</span></li>
+            </ul>
+        </div>
+        <div class="ld-ai-media">
+            <HomeScene Name="risk" Alt="Asystent pokazuje klientów, którzy mogą odejść, i pisze do nich wiadomość w stylu trenera" AssistantName="@_look.Name" Mascot="@Mascot" />
+            <div class="ld-ai-media-2">
+                <HomeScene Name="stats" Alt="„Co się zmieniło” w biznesie: retencja, przychód i prognoza na 30 dni" AssistantName="@_look.Name" Mascot="@Mascot" />
+            </div>
+        </div>
+    </div>
+</section>
+
+<!-- APLIKACJA KLIENTA -->
+<section class="ld-section ld-client" id="klienci">
+    <div class="lp-container ld-client-grid">
+        <figure class="ld-phone ld-client-phone">
+            <video data-ld-video muted loop playsinline preload="none" poster="/img/lp/film-klient-aplikacja.webp" aria-label="Nagranie: aplikacja klienta — start, medale i postępy">
+                <source src="/img/lp/film-klient-aplikacja.mp4" type="video/mp4" />
+                <source src="/img/lp/film-klient-aplikacja.webm" type="video/webm" />
+            </video>
+        </figure>
+        <div class="ld-client-copy">
+            <div class="lp-eyebrow">Aplikacja dla Twoich klientów</div>
+            <h2>Klienci dostają aplikację z Twoim logo. I naprawdę do niej wracają.</h2>
+            <ul class="ld-checks">
+                <li><i class="bi bi-phone"></i><span><b>Bez sklepu z aplikacjami.</b> Link w SMS-ie, ikona na ekranie telefonu, powiadomienia — jak zwykła aplikacja.</span></li>
+                <li><i class="bi bi-clipboard2-pulse"></i><span><b>Plan na dziś w kieszeni.</b> Ciężary z poprzedniego razu, filmy ćwiczeń, odhaczanie serii także bez internetu.</span></li>
+                <li><i class="bi bi-trophy"></i><span><b>Motywacja, która przychodzi sama.</b> Rekordy po treningu, medale za regularność i podsumowanie „Twój miesiąc”.</span></li>
+                <li><i class="bi bi-wallet2"></i><span><b>Rezerwacje i płatności w jednym miejscu.</b> Pakiety, karnety, BLIK i karta — klient wie, ile treningów mu zostało.</span></li>
+            </ul>
+        </div>
+    </div>
+    <div class="ld-screens" aria-label="Ekrany aplikacji klienta">
+        <div class="ld-screens-track">
+            @foreach (var copy in new[] { false, true })
+            {
+                @foreach (var (img, label) in _clientScreens)
+                {
+                    <figure class="ld-screen" aria-hidden="@(copy ? "true" : null)">
+                        <img src="@($"/img/lp/{img}.webp")" width="720" height="1558" alt="@(copy ? "" : label)" loading="lazy" />
+                        <figcaption>@label</figcaption>
+                    </figure>
+                }
+            }
+        </div>
+    </div>
+</section>
+
+<!-- TWOJA MARKA: szablony stron -->
+<section class="lp-section lp-section-alt" id="szablony">
+    <div class="lp-container">
+        <div class="ld-head">
+            <div class="lp-eyebrow">Twoja marka, Twoja strona</div>
+            <h2>Strona, która sprzedaje treningi za Ciebie</h2>
+            <p>Wybierz szablon — oferta, opinie, wolne terminy i przycisk „Umów trening” pokazują się same, prosto z aplikacji. Najedź na podgląd (albo go dotknij), żeby przewinąć stronę.</p>
+        </div>
+        <div class="lp-tpls">
+            @foreach (var t in HomeShared.Templates.Take(6))
+            {
+                <figure class="lp-tpl" tabindex="0">
+                    <div class="lp-tpl-frame">
+                        <div class="lp-tpl-bar"><b></b><b></b><b></b><span>@t.Url</span></div>
+                        <div class="lp-tpl-shot">
+                            <img src="@($"/img/templates/{t.Key}.jpg")" alt="@($"Szablon strony: {t.Name}")" loading="lazy" width="1280" height="3400" />
+                        </div>
+                    </div>
+                    <figcaption>
+                        <span class="lp-tpl-sw" style="--a:@t.Accent;--b:@t.Bg"></span>
+                        <span><b>@t.Name</b><small>@t.For</small></span>
+                    </figcaption>
+                </figure>
+            }
+        </div>
+        <p class="lp-tpls-more"><i class="bi bi-grid-1x2"></i>18 szablonów, 16 motywów kolorów i 16 widgetów, własne logo — a od planu Starter także własna domena z certyfikatem HTTPS.</p>
+    </div>
+</section>
+
+@if (_reviews.Count > 0)
+{
+    <!-- OPINIE (tylko prawdziwe, z Panelu) -->
+    <section class="ld-section" id="opinie">
+        <div class="lp-container">
+            <div class="ld-head">
+                <div class="lp-eyebrow">Opinie trenerów</div>
+                <h2>Co mówią trenerzy, którzy już pracują z Hantly</h2>
+                <p><span class="lp-stars">★★★★★</span> średnio @_reviews.Average(r => r.Rating).ToString("0.0", Pl) z @_reviews.Count opinii w aplikacji</p>
+            </div>
+            <div class="lp-reviews-grid">
+                @foreach (var f in _reviews.Take(6))
+                {
+                    var author = string.IsNullOrWhiteSpace(f.PublicAuthor) ? "Trener Hantly" : f.PublicAuthor;
+                    <figure class="lp-review">
+                        <div class="lp-stars" aria-label="@($"{f.Rating} na 5")">@(new string('★', f.Rating))<span class="off">@(new string('★', 5 - f.Rating))</span></div>
+                        <blockquote>„@f.Text”</blockquote>
+                        <figcaption><span class="lp-review-avatar">@Initials(author)</span>@author</figcaption>
+                    </figure>
+                }
+            </div>
+        </div>
+    </section>
+}
+
+<!-- JAK ZACZĄĆ -->
+<section class="ld-section ld-start">
+    <div class="lp-container">
+        <div class="ld-head">
+            <div class="lp-eyebrow">Jak zacząć</div>
+            <h2>Pierwszego klienta zaprosisz jeszcze dziś</h2>
+        </div>
+        <ol class="ld-howto">
+            <li data-ld-reveal><span class="ld-howto-n">1</span><h3>Zbuduj aplikację</h3><p>Nazwa, specjalizacja, kolory i oferta. Kreator pokazuje podgląd na żywo — publikujesz jednym kliknięciem.</p></li>
+            <li data-ld-reveal><span class="ld-howto-n">2</span><h3>Ustaw swoje zasady</h3><p>Godziny pracy, rodzaje treningów, pakiety i zasady odwołań. Klientów zaimportujesz z pliku.</p></li>
+            <li data-ld-reveal><span class="ld-howto-n">3</span><h3>Wyślij link klientom</h3><p>Rezerwują, płacą i trenują w Twojej aplikacji. Ty widzisz wszystko w jednym grafiku.</p></li>
+        </ol>
+        <div class="ld-center"><a href="/register" class="lp-btn lp-btn-primary"><i class="bi bi-play-fill"></i>Zaczynam — krok 1</a></div>
+    </div>
+</section>
+
+<!-- CENNIK -->
+<section class="lp-section lp-section-alt" id="cennik">
+    <div class="lp-container">
+        <div class="ld-head">
+            <div class="lp-eyebrow">Cennik</div>
+            <h2>Płacisz za to, czego używasz. Bez umów.</h2>
+            <p>Zacznij za darmo i przejdź na wyższy plan, gdy przybędzie klientów. Zmiana planu zajmuje minutę.</p>
+        </div>
+        <div class="lp-pricing">
+            @foreach (var plan in _plans)
+            {
+                <div class="lp-price @(plan.IsFeatured ? "featured" : "")">
+                    @if (plan.IsFeatured)
+                    {
+                        <div class="lp-price-badge">Najczęściej wybierany</div>
+                    }
+                    <h3>@plan.Name</h3>
+                    <p class="lp-price-desc">@plan.Description</p>
+                    <div class="lp-price-amount">@plan.MonthlyPrice.ToString("0") <small>@(plan.MonthlyPrice == 0 ? "zł" : "zł / mies.")</small></div>
+                    <div class="lp-price-period">@PricePeriod(plan)</div>
+                    <ul>
+                        @foreach (var (label, included) in HomeShared.PlanFeatures(plan))
+                        {
+                            <li class="@(included ? "" : "off")"><i class="bi @(included ? "bi-check-circle-fill" : "bi-dash-circle")"></i>@label</li>
+                        }
+                    </ul>
+                    <a href="/register?plan=@plan.Id" class="lp-btn @(plan.IsFeatured ? "lp-btn-primary" : "lp-btn-ghost")">
+                        @(plan.MonthlyPrice == 0 ? "Zacznij za darmo" : $"Wybieram {plan.Name}")
+                    </a>
+                </div>
+            }
+        </div>
+        <ul class="ld-guarantee">
+            <li><i class="bi bi-credit-card-2-front"></i><span><b>Pierwsza opłata po okresie próbnym.</b> Przypominamy e-mailem kilka dni wcześniej.</span></li>
+            <li><i class="bi bi-x-circle"></i><span><b>Rezygnujesz jednym kliknięciem.</b> Bez umów i okresu wypowiedzenia.</span></li>
+            <li><i class="bi bi-box-arrow-down"></i><span><b>Dane klientów są Twoje.</b> Zawsze do pobrania, także po rezygnacji.</span></li>
+        </ul>
+    </div>
+</section>
+
+<!-- FAQ -->
+<section class="lp-section" id="faq">
+    <div class="lp-container">
+        <div class="ld-head">
+            <div class="lp-eyebrow">Pytania</div>
+            <h2>Najczęstsze pytania</h2>
+        </div>
+        <div class="lp-faq">
+            @for (var i = 0; i < HomeShared.Faqs.Length; i++)
+            {
+                var f = HomeShared.Faqs[i];
+                <details open="@(i == 0)">
+                    <summary>@f.Question<i class="bi bi-plus-lg"></i></summary>
+                    <p>@f.Answer</p>
+                </details>
+            }
+        </div>
+    </div>
+</section>
+
+<!-- CTA -->
+<section class="ld-cta">
+    <div class="lp-container ld-cta-inner">
+        <span class="ld-cta-mascot">@Mascot("celebrate")</span>
+        <h2>@_s("cta_title", "Oddaj papierologię aplikacji. Wróć do trenowania.")</h2>
+        <p>@_s("cta_subtitle", "Zbuduj aplikację w kilka minut i zaproś pierwszych klientów jeszcze dziś. Okres próbny jest za darmo.")</p>
+        <div class="ld-ctas ld-cta-btns">
+            <a href="/register" class="lp-btn lp-btn-energy"><i class="bi bi-rocket-takeoff"></i>@_s("cta_button", "Zbuduj swoją aplikację")</a>
+            @if (DemoOn)
+            {
+                <a href="/demo" data-enhance-nav="false" class="lp-btn lp-btn-ghost ld-ghost-dark"><i class="bi bi-play-circle"></i>Najpierw wypróbuj demo</a>
+            }
+        </div>
+    </div>
+</section>
+
+<a href="/register" class="lp-sticky-cta"><i class="bi bi-rocket-takeoff"></i>Zbuduj swoją aplikację</a>
+
+</div>
+
+@code {
+    private Dictionary<string, string> _settings = new();
+    private List<Plan> _plans = [];
+    private List<AppFeedback> _reviews = [];
+    private int _activeTrainers;
+    private AssistantService.PublicLook _look = new(AssistantService.DefaultName, "live", null, m => $"/assistant/mascot/{m}.png");
+
+    /// <summary>Kolory do wyboru w podglądzie hero (klucze jak w kreatorze — przechodzą do /register?kolor=).</summary>
+    private static readonly AppBuilderCatalog.AppColor[] _heroColors =
+        new[] { "lavender", "ocean", "forest", "rose", "sunset", "slate" }.Select(AppBuilderCatalog.ColorOf).ToArray();
+
+    private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
+
+    private record Pain(string Icon, string Before, string After);
+
+    private static readonly Pain[] _pains =
+    [
+        new("bi-whatsapp", "Zapisy na WhatsAppie o 23:00", "Klienci rezerwują sami — o każdej porze, w Twojej aplikacji."),
+        new("bi-journal-x", "Zeszyt z tym, kto ile zapłacił", "Zaległości w jednym miejscu. Wpłatę odhaczasz jednym kliknięciem."),
+        new("bi-person-dash", "Klient, który znika bez słowa", "Asystent widzi przerwy i spadek formy, zanim klient odejdzie."),
+        new("bi-file-earmark-pdf", "Plany w PDF-ach i notatkach", "Plan w telefonie klienta, a ciężary zapisują się same."),
+    ];
+
+    /// <param name="Scene">Nazwa sceny w HomeScene.</param>
+    private record DayStep(string Time, string Icon, string Title, string Text, string Scene, string Alt);
+
+    private static readonly DayStep[] _day =
+    [
+        new("07:00", "bi-sunrise", "Poranny brief", "Zanim wypijesz kawę, wiesz wszystko: ile wizyt, kto ma uwagi zdrowotne, co czeka na Twoją decyzję. Plan dnia przychodzi też e-mailem i pushem.",
+            "brief", "Poranny brief: powiadomienie i karta „Na dziś” z czterema sprawami, każda z przyciskiem"),
+        new("09:30", "bi-lightning-charge", "Trening z planem w telefonie", "Klient widzi plan na dziś i ciężary z poprzedniego razu. Odhacza serie, a po treningu dostaje podsumowanie z rekordami. Ty widzisz je od razu w jego profilu.",
+            "train", "Klient odhacza serie w telefonie i dostaje nowy rekord, trener widzi go w profilu"),
+        new("13:00", "bi-cash-coin", "Pieniądze bez gonienia", "Wszystkie zaległości w jednym miejscu. Gotówka, przelew albo karta — jedno kliknięcie. Przypomnienie asystent napisze za Ciebie: uprzejmie i w Twoim stylu.",
+            "debts", "Trener odhacza wpłatę gotówką, a asystent pisze uprzejme przypomnienie o płatności"),
+        new("16:00", "bi-calendar-plus", "Wolne okienko nie przepada", "Ktoś odwołał trening? Hantly podpowiada, kto zwykle trenuje o tej porze, i wysyła zaproszenie z linkiem do rezerwacji tego terminu.",
+            "slots", "Odwołany trening zwalnia termin, asystent zaprasza trzy osoby i termin zajmuje nowa rezerwacja"),
+        new("20:30", "bi-moon-stars", "Dzień domknięty", "Wizyty same zamykają się 2 godziny po treningu, a wpływy trafiają do Finansów. Na koniec miesiąca paczka dla księgowej jednym kliknięciem.",
+            "close", "Podsumowanie dnia: treningi, wpływy, wykres tygodnia i gotowa paczka dla księgowej"),
+    ];
+
+    private record FeatureTab(string Icon, string Name, string Title, string[] Points, string Scene, string Alt);
+
+    private static readonly FeatureTab[] _features =
+    [
+        new("bi-calendar-week", "Grafik i zapisy", "Grafik, który układa się sam",
+            ["Klienci rezerwują wolne terminy z Twoich godzin pracy", "Serie wizyt i szablon tygodnia — grafik na miesiąc w minutę", "Przypomnienia e-mail, SMS i push: mniej nieobecności", "Dwustronna synchronizacja z Kalendarzem Google i linki Meet"],
+            "cal", "Tydzień w kalendarzu trenera i nowa rezerwacja online w czwartek o 18:00"),
+        new("bi-people", "Klienci", "Każdy klient jak na dłoni",
+            ["Profil z historią wizyt, pakietów, treningów i pomiarów", "Ankieta zdrowotna i zgody RODO przed pierwszym treningiem", "Czat z klientem w aplikacji, z powiadomieniami", "Import klientów z pliku — bez przepisywania"],
+            "client", "Profil klientki: cel, liczba treningów, pakiet, obecność, wykres siły i wiadomość na czacie"),
+        new("bi-clipboard2-pulse", "Plany treningowe", "Plany, które klient ma zawsze przy sobie",
+            ["Katalog ćwiczeń po polsku, z opisami i filmami", "Propozycja planu z historii klienta — AI podpowiada, Ty decydujesz", "Podpowiedzi progresji z oceny wysiłku po treningu", "Plan w PDF z Twoim logo"],
+            "plan", "Plan treningowy z ćwiczeniami i propozycją zwiększenia ciężaru"),
+        new("bi-wallet2", "Płatności", "Pieniądze w porządku, bez arkusza",
+            ["Pakiety, karnety cykliczne, vouchery i kupony", "BLIK i karta online — pieniądze trafiają prosto na Twoje konto", "Faktury i wysyłka do KSeF", "Ręczne wpłaty edytujesz, a te z bramki rozliczają się same"],
+            "pay", "Pakiet, karnet i voucher oraz wpłaty: BLIK online, faktura w KSeF i gotówka odhaczona ręcznie"),
+        new("bi-graph-up-arrow", "Statystyki", "Wiesz, jak naprawdę idzie biznes",
+            ["„Co się zmieniło” — retencja, przychód i przyczyny w trzech zdaniach", "Prognoza przychodu na 30 dni z odnowień karnetów", "Obłożenie grafiku i klienci, którzy wydają najwięcej", "Aktywność podopiecznych: kto trenuje, a kto odpuszcza"],
+            "stats", "„Co się zmieniło”: retencja, przychód, obłożenie grafiku, wykres sześciu miesięcy i prognoza"),
+    ];
+
+    private static readonly (string Image, string Label)[] _clientScreens =
+    [
+        ("klient-start", "Start"), ("klient-trening", "Trening"), ("klient-postepy", "Postępy"), ("klient-medale", "Medale"),
+        ("klient-statystyki", "Statystyki"), ("klient-pakiety", "Pakiety"), ("klient-pomiary", "Pomiary"),
+    ];
+
+    private RenderFragment DayMedia(DayStep step, bool stage) => __builder =>
+    {
+        <HomeScene Name="@step.Scene" Alt="@step.Alt" AssistantName="@_look.Name" Mascot="@Mascot" />
+    };
+
+    /// <summary>Maskotka asystenta: animowany SVG (wbudowane ikony, animacja „Żywy”) albo ikona nastroju z Panelu.</summary>
+    private RenderFragment Mascot(string mood) => __builder =>
+    {
+        if (_look.AnimatedSvg is { } svg)
+        {
+            <span class="hm-live st-idle md-@mood">@((MarkupString)svg)</span>
+        }
+        else
+        {
+            <img class="hm-anim-@_look.Animation" src="@_look.IconUrl(mood)" alt="" loading="lazy" />
+        }
+    };
+
+    /// <summary>Publiczne demo włączone w Panelu (przycisk „Wypróbuj demo” → /demo).</summary>
+    private bool DemoOn => _s(SiteSettingsService.Keys.DemoEnabled) == "true";
+
+    /// <summary>Własny tytuł z Panelu (gdy ktoś go zmienił) — inaczej tytuł tego szablonu.</summary>
+    private string? CustomTitle =>
+        _settings.TryGetValue(SiteSettingsService.Keys.HeroTitle, out var t) && !string.IsNullOrWhiteSpace(t) && t != SiteSettingsService.DefaultHeroTitle ? t : null;
+
+    private string HeroSubtitle
+    {
+        get
+        {
+            var custom = _s(SiteSettingsService.Keys.HeroSubtitle, "");
+            const string oldDefault = "Grafik i rezerwacje online, karnety, płatności, czat z klientem i plany treningowe — w jednej aplikacji pod Twoją marką. Klienci instalują ją na telefonie jak zwykłą apkę.";
+            return string.IsNullOrWhiteSpace(custom) || custom == oldDefault
+                ? $"Grafik i zapisy online, płatności, plany treningowe i aplikacja dla Twoich klientów — wszystko pod Twoją marką. A asystent AI {_look.Name} codziennie mówi, kto czeka, kto zalega i kto może odejść."
+                : custom;
+        }
+    }
+
+    private static string PricePeriod(Plan plan) =>
+        plan.MonthlyPrice == 0 ? $"{plan.TrialDays} dni za darmo"
+        : plan.YearlyPrice is > 0 ? $"lub {plan.YearlyPrice:0} zł rocznie" + (plan.TrialDays > 0 ? $" · {plan.TrialDays} dni za darmo" : "")
+        : plan.TrialDays > 0 ? $"{plan.TrialDays} dni za darmo na start" : "";
+
+    private static string Initials(string author) =>
+        string.Concat(author.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => char.IsLetter(w[0])).Take(2).Select(w => char.ToUpperInvariant(w[0])));
+
+    private string _s(string key, string fallback = "") =>
+        _settings.TryGetValue(key, out var val) && !string.IsNullOrWhiteSpace(val) ? val : fallback;
+
+    protected override async Task OnInitializedAsync()
+    {
+        try { _look = await Assistant.GetPublicLookAsync(); }
+        catch (Exception ex) when (ex is InvalidOperationException or Npgsql.NpgsqlException) { } // strona działa też bez ustawień asystenta
+
+        _settings = await Settings.GetAllAsync(
+            SiteSettingsService.Keys.HeroTitle, SiteSettingsService.Keys.HeroSubtitle, SiteSettingsService.Keys.HeroCta,
+            SiteSettingsService.Keys.HeroCtaUrl, SiteSettingsService.Keys.CtaTitle, SiteSettingsService.Keys.CtaSubtitle,
+            SiteSettingsService.Keys.CtaButton, SiteSettingsService.Keys.DemoEnabled);
+
+        await using var db = DbFactory.CreateDbContext();
+        _reviews = await db.AppFeedbacks.AsNoTracking()
+            .Where(f => f.ShowOnHomepage && f.Text != null && f.Text != "")
+            .OrderByDescending(f => f.Rating).ThenByDescending(f => f.CreatedAt)
+            .Take(6).ToListAsync();
+        _plans = await db.Plans.AsNoTracking().Where(p => p.IsActive).OrderBy(p => p.SortOrder).ToListAsync();
+        _activeTrainers = await db.Tenants.CountAsync(t => t.Status == TenantStatus.Active);
+    }
+}

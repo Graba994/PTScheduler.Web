@@ -1,0 +1,384 @@
+@page "/admin/automations"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer")]
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Rules
+@inject IAutomationService AutomationSvc
+@inject IAppClock Clock
+@inject IServiceProvider Services
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Automatyzacje" />
+
+<div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <div>
+        <h4 class="page-title mb-1"><i class="bi bi-magic me-2" style="color:var(--c-primary)"></i>Automatyzacje</h4>
+        <p class="text-muted small mb-0">Wiadomości, które aplikacja wysyła sama: powitanie nowych klientów, zaproszenie do powrotu i życzenia urodzinowe. Włącz, dopasuj treść — resztę robi aplikacja.</p>
+    </div>
+    <button class="btn btn-outline-secondary btn-sm" @onclick="RunNow" disabled="@_running">
+        @if (_running) { <span class="spinner-border spinner-border-sm me-1"></span> }
+        <i class="bi bi-play me-1"></i>Sprawdź teraz
+    </button>
+</div>
+
+@if (_message is not null)
+{
+    <div class="alert @(_msgError ? "alert-danger" : "alert-success") alert-dismissible py-2 small">
+        @_message
+        <button type="button" class="btn-close" @onclick="() => _message = null"></button>
+    </div>
+}
+
+@if (_channels is not null)
+{
+    <div class="au-channels">
+        <span class="small text-muted me-1">Kanały:</span>
+        @Chip("E-mail", _channels.Email) @Chip("Push na telefonie", _channels.Push) @Chip("SMS", _channels.Sms)
+        <span class="small text-muted ms-1">Wysyłamy między 9:00 a 20:00. Klient może wyłączyć te wiadomości w ustawieniach powiadomień.</span>
+    </div>
+}
+
+@if (_rules.Count == 0)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    @foreach (var group in Groups)
+    {
+        var groupRules = _rules.Where(r => AutomationKinds.Find(r.Kind)?.Group == group.Key).ToList();
+        var (sent, returned) = GroupStats(groupRules);
+        <section class="au-group">
+            <div class="au-group-head">
+                <span class="au-group-ic"><i class="bi @group.Icon"></i></span>
+                <div class="flex-grow-1">
+                    <h5 class="au-group-title">@group.Title</h5>
+                    <p class="au-group-lead">@group.Lead</p>
+                </div>
+                @if (sent > 0)
+                {
+                    <div class="au-kpi">
+                        <b>@sent</b><small>wysłanych (90 dni)</small>
+                        @if (group.TracksReturn) { <span class="au-kpi-ok">@returned wróciło</span> }
+                    </div>
+                }
+            </div>
+
+            @foreach (var rule in groupRules)
+            {
+                var def = AutomationKinds.Find(rule.Kind)!;
+                var open = _open.Contains(rule.Kind);
+                <article class="au-rule @(rule.Enabled ? "on" : "")">
+                    <div class="au-rule-head">
+                        <span class="au-rule-ic"><i class="bi @def.Icon"></i></span>
+                        <div class="min-w-0 flex-grow-1">
+                            <div class="au-rule-title">@def.Title @if (rule.Enabled) { <span class="au-on">włączona</span> }</div>
+                            <div class="au-rule-desc">@def.Description @WhenText(rule)</div>
+                        </div>
+                        <div class="form-check form-switch m-0">
+                            <input class="form-check-input" type="checkbox" role="switch" aria-label="@($"Włącz: {def.Title}")"
+                                   checked="@rule.Enabled" @onchange="e => ToggleAsync(rule, (bool)(e.Value ?? false))" />
+                        </div>
+                        <button class="btn btn-sm btn-link text-decoration-none" @onclick="() => ToggleOpen(rule.Kind)">
+                            @(open ? "Zwiń" : "Ustawienia") <i class="bi @(open ? "bi-chevron-up" : "bi-chevron-down")"></i>
+                        </button>
+                    </div>
+
+                    @if (open)
+                    {
+                        <div class="au-rule-body">
+                            <div class="row g-3">
+                                <div class="col-12 col-lg-7">
+                                    <div class="row g-2">
+                                        @if (rule.Kind != AutomationKinds.Birthday)
+                                        {
+                                            <div class="col-6">
+                                                <label class="form-label small fw-semibold">@DelayLabel(rule.Kind)</label>
+                                                <div class="input-group input-group-sm">
+                                                    <input type="number" min="0" max="365" class="form-control" @bind="rule.DelayDays" />
+                                                    <span class="input-group-text">dni</span>
+                                                </div>
+                                            </div>
+                                        }
+                                        @if (def.TracksReturn)
+                                        {
+                                            <div class="col-6">
+                                                <label class="form-label small fw-semibold">Nie częściej niż co</label>
+                                                <div class="input-group input-group-sm">
+                                                    <input type="number" min="1" max="3650" class="form-control" @bind="rule.CooldownDays" />
+                                                    <span class="input-group-text">dni</span>
+                                                </div>
+                                            </div>
+                                        }
+                                        <div class="col-12">
+                                            <label class="form-label small fw-semibold">Temat / tytuł</label>
+                                            <input class="form-control form-control-sm" maxlength="200" @bind="rule.Subject" @bind:event="oninput" />
+                                        </div>
+                                        <div class="col-12">
+                                            <label class="form-label small fw-semibold">Treść</label>
+                                            <textarea class="form-control form-control-sm" rows="5" maxlength="2000" @bind="rule.Message" @bind:event="oninput"></textarea>
+                                            <div class="au-fields">
+                                                Wstaw: @foreach (var f in Fields(def)) { <button type="button" class="au-field" @onclick="() => rule.Message += f">@f</button> }
+                                            </div>
+                                        </div>
+                                        <div class="col-12 col-sm-6">
+                                            <label class="form-label small fw-semibold">Przycisk w e-mailu</label>
+                                            <input class="form-control form-control-sm" maxlength="60" @bind="rule.ButtonText" @bind:event="oninput" />
+                                        </div>
+                                        <div class="col-12 col-sm-6">
+                                            <label class="form-label small fw-semibold d-block">Wyślij przez</label>
+                                            <div class="d-flex gap-3 flex-wrap small pt-1">
+                                                <label class="form-check m-0"><input type="checkbox" class="form-check-input" @bind="rule.ViaEmail" /> <span class="form-check-label">e-mail</span></label>
+                                                <label class="form-check m-0"><input type="checkbox" class="form-check-input" @bind="rule.ViaPush" /> <span class="form-check-label">push</span></label>
+                                                <label class="form-check m-0"><input type="checkbox" class="form-check-input" @bind="rule.ViaSms" /> <span class="form-check-label">SMS</span></label>
+                                            </div>
+                                        </div>
+                                        @if (def.Group != "welcome")
+                                        {
+                                            <div class="col-6">
+                                                <label class="form-label small fw-semibold">Kupon rabatowy</label>
+                                                <div class="input-group input-group-sm">
+                                                    <input type="number" min="0" max="90" class="form-control" @bind="rule.CouponPercent" @bind:event="oninput" />
+                                                    <span class="input-group-text">%</span>
+                                                </div>
+                                                <div class="form-text">0 = bez kuponu. Każdy klient dostaje własny, jednorazowy kod.</div>
+                                            </div>
+                                            <div class="col-6">
+                                                <label class="form-label small fw-semibold">Kupon ważny</label>
+                                                <div class="input-group input-group-sm">
+                                                    <input type="number" min="1" max="365" class="form-control" @bind="rule.CouponValidDays" @bind:event="oninput" />
+                                                    <span class="input-group-text">dni</span>
+                                                </div>
+                                            </div>
+                                        }
+                                    </div>
+                                    <div class="d-flex gap-2 mt-3">
+                                        <button class="btn btn-primary btn-sm" @onclick="() => SaveAsync(rule)"><i class="bi bi-floppy me-1"></i>Zapisz</button>
+                                        <button class="btn btn-link btn-sm text-muted" @onclick="() => ResetText(rule)">Przywróć domyślną treść</button>
+                                    </div>
+                                </div>
+                                <div class="col-12 col-lg-5">
+                                    <div class="au-preview">
+                                        <div class="au-preview-label"><i class="bi bi-eye me-1"></i>Tak zobaczy to klient</div>
+                                        <div class="au-preview-subject">@Preview(rule, rule.Subject)</div>
+                                        @foreach (var line in Preview(rule, rule.Message).Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                                        {
+                                            <p>@line</p>
+                                        }
+                                        <span class="au-preview-btn">@rule.ButtonText</span>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    }
+                </article>
+            }
+        </section>
+    }
+
+    <section class="au-group">
+        <div class="au-group-head">
+            <span class="au-group-ic"><i class="bi bi-clock-history"></i></span>
+            <div class="flex-grow-1">
+                <h5 class="au-group-title">Ostatnio wysłane</h5>
+                <p class="au-group-lead">„Wrócił” = klient zarezerwował trening albo kupił pakiet w ciągu 30 dni od wiadomości.</p>
+            </div>
+        </div>
+        @if (_log.Count == 0)
+        {
+            <p class="text-muted small mb-0">Jeszcze nic nie wysłano. Włącz automatyzację — pierwsze wiadomości wyjdą w ciągu godziny.</p>
+        }
+        else
+        {
+            <div class="table-responsive">
+                <table class="table table-sm align-middle small mb-0">
+                    <thead class="text-muted"><tr><th>Kiedy</th><th>Klient</th><th>Wiadomość</th><th>Kanały</th><th>Kupon</th><th>Wynik</th></tr></thead>
+                    <tbody>
+                        @foreach (var l in _log)
+                        {
+                            <tr>
+                                <td class="text-nowrap">@Clock.ToWallClock(l.SentAtUtc).ToString("dd.MM HH:mm")</td>
+                                <td><a href="@($"/clients/{l.ClientId}")">@l.ClientName</a></td>
+                                <td>@(AutomationKinds.Find(l.Kind)?.Title ?? l.Kind)</td>
+                                <td class="text-muted">@l.Channels.Replace(",", ", ")</td>
+                                <td class="font-monospace">@(l.CouponCode ?? "—")</td>
+                                <td>
+                                    @if (l.ReturnedAtUtc is { } r)
+                                    {
+                                        <span class="badge bg-success-subtle text-success-emphasis"><i class="bi bi-check2 me-1"></i>wrócił @Clock.ToWallClock(r).ToString("dd.MM")</span>
+                                    }
+                                    else if (AutomationKinds.Find(l.Kind)?.TracksReturn == true)
+                                    {
+                                        <span class="text-muted">czekamy</span>
+                                    }
+                                </td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        }
+    </section>
+}
+
+<style>
+    .au-channels { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem; margin-bottom: 1rem; }
+    .au-chip { display: inline-flex; align-items: center; gap: .25rem; padding: .15rem .6rem; border-radius: 99px; font-size: .75rem; font-weight: 600; }
+    .au-chip.ok { background: color-mix(in srgb, var(--c-success) 14%, transparent); color: var(--c-success); }
+    .au-chip.off { background: var(--bs-tertiary-bg); color: var(--bs-secondary-color); text-decoration: line-through; }
+    .au-group { padding: 1.1rem 1.2rem; border-radius: 16px; border: 1px solid var(--bs-border-color); background: var(--bs-body-bg); margin-bottom: 1rem; }
+    .au-group-head { display: flex; gap: .75rem; align-items: center; margin-bottom: .85rem; flex-wrap: wrap; }
+    .au-group-ic { width: 40px; height: 40px; border-radius: 12px; flex-shrink: 0; display: grid; place-items: center; background: var(--c-primary-light); color: var(--c-primary); font-size: 1.15rem; }
+    .au-group-title { font-weight: 800; margin: 0; font-size: 1.05rem; }
+    .au-group-lead { margin: 0; font-size: .82rem; color: var(--bs-secondary-color); }
+    .au-kpi { display: flex; align-items: baseline; gap: .35rem; flex-wrap: wrap; }
+    .au-kpi b { font-size: 1.3rem; font-variant-numeric: tabular-nums; }
+    .au-kpi small { color: var(--bs-secondary-color); }
+    .au-kpi-ok { font-size: .8rem; font-weight: 700; color: var(--c-success); }
+    .au-rule { border: 1px solid var(--bs-border-color); border-radius: 12px; margin-top: .6rem; transition: border-color .15s; }
+    .au-rule.on { border-color: color-mix(in srgb, var(--c-primary) 55%, var(--bs-border-color)); }
+    .au-rule-head { display: flex; align-items: center; gap: .7rem; padding: .7rem .85rem; flex-wrap: wrap; }
+    .au-rule-ic { width: 34px; height: 34px; border-radius: 10px; flex-shrink: 0; display: grid; place-items: center; background: var(--bs-tertiary-bg); color: var(--c-primary); }
+    .au-rule-title { font-weight: 700; font-size: .92rem; }
+    .au-rule-desc { font-size: .8rem; color: var(--bs-secondary-color); }
+    .au-on { margin-left: .35rem; padding: 0 .45rem; border-radius: 99px; font-size: .66rem; font-weight: 700; background: var(--c-primary); color: #fff; vertical-align: middle; }
+    .au-rule-body { padding: .2rem .85rem .9rem; border-top: 1px dashed var(--bs-border-color); padding-top: .85rem; }
+    .au-fields { display: flex; flex-wrap: wrap; gap: .3rem; align-items: center; font-size: .74rem; color: var(--bs-secondary-color); margin-top: .35rem; }
+    .au-field { border: 1px solid var(--bs-border-color); background: var(--bs-body-bg); border-radius: 6px; padding: 0 .4rem; font-family: var(--bs-font-monospace); font-size: .72rem; color: var(--c-primary); }
+    .au-preview { border-radius: 12px; background: var(--bs-tertiary-bg); padding: .9rem 1rem; font-size: .86rem; height: 100%; }
+    .au-preview-label { font-size: .7rem; text-transform: uppercase; letter-spacing: .06em; color: var(--bs-secondary-color); margin-bottom: .5rem; }
+    .au-preview-subject { font-weight: 700; margin-bottom: .5rem; }
+    .au-preview p { margin: 0 0 .45rem; }
+    .au-preview-btn { display: inline-block; margin-top: .3rem; padding: .35rem .9rem; border-radius: 8px; background: var(--c-primary); color: #fff; font-weight: 600; font-size: .82rem; }
+</style>
+
+@code {
+    private sealed record GroupInfo(string Key, string Icon, string Title, string Lead, bool TracksReturn);
+    private static readonly GroupInfo[] Groups =
+    [
+        new("welcome", "bi-door-open", "Powitanie nowego klienta", "Trzy krótkie wiadomości w pierwszym tygodniu: jak umówić trening, ankieta zdrowotna, pierwszy pomiar.", false),
+        new("retention", "bi-arrow-repeat", "Odzyskiwanie klientów", "Gdy ktoś przestaje przychodzić albo skończył pakiet — przypomnienie, czasem z kuponem.", true),
+        new("birthday", "bi-gift", "Urodziny", "Życzenia w dniu urodzin (z daty urodzenia w profilu klienta) i drobny prezent.", true),
+    ];
+
+    private List<AutomationRuleDto> _rules = [];
+    private List<AutomationLogDto> _log = [];
+    private List<AutomationStatsDto> _stats = [];
+    private AutomationChannels? _channels;
+    private readonly HashSet<string> _open = [];
+    private bool _running;
+    private string? _message;
+    private bool _msgError;
+
+    protected override async Task OnInitializedAsync()
+    {
+        await LoadAsync();
+        try { _channels = await PTScheduler.Web.Services.AutomationBackgroundService.ChannelsAsync(Services); }
+        catch { _channels = null; }
+    }
+
+    private async Task LoadAsync()
+    {
+        _rules = await AutomationSvc.GetRulesAsync();
+        _log = await AutomationSvc.GetLogAsync(50);
+        _stats = await AutomationSvc.GetStatsAsync();
+    }
+
+    private (int Sent, int Returned) GroupStats(List<AutomationRuleDto> rules)
+    {
+        var kinds = rules.Select(r => r.Kind).ToHashSet();
+        var rows = _stats.Where(s => kinds.Contains(s.Kind)).ToList();
+        return (rows.Sum(r => r.Sent), rows.Sum(r => r.Returned));
+    }
+
+    private void ToggleOpen(string kind)
+    {
+        if (!_open.Remove(kind)) _open.Add(kind);
+    }
+
+    private async Task ToggleAsync(AutomationRuleDto rule, bool on)
+    {
+        rule.Enabled = on;
+        await AutomationSvc.SaveRuleAsync(rule);
+        _message = on ? $"Włączono: {AutomationKinds.Find(rule.Kind)?.Title}." : $"Wyłączono: {AutomationKinds.Find(rule.Kind)?.Title}.";
+        _msgError = false;
+    }
+
+    private async Task SaveAsync(AutomationRuleDto rule)
+    {
+        try
+        {
+            await AutomationSvc.SaveRuleAsync(rule);
+            _message = "Zapisano ustawienia.";
+            _msgError = false;
+            await LoadAsync();
+        }
+        catch (Exception ex) { _message = ex.Message; _msgError = true; }
+    }
+
+    private void ResetText(AutomationRuleDto rule)
+    {
+        var def = AutomationKinds.Find(rule.Kind)!;
+        rule.Subject = def.Subject;
+        rule.Message = def.Message;
+        rule.ButtonText = def.ButtonText;
+    }
+
+    private async Task RunNow()
+    {
+        _running = true;
+        try
+        {
+            var sent = await AutomationSvc.RunAsync(_channels ?? await PTScheduler.Web.Services.AutomationBackgroundService.ChannelsAsync(Services));
+            await LoadAsync();
+            _message = sent > 0 ? $"Wysłano {sent} {(sent == 1 ? "wiadomość" : "wiadomości")}." : "Nikt nie czeka teraz na wiadomość — sprawdzimy znowu za godzinę.";
+            _msgError = false;
+        }
+        catch (Exception ex) { _message = ex.Message; _msgError = true; }
+        finally { _running = false; }
+    }
+
+    private static string DelayLabel(string kind) => kind switch
+    {
+        AutomationKinds.WinBack => "Bez wizyty od",
+        AutomationKinds.PackageEnded => "Po końcu pakietu",
+        _ => "Dni po założeniu konta"
+    };
+
+    private static string WhenText(AutomationRuleDto r) => r.Kind switch
+    {
+        AutomationKinds.WinBack => $"(po {r.DelayDays} dniach bez wizyty)",
+        AutomationKinds.PackageEnded => $"({r.DelayDays} dni po końcu pakietu)",
+        AutomationKinds.Birthday => "",
+        _ => r.DelayDays == 0 ? "(od razu)" : $"({r.DelayDays} dni po założeniu konta)"
+    };
+
+    private static IEnumerable<string> Fields(AutomationKinds.Default def)
+    {
+        yield return "{Imie}";
+        yield return "{Trener}";
+        yield return "{Studio}";
+        if (def.Group != "welcome")
+        {
+            yield return "{Kupon}";
+            yield return "{Rabat}";
+            yield return "{WaznyDo}";
+        }
+    }
+
+    private string Preview(AutomationRuleDto rule, string text) => AutomationRules.Fill(text, new Dictionary<string, string>
+    {
+        ["Imie"] = "Anna",
+        ["Trener"] = "Twój trener",
+        ["Studio"] = "Twoje studio",
+        ["Kupon"] = rule.CouponPercent > 0 ? "WRACAJ-7KQ2M" : "",
+        ["Rabat"] = rule.CouponPercent > 0 ? $"{rule.CouponPercent}%" : "",
+        ["WaznyDo"] = rule.CouponPercent > 0 ? Clock.Today.AddDays(rule.CouponValidDays).ToString("dd.MM.yyyy") : ""
+    });
+
+    private static RenderFragment Chip(string label, bool on) => __builder =>
+    {
+        <span class="au-chip @(on ? "ok" : "off")" title="@(on ? "Działa" : "Niedostępne w planie albo nieskonfigurowane")"><i class="bi @(on ? "bi-check2" : "bi-x")"></i>@label</span>
+    };
+}

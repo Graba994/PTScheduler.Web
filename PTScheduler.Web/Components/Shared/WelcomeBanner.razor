@@ -1,0 +1,40 @@
+@* Pierwsze wejście prosto z kreatora w Portalu („Zbuduj swoją aplikację”) — adres /app?witaj=1. *@
+@inject NavigationManager Nav
+
+@if (_show)
+{
+    <div class="ad-welcome">
+        <div class="ad-welcome-burst" aria-hidden="true"><i class="bi bi-stars"></i></div>
+        <div class="min-w-0 flex-grow-1">
+            <div class="ad-welcome-title">Twoja aplikacja działa!</div>
+            @if (Trainer)
+            {
+                <div class="small">Kolor, strona główna i oferta są już ustawione — tak jak w kreatorze. Ustaw godziny pracy, a klienci zobaczą wolne terminy i zapiszą się sami.</div>
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <a href="/trainer/availability" class="btn btn-sm btn-light"><i class="bi bi-clock me-1"></i>Ustaw godziny pracy</a>
+                    <a href="/clients/new" class="btn btn-sm btn-light"><i class="bi bi-person-plus me-1"></i>Dodaj klienta</a>
+                    <a href="/" target="_blank" class="btn btn-sm btn-outline-light"><i class="bi bi-globe me-1"></i>Zobacz swoją stronę</a>
+                </div>
+                <div class="small mt-2 opacity-75">To Twój profil trenera. Ceny, płatności i wygląd zmienisz na koncie administratora — przycisk „Wróć” u góry.</div>
+            }
+            else
+            {
+                <div class="small">Kolor, strona główna i oferta są już ustawione — tak jak w kreatorze. Treningi prowadzisz na profilu trenera: tam ustawisz godziny pracy i przyjmiesz zapisy.</div>
+                <div class="d-flex flex-wrap gap-2 mt-2">
+                    <a href="/switch-account" class="btn btn-sm btn-light"><i class="bi bi-person-badge me-1"></i>Przejdź na profil trenera</a>
+                    <a href="/" target="_blank" class="btn btn-sm btn-outline-light"><i class="bi bi-globe me-1"></i>Zobacz swoją stronę</a>
+                </div>
+            }
+        </div>
+        <button type="button" class="btn-close btn-close-white" aria-label="Zamknij" @onclick="() => _show = false"></button>
+    </div>
+}
+
+@code {
+    /// <summary>Wersja dla profilu trenera (godziny pracy, klienci) zamiast konta administratora.</summary>
+    [Parameter] public bool Trainer { get; set; }
+
+    private bool _show;
+
+    protected override void OnInitialized() => _show = Nav.Uri.Contains("witaj=1", StringComparison.Ordinal);
+}

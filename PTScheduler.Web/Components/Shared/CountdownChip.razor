@@ -1,0 +1,22 @@
+@implements IDisposable
+@inject PTScheduler.Application.Interfaces.IAppClock Clock
+
+@* Odliczanie do wizyty, odświeżane co 30 s: „Trening za 25 min”, „Trwa · jeszcze 20 min”. *@
+@if (PTScheduler.Application.Scheduling.Countdown.Label(Start, End, Clock.LocalNow) is { } text)
+{
+    <span class="cdn-chip @(PTScheduler.Application.Scheduling.Countdown.IsSoon(Start, End, Clock.LocalNow) ? "is-soon" : "")" role="timer" aria-live="off">
+        <i class="bi @(Clock.LocalNow >= Start ? "bi-play-circle-fill" : "bi-stopwatch")"></i>@text
+    </span>
+}
+
+@code {
+    [Parameter, EditorRequired] public DateTime Start { get; set; }
+    [Parameter, EditorRequired] public DateTime End { get; set; }
+
+    private Timer? _timer;
+
+    protected override void OnInitialized() =>
+        _timer = new Timer(_ => InvokeAsync(StateHasChanged), null, TimeSpan.FromSeconds(30), TimeSpan.FromSeconds(30));
+
+    public void Dispose() => _timer?.Dispose();
+}

@@ -1,9 +1,8 @@
-using System.Security.Cryptography;
-using System.Text;
 using Microsoft.EntityFrameworkCore;
 using PTScheduler.Application.DTOs;
 using PTScheduler.Application.Interfaces;
 using PTScheduler.Domain.Entities;
+using PTScheduler.Domain.Security;
 using PTScheduler.Infrastructure.Data;
 
 namespace PTScheduler.Infrastructure.Services;
@@ -19,12 +18,96 @@ public class FinanceService(IDbContextFactory<ApplicationDbContext> dbFactory) :
         await db.SaveChangesAsync();
     }
 
+    public async Task SetSessionHiddenAsync(int sessionId, bool hidden)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        await db.Sessions.Where(s => s.Id == sessionId).ExecuteUpdateAsync(u => u.SetProperty(s => s.IsHidden, hidden));
+    }
+
+    public async Task<List<OffPackagePaymentDto>> GetOffPackagePaymentsAsync(DateTime fromUtc, string? trainerUserId, bool? hidden)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var q = db.Sessions.AsNoTracking()
+            .Where(s => s.PaidAt != null && s.PaidAt >= fromUtc && s.PaidVia != null && s.PaidVia != "online" && s.Status != Domain.Enums.SessionStatus.Cancelled);
+        if (trainerUserId is not null) q = q.Where(s => s.TrainerUserId == trainerUserId);
+        if (hidden is bool h) q = q.Where(s => s.IsHidden == h);
+        return await q.OrderByDescending(s => s.PaidAt).Select(s => new OffPackagePaymentDto
+        {
+            SessionId = s.Id,
+            ClientId = s.ClientId,
+            ClientName = (s.Client.FirstName + " " + s.Client.LastName).Trim(),
+            SessionTypeName = s.SessionType.Name,
+            StartTime = s.StartTime,
+            PaidAt = s.PaidAt!.Value,
+            PaidVia = s.PaidVia,
+            Amount = s.SessionType.SinglePrice ?? 0,
+            IsHidden = s.IsHidden
+        }).ToListAsync();
+    }
+
+    public static readonly string[] ManualMethods = ["gotówka", "przelew", "karta"];
+
+    public async Task UpdatePackagePaymentAsync(int packageId, ManualPaymentEdit edit)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var p = await db.SessionPackages.FirstOrDefaultAsync(x => x.Id == packageId)
+            ?? throw new InvalidOperationException("Pakiet nie istnieje.");
+        if (p.PaidVia == "online" || !string.IsNullOrEmpty(p.PaymentReference))
+            throw new InvalidOperationException("Ta płatność przyszła automatycznie — nie da się jej edytować.");
+        if (await db.MembershipPeriods.AnyAsync(x => x.PackageId == packageId))
+            throw new InvalidOperationException("To pakiet z karnetu — płatność zmienisz w Karnetach.");
+        if (edit.TotalPrice is decimal total)
+        {
+            if (total < 0) throw new InvalidOperationException("Wartość nie może być ujemna.");
+            p.PricePerSession = p.TotalSessions > 0 ? Math.Round(total / p.TotalSessions, 2) : total;
+        }
+        Apply(edit, paid => p.IsPaid = paid, at => p.PaidAt = at, via => p.PaidVia = via);
+        await db.SaveChangesAsync();
+    }
+
+    public async Task UpdateSessionPaymentAsync(int sessionId, ManualPaymentEdit edit)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var s = await db.Sessions.FirstOrDefaultAsync(x => x.Id == sessionId)
+            ?? throw new InvalidOperationException("Nie znaleziono wizyty.");
+        if (s.PaidVia == "online") throw new InvalidOperationException("Ta płatność przyszła automatycznie — nie da się jej edytować.");
+        Apply(edit, _ => { }, at => s.PaidAt = at, via => s.PaidVia = via);
+        if (!edit.IsPaid) s.IsHidden = false;
+        await db.SaveChangesAsync();
+    }
+
+    private static void Apply(ManualPaymentEdit edit, Action<bool> setPaid, Action<DateTime?> setAt, Action<string?> setVia)
+    {
+        if (!edit.IsPaid)
+        {
+            setPaid(false);
+            setAt(null);
+            setVia(null);
+            return;
+        }
+        var via = edit.Via?.Trim().ToLowerInvariant();
+        if (via is null || !ManualMethods.Contains(via)) throw new InvalidOperationException("Wybierz sposób płatności: gotówka, przelew albo karta.");
+        if (edit.PaidAtUtc is DateTime at && at > DateTime.UtcNow.AddDays(1)) throw new InvalidOperationException("Data płatności nie może być w przyszłości.");
+        setPaid(true);
+        setAt(edit.PaidAtUtc ?? DateTime.UtcNow);
+        setVia(via);
+    }
+
     public async Task<bool> VerifyPinAsync(string pin)
     {
         await using var db = dbFactory.CreateDbContext();
         var fp = await db.Set<FinancePin>().FirstOrDefaultAsync();
         if (fp is null || string.IsNullOrEmpty(fp.PinHash)) return false;
-        return fp.PinHash == HashPin(pin);
+
+        if (!PinHasher.Verify(pin, fp.PinHash)) return false;
+
+        // Transparentne podniesienie starego SHA-256 na PBKDF2 przy poprawnym PIN-ie.
+        if (PinHasher.IsLegacy(fp.PinHash))
+        {
+            fp.PinHash = PinHasher.Hash(pin);
+            await db.SaveChangesAsync();
+        }
+        return true;
     }
 
     public async Task SetPinAsync(string pin)
@@ -33,12 +116,12 @@ public class FinanceService(IDbContextFactory<ApplicationDbContext> dbFactory) :
         var fp = await db.Set<FinancePin>().FirstOrDefaultAsync();
         if (fp is null)
         {
-            fp = new FinancePin { PinHash = HashPin(pin) };
+            fp = new FinancePin { PinHash = PinHasher.Hash(pin) };
             db.Set<FinancePin>().Add(fp);
         }
         else
         {
-            fp.PinHash = HashPin(pin);
+            fp.PinHash = PinHasher.Hash(pin);
         }
         await db.SaveChangesAsync();
     }
@@ -74,7 +157,17 @@ public class FinanceService(IDbContextFactory<ApplicationDbContext> dbFactory) :
             MonthlyFixedCosts = cfg.MonthlyFixedCosts,
             InvoiceNumberingEnabled = cfg.InvoiceNumberingEnabled,
             InvoicePrefix = cfg.InvoicePrefix,
-            InvoiceNextNumber = cfg.InvoiceNextNumber
+            InvoiceNextNumber = cfg.InvoiceNextNumber,
+            SellerNip = cfg.SellerNip,
+            SellerName = cfg.SellerName,
+            VatExemptBasis = cfg.VatExemptBasis,
+            KsefEnabled = cfg.KsefEnabled,
+            KsefEnvironment = cfg.KsefEnvironment,
+            KsefApiUrl = cfg.KsefApiUrl,
+            KsefTokenSet = !string.IsNullOrEmpty(cfg.KsefTokenProtected),
+            SellerAddress = cfg.SellerAddress,
+            SellerCity = cfg.SellerCity,
+            SellerPostalCode = cfg.SellerPostalCode
         };
     }
 
@@ -104,12 +197,16 @@ public class FinanceService(IDbContextFactory<ApplicationDbContext> dbFactory) :
         cfg.InvoiceNumberingEnabled = dto.InvoiceNumberingEnabled;
         cfg.InvoicePrefix = dto.InvoicePrefix;
         cfg.InvoiceNextNumber = dto.InvoiceNextNumber;
+        cfg.SellerNip = dto.SellerNip;
+        cfg.SellerName = dto.SellerName;
+        cfg.VatExemptBasis = dto.VatExemptBasis;
+        cfg.KsefEnabled = dto.KsefEnabled;
+        cfg.KsefEnvironment = dto.KsefEnvironment is "production" or "demo" ? dto.KsefEnvironment : "test";
+        cfg.KsefApiUrl = string.IsNullOrWhiteSpace(dto.KsefApiUrl) ? null : dto.KsefApiUrl.Trim();
+        cfg.SellerAddress = dto.SellerAddress;
+        cfg.SellerCity = dto.SellerCity;
+        cfg.SellerPostalCode = dto.SellerPostalCode;
         await db.SaveChangesAsync();
     }
 
-    private static string HashPin(string pin)
-    {
-        var bytes = SHA256.HashData(Encoding.UTF8.GetBytes(pin));
-        return Convert.ToHexStringLower(bytes);
-    }
 }

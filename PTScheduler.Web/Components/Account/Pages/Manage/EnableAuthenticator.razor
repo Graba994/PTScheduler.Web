@@ -11,7 +11,7 @@
 @inject IdentityRedirectManager RedirectManager
 @inject ILogger<EnableAuthenticator> Logger
 
-<PageTitle>Configure authenticator app</PageTitle>
+<AppTitle Page="Aplikacja uwierzytelniająca" />
 
 @if (recoveryCodes is not null)
 {
@@ -20,48 +20,56 @@
 else
 {
     <StatusMessage Message="@message" />
-    <h3>Configure authenticator app</h3>
     <div>
-        <p>To use an authenticator app go through the following steps:</p>
-        <ol class="list">
-            <li>
-                <p>
-                    Download a two-factor authenticator app like Microsoft Authenticator for
-                    <a href="https://go.microsoft.com/fwlink/?Linkid=825072">Android</a> and
-                    <a href="https://go.microsoft.com/fwlink/?Linkid=825073">iOS</a> or
-                    Google Authenticator for
-                    <a href="https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2&amp;hl=en">Android</a> and
-                    <a href="https://itunes.apple.com/us/app/google-authenticator/id388497605?mt=8">iOS</a>.
-                </p>
-            </li>
-            <li>
-                <p>Scan the QR Code or enter this key <kbd>@sharedKey</kbd> into your two factor authenticator app. Spaces and casing do not matter.</p>
-                <div class="alert alert-info">Learn how to <a href="https://go.microsoft.com/fwlink/?Linkid=852423">enable QR code generation</a>.</div>
-                <div></div>
-                <div data-url="@authenticatorUri"></div>
-            </li>
-            <li>
-                <p>
-                    Once you have scanned the QR code or input the key above, your two factor authentication app will provide you
-                    with a unique code. Enter the code in the confirmation box below.
-                </p>
-                <div class="row">
-                    <div class="col-xl-6">
-                        <EditForm Model="Input" FormName="send-code" OnValidSubmit="OnValidSubmitAsync" method="post">
-                            <DataAnnotationsValidator />
-                            <div class="form-floating mb-3">
-                                <InputText @bind-Value="Input.Code" id="Input.Code" class="form-control" autocomplete="off" placeholder="Enter the code" />
-                                <label for="Input.Code" class="control-label form-label">Verification Code</label>
-                                <ValidationMessage For="() => Input.Code" class="text-danger" />
-                            </div>
-                            <button type="submit" class="w-100 btn btn-lg btn-primary">Verify</button>
-                            <ValidationSummary class="text-danger" role="alert" />
-                        </EditForm>
-                    </div>
-                </div>
-            </li>
-        </ol>
+        <h1 class="h4 fw-bold mb-1">Włącz weryfikację dwuetapową</h1>
+        <p class="text-muted small mb-0">Trzy kroki, ok. 2 minuty.</p>
     </div>
+
+    <div class="acct-card">
+        <div class="fw-semibold mb-1">1. Zainstaluj aplikację na telefonie</div>
+        <p class="small text-muted mb-0">
+            Np. Google Authenticator (<a href="https://play.google.com/store/apps/details?id=com.google.android.apps.authenticator2" target="_blank" rel="noopener">Android</a>,
+            <a href="https://apps.apple.com/app/google-authenticator/id388497605" target="_blank" rel="noopener">iPhone</a>)
+            albo Microsoft Authenticator (<a href="https://go.microsoft.com/fwlink/?Linkid=825072" target="_blank" rel="noopener">Android</a>,
+            <a href="https://go.microsoft.com/fwlink/?Linkid=825073" target="_blank" rel="noopener">iPhone</a>).
+        </p>
+    </div>
+
+    <div class="acct-card">
+        <div class="fw-semibold mb-2">2. Zeskanuj kod QR w aplikacji</div>
+        <div class="d-flex flex-wrap gap-3 align-items-center">
+            <div id="tfa-qr" data-url="@authenticatorUri" style="background:#fff;padding:10px;border-radius:12px;width:200px;height:200px"></div>
+            <div class="small text-muted" style="max-width:320px">
+                Nie możesz zeskanować? Wpisz w aplikacji ten klucz (spacje i wielkość liter nie mają znaczenia):
+                <div class="mt-1"><kbd style="font-size:.9rem;word-break:break-all">@sharedKey</kbd></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="acct-card">
+        <div class="fw-semibold mb-2">3. Wpisz 6 cyfr z aplikacji</div>
+        <EditForm Model="Input" FormName="send-code" OnValidSubmit="OnValidSubmitAsync" method="post">
+            <DataAnnotationsValidator />
+            <div class="d-flex gap-2 flex-wrap">
+                <InputText @bind-Value="Input.Code" id="Input.Code" class="form-control form-control-lg" style="max-width:220px;letter-spacing:.2em" autocomplete="one-time-code" inputmode="numeric" placeholder="123 456" aria-label="Kod z aplikacji" />
+                <button type="submit" class="btn btn-primary btn-lg">Włącz</button>
+            </div>
+            <ValidationMessage For="() => Input.Code" class="text-danger small" />
+        </EditForm>
+    </div>
+
+    <script src="/lib/qrcode-generator/qrcode.js"></script>
+    <script>
+        (function () {
+            var el = document.getElementById('tfa-qr');
+            if (!el || typeof qrcode !== 'function' || el.dataset.done) return;
+            el.dataset.done = '1';
+            var qr = qrcode(0, 'M');
+            qr.addData(el.getAttribute('data-url'));
+            qr.make();
+            el.innerHTML = qr.createSvgTag({ cellSize: 4, margin: 0, scalable: true });
+        })();
+    </script>
 }
 
 @code {
@@ -109,7 +117,7 @@ else
 
         if (!is2faTokenValid)
         {
-            message = "Error: Verification code is invalid.";
+            message = "Błąd: kod jest nieprawidłowy albo wygasł — wpisz aktualne 6 cyfr z aplikacji.";
             return;
         }
 
@@ -117,7 +125,7 @@ else
         var userId = await UserManager.GetUserIdAsync(user);
         Logger.LogInformation("User with ID '{UserId}' has enabled 2FA with an authenticator app.", userId);
 
-        message = "Your authenticator app has been verified.";
+        message = "Gotowe — weryfikacja dwuetapowa jest włączona.";
 
         if (await UserManager.CountRecoveryCodesAsync(user) == 0)
         {
@@ -167,7 +175,7 @@ else
         return string.Format(
             CultureInfo.InvariantCulture,
             AuthenticatorUriFormat,
-            UrlEncoder.Encode("Microsoft.AspNetCore.Identity.UI"),
+            UrlEncoder.Encode("PTScheduler"),
             UrlEncoder.Encode(email),
             unformattedKey);
     }
@@ -175,9 +183,9 @@ else
     private sealed class InputModel
     {
         [Required]
-        [StringLength(7, ErrorMessage = "The {0} must be at least {2} and at max {1} characters long.", MinimumLength = 6)]
+        [StringLength(7, ErrorMessage = "Kod ma 6 cyfr.", MinimumLength = 6)]
         [DataType(DataType.Text)]
-        [Display(Name = "Verification Code")]
+        [Display(Name = "Kod")]
         public string Code { get; set; } = "";
     }
 }

@@ -23,7 +23,7 @@ public class ClientService(
             .ToListAsync();
 
         var userIds = clients.Select(c => c.ApplicationUserId).ToList();
-        var users = await userManager.Users
+        var users = await db.Users.AsNoTracking()
             .Where(u => userIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id);
 
@@ -58,6 +58,7 @@ public class ClientService(
                 LastSessionDate = stats?.LastDate,
                 Status = c.Status,
                 AllowSelfBooking = c.AllowSelfBooking,
+                TrustedForDeferredPayment = c.TrustedForDeferredPayment,
                 TrainerUserId = c.TrainerUserId
             };
         }).ToList();
@@ -76,7 +77,7 @@ public class ClientService(
         var c = await db.Clients.FindAsync(id);
         if (c is null) return null;
 
-        var user = await userManager.FindByIdAsync(c.ApplicationUserId);
+        var user = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == c.ApplicationUserId);
         var stats = await db.Sessions
             .AsNoTracking()
             .Where(s => s.ClientId == id)
@@ -122,14 +123,80 @@ public class ClientService(
             LastSessionDate = stats?.LastDate,
             Status = c.Status,
             AllowSelfBooking = c.AllowSelfBooking,
+                TrustedForDeferredPayment = c.TrustedForDeferredPayment,
             TrainerUserId = c.TrainerUserId,
             ActivePackage = activePackage is null ? null : MapPkg(activePackage),
             AllPackages = packages.Select(MapPkg).ToList()
         };
     }
 
+    public async Task<EmailOwnerDto?> FindEmailOwnerAsync(string email)
+    {
+        var normalized = Domain.Rules.EmailRules.Normalize(email);
+        if (normalized.Length == 0) return null;
+        var user = await userManager.FindByEmailAsync(normalized);
+        if (user is null) return null;
+        var roles = await userManager.GetRolesAsync(user);
+        var name = $"{user.FirstName} {user.LastName}".Trim() is { Length: > 0 } n ? n : user.Email ?? normalized;
+        if (!roles.Contains(Roles.Client) || roles.Any(r => r is Roles.Admin or Roles.Trainer or Roles.Subordinate or Roles.Root))
+            return new("staff", name, null, null, null);
+        await using var db = dbFactory.CreateDbContext();
+        var client = await db.Clients.AsNoTracking().FirstOrDefaultAsync(c => c.ApplicationUserId == user.Id);
+        string? trainerName = null;
+        if (client?.TrainerUserId is { } tid)
+        {
+            var t = await db.Users.AsNoTracking().FirstOrDefaultAsync(u => u.Id == tid);
+            trainerName = t is null ? null : $"{t.FirstName} {t.LastName}".Trim() is { Length: > 0 } tn ? tn : t.Email;
+        }
+        return new("client", client is null ? name : $"{client.FirstName} {client.LastName}".Trim(), client?.Id, client?.TrainerUserId, trainerName);
+    }
+
+    public async Task<ClientCreateResult> AddClientAsync(CreateClientDto dto)
+    {
+        dto.Email = Domain.Rules.EmailRules.Normalize(dto.Email);
+        if (Domain.Rules.EmailRules.Problem(dto.Email) is { } problem) return new(null, problem);
+        if (string.IsNullOrWhiteSpace(dto.FirstName) && string.IsNullOrWhiteSpace(dto.LastName)) return new(null, "Podaj imię albo nazwisko klienta.");
+
+        var owner = await FindEmailOwnerAsync(dto.Email);
+        if (owner is { Kind: "staff" })
+            return new(null, $"Ten adres należy do konta zespołu studia ({owner.Name}). Klient potrzebuje innego adresu e-mail.");
+        if (owner is { Kind: "client" })
+        {
+            await using var db = dbFactory.CreateDbContext();
+            var user = await userManager.FindByEmailAsync(dto.Email);
+            var client = await db.Clients.FirstOrDefaultAsync(c => c.ApplicationUserId == user!.Id);
+            if (client is null)
+            {
+                // Konto klienta bez profilu (np. po przerwanym imporcie) — uzupełniamy profil zamiast zakładać drugie konto.
+                client = new Client
+                {
+                    ApplicationUserId = user!.Id, FirstName = dto.FirstName, LastName = dto.LastName, Phone = dto.Phone,
+                    TrainingGoal = dto.TrainingGoal, DateOfBirth = dto.DateOfBirth, TrainerUserId = dto.TrainerUserId, CreatedAt = DateTime.UtcNow
+                };
+                db.Clients.Add(client);
+                await db.SaveChangesAsync();
+                return new(await GetClientAsync(client.Id), null, "To konto już istniało — uzupełniliśmy profil klienta i dodaliśmy go do listy.");
+            }
+            if (client.TrainerUserId == dto.TrainerUserId)
+                return new(await GetClientAsync(client.Id), null, $"{owner.Name} już jest na liście klientów — otwieramy profil.");
+            if (client.TrainerUserId is null)
+            {
+                client.TrainerUserId = dto.TrainerUserId;
+                await db.SaveChangesAsync();
+                return new(await GetClientAsync(client.Id), null, $"{owner.Name} jest już w bazie, ale bez trenera — dodaliśmy do listy.");
+            }
+            return new(null, $"Ten adres ma już klient innego trenera ({owner.TrainerName ?? "inny trener"}). Trenera zmieni administrator studia w profilu klienta.");
+        }
+
+        try { return new(await CreateClientAsync(dto), null); }
+        catch (InvalidOperationException ex) { return new(null, ex.Message); }
+    }
+
     public async Task<ClientDto> CreateClientAsync(CreateClientDto dto)
     {
+        dto.Email = Domain.Rules.EmailRules.Normalize(dto.Email);
+        if (Domain.Rules.EmailRules.Problem(dto.Email) is { } problem)
+            throw new InvalidOperationException(problem);
         if (await userManager.FindByEmailAsync(dto.Email) is not null)
             throw new InvalidOperationException("Podany adres email jest już zajęty.");
 
@@ -156,6 +223,7 @@ public class ClientService(
             Phone = dto.Phone,
             TrainingGoal = dto.TrainingGoal,
             DateOfBirth = dto.DateOfBirth,
+            TrainerUserId = string.IsNullOrWhiteSpace(dto.TrainerUserId) ? null : dto.TrainerUserId,
             CreatedAt = DateTime.UtcNow
         };
 
@@ -208,7 +276,7 @@ public class ClientService(
             .ToListAsync();
 
         var trainerIds = notes.Select(n => n.TrainerUserId).Distinct().ToList();
-        var trainers = await userManager.Users
+        var trainers = await db.Users.AsNoTracking()
             .Where(u => trainerIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id,
                 u => $"{u.FirstName} {u.LastName}".Trim() is { Length: > 0 } n ? n : u.Email ?? u.Id);
@@ -266,7 +334,7 @@ public class ClientService(
             .ToListAsync();
 
         var userIds = clients.Select(c => c.ApplicationUserId).ToList();
-        var users = await userManager.Users
+        var users = await db.Users.AsNoTracking()
             .Where(u => userIds.Contains(u.Id))
             .ToDictionaryAsync(u => u.Id);
 
@@ -294,5 +362,57 @@ public class ClientService(
             ?? throw new InvalidOperationException("Klient nie istnieje.");
         client.AllowSelfBooking = allow;
         await db.SaveChangesAsync();
+    }
+
+    public async Task<CsvImportResult> ImportClientsFromCsvAsync(Stream csvStream, string? trainerUserId = null)
+    {
+        using var reader = new StreamReader(csvStream, System.Text.Encoding.UTF8);
+        var table = PTScheduler.Application.Import.ClientImportParser.Parse(await reader.ReadToEndAsync());
+        if (table.Rows.Count == 0) return new CsvImportResult { Errors = { "Plik jest pusty." } };
+        var map = PTScheduler.Application.Import.ClientImportParser.GuessMapping(table);
+        if (!PTScheduler.Application.Import.ClientImportParser.HasName(map) || !map.ContainsValue(PTScheduler.Application.Import.ImportField.Email))
+            return new CsvImportResult { Errors = { "Brak wymaganych kolumn: Imię (albo Imię i nazwisko) oraz Email." } };
+        return await ImportCandidatesAsync(PTScheduler.Application.Import.ClientImportParser.Build(table, map), trainerUserId);
+    }
+
+    public async Task<CsvImportResult> ImportCandidatesAsync(IReadOnlyList<PTScheduler.Application.Import.ImportCandidate> rows, string? trainerUserId = null)
+    {
+        var result = new CsvImportResult();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var r in rows)
+        {
+            if (r.Problem is not null || r.Email is null)
+            {
+                result.Errors.Add($"Wiersz {r.Row}: {r.Problem ?? "brak e-maila"} — pominięto.");
+                result.Skipped++;
+                continue;
+            }
+            if (!seen.Add(r.Email) || await userManager.FindByEmailAsync(r.Email) is not null)
+            {
+                result.Errors.Add($"Wiersz {r.Row}: {r.Email} — taki e-mail już jest — pominięto.");
+                result.Skipped++;
+                continue;
+            }
+            try
+            {
+                await CreateClientAsync(new CreateClientDto
+                {
+                    Email = r.Email,
+                    FirstName = r.FirstName,
+                    LastName = string.IsNullOrWhiteSpace(r.LastName) ? r.FirstName : r.LastName,
+                    Phone = r.Phone,
+                    TrainingGoal = r.Goal,
+                    DateOfBirth = r.BirthDate,
+                    TrainerUserId = trainerUserId
+                });
+                result.Imported++;
+            }
+            catch (Exception ex)
+            {
+                result.Errors.Add($"Wiersz {r.Row}: {r.Email} — {ex.Message}");
+                result.Skipped++;
+            }
+        }
+        return result;
     }
 }

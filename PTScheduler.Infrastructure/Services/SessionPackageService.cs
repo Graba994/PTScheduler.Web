@@ -14,6 +14,7 @@ public class SessionPackageService(
     IEmailService emailService,
     IEmailTemplateService emailTemplateService,
     INotificationPreferencesService notificationPrefs,
+    IAuditLogService auditLog,
     ILogger<SessionPackageService> logger) : ISessionPackageService
 {
     public async Task<List<SessionPackageDto>> GetPackagesAsync(int clientId)
@@ -24,10 +25,11 @@ public class SessionPackageService(
             .AsNoTracking()
             .Include(p => p.SessionType)
             .Include(p => p.Client)
-            .Where(p => p.ClientId == clientId)
+            .Include(p => p.PartnerClient)
+            .Where(p => p.ClientId == clientId || p.PartnerClientId == clientId)
             .OrderByDescending(p => p.PurchasedAt)
             .ToListAsync();
-        return list.Select(MapToDto).ToList();
+        return await WithMembershipFlagAsync(db, list.Select(MapToDto).ToList());
     }
 
     public async Task<List<SessionPackageDto>> GetAllPackagesAsync(string? trainerUserId = null)
@@ -38,10 +40,11 @@ public class SessionPackageService(
             .AsNoTracking()
             .Include(p => p.SessionType)
             .Include(p => p.Client)
+            .Include(p => p.PartnerClient)
             .Where(p => trainerUserId == null || p.Client.TrainerUserId == trainerUserId)
             .OrderByDescending(p => p.PurchasedAt)
             .ToListAsync();
-        return list.Select(MapToDto).ToList();
+        return await WithMembershipFlagAsync(db, list.Select(MapToDto).ToList());
     }
 
     public async Task<SessionPackageDto?> GetPackageAsync(int id)
@@ -51,6 +54,7 @@ public class SessionPackageService(
             .AsNoTracking()
             .Include(p => p.SessionType)
             .Include(p => p.Client)
+            .Include(p => p.PartnerClient)
             .FirstOrDefaultAsync(p => p.Id == id);
         return p is null ? null : MapToDto(p);
     }
@@ -61,59 +65,54 @@ public class SessionPackageService(
         var sessionType = await db.SessionTypes.FindAsync(dto.SessionTypeId)
             ?? throw new InvalidOperationException("Typ sesji nie istnieje.");
 
+        if (dto.PartnerClientId == dto.ClientId) dto.PartnerClientId = null;
         var package = new SessionPackage
         {
             ClientId = dto.ClientId,
+            PartnerClientId = dto.PartnerClientId,
             CreatedByUserId = dto.CreatedByUserId,
             Name = string.IsNullOrWhiteSpace(dto.Name)
-                ? $"Pakiet {dto.TotalSessions}×{sessionType.Name}"
+                ? $"{(dto.PartnerClientId is null ? "Pakiet" : "Duet")} {dto.TotalSessions}×{sessionType.Name}"
                 : dto.Name,
             SessionTypeId = dto.SessionTypeId,
             TotalSessions = dto.TotalSessions,
             PricePerSession = dto.PricePerSession,
             ExpiresAt = dto.ExpiresAt,
             Notes = dto.Notes,
+            IsHidden = dto.IsHidden,
+            IsPaid = dto.IsPaid,
+            PaidAt = dto.IsPaid ? DateTime.UtcNow : null,
             PurchasedAt = DateTime.UtcNow,
             Status = PackageStatus.Active
         };
 
         db.SessionPackages.Add(package);
+        if (dto.PartnerClientId is int partnerId)
+            await PairService.EnsurePairAsync(db, dto.ClientId, partnerId, dto.CreatedByUserId);
         await db.SaveChangesAsync();
 
-        var awaitingSessions = await db.Sessions
-            .Where(s => s.ClientId == dto.ClientId
-                     && s.SessionTypeId == dto.SessionTypeId
-                     && s.Status == SessionStatus.AwaitingPackage)
-            .OrderBy(s => s.StartTime)
-            .ToListAsync();
+        await PackageAllocation.FillAwaitingAsync(db, package);
+        await db.SaveChangesAsync();
 
-        foreach (var session in awaitingSessions)
+        // Pakiet pary widzą od razu obie osoby — obie dostają wiadomość.
+        foreach (var clientId in new[] { dto.ClientId, dto.PartnerClientId ?? 0 }.Where(id => id > 0))
         {
-            if (package.UsedSessions >= package.TotalSessions) break;
-            session.PackageId = package.Id;
-            session.Status = SessionStatus.Scheduled;
-            package.UsedSessions++;
+            try { await SendPackageAssignedEmailAsync(clientId, package); }
+            catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila o przypisaniu pakietu (PackageId={Id})", package.Id); }
         }
-
-        if (package.UsedSessions >= package.TotalSessions)
-            package.Status = PackageStatus.Depleted;
-
-        if (awaitingSessions.Count > 0)
-            await db.SaveChangesAsync();
-
-        try { await SendPackageAssignedEmailAsync(dto.ClientId, package); }
-        catch (Exception ex) { logger.LogWarning(ex, "Błąd wysyłki emaila o przypisaniu pakietu (PackageId={Id})", package.Id); }
 
         return (await GetPackageAsync(package.Id))!;
     }
 
-    public async Task MarkPaidAsync(int packageId)
+    public async Task MarkPaidAsync(int packageId, string? via = null, bool hidden = false)
     {
         await using var db = dbFactory.CreateDbContext();
         var p = await db.SessionPackages.FindAsync(packageId)
             ?? throw new InvalidOperationException("Pakiet nie istnieje.");
         p.IsPaid = true;
         p.PaidAt = DateTime.UtcNow;
+        if (!string.IsNullOrWhiteSpace(via)) p.PaidVia = via.Trim();
+        if (hidden) p.IsHidden = true;
         await db.SaveChangesAsync();
     }
 
@@ -127,32 +126,37 @@ public class SessionPackageService(
     }
 
     public async Task DeductCreditAsync(int packageId)
-    {
-        await using var db = dbFactory.CreateDbContext();
-        var p = await db.SessionPackages.FindAsync(packageId);
-        if (p is null || p.Status != PackageStatus.Active) return;
+        // Retry na wypadek równoległego zapisu na tym samym pakiecie — token xmin
+        // wykryje konflikt, a my ponawiamy na świeżym stanie (bez podwójnego zliczenia,
+        // bo każda próba czyta aktualne UsedSessions).
+        => await ConcurrencyRetry.ExecuteAsync(async () =>
+        {
+            await using var db = dbFactory.CreateDbContext();
+            var p = await db.SessionPackages.FindAsync(packageId);
+            if (p is null || p.Status != PackageStatus.Active) return;
 
-        p.UsedSessions++;
-        if (p.UsedSessions >= p.TotalSessions)
-            p.Status = PackageStatus.Depleted;
+            p.UsedSessions++;
+            if (p.UsedSessions >= p.TotalSessions)
+                p.Status = PackageStatus.Depleted;
 
-        await db.SaveChangesAsync();
-    }
+            await db.SaveChangesAsync();
+        });
 
     public async Task ReturnCreditAsync(int packageId)
-    {
-        await using var db = dbFactory.CreateDbContext();
-        var p = await db.SessionPackages.FindAsync(packageId);
-        if (p is null || p.Status == PackageStatus.Cancelled) return;
+        => await ConcurrencyRetry.ExecuteAsync(async () =>
+        {
+            await using var db = dbFactory.CreateDbContext();
+            var p = await db.SessionPackages.FindAsync(packageId);
+            if (p is null || p.Status == PackageStatus.Cancelled) return;
 
-        if (p.UsedSessions > 0)
-            p.UsedSessions--;
+            if (p.UsedSessions > 0)
+                p.UsedSessions--;
 
-        if (p.Status == PackageStatus.Depleted && p.UsedSessions < p.TotalSessions)
-            p.Status = PackageStatus.Active;
+            if (p.Status == PackageStatus.Depleted && p.UsedSessions < p.TotalSessions)
+                p.Status = PackageStatus.Active;
 
-        await db.SaveChangesAsync();
-    }
+            await db.SaveChangesAsync();
+        });
 
     public async Task UpdatePackageAsync(int id, UpdateSessionPackageDto dto)
     {
@@ -168,6 +172,7 @@ public class SessionPackageService(
         p.PricePerSession = dto.PricePerSession;
         p.ExpiresAt = dto.ExpiresAt;
         p.Notes = dto.Notes;
+        p.IsHidden = dto.IsHidden;
 
         if (p.Status != PackageStatus.Cancelled)
         {
@@ -196,7 +201,15 @@ public class SessionPackageService(
             p.Status = PackageStatus.Expired;
 
         if (toExpire.Count > 0)
+        {
             await db.SaveChangesAsync();
+            try
+            {
+                await auditLog.LogAsync("system", "system", "System", "PackagesExpired", "SessionPackage", null,
+                    $"Automatycznie wygaszono {toExpire.Count} pakiet(ów): {string.Join(", ", toExpire.Select(p => $"#{p.Id}"))}");
+            }
+            catch (Exception ex) { logger.LogError(ex, "Audit log write failed for package expiry batch"); }
+        }
 
         return toExpire.Count;
     }
@@ -258,6 +271,18 @@ public class SessionPackageService(
         await emailService.SendAsync(clientUser.Email, clientName, subject, html);
     }
 
+    // Pakiety z okresów karnetu: płatność zmienia się w Karnetach (żeby okres i pakiet się nie rozjechały).
+    private static async Task<List<SessionPackageDto>> WithMembershipFlagAsync(ApplicationDbContext db, List<SessionPackageDto> list)
+    {
+        if (list.Count == 0) return list;
+        var ids = list.Select(p => p.Id).ToList();
+        var fromMembership = (await db.MembershipPeriods.AsNoTracking()
+            .Where(x => x.PackageId != null && ids.Contains(x.PackageId.Value))
+            .Select(x => x.PackageId!.Value).ToListAsync()).ToHashSet();
+        foreach (var p in list) p.IsMembership = fromMembership.Contains(p.Id);
+        return list;
+    }
+
     private static SessionPackageDto MapToDto(SessionPackage p) => new()
     {
         Id = p.Id,
@@ -265,6 +290,10 @@ public class SessionPackageService(
         ClientName = p.Client is not null
             ? $"{p.Client.FirstName} {p.Client.LastName}".Trim() is { Length: > 0 } n ? n : p.Client.ApplicationUserId
             : string.Empty,
+        PartnerClientId = p.PartnerClientId,
+        PartnerName = p.PartnerClient is not null
+            ? $"{p.PartnerClient.FirstName} {p.PartnerClient.LastName}".Trim() is { Length: > 0 } pn ? pn : "Partner"
+            : null,
         CreatedByUserId = p.CreatedByUserId,
         Name = p.Name,
         Notes = p.Notes,
@@ -277,6 +306,7 @@ public class SessionPackageService(
         IsPaid = p.IsPaid,
         PaidAt = p.PaidAt,
         PaymentReference = p.PaymentReference,
+        PaidVia = p.PaidVia,
         PurchasedAt = p.PurchasedAt,
         ExpiresAt = p.ExpiresAt,
         Status = p.Status,

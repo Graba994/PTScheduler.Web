@@ -1,0 +1,77 @@
+@page "/logout"
+@layout PublicLayout
+
+@* Pożegnanie po wylogowaniu (administrator albo trener) — ciepło, krótko i z drogą powrotu. *@
+
+<PageTitle>Do zobaczenia — Hantly</PageTitle>
+
+<section class="bye">
+    <div class="bye-card">
+        <div class="bye-mark" aria-hidden="true">
+            <span class="bye-ring"></span>
+            <img src="/brand/hantly-mark.svg" alt="" width="72" height="72" />
+            <span class="bye-hand">👋</span>
+        </div>
+        <div class="bye-eyebrow"><i class="bi bi-check2-circle"></i>Wylogowano bezpiecznie</div>
+        <h1>Do zobaczenia!</h1>
+        <p class="bye-lead">@Wish</p>
+        <p class="bye-note">@(Trainer ? "Twoja aplikacja działa dalej — klienci mogą się zapisywać i płacić także teraz." : "Sesja w tej przeglądarce jest zamknięta. Jeśli korzystasz z cudzego komputera, możesz już spokojnie odejść.")</p>
+        <div class="bye-actions">
+            <a class="bye-btn" href="/login" data-enhance-nav="false"><i class="bi bi-box-arrow-in-right"></i>Zaloguj się ponownie</a>
+            <a class="bye-btn bye-ghost" href="/"><i class="bi bi-house"></i>Strona główna</a>
+        </div>
+    </div>
+</section>
+
+<style>
+    .bye { min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 110px 20px 60px; position: relative; overflow: hidden;
+        font-family: var(--pts-font-body); color: var(--pts-text); background: var(--pts-bg); }
+    .bye::before { content: ""; position: absolute; top: -260px; right: -180px; width: 640px; height: 640px; background: radial-gradient(circle, var(--pts-glow) 0%, transparent 70%); pointer-events: none; }
+    .bye::after { content: ""; position: absolute; bottom: -220px; left: -160px; width: 520px; height: 520px; background: radial-gradient(circle, rgba(6, 214, 160, .08) 0%, transparent 70%); pointer-events: none; }
+    .bye-card { position: relative; z-index: 1; width: 100%; max-width: 460px; text-align: center; padding: 40px 32px 32px; border-radius: 24px;
+        background: var(--pts-surface); border: 1px solid var(--pts-border); box-shadow: var(--pts-shadow-lg); animation: bye-in .5s cubic-bezier(.2, .8, .2, 1) both; }
+    @@keyframes bye-in { from { opacity: 0; transform: translateY(14px) scale(.98); } to { opacity: 1; transform: none; } }
+
+    .bye-mark { position: relative; width: 96px; height: 96px; margin: 0 auto 18px; display: grid; place-items: center; }
+    .bye-mark img { position: relative; z-index: 1; animation: bye-bob 3s ease-in-out infinite; }
+    .bye-ring { position: absolute; inset: 0; border-radius: 50%; background: color-mix(in srgb, var(--pts-primary) 12%, transparent); animation: bye-pulse 3s ease-out infinite; }
+    .bye-hand { position: absolute; z-index: 2; right: -6px; top: 2px; font-size: 1.8rem; transform-origin: 70% 80%; animation: bye-wave 2.4s ease-in-out .4s infinite; }
+    @@keyframes bye-bob { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-4px); } }
+    @@keyframes bye-pulse { 0% { transform: scale(.85); opacity: .9; } 100% { transform: scale(1.25); opacity: 0; } }
+    @@keyframes bye-wave { 0%, 60%, 100% { transform: rotate(0); } 10%, 30% { transform: rotate(18deg); } 20%, 40% { transform: rotate(-10deg); } }
+
+    .bye-eyebrow { display: inline-flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 999px; font-size: .78rem; font-weight: 700;
+        color: #047857; background: #ecfdf5; border: 1px solid #a7f3d0; }
+    .bye-card h1 { font-family: var(--pts-font-display); font-weight: 800; font-size: clamp(1.8rem, 5vw, 2.3rem); margin: 14px 0 6px; text-wrap: balance; }
+    .bye-lead { font-size: 1.05rem; margin: 0 0 10px; color: var(--pts-text); }
+    .bye-note { font-size: .9rem; line-height: 1.55; color: var(--pts-text-secondary); margin: 0 auto 24px; max-width: 36ch; }
+    .bye-actions { display: flex; flex-direction: column; gap: 10px; }
+    .bye-btn { display: inline-flex; align-items: center; justify-content: center; gap: 8px; padding: 13px 18px; border-radius: 14px; font-weight: 700; text-decoration: none;
+        color: #fff; background: var(--pts-primary); transition: background .15s, transform .15s; }
+    .bye-btn:hover { color: #fff; background: var(--pts-primary-dark); transform: translateY(-1px); }
+    .bye-ghost { color: var(--pts-text); background: var(--pts-surface-alt); }
+    .bye-ghost:hover { color: var(--pts-primary); background: color-mix(in srgb, var(--pts-primary) 8%, var(--pts-surface)); }
+    .bye-btn:focus-visible { outline: 3px solid var(--pts-primary-light); outline-offset: 2px; }
+    @@media (prefers-reduced-motion: reduce) { .bye-card, .bye-mark img, .bye-ring, .bye-hand { animation: none; } }
+</style>
+
+@code {
+    [SupplyParameterFromQuery(Name = "trener")] public string? TrainerQuery { get; set; }
+    private bool Trainer => TrainerQuery == "1";
+
+    /// <summary>Życzenia zależne od pory dnia (czas polski).</summary>
+    private static string Wish
+    {
+        get
+        {
+            var tz = TimeZoneInfo.FindSystemTimeZoneById("Europe/Warsaw");
+            var now = TimeZoneInfo.ConvertTimeFromUtc(DateTime.UtcNow, tz);
+            var h = now.Hour;
+            var wish = h >= 22 || h < 5 ? "Dobrej nocy — mięśnie rosną we śnie! 🌙"
+                : h >= 18 ? "Miłego wieczoru i dobrej regeneracji! 🌆"
+                : h >= 12 ? "Udanego popołudnia — oby pełnego energii! 💪"
+                : "Miłego dnia i udanych treningów! ☀️";
+            return now.DayOfWeek == DayOfWeek.Friday && h >= 12 ? wish + " I udanego weekendu!" : wish;
+        }
+    }
+}

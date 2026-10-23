@@ -1,6 +1,6 @@
 @page "/my/packages"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Client")]
-@rendermode InteractiveServer
+@rendermode PTScheduler.Web.RenderModes.Server
 @inject ISessionPackageService PackageService
 @inject IClientService ClientService
 @inject AuthenticationStateProvider AuthState
@@ -12,7 +12,13 @@
 
 <AppTitle Page="Moje pakiety" />
 
-<h4 class="fw-bold mb-4"><i class="bi bi-box-seam me-2"></i>Moje pakiety</h4>
+<div class="d-flex align-items-center justify-content-between flex-wrap gap-2 mb-4">
+    <h4 class="fw-bold mb-0"><i class="bi bi-box-seam me-2"></i>Moje pakiety</h4>
+    <div class="d-flex gap-2">
+        <a href="/my/vouchers#redeem" class="btn btn-sm btn-outline-primary"><i class="bi bi-ticket-perforated me-1"></i>Mam bon</a>
+        <a href="/packages" class="btn btn-sm btn-primary"><i class="bi bi-bag-check me-1"></i>Kup pakiet</a>
+    </div>
+</div>
 
 @if (_loading)
 {
@@ -28,9 +34,10 @@
 else if (_packages.Count == 0)
 {
     <div class="empty-state py-5">
-        <div class="empty-state-icon">📦</div>
+        <div class="empty-state-icon"><i class="bi bi-box-seam" style="font-size:2.4rem;color:var(--c-primary)"></i></div>
         <div class="empty-state-title">Brak pakietów</div>
-        <div class="empty-state-desc">Nie masz jeszcze żadnych pakietów. Skontaktuj się z trenerem, aby zakupić pierwszy pakiet.</div>
+        <div class="empty-state-desc">Nie masz jeszcze żadnych pakietów treningowych.</div>
+        <a href="/packages" class="btn btn-primary mt-3"><i class="bi bi-bag-check me-1"></i>Przeglądaj pakiety</a>
     </div>
 }
 else
@@ -53,6 +60,10 @@ else
                                 <div>
                                     <div class="fw-bold" style="font-size:1rem">@p.Name</div>
                                     <div class="text-muted small">@p.SessionTypeName · @p.DurationMinutes min</div>
+                                    @if (p.IsForPair)
+                                    {
+                                        <span class="pair-chip mt-1" title="Za wspólny trening schodzi 1. Gdy jedno z Was odwoła, drugie może przyjść samo."><i class="bi bi-people-fill"></i>Wspólny z: @(p.ClientId == _clientId ? p.PartnerName : p.ClientName)</span>
+                                    }
                                 </div>
                                 <span class="badge @(p.IsPaid ? "bg-success" : "bg-warning text-dark")">
                                     @(p.IsPaid ? "Opłacony" : "Nieopłacony")
@@ -79,7 +90,7 @@ else
                                 <span><i class="bi bi-calendar me-1"></i>Zakup: @p.PurchasedAt.ToLocalTime().ToString("dd.MM.yyyy")</span>
                                 @if (p.ExpiresAt.HasValue)
                                 {
-                                    var daysLeft = (int)(p.ExpiresAt.Value.ToLocalTime() - DateTime.Now).TotalDays;
+                                    var daysLeft = (int)(p.ExpiresAt.Value.ToLocalTime() - StudioClock.Now).TotalDays;
                                     <span style="@(daysLeft <= 7 ? "color:var(--c-danger);font-weight:600" : "")">
                                         <i class="bi bi-hourglass-split me-1"></i>Ważny do: @p.ExpiresAt.Value.ToLocalTime().ToString("dd.MM.yyyy")
                                         @if (daysLeft <= 14) { <text>(@daysLeft dni)</text> }
@@ -130,7 +141,29 @@ else
             <span><i class="bi bi-clock-history me-2"></i>Historia pakietów</span>
             <span class="badge bg-secondary">@_packages.Count</span>
         </div>
-        <div class="table-responsive">
+        @* Telefon: nazwa, wykorzystanie i status na wierzchu, szczegóły po rozwinięciu. *@
+        <div class="hist-list d-md-none">
+            @foreach (var p in _packages.OrderByDescending(p => p.PurchasedAt))
+            {
+                <details class="hist-item">
+                    <summary>
+                        <div class="hist-main">
+                            <div class="hist-title">@p.Name</div>
+                            <div class="hist-sub">@p.PurchasedAt.ToLocalTime().ToString("dd.MM.yyyy") · <span class="badge @StatusCss(p.Status)">@StatusLabel(p.Status)</span></div>
+                        </div>
+                        <div class="hist-side"><b>@p.UsedSessions/@p.TotalSessions</b><div class="hist-sub">treningów</div></div>
+                    </summary>
+                    <div class="hist-body">
+                        <div><small>Wartość</small>@p.TotalPrice.ToString("N0") zł</div>
+                        <div><small>Za trening</small>@p.PricePerSession.ToString("N0") zł</div>
+                        <div><small>Ważny do</small>@(p.ExpiresAt.HasValue ? p.ExpiresAt.Value.ToLocalTime().ToString("dd.MM.yyyy") : "bez limitu")</div>
+                        <div><small>Płatność</small>@(p.IsPaid ? "Opłacony" : p.Status != PackageStatus.Cancelled ? "Oczekuje" : "—")</div>
+                        <div class="wide"><small>Rodzaj</small>@p.SessionTypeName · @p.DurationMinutes min@(p.IsForPair ? $" · wspólny z: {(p.ClientId == _clientId ? p.PartnerName : p.ClientName)}" : "")</div>
+                    </div>
+                </details>
+            }
+        </div>
+        <div class="table-responsive d-none d-md-block">
             <table class="table table-hover align-middle mb-0" style="font-size:.875rem">
                 <thead class="table-light">
                     <tr>
@@ -191,6 +224,7 @@ else
 }
 
 @code {
+    private int _clientId;
     private List<SessionPackageDto> _packages = [];
     private List<SessionPackageDto> _active = [];
     private decimal _unpaidTotal;
@@ -203,6 +237,7 @@ else
         var client = await ClientService.GetClientByUserIdAsync(uid);
         if (client is not null)
         {
+            _clientId = client.Id;
             _packages = await PackageService.GetPackagesAsync(client.Id);
             _active   = _packages.Where(p => p.Status == PackageStatus.Active).ToList();
             _unpaidTotal = _packages

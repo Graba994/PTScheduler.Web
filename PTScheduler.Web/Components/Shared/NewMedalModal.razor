@@ -1,0 +1,33 @@
+@using PTScheduler.Domain.Rules
+@* Gratulacje za nowe medale — po kolei, z konfetti w kolorach marki. *@
+@if (Medals.Count > 0 && Settings is not null)
+{
+    var m = Medals[Math.Min(_index, Medals.Count - 1)];
+    <div class="medal-modal-backdrop" @onclick="NextAsync"></div>
+    <div class="medal-modal" role="dialog" aria-modal="true" aria-labelledby="medal-modal-title">
+        <div class="medal-confetti" aria-hidden="true">
+            @for (var i = 0; i < 14; i++)
+            {
+                <i style="--i:@i;--c:@(i % 3 == 0 ? Settings.Palette.Primary : i % 3 == 1 ? Settings.Palette.Secondary : "#FBBF24")"></i>
+            }
+        </div>
+        <div class="medal-modal-eyebrow">@(Medals.Count > 1 ? $"Nowy medal {_index + 1} z {Medals.Count}" : "Nowy medal!")</div>
+        <MedalImage Medal="m" Style="@Settings.Style" Palette="Settings.Palette" Size="150" />
+        <h2 class="medal-modal-title" id="medal-modal-title">@m.Name</h2>
+        <p class="medal-modal-text">@m.Description</p>
+        <button type="button" class="btn btn-primary px-4" @onclick="NextAsync">@(_index < Medals.Count - 1 ? "Dalej" : "Super!")</button>
+    </div>
+}
+
+@code {
+    [Parameter] public List<MedalRules.Medal> Medals { get; set; } = [];
+    [Parameter] public PTScheduler.Web.Services.MedalService.Settings? Settings { get; set; }
+    [Parameter] public EventCallback OnDone { get; set; }
+    private int _index;
+
+    private async Task NextAsync()
+    {
+        if (_index < Medals.Count - 1) { _index++; return; }
+        await OnDone.InvokeAsync();
+    }
+}
