@@ -274,6 +274,8 @@ else
     private List<ClientDto>? clients;
     private string search = string.Empty;
     private bool _showImport;
+    /// <summary>?import=1 — od razu okno importu (np. z konfiguratora „Pierwsze ustawienia”).</summary>
+    [SupplyParameterFromQuery(Name = "import")] public int? ImportQuery { get; set; }
     private bool _importing;
     private string? _importError;
     private CsvImportResult? _importResult;
@@ -295,6 +297,7 @@ else
         var isAdmin = auth.User.IsInRole(Roles.Admin);
         var trainerUserId = isAdmin ? null : auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         clients = await ClientService.GetClientsAsync(trainerUserId);
+        _showImport = ImportQuery == 1;
     }
 
     private string? _impText;
