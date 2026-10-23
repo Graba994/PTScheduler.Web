@@ -1,0 +1,325 @@
+@* Sceny strony głównej („Nowa”): zaprojektowane fragmenty aplikacji w HTML zamiast zrzutów ekranu —
+   duży, ostry tekst na każdym ekranie, kolory marki, przykładowe dane bez prawdziwych klientów.
+   Animację prowadzi landing.js (scenes): element z data-at="ms" dostaje klasę „on” po tylu milisekundach od startu,
+   data-count="od:do" liczy liczbę, data-type pisze tekst, .sc-cur jeździ po data-moves="ms>cel[!]" (! = kliknięcie).
+   Scena gra, gdy jest na ekranie, i zapętla się po data-len ms (data-loop="0" — raz). Wygląd: landing.css („Sceny”). *@
+
+<div class="sc s-@Name" data-ld-scene data-len="@Len" data-loop="@(Loop ? "1" : "0")" role="img" aria-label="@Alt">
+    <div class="sc-in">
+        @switch (Name)
+        {
+            case "brief":
+                <div class="sc-push" data-at="200">
+                    <span class="sc-push-ic">@Mascot?.Invoke("hello")</span>
+                    <span class="sc-push-t"><b>@AssistantName <small>· teraz</small></b>Dzień dobry! Dziś 6 treningów, pierwszy o 7:00.</span>
+                </div>
+                <div class="sc-card sc-hantly" data-at="700">
+                    <div class="sc-hantly-head">
+                        <span class="sc-mascot">@Mascot?.Invoke("think")</span>
+                        <span><b>Na dziś od @AssistantName</b><small>4 sprawy · około 5 minut</small></span>
+                    </div>
+                    <ul class="sc-tips">
+                        <li data-at="1300"><i class="bi bi-exclamation-circle-fill c-red"></i><span>2 rezerwacje czekają na Twoją akceptację</span><em>Zobacz</em></li>
+                        <li data-at="2000"><i class="bi bi-box-seam c-amber"></i><span>Ani K. zostały 2 treningi w pakiecie</span><em>Zaproponuj</em></li>
+                        <li data-at="2700"><i class="bi bi-calendar-plus c-violet"></i><span>Wolne 16:00 — 3 osoby zwykle trenują o tej porze</span><em data-target="invite">Zaproś<b class="sc-done" data-at="5200"><i class="bi bi-check2"></i>Wysłano</b></em></li>
+                        <li data-at="3400"><i class="bi bi-trophy-fill c-gold"></i><span>Hubert M. ma za sobą 50 treningów</span><em>Pogratuluj</em></li>
+                    </ul>
+                </div>
+                <div class="sc-chips" data-at="4000">
+                    <span><i class="bi bi-clock"></i>6 wizyt · 7:00–19:00</span>
+                    <span class="warn"><i class="bi bi-heart-pulse"></i>1 uwaga zdrowotna</span>
+                    <span><i class="bi bi-cash-coin"></i>2 płatności na miejscu</span>
+                </div>
+                <span class="sc-cur" data-moves="4300>invite;5000>invite!;6200>-" aria-hidden="true"></span>
+                break;
+
+            case "train":
+                <div class="sc-phone">
+                    <div class="sc-phone-scr">
+                        <div class="sc-ph-bar"><span>9:41</span><span><i class="bi bi-reception-4"></i><i class="bi bi-battery-full"></i></span></div>
+                        <div class="sc-ph-head"><b>Dzień B · Plecy</b><small>start 9:30 · 3 z 5 ćwiczeń</small><span class="sc-ph-prog"><i data-at="600"></i></span></div>
+                        <div class="sc-ex">
+                            <span class="sc-ex-ic"><i class="bi bi-lightning-charge-fill"></i></span>
+                            <span><b>Wiosłowanie hantlem</b><small>Cel 4 × 8 · ostatnio 27,5 kg</small></span>
+                        </div>
+                        <div class="sc-sets">
+                            @for (var i = 1; i <= 4; i++)
+                            {
+                                <div class="sc-set">
+                                    <span class="n">@i</span><span class="v">29 <small>kg</small></span><span class="v">8 <small>powt.</small></span>
+                                    <span class="chk" data-target="@($"s{i}")" data-at="@(500 + i * 950)"><i class="bi bi-check-lg"></i></span>
+                                </div>
+                            }
+                        </div>
+                        <div class="sc-pr" data-at="4600">
+                            <i class="bi bi-trophy-fill"></i>
+                            <span><b>Nowy rekord!</b>29 kg · +1,5 kg od ostatniego razu</span>
+                        </div>
+                        <div class="sc-confetti" data-at="4600" aria-hidden="true">@for (var i = 0; i < 14; i++) { <i></i> }</div>
+                        <div class="sc-sum" data-at="6400">
+                            <b>Dobra robota! 💪</b>
+                            <div class="sc-sum-row"><span><strong>7</strong>serii</span><span><strong>378</strong>kg objętości</span><span><strong>48</strong>minut</span></div>
+                        </div>
+                    </div>
+                </div>
+                <div class="sc-note" data-at="7300">
+                    <span class="sc-av av2">AK</span>
+                    <span><b>Profil klienta · Ania K.</b>Nowy rekord: wiosłowanie 29 kg</span>
+                </div>
+                <span class="sc-cur touch" data-moves="1200>s1!;2150>s2!;3100>s3!;4050>s4!;4700>-" aria-hidden="true"></span>
+                break;
+
+            case "debts":
+                <div class="sc-card sc-debts-card">
+                    <div class="sc-head">
+                        <span><b>Zaległości</b><small>do odebrania od 3 osób</small></span>
+                        <strong class="sc-total"><span data-count="1070:920" data-at="1900">1 070</span> zł</strong>
+                    </div>
+                    <div class="sc-debt">
+                        <div class="sc-debt-who"><span class="sc-av av1">RL</span><b>Rafał L.</b><small class="late">od 21 dni</small><strong><span data-count="300:150" data-at="1900">300</span> zł</strong></div>
+                        <div class="sc-collapse" data-at="3000">
+                            <div class="sc-debt-row" data-at="1750">
+                                <span><i class="bi bi-calendar3"></i>Trening personalny · 2.10</span><span class="amt">150 zł</span>
+                                <span class="sc-pay"><em data-target="cash">Gotówka</em><em>Przelew</em><em>Karta</em></span>
+                                <span class="sc-paid"><i class="bi bi-check-circle-fill"></i>Opłacone · gotówka</span>
+                            </div>
+                        </div>
+                        <div class="sc-debt-row">
+                            <span><i class="bi bi-calendar3"></i>Trening personalny · 9.10</span><span class="amt">150 zł</span>
+                            <span class="sc-pay"><em>Gotówka</em><em>Przelew</em><em>Karta</em></span>
+                        </div>
+                    </div>
+                    <div class="sc-debt">
+                        <div class="sc-debt-who"><span class="sc-av av3">MN</span><b>Marek N.</b><small class="late">od 9 dni</small><strong>320 zł</strong></div>
+                        <div class="sc-debt-row">
+                            <span><i class="bi bi-box-seam"></i>Pakiet 4 treningów</span><span class="amt">320 zł</span>
+                            <span class="sc-ai-btn" data-target="remind"><i class="bi bi-stars"></i>Przypomnij uprzejmie</span>
+                        </div>
+                        <div class="sc-draft" data-at="4300">
+                            <p data-type data-at="4500">Cześć Marek! Przypominam o płatności za pakiet (320 zł). Możesz zapłacić gotówką na treningu albo przelewem — jak Ci wygodniej. Dzięki! 🙂</p>
+                            <div class="sc-draft-foot">
+                                <small><i class="bi bi-stars"></i>Szkic w Twoim stylu</small>
+                                <span class="sc-btn" data-target="send">Wyślij na czacie<b class="sc-done" data-at="9100"><i class="bi bi-check2"></i>Wysłano</b></span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <span class="sc-cur" data-moves="900>cash;1600>cash!;3400>remind;4000>remind!;8300>send;8900>send!;10000>-" aria-hidden="true"></span>
+                break;
+
+            case "slots":
+                <div class="sc-slots">
+                    <div class="sc-card sc-tl">
+                        <div class="sc-tl-head"><b>Środa</b><small>22 października</small></div>
+                        <div class="sc-tl-row"><span class="h">15:00</span><span class="sc-ev ev1"><b>Tomek W.</b>Trening personalny</span></div>
+                        <div class="sc-tl-row">
+                            <span class="h">16:00</span>
+                            <span class="sc-tl-slot">
+                                <span class="sc-ev ev2 sc-cancel" data-at="900"><b>Kasia P.</b>Trening personalny<em>odwołany</em></span>
+                                <span class="sc-ev sc-free" data-at="1700"><b>Wolne 16:00–17:00</b>Zwolniony termin</span>
+                                <span class="sc-ev ev3 sc-new" data-at="7000"><b>Magda D.</b>Nowa rezerwacja</span>
+                            </span>
+                        </div>
+                        <div class="sc-tl-row"><span class="h">17:00</span><span class="sc-ev ev1"><b>Ola S.</b>Trening w parze</span></div>
+                    </div>
+                    <div class="sc-card sc-suggest" data-at="2200">
+                        <div class="sc-hantly-head sm">
+                            <span class="sc-mascot">@Mascot?.Invoke("think")</span>
+                            <span><b>Wolne 16:00</b><small>Te osoby zwykle trenują o tej porze</small></span>
+                        </div>
+                        <ul class="sc-people">
+                            <li data-at="2700"><span class="sc-av av3">MD</span><span><b>Magda D.</b><small>4× o tej porze</small></span><i class="bi bi-check-square-fill"></i></li>
+                            <li data-at="3000"><span class="sc-av av1">PG</span><span><b>Paweł G.</b><small>3× o tej porze</small></span><i class="bi bi-check-square-fill"></i></li>
+                            <li data-at="3300"><span class="sc-av av2">JW</span><span><b>Julia W.</b><small>2× o tej porze</small></span><i class="bi bi-check-square-fill"></i></li>
+                        </ul>
+                        <p class="sc-msg">„Zwolniło mi się okienko dziś o 16:00. Wpadniesz? Rezerwacja jednym kliknięciem: <u>link</u>”</p>
+                        <span class="sc-btn wide" data-target="inv">Zaproś (3)<b class="sc-done" data-at="4700"><i class="bi bi-send-check"></i>Wysłano</b></span>
+                    </div>
+                </div>
+                <div class="sc-toast" data-at="6600"><span class="ic mint"><i class="bi bi-calendar-check"></i></span><span><b>Nowa rezerwacja</b>Magda D. · dziś 16:00</span></div>
+                <span class="sc-cur" data-moves="3700>inv;4400>inv!;5400>-" aria-hidden="true"></span>
+                break;
+
+            case "close":
+                <div class="sc-card sc-close">
+                    <div class="sc-close-head">
+                        <span class="sc-moon"><i class="bi bi-moon-stars-fill"></i></span>
+                        <span><b>Dzień domknięty</b><small>Wizyty zamknęły się same 2 godziny po treningu</small></span>
+                    </div>
+                    <div class="sc-kpis">
+                        <span><strong><span data-count="0:6" data-at="500">0</span>/6</strong>treningów</span>
+                        <span><strong><span data-count="0:900" data-at="700">0</span> zł</strong>wpływów dziś</span>
+                        <span class="ok"><strong>0 zł</strong>do rozliczenia</span>
+                    </div>
+                    <div class="sc-bars" aria-hidden="true">
+                        @foreach (var (day, h) in Week)
+                        {
+                            <span class="sc-bar @(day == "Śr" ? "today" : "")"><i style="--h:@(h)%" data-at="@(900 + Array.IndexOf(Week, (day, h)) * 120)"></i><small>@day</small></span>
+                        }
+                    </div>
+                    <div class="sc-file" data-at="2600">
+                        <span class="ic"><i class="bi bi-file-earmark-zip-fill"></i></span>
+                        <span><b>Paczka dla księgowej · październik</b><small>faktury, wpłaty i zestawienie</small></span>
+                        <em data-at="3600"><i class="bi bi-check2"></i>Gotowa</em>
+                    </div>
+                </div>
+                <div class="sc-toast" data-at="4600"><span class="ic violet">@Mascot?.Invoke("celebrate")</span><span><b>@AssistantName</b>Dobry dzień! 900 zł wpływów, wszystko rozliczone.</span></div>
+                break;
+
+            case "cal":
+                <div class="sc-card sc-cal">
+                    <div class="sc-cal-head"><b>19–23 października</b><span class="sc-seg"><em class="on">Tydzień</em><em>Dzień</em></span></div>
+                    <div class="sc-cal-grid">
+                        @for (var c = 0; c < CalDays.Length; c++)
+                        {
+                            <span class="dh" style="grid-column:@(c + 2);grid-row:1">@CalDays[c]</span>
+                        }
+                        @for (var r = 0; r < CalHours.Length; r++)
+                        {
+                            <span class="hh" style="grid-column:1;grid-row:@(r + 2)">@CalHours[r]</span>
+                            @for (var c = 0; c < CalDays.Length; c++)
+                            {
+                                <span class="cell" style="grid-column:@(c + 2);grid-row:@(r + 2)"></span>
+                            }
+                        }
+                        @foreach (var (col, row, cls, who) in CalEvents)
+                        {
+                            <span class="sc-ev @cls" style="grid-column:@(col + 2);grid-row:@(row + 2)"><b>@who</b></span>
+                        }
+                        <span class="sc-ev ev3 sc-pop" style="grid-column:5;grid-row:6" data-at="1400"><b>Ola S.</b></span>
+                    </div>
+                </div>
+                <div class="sc-toast" data-at="1200"><span class="ic mint"><i class="bi bi-phone"></i></span><span><b>Rezerwacja online</b>Ola S. · czwartek 18:00</span></div>
+                break;
+
+            case "client":
+                <div class="sc-card sc-client">
+                    <div class="sc-client-head">
+                        <span class="sc-av sc-av-lg av2">AK</span>
+                        <span><b>Ania Kowalczyk</b><small>Cel: sylwetka na wesele · od 9 miesięcy</small></span>
+                        <span class="sc-tag ok"><i class="bi bi-clipboard2-check"></i>Ankieta zdrowotna</span>
+                    </div>
+                    <div class="sc-kpis sm">
+                        <span><strong>48</strong>treningów</span>
+                        <span><strong>3/10</strong>pakiet</span>
+                        <span><strong>94%</strong>obecności</span>
+                    </div>
+                    <div class="sc-chart">
+                        <div class="sc-chart-t"><b>Przysiad</b><small>60 → 80 kg</small></div>
+                        <svg viewBox="0 0 300 70" preserveAspectRatio="none" aria-hidden="true"><polyline data-at="300" points="0,62 40,58 80,52 120,47 160,40 200,30 240,24 300,10" /></svg>
+                    </div>
+                    <div class="sc-bubble" data-at="1500"><span class="sc-av av2">AK</span><p>Czy mogę przełożyć czwartek na 18:00?</p></div>
+                </div>
+                break;
+
+            case "plan":
+                <div class="sc-card sc-plan">
+                    <div class="sc-plan-head"><span><b>Masa · 3 dni w tygodniu</b><small>Ania K. · z trenerem i solo</small></span><span class="sc-seg"><em class="on">A</em><em>B</em><em>C</em></span></div>
+                    @foreach (var (ex, sets, kg) in PlanRows)
+                    {
+                        <div class="sc-plan-row"><span class="sc-ex-ic sm"><i class="bi bi-lightning-charge-fill"></i></span><b>@ex</b><span>@sets</span><strong>@kg</strong></div>
+                    }
+                    <div class="sc-suggest-chip" data-at="900">
+                        <i class="bi bi-stars"></i>
+                        <span><b>Propozycja: +2,5 kg w przysiadzie</b>3 treningi z rzędu z pełnymi seriami i lekkim wysiłkiem</span>
+                        <em>Zastosuj</em>
+                    </div>
+                </div>
+                break;
+
+            case "pay":
+                <div class="sc-pay-grid">
+                    <div class="sc-card sc-offer"><span class="ic"><i class="bi bi-box-seam"></i></span><b>Pakiet 10 treningów</b><strong>1 300 zł</strong><small>BLIK · karta · na miejscu</small></div>
+                    <div class="sc-card sc-offer hot"><span class="ic"><i class="bi bi-arrow-repeat"></i></span><b>Karnet 8 treningów</b><strong>560 zł <small>/ mies.</small></strong><small>odnawia się sam</small></div>
+                    <div class="sc-card sc-offer"><span class="ic"><i class="bi bi-gift"></i></span><b>Voucher na prezent</b><strong>200 zł</strong><small>z kodem do wpisania</small></div>
+                </div>
+                <div class="sc-card sc-feed">
+                    <div class="sc-feed-row" data-at="500"><span class="ic mint"><i class="bi bi-check-lg"></i></span><span><b>Ania K. · Pakiet 10 treningów</b>opłacone online · BLIK</span><strong>1 300 zł</strong></div>
+                    <div class="sc-feed-row" data-at="1100"><span class="ic violet"><i class="bi bi-receipt"></i></span><span><b>Faktura FV/42/10/2026</b>wysłana do KSeF</span><strong class="ok">✓</strong></div>
+                    <div class="sc-feed-row" data-at="1700"><span class="ic energy"><i class="bi bi-cash-coin"></i></span><span><b>Paweł G. · trening 21.10</b>gotówka · odhaczone ręcznie</span><strong>150 zł</strong></div>
+                </div>
+                break;
+
+            case "stats":
+                <div class="sc-card sc-stats">
+                    <div class="sc-hantly-head sm">
+                        <span class="sc-mascot">@Mascot?.Invoke("think")</span>
+                        <span><b>Co się zmieniło · 90 dni</b><small>Przychód wzrósł o 11% — dzięki większym pakietom. 5 osób zaczęło trenować regularnie.</small></span>
+                    </div>
+                    <div class="sc-kpis">
+                        <span><strong>87%</strong>retencja</span>
+                        <span><strong>+11%</strong>przychód</span>
+                        <span><strong>84%</strong>obłożenie grafiku</span>
+                    </div>
+                    <div class="sc-bars wide" aria-hidden="true">
+                        @foreach (var (m, h) in Months)
+                        {
+                            <span class="sc-bar @(m == "paź" ? "today" : "")"><i style="--h:@(h)%" data-at="@(300 + Array.IndexOf(Months, (m, h)) * 120)"></i><small>@m</small></span>
+                        }
+                    </div>
+                    <div class="sc-forecast" data-at="1300"><i class="bi bi-graph-up-arrow"></i>Prognoza na 30 dni: <b>7 090 zł</b> z odnowień karnetów</div>
+                </div>
+                break;
+
+            case "risk":
+                <div class="sc-card sc-risk">
+                    <div class="sc-head"><span><b>Klienci, którzy mogą odejść</b><small>przerwy, rzadsze treningi, koniec pakietu</small></span></div>
+                    <div class="sc-risk-row high">
+                        <span class="sc-av av3">JW</span>
+                        <span><b>Justyna W. <em>wysokie ryzyko</em></b><small>3 tygodnie bez treningu · pakiet się skończył</small></span>
+                        <span class="sc-btn" data-target="write">Napisz</span>
+                    </div>
+                    <div class="sc-draft" data-at="1900">
+                        <p data-type data-at="2100">Hej Justyna! Dawno Cię nie było — wszystko w porządku? Mam wolny wtorek o 18:00. Wpadniesz? 🙂</p>
+                        <div class="sc-draft-foot">
+                            <small><i class="bi bi-stars"></i>Szkic w Twoim stylu — popraw, jeśli chcesz</small>
+                            <span class="sc-btn" data-target="go">Wyślij<b class="sc-done" data-at="6900"><i class="bi bi-check2"></i>Wysłano</b></span>
+                        </div>
+                    </div>
+                    <div class="sc-risk-row mid">
+                        <span class="sc-av av1">PG</span>
+                        <span><b>Paweł G. <em>średnie</em></b><small>trenuje raz w tygodniu zamiast dwóch</small></span>
+                        <span class="sc-btn ghost">Napisz</span>
+                    </div>
+                </div>
+                <span class="sc-cur" data-moves="1000>write;1600>write!;6100>go;6700>go!;7800>-" aria-hidden="true"></span>
+                break;
+        }
+    </div>
+</div>
+
+@code {
+    [Parameter, EditorRequired] public string Name { get; set; } = "";
+    [Parameter] public string Alt { get; set; } = "";
+    [Parameter] public string AssistantName { get; set; } = "Hantly";
+    /// <summary>Maskotka asystenta w danym nastroju (z HomeLanding — animowany SVG albo ikona z Panelu).</summary>
+    [Parameter] public Func<string, RenderFragment>? Mascot { get; set; }
+
+    // Sceny „dnia” zapętlają się; sceny w zakładkach funkcji grają raz.
+    private bool Loop => Name is "brief" or "train" or "debts" or "slots" or "close" or "risk";
+
+    private int Len => Name switch
+    {
+        "brief" => 7500, "train" => 9500, "debts" => 11000, "slots" => 9500, "close" => 7500, "risk" => 9000,
+        _ => 2500
+    };
+
+    private static readonly (string Day, int H)[] Week = [("Pn", 70), ("Wt", 55), ("Śr", 90), ("Cz", 0), ("Pt", 0), ("So", 0), ("Nd", 0)];
+    private static readonly (string M, int H)[] Months = [("maj", 52), ("cze", 58), ("lip", 49), ("sie", 61), ("wrz", 74), ("paź", 88)];
+
+    private static readonly string[] CalDays = ["Pon", "Wt", "Śr", "Czw", "Pt"];
+    private static readonly string[] CalHours = ["7:00", "9:00", "11:00", "16:00", "18:00"];
+
+    private static readonly (int Col, int Row, string Cls, string Who)[] CalEvents =
+    [
+        (0, 0, "ev1", "Tomek W."), (0, 3, "ev2", "Kasia P."), (1, 1, "ev1", "Hubert M."), (1, 4, "ev3", "Magda D."),
+        (2, 0, "ev2", "Ania K."), (2, 2, "ev1", "Paweł G."), (2, 3, "ev1", "Julia W."), (3, 1, "ev2", "Marek N."),
+        (4, 0, "ev1", "Rafał L."), (4, 3, "ev2", "Ola S."), (4, 4, "ev1", "Tomek W."),
+    ];
+
+    private static readonly (string Ex, string Sets, string Kg)[] PlanRows =
+    [
+        ("Przysiad ze sztangą", "4 × 6–8", "80 kg"), ("Wyciskanie hantli", "4 × 8", "24 kg"),
+        ("Wiosłowanie hantlem", "4 × 8", "29 kg"), ("Hip thrust", "3 × 10", "90 kg"),
+    ];
+}

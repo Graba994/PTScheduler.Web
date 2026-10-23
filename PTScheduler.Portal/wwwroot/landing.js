@@ -1,4 +1,6 @@
 // Strona główna, szablon „Nowa” (HomeLanding.razor):
+//  - podgląd aplikacji w hero: wpisana nazwa i kolor od razu na telefonie (bez wpisywania — przykładowe marki po kolei),
+//  - sceny (HomeScene.razor): oś czasu z data-at / data-count / data-type / kursorem („-” chowa kursor), grają tylko na ekranie,
 //  - filmy z aplikacji grają tylko, gdy są na ekranie (i nie przy „ogranicz ruch”),
 //  - oś „dzień z Hantly”: aktywny krok wg przewijania, obok przyklejony ekran,
 //  - zakładki funkcji (klawiatura: strzałki, Home, End),
@@ -7,10 +9,13 @@
 (function () {
     var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
     var observers = [];
+    var syncScenes = function () { };
 
     function cleanup() {
         observers.forEach(function (o) { o.disconnect(); });
         observers = [];
+        document.querySelectorAll('[data-ld-scene]').forEach(function (sc) { if (sc.__ld) stop(sc); });
+        syncScenes = function () { };
     }
 
     function videos(root) {
@@ -49,12 +54,177 @@
                     else { v.pause(); }
                 }
             });
+            syncScenes();
         }
         var io = new IntersectionObserver(function (entries) {
             entries.forEach(function (e) { if (e.isIntersecting) activate(e.target.getAttribute('data-ld-step')); });
         }, { rootMargin: '-45% 0px -45% 0px', threshold: 0 });
         steps.forEach(function (s) { io.observe(s); });
         observers.push(io);
+    }
+
+    // ── Podgląd aplikacji w hero ──
+    function monogram(name) {
+        var words = name.split(/\s+/).filter(function (w) { return w && /[\p{L}\p{N}]/u.test(w[0]); });
+        if (!words.length) return 'PT';
+        if (words.length === 1) return words[0].length > 1 ? words[0][0].toUpperCase() + words[0][1].toLowerCase() : words[0][0].toUpperCase();
+        return (words[0][0] + words[1][0]).toUpperCase();
+    }
+
+    function live(root) {
+        var box = root.querySelector('[data-ld-live]');
+        if (!box || box.__ldLive) return; box.__ldLive = 1;
+        var input = box.querySelector('input[name="nazwa"]');
+        var phone = box.querySelector('.ldl-phone');
+        var radios = Array.prototype.slice.call(box.querySelectorAll('input[name="kolor"]'));
+        var nameEl = box.querySelector('[data-ldl-name]'), monoEl = box.querySelector('[data-ldl-mono]');
+        var samples = [['Kasia Fit Studio', 0], ['Strefa Ruchu', 1], ['Marek Trener', 2], ['Joga z Olą', 3], ['Power Gym', 4]];
+        var touched = false, timer = null;
+
+        function color(r) {
+            phone.style.setProperty('--app', r.getAttribute('data-hex'));
+            phone.style.setProperty('--app2', r.getAttribute('data-hex2'));
+            box.style.setProperty('--ldl-c', r.getAttribute('data-hex'));
+        }
+        function show(name) {
+            nameEl.textContent = name;
+            monoEl.textContent = monogram(name);
+            monoEl.classList.remove('ldl-flash'); void monoEl.offsetWidth; monoEl.classList.add('ldl-flash');
+        }
+        function user() {
+            touched = true; clearTimeout(timer);
+            show(input.value.trim() || 'Twoje studio');
+        }
+        input.addEventListener('input', user);
+        input.addEventListener('focus', function () { touched = true; clearTimeout(timer); });
+        radios.forEach(function (r) {
+            r.addEventListener('change', function () { touched = true; clearTimeout(timer); color(r); });
+        });
+        // Bez wpisywania: przykładowe marki i kolory po kolei, żeby było widać, co się zmienia.
+        if (reduce) return;
+        var i = 0;
+        function next() {
+            if (touched) return;
+            i = (i + 1) % samples.length;
+            var sm = samples[i], r = radios[sm[1] % radios.length];
+            show(sm[0]); color(r); r.checked = true;
+            timer = setTimeout(next, 2800);
+        }
+        timer = setTimeout(next, 2400);
+    }
+
+    // ── Sceny ──
+    function fmt(n) { return String(Math.round(n)).replace(/\B(?=(\d{3})+(?!\d))/g, '\u00a0'); }
+
+    function scenes(root) {
+        var list = Array.prototype.slice.call(root.querySelectorAll('[data-ld-scene]'));
+        if (!list.length) return;
+        list.forEach(function (sc) {
+            if (sc.__ld) return;
+            sc.__ld = { timers: [] };
+            sc.querySelectorAll('[data-type]').forEach(function (el) { el.__text = el.textContent.trim(); });
+            sc.querySelectorAll('[data-count]').forEach(function (el) { var p = el.getAttribute('data-count').split(':'); el.__from = +p[0]; el.__to = +p[1]; });
+        });
+        if (reduce || !('IntersectionObserver' in window)) { list.forEach(finalState); return; }
+
+        var io = new IntersectionObserver(function (entries) {
+            entries.forEach(function (e) { e.target.__ld.vis = e.isIntersecting; });
+            sync();
+        }, { threshold: 0.35 });
+        list.forEach(function (sc) { io.observe(sc); });
+        observers.push(io);
+        syncScenes = sync;
+
+        function sync() {
+            list.forEach(function (sc) {
+                var item = sc.closest('[data-ld-stage]');
+                var want = sc.__ld.vis && (!item || item.classList.contains('is-active'));
+                if (want && !sc.__ld.run) play(sc);
+                else if (!want && sc.__ld.run) stop(sc);
+            });
+        }
+    }
+
+    function later(sc, ms, fn) { sc.__ld.timers.push(setTimeout(fn, ms)); }
+    function stop(sc) { sc.__ld.run = false; sc.__ld.timers.forEach(clearTimeout); sc.__ld.timers.forEach(clearInterval); sc.__ld.timers = []; }
+
+    function reset(sc) {
+        sc.querySelectorAll('[data-at]').forEach(function (el) { el.classList.remove('on', 'typing'); });
+        sc.querySelectorAll('[data-type]').forEach(function (el) { el.textContent = ''; });
+        sc.querySelectorAll('[data-count]').forEach(function (el) { el.textContent = fmt(el.__from); });
+        var cur = sc.querySelector('.sc-cur');
+        if (cur && cur.offsetParent) {
+            var b = cur.offsetParent;
+            cur.classList.remove('show', 'click'); cur.style.transition = 'none';
+            cur.style.transform = 'translate(' + b.offsetWidth * .78 + 'px, ' + b.offsetHeight * .96 + 'px)';
+            void cur.offsetWidth; cur.style.transition = '';
+        }
+    }
+
+    function finalState(sc) {
+        sc.classList.add('sc-final');
+        sc.querySelectorAll('[data-at]').forEach(function (el) { el.classList.add('on'); });
+        sc.querySelectorAll('[data-type]').forEach(function (el) { el.textContent = el.__text; });
+        sc.querySelectorAll('[data-count]').forEach(function (el) { el.textContent = fmt(el.__to); });
+    }
+
+    function count(sc, el) {
+        var t0 = performance.now(), from = el.__from, to = el.__to, dur = 900;
+        (function step(now) {
+            if (!sc.__ld.run) return;
+            var k = Math.min(1, (now - t0) / dur), e = 1 - Math.pow(1 - k, 3);
+            el.textContent = fmt(from + (to - from) * e);
+            if (k < 1) requestAnimationFrame(step);
+        })(t0);
+    }
+
+    function type(sc, el) {
+        var text = el.__text, i = 0;
+        el.classList.add('typing');
+        var id = setInterval(function () {
+            i += 2; el.textContent = text.slice(0, i);
+            if (i >= text.length) { clearInterval(id); el.classList.remove('typing'); }
+        }, 32);
+        sc.__ld.timers.push(id);
+    }
+
+    function moveCursor(sc, cur, step) {
+        if (step === '-') { cur.classList.remove('show'); return; }
+        var click = step.slice(-1) === '!', name = click ? step.slice(0, -1) : step;
+        var target = sc.querySelector('[data-target="' + name + '"]');
+        if (!target) return;
+        var box = cur.offsetParent.getBoundingClientRect(), r = target.getBoundingClientRect();
+        var x = r.left - box.left + r.width / 2, y = r.top - box.top + r.height / 2;
+        cur.classList.add('show');
+        cur.style.transform = 'translate(' + x + 'px, ' + y + 'px)';
+        if (click) {
+            cur.classList.remove('click'); void cur.offsetWidth; cur.classList.add('click');
+            target.classList.add('hit');
+            later(sc, 180, function () { target.classList.remove('hit'); });
+        }
+    }
+
+    function play(sc) {
+        stop(sc);
+        sc.__ld.run = true;
+        reset(sc);
+        sc.querySelectorAll('[data-at]').forEach(function (el) {
+            later(sc, +el.getAttribute('data-at'), function () {
+                el.classList.add('on');
+                if (el.__from !== undefined) count(sc, el);
+                if (el.__text !== undefined) type(sc, el);
+            });
+        });
+        var cur = sc.querySelector('.sc-cur');
+        if (cur && cur.getAttribute('data-moves')) {
+            cur.getAttribute('data-moves').split(';').forEach(function (m) {
+                var p = m.split('>');
+                later(sc, +p[0], function () { moveCursor(sc, cur, p[1]); });
+            });
+        }
+        if (sc.getAttribute('data-loop') === '1') {
+            later(sc, +sc.getAttribute('data-len') + 2600, function () { if (sc.__ld.run) play(sc); });
+        }
     }
 
     function tabs(root) {
@@ -99,7 +269,7 @@
         var root = document.querySelector('.ld');
         if (!root) return;
         document.documentElement.classList.add('ld-js');
-        videos(root); story(root); tabs(root); reveal(root);
+        live(root); scenes(root); videos(root); story(root); tabs(root); reveal(root);
     }
 
     document.addEventListener('DOMContentLoaded', function () {

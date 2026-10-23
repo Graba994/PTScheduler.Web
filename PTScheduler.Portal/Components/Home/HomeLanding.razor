@@ -3,11 +3,11 @@
 @inject AssistantService Assistant
 
 @* Szablon „Nowa” strony głównej: sprzedażowa strona na prawdziwych ekranach i nagraniach z aplikacji
-   (wwwroot/img/lp — zrzuty z danych demo „Pełny grafik”). Zachowanie: landing.js, wygląd: landing.css. *@
+   Zamiast zrzutów — zaprojektowane, animowane sceny (HomeScene) i podgląd aplikacji na żywo w hero (nazwa + kolor → /register).
+   Prawdziwe ekrany zostają tylko w sekcji aplikacji klienta (wwwroot/img/lp). Zachowanie: landing.js, wygląd: landing.css. *@
 <PageTitle>Hantly — aplikacja dla trenerów personalnych z asystentem AI</PageTitle>
 <HeadContent>
     <meta name="description" content="Grafik i zapisy online, płatności, plany treningowe i aplikacja dla klientów pod Twoją marką. Asystent AI mówi, kto czeka, kto zalega i kto może odejść. Zacznij za darmo." />
-    <link rel="preload" as="image" href="/img/lp/trener-pulpit.webp" />
 </HeadContent>
 
 <div class="ld">
@@ -42,18 +42,48 @@
             </ul>
         </div>
 
-        <div class="ld-hero-stage">
-            <figure class="ld-browser ld-hero-laptop">
-                <div class="ld-browser-bar" aria-hidden="true"><b></b><b></b><b></b><span>jan-kowalski.hantly.pl/app</span></div>
-                <img src="/img/lp/trener-pulpit.webp" width="1600" height="1000" alt="Pulpit trenera w Hantly: karta „Na dziś od Hantly” z podpowiedziami, liczba sesji w tygodniu i wizyty na dziś" fetchpriority="high" />
-            </figure>
-            <figure class="ld-phone ld-hero-phone">
-                <video data-ld-video muted loop playsinline preload="none" poster="/img/lp/film-klient-trening.webp" aria-label="Nagranie: klient odhacza serie w aplikacji i dostaje podsumowanie treningu z rekordem">
-                    <source src="/img/lp/film-klient-trening.mp4" type="video/mp4" />
-                    <source src="/img/lp/film-klient-trening.webm" type="video/webm" />
-                </video>
-            </figure>
-            <div class="ld-toast ld-toast-1" aria-hidden="true"><span class="ld-toast-ic mint"><i class="bi bi-trophy-fill"></i></span><span><b>Nowy rekord klienta</b>Wiosłowanie hantlami — 29 kg</span></div>
+        <div class="ld-hero-stage ldl" data-ld-live>
+            <form class="ldl-form" action="/register" method="get" data-enhance="false">
+                <div class="ldl-form-k"><i class="bi bi-magic"></i>Sprawdź na żywo</div>
+                <label for="ldl-name">Jak nazywa się Twoje studio?</label>
+                <input id="ldl-name" name="nazwa" maxlength="40" autocomplete="organization" placeholder="np. Kasia Fit Studio" />
+                <div class="ldl-sw" role="radiogroup" aria-label="Kolor aplikacji">
+                    @foreach (var c in _heroColors)
+                    {
+                        <label class="ldl-swatch" style="--c1:@c.Hex;--c2:@c.Hex2" title="@c.Name">
+                            <input type="radio" name="kolor" value="@c.Key" checked="@(c.Key == _heroColors[0].Key)" data-hex="@c.Hex" data-hex2="@c.Hex2" />
+                            <span class="visually-hidden">@c.Name</span>
+                        </label>
+                    }
+                </div>
+                <button type="submit" class="lp-btn lp-btn-primary"><i class="bi bi-arrow-right-circle"></i>Zbuduj tę aplikację</button>
+                <small>Za darmo, bez karty. Kreator przeniesie nazwę i kolor.</small>
+            </form>
+            <div class="ldl-phone" style="--app:@_heroColors[0].Hex;--app2:@_heroColors[0].Hex2" aria-label="Podgląd aplikacji dla Twoich klientów">
+                <div class="ldl-scr">
+                    <div class="ldl-bar"><span>9:41</span><span><i class="bi bi-reception-4"></i><i class="bi bi-wifi"></i><i class="bi bi-battery-full"></i></span></div>
+                    <div class="ldl-head">
+                        <span class="ldl-mono" data-ldl-mono>KF</span>
+                        <span class="ldl-id"><b data-ldl-name>Kasia Fit Studio</b><small>Twoja aplikacja</small></span>
+                        <i class="bi bi-bell"></i>
+                    </div>
+                    <div class="ldl-hello">Cześć, Marta! 👋</div>
+                    <div class="ldl-next">
+                        <small>Najbliższy trening</small>
+                        <b>czwartek, 18:00</b>
+                        <span>Trening personalny · 60 min</span>
+                        <em><i class="bi bi-check2"></i>potwierdzony</em>
+                    </div>
+                    <div class="ldl-book"><i class="bi bi-calendar-plus"></i>Umów trening</div>
+                    <div class="ldl-list">
+                        <div><span class="ldl-ic"><i class="bi bi-lightning-charge-fill"></i></span><span><b>Trening personalny</b><small>60 min</small></span><strong>150 zł</strong></div>
+                        <div><span class="ldl-ic"><i class="bi bi-people-fill"></i></span><span><b>Trening w parze</b><small>60 min</small></span><strong>220 zł</strong></div>
+                        <div><span class="ldl-ic"><i class="bi bi-box-seam"></i></span><span><b>Pakiet 10 treningów</b><small>ważny 3 miesiące</small></span><strong>1 300 zł</strong></div>
+                    </div>
+                    <div class="ldl-tabs"><span class="on"><i class="bi bi-house-door-fill"></i>Start</span><span><i class="bi bi-calendar3"></i>Wizyty</span><span><i class="bi bi-lightning-charge"></i>Trening</span><span><i class="bi bi-chat"></i>Czat</span></div>
+                </div>
+            </div>
+            <div class="ld-toast ld-toast-1" aria-hidden="true"><span class="ld-toast-ic mint"><i class="bi bi-trophy-fill"></i></span><span><b>Nowy rekord klienta</b>Wiosłowanie hantlem — 29 kg</span></div>
             <div class="ld-toast ld-toast-2" aria-hidden="true"><span class="ld-toast-ic violet"><i class="bi bi-cash-coin"></i></span><span><b>Wpłata odhaczona</b>150 zł · gotówka</span></div>
             <div class="ld-toast ld-toast-3" aria-hidden="true"><span class="ld-toast-ic energy"><i class="bi bi-stars"></i></span><span><b>@_look.Name</b>3 osoby zwykle trenują o 16:00 — zaprosić?</span></div>
         </div>
@@ -102,7 +132,7 @@
         <div class="ld-head ld-head-dark">
             <div class="lp-eyebrow">Jeden dzień z Hantly</div>
             <h2 id="ld-day-title">Tak wygląda Twój dzień, kiedy aplikacja pracuje razem z Tobą</h2>
-            <p>Prawdziwe ekrany i nagrania z aplikacji trenera — bez makiet. Dane pochodzą z konta pokazowego.</p>
+            <p>Pięć chwil z prawdziwego dnia trenera. Tak działają w aplikacji ekran „Dziś”, zaległości, wolne okienka i aplikacja klienta.</p>
         </div>
         <div class="ld-day-grid" data-ld-story>
             <ol class="ld-steps">
@@ -160,10 +190,9 @@
                             }
                         </ul>
                     </div>
-                    <figure class="ld-browser">
-                        <div class="ld-browser-bar" aria-hidden="true"><b></b><b></b><b></b><span>@($"jan-kowalski.hantly.pl{f.Path}")</span></div>
-                        <img src="@($"/img/lp/{f.Image}.webp")" width="1600" height="1000" alt="@f.Alt" loading="lazy" />
-                    </figure>
+                    <div class="ld-scene-box">
+                        <HomeScene Name="@f.Scene" Alt="@f.Alt" AssistantName="@_look.Name" Mascot="@Mascot" />
+                    </div>
                 </div>
             }
         </div>
@@ -179,10 +208,8 @@
                 <div class="lp-eyebrow">Asystent AI w Twojej aplikacji</div>
             </div>
             <h2 id="ld-ai-title">@_look.Name mówi Ci, co jest ważne dziś. <span class="ld-grad">Zanim o to zapytasz.</span></h2>
-            <p>Asystent sam przegląda grafik, płatności, ankiety i treningi klientów. Każda podpowiedź ma przycisk, który od razu prowadzi do działania. Tak to wygląda na pulpicie trenera:</p>
-            <figure class="ld-card-shot">
-                <img src="/img/lp/zoom-hantly.webp" width="1392" height="666" alt="Karta „Na dziś od Hantly” na pulpicie trenera: rezerwacje do akceptacji, kończące się pakiety, zaległości i wolne okienko — każda z przyciskiem" loading="lazy" />
-            </figure>
+            <p>Asystent sam przegląda grafik, płatności, ankiety i treningi klientów. Każda podpowiedź ma przycisk, który od razu prowadzi do działania, a wiadomość do klienta asystent napisze w Twoim stylu.</p>
+
             <ul class="ld-ai-trust">
                 <li><i class="bi bi-calculator"></i><span><b>AI nie zmyśla liczb.</b> Liczy je aplikacja, a każda liczba w tekście jest sprawdzana.</span></li>
                 <li><i class="bi bi-incognito"></i><span><b>Imiona klientów zostają u Ciebie.</b> Do AI trafiają same liczby i fakty.</span></li>
@@ -190,14 +217,10 @@
             </ul>
         </div>
         <div class="ld-ai-media">
-            <figure class="ld-browser" data-ld-reveal>
-                <div class="ld-browser-bar" aria-hidden="true"><b></b><b></b><b></b><span>jan-kowalski.hantly.pl/trainer/retencja</span></div>
-                <img src="/img/lp/trener-retencja.webp" width="1600" height="1000" alt="Ekran „Klienci, którzy mogą odejść”: ryzyko, powody i przycisk Napisz" loading="lazy" />
-            </figure>
-            <figure class="ld-browser ld-ai-media-2" data-ld-reveal>
-                <div class="ld-browser-bar" aria-hidden="true"><b></b><b></b><b></b><span>jan-kowalski.hantly.pl/stats/business</span></div>
-                <img src="/img/lp/trener-biznes.webp" width="1600" height="1000" alt="Statystyki biznesu: „Co się zmieniło” w trzech zdaniach, retencja i prognoza przychodu" loading="lazy" />
-            </figure>
+            <HomeScene Name="risk" Alt="Asystent pokazuje klientów, którzy mogą odejść, i pisze do nich wiadomość w stylu trenera" AssistantName="@_look.Name" Mascot="@Mascot" />
+            <div class="ld-ai-media-2">
+                <HomeScene Name="stats" Alt="„Co się zmieniło” w biznesie: retencja, przychód i prognoza na 30 dni" AssistantName="@_look.Name" Mascot="@Mascot" />
+            </div>
         </div>
     </div>
 </section>
@@ -389,6 +412,10 @@
     private int _activeTrainers;
     private AssistantService.PublicLook _look = new(AssistantService.DefaultName, "live", null, m => $"/assistant/mascot/{m}.png");
 
+    /// <summary>Kolory do wyboru w podglądzie hero (klucze jak w kreatorze — przechodzą do /register?kolor=).</summary>
+    private static readonly AppBuilderCatalog.AppColor[] _heroColors =
+        new[] { "lavender", "ocean", "forest", "rose", "sunset", "slate" }.Select(AppBuilderCatalog.ColorOf).ToArray();
+
     private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
 
     private record Pain(string Icon, string Before, string After);
@@ -401,42 +428,42 @@
         new("bi-file-earmark-pdf", "Plany w PDF-ach i notatkach", "Plan w telefonie klienta, a ciężary zapisują się same."),
     ];
 
-    /// <param name="Kind">„img” — zrzut w oknie przeglądarki, „video” — nagranie z komputera, „phone” — nagranie z telefonu.</param>
-    private record DayStep(string Time, string Icon, string Title, string Text, string Kind, string Media, string Alt, string Path);
+    /// <param name="Scene">Nazwa sceny w HomeScene.</param>
+    private record DayStep(string Time, string Icon, string Title, string Text, string Scene, string Alt);
 
     private static readonly DayStep[] _day =
     [
         new("07:00", "bi-sunrise", "Poranny brief", "Zanim wypijesz kawę, wiesz wszystko: ile wizyt, kto ma uwagi zdrowotne, co czeka na Twoją decyzję. Plan dnia przychodzi też e-mailem i pushem.",
-            "img", "trener-dzis", "Ekran „Dziś”: liczba wizyt, sprawy do zrobienia i uwagi zdrowotne klientów", "/dzis"),
+            "brief", "Poranny brief: powiadomienie i karta „Na dziś” z czterema sprawami, każda z przyciskiem"),
         new("09:30", "bi-lightning-charge", "Trening z planem w telefonie", "Klient widzi plan na dziś i ciężary z poprzedniego razu. Odhacza serie, a po treningu dostaje podsumowanie z rekordami. Ty widzisz je od razu w jego profilu.",
-            "phone", "film-klient-trening", "Nagranie: klient odhacza serie i kończy trening z nowym rekordem", "/train"),
+            "train", "Klient odhacza serie w telefonie i dostaje nowy rekord, trener widzi go w profilu"),
         new("13:00", "bi-cash-coin", "Pieniądze bez gonienia", "Wszystkie zaległości w jednym miejscu. Gotówka, przelew albo karta — jedno kliknięcie. Przypomnienie asystent napisze za Ciebie: uprzejmie i w Twoim stylu.",
-            "video", "film-trener-zaleglosci", "Nagranie: trener odhacza wpłaty, a asystent przygotowuje uprzejme przypomnienie", "/zaleglosci"),
+            "debts", "Trener odhacza wpłatę gotówką, a asystent pisze uprzejme przypomnienie o płatności"),
         new("16:00", "bi-calendar-plus", "Wolne okienko nie przepada", "Ktoś odwołał trening? Hantly podpowiada, kto zwykle trenuje o tej porze, i wysyła zaproszenie z linkiem do rezerwacji tego terminu.",
-            "img", "trener-okienka", "Ekran „Wolne okienka”: osoby, które zwykle trenują o tej porze, i gotowa wiadomość", "/okienka"),
+            "slots", "Odwołany trening zwalnia termin, asystent zaprasza trzy osoby i termin zajmuje nowa rezerwacja"),
         new("20:30", "bi-moon-stars", "Dzień domknięty", "Wizyty same zamykają się 2 godziny po treningu, a wpływy trafiają do Finansów. Na koniec miesiąca paczka dla księgowej jednym kliknięciem.",
-            "img", "trener-finanse", "Ekran „Finanse”: łączna wartość, opłacone, nieopłacone i wpłaty u trenera", "/finance"),
+            "close", "Podsumowanie dnia: treningi, wpływy, wykres tygodnia i gotowa paczka dla księgowej"),
     ];
 
-    private record FeatureTab(string Icon, string Name, string Title, string[] Points, string Image, string Path, string Alt);
+    private record FeatureTab(string Icon, string Name, string Title, string[] Points, string Scene, string Alt);
 
     private static readonly FeatureTab[] _features =
     [
         new("bi-calendar-week", "Grafik i zapisy", "Grafik, który układa się sam",
             ["Klienci rezerwują wolne terminy z Twoich godzin pracy", "Serie wizyt i szablon tygodnia — grafik na miesiąc w minutę", "Przypomnienia e-mail, SMS i push: mniej nieobecności", "Dwustronna synchronizacja z Kalendarzem Google i linki Meet"],
-            "trener-kalendarz", "/calendar", "Kalendarz trenera: tydzień z wizytami klientów i statusami"),
+            "cal", "Tydzień w kalendarzu trenera i nowa rezerwacja online w czwartek o 18:00"),
         new("bi-people", "Klienci", "Każdy klient jak na dłoni",
             ["Profil z historią wizyt, pakietów, treningów i pomiarów", "Ankieta zdrowotna i zgody RODO przed pierwszym treningiem", "Czat z klientem w aplikacji, z powiadomieniami", "Import klientów z pliku — bez przepisywania"],
-            "trener-klienci", "/clients", "Lista klientów z celami, liczbą sesji i datą najbliższej wizyty"),
+            "client", "Profil klientki: cel, liczba treningów, pakiet, obecność, wykres siły i wiadomość na czacie"),
         new("bi-clipboard2-pulse", "Plany treningowe", "Plany, które klient ma zawsze przy sobie",
             ["Katalog ćwiczeń po polsku, z opisami i filmami", "Propozycja planu z historii klienta — AI podpowiada, Ty decydujesz", "Podpowiedzi progresji z oceny wysiłku po treningu", "Plan w PDF z Twoim logo"],
-            "trener-plany", "/plans", "Plany treningowe: szablony i plany klientów"),
+            "plan", "Plan treningowy z ćwiczeniami i propozycją zwiększenia ciężaru"),
         new("bi-wallet2", "Płatności", "Pieniądze w porządku, bez arkusza",
             ["Pakiety, karnety cykliczne, vouchery i kupony", "BLIK i karta online — pieniądze trafiają prosto na Twoje konto", "Faktury i wysyłka do KSeF", "Ręczne wpłaty edytujesz, a te z bramki rozliczają się same"],
-            "trener-finanse", "/finance", "Finanse: wartość pakietów, wpływy i treningi opłacone u trenera"),
+            "pay", "Pakiet, karnet i voucher oraz wpłaty: BLIK online, faktura w KSeF i gotówka odhaczona ręcznie"),
         new("bi-graph-up-arrow", "Statystyki", "Wiesz, jak naprawdę idzie biznes",
             ["„Co się zmieniło” — retencja, przychód i przyczyny w trzech zdaniach", "Prognoza przychodu na 30 dni z odnowień karnetów", "Obłożenie grafiku i klienci, którzy wydają najwięcej", "Aktywność podopiecznych: kto trenuje, a kto odpuszcza"],
-            "trener-biznes", "/stats/business", "Statystyki biznesu: retencja, średnio na klienta, obłożenie grafiku i prognoza"),
+            "stats", "„Co się zmieniło”: retencja, przychód, obłożenie grafiku, wykres sześciu miesięcy i prognoza"),
     ];
 
     private static readonly (string Image, string Label)[] _clientScreens =
@@ -447,32 +474,7 @@
 
     private RenderFragment DayMedia(DayStep step, bool stage) => __builder =>
     {
-        if (step.Kind == "phone")
-        {
-            <figure class="ld-phone">
-                <video data-ld-video muted loop playsinline preload="none" poster="@($"/img/lp/{step.Media}.webp")" aria-label="@step.Alt">
-                    <source src="@($"/img/lp/{step.Media}.mp4")" type="video/mp4" />
-                    <source src="@($"/img/lp/{step.Media}.webm")" type="video/webm" />
-                </video>
-            </figure>
-        }
-        else
-        {
-            <figure class="ld-browser">
-                <div class="ld-browser-bar"><b></b><b></b><b></b><span>@($"jan-kowalski.hantly.pl{step.Path}")</span></div>
-                @if (step.Kind == "video")
-                {
-                    <video data-ld-video muted loop playsinline preload="none" poster="@($"/img/lp/{step.Media}.webp")" width="1000" height="620" aria-label="@step.Alt">
-                        <source src="@($"/img/lp/{step.Media}.mp4")" type="video/mp4" />
-                        <source src="@($"/img/lp/{step.Media}.webm")" type="video/webm" />
-                    </video>
-                }
-                else
-                {
-                    <img src="@($"/img/lp/{step.Media}.webp")" width="1600" height="1000" alt="@(stage ? "" : step.Alt)" loading="lazy" />
-                }
-            </figure>
-        }
+        <HomeScene Name="@step.Scene" Alt="@step.Alt" AssistantName="@_look.Name" Mascot="@Mascot" />
     };
 
     /// <summary>Maskotka asystenta: animowany SVG (wbudowane ikony, animacja „Żywy”) albo ikona nastroju z Panelu.</summary>
