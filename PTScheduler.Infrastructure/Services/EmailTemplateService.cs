@@ -8,7 +8,8 @@ namespace PTScheduler.Infrastructure.Services;
 
 public class EmailTemplateService(
     IDbContextFactory<ApplicationDbContext> dbFactory,
-    IBrandingService brandingService) : IEmailTemplateService
+    IBrandingService brandingService,
+    IWebRootPathProvider webRoot) : IEmailTemplateService
 {
     public async Task<List<EmailTemplateDto>> GetAllAsync()
     {
@@ -79,21 +80,39 @@ public class EmailTemplateService(
         variables["CompanyName"] = companyName;
         variables["AccentColor"] = accentColor;
 
-        string? logoHtml = null;
-        if (!string.IsNullOrEmpty(branding.LogoPath))
-        {
-            variables["Logo"] = branding.LogoPath;
-            logoHtml = "<img src=\"{{Logo}}\" alt=\"" + companyName + "\" style=\"max-height:48px;max-width:180px;display:block;margin:0 auto 12px\" />";
-        }
+        // Logo jako obrazek w samej wiadomości (SmtpEmailService dołącza je do maila) — bez SVG i bez
+        // adresów względnych, które w skrzynce kończyły się pustą ikonką. Bez logo: sama nazwa studia.
+        var safeName = System.Net.WebUtility.HtmlEncode(companyName);
+        if (!string.IsNullOrEmpty(branding.LogoPath)) variables["Logo"] = AbsoluteUrl(branding.LogoPath);
+        var logoHtml = EmailLogo.Png(webRoot.WebRootPath, branding.LogoPath) is { } png
+            ? $"<img src=\"{EmailLogo.Src}\" alt=\"{safeName}\" height=\"{LogoHeight(png)}\" style=\"max-height:48px;max-width:180px;height:auto;display:block;margin:0 auto 12px;border:0\" />"
+            : $"<div style=\"color:rgba(255,255,255,.85);font-size:13px;font-weight:bold;letter-spacing:.04em;margin:0 0 6px\">{safeName}</div>";
 
         var subject = ReplacePlaceholders(template.Subject, variables);
         var headerTitle = ReplacePlaceholders(template.HeaderTitle, variables);
         var body = ReplacePlaceholders(template.HtmlBody, variables);
         var footer = ReplacePlaceholders(template.FooterText, variables);
-        var logoRendered = logoHtml is not null ? ReplacePlaceholders(logoHtml, variables) : null;
-
-        var html = WrapInLayout(headerTitle, body, footer, accentColor, logoRendered);
+        var html = WrapInLayout(headerTitle, body, footer, accentColor, logoHtml);
         return (subject, html);
+    }
+
+    /// <summary>Pełny adres pliku aplikacji (TENANT_DOMAIN) — zmienna {{Logo}} we własnych szablonach.</summary>
+    private static string AbsoluteUrl(string path)
+    {
+        var domain = Environment.GetEnvironmentVariable("TENANT_DOMAIN")?.Trim().TrimEnd('/');
+        if (string.IsNullOrEmpty(domain)) return path;
+        var host = domain.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? domain : "https://" + domain;
+        return host + "/" + path.TrimStart('/');
+    }
+
+    /// <summary>Wysokość logo w px (najwyżej 48) z proporcji PNG — część skrzynek ignoruje max-height.</summary>
+    private static int LogoHeight(byte[] png)
+    {
+        if (png.Length < 24) return 48;
+        var w = (png[16] << 24) | (png[17] << 16) | (png[18] << 8) | png[19];
+        var h = (png[20] << 24) | (png[21] << 16) | (png[22] << 8) | png[23];
+        if (w <= 0 || h <= 0) return 48;
+        return (int)Math.Round(Math.Min(48.0, 180.0 * h / w));
     }
 
     private static string ReplacePlaceholders(string text, Dictionary<string, string> vars)

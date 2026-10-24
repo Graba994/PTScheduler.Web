@@ -8,6 +8,29 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
     /// <summary>Obrazek dołączony do wiadomości (w HTML: <c>src="cid:{ContentId}"</c>) — widać go bez pobierania z sieci.</summary>
     public sealed record InlineImage(string ContentId, byte[] Data, string ContentType);
 
+    /// <summary>Znacznik w szablonach Portalu: przy wysyłce zamienia się w logo Hantly (obrazek w samej wiadomości).
+    /// Maile trenerów przekazywane przez Portal go nie mają, więc nie dostają logo platformy.</summary>
+    public const string LogoMarker = "<!--hantly-logo-->";
+    private const string LogoCid = "hantly-logo";
+    private static readonly Lazy<byte[]?> LogoPng = new(() =>
+    {
+        foreach (var root in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
+        {
+            var file = Path.Combine(root, "wwwroot", "brand", "hantly-logo.png");
+            if (File.Exists(file)) return File.ReadAllBytes(file);
+        }
+        return null;
+    });
+
+    public static (string Html, IReadOnlyList<InlineImage>? Images) WithLogo(string html, IReadOnlyList<InlineImage>? images)
+    {
+        if (!html.Contains(LogoMarker, StringComparison.Ordinal)) return (html, images);
+        if (LogoPng.Value is not { } png)
+            return (html.Replace(LogoMarker, """<div style="text-align:center;margin:0 0 6px;font-weight:800;font-size:20px;color:#7c3aed;letter-spacing:-.01em">Hantly</div>"""), images);
+        var img = $"""<div style="text-align:center;margin:0 0 6px"><img src="cid:{LogoCid}" width="132" height="43" alt="Hantly" style="display:inline-block;border:0;width:132px;height:auto"></div>""";
+        return (html.Replace(LogoMarker, img), [.. images ?? [], new InlineImage(LogoCid, png, "image/png")]);
+    }
+
     /// <param name="fromNameOverride">Nazwa nadawcy (np. studio trenera); adres zostaje adresem platformy.</param>
     /// <param name="replyTo">Adres odpowiedzi — przy poczcie trenera jego własny e-mail.</param>
     public async Task<(bool Success, string? Error)> SendAsync(string toEmail, string subject, string htmlBody,
@@ -16,6 +39,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
     {
         try
         {
+            (htmlBody, images) = WithLogo(htmlBody, images);
             var s = await settings.GetAllAsync(
                 SiteSettingsService.Keys.SmtpHost,
                 SiteSettingsService.Keys.SmtpPort,
@@ -88,6 +112,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <div style="text-align: center; padding: 20px 0;">
                 <h1 style="color: #6366f1;">🎉 Witaj w Hantly!</h1>
             </div>
@@ -129,6 +154,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <h1 style="color: #7c3aed; font-size: 1.4rem;">Za {daysLeft} dni kończy się okres próbny</h1>
             <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
             <p>nic nie musisz robić — aplikacja działa dalej. Po okresie próbnym pobierzemy z karty <strong>{amount:0.##} zł</strong>
@@ -149,6 +175,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <div style="text-align: center; padding: 20px 0;">
                 <h1 style="color: #f59e0b;">Twoj okres probny konczy sie za {daysLeft} dni</h1>
             </div>
@@ -170,6 +197,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <div style="text-align: center; padding: 20px 0;">
                 <h1 style="color: #10b981;">Platnosc otrzymana</h1>
             </div>
@@ -191,6 +219,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <div style="text-align: center; padding: 20px 0;">
                 <h1 style="color: #ef4444;">Platnosc nieudana</h1>
             </div>
@@ -212,6 +241,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <div style="text-align: center; padding: 20px 0;">
                 <h1 style="color: #ef4444;">Konto zawieszone</h1>
             </div>
@@ -232,6 +262,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <div style="text-align: center; padding: 20px 0;">
                 <h1 style="color: #f59e0b;">Twoje konto jest nieaktywne</h1>
             </div>
@@ -253,6 +284,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <div style="text-align: center; padding: 20px 0;">
                 <h1 style="color: #ef4444;">Twoje konto zostanie usuniete</h1>
             </div>
@@ -274,6 +306,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <div style="text-align: center; padding: 20px 0;">
                 <h1 style="color: #ef4444;">Konto zostalo usuniete</h1>
             </div>
@@ -293,6 +326,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <div style="text-align: center; padding: 20px 0;">
                 <h1 style="color: #10b981;">Przedluzono okres ochrony konta</h1>
             </div>
@@ -313,6 +347,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <div style="text-align: center; padding: 20px 0;">
                 <h1 style="color: #6366f1;">Dziekujemy za rejestracje!</h1>
             </div>
@@ -340,6 +375,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <div style="text-align: center; padding: 20px 0;">
                 <h1 style="color: #f59e0b;">Nowa rejestracja trenera</h1>
             </div>
@@ -371,6 +407,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <div style="text-align: center; padding: 20px 0;">
                 <h1 style="color: #7c3aed; margin-bottom: 4px;">Twoja aplikacja działa!</h1>
                 <p style="color: #6b7280; margin-top: 0;">{WebUtility.HtmlEncode(companyName)}</p>
@@ -412,6 +449,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <div style="text-align: center; padding: 20px 0;">
                 <h1 style="color: #7c3aed; margin-bottom: 4px;">Twoja aplikacja czeka!</h1>
                 <p style="color: #6b7280; margin-top: 0;">{WebUtility.HtmlEncode(companyName)}</p>
@@ -434,6 +472,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <h1 style="color: #7c3aed; font-size: 1.4rem;">Twoja aplikacja jest w kolejce</h1>
             <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
             <p>aplikacja <strong>{WebUtility.HtmlEncode(companyName)}</strong> jest zbudowana i czeka na uruchomienie. Wszystkie ustawienia z kreatora są zapisane —
@@ -450,6 +489,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 560px; margin: 0 auto; padding: 20px; color: #1f2937; line-height: 1.55;">
+            <!--hantly-logo-->
         {inner}
             <p style="color: #6b7280; font-size: 0.875rem; margin-top: 28px;">Coś nie działa albo masz pytanie? Odpisz na tego maila — czytamy wszystko.<br>Hantly</p>
         </body>
@@ -572,6 +612,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 560px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <h1 style="color: #059669; font-size: 1.4rem;">{WebUtility.HtmlEncode(domain)} działa!</h1>
             <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
             <p>Twoja domena wskazuje już naszą platformę i ma certyfikat HTTPS. Klienci mogą wchodzić pod
@@ -586,6 +627,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 560px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <h1 style="color: #d97706; font-size: 1.4rem;">Nie widzimy ustawień DNS dla {WebUtility.HtmlEncode(domain)}</h1>
             <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
             <p>przez 7 dni domena nie wskazała naszego serwera, więc przestaliśmy czekać. Aplikacja działa normalnie pod
@@ -603,6 +645,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 520px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <h1 style="color: #7c3aed; font-size: 1.3rem;">Twój kod do publikacji aplikacji</h1>
             <p>Wpisz ten kod w kreatorze, żeby potwierdzić adres e-mail:</p>
             <p style="font-size: 2rem; font-weight: 800; letter-spacing: .3em; text-align: center; background: #f5f3ff; padding: 16px; border-radius: 12px;">{code}</p>
@@ -617,6 +660,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <h1 style="color: {(ok ? "#10b981" : "#dc2626")}; font-size: 1.4rem;">{(ok ? "Nowy trener uruchomił aplikację" : "Rejestracja z kreatora — uruchomienie się nie udało")}</h1>
             <div style="background: #f9fafb; border-radius: 12px; padding: 20px; margin: 20px 0;">
                 <div style="margin-bottom: 8px;"><strong>Trener:</strong> {WebUtility.HtmlEncode(trainerName)}</div>
@@ -637,6 +681,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <div style="text-align: center; padding: 20px 0;">
                 <h1 style="color: #10b981;">Twoja aplikacja działa!</h1>
             </div>
@@ -676,6 +721,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <div style="text-align: center; padding: 20px 0;">
                 <h1 style="color: #6366f1;">Nowe zamowienie uslugi</h1>
             </div>
@@ -707,6 +753,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <div style="text-align: center; padding: 20px 0;">
                 <h1 style="color: #6366f1;">Zmiana statusu zamowienia</h1>
             </div>
@@ -732,6 +779,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         <!DOCTYPE html>
         <html>
         <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
             <div style="text-align: center; padding: 20px 0;">
                 <h1 style="color: #6366f1;">Witaj w Hantly!</h1>
             </div>

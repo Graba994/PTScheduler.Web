@@ -10,6 +10,7 @@ public class SmtpEmailService(
     IEmailSettingsService settingsService,
     IBrandingService brandingService,
     PlatformEmailProvider platformEmail,
+    IWebRootPathProvider webRoot,
     ILogger<SmtpEmailService> logger) : IEmailService
 {
     private static bool OwnConfigured(Application.DTOs.EmailSettingsDto s) =>
@@ -68,6 +69,7 @@ public class SmtpEmailService(
         if (Application.Demo.DemoScenarios.IsDemoEmail(toAddress)) return;
         var s = await ResolveAsync();
         if (s is null) return;
+        images = await WithLogoAsync(htmlBody, images);
 
         if (s.Provider == "Platform")
         {
@@ -94,6 +96,22 @@ public class SmtpEmailService(
             if (await platformEmail.GetStatusAsync() is null) throw;
             logger.LogWarning(ex, "Własna skrzynka nie wysłała maila do {To} — wysyłam przez serwer platformy.", toAddress);
             await platformEmail.SendAsync(toAddress, toName, subject, Domain.Rules.PlatformMailNote.Append(htmlBody, s.FromName, s.FromAddress), s.FromName, s.FromAddress, images);
+        }
+    }
+
+    /// <summary>Szablon z logo (<c>cid:brand-logo</c>) — dokładamy PNG logo do wiadomości.</summary>
+    private async Task<IReadOnlyList<Application.Interfaces.EmailInlineImage>?> WithLogoAsync(string html, IReadOnlyList<Application.Interfaces.EmailInlineImage>? images)
+    {
+        if (!html.Contains(EmailLogo.Src, StringComparison.Ordinal) || images?.Any(i => i.ContentId == EmailLogo.ContentId) == true) return images;
+        try
+        {
+            if (EmailLogo.Png(webRoot.WebRootPath, (await brandingService.GetAsync()).LogoPath) is not { } png) return images;
+            return [.. images ?? [], new Application.Interfaces.EmailInlineImage(EmailLogo.ContentId, png, "image/png")];
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            logger.LogWarning(ex, "Nie udało się dołączyć logo do maila.");
+            return images;
         }
     }
 
