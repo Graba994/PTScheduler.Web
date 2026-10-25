@@ -181,6 +181,12 @@ public class SiteBlock
     public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
     public string Type { get; set; } = "text";
     public bool Visible { get; set; } = true;
+    /// <summary>
+    /// Treść przykładowa z szablonu. Dopóki trener jej nie zmieni, goście nie widzą tego, co udaje fakty:
+    /// liczb, metamorfoz, wymyślonych opinii, certyfikatów, „wolnych miejsc” i danych kontaktowych z szablonu.
+    /// Trener widzi je u siebie z oznaczeniem „Przykład”.
+    /// </summary>
+    public bool Sample { get; set; }
     /// <summary>Wariant wyglądu widgetu (np. hero: split / full / center).</summary>
     public string? Variant { get; set; }
     /// <summary>Tło sekcji: default | tint | dark | accent | image.</summary>

@@ -35,8 +35,8 @@ public sealed class SetupState
 }
 
 /// <summary>
-/// Liczy „Pierwsze kroki” i stan opcji ustawień — jedno źródło dla strony „Zarządzanie”
-/// i paska samouczka na podstronach.
+/// Liczy „Pierwsze kroki” i stan opcji ustawień — jedno źródło dla strony „Zarządzanie”, Pulpitu,
+/// ekranu Dziś i paska samouczka na podstronach (jedna lista, jeden licznik).
 /// </summary>
 public sealed class SetupGuide(
     IDbContextFactory<ApplicationDbContext> dbFactory,
@@ -85,22 +85,41 @@ public sealed class SetupGuide(
                 ["users"] = new($"{users} {Pl(users, "konto", "konta", "kont")}", "muted")
             };
 
+            // Jedna lista „Pierwsze kroki” — ta sama w Zarządzaniu, na Pulpicie, na ekranie Dziś i na podstronach.
+            // Zalicza też to, co trener zrobił w kreatorze na hantly.pl i w „Pierwszych ustawieniach” (/witaj).
             // Tylko kroki, które ta osoba może wykonać (asystent bez uprawnień do wyglądu nie dostanie linku do niego).
             var steps = new List<SetupStep>();
             if (access.IsOwner)
             {
-                if (access.IsAdmin)
-                    steps.Add(new("Dodaj logo i kolory", "Klienci zobaczą Twoją markę", "/admin/branding", "bi-palette", hasLogo));
-                // Konto administratora nie prowadzi treningów (nie ma go w zapisach online) —
-                // właściciel zakłada sobie profil trenera i tam ustawia godziny pracy.
-                if (access.IsAdmin)
-                    steps.Add(new("Utwórz swój profil trenera", "Na nim prowadzisz treningi i przyjmujesz zapisy", "/admin/users", "bi-person-badge", trainers > 0));
+                var iTrain = await (from ur in db.UserRoles
+                                    join r in db.Roles on ur.RoleId equals r.Id
+                                    where ur.UserId == userId && r.Name == Domain.Constants.Roles.Trainer
+                                    select ur.UserId).AnyAsync();
+                if (access.IsAdmin && !iTrain && trainers == 0)
+                    // Samo konto administratora (bez roli trenera) nie przyjmuje zapisów — potrzebny profil trenera.
+                    steps.Add(new("Utwórz swój profil trenera", "Na nim prowadzisz treningi i przyjmujesz zapisy", "/admin/users", "bi-person-badge", false));
                 else
-                    steps.Add(new("Ustaw godziny pracy", "Kiedy klienci mogą się zapisać", "/trainer/availability", "bi-clock", weeklyHours > 0));
+                {
+                    var hoursSet = iTrain ? weeklyHours > 0
+                        : await db.TrainerAvailabilities.AnyAsync(a => a.IsActive && a.DayOfWeek != null);
+                    steps.Add(new("Ustaw godziny pracy", "Kiedy klienci mogą się zapisać", "/trainer/availability", "bi-clock", hoursSet));
+                }
                 if (access.IsAdmin)
                     steps.Add(new("Dodaj rodzaj treningu", "Np. trening personalny 60 min", "/admin/session-types", "bi-lightning-charge", sessionTypes > 0));
+                if (access.IsAdmin)
+                    steps.Add(new("Dodaj swoje logo", "Kolor już jest — logo zobaczą klienci w aplikacji i w e-mailach", "/admin/branding", "bi-palette", hasLogo));
+
+                var mine = access.IsAdmin ? db.Clients : db.Clients.Where(c => c.TrainerUserId == userId);
+                var mineIds = mine.Select(c => c.Id);
                 if (access.Can(Perms.ManageClients))
-                    steps.Add(new("Zaproś pierwszego klienta", "Wyślij link albo dodaj ręcznie", "/clients", "bi-person-plus", clients > 0));
+                    steps.Add(new("Dodaj swoich klientów", "Z Excela, z kontaktów w telefonie albo ręcznie", "/clients", "bi-people", await mine.AnyAsync()));
+                steps.Add(new("Zaplanuj pierwszą wizytę", "Klient dostanie potwierdzenie i przypomnienie", "/calendar?nowa=1", "bi-calendar-plus",
+                    await db.Sessions.AnyAsync(x => mineIds.Contains(x.ClientId))));
+                if (entitlements.IsAllowed("TrainingPlansEnabled"))
+                    steps.Add(new("Przypisz pierwszy plan", "Klient zobaczy go w aplikacji, Ty — na wizycie", "/plans/new", "bi-clipboard-check",
+                        await db.TrainingPlans.AnyAsync(x => x.ClientId != null && mineIds.Contains(x.ClientId!.Value))));
+                steps.Add(new("Włącz powiadomienia na telefonie", "Nowe rezerwacje i wiadomości od razu na ekranie", "/Account/Manage/Notifications", "bi-bell",
+                    await db.PushSubscriptions.AnyAsync(x => x.UserId == userId)));
                 if (access.Can(Perms.ManagePayments) && entitlements.IsAllowed("PaymentsEnabled"))
                     steps.Add(new("Włącz płatności online", "BLIK i karta — pieniądze od razu u Ciebie", "/admin/payments", "bi-credit-card", paymentsEnabled));
             }

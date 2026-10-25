@@ -190,7 +190,7 @@ public class SetupService(
             await DefaultReplyToAsync(db, email);
             branding.OnboardingJson = JsonSerializer.Serialize(state);
             await db.SaveChangesAsync();
-            await ApplySiteAsync(dto.SiteTemplate, company);
+            await ApplySiteAsync(dto.SiteTemplate, company, email, dto.OwnerPhone);
             return new(false, "Dane zapisane — kreator /setup jest wypełniony.");
         }
 
@@ -240,16 +240,18 @@ public class SetupService(
         branding.OnboardingJson = JsonSerializer.Serialize(state);
         await db.SaveChangesAsync();
 
-        await ApplySiteAsync(dto.SiteTemplate, company);
-        return new(true, "Konto właściciela i profil trenera utworzone, aplikacja skonfigurowana.");
+        await ApplySiteAsync(dto.SiteTemplate, company, email, dto.OwnerPhone);
+        return new(true, "Konto właściciela utworzone (prowadzi też treningi), aplikacja skonfigurowana.");
     }
 
-    private async Task ApplySiteAsync(string? template, string? company)
+    private async Task ApplySiteAsync(string? template, string? company, string? email, string? phone)
     {
         if (string.IsNullOrWhiteSpace(template)) return;
         try
         {
             var site = SiteWidgets.BuildTemplate(template);
+            // Kontakt i telefon w przyciskach: prawdziwe dane trenera zamiast przykładowych z szablonu.
+            SiteWidgets.Personalize(site, email, phone);
             if (company is not null) site.SeoDescription = $"{company} — treningi, wolne terminy i zapisy online.";
             await siteContent.SaveAsync(site);
             await siteContent.DiscardDraftAsync();
@@ -258,57 +260,30 @@ public class SetupService(
     }
 
     /// <summary>
-    /// Profil trenera dla właściciela: konto Administratora służy do ustawień, a zapisy klientów idą na
-    /// profil trenera. Login profilu to adres właściciela z dopiskiem „+trener” (np. anna+trener@gmail.com)
-    /// i to samo hasło; właściciel przełącza się na niego jednym kliknięciem. Gdy w aplikacji jest już
-    /// trener — nic nie zakładamy.
+    /// Właściciel z kreatora od razu prowadzi treningi na swoim koncie („pracuję sam”): to samo konto ma
+    /// role Administratora i Trenera, więc nie ma drugiego loginu ani przełączania. Gdy w aplikacji jest już
+    /// trener — nic nie zmieniamy. Osobny profil trenera da się utworzyć później (Zarządzanie → Konta).
     /// </summary>
     private async Task<ApplicationUser?> EnsureTrainerProfileAsync(ApplicationUser owner)
     {
         try
         {
+            if (await userManager.IsInRoleAsync(owner, Roles.Trainer)) return owner;
             if ((await userManager.GetUsersInRoleAsync(Roles.Trainer)).Count > 0) return null;
-            var email = TrainerAlias(owner.Email ?? "");
-            if (email is null) return null;
-            var existing = await userManager.FindByEmailAsync(email);
-            if (existing is not null) return existing;
-
-            var trainer = new ApplicationUser
+            var added = await userManager.AddToRoleAsync(owner, Roles.Trainer);
+            if (!added.Succeeded)
             {
-                UserName = email,
-                Email = email,
-                EmailConfirmed = true,
-                FirstName = owner.FirstName,
-                LastName = owner.LastName,
-                PhoneNumber = owner.PhoneNumber,
-                PasswordHash = owner.PasswordHash,
-                MustChangePassword = false
-            };
-            var created = await userManager.CreateAsync(trainer);
-            if (!created.Succeeded)
-            {
-                logger.LogWarning("Nie założono profilu trenera: {Errors}", string.Join(" ", created.Errors.Select(e => e.Description)));
+                logger.LogWarning("Nie nadano roli trenera właścicielowi: {Errors}", string.Join(" ", added.Errors.Select(e => e.Description)));
                 return null;
             }
-            await userManager.AddToRoleAsync(trainer, Roles.Trainer);
-            return trainer;
+            await userManager.UpdateSecurityStampAsync(owner);
+            return owner;
         }
         catch (Exception ex)
         {
-            logger.LogWarning(ex, "Nie udało się założyć profilu trenera dla {Email}.", owner.Email);
+            logger.LogWarning(ex, "Nie udało się ustawić właściciela {Email} jako trenera.", owner.Email);
             return null;
         }
-    }
-
-    /// <summary>anna@gmail.com → anna+trener@gmail.com (null, gdy adres jest nieprawidłowy).</summary>
-    public static string? TrainerAlias(string email)
-    {
-        var at = email.LastIndexOf('@');
-        if (at <= 0 || at == email.Length - 1) return null;
-        var local = email[..at];
-        var plus = local.IndexOf('+');
-        if (plus >= 0) local = local[..plus];
-        return $"{local}+trener{email[at..]}";
     }
 
     public async Task<string?> GetTrainerProfileIdAsync()

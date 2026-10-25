@@ -88,24 +88,14 @@ public class SetupBootstrapTests
 
         site.Verify(s => s.SaveAsync(It.Is<SiteContentDto>(c => c.Template == "women" && c.LayoutVersion == 2)), Times.Once);
 
-        // Profil trenera od pierwszej minuty: anna+trener@…, to samo hasło, rola Trener.
-        var trainer = await users.FindByEmailAsync("anna+trener@example.com");
-        trainer.Should().NotBeNull();
-        (await users.IsInRoleAsync(trainer!, Roles.Trainer)).Should().BeTrue();
-        (await users.IsInRoleAsync(trainer!, Roles.Admin)).Should().BeFalse();
-        (await users.CheckPasswordAsync(trainer!, "Mocne-Haslo-1")).Should().BeTrue();
-        (await setup.GetTrainerProfileIdAsync()).Should().Be(trainer!.Id);
+        // Jedno konto od pierwszej minuty („pracuję sam”): właściciel jest też trenerem — bez drugiego loginu.
+        (await users.IsInRoleAsync(owner, Roles.Trainer)).Should().BeTrue();
+        (await users.FindByEmailAsync("anna+trener@example.com")).Should().BeNull();
+        (await setup.GetTrainerProfileIdAsync()).Should().Be(owner.Id);
     }
 
-    [Theory]
-    [InlineData("anna@gmail.com", "anna+trener@gmail.com")]
-    [InlineData("anna+studio@gmail.com", "anna+trener@gmail.com")]
-    [InlineData("zle", null)]
-    public void TrainerAlias_UsesPlusAddress(string email, string? expected) =>
-        SetupService.TrainerAlias(email).Should().Be(expected);
-
     [Fact]
-    public async Task BuiltByAdmin_AppliesOffer_AndSetupCreatesTrainerProfile()
+    public async Task BuiltByAdmin_AppliesOffer_AndSetupMakesOwnerTrainer()
     {
         var (sp, users, setup, site) = await CreateAsync();
 
@@ -126,9 +116,9 @@ public class SetupBootstrapTests
             (await db.PackageOffers.CountAsync()).Should().Be(1);
 
         await setup.CompleteSetupAsync("self", "Anna Fit Studio", "anna@example.com", "Mocne-Haslo-1");
-        var trainer = await users.FindByEmailAsync("anna+trener@example.com");
-        trainer.Should().NotBeNull("po /setup z danymi z rejestracji powstaje też profil trenera");
-        (await users.IsInRoleAsync(trainer!, Roles.Trainer)).Should().BeTrue();
+        var owner = await users.FindByEmailAsync("anna@example.com");
+        (await users.IsInRoleAsync(owner!, Roles.Trainer)).Should().BeTrue("po /setup z danymi z rejestracji właściciel od razu prowadzi treningi");
+        (await users.FindByEmailAsync("anna+trener@example.com")).Should().BeNull();
     }
 
     [Fact]

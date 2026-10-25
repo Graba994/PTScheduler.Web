@@ -6,6 +6,10 @@
 }
 
 <div class="sb-fields">
+    @if (Block.Sample && Block.Type is "stats" or "transformations" or "testimonials" or "about" or "contact" or "cta")
+    {
+        <div class="sb-sample"><i class="bi bi-eye-slash"></i><span><b>Treść przykładowa.</b> Część z liczbami, opiniami, efektami albo kontaktem klienci zobaczą dopiero, gdy wpiszesz tu swoje dane.</span></div>
+    }
     @if (w is { Variants.Count: > 0 })
     {
         <div class="sb-row">
@@ -13,7 +17,7 @@
             <div class="sb-seg">
                 @foreach (var v in w.Variants)
                 {
-                    <button type="button" class="@((Block.Variant ?? w.Variants[0].Key) == v.Key ? "active" : "")" @onclick="() => Set(() => Block.Variant = v.Key)">@v.Name</button>
+                    <button type="button" class="@((Block.Variant ?? w.Variants[0].Key) == v.Key ? "active" : "")" @onclick="() => Set(() => Block.Variant = v.Key, content: false)">@v.Name</button>
                 }
             </div>
         </div>
@@ -270,9 +274,11 @@
     private static List<string> Lines(object? v) =>
         (v?.ToString() ?? "").Split('\n', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToList();
 
-    private async Task Set(Action change)
+    /// <summary>Zmiana treści zdejmuje oznaczenie „przykład” (zmiana samego wyglądu — nie).</summary>
+    private async Task Set(Action change, bool content = true)
     {
         change();
+        if (content) Block.Sample = false;
         await OnChange.InvokeAsync();
     }
 
@@ -324,7 +330,7 @@
             <div class="sb-seg sb-seg-wrap">
                 @foreach (var (key, name) in new[] { ("default", "Zwykłe"), ("tint", "Delikatne"), ("dark", "Ciemne"), ("accent", "Kolor marki"), ("image", "Zdjęcie") })
                 {
-                    <button type="button" class="@(Block.Background == key ? "active" : "")" @onclick="() => Set(() => Block.Background = key)">@name</button>
+                    <button type="button" class="@(Block.Background == key ? "active" : "")" @onclick="() => Set(() => Block.Background = key, content: false)">@name</button>
                 }
             </div>
             @if (Block.Background == "image")

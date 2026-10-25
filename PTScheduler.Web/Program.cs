@@ -859,10 +859,11 @@ app.MapGet("/account/welcome",
     var ownerId = await setup.RedeemWelcomeTokenAsync(token);
     var owner = ownerId is null ? null : await users.FindByIdAsync(ownerId);
     if (owner is null) return Results.Redirect("/Account/Login?witaj=1");
-    // Od razu na profil trenera (tam ustawia się godziny pracy i przyjmuje zapisy); „Wróć” prowadzi
-    // na konto administratora — tak samo jak przy ręcznym przełączeniu konta.
+    // Starsze instalacje z osobnym profilem trenera: od razu na ten profil (tam są godziny i zapisy),
+    // „Wróć” prowadzi na konto administratora — tak samo jak przy ręcznym przełączeniu konta.
     var trainerId = await setup.GetTrainerProfileIdAsync();
-    var trainer = trainerId is null ? null : await users.FindByIdAsync(trainerId);
+    var trainer = trainerId is null || trainerId == owner.Id ? null : await users.FindByIdAsync(trainerId);
+    // Jedno konto („pracuję sam”): właściciel jest też trenerem — zwykłe logowanie, bez paska przełączenia.
     if (trainer is not null)
         await signIn.SignInWithClaimsAsync(trainer, isPersistent: true,
             [new Claim(PTScheduler.Web.Services.AccountSwitchService.OriginalUserClaim, owner.Id)]);

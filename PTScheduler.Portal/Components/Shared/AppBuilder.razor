@@ -53,6 +53,13 @@
                             </button>
                         }
                     </div>
+                    @* Telefon: podgląd jest pod formularzem — tu tylko adres i skrót do podglądu. *@
+                    <button type="button" class="bd-mini" aria-label="Zobacz podgląd aplikacji"
+                            onclick="document.getElementById('podglad').scrollIntoView({ behavior: 'smooth' })">
+                        <span class="bd-mini-dot" aria-hidden="true"></span>
+                        <span class="bd-mini-url">@AddressText</span>
+                        <span class="bd-mini-go">Podgląd<i class="bi bi-arrow-down-short"></i></span>
+                    </button>
                 </div>
 
                 <BuilderGuidePanel Line="GuideLine" Look="_look" />
@@ -488,7 +495,10 @@
                     {
                         <a class="bd-back bd-site-link" href="/moje-konto"><i class="bi bi-person-badge"></i>Sprawdzaj stan w swoim panelu Hantly</a>
                     }
-                    <p class="bd-foot"><i class="bi bi-calendar-heart"></i>Okres próbny liczymy od dnia uruchomienia, nie od dziś.</p>
+                    @if (SelectedPlan is { MonthlyPrice: > 0, TrialDays: > 0 })
+                    {
+                        <p class="bd-foot"><i class="bi bi-calendar-heart"></i>Okres próbny liczymy od dnia uruchomienia, nie od dziś.</p>
+                    }
                     @if (!AdminMode)
                     {
                         <p class="bd-foot">Masz kod zaproszenia? Napisz do nas — uruchomimy od razu.</p>
@@ -498,7 +508,7 @@
             }
         </div>
 
-        <div class="bd-stage @(Demo ? "bd-stage-s5" : "")" aria-label="Podgląd Twojej aplikacji na żywo">
+        <div id="podglad" class="bd-stage @(Demo ? "bd-stage-s5" : "")" aria-label="Podgląd Twojej aplikacji na żywo">
             <div class="bd-stage-top">
                 <span class="bd-live"><span class="bd-live-dot"></span>@(_phase is Phase.Build or Phase.Verify or Phase.Card ? "Podgląd na żywo" : _phase == Phase.Done ? "Opublikowano" : _phase == Phase.Queued ? "W kolejce" : "Publikowanie")</span>
                 <span class="bd-timer" title="Czas budowania"><i class="bi bi-stopwatch"></i>@TimerText</span>
@@ -657,7 +667,7 @@
                     <span class="bd-where-ic"><i class="bi bi-globe2"></i></span>
                     <span class="bd-where-txt">
                         <small>@(_phase == Phase.Build && string.IsNullOrWhiteSpace(_company) ? "Tu pojawi się adres Twojej strony" : AdminMode ? "Strona trenera będzie pod adresem" : "Twoja strona będzie pod adresem")</small>
-                        <b @key="StageHost">@StageHost</b>
+                        <b @key="StageHost">@Breakable(StageHost)</b>
                         @if (NormalizedDomain is { } own) { <em>a po podłączeniu domeny także @own</em> }
                     </span>
                 </div>
@@ -831,6 +841,10 @@
     private string Mono => AppBuilderCatalog.Monogram(string.IsNullOrWhiteSpace(_company) ? null : _company);
     private string? FirstName => TenantSetupPayload.SplitName(_fullName).First;
     private string BaseSlug => AppBuilderCatalog.Slugify(_company) is { Length: >= 3 } s ? s : (AppBuilderCatalog.Slugify(_company) + "-pt").Trim('-');
+    /// <summary>Adres z miejscami łamania przed kropką i po myślniku — na wąskim ekranie nie tnie słowa w połowie.</summary>
+    private static MarkupString Breakable(string host) =>
+        new(string.Join("", host.Select(c => c switch { '.' => "<wbr>.", '-' => "-<wbr>", _ => System.Net.WebUtility.HtmlEncode(c.ToString()) })));
+
     private string AddressText => $"{(string.IsNullOrEmpty(_slug) ? "twoje-studio" : _slug)}.{_mainDomain}";
     /// <summary>Adres, pod którym stanie strona trenera — po zapisie zgłoszenia ten z bazy (może różnić się końcówką).</summary>
     private string StageHost => string.IsNullOrEmpty(_appHost) ? AddressText : _appHost;
@@ -1444,7 +1458,9 @@
                     await CreateTenantAndCardAsync();
                     return;
                 }
-                _error = "Nie udało się wysłać kodu. Sprawdź adres e-mail i spróbuj ponownie.";
+                _error = error?.StartsWith(EmailService.RecipientRejected) == true
+                    ? "Ta skrzynka nie przyjmuje wiadomości — sprawdź, czy w adresie nie ma literówki."
+                    : "Mamy chwilowy problem z wysyłką e-maili — to nie Twoja wina. Spróbuj ponownie za kilka minut; dane z kreatora zostają.";
                 return;
             }
             _codeHash = HashCode(code);

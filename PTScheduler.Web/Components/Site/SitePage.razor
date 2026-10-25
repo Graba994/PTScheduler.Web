@@ -53,9 +53,13 @@
     </header>
 
     <main>
-        @foreach (var b in Content.Blocks.Where(x => x.Visible))
+        @foreach (var b in Content.Blocks.Where(x => x.Visible && Shown(x)))
         {
             <span id="b-@b.Id" class="sp-anchor"></span>
+            @if (b.Sample && ShowSamples && SampleHidesSomething(b))
+            {
+                <div class="sp-sample-note" role="note"><i class="bi bi-eye-slash"></i><span><b>Przykład z szablonu.</b> Klienci nie widzą @SampleWhat(b), dopóki nie wpiszesz swoich danych w Zarządzanie → Twoja strona.</span></div>
+            }
             @RenderBlock(b)
         }
     </main>
@@ -94,6 +98,8 @@
     [Parameter] public List<BookingDayDto> Slots { get; set; } = [];
     /// <summary>Stopka „Zrobione w …” (null = nie pokazujemy).</summary>
     [Parameter] public PTScheduler.Web.Services.PlatformInfoService.Info? PoweredBy { get; set; }
+    /// <summary>Trener ogląda swoją stronę: przykładowe treści widać z oznaczeniem. Goście ich nie widzą.</summary>
+    [Parameter] public bool ShowSamples { get; set; }
 
     private static readonly CultureInfo Pl = new("pl-PL");
     private SiteWidgets.ThemeInfo _theme = SiteWidgets.Themes[0];
@@ -109,7 +115,31 @@
 
     private string ShortCta => Content.StickyCtaLabel.Length > 22 ? "Umów trening" : Content.StickyCtaLabel;
 
-    private IEnumerable<(string Id, string Label)> NavLinks => Content.Blocks.Where(b => b.Visible)
+    private bool Shown(SiteBlock b) => ShowSamples || SiteWidgets.ShownToGuests(b, Reviews.Count);
+    /// <summary>Przykład z szablonu oglądany przez gościa — chowamy części, które udają fakty.</summary>
+    private bool HideSample(SiteBlock b) => b.Sample && !ShowSamples;
+
+    /// <summary>Czy gość zobaczy ten przykład inaczej niż trener (wtedy trener dostaje notkę).</summary>
+    private static bool SampleHidesSomething(SiteBlock b) => b.Type switch
+    {
+        "stats" or "transformations" => true,
+        "testimonials" => b.Items.Any(x => !string.IsNullOrWhiteSpace(x.Text)),
+        "about" => b.Items.Any(x => !string.IsNullOrWhiteSpace(x.Title)),
+        "contact" => b.Items.Any(SiteWidgets.IsPlaceholderContact),
+        "cta" => !string.IsNullOrWhiteSpace(b.Eyebrow),
+        _ => false
+    };
+    private static string SampleWhat(SiteBlock b) => b.Type switch
+    {
+        "stats" => "tych liczb",
+        "transformations" => "tych metamorfoz",
+        "testimonials" => "przykładowych opinii (zobaczą tylko opinie od Twoich klientów z aplikacji)",
+        "about" => "przykładowych certyfikatów pod opisem",
+        "contact" => "przykładowych danych kontaktowych",
+        _ => "paska nad tytułem"
+    };
+
+    private IEnumerable<(string Id, string Label)> NavLinks => Content.Blocks.Where(b => b.Visible && Shown(b))
         .Select(b => (Anchor(b), b.Type switch
         {
             "about" => "O mnie", "offer" => "Cennik", "testimonials" => "Opinie", "transformations" => "Efekty",
@@ -122,6 +152,14 @@
         "about" => "o-mnie", "offer" => "cennik", "testimonials" => "opinie", "transformations" => "metamorfozy",
         "contact" => "kontakt", "faq" => "pytania", "slots" => "terminy", _ => "s-" + b.Id
     };
+
+    /// <summary>Przycisk z kotwicą do sekcji, której gość nie zobaczy (np. „Zobacz efekty” bez metamorfoz), chowamy.</summary>
+    private bool AnchorShown(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url) || !url.StartsWith('#')) return true;
+        var target = Content.Blocks.FirstOrDefault(x => "#" + Anchor(x) == url);
+        return target is null || (target.Visible && Shown(target));
+    }
 
     private static string SecClass(SiteBlock b) => $"sp-sec sp-bg-{b.Background} sp-w-{b.Type}";
     private static string SecStyle(SiteBlock b) => b.Background == "image" && Img(b.BackgroundImageUrl) is { } u ? $"--sp-sec-img:url('{u}')" : "";
@@ -212,7 +250,7 @@
                                 else
                                 {
                                     <a href="@Safe(b.CtaUrl)" class="sp-btn sp-btn-primary sp-btn-lg sp-pulse">@b.CtaLabel <i class="bi bi-arrow-right"></i></a>
-                                    @if (!string.IsNullOrWhiteSpace(b.Cta2Label))
+                                    @if (!string.IsNullOrWhiteSpace(b.Cta2Label) && AnchorShown(b.Cta2Url))
                                     {
                                         <a href="@Safe(b.Cta2Url)" class="sp-btn sp-btn-ghost sp-btn-lg">@b.Cta2Label</a>
                                     }
@@ -344,7 +382,7 @@
                             {
                                 <p>@p</p>
                             }
-                            @if (b.Items.Count > 0)
+                            @if (b.Items.Count > 0 && !HideSample(b))
                             {
                                 <div class="sp-chips">
                                     @foreach (var it in b.Items.Where(x => !string.IsNullOrWhiteSpace(x.Title)))
@@ -493,7 +531,7 @@
             case "testimonials":
                 var quotes = new List<(string Text, string Author, string? Badge, int? Rating)>();
                 if (b.UseLiveData) quotes.AddRange(Reviews.Items.Select(r => (r.Text ?? "", r.DisplayName, (string?)"klient", (int?)r.Rating)));
-                quotes.AddRange(b.Items.Where(x => !string.IsNullOrWhiteSpace(x.Text)).Select(x => (x.Text!, x.Title ?? "", x.Badge, (int?)null)));
+                if (!HideSample(b)) quotes.AddRange(b.Items.Where(x => !string.IsNullOrWhiteSpace(x.Text)).Select(x => (x.Text!, x.Title ?? "", x.Badge, (int?)null)));
                 quotes = quotes.Where(q => q.Text.Length > 0).ToList();
                 if (quotes.Count == 0) break;
                 var scroll = b.Variant != "grid" && quotes.Count >= 3;
@@ -576,7 +614,7 @@
                     <div class="sp-wrap">
                         <div class="sp-cta sp-bg-@b.Background wp-reveal" style="@SecStyle(b)">
                             <div class="sp-cta-shine" aria-hidden="true"></div>
-                            @if (!string.IsNullOrWhiteSpace(b.Eyebrow)) { <span class="sp-urgency"><span class="sp-live-dot"></span>@b.Eyebrow</span> }
+                            @if (!string.IsNullOrWhiteSpace(b.Eyebrow) && !HideSample(b)) { <span class="sp-urgency"><span class="sp-live-dot"></span>@b.Eyebrow</span> }
                             <h2>@b.Title</h2>
                             @if (!string.IsNullOrWhiteSpace(b.Text)) { <p>@b.Text</p> }
                             <a href="@Safe(b.CtaUrl)" class="sp-btn sp-btn-invert sp-btn-lg sp-pulse">@b.CtaLabel <i class="bi bi-arrow-right"></i></a>
@@ -591,7 +629,7 @@
                         @Head(b)
                         @if (!string.IsNullOrWhiteSpace(b.Text)) { <p class="sp-lead sp-center">@b.Text</p> }
                         <div class="sp-contacts wp-reveal">
-                            @foreach (var (it, i) in b.Items.Select((x, i) => (x, i)))
+                            @foreach (var (it, i) in b.Items.Where(x => !HideSample(b) || !SiteWidgets.IsPlaceholderContact(x)).Select((x, i) => (x, i)))
                             {
                                 var href = string.IsNullOrWhiteSpace(it.Url) ? null : Safe(it.Url);
                                 @if (href is not null)

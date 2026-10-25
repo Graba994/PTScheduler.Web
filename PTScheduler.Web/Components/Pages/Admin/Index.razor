@@ -90,7 +90,7 @@ else
         }
     }
 
-    @if (!_isHighestPlan && _access.IsOwner)
+    @if (!_isHighestPlan && _access.IsOwner && !_firstWeek)
     {
         <a href="/admin/upgrade" class="set-upgrade">
             <i class="bi bi-rocket-takeoff-fill"></i>
@@ -435,6 +435,8 @@ else
     // Strona „Zarządzanie”: kto co widzi, pierwsze kroki i stan kafelków.
     private AdminAccess _access = new();
     private bool _isHighestPlan;
+    /// <summary>Pierwszy tydzień po uruchomieniu — bez zachęt do wyższego planu (najpierw pierwsze kroki).</summary>
+    private bool _firstWeek;
     private SetupState _setup = new();
     private bool IsLocked(AdminMenuItem i) => i.PlanFlag is not null && !Entitlements.IsAllowed(i.PlanFlag);
     private List<AuditLogDto> _recentLogs = [];
@@ -471,6 +473,13 @@ else
 
         _access = await AdminAccess.LoadAsync(AuthState, Permission);
         _isHighestPlan = !PlanCatalog.HasUpgrade(Entitlements.Current);
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var started = await db.AppBrandings.AsNoTracking().Select(b => b.SetupCompletedAt).FirstOrDefaultAsync();
+            _firstWeek = started is { } at && at > DateTime.UtcNow.AddDays(-PTScheduler.Web.Services.UpsellService.FirstWeekDays);
+        }
+        catch (Exception) { }
         await LoadDataAsync();
         await LoadHubAsync(auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "");
         _loading = false;

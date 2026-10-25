@@ -100,12 +100,21 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             logger.LogInformation("Email sent to {To}: {Subject}", toEmail, subject);
             return (true, null);
         }
+        catch (System.Net.Mail.SmtpFailedRecipientException ex)
+        {
+            // Serwer odbiorcy nie przyjął adresu (literówka, nieistniejąca skrzynka) — to nie awaria poczty.
+            logger.LogWarning(ex, "Adres {To} odrzucony przez serwer poczty.", toEmail);
+            return (false, RecipientRejected + ": " + ex.Message);
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Email send failed to {To}", toEmail);
             return (false, ex.Message);
         }
     }
+
+    /// <summary>Początek błędu, gdy serwer odbiorcy odrzucił adres (a nie gdy nasza poczta nie działa).</summary>
+    public const string RecipientRejected = "Adres odrzucony";
 
     public string WelcomeEmailBody(string trainerName, string domain, string port, string planName) =>
         $"""

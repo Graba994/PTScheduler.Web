@@ -84,8 +84,56 @@ public static class SiteWidgets
     public static Widget? Find(string type) => Catalog.FirstOrDefault(w => w.Type == type);
     public static ThemeInfo ThemeOf(string? key) => Themes.FirstOrDefault(t => t.Key == key) ?? Themes[0];
 
-    /// <summary>Nowy widget z przykładową treścią (po dodaniu od razu wygląda dobrze).</summary>
-    public static SiteBlock Create(string type) => type switch
+    /// <summary>Nowy widget z przykładową treścią (po dodaniu od razu wygląda dobrze) — oznaczony jako przykład.</summary>
+    public static SiteBlock Create(string type)
+    {
+        var block = Sample(type);
+        block.Sample = true;
+        return block;
+    }
+
+    /// <summary>
+    /// Czy goście zobaczą ten widget. Przykładowe liczby i metamorfozy czekają na prawdziwe dane trenera;
+    /// przykładowe opinie znikają (zostają tylko te od klientów z aplikacji).
+    /// </summary>
+    public static bool ShownToGuests(SiteBlock b, int liveReviews) => !b.Sample || b.Type switch
+    {
+        "stats" or "transformations" => false,
+        "testimonials" => b.UseLiveData && liveReviews > 0,
+        "contact" => b.Items.Any(i => !IsPlaceholderContact(i)),
+        _ => true
+    };
+
+    /// <summary>Dane kontaktowe z szablonu (numer 600 000 000, „twojadomena”, „Przykładowa”) — nie pokazujemy ich gościom.</summary>
+    public static bool IsPlaceholderContact(SiteBlockItem i)
+    {
+        var v = (i.Value ?? "") + " " + (i.Url ?? "");
+        return v.Contains("600 000 000") || v.Contains("600000000") || v.Contains("twojadomena", StringComparison.OrdinalIgnoreCase)
+            || v.Contains("Przykładowa", StringComparison.OrdinalIgnoreCase) || v.Contains("@twoj.trener") || i.Url is "https://instagram.com/";
+    }
+
+    /// <summary>
+    /// Strona z kreatora: w miejsce przykładowego kontaktu i telefonu w przyciskach wstawiamy prawdziwy e-mail
+    /// i telefon trenera — to jedyne dane, które znamy na pewno.
+    /// </summary>
+    public static void Personalize(SiteContentDto content, string? email, string? phone)
+    {
+        var tel = string.IsNullOrWhiteSpace(phone) ? null : new string(phone.Where(c => char.IsDigit(c) || c == '+').ToArray());
+        foreach (var b in content.Blocks)
+        {
+            if (b.CtaUrl?.StartsWith("tel:+48600") == true) b.CtaUrl = tel is null ? "/book" : "tel:" + tel;
+            if (b.Cta2Url?.StartsWith("tel:+48600") == true) b.Cta2Url = tel is null ? "/book" : "tel:" + tel;
+            foreach (var it in b.Items.Where(i => i.Text == "+48 600 000 000")) it.Text = phone ?? "zapisy online";
+            if (b.Type != "contact") continue;
+            var items = new List<SiteBlockItem>();
+            if (tel is not null) items.Add(new() { Icon = "bi-telephone", Title = "Telefon", Value = phone!.Trim(), Url = "tel:" + tel });
+            if (!string.IsNullOrWhiteSpace(email)) items.Add(new() { Icon = "bi-envelope", Title = "E-mail", Value = email.Trim(), Url = "mailto:" + email.Trim() });
+            items.AddRange(b.Items.Where(i => !IsPlaceholderContact(i)));
+            b.Items = items;
+        }
+    }
+
+    private static SiteBlock Sample(string type) => type switch
     {
         "hero" => new()
         {
@@ -95,7 +143,7 @@ public static class SiteWidgets
             Subtitle = "Treningi dopasowane do Ciebie, plan i opieka między sesjami. Umów pierwszy trening — zobaczysz, jak to działa.",
             CtaLabel = "Umów pierwszy trening", CtaUrl = "/book",
             Cta2Label = "Zobacz cennik", Cta2Url = "#cennik",
-            Items = [new() { Icon = "bi-star-fill", Title = "4,9 / 5", Text = "opinie klientów" }, new() { Icon = "bi-lightning-charge-fill", Title = "Wolny termin", Text = "już jutro" }]
+            Items = [new() { Icon = "bi-bullseye", Title = "Plan pod Ciebie", Text = "od pierwszego treningu" }, new() { Icon = "bi-calendar-check-fill", Title = "Zapisy online", Text = "wolne terminy w aplikacji" }]
         },
         "marquee" => new()
         {
@@ -176,7 +224,7 @@ public static class SiteWidgets
         },
         "cta" => new()
         {
-            Type = "cta", Background = "accent", Eyebrow = "Zostały 3 wolne miejsca w tym miesiącu",
+            Type = "cta", Background = "accent", Eyebrow = "Pierwszy krok jest najprostszy",
             Title = "Zacznij od jednego treningu", Text = "Bez zobowiązań. Zobaczysz, jak pracuję, i wtedy zdecydujesz, co dalej.",
             CtaLabel = "Umów pierwszy trening", CtaUrl = "/book"
         },
@@ -226,12 +274,12 @@ public static class SiteWidgets
                 B("benefits", b => { b.Variant = "list"; b.Title = "Dla kogo są te zajęcia"; b.Items = [new() { Icon = "bi-laptop", Title = "Pracujesz przy biurku", Text = "Odciążysz kark, barki i odcinek lędźwiowy." }, new() { Icon = "bi-bicycle", Title = "Trenujesz inny sport", Text = "Lepsza mobilność to mniej kontuzji i lepsza technika." }, new() { Icon = "bi-flower2", Title = "Chcesz się wyciszyć", Text = "Godzina tylko dla Ciebie — ruch zamiast scrollowania." }]; }),
                 B("about", b => b.Variant = "right"), B("gallery", b => b.Title = "Studio"), B("offer"), B("slots"), B("contact")),
             "combat" => Seq(
-                B("hero", b => { b.Variant = "full"; b.Eyebrow = "Boks · kickboxing · MMA"; b.Title = "Wejdź na matę. Wyjdź silniejszy."; b.Subtitle = "Technika, kondycja i charakter. Zajęcia dla początkujących i zawodników — indywidualnie i w grupach."; b.CtaLabel = "Pierwszy trening za darmo"; b.Cta2Label = "Grafik zajęć"; b.Cta2Url = "#terminy"; }),
+                B("hero", b => { b.Variant = "full"; b.Eyebrow = "Boks · kickboxing · MMA"; b.Title = "Wejdź na matę. Wyjdź silniejszy."; b.Subtitle = "Technika, kondycja i charakter. Zajęcia dla początkujących i zawodników — indywidualnie i w grupach."; b.CtaLabel = "Umów pierwszy trening"; b.Cta2Label = "Grafik zajęć"; b.Cta2Url = "#terminy"; }),
                 B("marquee", b => b.Items = [new() { Title = "Technika" }, new() { Title = "Kondycja" }, new() { Title = "Sparingi" }, new() { Title = "Samoobrona" }, new() { Title = "Pewność siebie" }, new() { Title = "Dyscyplina" }]),
                 B("stats", b => b.Items = [new() { Value = "12", Title = "lat na ringu" }, new() { Value = "300+", Title = "wychowanków" }, new() { Value = "40+", Title = "walk zawodników" }, new() { Value = "5", Title = "treningów w tygodniu" }]),
                 B("benefits", b => { b.Title = "Co dają sporty walki"; b.Items = [new() { Icon = "bi-fire", Title = "Spalanie jak nigdzie", Text = "Godzina treningu to nawet 800 kcal." }, new() { Icon = "bi-shield-check", Title = "Samoobrona", Text = "Wiesz, jak zareagować, gdy trzeba." }, new() { Icon = "bi-emoji-angry", Title = "Odreagowanie stresu", Text = "Worek przyjmie wszystko." }, new() { Icon = "bi-trophy", Title = "Cel do zdobycia", Text = "Kolejne pasy, sparingi, zawody." }]; }),
                 B("video", b => { b.Title = "Zobacz, jak trenujemy"; b.Subtitle = "Minuta z naszego treningu."; }), B("offer"), B("testimonials"),
-                B("cta", b => { b.Eyebrow = "Bez doświadczenia? Idealnie."; b.Title = "Pierwszy trening jest na nas"; b.CtaLabel = "Zapisz się"; })),
+                B("cta", b => { b.Eyebrow = "Bez doświadczenia? Idealnie."; b.Title = "Zacznij od pierwszego treningu"; b.CtaLabel = "Zapisz się"; })),
             "bootcamp" => Seq(
                 B("hero", b => { b.Eyebrow = "Treningi w małych grupach"; b.Title = "Razem trenuje się łatwiej"; b.Subtitle = "Do 8 osób w grupie, trener, który zna Twoje imię, i energia, która niesie do końca treningu."; b.CtaLabel = "Zarezerwuj miejsce"; b.Cta2Label = "Grafik zajęć"; b.Cta2Url = "#terminy"; b.Items = [new() { Icon = "bi-people-fill", Title = "Max 8 osób", Text = "w grupie" }, new() { Icon = "bi-clock-fill", Title = "45 minut", Text = "konkretnego treningu" }]; }),
                 B("steps", b => { b.Title = "Jak to działa"; b.Items = [new() { Title = "Wybierasz zajęcia", Text = "Grafik i wolne miejsca widzisz online." }, new() { Title = "Rezerwujesz miejsce", Text = "Jednym kliknięciem, z karnetu albo pojedynczo." }, new() { Title = "Przychodzisz i trenujesz", Text = "Dostajesz przypomnienie dzień wcześniej." }]; }),

@@ -21,13 +21,13 @@
 @if (_content.LayoutVersion >= 2 && _preview)
 {
     @* Podgląd szkicu w kreatorze — tak, jak zobaczy go gość (bez „Moja aplikacja”). *@
-    <SitePage Content="_content" CompanyName="@_companyName" LogoPath="@_logoPath" IsAuthenticated="false" Reviews="_reviews" Offers="_offers" Slots="_slots" PoweredBy="PoweredBy" />
+    <SitePage Content="_content" CompanyName="@_companyName" LogoPath="@_logoPath" IsAuthenticated="false" Reviews="_reviews" Offers="_offers" Slots="_slots" PoweredBy="PoweredBy" ShowSamples="true" />
 }
 else if (_content.LayoutVersion >= 2)
 {
     <AuthorizeView>
         <Authorized>
-            <SitePage Content="_content" CompanyName="@_companyName" LogoPath="@_logoPath" IsAuthenticated="true" Reviews="_reviews" Offers="_offers" Slots="_slots" PoweredBy="PoweredBy" />
+            <SitePage Content="_content" CompanyName="@_companyName" LogoPath="@_logoPath" IsAuthenticated="true" Reviews="_reviews" Offers="_offers" Slots="_slots" PoweredBy="PoweredBy" ShowSamples="@_staff" />
         </Authorized>
         <NotAuthorized>
             <SitePage Content="_content" CompanyName="@_companyName" LogoPath="@_logoPath" IsAuthenticated="false" Reviews="_reviews" Offers="_offers" Slots="_slots" PoweredBy="PoweredBy" />
@@ -526,6 +526,8 @@ else
     private List<PackageOfferDto> _offers = [];
     [SupplyParameterFromQuery(Name = "draft")] public int? Draft { get; set; }
     private bool _preview;
+    /// <summary>Trener albo właściciel — widzi przykładowe treści strony z oznaczeniem.</summary>
+    private bool _staff;
     [CascadingParameter] private Task<AuthenticationState>? AuthStateTask { get; set; }
     private List<BookingDayDto> _slots = [];
 
@@ -569,6 +571,8 @@ else
         // Podgląd szkicu z kreatora (tylko dla administratora): /?draft=1
         if (Draft == 1 && AuthStateTask is not null)
             _preview = (await AuthStateTask).User.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+        if (AuthStateTask is not null && (await AuthStateTask).User is { } viewer)
+            _staff = viewer.IsInRole(PTScheduler.Domain.Constants.Roles.Admin) || viewer.IsInRole(PTScheduler.Domain.Constants.Roles.Trainer);
         try { _content = _preview ? await SiteContentService.GetDraftAsync() : await SiteContentService.GetAsync(); }
         catch { }
 

@@ -26,6 +26,8 @@ public sealed class UpsellService(
 {
     public const string ShopHref = "/admin/sklep";
     public const string UpgradeHref = "/admin/upgrade";
+    /// <summary>Tyle dni po uruchomieniu aplikacji nie podsuwamy wyższego planu.</summary>
+    public const int FirstWeekDays = 7;
 
     // Funkcje, które warto podsunąć, gdy nie ma ich w planie — po jednej, zmieniają się co dzień.
     private static readonly (string Flag, string Icon, string Title, string Text)[] Tips =
@@ -118,8 +120,16 @@ public sealed class UpsellService(
                     "Zobacz plany", UpgradeHref));
         });
 
-        // Spokojna podpowiedź planu — jedna, zmienia się co dzień.
-        var locked = canUpgrade ? Tips.Where(t => !entitlements.IsAllowed(t.Flag)).ToList() : [];
+        // Spokojna podpowiedź planu — jedna, zmienia się co dzień. Przez pierwszy tydzień po starcie
+        // żadnych propozycji: najpierw pierwsze kroki i pierwsi klienci (pilne sprawy powyżej i tak się pokażą).
+        var firstWeek = false;
+        await Safe(async () =>
+        {
+            await using var db = dbFactory.CreateDbContext();
+            var started = await db.AppBrandings.AsNoTracking().Select(b => b.SetupCompletedAt).FirstOrDefaultAsync();
+            firstWeek = started is { } at && at > DateTime.UtcNow.AddDays(-FirstWeekDays);
+        });
+        var locked = canUpgrade && !firstWeek ? Tips.Where(t => !entitlements.IsAllowed(t.Flag)).ToList() : [];
         if (locked.Count > 0)
         {
             var t = locked[DateTime.UtcNow.DayOfYear % locked.Count];
