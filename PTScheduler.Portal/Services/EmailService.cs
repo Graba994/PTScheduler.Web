@@ -568,6 +568,14 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         {Btn(link, "Otwórz zgłoszenie")}
         """);
 
+    /// <summary>„Wyślij mi link” ze strony głównej: wraca do kreatora z wpisaną nazwą studia.</summary>
+    public string LaterLinkEmailBody(string? company, string link) => Shell($"""
+        <h1 style="color: #7c3aed; font-size: 1.35rem;">Twoja aplikacja czeka</h1>
+        <p>Cześć! Oto link do kreatora ze strony hantly.pl. Zbudowanie aplikacji zajmie kilka minut: nazwa{(string.IsNullOrWhiteSpace(company) ? "" : $" (<b>{WebUtility.HtmlEncode(company.Trim())}</b>)")}, wygląd, oferta i gotowe. Okres próbny jest za darmo.</p>
+        {Btn(link, "Zbuduj swoją aplikację")}
+        <p style="color: #6b7280; font-size: 0.9rem;">Ta wiadomość nie jest dla Ciebie? Wystarczy ją zignorować — więcej nie napiszemy.</p>
+        """);
+
     /// <summary>Do osoby, która zgłosiła błąd, gdy administrator oznaczy go jako naprawiony.</summary>
     public string BugFixedEmailBody(string? name, string comment, string? note)
     {

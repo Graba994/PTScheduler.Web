@@ -264,12 +264,36 @@
         observers.push(io);
     }
 
+    // „Wyślij mi link”: nazwa studia i kolor z kreatora na żywo jadą razem z e-mailem (link otworzy kreator z nimi).
+    function later(root) {
+        root.querySelectorAll('form[data-ld-later]').forEach(function (form) {
+            if (form.__ld) return;
+            form.__ld = true;
+            form.addEventListener('submit', function () {
+                var name = root.querySelector('#ldl-name');
+                var color = root.querySelector('input[name="kolor"]:checked');
+                if (name) form.elements.nazwa.value = name.value.trim();
+                if (color) form.elements.kolor.value = color.value;
+            });
+        });
+    }
+
+    // Cennik na telefonie to przewijane karty — startujemy od wyróżnionego planu.
+    function snap(root) {
+        root.querySelectorAll('[data-ld-snap]').forEach(function (track) {
+            if (track.scrollWidth <= track.clientWidth + 4) return;
+            var featured = track.querySelector('.featured');
+            if (!featured) return;
+            track.scrollLeft = featured.offsetLeft - (track.clientWidth - featured.offsetWidth) / 2;
+        });
+    }
+
     function init() {
         cleanup();
         var root = document.querySelector('.ld');
         if (!root) return;
         document.documentElement.classList.add('ld-js');
-        live(root); scenes(root); videos(root); story(root); tabs(root); reveal(root);
+        live(root); scenes(root); videos(root); story(root); tabs(root); reveal(root); later(root); snap(root);
     }
 
     document.addEventListener('DOMContentLoaded', function () {

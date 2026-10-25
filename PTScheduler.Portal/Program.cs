@@ -155,6 +155,14 @@ builder.Services.AddRateLimiter(o =>
     o.GlobalLimiter = System.Threading.RateLimiting.PartitionedRateLimiter.Create<HttpContext, string>(ctx =>
     {
         // Wejście do publicznego demo: każde tworzy jednorazowy token — limit na adres IP.
+        // „Wyślij mi link” ze strony głównej — każde wysłanie to e-mail, więc limit na adres IP.
+        if (ctx.Request.Path.StartsWithSegments("/link-na-pozniej"))
+            return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter("later:" + (ctx.Connection.RemoteIpAddress?.ToString() ?? "?"), _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
+            {
+                PermitLimit = 5,
+                Window = TimeSpan.FromMinutes(10),
+                QueueLimit = 0
+            });
         if (ctx.Request.Path.StartsWithSegments("/demo"))
             return System.Threading.RateLimiting.RateLimitPartition.GetFixedWindowLimiter("demo:" + (ctx.Connection.RemoteIpAddress?.ToString() ?? "?"), _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
             {
@@ -404,6 +412,35 @@ app.MapGet("/api/internal/git-config", async (HttpContext ctx, SiteSettingsServi
         repo = settings[SiteSettingsService.Keys.GithubRepo],
         branch = settings[SiteSettingsService.Keys.GithubBranch]
     });
+});
+
+// „Nie teraz? Wyślemy Ci link” ze strony głównej: jeden e-mail z linkiem do kreatora (z nazwą studia
+// i kolorem z kreatora na żywo). Adresu nie zapisujemy; ten sam adres dostaje link najwyżej raz na 10 minut.
+app.MapPost("/link-na-pozniej", async (HttpContext ctx, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery,
+    EmailService email, Microsoft.Extensions.Caching.Memory.IMemoryCache cache, IConfiguration config, ILogger<Program> log) =>
+{
+    var form = await ctx.Request.ReadFormAsync();
+    var back = form["wroc"] == "ld-later-dark" ? "#ld-later-dark" : "#ld-later-hero";
+    try { await antiforgery.ValidateRequestAsync(ctx); }
+    catch (Microsoft.AspNetCore.Antiforgery.AntiforgeryValidationException) { return Results.Redirect("/?link=blad" + back); }
+
+    var to = form["email"].ToString().Trim();
+    if (!HomeLinks.IsEmail(to) || RegistrationGateService.IsDisposableEmail(to)) return Results.Redirect("/?link=blad" + back);
+    var key = "later:" + to.ToLowerInvariant();
+    if (!cache.TryGetValue(key, out _))
+    {
+        Microsoft.Extensions.Caching.Memory.CacheExtensions.Set(cache, key, true, TimeSpan.FromMinutes(10));
+        var company = HomeLinks.Clean(form["nazwa"], 40);
+        var link = HomeLinks.RegisterLink(PortalUrls.Public(config), company, form["kolor"]);
+        var (ok, error) = await email.SendAsync(to, "Twój link do kreatora Hantly", email.LaterLinkEmailBody(company, link));
+        if (!ok)
+        {
+            cache.Remove(key);
+            log.LogWarning("Link na później nie wyszedł: {Error}", error);
+            return Results.Redirect("/?link=blad" + back);
+        }
+    }
+    return Results.Redirect("/?link=wyslany" + back);
 });
 
 // Wejście do aplikacji trenera jednym kliknięciem: token powstaje dopiero po kliknięciu, żyje 2 minuty

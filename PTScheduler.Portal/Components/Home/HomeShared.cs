@@ -61,4 +61,59 @@ public static class HomeShared
         }, p.BrandingTier != "preview");
         if (p.MaxTrainers > 1) yield return ($"{p.MaxTrainers} trenerów w zespole", true);
     }
+
+    /// <summary>Plany na pierwszy rzut oka: darmowy (najtańszy), wyróżniony i najwyższy — reszta w porównaniu.</summary>
+    public static List<Plan> MainPlans(IReadOnlyList<Plan> plans)
+    {
+        if (plans.Count <= 3) return [.. plans];
+        var byPrice = plans.OrderBy(p => p.MonthlyPrice).ToList();
+        var picked = new HashSet<Plan> { byPrice[0], byPrice[^1] };
+        picked.Add(plans.FirstOrDefault(p => p.IsFeatured) ?? byPrice[byPrice.Count / 2]);
+        return [.. plans.Where(picked.Contains)];
+    }
+
+    /// <summary>Dla kogo jest plan — jedno zdanie z jego limitów (bez ręcznego opisu w Panelu).</summary>
+    public static string ForWhom(Plan p)
+    {
+        var clients = p.MaxClients >= 9999 ? "bez limitu klientów" : $"do {p.MaxClients} klientów";
+        if (p.MaxTrainers >= 5) return $"Studio z zespołem: {(p.MaxTrainers >= 9999 ? "bez limitu trenerów" : $"do {p.MaxTrainers} trenerów")}, {clients}";
+        if (p.MonthlyPrice <= 0) return $"Na start: sprawdzasz aplikację z pierwszymi klientami ({clients})";
+        var team = p.MaxTrainers > 1 ? $", do {p.MaxTrainers} trenerów" : "";
+        return p.PaymentsEnabled ? $"Trener z pełnym grafikiem: płatności online, {clients}{team}" : $"Trener, który rośnie: {clients}{team}";
+    }
+
+    /// <summary>
+    /// Najważniejsze punkty karty planu: przy pierwszym planie pierwsze cechy, przy wyższych tylko to,
+    /// czego nie ma niższy plan („Wszystko z …, a także:”) — karta zostaje krótka.
+    /// </summary>
+    public static (string? Lead, List<string> Points) Highlights(Plan plan, Plan? lower, int max = 5)
+    {
+        var mine = PlanFeatures(plan).Where(f => f.Included).Select(f => f.Label).ToList();
+        if (lower is null) return (null, mine.Take(max).ToList());
+        var theirs = PlanFeatures(lower).Where(f => f.Included).Select(f => f.Label).ToHashSet();
+        var extra = mine.Where(l => !theirs.Contains(l)).Take(max).ToList();
+        return ($"Wszystko z planu {lower.Name}, a także:", extra);
+    }
+
+    public sealed record CompareRow(string Label, Func<Plan, string> Value);
+
+    /// <summary>Tabela „Porównaj wszystkie plany”: ✓ / — albo wartość (liczba klientów, trenerów, kursów).</summary>
+    public static readonly CompareRow[] CompareRows =
+    [
+        new("Klienci", p => p.MaxClients >= 9999 ? "bez limitu" : $"do {p.MaxClients}"),
+        new("Trenerzy w zespole", p => p.MaxTrainers >= 9999 ? "bez limitu" : p.MaxTrainers > 1 ? p.MaxTrainers.ToString() : "—"),
+        new("Grafik, rezerwacje online, czat", _ => "✓"),
+        new("Przypomnienia e-mail", p => Mark(p.EmailReminders)),
+        new("SMS-y i powiadomienia push", p => Mark(p.SmsReminders || p.PushNotifications)),
+        new("Płatności online, pakiety i karnety", p => Mark(p.PaymentsEnabled)),
+        new("Plany treningowe i postępy", p => Mark(p.TrainingPlansEnabled)),
+        new("Pomiary i zdjęcia sylwetki", p => Mark(p.BodyMeasurements)),
+        new("Kursy wideo", p => !p.CoursesEnabled ? "—" : p.MaxCourses is > 0 and < 9999 ? p.MaxCourses.ToString()! : "✓"),
+        new("Kupony i program poleceń", p => Mark(p.Coupons || p.ReferralProgram)),
+        new("Raporty finansowe", p => Mark(p.FinancialReports)),
+        new("Kalendarz Google i Meet", p => Mark(p.IntegrationGoogleMeet)),
+        new("Własna domena", p => Mark(p.BrandingTier is "full" or "premium")),
+    ];
+
+    private static string Mark(bool on) => on ? "✓" : "—";
 }

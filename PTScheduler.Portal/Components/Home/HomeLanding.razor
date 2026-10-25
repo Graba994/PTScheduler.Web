@@ -30,21 +30,21 @@
                 <h1>Ty prowadzisz treningi.<br /><span class="ld-under">Hantly prowadzi resztę.</span></h1>
             }
             <p class="ld-sub">@HeroSubtitle</p>
+            @* Jedna główna ścieżka: przycisk zakupu. Demo i „zobacz, jak działa” to ciche linki pod nim. *@
             <div class="ld-ctas">
                 <a href="@_s("hero_cta_url", "/register")" class="lp-btn lp-btn-energy"><i class="bi bi-rocket-takeoff"></i>@_s("hero_cta", "Zbuduj swoją aplikację")</a>
+            </div>
+            <p class="ld-demo-note">
                 @if (DemoOn)
                 {
-                    <a href="/demo" data-enhance-nav="false" class="lp-btn lp-btn-ghost"><i class="bi bi-play-circle"></i>Wypróbuj demo</a>
+                    <a href="/demo" data-enhance-nav="false">Wypróbuj demo bez konta</a><span aria-hidden="true"> · </span><a href="/demo?jako=klient" data-enhance-nav="false">widok klienta</a>
                 }
                 else
                 {
-                    <a href="#dzien" class="lp-btn lp-btn-ghost"><i class="bi bi-play-circle"></i>Zobacz ją w akcji</a>
+                    <a href="#dzien">Zobacz, jak działa</a>
                 }
-            </div>
-            @if (DemoOn)
-            {
-                <p class="ld-demo-note">Bez zakładania konta · <a href="/demo?jako=klient" data-enhance-nav="false">widok klienta</a></p>
-            }
+            </p>
+            <LaterLink Sent="@LinkSent" Css="ld-later-hero" />
             <ul class="ld-trust">
                 <li><i class="bi bi-check-circle-fill"></i>Okres próbny za 0 zł</li>
                 <li><i class="bi bi-check-circle-fill"></i>Bez umowy i wypowiedzenia</li>
@@ -143,7 +143,7 @@
         <div class="ld-head ld-head-dark">
             <div class="lp-eyebrow">Jeden dzień z Hantly</div>
             <h2 id="ld-day-title">Tak wygląda Twój dzień, kiedy aplikacja pracuje razem z Tobą</h2>
-            <p>Pięć chwil z prawdziwego dnia trenera. Tak działają w aplikacji ekran „Dziś”, zaległości, wolne okienka i aplikacja klienta.</p>
+            <p>Trzy chwile z prawdziwego dnia trenera: poranek, pieniądze i wolne okienko w grafiku.</p>
         </div>
         <div class="ld-day-grid" data-ld-story>
             <ol class="ld-steps">
@@ -350,22 +350,29 @@
             <h2>Płacisz za to, czego używasz. Bez umów.</h2>
             <p>Zacznij za darmo i przejdź na wyższy plan, gdy przybędzie klientów. Zmiana planu zajmuje minutę.</p>
         </div>
-        <div class="lp-pricing">
-            @foreach (var plan in _plans)
+        @{ var mainPlans = HomeShared.MainPlans(_plans); }
+        <div class="lp-pricing ld-pricing" data-ld-snap>
+            @for (var i = 0; i < mainPlans.Count; i++)
             {
+                var plan = mainPlans[i];
+                var (lead, points) = HomeShared.Highlights(plan, i == 0 ? null : mainPlans[i - 1]);
                 <div class="lp-price @(plan.IsFeatured ? "featured" : "")">
                     @if (plan.IsFeatured)
                     {
                         <div class="lp-price-badge">Najczęściej wybierany</div>
                     }
                     <h3>@plan.Name</h3>
-                    <p class="lp-price-desc">@plan.Description</p>
+                    <p class="ld-price-for">@HomeShared.ForWhom(plan)</p>
                     <div class="lp-price-amount">@plan.MonthlyPrice.ToString("0") <small>@(plan.MonthlyPrice == 0 ? "zł" : "zł / mies.")</small></div>
                     <div class="lp-price-period">@PricePeriod(plan)</div>
+                    @if (lead is not null)
+                    {
+                        <p class="ld-price-lead">@lead</p>
+                    }
                     <ul>
-                        @foreach (var (label, included) in HomeShared.PlanFeatures(plan))
+                        @foreach (var label in points)
                         {
-                            <li class="@(included ? "" : "off")"><i class="bi @(included ? "bi-check-circle-fill" : "bi-dash-circle")"></i>@label</li>
+                            <li><i class="bi bi-check-circle-fill"></i>@label</li>
                         }
                     </ul>
                     <a href="/register?plan=@plan.Id" class="lp-btn @(plan.IsFeatured ? "lp-btn-primary" : "lp-btn-ghost")">
@@ -374,6 +381,45 @@
                 </div>
             }
         </div>
+        @if (_plans.Count > 1)
+        {
+            <details class="ld-compare">
+                <summary>@(_plans.Count > mainPlans.Count ? $"Porównaj wszystkie plany ({_plans.Count})" : "Porównaj plany szczegółowo")<i class="bi bi-chevron-down"></i></summary>
+                <div class="ld-compare-scroll">
+                    <table>
+                        <thead>
+                            <tr>
+                                <th scope="col"><span class="visually-hidden">Funkcja</span></th>
+                                @foreach (var plan in _plans)
+                                {
+                                    <th scope="col" class="@(plan.IsFeatured ? "is-featured" : "")">@plan.Name<small>@(plan.MonthlyPrice == 0 ? "0 zł" : $"{plan.MonthlyPrice:0} zł / mies.")</small></th>
+                                }
+                            </tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var row in HomeShared.CompareRows)
+                            {
+                                <tr>
+                                    <th scope="row">@row.Label</th>
+                                    @foreach (var plan in _plans)
+                                    {
+                                        var v = row.Value(plan);
+                                        <td class="@(v == "—" ? "is-off" : "") @(plan.IsFeatured ? "is-featured" : "")">@v</td>
+                                    }
+                                </tr>
+                            }
+                            <tr class="ld-compare-cta">
+                                <th scope="row"></th>
+                                @foreach (var plan in _plans)
+                                {
+                                    <td class="@(plan.IsFeatured ? "is-featured" : "")"><a href="/register?plan=@plan.Id">@(plan.MonthlyPrice == 0 ? "Zacznij" : "Wybieram")</a></td>
+                                }
+                            </tr>
+                        </tbody>
+                    </table>
+                </div>
+            </details>
+        }
         <ul class="ld-guarantee">
             <li><i class="bi bi-credit-card-2-front"></i><span><b>Pierwsza opłata po okresie próbnym.</b> Przypominamy e-mailem kilka dni wcześniej.</span></li>
             <li><i class="bi bi-x-circle"></i><span><b>Rezygnujesz jednym kliknięciem.</b> Bez umów i okresu wypowiedzenia.</span></li>
@@ -410,11 +456,12 @@
         <p>@_s("cta_subtitle", "Zbuduj aplikację w kilka minut i zaproś pierwszych klientów jeszcze dziś. Okres próbny jest za darmo.")</p>
         <div class="ld-ctas ld-cta-btns">
             <a href="/register" class="lp-btn lp-btn-energy"><i class="bi bi-rocket-takeoff"></i>@_s("cta_button", "Zbuduj swoją aplikację")</a>
-            @if (DemoOn)
-            {
-                <a href="/demo" data-enhance-nav="false" class="lp-btn lp-btn-ghost ld-ghost-dark"><i class="bi bi-play-circle"></i>Najpierw wypróbuj demo</a>
-            }
         </div>
+        @if (DemoOn)
+        {
+            <p class="ld-demo-note ld-demo-note-dark"><a href="/demo" data-enhance-nav="false">Najpierw wypróbuj demo bez konta</a></p>
+        }
+        <LaterLink Sent="@LinkSent" Css="ld-later-dark" />
     </div>
 </section>
 
@@ -452,14 +499,10 @@
     [
         new("07:00", "bi-sunrise", "Poranny brief", "Zanim wypijesz kawę, wiesz wszystko: ile wizyt, kto ma uwagi zdrowotne, co czeka na Twoją decyzję. Plan dnia przychodzi też e-mailem i pushem.",
             "brief", "Poranny brief: powiadomienie i karta „Na dziś” z czterema sprawami, każda z przyciskiem"),
-        new("09:30", "bi-lightning-charge", "Trening z planem w telefonie", "Klient widzi plan na dziś i ciężary z poprzedniego razu. Odhacza serie, a po treningu dostaje podsumowanie z rekordami. Ty widzisz je od razu w jego profilu.",
-            "train", "Klient odhacza serie w telefonie i dostaje nowy rekord, trener widzi go w profilu"),
         new("13:00", "bi-cash-coin", "Pieniądze bez gonienia", "Wszystkie zaległości w jednym miejscu. Gotówka, przelew albo karta — jedno kliknięcie. Przypomnienie asystent napisze za Ciebie: uprzejmie i w Twoim stylu.",
             "debts", "Trener odhacza wpłatę gotówką, a asystent pisze uprzejme przypomnienie o płatności"),
         new("16:00", "bi-calendar-plus", "Wolne okienko nie przepada", "Ktoś odwołał trening? Hantly podpowiada, kto zwykle trenuje o tej porze, i wysyła zaproszenie z linkiem do rezerwacji tego terminu.",
             "slots", "Odwołany trening zwalnia termin, asystent zaprasza trzy osoby i termin zajmuje nowa rezerwacja"),
-        new("20:30", "bi-moon-stars", "Dzień domknięty", "Wizyty same zamykają się 2 godziny po treningu, a wpływy trafiają do Finansów. Na koniec miesiąca paczka dla księgowej jednym kliknięciem.",
-            "close", "Podsumowanie dnia: treningi, wpływy, wykres tygodnia i gotowa paczka dla księgowej"),
     ];
 
     private record FeatureTab(string Icon, string Name, string Title, string[] Points, string Scene, string Alt);
@@ -533,6 +576,9 @@
 
     private static string Initials(string author) =>
         string.Concat(author.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => char.IsLetter(w[0])).Take(2).Select(w => char.ToUpperInvariant(w[0])));
+
+    /// <summary>Po „Wyślij mi link”: /?link=wyslany (albo =blad) — komunikat zamiast formularza.</summary>
+    [SupplyParameterFromQuery(Name = "link")] public string? LinkSent { get; set; }
 
     private string _s(string key, string fallback = "") =>
         _settings.TryGetValue(key, out var val) && !string.IsNullOrWhiteSpace(val) ? val : fallback;
