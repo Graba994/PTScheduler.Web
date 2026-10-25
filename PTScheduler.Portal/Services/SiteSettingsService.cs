@@ -65,6 +65,8 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string RegistrationMode = "registration_mode";
         /// <summary>Ile aplikacji dziennie może się uruchomić samo (bez kodu zaproszenia); nadmiar czeka w kolejce.</summary>
         public const string RegistrationDailyLimit = "registration_daily_limit";
+        /// <summary>Ile aplikacji w planie darmowym (bez karty) startuje dziennie automatycznie; reszta czeka w kolejce.</summary>
+        public const string RegistrationFreeDailyLimit = "registration_free_daily_limit";
         /// <summary>Płatność przy publikacji z kreatora: „auto” (Stripe, a bez niego bramka sklepu), „stripe”, „autopay”, „payu”, „przelewy24”.</summary>
         public const string RegistrationGateway = "registration_gateway";
         /// <summary>Kwota płatności weryfikacyjnej przez Autopay / PayU / Przelewy24 (domyślnie 1 zł).</summary>

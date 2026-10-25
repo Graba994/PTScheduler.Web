@@ -15,7 +15,7 @@ public static class TenantEventTypes
 {
     public const string Created = "created";
     public const string Provisioned = "provisioned";
-    /// <summary>Uruchomione samo z kreatora (Detail: „limit” — liczy się do dziennego limitu, „invite” — z kodem).</summary>
+    /// <summary>Uruchomione samo z kreatora (Detail: „limit” — liczy się do dziennego limitu, „free” — plan darmowy bez karty, osobny limit, „invite” — z kodem).</summary>
     public const string AutoLaunched = "auto_launched";
     public const string Suspended = "suspended";
     public const string Resumed = "resumed";

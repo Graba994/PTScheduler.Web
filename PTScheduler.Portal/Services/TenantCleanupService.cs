@@ -31,8 +31,11 @@ public class TenantCleanupService(
 
     private async Task ScanInactivityAsync(CancellationToken ct)
     {
-        var warningDays = config.GetValue("TenantLifecycle:InactivityWarningDays", 14);
-        var suspendDays = config.GetValue("TenantLifecycle:InactivitySuspendDays", 21);
+        var paidWarningDays = config.GetValue("TenantLifecycle:InactivityWarningDays", 14);
+        var paidSuspendDays = config.GetValue("TenantLifecycle:InactivitySuspendDays", 21);
+        // Plan darmowy startuje bez karty — nieużywana aplikacja zasypia szybciej i zwalnia serwer.
+        var freeWarningDays = config.GetValue("TenantLifecycle:FreeInactivityWarningDays", 10);
+        var freeSuspendDays = config.GetValue("TenantLifecycle:FreeInactivitySuspendDays", 14);
 
         using var scope = scopeFactory.CreateScope();
         var dbFactory = scope.ServiceProvider.GetRequiredService<IDbContextFactory<PortalDbContext>>();
@@ -43,6 +46,7 @@ public class TenantCleanupService(
         var now = DateTime.UtcNow;
 
         var activeTenants = await db.Tenants
+            .Include(t => t.Plan)
             .Where(t => t.Status == TenantStatus.Active && t.LastActivityAt != null)
             .ToListAsync(ct);
 
@@ -63,6 +67,9 @@ public class TenantCleanupService(
             }
 
             var inactiveDays = (int)(now - t.LastActivityAt!.Value).TotalDays;
+            var free = t.Plan is { MonthlyPrice: <= 0 } && !t.IsTestAccount;
+            var warningDays = free ? freeWarningDays : paidWarningDays;
+            var suspendDays = free ? freeSuspendDays : paidSuspendDays;
 
             if (inactiveDays >= suspendDays)
             {

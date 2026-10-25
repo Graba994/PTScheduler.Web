@@ -32,8 +32,8 @@ public static class HomeShared
         new("Czy mogę podpiąć własną domenę?", "Tak (od planu Starter), np. annafit.pl. Wpisujesz ją w kreatorze, ustawiasz u dostawcy domeny jeden rekord DNS, a my sami podłączamy domenę i certyfikat HTTPS — dostaniesz e-mail, gdy zadziała."),
         new("Czy asystent AI ma dostęp do danych moich klientów?", "Asystent korzysta z danych w Twojej aplikacji, żeby wiedzieć, co jest ważne — ale do modelu AI wysyłamy tylko liczby i fakty (np. „3 treningi poza pakietem”), bez imion i danych kontaktowych. Każda liczba w odpowiedzi jest sprawdzana z faktami, a asystenta wyciszysz jednym kliknięciem."),
         new("Czy dane moich klientów są bezpieczne?", "Każdy trener ma osobną aplikację i osobną bazę danych na serwerach w Europie. Zdjęcia sylwetki i ankiety zdrowotne widzisz tylko Ty i dany klient. Klient może pobrać lub usunąć swoje dane zgodnie z RODO."),
-        new("Dlaczego przy rejestracji trzeba podać kartę?", "Żeby każda aplikacja należała do prawdziwego trenera, a serwer pracował dla Twoich klientów, nie dla kont „na próbę”. Okres próbny jest za darmo, przed pierwszą opłatą przypominamy e-mailem, a subskrypcję anulujesz w aplikacji jednym kliknięciem."),
-        new("Czy mogę zacząć za darmo?", "Tak. Każdy plan zaczyna się od okresu próbnego, a plan startowy jest za 0 zł. Przy publikacji podpinasz kartę — pierwsza opłata dopiero po okresie próbnym, a zrezygnujesz w każdej chwili jednym kliknięciem."),
+        new("Czy przy rejestracji trzeba podać kartę?", "Przy planie darmowym nie — wystarczy potwierdzić e-mail kodem. Przy planach płatnych podpinasz kartę: pierwsza opłata dopiero po okresie próbnym, przed nią przypominamy e-mailem, a subskrypcję anulujesz w aplikacji jednym kliknięciem."),
+        new("Czy mogę zacząć za darmo?", "Tak. Plan startowy jest za 0 zł i bez karty — idealny, żeby sprawdzić aplikację z pierwszymi klientami. Na plan płatny przejdziesz w aplikacji, gdy przybędzie klientów; dane zostają."),
         new("Co, jeśli zrezygnuję?", "Nie ma umów ani okresu wypowiedzenia. Przed zamknięciem konta możesz wyeksportować dane klientów.")
     ];
 

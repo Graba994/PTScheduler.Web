@@ -6,7 +6,8 @@ namespace PTScheduler.Portal.Services;
 
 /// <summary>
 /// Bramki publikacji z kreatora: czy aplikacja trenera uruchamia się od razu, czy czeka w kolejce
-/// na admina. Uruchamiamy od razu, gdy karta jest podpięta (pilnuje tego kreator) i: jest ważny kod
+/// na admina. Uruchamiamy od razu, gdy karta jest podpięta (pilnuje tego kreator; plan darmowy startuje
+/// bez karty, ale z osobnym, mniejszym limitem dziennym) i: jest ważny kod
 /// zaproszenia albo — przy trybie „uruchamiaj od razu” — nie przekroczono dziennego limitu. Zawsze
 /// sprawdzamy też serwer (Docker, obraz, miejsce), żeby zamiast błędu trener zobaczył kolejkę.
 /// </summary>
@@ -20,6 +21,8 @@ public class RegistrationGateService(
     ILogger<RegistrationGateService> logger)
 {
     public const int DefaultDailyLimit = 10;
+    /// <summary>Plan darmowy startuje bez karty — dlatego osobny, mniejszy limit dzienny.</summary>
+    public const int DefaultFreeDailyLimit = 3;
 
     public sealed record Decision(bool Launch, string? QueueReason);
 
@@ -39,6 +42,47 @@ public class RegistrationGateService(
     {
         var at = email.LastIndexOf('@');
         return at > 0 && DisposableDomains.Contains(email[(at + 1)..].Trim());
+    }
+
+    /// <summary>
+    /// Adres do porównań „jedna darmowa aplikacja na osobę”: małe litery, bez dopisku po „+”,
+    /// a w Gmailu także bez kropek (ola.fit+1@gmail.com, olafit@googlemail.com → olafit@gmail.com).
+    /// </summary>
+    public static string NormalizeEmail(string email)
+    {
+        var e = email.Trim().ToLowerInvariant();
+        var at = e.LastIndexOf('@');
+        if (at <= 0) return e;
+        var local = e[..at];
+        var domain = e[(at + 1)..];
+        var plus = local.IndexOf('+');
+        if (plus > 0) local = local[..plus];
+        if (domain is "gmail.com" or "googlemail.com") { local = local.Replace(".", ""); domain = "gmail.com"; }
+        return local + "@" + domain;
+    }
+
+    public async Task<int> FreeDailyLimitAsync() =>
+        int.TryParse(await settings.GetAsync(SiteSettingsService.Keys.RegistrationFreeDailyLimit), out var n) && n >= 0 ? n : DefaultFreeDailyLimit;
+
+    /// <summary>Ile darmowych aplikacji (bez karty) uruchomiło się dziś automatycznie.</summary>
+    public async Task<int> FreeLaunchesTodayAsync()
+    {
+        var since = DateTime.UtcNow.Date;
+        await using var db = await dbFactory.CreateDbContextAsync();
+        return await db.TenantEvents.CountAsync(e => e.EventType == TenantEventTypes.AutoLaunched && e.OccurredAt >= since && e.Detail == "free");
+    }
+
+    /// <summary>Czy ta osoba (po ujednoliceniu adresu) ma już aplikację, która nie została usunięta.</summary>
+    public async Task<bool> HasAppForPersonAsync(string email)
+    {
+        var me = NormalizeEmail(email);
+        var at = me.LastIndexOf('@');
+        var domain = at > 0 ? me[(at + 1)..] : me;
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var candidates = await db.Tenants.AsNoTracking()
+            .Where(t => t.Status != TenantStatus.Destroyed && (t.OwnerEmail.EndsWith("@" + domain) || (domain == "gmail.com" && t.OwnerEmail.EndsWith("@googlemail.com"))))
+            .Select(t => t.OwnerEmail).ToListAsync();
+        return candidates.Any(c => NormalizeEmail(c) == me);
     }
 
     public async Task<int> DailyLimitAsync() =>
@@ -71,16 +115,26 @@ public class RegistrationGateService(
     }
 
     /// <summary>Czy uruchamiać teraz. Powód kolejki trafia do Panelu (Trenerzy → „Czeka”).</summary>
-    public async Task<Decision> DecideAsync(Tenant tenant)
+    /// <param name="freeNoCard">Plan darmowy bez karty — liczy się osobny, mniejszy limit dzienny.</param>
+    public async Task<Decision> DecideAsync(Tenant tenant, bool freeNoCard = false)
     {
         var invite = await FindInviteAsync(tenant.InviteCode);
         if (invite is null)
         {
             if (await settings.GetAsync(SiteSettingsService.Keys.RegistrationMode) == "review")
                 return new(false, "Tryb „czekaj na moją akceptację” (Panel → Strona publiczna).");
-            var limit = await DailyLimitAsync();
-            if (await AutoLaunchesTodayAsync() >= limit)
-                return new(false, $"Dzienny limit automatycznych uruchomień ({limit}) wyczerpany.");
+            if (freeNoCard)
+            {
+                var free = await FreeDailyLimitAsync();
+                if (await FreeLaunchesTodayAsync() >= free)
+                    return new(false, $"Dzienny limit startów planu darmowego bez karty ({free}) wyczerpany.");
+            }
+            else
+            {
+                var limit = await DailyLimitAsync();
+                if (await AutoLaunchesTodayAsync() >= limit)
+                    return new(false, $"Dzienny limit automatycznych uruchomień ({limit}) wyczerpany.");
+            }
         }
 
         var (ok, reason) = await PreflightAsync();

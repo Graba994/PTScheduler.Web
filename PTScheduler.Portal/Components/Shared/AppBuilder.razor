@@ -301,7 +301,7 @@
                 }
                 else
                 {
-                    <p class="bd-foot"><i class="bi bi-shield-check"></i>Na razie nic nie tworzymy — aplikacja powstanie dopiero po „Opublikuj”, potwierdzeniu e-maila i @(IsStripe || _gateway is null ? "podpięciu karty" : "płatności weryfikacyjnej").</p>
+                    <p class="bd-foot"><i class="bi bi-shield-check"></i>Na razie nic nie tworzymy — aplikacja powstanie dopiero po „Opublikuj” i potwierdzeniu e-maila@(FreeNoCard ? "" : IsStripe || _gateway is null ? " oraz podpięciu karty" : " oraz płatności weryfikacyjnej").</p>
                     <p class="bd-foot bd-foot-login">Masz już aplikację? <a href="/login?z=kreator" data-enhance-nav="false">Zaloguj się</a></p>
                 }
             }
@@ -782,10 +782,12 @@
     /// <summary>Ostatni krok kreatora — podgląd „klika się” sam, a pod nim widać, co daje wybrany plan.</summary>
     private bool Demo => _phase == Phase.Build && _step == 5;
     private Plan? SelectedPlan => _plans.FirstOrDefault(p => p.Id == _planId);
+    /// <summary>Plan darmowy startuje bez karty — tylko kod z e-maila (i osobny limit dzienny w bramkach).</summary>
+    private bool FreeNoCard => !AdminMode && SelectedPlan is { MonthlyPrice: <= 0 };
 
     private string AfterFirstNote =>
         AdminMode ? "z linkiem do ustawienia hasła"
-        : _gateway is null ? "kodem z wiadomości"
+        : FreeNoCard || _gateway is null ? "kodem z wiadomości"
         : IsStripe ? "i podpinasz kartę"
         : $"i płacisz {_verifyAmount.ToString("0.##", Pl)} zł weryfikacji";
 
@@ -915,20 +917,19 @@
         {
             var p = SelectedPlan;
             if (p is null) return "";
+            if (p.MonthlyPrice <= 0) return "Plan darmowy bez karty — potwierdzasz tylko e-mail. Kartę podasz dopiero przy przejściu na plan płatny.";
             var days = p.TrialDays + ExtraDays;
             var amount = Yearly(p) ? $"{p.YearlyPrice!.Value.ToString("N0", Pl)} zł za rok" : $"{p.MonthlyPrice.ToString("N0", Pl)} zł miesięcznie";
             if (_gateway is not null && !IsStripe)
             {
                 // Polskie bramki: jednorazowa płatność weryfikacyjna, potem rachunki z linkiem do płatności.
                 var verify = $"Płatność weryfikacyjna {_verifyAmount.ToString("0.##", Pl)} zł przez {RegistrationGateService.GatewayName(_gateway)} (BLIK, karta albo przelew).";
-                if (p.MonthlyPrice <= 0) return verify + " Przy planie darmowym potem nic nie płacisz.";
                 return verify + (days > 0 ? $" Pierwsze {days} dni za darmo, potem {amount}" : $" Potem {amount}")
                        + " — rachunek przyjdzie e-mailem z linkiem do płatności. Zrezygnujesz w każdej chwili jednym kliknięciem.";
             }
-            if (p.MonthlyPrice <= 0) return "Karta jest wymagana przy każdym planie. Przy planie darmowym tylko ją zapisujemy — nic nie pobieramy.";
             return days > 0
-                ? $"Karta jest wymagana przy każdym planie. Pierwsze {days} dni za darmo, potem {amount}. Zrezygnujesz w każdej chwili jednym kliknięciem."
-                : $"Karta jest wymagana przy każdym planie: {amount}. Zrezygnujesz w każdej chwili jednym kliknięciem.";
+                ? $"Przy planie płatnym podpinasz kartę. Pierwsze {days} dni za darmo, potem {amount}. Zrezygnujesz w każdej chwili jednym kliknięciem."
+                : $"Przy planie płatnym podpinasz kartę: {amount}. Zrezygnujesz w każdej chwili jednym kliknięciem.";
         }
     }
 
@@ -1366,7 +1367,7 @@
         return ctx?.Connection.RemoteIpAddress?.ToString();
     }
 
-    /// <summary>„Opublikuj”: sprawdzenie danych, potem kod z e-maila → karta → start albo kolejka. Admin: od razu start.</summary>
+    /// <summary>„Opublikuj”: sprawdzenie danych, potem kod z e-maila → karta (plan darmowy bez karty) → start albo kolejka. Admin: od razu start.</summary>
     private async Task Publish()
     {
         _error = null;
@@ -1404,6 +1405,12 @@
                 _error = AdminMode ? "Na ten adres jest już aplikacja (Panel → Trenerzy)." : "Na ten adres e-mail jest już aplikacja. Zaloguj się w niej albo użyj innego adresu.";
                 return;
             }
+        }
+
+        if (FreeNoCard && await Gates.HasAppForPersonAsync(email))
+        {
+            _error = "Na ten adres e-mail (albo jego wariant) jest już aplikacja. Zaloguj się w niej albo wybierz plan płatny.";
+            return;
         }
 
         if (AdminMode) { await PublishAsAdminAsync(); return; }
@@ -1555,6 +1562,8 @@
                 await CreateTenantAsync(TenantSetupPayload.HashPassword(_password));
                 _password = "";
             }
+            // Plan darmowy: bez karty — od razu bramki (osobny limit dzienny) i start albo kolejka.
+            if (FreeNoCard && _pendingTenantId is { } freeId) { await GoLiveAsync(freeId, freeNoCard: true); return; }
             await StartCardAsync();
         }
         catch (Exception ex)
@@ -1633,11 +1642,11 @@
     }
 
     /// <summary>Karta jest — bramki decydują: start od razu albo kolejka (z powodem dla admina).</summary>
-    private async Task GoLiveAsync(int tenantId)
+    private async Task GoLiveAsync(int tenantId, bool freeNoCard = false)
     {
         await using var db = await DbFactory.CreateDbContextAsync();
         var tenant = await db.Tenants.AsNoTracking().FirstAsync(t => t.Id == tenantId);
-        var decision = await Gates.DecideAsync(tenant);
+        var decision = await Gates.DecideAsync(tenant, freeNoCard);
         if (!decision.Launch)
         {
             await QueueAsync(tenantId, decision.QueueReason ?? "Czeka na akceptację.");
@@ -1646,7 +1655,7 @@
         var invite = await Gates.FindInviteAsync(tenant.InviteCode);
         if (invite is not null) await Gates.ConsumeInviteAsync(invite.Code);
         var token = await Gates.PrepareWelcomeTokenAsync(tenantId);
-        _launch = Launcher.Start(tenantId, token, invite is not null ? "invite" : "limit");
+        _launch = Launcher.Start(tenantId, token, invite is not null ? "invite" : freeNoCard ? "free" : "limit");
         _phase = Phase.Deploying;
         try { await JS.InvokeVoidAsync("ptBuilder.clear"); await JS.InvokeVoidAsync("window.scrollTo", 0, 0); } catch (Exception) { }
     }
