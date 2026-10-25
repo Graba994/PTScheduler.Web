@@ -265,7 +265,7 @@
     }
 
     // „Wyślij mi link”: nazwa studia i kolor z kreatora na żywo jadą razem z e-mailem (link otworzy kreator z nimi).
-    function later(root) {
+    function laterLink(root) {
         root.querySelectorAll('form[data-ld-later]').forEach(function (form) {
             if (form.__ld) return;
             form.__ld = true;
@@ -293,7 +293,7 @@
         var root = document.querySelector('.ld');
         if (!root) return;
         document.documentElement.classList.add('ld-js');
-        live(root); scenes(root); videos(root); story(root); tabs(root); reveal(root); later(root); snap(root);
+        live(root); scenes(root); videos(root); story(root); tabs(root); reveal(root); laterLink(root); snap(root);
     }
 
     document.addEventListener('DOMContentLoaded', function () {
