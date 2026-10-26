@@ -83,6 +83,10 @@
                     else
                     {
                         <img class="hm-mascot hm-anim-@(_animation == "live" ? "bounce" : _animation)" src="@Icon(_previewMood)" alt="" width="120" height="120" />
+                        @if (!IsLeo)
+                        {
+                            <div class="small text-muted text-center">Prosta animacja obrazka. Pełny ruch (oczy za kursorem, sztuczki) włączysz w sekcji „Ruch” po prawej.</div>
+                        }
                     }
                     <div class="hm-moods" role="group" aria-label="Podgląd nastroju">
                         @foreach (var m in AssistantService.MoodsFor(_agent))
@@ -136,10 +140,30 @@
                             Osoby z włączonym w systemie ograniczeniem ruchu zawsze widzą wersję bez animacji.
                         </div>
                     </div>
-                    @if (!IsLeo && _animation == "live" && _custom.Count == 0)
+                    @if (!IsLeo)
                     {
                         <div class="hm-motion">
-                            <div class="form-label small fw-semibold mb-2">Ruch</div>
+                            <div class="form-label small fw-semibold mb-2">Ruch <span class="text-muted fw-normal">— patrzenie za kursorem, sztuczki, mówienie, drzemka, konfetti</span></div>
+                            @if (!FullMotion)
+                            {
+                                <div class="hm-motion-off" role="status">
+                                    <i class="bi bi-pause-circle"></i>
+                                    <div>
+                                        <b>Pełny ruch jest teraz wyłączony.</b>
+                                        @if (_animation != "live")
+                                        {
+                                            <span>Działa tylko przy animacji „Żywy” — teraz wybrana jest inna.</span>
+                                            <button type="button" class="btn btn-sm btn-primary mt-2" @onclick="EnableLiveAsync"><i class="bi bi-magic me-1"></i>Włącz „Żywy”</button>
+                                        }
+                                        else
+                                        {
+                                            <span>Działa tylko z wbudowanym hantelkiem — masz własne ikony (@string.Join(", ", AssistantService.MoodsFor(_agent).Where(m => _custom.Contains(m.Key)).Select(m => m.Label.ToLowerInvariant()))).</span>
+                                            <button type="button" class="btn btn-sm btn-primary mt-2" @onclick="RestoreBuiltInAsync"><i class="bi bi-arrow-counterclockwise me-1"></i>Przywróć wbudowanego hantelka</button>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                            <fieldset disabled="@(!FullMotion)" class="d-flex flex-column gap-2">
                             <div class="hm-motion-levels" role="radiogroup" aria-label="Ruchliwość">
                                 @foreach (var m in AssistantService.MotionLevels)
                                 {
@@ -157,6 +181,7 @@
                                     </label>
                                 }
                             </div>
+                            </fieldset>
                             <div class="form-text small">Trenerzy mogą u siebie przyciszyć ruch („Spokojnie” albo „Bez ruchu”) w dymku asystenta.</div>
                         </div>
                     }
@@ -560,6 +585,23 @@ else
         ("wiggle", "Shimmy", "bi-music-note-beamed"), ("look", "Rozgląda się", "bi-eye"), ("stretch", "Przeciąga się", "bi-arrows-vertical"),
         ("talk", "Mówi", "bi-chat-dots"), ("heart", "Serduszko", "bi-heart"), ("party", "Konfetti", "bi-stars"), ("yawn", "Ziewa", "bi-cup-hot"),
     ];
+
+    /// <summary>Pełny ruch (patrzenie, sztuczki…) działa przy animacji „Żywy” i wbudowanych ikonach.</summary>
+    private bool FullMotion => _animation == "live" && _custom.Count == 0;
+
+    private async Task EnableLiveAsync()
+    {
+        _animation = "live";
+        await Settings.SetAsync(K.AssistantAnimation, "live");
+        Ok(_custom.Count == 0 ? "Włączono animację „Żywy” — pełny ruch działa." : "Włączono „Żywy”. Pełny ruch ruszy po przywróceniu wbudowanych ikon.");
+    }
+
+    private async Task RestoreBuiltInAsync()
+    {
+        foreach (var mood in _custom.ToList()) await Assistant.ResetAssetAsync(mood, _agent);
+        await LoadIconsAsync();
+        Ok("Przywrócono wbudowanego hantelka — pełny ruch działa w podglądzie i w aplikacjach trenerów.");
+    }
 
     private void ToggleEffect(string key, bool on)
     {
