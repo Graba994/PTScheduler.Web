@@ -4,6 +4,8 @@
 @inject SiteSettingsService Settings
 @inject IConfiguration Config
 @inject IDbContextFactory<PortalDbContext> DbFactory
+@inject LegalService Legal
+@inject AccountingService Accounting
 @rendermode InteractiveServer
 
 <PageTitle>Konfiguracja platformy — Hantly Portal</PageTitle>
@@ -73,8 +75,11 @@ else
             SiteSettingsService.Keys.StripeSecretKey, SiteSettingsService.Keys.PayuPosId, SiteSettingsService.Keys.P24MerchantId, SiteSettingsService.Keys.AutopayServiceId,
             SiteSettingsService.Keys.BackupDir, SiteSettingsService.Keys.PlatformGoogleClientId,
             SiteSettingsService.Keys.AiEnabled, SiteSettingsService.Keys.AiApiKey,
-            SiteSettingsService.Keys.LegalCompany, SiteSettingsService.Keys.LegalNip, SiteSettingsService.Keys.LegalAddress);
+            SiteSettingsService.Keys.RequireAdmin2fa, SiteSettingsService.Keys.BackupOffsiteTarget, SiteSettingsService.Keys.BackupVerify,
+            SiteSettingsService.Keys.AdminNotificationEmail, SiteSettingsService.Keys.ErrorAlertEnabled, SiteSettingsService.Keys.ErrorAlertEmail);
         bool Has(string key) => !string.IsNullOrWhiteSpace(s.GetValueOrDefault(key));
+        var legal = await Legal.CompanyAsync();
+        var books = await Accounting.GetSettingsAsync();
         bool plans, services;
         await using (var db = await DbFactory.CreateDbContextAsync())
         {
@@ -93,7 +98,11 @@ else
                     Has(SiteSettingsService.Keys.NpmUrl) && (Has(SiteSettingsService.Keys.NpmToken) || Has(SiteSettingsService.Keys.NpmEmail))),
                 new("GitHub", "Źródło aktualizacji aplikacji i Portalu.", "bi-github", "/panel/github", Has(SiteSettingsService.Keys.GithubToken)),
                 new("Guardian (aktualizacje bez przestoju)", "Adres i sekret usługi aktualizacji.", "bi-shield-check", "/panel/updates", Has(SiteSettingsService.Keys.GuardianUrl)),
-                new("Kopie zapasowe", "Katalog i harmonogram kopii baz trenerów.", "bi-hdd-stack", "/panel/backups", Has(SiteSettingsService.Keys.BackupDir), Optional: true)
+                new("Kopie zapasowe", "Katalog i harmonogram kopii baz trenerów.", "bi-hdd-stack", "/panel/backups", Has(SiteSettingsService.Keys.BackupDir), Optional: true),
+                new("Kopia poza serwerem", "Zaszyfrowane kopie na SFTP albo Google Drive — awaria serwera nie zabiera danych.", "bi-cloud-arrow-up", "/panel/backups",
+                    s.GetValueOrDefault(SiteSettingsService.Keys.BackupOffsiteTarget) is "sftp" or "gdrive"),
+                new("Test odtworzenia kopii", "Co tydzień Portal odtwarza najnowsze kopie do tymczasowej bazy i sprawdza, czy działają.", "bi-arrow-counterclockwise", "/panel/backups",
+                    s.GetValueOrDefault(SiteSettingsService.Keys.BackupVerify) != "off")
             ]),
             new("Usługi dla trenerów",
             [
@@ -109,8 +118,8 @@ else
             [
                 new("Plany cenowe", "Pakiety dla trenerów: ceny, limity, funkcje i okres próbny.", "bi-tags", "/panel/plans", plans),
                 new("Katalog usług", "Usługi, dodatki i pakiety, które trenerzy kupują w Sklepie.", "bi-shop", "/panel/services", services),
-                new("Dokumenty prawne", "Regulamin, polityka prywatności i umowa powierzenia z danymi firmy.", "bi-file-earmark-text", "/panel/dokumenty",
-                    Has(SiteSettingsService.Keys.LegalCompany) && Has(SiteSettingsService.Keys.LegalNip) && Has(SiteSettingsService.Keys.LegalAddress)),
+                new("Dokumenty prawne", "Regulamin, polityka prywatności i umowa powierzenia z danymi usługodawcy.", "bi-file-earmark-text", "/panel/dokumenty",
+                    legal.Complete),
                 new("Asystent, Leo i AI", "Maskotka trenerów, agent Portalu, klucz AI i włączniki funkcji AI.", "bi-emoji-smile", "/panel/asystent",
                     s.GetValueOrDefault(SiteSettingsService.Keys.AiEnabled) == "true" && Has(SiteSettingsService.Keys.AiApiKey), Optional: true)
             ]),
@@ -120,10 +129,27 @@ else
                 new("Sklep usług (PayU / Przelewy24 / Autopay)", "Płatności trenerów za SMS-y, wideo i usługi.", "bi-wallet2", "/panel/payment-gateways",
                     Has(SiteSettingsService.Keys.PayuPosId) || Has(SiteSettingsService.Keys.P24MerchantId) || Has(SiteSettingsService.Keys.AutopayServiceId))
             ]),
+            new("Księgowość",
+            [
+                new("Forma działalności i dane sprzedawcy", books.Configured
+                        ? $"{AccountingService.ModeLabel(books.ModeOn(AccountingService.Today))} — ewidencja wpłat i dokumenty sprzedaży."
+                        : "Działalność nierejestrowana albo firma — od tego zależą rachunki, faktury i treść regulaminu.",
+                    "bi-journal-check", "/panel/ksiegowosc?tab=ustawienia", books.Configured && books.MissingSellerData().Count == 0)
+            ]),
+            new("Powiadomienia",
+            [
+                new("E-mail administratora", "Adres na zgłoszenia, alarmy, limit działalności i raporty Leo.", "bi-bell", "/panel/orders",
+                    Has(SiteSettingsService.Keys.AdminNotificationEmail)),
+                new("Alarm przy fali błędów", "E-mail, gdy aplikacje trenerów zaczną zgłaszać błędy.", "bi-activity", "/panel/alerts",
+                    s.GetValueOrDefault(SiteSettingsService.Keys.ErrorAlertEnabled) != "false" && s.GetValueOrDefault(SiteSettingsService.Keys.ErrorAlertEmail) != "false"
+                    && Has(SiteSettingsService.Keys.AdminNotificationEmail))
+            ]),
             new("Bezpieczeństwo",
             [
                 new("Izolacja trenerów", "Własne sekrety instancji, limity zasobów i poczty — trenerzy nie wpływają na siebie.", "bi-shield-lock", "/panel/setup/isolation", _isolationOk),
                 new("Konto administratora", "Hasło do Portalu i historia logowań.", "bi-person-lock", "/panel/change-password", true),
+                new("Weryfikacja dwuetapowa wymagana", "Każdy administrator loguje się hasłem i kodem z aplikacji — wyciek hasła nie otwiera Panelu.", "bi-shield-check", "/panel/administratorzy",
+                    s.GetValueOrDefault(SiteSettingsService.Keys.RequireAdmin2fa) == "true"),
                 new("Logi logowań", "Kto i skąd logował się do Portalu.", "bi-journal-text", "/panel/login-logs", true, Optional: true)
             ])
         ];

@@ -16,7 +16,7 @@
 
 @if (_company is { Complete: false })
 {
-    <div class="alert alert-warning small"><i class="bi bi-exclamation-triangle me-1"></i>Uzupełnij dane firmy — dopóki ich brakuje, dokumenty pokazują żółte pola „[do uzupełnienia]”, a umowa z trenerem nie wskazuje usługodawcy.</div>
+    <div class="alert alert-warning small"><i class="bi bi-exclamation-triangle me-1"></i>Uzupełnij dane usługodawcy — dopóki ich brakuje, dokumenty pokazują żółte pola „[do uzupełnienia]”, a umowa z trenerem nie wskazuje usługodawcy.</div>
 }
 @if (_saved)
 {
@@ -38,18 +38,39 @@
                         <label class="form-label small fw-semibold">E-mail do spraw umowy i danych</label>
                         <input class="form-control" type="email" @bind="_email" maxlength="120" placeholder="kontakt@twojadomena.pl" />
                     </div>
-                    <div class="col-12">
-                        <label class="form-label small fw-semibold">Firma (pełna nazwa z CEIDG/KRS)</label>
-                        <input class="form-control" @bind="_name" maxlength="200" placeholder="np. Jan Kowalski prowadzący działalność gospodarczą pod firmą …" />
-                    </div>
-                    <div class="col-md-8">
-                        <label class="form-label small fw-semibold">Adres siedziby</label>
-                        <input class="form-control" @bind="_address" maxlength="200" placeholder="ul. Przykładowa 1, 00-000 Miasto" />
-                    </div>
-                    <div class="col-md-4">
-                        <label class="form-label small fw-semibold">NIP</label>
-                        <input class="form-control" @bind="_nip" maxlength="20" />
-                    </div>
+                    @if (_company?.FromAccounting == true)
+                    {
+                        <div class="col-12">
+                            <div class="lg-source">
+                                <div class="min-w-0">
+                                    <span class="lg-source-k"><i class="bi bi-journal-check me-1"></i>Z Księgowości · @AccountingService.ModeLabel(_company.Mode)</span>
+                                    <b>@(_company.Name.Length > 0 ? _company.Name : "[imię i nazwisko / nazwa]")</b>
+                                    <span>@(_company.Address.Length > 0 ? _company.Address : "[adres]")</span>
+                                    <span>@(_company.Identification ?? "[NIP]")</span>
+                                </div>
+                                <a class="btn btn-sm btn-outline-secondary ms-auto" href="/panel/ksiegowosc?tab=ustawienia">Zmień w Księgowości</a>
+                            </div>
+                            <div class="form-text small">Te same dane są na rachunkach i fakturach. Po przejściu na firmę dokumenty same pokażą NIP i zapis o fakturach.</div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="col-12">
+                            <div class="alert alert-info small mb-1"><i class="bi bi-info-circle me-1"></i>Najprościej ustawić <a href="/panel/ksiegowosc?tab=ustawienia">Księgowość</a> — imię i nazwisko (albo firma), adres i forma działalności trafią tu same, a przy działalności nierejestrowanej dokumenty nie wymagają NIP-u.</div>
+                        </div>
+                        <div class="col-12">
+                            <label class="form-label small fw-semibold">Firma (pełna nazwa z CEIDG/KRS)</label>
+                            <input class="form-control" @bind="_name" maxlength="200" placeholder="np. Jan Kowalski prowadzący działalność gospodarczą pod firmą …" />
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label small fw-semibold">Adres siedziby</label>
+                            <input class="form-control" @bind="_address" maxlength="200" placeholder="ul. Przykładowa 1, 00-000 Miasto" />
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label small fw-semibold">NIP</label>
+                            <input class="form-control" @bind="_nip" maxlength="20" />
+                        </div>
+                    }
                     <div class="col-md-6">
                         <label class="form-label small fw-semibold">Dostawca serwerów</label>
                         <input class="form-control" @bind="_hosting" maxlength="200" placeholder="np. OVH sp. z o.o. (Polska)" />
@@ -142,23 +163,28 @@
     private async Task LoadCompanyAsync()
     {
         _company = await Legal.CompanyAsync();
-        var raw = await Settings.GetAllAsync(K.BrandName);
+        var raw = await Settings.GetAllAsync(K.BrandName, K.LegalCompany, K.LegalAddress, K.LegalNip, K.LegalEmail);
+        // Pola własne dokumentów (gdy Księgowość nie jest ustawiona); e-mail — zapisany tutaj albo z Księgowości.
         (_brand, _name, _address, _nip, _email, _hosting, _mail) =
-            (raw[K.BrandName], _company.Name, _company.Address, _company.Nip, _company.Email, _company.Hosting, _company.Mail);
+            (raw[K.BrandName], raw[K.LegalCompany], raw[K.LegalAddress], raw[K.LegalNip], _company.Email, _company.Hosting, _company.Mail);
     }
 
     private async Task SaveAsync()
     {
-        await Settings.SetManyAsync(new Dictionary<string, string>
+        var values = new Dictionary<string, string>
         {
             [K.BrandName] = _brand.Trim(),
-            [K.LegalCompany] = _name.Trim(),
-            [K.LegalAddress] = _address.Trim(),
-            [K.LegalNip] = _nip.Trim(),
             [K.LegalEmail] = _email.Trim(),
             [K.LegalHosting] = _hosting.Trim(),
             [K.LegalMail] = _mail.Trim(),
-        });
+        };
+        if (_company?.FromAccounting != true)
+        {
+            values[K.LegalCompany] = _name.Trim();
+            values[K.LegalAddress] = _address.Trim();
+            values[K.LegalNip] = _nip.Trim();
+        }
+        await Settings.SetManyAsync(values);
         await LoadCompanyAsync();
         _saved = true;
     }
