@@ -46,8 +46,12 @@ public static class MascotArt
 
     private const string Cheeks = """<circle cx="43" cy="72" r="4.5" fill="#F472B6" opacity=".55"/><circle cx="77" cy="72" r="4.5" fill="#F472B6" opacity=".55"/>""";
 
-    private static string OpenEyes(double dx = 0, double dy = 0) =>
-        $"""<ellipse cx="51" cy="63" rx="4.6" ry="5.4" fill="#1E1B4B"/><ellipse cx="69" cy="63" rx="4.6" ry="5.4" fill="#1E1B4B"/><circle class="hma-pupil" cx="{52.6 + dx}" cy="{61 + dy}" r="1.8" fill="#fff"/><circle class="hma-pupil" cx="{70.6 + dx}" cy="{61 + dy}" r="1.8" fill="#fff"/>""";
+    /// <param name="live">Wersja animowana: błyski w oczach z klasą „hma-pupil” (idą za kursorem). Statyczna ikona jest bez klas.</param>
+    private static string OpenEyes(double dx = 0, double dy = 0, bool live = false)
+    {
+        var pupil = live ? " class=\"hma-pupil\"" : "";
+        return $"""<ellipse cx="51" cy="63" rx="4.6" ry="5.4" fill="#1E1B4B"/><ellipse cx="69" cy="63" rx="4.6" ry="5.4" fill="#1E1B4B"/><circle{pupil} cx="{52.6 + dx}" cy="{61 + dy}" r="1.8" fill="#fff"/><circle{pupil} cx="{70.6 + dx}" cy="{61 + dy}" r="1.8" fill="#fff"/>""";
+    }
 
     private const string HappyEyes = """<path d="M46 64 q5 -6 10 0" stroke="#1E1B4B" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M64 64 q5 -6 10 0" stroke="#1E1B4B" stroke-width="3" fill="none" stroke-linecap="round"/>""";
 
@@ -93,7 +97,7 @@ public static class MascotArt
     /// <summary>Sceny animacji: wejście (podskokami z boku), lądowanie, spoczynek, radość (salto), sen.</summary>
     public static readonly string[] Stages = ["enter", "land", "idle", "excited", "sleep"];
 
-    private static string BlinkEyes(double dx = 0, double dy = 0) => $"""<g class="hma-blink">{OpenEyes(dx, dy)}</g>""";
+    private static string BlinkEyes(double dx = 0, double dy = 0) => $"""<g class="hma-blink">{OpenEyes(dx, dy, live: true)}</g>""";
 
     private static string Eyes(string svg) => $"""<g class="hma-eyes">{svg}</g>""";
     private static string Mouth(string svg) => $"""<g class="hma-mouth">{svg}</g>""";
