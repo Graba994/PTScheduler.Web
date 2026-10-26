@@ -157,7 +157,7 @@ else
     private bool _paymentsEnabled;
     private bool _isStaff;
     private bool _busy;
-    private string _currency = "PLN";
+    private string _currency = "zł";
     private string _userId = string.Empty;
     private string _email = string.Empty;
     private int? _buyingId;
@@ -186,7 +186,7 @@ else
         _isStaff = auth.User.IsInRole("Admin") || auth.User.IsInRole("Trainer") || auth.User.IsInRole("Subordinate");
 
         var settings = await PaymentSettings.GetAsync();
-        _currency = settings.Currency;
+        _currency = PTScheduler.Domain.Rules.CurrencyLabel.Of(settings.Currency);
         _options = (await PaymentService.GetEnabledOptionsAsync())
             .Where(o => IsProviderAllowed(o.Key)).ToList();
         _paymentsEnabled = _options.Count > 0;

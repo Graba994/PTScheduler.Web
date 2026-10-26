@@ -1,0 +1,141 @@
+@page "/admin/regulamin"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin")]
+@using PTScheduler.Web.Services
+@inject StudioLegalService StudioLegal
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Dane trenera w regulaminie, polityce prywatności i cookies dla klientów. Te same pola co sprzedawca na rachunkach
+   (Finanse), więc wpisuje się je raz. Reszta treści (odwołania, płatności) pochodzi z ustawień aplikacji. *@
+
+<AppTitle Page="Regulamin i prywatność" />
+
+<div class="page-header">
+    <div>
+        <h4 class="page-title mb-1"><i class="bi bi-file-earmark-check me-2" style="color:var(--c-primary)"></i>Regulamin i prywatność</h4>
+        <p class="text-muted small mb-0">Dokumenty, które klienci akceptują przy rejestracji. Ty jesteś w nich usługodawcą i administratorem danych klientów — wpisz tylko swoje dane.</p>
+    </div>
+</div>
+
+@if (_info is null)
+{
+    <div class="d-flex justify-content-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    @if (_message is not null)
+    {
+        <div class="alert @(_error ? "alert-danger" : "alert-success") py-2 small">@_message</div>
+    }
+
+    <div class="row g-3">
+        <div class="col-12 col-lg-7">
+            <div class="card h-100">
+                <div class="card-header"><i class="bi bi-person-vcard me-2"></i>Twoje dane w dokumentach</div>
+                <div class="card-body">
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Imię i nazwisko albo nazwa firmy</label>
+                        <input class="form-control" @bind="_name" maxlength="200" placeholder="@(_info.NameFromAccount ? _info.Name : "np. Anna Kowalska")" />
+                        @if (_info.NameFromAccount)
+                        {
+                            <div class="form-text">Puste pole — dokumenty pokażą imię i nazwisko z Twojego konta: <b>@_info.Name</b>.</div>
+                        }
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">Adres</label>
+                        <input class="form-control" @bind="_address" maxlength="200" placeholder="ul. Przykładowa 1/2" autocomplete="street-address" />
+                    </div>
+                    <div class="row g-2 mb-3">
+                        <div class="col-4">
+                            <label class="form-label small fw-semibold">Kod pocztowy</label>
+                            <input class="form-control" @bind="_postal" maxlength="6" placeholder="00-000" inputmode="numeric" />
+                        </div>
+                        <div class="col-8">
+                            <label class="form-label small fw-semibold">Miasto</label>
+                            <input class="form-control" @bind="_city" maxlength="100" />
+                        </div>
+                    </div>
+                    <div class="mb-3">
+                        <label class="form-label small fw-semibold">NIP <span class="text-muted fw-normal">(jeśli masz firmę)</span></label>
+                        <input class="form-control" @bind="_nip" maxlength="13" inputmode="numeric" />
+                        <div class="form-text">Prowadzisz działalność nierejestrowaną albo trenujesz na umowie? Zostaw puste — w dokumentach będą imię, nazwisko i adres.</div>
+                    </div>
+                    <div class="mb-3 small">
+                        <span class="fw-semibold">E-mail kontaktowy:</span>&nbsp;
+                        @if (!string.IsNullOrWhiteSpace(_info.Email))
+                        {
+                            <span>@_info.Email</span>
+                        }
+                        else
+                        {
+                            <span class="text-danger">brak</span>
+                        }
+                        <span class="text-muted">&nbsp;— adres „Odpowiedzi na” z <a href="/admin/email">ustawień poczty</a> albo e-mail Twojego konta.</span>
+                    </div>
+                    <button class="btn btn-primary" @onclick="SaveAsync" disabled="@_saving"><i class="bi bi-check2 me-1"></i>Zapisz</button>
+                    <p class="text-muted small mt-3 mb-0"><i class="bi bi-info-circle me-1"></i>Te same dane są w Finansach jako dane sprzedawcy na rachunkach i fakturach — zmieniasz je w jednym miejscu.</p>
+                </div>
+            </div>
+        </div>
+
+        <div class="col-12 col-lg-5">
+            <div class="card mb-3">
+                <div class="card-header"><i class="bi bi-eye me-2"></i>Tak widzą to klienci</div>
+                <div class="card-body small">
+                    <p class="mb-2">Usługodawca i administrator danych: <b>@_info.Who</b>@(_info.Email is { } e ? $", {e}" : "")</p>
+                    @if (_info.Missing().Count > 0)
+                    {
+                        <p class="text-warning-emphasis mb-2"><i class="bi bi-exclamation-triangle me-1"></i>Brakuje: @string.Join(", ", _info.Missing()).</p>
+                    }
+                    else
+                    {
+                        <p class="text-success mb-2"><i class="bi bi-check-circle me-1"></i>Dokumenty mają wszystkie potrzebne dane.</p>
+                    }
+                    <div class="d-flex flex-wrap gap-2">
+                        <a class="btn btn-sm btn-outline-primary" href="/legal/terms" target="_blank">Regulamin</a>
+                        <a class="btn btn-sm btn-outline-primary" href="/legal/privacy" target="_blank">Polityka prywatności</a>
+                        <a class="btn btn-sm btn-outline-primary" href="/legal/cookies" target="_blank">Cookies</a>
+                    </div>
+                </div>
+            </div>
+            <div class="card">
+                <div class="card-header"><i class="bi bi-magic me-2"></i>Co dokumenty biorą same</div>
+                <div class="card-body small">
+                    <ul class="mb-2 ps-3">
+                        <li><b>Zasady odwołań</b> — @(_info.Cancellation.Length > 0 ? _info.Cancellation : "z Godzin pracy") <a href="/trainer/availability">zmień</a></li>
+                        <li><b>Płatności online</b> — @(_info.Gateways.Count > 0 ? string.Join(", ", _info.Gateways) : "wyłączone (płatność u trenera)") <a href="/admin/payments">zmień</a></li>
+                        <li><b>Nazwa aplikacji</b> — @_info.Brand <a href="/admin/branding">zmień</a></li>
+                    </ul>
+                    <p class="text-muted mb-0">Własne oświadczenia (np. zgoda na wizerunek, regulamin sali) dodasz w <a href="/admin/documents">Dokumentach i zgodach</a>. Szablony przygotowała platforma Hantly; przy nietypowej działalności (np. siłownia, zajęcia grupowe dla dzieci) warto pokazać je prawnikowi.</p>
+                </div>
+            </div>
+        </div>
+    </div>
+}
+
+@code {
+    private StudioLegalService.Info? _info;
+    private string? _name, _address, _postal, _city, _nip, _message;
+    private bool _error, _saving;
+
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        _info = await StudioLegal.GetAsync();
+        var (name, address, postal, city, nip) = await StudioLegal.RawAsync();
+        (_name, _address, _postal, _city, _nip) = (name, address, postal, city, nip);
+    }
+
+    private async Task SaveAsync()
+    {
+        _saving = true;
+        try
+        {
+            var error = await StudioLegal.SaveAsync(_name, _address, _postal, _city, _nip);
+            _error = error is not null;
+            _message = error ?? "Zapisane — regulamin, polityka prywatności i cookies pokazują już nowe dane.";
+            if (error is null) await LoadAsync();
+        }
+        finally { _saving = false; }
+    }
+}

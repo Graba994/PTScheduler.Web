@@ -380,7 +380,7 @@ public class PaymentService(
                 OrderKind.Session => "trening poza pakietem",
                 _ => "pakiet"
             };
-            var details = $"Kupujący: {order.ApplicationUserId}, kwota: {order.Amount:0.00} {order.Currency}, bramka: {order.Provider}"
+            var details = $"Kupujący: {order.ApplicationUserId}, kwota: {order.Amount:0.00} {PTScheduler.Domain.Rules.CurrencyLabel.Of(order.Currency)}, bramka: {order.Provider}"
                 + (order.CouponCode is not null ? $", kupon: {order.CouponCode}" : "");
             await auditLog.LogAsync(SystemUserId, SystemUserEmail, SystemRole, "OrderPaid", "Order", order.Id.ToString(),
                 $"Opłacono {itemLabel} — {details}");
@@ -446,7 +446,7 @@ public class PaymentService(
         try
         {
             await auditLog.LogAsync(SystemUserId, SystemUserEmail, SystemRole, "SessionPaidAfterExpiry", "Session", session.Id.ToString(),
-                $"Klient zapłacił za trening {session.StartTime:dd.MM HH:mm} po wygaśnięciu rezerwacji, a termin jest już zajęty — umów inny termin albo zwróć {order.Amount:0.00} {order.Currency}.",
+                $"Klient zapłacił za trening {session.StartTime:dd.MM HH:mm} po wygaśnięciu rezerwacji, a termin jest już zajęty — umów inny termin albo zwróć {order.Amount:0.00} {PTScheduler.Domain.Rules.CurrencyLabel.Of(order.Currency)}.",
                 AuditSeverity.Warning);
         }
         catch (Exception ex) { logger.LogError(ex, "Audit log write failed for late session payment {OrderId}", order.Id); }

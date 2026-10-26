@@ -233,7 +233,7 @@ public class MembershipService(
                 {
                     Title = $"🗓️ Nowy okres karnetu „{m.Plan.Name}”",
                     Body = $"Masz {m.Plan.SessionsPerPeriod} sesji do {MembershipBilling.PeriodEnd(start, m.Plan.PeriodMonths):dd.MM}. " +
-                           $"Do zapłaty {period.Amount:0.00} {m.Plan.Currency} do {period.DueDate:dd.MM}.",
+                           $"Do zapłaty {period.Amount:0.00} {PTScheduler.Domain.Rules.CurrencyLabel.Of(m.Plan.Currency)} do {period.DueDate:dd.MM}.",
                     Url = "/my/memberships"
                 }));
             }
@@ -254,7 +254,7 @@ public class MembershipService(
             notify.Add((p.Membership.Client.ApplicationUserId, new PushMessageDto
             {
                 Title = "💳 Przypomnienie o płatności za karnet",
-                Body = $"„{p.Membership.Plan.Name}” — {p.Amount:0.00} {p.Membership.Plan.Currency} (termin minął {p.DueDate:dd.MM}).",
+                Body = $"„{p.Membership.Plan.Name}” — {p.Amount:0.00} {PTScheduler.Domain.Rules.CurrencyLabel.Of(p.Membership.Plan.Currency)} (termin minął {p.DueDate:dd.MM}).",
                 Url = "/my/memberships"
             }));
             if (!string.IsNullOrEmpty(p.Membership.Client.TrainerUserId))
@@ -262,7 +262,7 @@ public class MembershipService(
                 notify.Add((p.Membership.Client.TrainerUserId, new PushMessageDto
                 {
                     Title = $"Zaległa płatność: {p.Membership.Client.FirstName} {p.Membership.Client.LastName}".Trim(),
-                    Body = $"Karnet „{p.Membership.Plan.Name}”, {p.Amount:0.00} {p.Membership.Plan.Currency}.",
+                    Body = $"Karnet „{p.Membership.Plan.Name}”, {p.Amount:0.00} {PTScheduler.Domain.Rules.CurrencyLabel.Of(p.Membership.Plan.Currency)}.",
                     Url = $"/clients/{p.Membership.ClientId}"
                 }));
             }

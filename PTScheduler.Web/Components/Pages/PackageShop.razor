@@ -49,7 +49,7 @@ else
                             <div class="small text-muted mb-2">@p.SessionsPerPeriod × @p.SessionTypeName co @p.PeriodLabel</div>
                             @if (!string.IsNullOrEmpty(p.Description)) { <p class="small mb-2">@p.Description</p> }
                             <div class="mt-auto d-flex align-items-end justify-content-between">
-                                <div><span class="fs-5 fw-bold">@p.Price.ToString("0.00")</span> <span class="small text-muted">@p.Currency / @p.PeriodLabel</span></div>
+                                <div><span class="fs-5 fw-bold">@p.Price.ToString("0.00")</span> <span class="small text-muted">@CurrencyLabel.Of(p.Currency) / @p.PeriodLabel</span></div>
                                 @if (_paymentsEnabled && !_isStaff)
                                 {
                                     <button class="btn btn-primary btn-sm" @onclick="() => { _planFor = p; _err = string.Empty; }">Kup karnet</button>
@@ -164,7 +164,7 @@ else
                 <div class="modal-body">
                     <p class="small">
                         Pierwszy okres zaczyna się dziś: <strong>@_planFor.SessionsPerPeriod sesji</strong> do wykorzystania,
-                        <strong>@_planFor.Price.ToString("0.00") @_planFor.Currency</strong> za @_planFor.PeriodLabel.
+                        <strong>@_planFor.Price.ToString("0.00") @CurrencyLabel.Of(_planFor.Currency)</strong> za @_planFor.PeriodLabel.
                         Przed każdym kolejnym okresem dostaniesz przypomnienie o płatności. Zrezygnujesz w każdej chwili
                         w „Moje karnety” — karnet skończy się z końcem opłaconego okresu.
                     </p>
@@ -299,7 +299,7 @@ else
     private bool _paymentsEnabled;
     private bool _isStaff;
     private bool _busy;
-    private string _currency = "PLN";
+    private string _currency = "zł";
     private string _userId = string.Empty;
     private string _email = string.Empty;
     private int? _buyingId;
@@ -371,7 +371,7 @@ else
         _isStaff = auth.User.IsInRole("Admin") || auth.User.IsInRole("Trainer") || auth.User.IsInRole("Subordinate");
 
         var settings = await PaymentSettings.GetAsync();
-        _currency = settings.Currency;
+        _currency = PTScheduler.Domain.Rules.CurrencyLabel.Of(settings.Currency);
         _options = (await PaymentService.GetEnabledOptionsAsync())
             .Where(o => IsProviderAllowed(o.Key)).ToList();
         _paymentsEnabled = _options.Count > 0;

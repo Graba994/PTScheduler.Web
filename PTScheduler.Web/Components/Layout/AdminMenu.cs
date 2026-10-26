@@ -77,7 +77,7 @@ public static class AdminMenu
     public static readonly HashSet<string> AdminOnly = new(StringComparer.OrdinalIgnoreCase)
     {
         "admin/session-types", "admin/modules", "admin/email", "admin/email-templates", "admin/push", "admin/surveys",
-        "admin/branding", "admin/site", "admin/users", "admin/permissions", "admin/audit-logs"
+        "admin/branding", "admin/site", "admin/users", "admin/permissions", "admin/audit-logs", "admin/regulamin"
     };
 
     /// <summary>Strony z atrybutem Authorize(Roles = "Admin,Trainer") — bez asystenta.</summary>
@@ -134,7 +134,11 @@ public static class AdminMenu
             new("admin/site", "bi-globe", "Twoja strona",
                 "Oferta, opinie i „Umów trening”",
                 "Publiczna strona pod Twoim adresem: kim jesteś, oferta, opinie i przycisk do umówienia pierwszego treningu. Link wrzucasz na Instagram i do wizytówki Google.",
-                Permissions.ManageBranding)
+                Permissions.ManageBranding),
+            new("admin/regulamin", "bi-file-earmark-check-fill", "Regulamin i prywatność",
+                "Twoje dane w dokumentach dla klientów",
+                "Regulamin, polityka prywatności i cookies, które klienci akceptują przy rejestracji. Wpisujesz tylko swoje dane (imię i nazwisko albo firmę, adres, NIP, jeśli masz) — resztę, np. zasady odwołań i płatności, dokumenty biorą z ustawień aplikacji.",
+                OwnerOnly: true)
         ]),
         new("Więcej: oferta i sprzedaż", "bi-bag", "blue",
         [

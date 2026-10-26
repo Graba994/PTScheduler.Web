@@ -1,215 +1,161 @@
 @page "/legal/terms"
-@using PTScheduler.Application.Interfaces
-@inject IBrandingService BrandingService
-@inject IEmailSettingsService EmailSettingsService
+@using PTScheduler.Web.Services
+@inject StudioLegalService StudioLegal
+
+@* Regulamin aplikacji studia dla klientów. Usługodawcą jest trener (studio), nie Hantly — dane, zasady odwołań
+   i bramki płatności pochodzą z ustawień tej aplikacji, więc dokument opisuje to, co tu naprawdę działa. *@
 
 <PageTitle>Regulamin</PageTitle>
 
 <div class="legal-page">
+    <StudioLegalNotice Info="_info" />
+
     <div class="legal-header">
         <i class="bi bi-file-earmark-text"></i>
-        <h4>Regulamin świadczenia usług drogą elektroniczną</h4>
+        <h4>Regulamin aplikacji @(_info?.Brand)</h4>
     </div>
 
-    <div class="legal-meta">
-        Obowiązuje od: 1 stycznia 2025 r. · Ostatnia aktualizacja: 14 lipca 2026 r.
-    </div>
+    <div class="legal-meta">Obowiązuje od: @StudioLegalNotice.EffectiveDate</div>
 
-    <section>
-        <h5>§1. Postanowienia ogólne</h5>
-        <ol>
-            <li>Niniejszy Regulamin określa zasady świadczenia usług drogą elektroniczną za pośrednictwem aplikacji <strong>@_companyName</strong> (dalej: „Serwis").</li>
-            <li>Usługodawcą jest właściciel Serwisu (dalej: „Usługodawca").</li>
-            <li>Regulamin jest udostępniany nieodpłatnie, w sposób umożliwiający jego pobranie, utrwalenie i wydrukowanie.</li>
-            <li>Korzystanie z Serwisu oznacza akceptację niniejszego Regulaminu.</li>
-        </ol>
-    </section>
+    @if (_info is { } i)
+    {
+        <section>
+            <h5>§1. Postanowienia ogólne</h5>
+            <ol>
+                <li>Regulamin określa zasady korzystania z aplikacji <strong>@i.Brand</strong> (dalej: „Aplikacja”) oraz zasady rezerwacji i zakupu usług treningowych za jej pośrednictwem.</li>
+                <li>Usługi świadczy <strong>@i.Who</strong>@(i.Email is { } e ? $", e-mail: {e}" : "") (dalej: „Usługodawca”).</li>
+                <li>Aplikacja działa na platformie Hantly, która dostarcza technologię (serwery, poczta, powiadomienia). Umowę o usługi treningowe Klient zawiera z Usługodawcą.</li>
+                <li>Regulamin jest dostępny bezpłatnie w Aplikacji w sposób, który pozwala go pobrać, zapisać i wydrukować.</li>
+            </ol>
+        </section>
 
-    <section>
-        <h5>§2. Definicje</h5>
-        <ol>
-            <li><strong>Użytkownik</strong> — osoba fizyczna korzystająca z Serwisu po utworzeniu konta.</li>
-            <li><strong>Klient</strong> — Użytkownik korzystający z usług treningowych oferowanych przez Trenera za pośrednictwem Serwisu.</li>
-            <li><strong>Trener</strong> — Użytkownik świadczący usługi treningowe i zarządzający grafikiem wizyt.</li>
-            <li><strong>Konto</strong> — indywidualny profil Użytkownika, zabezpieczony hasłem, umożliwiający korzystanie z funkcji Serwisu.</li>
-            <li><strong>Pakiet sesji</strong> — wykupiony zestaw sesji treningowych o określonej liczbie, cenie i terminie ważności.</li>
-            <li><strong>Sesja</strong> — pojedyncza wizyta treningowa zaplanowana w Serwisie.</li>
-        </ol>
-    </section>
+        <section>
+            <h5>§2. Definicje</h5>
+            <ol>
+                <li><strong>Klient</strong> — osoba, która założyła konto w Aplikacji, żeby korzystać z usług treningowych.</li>
+                <li><strong>Trener</strong> — osoba prowadząca treningi w imieniu Usługodawcy.</li>
+                <li><strong>Konto</strong> — profil Klienta w Aplikacji chroniony hasłem.</li>
+                <li><strong>Wizyta</strong> — pojedynczy trening zaplanowany w Aplikacji (stacjonarny albo online).</li>
+                <li><strong>Pakiet</strong> i <strong>Karnet</strong> — określona liczba wizyt do wykorzystania w terminie ważności albo w okresie rozliczeniowym.</li>
+                <li><strong>Kurs online</strong> — materiały treningowe dostępne w Aplikacji (treści cyfrowe).</li>
+                <li><strong>Konsument</strong> — osoba fizyczna zawierająca umowę niezwiązaną bezpośrednio z jej działalnością gospodarczą lub zawodową; postanowienia dotyczące Konsumenta stosuje się także do przedsiębiorcy na prawach konsumenta (art. 38a ustawy o prawach konsumenta).</li>
+            </ol>
+        </section>
 
-    <section>
-        <h5>§3. Rodzaj i zakres usług</h5>
-        <ol>
-            <li>Serwis umożliwia:
-                <ul>
-                    <li>rejestrację i zarządzanie kontem Użytkownika,</li>
-                    <li>planowanie i zarządzanie sesjami treningowymi,</li>
-                    <li>zakup i rozliczanie pakietów sesji,</li>
-                    <li>przeglądanie grafiku dostępności Trenera,</li>
-                    <li>rejestrowanie pomiarów ciała i śledzenie postępów,</li>
-                    <li>komunikację pomiędzy Trenerem a Klientem,</li>
-                    <li>zarządzanie powiadomieniami e-mail i push.</li>
-                </ul>
-            </li>
-            <li>Usługi świadczone są 24 godziny na dobę, 7 dni w tygodniu, z zastrzeżeniem przerw technicznych.</li>
-        </ol>
-    </section>
+        <section>
+            <h5>§3. Co umożliwia Aplikacja</h5>
+            <ol>
+                <li>Aplikacja pozwala m.in.: rezerwować i odwoływać wizyty, kupować pakiety, karnety i kursy online, przeglądać plan treningowy i zapisywać wyniki, prowadzić pomiary i zdjęcia postępów, pisać z Trenerem oraz otrzymywać przypomnienia e-mail, SMS i push.</li>
+                <li>Do korzystania z Aplikacji potrzebne są urządzenie z dostępem do Internetu, aktualna przeglądarka (albo zainstalowana aplikacja PWA) i adres e-mail.</li>
+                <li>Aplikacja działa całą dobę, z zastrzeżeniem przerw technicznych, o których — gdy to możliwe — informujemy wcześniej.</li>
+            </ol>
+        </section>
 
-    <section>
-        <h5>§4. Warunki korzystania z Serwisu</h5>
-        <ol>
-            <li>Korzystanie z Serwisu wymaga:
-                <ul>
-                    <li>urządzenia z dostępem do Internetu,</li>
-                    <li>przeglądarki internetowej w aktualnej wersji (Chrome, Firefox, Safari, Edge),</li>
-                    <li>aktywnego adresu e-mail.</li>
-                </ul>
-            </li>
-            <li>Użytkownik zobowiązuje się do:
-                <ul>
-                    <li>podawania prawdziwych danych osobowych,</li>
-                    <li>nieudostępniania danych logowania osobom trzecim,</li>
-                    <li>korzystania z Serwisu zgodnie z prawem i dobrymi obyczajami,</li>
-                    <li>nienaruszania praw innych Użytkowników.</li>
-                </ul>
-            </li>
-            <li>Zabronione jest umieszczanie w Serwisie treści bezprawnych.</li>
-        </ol>
-    </section>
+        <section>
+            <h5>§4. Konto</h5>
+            <ol>
+                <li>Założenie i prowadzenie Konta jest bezpłatne. Klient podaje prawdziwe dane i nie udostępnia danych logowania innym osobom.</li>
+                <li>Klient może w każdej chwili pobrać swoje dane albo usunąć Konto w ustawieniach Konta (Moje konto → Dane osobowe). Usunięcie Konta kończy umowę o prowadzenie Konta; dane rozliczeniowe przechowujemy tak długo, jak wymagają tego przepisy.</li>
+                <li>Zakazane jest zamieszczanie w Aplikacji treści bezprawnych. Po bezskutecznym wezwaniu Usługodawca może zablokować Konto naruszające Regulamin.</li>
+            </ol>
+        </section>
 
-    <section>
-        <h5>§5. Rejestracja i konto</h5>
-        <ol>
-            <li>Rejestracja w Serwisie jest bezpłatna i wymaga podania adresu e-mail oraz hasła.</li>
-            <li>Użytkownik może posiadać jedno konto.</li>
-            <li>Konto może zostać usunięte na żądanie Użytkownika. Usunięcie konta wiąże się z trwałym usunięciem danych z zastrzeżeniem obowiązków wynikających z przepisów prawa.</li>
-            <li>Usługodawca może zawiesić lub usunąć konto Użytkownika naruszającego Regulamin po uprzednim wezwaniu do zaprzestania naruszeń.</li>
-        </ol>
-    </section>
+        <section>
+            <h5>§5. Zdrowie i bezpieczeństwo</h5>
+            <ol>
+                <li>Klient trenuje na własną odpowiedzialność, w granicach swoich możliwości. Przed rozpoczęciem treningów, zwłaszcza przy chorobach, urazach, w ciąży lub po dłuższej przerwie, warto skonsultować się z lekarzem.</li>
+                <li>Klient informuje Trenera o przeciwwskazaniach zdrowotnych (np. w ankiecie zdrowotnej w Aplikacji — jej wypełnienie jest dobrowolne) i przerywa ćwiczenie, gdy odczuwa ból lub złe samopoczucie.</li>
+                <li>Plany i wskazówki w Aplikacji nie są poradą medyczną ani dietetyczną w rozumieniu przepisów o zawodach medycznych.</li>
+            </ol>
+        </section>
 
-    <section>
-        <h5>§6. Pakiety sesji i płatności</h5>
-        <ol>
-            <li>Ceny pakietów sesji podawane są w złotych polskich (PLN) i zawierają podatek VAT, jeśli Trener jest jego płatnikiem.</li>
-            <li>Zakup pakietu następuje poprzez przypisanie go przez Trenera do konta Klienta.</li>
-            <li>Warunki płatności (termin, forma) ustalane są indywidualnie pomiędzy Trenerem a Klientem.</li>
-            <li>Pakiet sesji ma określony termin ważności. Niewykorzystane sesje po upływie terminu przepadają, chyba że Trener postanowi inaczej.</li>
-            <li>Anulowanie pakietu jest możliwe wyłącznie przez Trenera.</li>
-        </ol>
-    </section>
+        <section>
+            <h5>§6. Rezerwacje i odwołania</h5>
+            <ol>
+                <li>Wizytę rezerwuje się w Aplikacji albo w uzgodnieniu z Trenerem. Część rezerwacji może wymagać potwierdzenia przez Trenera — Aplikacja informuje o tym przy rezerwacji.</li>
+                @if (i.Cancellation.Length > 0)
+                {
+                    <li>Zasady odwołań: @i.Cancellation Zasady obowiązujące u danego Trenera Aplikacja pokazuje przy rezerwacji i przy każdej wizycie.</li>
+                }
+                else
+                {
+                    <li>Zasady odwołań obowiązujące u danego Trenera Aplikacja pokazuje przy rezerwacji i przy każdej wizycie.</li>
+                }
+                <li>Usługodawca może odwołać lub przełożyć wizytę z ważnych przyczyn (np. choroba Trenera). Wizyta wraca wtedy do pakietu albo Klient otrzymuje zwrot za nią.</li>
+            </ol>
+        </section>
 
-    <section>
-        <h5>§7. Sesje treningowe</h5>
-        <ol>
-            <li>Rezerwacja sesji odbywa się za pośrednictwem Serwisu lub bezpośrednio z Trenerem.</li>
-            <li>Odwołanie sesji jest możliwe zgodnie z warunkami ustalonymi przez Trenera.</li>
-            <li>Nieodwołana i niezrealizowana sesja może być oznaczona jako „nieobecność" i zaliczona jako wykorzystana z pakietu.</li>
-        </ol>
-    </section>
+        <section>
+            <h5>§7. Ceny i płatności</h5>
+            <ol>
+                <li>Ceny podane w Aplikacji są cenami końcowymi w złotych polskich (zł)@(i.Nip is null ? "" : ", zawierają podatek VAT, jeżeli Usługodawca jest jego płatnikiem").</li>
+                @if (i.Gateways.Count > 0)
+                {
+                    <li>Płatności online obsługuje operator płatności (@string.Join(", ", i.Gateways)) na zasadach określonych w jego regulaminie. Można też zapłacić bezpośrednio Trenerowi, jeśli to uzgodnicie.</li>
+                }
+                else
+                {
+                    <li>Płatności rozliczane są bezpośrednio z Trenerem (np. przelewem lub gotówką), na warunkach uzgodnionych przed wizytą.</li>
+                }
+                <li>Umowa o pakiet, karnet albo kurs online zostaje zawarta z chwilą zapłaty online albo przypisania pakietu do Konta przez Trenera. Na żądanie Klienta Usługodawca wystawia dokument sprzedaży (rachunek albo fakturę).</li>
+                <li>Pakiet ma termin ważności widoczny w Aplikacji. Wizyty niewykorzystane w terminie przepadają, chyba że Trener przedłuży ważność.</li>
+                <li>Karnet odnawia się w kolejnych okresach rozliczeniowych do czasu rezygnacji, którą Klient może zgłosić Trenerowi w każdej chwili ze skutkiem na koniec bieżącego okresu.</li>
+            </ol>
+        </section>
 
-    <section>
-        <h5>§8. Odpowiedzialność</h5>
-        <ol>
-            <li>Usługodawca nie ponosi odpowiedzialności za:
-                <ul>
-                    <li>przerwy w działaniu Serwisu spowodowane siłą wyższą lub koniecznością konserwacji,</li>
-                    <li>skutki naruszenia przez Użytkownika zasad korzystania z Serwisu,</li>
-                    <li>treści zamieszczane przez Użytkowników,</li>
-                    <li>utratę danych wynikającą z okoliczności niezależnych od Usługodawcy.</li>
-                </ul>
-            </li>
-            <li>Usługodawca dokłada starań, aby Serwis działał prawidłowo i był dostępny bez przerw.</li>
-        </ol>
-    </section>
+        <section>
+            <h5>§8. Prawo odstąpienia od umowy</h5>
+            <ol>
+                <li>Od umowy zawartej na odległość (np. zakupu pakietu w Aplikacji) Konsument może odstąpić w terminie 14 dni bez podania przyczyny, wysyłając oświadczenie na adres e-mail Usługodawcy. Może skorzystać ze wzoru formularza odstąpienia (załącznik nr 2 do ustawy o prawach konsumenta).</li>
+                <li>Jeżeli na żądanie Konsumenta usługi rozpoczęły się przed upływem terminu na odstąpienie (np. wizyty z pakietu zostały zarezerwowane i odbyte), Konsument płaci za usługi wykonane do chwili odstąpienia — proporcjonalnie do ich zakresu.</li>
+                <li>Prawo odstąpienia nie przysługuje m.in.: w przypadku usługi w pełni wykonanej za wyraźną zgodą Konsumenta, poinformowanego wcześniej o utracie prawa odstąpienia; przy usługach związanych z wydarzeniami sportowymi, gdy w umowie oznaczono dzień lub okres ich świadczenia; przy treściach cyfrowych (kurs online), gdy dostęp rozpoczęto za wyraźną zgodą Konsumenta przed upływem terminu na odstąpienie, po poinformowaniu o utracie tego prawa.</li>
+                <li>Usługodawca zwraca płatność w ciągu 14 dni od otrzymania oświadczenia, tą samą metodą, którą Konsument zapłacił, chyba że strony uzgodnią inaczej.</li>
+            </ol>
+        </section>
 
-    <section>
-        <h5>§9. Reklamacje</h5>
-        <ol>
-            <li>Użytkownik ma prawo złożyć reklamację dotyczącą funkcjonowania Serwisu.</li>
-            <li>Reklamację należy przesłać drogą elektroniczną na adres e-mail Usługodawcy.</li>
-            <li>Reklamacja powinna zawierać: imię i nazwisko, adres e-mail, opis problemu.</li>
-            <li>Usługodawca rozpatruje reklamację w terminie 14 dni od jej otrzymania.</li>
-        </ol>
-    </section>
+        <section>
+            <h5>§9. Reklamacje</h5>
+            <ol>
+                <li>Reklamację dotyczącą usług lub działania Aplikacji można złożyć na adres e-mail Usługodawcy, opisując problem i podając adres e-mail Konta.</li>
+                <li>Usługodawca odpowiada w ciągu 14 dni od otrzymania reklamacji, na adres e-mail, z którego ją wysłano.</li>
+                <li>Konsumentowi przysługują uprawnienia z tytułu braku zgodności usługi lub treści cyfrowej z umową (rozdział 5a i 5b ustawy o prawach konsumenta), w szczególności żądanie doprowadzenia do zgodności z umową, obniżenia ceny albo odstąpienia od umowy.</li>
+            </ol>
+        </section>
 
-    <section>
-        <h5>§10. Prawo odstąpienia od umowy</h5>
-        <ol>
-            <li>Konsument ma prawo odstąpić od umowy o świadczenie usług drogą elektroniczną w terminie 14 dni od dnia zawarcia umowy, bez podania przyczyny (art. 27 ustawy o prawach konsumenta).</li>
-            <li>Prawo odstąpienia nie przysługuje, jeżeli usługa została w pełni wykonana za wyraźną zgodą Konsumenta (art. 38 pkt 1).</li>
-            <li>Oświadczenie o odstąpieniu można złożyć drogą elektroniczną na adres e-mail Usługodawcy.</li>
-        </ol>
-    </section>
+        <section>
+            <h5>§10. Odpowiedzialność</h5>
+            <ol>
+                <li>Usługodawca odpowiada za należyte wykonanie usług na zasadach ogólnych. Nie odpowiada za skutki podania przez Klienta nieprawdziwych informacji, w tym zatajenia przeciwwskazań zdrowotnych.</li>
+                <li>Postanowienia Regulaminu nie wyłączają ani nie ograniczają praw Konsumenta wynikających z bezwzględnie obowiązujących przepisów.</li>
+            </ol>
+        </section>
 
-    <section>
-        <h5>§11. Dane osobowe</h5>
-        <ol>
-            <li>Administratorem danych osobowych Użytkowników jest Usługodawca.</li>
-            <li>Dane osobowe przetwarzane są zgodnie z Rozporządzeniem Parlamentu Europejskiego i Rady (UE) 2016/679 (RODO) oraz ustawą o ochronie danych osobowych.</li>
-            <li>Szczegóły dotyczące przetwarzania danych osobowych zawiera <a href="/legal/privacy">Polityka Prywatności</a>.</li>
-        </ol>
-    </section>
+        <section>
+            <h5>§11. Dane osobowe</h5>
+            <p>Administratorem danych osobowych Klienta jest Usługodawca. Szczegóły opisuje <a href="/legal/privacy">Polityka prywatności</a>, a pliki cookies — <a href="/legal/cookies">Polityka cookies</a>.</p>
+        </section>
 
-    <section>
-        <h5>§12. Własność intelektualna</h5>
-        <ol>
-            <li>Wszelkie prawa do Serwisu, w tym prawa autorskie, znaki towarowe i inne prawa własności intelektualnej, należą do Usługodawcy lub podmiotów, które udzieliły mu stosownych licencji.</li>
-            <li>Kopiowanie, modyfikowanie lub rozpowszechnianie treści Serwisu bez zgody Usługodawcy jest zabronione.</li>
-        </ol>
-    </section>
+        <section>
+            <h5>§12. Pozasądowe rozwiązywanie sporów</h5>
+            <p>Konsument może skorzystać z pomocy miejskiego lub powiatowego rzecznika konsumentów, Wojewódzkiego Inspektoratu Inspekcji Handlowej albo organizacji konsumenckich. Informacje o pozasądowych sposobach rozwiązywania sporów są dostępne na stronie Urzędu Ochrony Konkurencji i Konsumentów (uokik.gov.pl).</p>
+        </section>
 
-    <section>
-        <h5>§13. Pozasądowe rozwiązywanie sporów</h5>
-        <ol>
-            <li>Konsument może skorzystać z pozasądowych sposobów rozwiązywania sporów, w szczególności:
-                <ul>
-                    <li>złożyć wniosek do właściwego wojewódzkiego inspektora Inspekcji Handlowej,</li>
-                    <li>skorzystać z platformy ODR (Online Dispute Resolution) dostępnej pod adresem <em>https://ec.europa.eu/consumers/odr</em>.</li>
-                </ul>
-            </li>
-        </ol>
-    </section>
-
-    <section>
-        <h5>§14. Kontakt</h5>
-        <p>We wszelkich sprawach związanych z Serwisem, w tym reklamacjach i odstąpieniach, prosimy o kontakt:</p>
-        @if (!string.IsNullOrEmpty(_contactEmail))
-        {
-            <p><i class="bi bi-envelope me-1"></i>E-mail: <a href="mailto:@_contactEmail">@_contactEmail</a></p>
-        }
-        else
-        {
-            <p>Dane kontaktowe dostępne są w Serwisie po zalogowaniu.</p>
-        }
-    </section>
-
-    <section>
-        <h5>§15. Postanowienia końcowe</h5>
-        <ol>
-            <li>Usługodawca zastrzega sobie prawo do zmiany Regulaminu. O zmianach Użytkownicy zostaną powiadomieni drogą elektroniczną z wyprzedzeniem co najmniej 14 dni.</li>
-            <li>W sprawach nieuregulowanych niniejszym Regulaminem zastosowanie mają przepisy prawa polskiego.</li>
-            <li>Regulamin wchodzi w życie z dniem opublikowania w Serwisie.</li>
-        </ol>
-    </section>
+        <section>
+            <h5>§13. Postanowienia końcowe</h5>
+            <ol>
+                <li>O zmianie Regulaminu Usługodawca informuje w Aplikacji lub e-mailem co najmniej 14 dni przed jej wejściem w życie. Zmiany nie dotyczą umów (np. pakietów) zawartych wcześniej.</li>
+                <li>W sprawach nieuregulowanych stosuje się prawo polskie. Spory z Konsumentami rozstrzyga sąd właściwy według przepisów ogólnych.</li>
+                @if (i.Email is { } mail)
+                {
+                    <li>Kontakt we wszystkich sprawach, w tym reklamacji i odstąpienia: <a href="mailto:@mail">@mail</a>.</li>
+                }
+            </ol>
+        </section>
+    }
 </div>
 
 @code {
-    private string _companyName = "Hantly";
-    private string _contactEmail = "";
+    private StudioLegalService.Info? _info;
 
-    protected override async Task OnInitializedAsync()
-    {
-        try
-        {
-            var branding = await BrandingService.GetAsync();
-            _companyName = branding.CompanyName ?? "Hantly";
-        }
-        catch { }
-        try
-        {
-            var settings = await EmailSettingsService.GetAsync();
-            _contactEmail = (string.IsNullOrWhiteSpace(settings?.ReplyTo) ? settings?.FromAddress : settings.ReplyTo) ?? "";
-        }
-        catch { }
-    }
+    protected override async Task OnInitializedAsync() => _info = await StudioLegal.GetAsync();
 }

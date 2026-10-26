@@ -36,7 +36,8 @@ public sealed record TechInfo(
 public sealed class AdminDashboardService(
     IDbContextFactory<ApplicationDbContext> dbFactory,
     EntitlementService entitlements,
-    AccountSwitchService switcher)
+    AccountSwitchService switcher,
+    StudioLegalService? studioLegal = null)
 {
     public async Task<AdminOverview> GetOverviewAsync()
     {
@@ -102,6 +103,13 @@ public sealed class AdminDashboardService(
             attention.Add(new("bi-hourglass-split", "info", $"{expiring} {Pl(expiring, "pakiet wygasa", "pakiety wygasają", "pakietów wygasa")} w ciągu 7 dni", "/clients"));
         if (!staff.Any(s => s.Role == Roles.Trainer))
             attention.Add(new("bi-person-badge", "warn", "Nie ma jeszcze profilu trenera — klienci nie mogą się zapisać online", "/admin/users"));
+        // Regulamin dla klientów bez danych usługodawcy (adres, e-mail) — klient nie wie, z kim zawiera umowę.
+        try
+        {
+            if (studioLegal is not null && (await studioLegal.GetAsync()).Missing() is { Count: > 0 } missing)
+                attention.Add(new("bi-file-earmark-text", "info", $"Regulamin dla klientów: uzupełnij {string.Join(", ", missing)}", "/admin/regulamin"));
+        }
+        catch { }
 
         var roles = await (from ur in db.UserRoles join r in db.Roles on ur.RoleId equals r.Id
                            group ur by r.Name into g select new { Role = g.Key!, Count = g.Count() }).ToListAsync();
