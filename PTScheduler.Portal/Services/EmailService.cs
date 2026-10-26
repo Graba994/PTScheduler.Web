@@ -7,6 +7,8 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
 {
     /// <summary>Obrazek dołączony do wiadomości (w HTML: <c>src="cid:{ContentId}"</c>) — widać go bez pobierania z sieci.</summary>
     public sealed record InlineImage(string ContentId, byte[] Data, string ContentType);
+    /// <summary>Załącznik e-maila (np. PDF dokumentu sprzedaży).</summary>
+    public sealed record FileAttachment(string Name, byte[] Data, string ContentType);
 
     /// <summary>Znacznik w szablonach Portalu: przy wysyłce zamienia się w logo Hantly (obrazek w samej wiadomości).
     /// Maile trenerów przekazywane przez Portal go nie mają, więc nie dostają logo platformy.</summary>
@@ -35,7 +37,8 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
     /// <param name="replyTo">Adres odpowiedzi — przy poczcie trenera jego własny e-mail.</param>
     public async Task<(bool Success, string? Error)> SendAsync(string toEmail, string subject, string htmlBody,
         string? fromNameOverride = null, string? replyTo = null, string? toName = null, IReadOnlyList<InlineImage>? images = null,
-        string? fromAddressOverride = null, IReadOnlyDictionary<string, string>? headers = null)
+        string? fromAddressOverride = null, IReadOnlyDictionary<string, string>? headers = null,
+        IReadOnlyList<FileAttachment>? attachments = null)
     {
         try
         {
@@ -90,6 +93,8 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                     });
                 mail.AlternateViews.Add(view);
             }
+            foreach (var file in attachments ?? [])
+                mail.Attachments.Add(new Attachment(new MemoryStream(file.Data), file.Name, file.ContentType));
             mail.To.Add(string.IsNullOrWhiteSpace(toName) ? new MailAddress(toEmail) : new MailAddress(toEmail, toName));
             if (!string.IsNullOrWhiteSpace(replyTo)) mail.ReplyToList.Add(new MailAddress(replyTo));
             // Np. In-Reply-To / References przy odpowiedzi z Poczty — wiadomość trafia do tego samego wątku u odbiorcy.

@@ -48,6 +48,11 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<TenantVideo> TenantVideos => Set<TenantVideo>();
     public DbSet<TenantVideoFolder> TenantVideoFolders => Set<TenantVideoFolder>();
     public DbSet<CommunityExercise> CommunityExercises => Set<CommunityExercise>();
+    public DbSet<SalesDocument> SalesDocuments => Set<SalesDocument>();
+    public DbSet<SalesDocumentLine> SalesDocumentLines => Set<SalesDocumentLine>();
+    public DbSet<SalesLedgerEntry> SalesLedger => Set<SalesLedgerEntry>();
+    public DbSet<Expense> Expenses => Set<Expense>();
+    public DbSet<FinanceEvent> FinanceEvents => Set<FinanceEvent>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -99,6 +104,10 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.HasIndex(t => t.Domain).IsUnique();
             e.HasIndex(t => t.Port).IsUnique();
             e.HasOne(t => t.Plan).WithMany(p => p.Tenants).HasForeignKey(t => t.PlanId);
+            e.Property(t => t.InvoiceName).HasMaxLength(300);
+            e.Property(t => t.InvoiceAddress).HasMaxLength(500);
+            e.Property(t => t.InvoiceTaxId).HasMaxLength(32);
+            e.Property(t => t.InvoiceEmail).HasMaxLength(256);
         });
 
         b.Entity<Plan>(e =>
@@ -318,6 +327,88 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.HasIndex(x => x.PaymentSessionId);
             e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
             e.HasMany(x => x.Lines).WithOne(l => l.Bill).HasForeignKey(l => l.BillId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<SalesDocument>(e =>
+        {
+            e.Property(x => x.Kind).HasMaxLength(16);
+            e.Property(x => x.Number).HasMaxLength(64);
+            e.Property(x => x.PaymentMethod).HasMaxLength(40);
+            e.Property(x => x.Mode).HasMaxLength(16);
+            e.Property(x => x.CorrectionReason).HasMaxLength(500);
+            e.Property(x => x.Seller).HasMaxLength(1000);
+            e.Property(x => x.BuyerName).HasMaxLength(300);
+            e.Property(x => x.BuyerAddress).HasMaxLength(500);
+            e.Property(x => x.BuyerTaxId).HasMaxLength(32);
+            e.Property(x => x.BuyerEmail).HasMaxLength(256);
+            e.Property(x => x.Net).HasPrecision(12, 2);
+            e.Property(x => x.Vat).HasPrecision(12, 2);
+            e.Property(x => x.Gross).HasPrecision(12, 2);
+            e.Property(x => x.Currency).HasMaxLength(3);
+            e.Property(x => x.VatNote).HasMaxLength(300);
+            e.Property(x => x.Note).HasMaxLength(1000);
+            e.Property(x => x.Provider).HasMaxLength(16);
+            e.Property(x => x.ExternalId).HasMaxLength(64);
+            e.Property(x => x.ExternalUrl).HasMaxLength(500);
+            e.Property(x => x.ExternalError).HasMaxLength(1000);
+            e.Property(x => x.CancelReason).HasMaxLength(500);
+            e.Property(x => x.CreatedBy).HasMaxLength(256);
+            // Jeden numer w serii raz na rok — chroni przed dziurą i duplikatem przy równoczesnym wystawianiu.
+            e.Property(x => x.Series).HasMaxLength(16);
+            e.HasIndex(x => new { x.Series, x.Year, x.Seq }).IsUnique().HasFilter("\"Seq\" > 0");
+            // Jedna wpłata = najwyżej jeden dokument sprzedaży (korekty mają własne wpisy).
+            e.HasIndex(x => x.PaymentRecordId).IsUnique().HasFilter("\"PaymentRecordId\" IS NOT NULL AND \"Kind\" <> 'korekta' AND \"Status\" <> 2");
+            e.HasIndex(x => x.IssueDate);
+            e.HasIndex(x => x.TenantId);
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(x => x.Corrects).WithMany().HasForeignKey(x => x.CorrectsId).OnDelete(DeleteBehavior.Restrict);
+            e.HasMany(x => x.Lines).WithOne(l => l.Document).HasForeignKey(l => l.DocumentId);
+        });
+
+        b.Entity<SalesDocumentLine>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(300);
+            e.Property(x => x.Unit).HasMaxLength(16);
+            e.Property(x => x.VatRate).HasMaxLength(8);
+            e.Property(x => x.Quantity).HasPrecision(12, 3);
+            e.Property(x => x.UnitGross).HasPrecision(12, 2);
+            e.Property(x => x.Net).HasPrecision(12, 2);
+            e.Property(x => x.Vat).HasPrecision(12, 2);
+            e.Property(x => x.Gross).HasPrecision(12, 2);
+        });
+
+        b.Entity<SalesLedgerEntry>(e =>
+        {
+            e.Property(x => x.Amount).HasPrecision(12, 2);
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.Property(x => x.Source).HasMaxLength(16);
+            e.Property(x => x.CreatedBy).HasMaxLength(256);
+            // Wpłata trafia do ewidencji dokładnie raz, nawet gdy synchronizacja ruszy dwa razy naraz.
+            e.HasIndex(x => x.PaymentRecordId).IsUnique().HasFilter("\"PaymentRecordId\" IS NOT NULL AND \"Source\" = 'payment'");
+            e.HasIndex(x => x.Date);
+        });
+
+        b.Entity<Expense>(e =>
+        {
+            e.Property(x => x.Amount).HasPrecision(12, 2);
+            e.Property(x => x.Vendor).HasMaxLength(200);
+            e.Property(x => x.Description).HasMaxLength(500);
+            e.Property(x => x.Category).HasMaxLength(40);
+            e.Property(x => x.DocumentNumber).HasMaxLength(100);
+            e.Property(x => x.AttachmentName).HasMaxLength(200);
+            e.Property(x => x.AttachmentType).HasMaxLength(100);
+            e.Property(x => x.CreatedBy).HasMaxLength(256);
+            e.Property(x => x.DeletedReason).HasMaxLength(500);
+            e.HasIndex(x => x.Date);
+        });
+
+        b.Entity<FinanceEvent>(e =>
+        {
+            e.Property(x => x.Actor).HasMaxLength(256);
+            e.Property(x => x.Action).HasMaxLength(60);
+            e.Property(x => x.Entity).HasMaxLength(40);
+            e.Property(x => x.Detail).HasMaxLength(2000);
+            e.HasIndex(x => x.At);
         });
 
         b.Entity<TenantBillLine>(e =>

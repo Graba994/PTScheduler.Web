@@ -15,6 +15,8 @@
 @inject AddonService AddonSvc
 @inject UpdateService UpdateSvc
 @inject TenantDemoService DemoSvc
+@inject AccountingService Accounting
+@inject AuthenticationStateProvider AuthState
 @rendermode InteractiveServer
 
 <PageTitle>@(_tenant?.CompanyName ?? "Trener") — Hantly Portal</PageTitle>
@@ -766,6 +768,35 @@ else
             </div>
         </div>
 
+        <div class="col-12 @TabCls("billing")">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <div class="d-flex justify-content-between align-items-center mb-3 gap-2 flex-wrap">
+                        <h2 class="pp-card-title pp-card-title-icon mb-0"><span class="pp-icon pp-icon-sm pp-tone-ok"><i class="bi bi-person-vcard"></i></span>Dane do rachunku i faktury</h2>
+                        <a class="btn btn-sm btn-outline-secondary" href="/panel/ksiegowosc?tab=dokumenty&amp;q=@Uri.EscapeDataString(_tenant.CompanyName)"><i class="bi bi-journal-text me-1"></i>Dokumenty w księgowości</a>
+                    </div>
+                    <p class="small text-muted">Trener może je uzupełnić sam w swoim panelu (/moje-konto). Z NIP-em dostaje fakturę, bez — rachunek na osobę prywatną. Już wystawione dokumenty się nie zmieniają.</p>
+                    <div class="row g-2">
+                        <div class="col-md-6"><label class="form-label small mb-1">Nazwa / imię i nazwisko</label><input class="form-control form-control-sm" @bind="_buyerName" placeholder="@_tenant.OwnerName" maxlength="300" /></div>
+                        <div class="col-md-3"><label class="form-label small mb-1">NIP (firma)</label><input class="form-control form-control-sm" @bind="_buyerNip" maxlength="20" inputmode="numeric" /></div>
+                        <div class="col-md-3"><label class="form-label small mb-1">E-mail do dokumentów</label><input class="form-control form-control-sm" @bind="_buyerEmail" placeholder="@_tenant.OwnerEmail" maxlength="256" /></div>
+                        <div class="col-12"><label class="form-label small mb-1">Adres</label><textarea class="form-control form-control-sm" rows="2" @bind="_buyerAddress" maxlength="500" placeholder="ul. Przykładowa 1&#10;00-001 Miasto"></textarea></div>
+                    </div>
+                    <div class="d-flex align-items-center gap-2 mt-2 flex-wrap">
+                        <button class="btn btn-sm btn-primary" @onclick="SaveBuyer"><i class="bi bi-check2 me-1"></i>Zapisz dane</button>
+                        @if (_buyerMsg is not null)
+                        {
+                            <span class="small @(_buyerOk ? "text-success" : "text-danger")">@_buyerMsg</span>
+                        }
+                        @if (_tenant.InvoiceDataAt is { } buyerAt)
+                        {
+                            <span class="small text-muted ms-auto">Zmienione @buyerAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</span>
+                        }
+                    </div>
+                </div>
+            </div>
+        </div>
+
         @if (!string.IsNullOrEmpty(_tenant.StripeCustomerId))
         {
             <div class="col-12 @TabCls("billing")">
@@ -1326,6 +1357,29 @@ else
     [Parameter] public int Id { get; set; }
 
     private Tenant? _tenant;
+    private string? _buyerName, _buyerNip, _buyerEmail, _buyerAddress, _buyerMsg;
+    private bool _buyerOk;
+    private bool _buyerLoaded;
+
+    private async Task SaveBuyer()
+    {
+        if (_tenant is null) return;
+        var actor = (await AuthState.GetAuthenticationStateAsync()).User.Identity?.Name ?? "admin";
+        var error = await Accounting.SaveBuyerAsync(_tenant.Id, _buyerName, _buyerAddress, _buyerNip, _buyerEmail, actor);
+        _buyerOk = error is null;
+        _buyerMsg = error ?? "Zapisane.";
+        if (error is null) _tenant = await TenantSvc.GetAsync(_tenant.Id) ?? _tenant;
+    }
+
+    private void LoadBuyer()
+    {
+        if (_buyerLoaded || _tenant is null) return;
+        _buyerLoaded = true;
+        _buyerName = _tenant.InvoiceName;
+        _buyerNip = _tenant.InvoiceTaxId;
+        _buyerEmail = _tenant.InvoiceEmail;
+        _buyerAddress = _tenant.InvoiceAddress;
+    }
     private bool _checkingHealth;
     private PTScheduler.Portal.Services.TenantEndpoint.ProbeResult? _healthProbe;
 
@@ -1499,6 +1553,7 @@ else
     protected override async Task OnInitializedAsync()
     {
         _tenant = await TenantSvc.GetAsync(Id);
+        LoadBuyer();
         if (_tenant is not null)
         {
             await RefreshContainers();

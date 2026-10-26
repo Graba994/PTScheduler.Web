@@ -73,6 +73,13 @@
             <NavLink href="/panel/billing" class="portal-nav-item" title="Rachunki">
                 <i class="bi bi-receipt"></i><span class="portal-label">Rachunki</span>
             </NavLink>
+            <NavLink href="/panel/ksiegowosc" class="portal-nav-item" title="Księgowość">
+                <i class="bi bi-journal-check"></i><span class="portal-label">Księgowość</span>
+                @if (_books > 0)
+                {
+                    <span class="portal-dot" title="@($"Dokumenty do uwagi: {_books}")"></span>
+                }
+            </NavLink>
             <NavLink href="/panel/bledy" class="portal-nav-item" title="Zgłoszenia błędów">
                 <i class="bi bi-bug"></i><span class="portal-label">Zgłoszenia błędów</span>
                 @if (_bugs > 0)
@@ -146,6 +153,7 @@
     private int _todo;
     private int _mail;
     private int _bugs;
+    private int _books;
 
     // Zgłoszenia ze sklepu czekające na zespół (nowe, zaakceptowane, w realizacji).
     protected override async Task OnInitializedAsync()
@@ -173,5 +181,12 @@
                 r => r.Status == PTScheduler.Portal.Entities.BugReportStatus.New);
         }
         catch { _bugs = 0; }
+        try
+        {
+            await using var db = DbFactory.CreateDbContext();
+            _books = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions.CountAsync(db.SalesDocuments,
+                d => d.Status == PTScheduler.Portal.Entities.SalesDocumentStatus.Pending);
+        }
+        catch { _books = 0; }
     }
 }

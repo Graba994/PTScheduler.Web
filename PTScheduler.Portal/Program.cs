@@ -98,6 +98,10 @@ builder.Services.AddHttpClient();
 builder.Services.AddScoped<StorePaymentService>();
 builder.Services.AddScoped<BillingService>();
 builder.Services.AddHostedService<BillingBackgroundService>();
+builder.Services.AddHttpClient(FakturowniaClient.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(30));
+builder.Services.AddScoped<FakturowniaClient>();
+builder.Services.AddScoped<AccountingService>();
+builder.Services.AddHostedService<AccountingBackgroundService>();
 builder.Services.AddScoped<ErrorAlertService>();
 builder.Services.AddHostedService<ErrorAlertBackgroundService>();
 builder.Services.AddScoped<BackupService>();
@@ -589,6 +593,30 @@ app.MapGet("/moje-konto/subskrypcja/{id:int}", async (int id, HttpContext ctx, I
     return Results.Redirect($"/subskrypcja/{Uri.EscapeDataString(token)}");
 });
 
+// Dokument sprzedaży w panelu trenera — tylko jego własne aplikacje.
+app.MapGet("/moje-konto/dokument/{id:int}.pdf", async (int id, HttpContext ctx, TrainerAccounts trainers, AccountingService acc) =>
+{
+    if (await TrainerAccounts.CurrentEmailAsync(ctx) is not { } email) return Results.Redirect("/login");
+    var ids = (await trainers.TenantsOfAsync(email)).Select(t => t.Id).ToHashSet();
+    var doc = await acc.GetDocumentAsync(id);
+    if (doc?.TenantId is not { } tenantId || !ids.Contains(tenantId) || doc.Status != SalesDocumentStatus.Issued) return Results.NotFound();
+    ctx.Response.Headers.CacheControl = "no-store";
+    return await acc.PdfAsync(id) is { } f ? Results.File(f.Pdf, "application/pdf", f.FileName) : Results.NotFound();
+});
+
+// Dane do rachunku / faktury z panelu trenera (formularz bez JavaScriptu).
+app.MapPost("/api/konto/dane-do-faktury", async (HttpContext ctx, Microsoft.AspNetCore.Antiforgery.IAntiforgery antiforgery, TrainerAccounts trainers, AccountingService acc) =>
+{
+    if (await TrainerAccounts.CurrentEmailAsync(ctx) is not { } email) return Results.Redirect("/login");
+    var form = await ctx.Request.ReadFormAsync();
+    try { await antiforgery.ValidateRequestAsync(ctx); }
+    catch (Microsoft.AspNetCore.Antiforgery.AntiforgeryValidationException) { return Results.Redirect("/moje-konto?dane=blad#dane-do-faktury"); }
+    if (!int.TryParse(form["tenant"], out var tenantId) || !(await trainers.TenantsOfAsync(email)).Any(t => t.Id == tenantId)) return Results.NotFound();
+    var company = form["typ"] == "firma";
+    var error = await acc.SaveBuyerAsync(tenantId, form["nazwa"], form["adres"], company ? form["nip"].ToString() : null, form["email"], $"trener {email}");
+    return Results.Redirect(error is null ? "/moje-konto?dane=ok#dane-do-faktury" : $"/moje-konto?dane={Uri.EscapeDataString(error)}#dane-do-faktury");
+});
+
 app.MapGet("/api/konto/wyloguj", async (HttpContext ctx) =>
 {
     await Microsoft.AspNetCore.Authentication.AuthenticationHttpContextExtensions.SignOutAsync(ctx, TrainerAccounts.Scheme);
@@ -877,6 +905,57 @@ app.MapGet("/api/panel/tenants/{id:int}/offer.pdf", async (
     var seller = await siteSettings.GetAsync(SiteSettingsService.Keys.OfferSellerDetails);
     var pdf = OfferPdf.Render(offer, seller, "Hantly");
     return Results.File(pdf, "application/pdf", $"oferta-{offer.Tenant.Slug}-{DateTime.UtcNow:yyyy-MM-dd}.pdf");
+}).RequireAuthorization();
+
+// ── Księgowość (tylko administrator): PDF dokumentów, dowody kosztów, ewidencja, rejestry i paczka dla księgowej ──
+static (DateOnly From, DateOnly To) FinancePeriod(string? od, string? @do)
+{
+    var today = AccountingService.Today;
+    var from = DateOnly.TryParse(od, System.Globalization.CultureInfo.InvariantCulture, out var f) ? f : new DateOnly(today.Year, today.Month, 1);
+    var to = DateOnly.TryParse(@do, System.Globalization.CultureInfo.InvariantCulture, out var t) ? t : today;
+    return to < from ? (to, from) : (from, to);
+}
+
+app.MapGet("/api/panel/ksiegowosc/dokument/{id:int}.pdf", async (int id, HttpContext ctx, AccountingService acc) =>
+{
+    if (!ctx.User.IsInRole("Admin")) return Results.Forbid();
+    ctx.Response.Headers.CacheControl = "no-store";
+    return await acc.PdfAsync(id) is { } f ? Results.File(f.Pdf, "application/pdf", f.FileName) : Results.NotFound();
+}).RequireAuthorization();
+
+app.MapGet("/api/panel/ksiegowosc/koszt/{id:int}/dowod", async (int id, HttpContext ctx, AccountingService acc) =>
+{
+    if (!ctx.User.IsInRole("Admin")) return Results.Forbid();
+    ctx.Response.Headers.CacheControl = "no-store";
+    ctx.Response.Headers["X-Content-Type-Options"] = "nosniff";
+    // Dowód zawsze jako pobranie (nie otwieramy w Portalu treści przesłanej z zewnątrz).
+    return await acc.ExpenseAttachmentAsync(id) is { } a ? Results.File(a.Data, "application/octet-stream", a.Name) : Results.NotFound();
+}).RequireAuthorization();
+
+app.MapGet("/api/panel/ksiegowosc/{plik}", async (string plik, string? od, string? @do, HttpContext ctx, AccountingService acc) =>
+{
+    if (!ctx.User.IsInRole("Admin")) return Results.Forbid();
+    ctx.Response.Headers.CacheControl = "no-store";
+    var (from, to) = FinancePeriod(od, @do);
+    var suffix = $"{from:yyyy-MM-dd}_{to:yyyy-MM-dd}";
+    switch (plik)
+    {
+        case "ewidencja.csv":
+            return Results.File(await acc.LedgerCsvAsync(from, to), "text/csv; charset=utf-8", $"ewidencja-sprzedazy_{suffix}.csv");
+        case "ewidencja.pdf":
+            return Results.File(await acc.LedgerPdfAsync(from, to), "application/pdf", $"ewidencja-sprzedazy_{suffix}.pdf");
+        case "dokumenty.csv":
+        {
+            var docs = (await acc.DocumentsAsync(new AccountingService.DocumentFilter(), 100_000)).Where(d => d.IssueDate >= from && d.IssueDate <= to).ToList();
+            return Results.File(AccountingService.DocumentsCsv(docs), "text/csv; charset=utf-8", $"dokumenty_{suffix}.csv");
+        }
+        case "koszty.csv":
+            return Results.File(AccountingService.ExpensesCsv(await acc.ExpensesAsync(from, to)), "text/csv; charset=utf-8", $"koszty_{suffix}.csv");
+        case "paczka.zip":
+            return Results.File(await acc.PackageAsync(from, to, ctx.User.Identity?.Name ?? "admin"), "application/zip", $"ksiegowosc_{suffix}.zip");
+        default:
+            return Results.NotFound();
+    }
 }).RequireAuthorization();
 
 // Logi kontenera jako plik .txt — tylko administrator i tylko kontenery, które panel sam pokazuje.

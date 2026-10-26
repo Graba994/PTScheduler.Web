@@ -5,6 +5,7 @@
 @inject UpdateService Updates
 @inject IDbContextFactory<PortalDbContext> DbFactory
 @inject NavigationManager Nav
+@inject AccountingService Accounting
 
 @* Panel trenera na stronie Hantly: gdzie jest aplikacja, w jakim jest stanie, plan i płatności.
    Logowanie hasłem z kreatora albo linkiem z e-maila (osobny schemat — bez dostępu do panelu admina). *@
@@ -161,6 +162,50 @@
                         }
                     </section>
 
+                    <section class="tp-card tp-invoice" id="dane-do-faktury" aria-label="Dane do rachunku">
+                        <h3><i class="bi bi-person-vcard"></i>Dane do rachunku i faktury</h3>
+                        @if (Dane == "ok")
+                        {
+                            <p class="tp-ok" role="status"><i class="bi bi-check-circle"></i>Zapisane. Następne dokumenty wystawimy na te dane.</p>
+                        }
+                        else if (Dane == "blad" || AccountingService.BuyerErrors.Contains(Dane))
+                        {
+                            <p class="tp-note" role="alert"><i class="bi bi-exclamation-circle"></i>@(Dane == "blad" ? "Formularz wygasł — wyślij go jeszcze raz." : Dane)</p>
+                        }
+                        <form method="post" action="/api/konto/dane-do-faktury" data-enhance="false" class="tp-form">
+                            <AntiforgeryToken />
+                            <input type="hidden" name="tenant" value="@t.Id" />
+                            <fieldset class="tp-seg">
+                                <legend class="visually-hidden">Na kogo dokument</legend>
+                                <label><input type="radio" name="typ" value="osoba" checked="@string.IsNullOrEmpty(t.InvoiceTaxId)" /><span>Osoba prywatna</span></label>
+                                <label><input type="radio" name="typ" value="firma" checked="@(!string.IsNullOrEmpty(t.InvoiceTaxId))" /><span>Firma (z NIP)</span></label>
+                            </fieldset>
+                            <label class="tp-field"><span>Imię i nazwisko albo nazwa firmy</span>
+                                <input name="nazwa" maxlength="300" value="@(t.InvoiceName ?? "")" placeholder="@t.OwnerName" autocomplete="organization" /></label>
+                            <label class="tp-field"><span>Adres</span>
+                                <textarea name="adres" rows="2" maxlength="500" placeholder="ul. Przykładowa 1&#10;00-001 Miasto" autocomplete="street-address">@(t.InvoiceAddress ?? "")</textarea></label>
+                            <label class="tp-field tp-nip"><span>NIP (tylko dla firmy)</span>
+                                <input name="nip" maxlength="20" inputmode="numeric" value="@(t.InvoiceTaxId ?? "")" placeholder="1234567890" /></label>
+                            <label class="tp-field"><span>E-mail do dokumentów</span>
+                                <input name="email" type="email" maxlength="256" value="@(t.InvoiceEmail ?? "")" placeholder="@t.OwnerEmail" autocomplete="email" /></label>
+                            <button class="tp-btn tp-btn-sm" type="submit"><i class="bi bi-check2"></i>Zapisz dane</button>
+                        </form>
+                        @if (app.Docs.Count > 0)
+                        {
+                            <h4 class="tp-sub">Twoje dokumenty</h4>
+                            <ul class="tp-bills">
+                                @foreach (var d in app.Docs)
+                                {
+                                    <li>
+                                        <span class="tp-bill-main"><b>@d.Number</b><small>@SalesDocumentKinds.Label(d.Kind) · @d.IssueDate.ToString("dd.MM.yyyy")</small></span>
+                                        <span class="tp-bill-amt">@d.Gross.ToString("0.00") zł</span>
+                                        <a class="tp-chip" href="/moje-konto/dokument/@(d.Id).pdf"><i class="bi bi-download"></i>PDF</a>
+                                    </li>
+                                }
+                            </ul>
+                        }
+                    </section>
+
                     <section class="tp-card tp-help" aria-label="Pomoc">
                         <h3><i class="bi bi-chat-heart"></i>Pomoc</h3>
                         <p>Coś nie działa albo chcesz zmienić plan? Odpisujemy zwykle tego samego dnia.</p>
@@ -259,6 +304,22 @@
     .tp-chip.warn { background: #f59e0b; color: #fff; }
     .tp-chip.warn:hover { color: #fff; background: #d97706; }
 
+    .tp-form { display: flex; flex-direction: column; gap: 10px; }
+    .tp-field { display: flex; flex-direction: column; gap: 4px; font-size: .8rem; font-weight: 700; color: var(--pts-text-secondary); }
+    .tp-field input, .tp-field textarea { font: inherit; font-size: .9rem; font-weight: 400; color: var(--pts-text); background: var(--pts-surface); border: 1px solid var(--pts-border); border-radius: 12px; padding: 9px 12px; }
+    .tp-field input:focus, .tp-field textarea:focus { outline: 3px solid color-mix(in srgb, var(--pts-primary) 25%, transparent); border-color: var(--pts-primary); }
+    .tp-seg { display: flex; gap: 6px; border: 0; margin: 0; padding: 4px; border-radius: 14px; background: var(--pts-surface-alt); }
+    .tp-seg label { flex: 1; }
+    .tp-seg input { position: absolute; opacity: 0; pointer-events: none; }
+    .tp-seg span { display: block; text-align: center; padding: 7px 10px; border-radius: 10px; font-size: .84rem; font-weight: 700; color: var(--pts-text-secondary); cursor: pointer; }
+    .tp-seg input:checked + span { background: var(--pts-surface); color: var(--pts-primary); box-shadow: var(--pts-shadow); }
+    .tp-seg input:focus-visible + span { outline: 3px solid var(--pts-primary-light); }
+    .tp-form:has(input[value="osoba"]:checked) .tp-nip { display: none; }
+    .tp-form .tp-btn { align-self: flex-start; }
+    .tp-ok { display: flex; gap: 8px; padding: 10px 12px; border-radius: 12px; background: #ecfdf5; color: #047857; font-size: .84rem; margin: 0 0 12px; }
+    .tp-invoice .tp-note { margin: 0 0 12px; }
+    .tp-sub { font-size: .82rem; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--pts-text-secondary); margin: 18px 0 8px; }
+
     .tp-empty { text-align: center; padding: 40px 24px; }
     .tp-empty > i { font-size: 2.2rem; color: var(--pts-primary); }
     .tp-empty h2 { font-family: var(--pts-font-display); font-weight: 800; font-size: 1.3rem; margin: 10px 0 6px; }
@@ -278,8 +339,9 @@
 @code {
     [CascadingParameter] public HttpContext? Http { get; set; }
     [SupplyParameterFromQuery] public string? Blad { get; set; }
+    [SupplyParameterFromQuery] public string? Dane { get; set; }
 
-    private sealed record AppView(Tenant Tenant, TrainerPanelStatus.State State, string Url, string Host, List<TenantBill> Bills, bool CanManage);
+    private sealed record AppView(Tenant Tenant, TrainerPanelStatus.State State, string Url, string Host, List<TenantBill> Bills, bool CanManage, List<SalesDocument> Docs);
 
     private string _email = "";
     private List<AppView> _apps = [];
@@ -301,6 +363,7 @@
         var ids = tenants.Select(t => t.Id).ToList();
         var bills = await db.TenantBills.AsNoTracking().Where(b => ids.Contains(b.TenantId) && b.Status != TenantBillStatus.Cancelled)
             .OrderByDescending(b => b.IssuedAt).ToListAsync();
+        var docs = await Accounting.DocumentsOfTenantsAsync(ids, 40);
 
         foreach (var t in tenants)
         {
@@ -309,7 +372,8 @@
             var own = bills.Where(b => b.TenantId == t.Id).Take(6).ToList();
             var canManage = t.Status != TenantStatus.Destroyed
                 && (!string.IsNullOrEmpty(t.StripeCustomerId) || own.Count > 0 || (t.Plan?.MonthlyPrice ?? 0) > 0);
-            _apps.Add(new AppView(t, TrainerPanelStatus.From(t, updating.Contains(t.Slug)), url, host, own, canManage));
+            _apps.Add(new AppView(t, TrainerPanelStatus.From(t, updating.Contains(t.Slug)), url, host, own, canManage,
+                docs.Where(d => d.TenantId == t.Id).Take(8).ToList()));
         }
     }
 

@@ -30,6 +30,15 @@ public class Tenant
     public string? Notes { get; set; }
     /// <summary>Rozliczenie abonamentu: „monthly” albo „yearly” (wybrane w kreatorze).</summary>
     public string BillingInterval { get; set; } = "monthly";
+    /// <summary>Dane do rachunku / faktury (nabywca). Puste — dokument na imię i nazwisko właściciela.</summary>
+    public string? InvoiceName { get; set; }
+    /// <summary>Adres nabywcy (ulica, kod i miasto — wiele linii).</summary>
+    public string? InvoiceAddress { get; set; }
+    /// <summary>NIP nabywcy — z nim dokument jest fakturą (firma), bez niego rachunkiem dla osoby prywatnej.</summary>
+    public string? InvoiceTaxId { get; set; }
+    /// <summary>Gdzie wysyłać dokumenty sprzedaży (puste — e-mail właściciela).</summary>
+    public string? InvoiceEmail { get; set; }
+    public DateTime? InvoiceDataAt { get; set; }
     /// <summary>Dlaczego zgłoszenie czeka w kolejce zamiast uruchomić się samo (dla admina; null = nie czeka).</summary>
     public string? QueuedReason { get; set; }
     /// <summary>Losowy klucz kreatora: powrót z płatności kartą wraca do właściwego zgłoszenia (w adresie, nie Id).</summary>

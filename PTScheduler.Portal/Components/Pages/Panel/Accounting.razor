@@ -1,0 +1,1342 @@
+@page "/panel/ksiegowosc"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject AccountingService Acc
+@inject FakturowniaClient Fakturownia
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject AuthenticationStateProvider AuthState
+@rendermode InteractiveServer
+
+@* Księgowość platformy: od działalności nierejestrowanej do firmy, bez przerwy w ewidencji i numeracji.
+   Wystawionych dokumentów i wpisów się nie zmienia — korekta, sprostowanie, a wszystko w historii zmian. *@
+
+<PageTitle>Księgowość — Hantly Portal</PageTitle>
+
+<PanelHeader Title="Księgowość" Icon="bi-journal-check" IconClass="pp-tone-ok"
+             Subtitle="Ewidencja sprzedaży, rachunki i faktury, koszty i limit — w jednym miejscu, od działalności nierejestrowanej po firmę.">
+    <Actions>
+        @if (_s?.Configured == true)
+        {
+            <button class="btn btn-sm btn-outline-secondary" @onclick="SyncNow" disabled="@_busy"><i class="bi bi-arrow-repeat me-1"></i>Synchronizuj wpłaty</button>
+            <button class="btn btn-sm btn-primary" @onclick="OpenNewDocument"><i class="bi bi-plus-lg me-1"></i>Wystaw dokument</button>
+        }
+    </Actions>
+</PanelHeader>
+
+@if (_o is null || _s is null)
+{
+    <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+}
+else
+{
+    <div class="acc-mode @(_s.Configured ? "" : "acc-mode-off")">
+        <span class="acc-mode-icon"><i class="bi @(_o.ModeToday == FinanceModes.Business ? "bi-building-check" : _s.Configured ? "bi-person-badge" : "bi-signpost-split")"></i></span>
+        <div class="acc-mode-text">
+            <b>@ModeHeadline()</b>
+            <span>@ModeDetail()</span>
+        </div>
+        @if (_s.Configured)
+        {
+            <span class="pp-chip @(_s.UsesFakturownia ? "pp-tone-info" : "pp-tone-muted")"><i class="bi @(_s.UsesFakturownia ? "bi-cloud-check" : "bi-file-earmark-text")"></i>@(_s.UsesFakturownia ? "Dokumenty w Fakturowni" : "Dokumenty w Hantly")</span>
+            <span class="pp-chip @(_s.AutoIssue ? "pp-tone-ok" : "pp-tone-muted")"><i class="bi bi-lightning-charge"></i>@(_s.AutoIssue ? "Automatycznie po wpłacie" : "Dokumenty ręcznie")</span>
+        }
+    </div>
+
+    @if (_flash is not null)
+    {
+        <div class="alert @(_flashOk ? "alert-success" : "alert-danger") py-2 small d-flex align-items-center gap-2" role="status">
+            <i class="bi @(_flashOk ? "bi-check-circle" : "bi-exclamation-triangle")"></i><span>@_flash</span>
+            <button type="button" class="btn-close ms-auto" aria-label="Zamknij" @onclick="() => _flash = null"></button>
+        </div>
+    }
+
+    <ul class="nav pp-tabs mb-3" role="tablist">
+        @foreach (var (key, label, icon) in Tabs)
+        {
+            <li class="nav-item" role="presentation">
+                <button type="button" role="tab" class="nav-link @(_tab == key ? "active" : "")" aria-selected="@(_tab == key ? "true" : "false")" @onclick="() => SelectTab(key)">
+                    <i class="bi @icon me-1"></i>@label
+                    @if (key == "dokumenty" && _o.PendingDocs + _o.PaymentsWithoutDoc > 0)
+                    {
+                        <span class="acc-dot" title="Do uwagi"></span>
+                    }
+                </button>
+            </li>
+        }
+    </ul>
+
+    @if (_tab == "przeglad")
+    {
+        @if (!_s.Configured)
+        {
+            <div class="pp-card acc-start">
+                <h2 class="pp-card-title mb-2">Zacznijmy od formy działalności</h2>
+                <p class="text-muted small mb-3">Wybierz, jak teraz sprzedajesz. Od wybranej daty każda wpłata trafi do ewidencji sprzedaży, a dokument (rachunek albo faktura) powstanie sam. Gdy założysz firmę, przełączysz to jednym kliknięciem — ewidencja i numeracja biegną dalej.</p>
+                <div class="acc-choice">
+                    <button type="button" class="acc-choice-btn" @onclick='() => StartWith(FinanceModes.Unregistered)'>
+                        <i class="bi bi-person-badge"></i><b>Działalność nierejestrowana</b>
+                        <span>Bez CEIDG, do limitu kwartalnego (w 2026 r. @FinanceRules.Money(FinanceRules.QuarterLimit(2026, 1).Limit)). Rachunki i ewidencja sprzedaży.</span>
+                    </button>
+                    <button type="button" class="acc-choice-btn" @onclick='() => StartWith(FinanceModes.Business)'>
+                        <i class="bi bi-building-check"></i><b>Firma (CEIDG)</b>
+                        <span>Masz NIP i wpis w CEIDG. Faktury bez VAT albo z VAT.</span>
+                    </button>
+                </div>
+            </div>
+        }
+
+        @foreach (var a in _o.Alerts)
+        {
+            <div class="acc-alert pp-tone-@a.Tone">
+                <i class="bi @a.Icon"></i>
+                <div class="min-w-0"><b>@a.Title</b><span>@a.Text</span></div>
+                @if (a.Tab is { } t)
+                {
+                    <button class="btn btn-sm btn-light ms-auto" @onclick="() => SelectTab(t)">Przejdź</button>
+                }
+            </div>
+        }
+
+        @if (_o.Quarter is { } q)
+        {
+            <div class="pp-card acc-limit pp-tone-@q.Tone">
+                <div class="acc-limit-head">
+                    <div>
+                        <span class="acc-eyebrow">Limit działalności nierejestrowanej · @(q.Quarter). kwartał @q.Year</span>
+                        <div class="acc-limit-big"><b>@FinanceRules.Money(q.Total)</b><span>z @FinanceRules.Money(q.Limit)</span></div>
+                    </div>
+                    <div class="acc-limit-pct">@(q.Percent)%</div>
+                </div>
+                <div class="acc-bar" role="img" aria-label="@($"Wykorzystano {q.Percent}% limitu")">
+                    <span class="acc-bar-paid" style="width:@Pct(q.Received, q.Limit)%"></span>
+                    <span class="acc-bar-open" style="width:@Pct(q.Outstanding, q.Limit, q.Received)%"></span>
+                    @if (q.Forecast > q.Total)
+                    {
+                        <span class="acc-bar-forecast" style="left:@Pct(q.Forecast, q.Limit)%" title="Prognoza na koniec kwartału"></span>
+                    }
+                </div>
+                <dl class="acc-limit-facts">
+                    <div><dt>Wpłynęło</dt><dd>@FinanceRules.Money(q.Received)</dd></div>
+                    <div><dt>Wystawione, nieopłacone</dt><dd>@FinanceRules.Money(q.Outstanding)</dd></div>
+                    <div><dt>Zostało</dt><dd>@FinanceRules.Money(q.Left)</dd></div>
+                    <div><dt>Prognoza na @q.End.ToString("dd.MM")</dt><dd>@FinanceRules.Money(q.Forecast)</dd></div>
+                </dl>
+                <p class="acc-fine">Limit to 225% minimalnego wynagrodzenia na kwartał@(q.Estimated ? " (płaca na ten rok nieznana — sprawdź i wpisz limit w ustawieniach)." : ".") Liczymy wpłaty z ewidencji i rachunki wystawione w tym kwartale, jeszcze nieopłacone. Prognoza zakłada dotychczasowe tempo sprzedaży.</p>
+                @if (_o.YearQuarters.Count > 1)
+                {
+                    <div class="acc-quarters">
+                        @foreach (var yq in _o.YearQuarters)
+                        {
+                            <div class="acc-q pp-tone-@yq.Tone @(yq.Quarter == q.Quarter ? "now" : "")">
+                                <span>Q@(yq.Quarter)</span>
+                                <div class="acc-q-bar"><i style="height:@Pct(yq.Total, yq.Limit)%"></i></div>
+                                <small>@yq.Percent%</small>
+                            </div>
+                        }
+                    </div>
+                }
+            </div>
+        }
+
+        @if (_o.Vat is { } v)
+        {
+            <div class="pp-card acc-limit pp-tone-@v.Tone">
+                <span class="acc-eyebrow">Limit zwolnienia z VAT · @v.Year</span>
+                <div class="acc-limit-big"><b>@FinanceRules.Money(v.Revenue)</b><span>z @FinanceRules.Money(v.Limit) (@v.Percent%)</span></div>
+                <div class="acc-bar"><span class="acc-bar-paid" style="width:@Pct(v.Revenue, v.Limit)%"></span></div>
+                <p class="acc-fine">Limit proporcjonalny do dni działania firmy w roku. Kwotę limitu sprawdź z księgową i w razie zmian przepisów wpisz ją w ustawieniach.</p>
+            </div>
+        }
+
+        @if (_s.Configured)
+        {
+            <div class="pp-stats">
+                <StatTile Label="Ten miesiąc" Value="@FinanceRules.Money(_o.MonthRevenue)" Icon="bi-calendar-event" Tone="info" />
+                <StatTile Label="Przychód w roku" Value="@FinanceRules.Money(_o.YearRevenue)" Icon="bi-graph-up-arrow" Tone="ok" />
+                <StatTile Label="Koszty w roku" Value="@FinanceRules.Money(_o.YearCosts)" Meta="@(_o.ExpensesWithoutProof > 0 ? $"{_o.ExpensesWithoutProof} bez dowodu" : null)" Icon="bi-bag" Tone="muted" />
+                <StatTile Label="Odłóż na podatek" Value="@FinanceRules.Money(_o.TaxReserve)" Meta="@($"szacunek: {_s.TaxReservePct:0.#}% od {FinanceRules.Money(_o.YearIncome)}")" Icon="bi-piggy-bank" Tone="warn" />
+            </div>
+
+            <div class="row g-3">
+                <div class="col-lg-7">
+                    <div class="pp-card h-100">
+                        <h2 class="pp-card-title mb-3">Przychód i koszty w @Today.Year</h2>
+                        <div class="acc-months" role="img" aria-label="Wykres miesięcznego przychodu i kosztów">
+                            @foreach (var m in _o.Months)
+                            {
+                                <div class="acc-month @(m.Month == Today.Month ? "now" : "")" title="@($"{MonthName(m.Month)}: przychód {FinanceRules.Money(m.Revenue)}, koszty {FinanceRules.Money(m.Costs)}")">
+                                    <div class="acc-month-bars">
+                                        <i class="rev" style="height:@Pct(m.Revenue, MonthMax)%"></i>
+                                        <i class="cost" style="height:@Pct(m.Costs, MonthMax)%"></i>
+                                    </div>
+                                    <span>@(MonthName(m.Month)[..3])</span>
+                                </div>
+                            }
+                        </div>
+                        <div class="acc-legend"><span><i class="rev"></i>Przychód</span><span><i class="cost"></i>Koszty</span></div>
+                    </div>
+                </div>
+                <div class="col-lg-5">
+                    <div class="pp-card h-100">
+                        <h2 class="pp-card-title mb-3">Porządek w papierach</h2>
+                        <ul class="acc-check">
+                            @foreach (var (ok, text, tab) in Checklist())
+                            {
+                                <li class="@(ok ? "ok" : "")">
+                                    <i class="bi @(ok ? "bi-check-circle-fill" : "bi-circle")"></i>
+                                    <span>@text</span>
+                                    @if (!ok && tab is not null)
+                                    {
+                                        <button class="btn btn-link btn-sm p-0 ms-auto" @onclick="() => SelectTab(tab)">Zrób to</button>
+                                    }
+                                </li>
+                            }
+                        </ul>
+                    </div>
+                </div>
+            </div>
+        }
+    }
+
+    @if (_tab == "dokumenty")
+    {
+        @if (_newDoc is not null)
+        {
+            <div class="pp-card acc-form">
+                <div class="pp-card-head">
+                    <h2 class="pp-card-title">Nowy dokument</h2>
+                    <button class="btn btn-sm btn-link ms-auto" @onclick="() => _newDoc = null">Anuluj</button>
+                </div>
+                <div class="row g-2">
+                    <div class="col-md-3">
+                        <label class="form-label small mb-1">Rodzaj</label>
+                        <select class="form-select form-select-sm" @bind="_newDoc.Kind">
+                            @foreach (var k in AccountingService.ManualKinds(_s, _newDoc.SaleDate))
+                            {
+                                <option value="@k">@SalesDocumentKinds.Label(k)</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-3">
+                        <label class="form-label small mb-1">Data sprzedaży</label>
+                        <input type="date" class="form-control form-control-sm" @bind="_newDoc.SaleDate" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small mb-1">Trener (wypełni dane nabywcy)</label>
+                        <select class="form-select form-select-sm" value="@(_newDoc.TenantId?.ToString() ?? "")" @onchange="PickTenant">
+                            <option value="">— inny nabywca —</option>
+                            @foreach (var t in _tenants)
+                            {
+                                <option value="@t.Id">@t.CompanyName (@t.OwnerName)</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-md-6"><label class="form-label small mb-1">Nabywca</label><input class="form-control form-control-sm" @bind="_newDoc.BuyerName" maxlength="300" /></div>
+                    <div class="col-md-3"><label class="form-label small mb-1">NIP nabywcy</label><input class="form-control form-control-sm" @bind="_newDoc.BuyerTaxId" maxlength="20" /></div>
+                    <div class="col-md-3"><label class="form-label small mb-1">E-mail nabywcy</label><input class="form-control form-control-sm" @bind="_newDoc.BuyerEmail" maxlength="256" /></div>
+                    <div class="col-12"><label class="form-label small mb-1">Adres nabywcy</label><textarea class="form-control form-control-sm" rows="2" @bind="_newDoc.BuyerAddress" maxlength="500"></textarea></div>
+                </div>
+
+                <div class="acc-lines mt-3">
+                    <div class="acc-line acc-line-head"><span>Nazwa</span><span>Ilość</span><span>Jedn.</span><span>Cena brutto</span>@if (_newDoc.Kind == SalesDocumentKinds.InvoiceVat) { <span>VAT</span> }<span></span></div>
+                    @foreach (var line in _newDoc.Lines)
+                    {
+                        <div class="acc-line">
+                            <input class="form-control form-control-sm" @bind="line.Name" placeholder="np. Konsultacja wdrożeniowa" maxlength="300" aria-label="Nazwa" />
+                            <input class="form-control form-control-sm" type="number" min="0" step="0.001" @bind="line.Quantity" aria-label="Ilość" />
+                            <input class="form-control form-control-sm" @bind="line.Unit" maxlength="16" aria-label="Jednostka" />
+                            <input class="form-control form-control-sm" type="number" min="0" step="0.01" @bind="line.UnitGross" aria-label="Cena brutto" />
+                            @if (_newDoc.Kind == SalesDocumentKinds.InvoiceVat)
+                            {
+                                <select class="form-select form-select-sm" @bind="line.VatRate" aria-label="Stawka VAT">
+                                    <option value="23">23%</option><option value="8">8%</option><option value="5">5%</option><option value="0">0%</option><option value="zw">zw</option>
+                                </select>
+                            }
+                            <button class="btn btn-sm btn-outline-secondary" title="Usuń pozycję" aria-label="Usuń pozycję" disabled="@(_newDoc.Lines.Count == 1)" @onclick="() => _newDoc.Lines.Remove(line)"><i class="bi bi-x"></i></button>
+                        </div>
+                    }
+                    <div class="d-flex align-items-center gap-2 flex-wrap">
+                        <button class="btn btn-sm btn-outline-primary" @onclick="() => _newDoc.Lines.Add(new())"><i class="bi bi-plus me-1"></i>Pozycja</button>
+                        <b class="ms-auto">Razem: @FinanceRules.Money(_newDoc.Lines.Sum(l => Math.Round(l.UnitGross * l.Quantity, 2)))</b>
+                    </div>
+                </div>
+
+                <div class="row g-2 mt-1">
+                    <div class="col-md-3">
+                        <label class="form-label small mb-1">Sposób zapłaty</label>
+                        <select class="form-select form-select-sm" @bind="_newDoc.PaymentMethod">
+                            <option value="przelew">przelew</option><option value="karta">karta</option><option value="gotówka">gotówka</option><option value="płatność online">płatność online</option>
+                        </select>
+                    </div>
+                    <div class="col-md-9"><label class="form-label small mb-1">Uwagi na dokumencie (opcjonalnie)</label><input class="form-control form-control-sm" @bind="_newDoc.Note" maxlength="1000" /></div>
+                </div>
+                <div class="d-flex flex-wrap gap-3 mt-2 small">
+                    <label class="form-check"><input class="form-check-input" type="checkbox" @bind="_newDoc.Paid" /> <span class="form-check-label">Zapłacono</span></label>
+                    <label class="form-check"><input class="form-check-input" type="checkbox" @bind="_newDoc.AddToLedger" /> <span class="form-check-label">Wpisz do ewidencji sprzedaży</span></label>
+                    <label class="form-check"><input class="form-check-input" type="checkbox" @bind="_newDoc.SendEmail" /> <span class="form-check-label">Wyślij PDF e-mailem</span></label>
+                </div>
+                <p class="acc-fine mt-2">Wpłat z platformy nie wpisuj tutaj — trafiają do ewidencji same. Ten formularz jest dla sprzedaży poza aplikacją (np. wdrożenie, konsultacja).</p>
+                <button class="btn btn-primary btn-sm" @onclick="IssueManual" disabled="@_busy"><i class="bi bi-check2 me-1"></i>Wystaw @SalesDocumentKinds.Label(_newDoc.Kind).ToLowerInvariant()</button>
+            </div>
+        }
+
+        @if (_noDoc.Count > 0)
+        {
+            <div class="pp-card">
+                <div class="pp-card-head">
+                    <h2 class="pp-card-title">Wpłaty bez dokumentu</h2>
+                    <span class="pp-chip pp-tone-warn">@_noDoc.Count</span>
+                    <button class="btn btn-sm btn-outline-primary ms-auto" @onclick="IssueAllMissing" disabled="@_busy">Wystaw wszystkie</button>
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle small mb-0">
+                        <tbody>
+                            @foreach (var e in _noDoc)
+                            {
+                                <tr>
+                                    <td class="text-nowrap">@e.Date.ToString("dd.MM.yyyy")</td>
+                                    <td>@e.Description</td>
+                                    <td class="text-end text-nowrap fw-semibold">@FinanceRules.Money(e.Amount)</td>
+                                    <td class="text-end"><button class="btn btn-sm btn-outline-secondary" @onclick="() => IssueFor(e)" disabled="@_busy">Wystaw</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
+
+        <div class="pp-card pp-card-flush">
+            <div class="acc-filters">
+                <select class="form-select form-select-sm" @bind="_fYear" @bind:after="LoadDocs" aria-label="Rok">
+                    <option value="0">Wszystkie lata</option>
+                    @for (var y = Today.Year; y >= Today.Year - 5; y--)
+                    {
+                        <option value="@y">@y</option>
+                    }
+                </select>
+                <select class="form-select form-select-sm" @bind="_fMonth" @bind:after="LoadDocs" aria-label="Miesiąc">
+                    <option value="0">Cały rok</option>
+                    @for (var m = 1; m <= 12; m++)
+                    {
+                        <option value="@m">@MonthName(m)</option>
+                    }
+                </select>
+                <select class="form-select form-select-sm" @bind="_fKind" @bind:after="LoadDocs" aria-label="Rodzaj">
+                    <option value="">Wszystkie rodzaje</option>
+                    @foreach (var k in SalesDocumentKinds.All)
+                    {
+                        <option value="@k">@SalesDocumentKinds.Label(k)</option>
+                    }
+                </select>
+                <input class="form-control form-control-sm" placeholder="Numer, nabywca, NIP…" @bind="_fQuery" @bind:event="oninput" @bind:after="LoadDocs" aria-label="Szukaj" />
+                <label class="form-check small mb-0 text-nowrap"><input class="form-check-input" type="checkbox" @bind="_fProblems" @bind:after="LoadDocs" /> <span class="form-check-label">Do uwagi</span></label>
+            </div>
+            @if (_docs.Count == 0)
+            {
+                <p class="text-muted small p-3 mb-0">Brak dokumentów dla tych filtrów.</p>
+            }
+            else
+            {
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle small mb-0 acc-table">
+                        <thead class="table-light">
+                            <tr><th>Numer</th><th>Rodzaj</th><th>Wystawiony</th><th>Nabywca</th><th class="text-end">Kwota</th><th>Stan</th><th></th></tr>
+                        </thead>
+                        <tbody>
+                            @foreach (var d in _docs)
+                            {
+                                <tr class="@(d.Status == SalesDocumentStatus.Cancelled ? "acc-cancelled" : "")">
+                                    <td class="font-monospace text-nowrap">@(d.Number.Length > 0 ? d.Number : "—")</td>
+                                    <td class="text-nowrap">@SalesDocumentKinds.Label(d.Kind)</td>
+                                    <td class="text-nowrap">@d.IssueDate.ToString("dd.MM.yyyy")</td>
+                                    <td class="acc-buyer">@d.BuyerName @if (d.BuyerTaxId is not null) { <small class="text-muted">NIP @d.BuyerTaxId</small> }</td>
+                                    <td class="text-end text-nowrap fw-semibold @(d.Gross < 0 ? "text-danger" : "")">@FinanceRules.Money(d.Gross)</td>
+                                    <td>
+                                        <span class="d-inline-flex flex-wrap gap-1">
+                                            @if (d.Status == SalesDocumentStatus.Pending)
+                                            {
+                                                <span class="pp-chip pp-tone-warn" title="@d.ExternalError"><i class="bi bi-cloud-slash"></i>czeka na Fakturownię</span>
+                                            }
+                                            else if (d.Status == SalesDocumentStatus.Cancelled)
+                                            {
+                                                <span class="pp-chip pp-tone-muted" title="@d.CancelReason">anulowany</span>
+                                            }
+                                            else
+                                            {
+                                                @if (d.ExternalId is not null) { <span class="pp-chip pp-tone-info"><i class="bi bi-cloud-check"></i>Fakturownia</span> }
+                                                @if (d.EmailedAt is not null) { <span class="pp-chip pp-tone-ok"><i class="bi bi-envelope-check"></i>wysłany</span> }
+                                                else if (d.BuyerEmail is not null) { <span class="pp-chip pp-tone-muted">niewysłany</span> }
+                                            }
+                                        </span>
+                                    </td>
+                                    <td class="text-end text-nowrap">
+                                        @if (d.Status != SalesDocumentStatus.Pending)
+                                        {
+                                            <a class="btn btn-sm btn-outline-secondary" href="/api/panel/ksiegowosc/dokument/@(d.Id).pdf" target="_blank" title="PDF" aria-label="PDF"><i class="bi bi-file-pdf"></i></a>
+                                        }
+                                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => OpenDoc(d)" title="Więcej" aria-label="Więcej"><i class="bi bi-three-dots"></i></button>
+                                    </td>
+                                </tr>
+                                @if (_open?.Id == d.Id)
+                                {
+                                    <tr class="acc-open">
+                                        <td colspan="7">
+                                            <div class="acc-doc">
+                                                <div class="acc-doc-meta">
+                                                    <div><small>Sprzedaż</small>@d.SaleDate.ToString("dd.MM.yyyy")</div>
+                                                    <div><small>Zapłata</small>@(d.PaidDate?.ToString("dd.MM.yyyy") ?? "—") @d.PaymentMethod</div>
+                                                    <div><small>Forma</small>@AccountingService.ModeLabel(d.Mode)</div>
+                                                    <div><small>E-mail</small>@(d.BuyerEmail ?? "—")</div>
+                                                    @if (d.CorrectionReason is not null) { <div><small>Przyczyna korekty</small>@d.CorrectionReason</div> }
+                                                    @if (d.CancelReason is not null) { <div><small>Powód anulowania</small>@d.CancelReason</div> }
+                                                    @if (d.ExternalError is not null) { <div class="text-danger"><small>Błąd Fakturowni (próba @d.ExternalAttempts)</small>@d.ExternalError</div> }
+                                                    @if (d.ExternalUrl is not null) { <div><small>Fakturownia</small><a href="@d.ExternalUrl" target="_blank" rel="noopener">otwórz dokument</a></div> }
+                                                </div>
+                                                <div class="acc-doc-actions">
+                                                    @if (d.Status == SalesDocumentStatus.Pending)
+                                                    {
+                                                        <button class="btn btn-sm btn-primary" @onclick="() => Retry(d)" disabled="@_busy">Ponów w Fakturowni</button>
+                                                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => IssueLocal(d)" disabled="@_busy">Wystaw z numerem Hantly</button>
+                                                    }
+                                                    @if (d.Status == SalesDocumentStatus.Issued)
+                                                    {
+                                                        <div class="acc-inline">
+                                                            <input class="form-control form-control-sm" placeholder="@(d.BuyerEmail ?? "adres e-mail")" @bind="_emailTo" aria-label="Adres e-mail" />
+                                                            <button class="btn btn-sm btn-outline-primary" @onclick="() => SendDoc(d)" disabled="@_busy"><i class="bi bi-send me-1"></i>@(d.EmailedAt is null ? "Wyślij" : "Wyślij ponownie")</button>
+                                                        </div>
+                                                        @if (d.Kind != SalesDocumentKinds.Correction)
+                                                        {
+                                                            <div class="acc-inline">
+                                                                <input class="form-control form-control-sm acc-amount" type="number" min="0" step="0.01" placeholder="kwota" @bind="_corrAmount" aria-label="Kwota korekty" />
+                                                                <input class="form-control form-control-sm" placeholder="przyczyna (np. zwrot za maj)" @bind="_corrReason" maxlength="500" aria-label="Przyczyna korekty" />
+                                                                <button class="btn btn-sm btn-outline-warning" @onclick="() => Correct(d)" disabled="@_busy">Korekta in minus</button>
+                                                            </div>
+                                                        }
+                                                    }
+                                                    @if (d.Status != SalesDocumentStatus.Cancelled && !d.InCirculation)
+                                                    {
+                                                        <div class="acc-inline">
+                                                            <input class="form-control form-control-sm" placeholder="powód anulowania (np. zły nabywca)" @bind="_cancelReason" maxlength="500" aria-label="Powód anulowania" />
+                                                            <button class="btn btn-sm btn-outline-danger" @onclick="() => Cancel(d)" disabled="@_busy">Anuluj</button>
+                                                        </div>
+                                                        <p class="acc-fine mb-0">Anulować można tylko dokument, który nie wyszedł do nabywcy. Wpłata zostaje w ewidencji i czeka na nowy dokument.</p>
+                                                    }
+                                                    else if (d.Status == SalesDocumentStatus.Issued)
+                                                    {
+                                                        <p class="acc-fine mb-0">Dokument wyszedł do nabywcy — błędy prostuje się korektą.</p>
+                                                    }
+                                                </div>
+                                            </div>
+                                        </td>
+                                    </tr>
+                                }
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+
+    @if (_tab == "ewidencja")
+    {
+        <div class="pp-card">
+            <div class="acc-period">
+                <input type="month" class="form-control form-control-sm" value="@_ledgerMonth" @onchange="SetLedgerMonth" aria-label="Miesiąc" />
+                <button class="btn btn-sm btn-outline-secondary" @onclick="() => LedgerRange(LedgerQuarter())">Ten kwartał</button>
+                <button class="btn btn-sm btn-outline-secondary" @onclick="() => LedgerRange((new DateOnly(Today.Year, 1, 1), Today))">Ten rok</button>
+                <span class="text-muted small ms-1">@_lFrom.ToString("dd.MM.yyyy") – @_lTo.ToString("dd.MM.yyyy")</span>
+                <span class="ms-auto d-inline-flex gap-1">
+                    <a class="btn btn-sm btn-outline-secondary" href="@ExportUrl("ewidencja.csv", _lFrom, _lTo)" download><i class="bi bi-filetype-csv me-1"></i>CSV</a>
+                    <a class="btn btn-sm btn-outline-secondary" href="@ExportUrl("ewidencja.pdf", _lFrom, _lTo)" target="_blank"><i class="bi bi-file-pdf me-1"></i>PDF</a>
+                </span>
+            </div>
+            @if (_days.Count == 0)
+            {
+                <p class="text-muted small mb-0 mt-3">Brak sprzedaży w tym okresie.</p>
+            }
+            else
+            {
+                <div class="table-responsive mt-3">
+                    <table class="table table-sm align-middle small mb-0 acc-table">
+                        <thead class="table-light"><tr><th>Lp.</th><th>Data</th><th>Sprzedaż</th><th class="text-end">Z dnia</th><th class="text-end">Narastająco w miesiącu</th></tr></thead>
+                        <tbody>
+                            @foreach (var d in _days)
+                            {
+                                <tr>
+                                    <td class="text-muted">@d.No</td>
+                                    <td class="text-nowrap">@d.Date.ToString("dd.MM.yyyy")</td>
+                                    <td>
+                                        @foreach (var e in d.Entries)
+                                        {
+                                            <div class="acc-entry">
+                                                <span class="@(e.Amount < 0 ? "text-danger" : "")">@e.Description</span>
+                                                <small class="text-muted text-nowrap">@FinanceRules.Money(e.Amount)</small>
+                                                @if (e.ReversesId is null && e.Source != "correction")
+                                                {
+                                                    <button class="btn btn-link btn-sm p-0 acc-mini" @onclick="() => { _reverseId = e.Id; _reverseReason = null; }">sprostuj</button>
+                                                }
+                                            </div>
+                                            @if (_reverseId == e.Id)
+                                            {
+                                                <div class="acc-inline my-1">
+                                                    <input class="form-control form-control-sm" placeholder="powód (np. pomyłka w kwocie)" @bind="_reverseReason" aria-label="Powód sprostowania" />
+                                                    <button class="btn btn-sm btn-outline-warning" @onclick="() => Reverse(e)" disabled="@_busy">Dodaj wpis in minus</button>
+                                                    <button class="btn btn-sm btn-link" @onclick="() => _reverseId = null">Anuluj</button>
+                                                </div>
+                                            }
+                                        }
+                                    </td>
+                                    <td class="text-end text-nowrap fw-semibold">@FinanceRules.Money(d.Amount)</td>
+                                    <td class="text-end text-nowrap">@FinanceRules.Money(d.MonthToDate)</td>
+                                </tr>
+                            }
+                        </tbody>
+                        <tfoot><tr><th colspan="3">Razem w okresie</th><th class="text-end text-nowrap">@FinanceRules.Money(_days.Sum(d => d.Amount))</th><th></th></tr></tfoot>
+                    </table>
+                </div>
+            }
+        </div>
+
+        <div class="pp-card acc-form">
+            <h2 class="pp-card-title mb-2">Sprzedaż spoza aplikacji</h2>
+            <p class="acc-fine">Np. gotówka za wdrożenie albo przelew na konto. Wpłaty z platformy dopisują się same. Wpisu nie da się usunąć — pomyłkę prostuje wpis in minus.</p>
+            <div class="acc-inline">
+                <input type="date" class="form-control form-control-sm acc-date" @bind="_manualDate" aria-label="Data" />
+                <input type="number" step="0.01" class="form-control form-control-sm acc-amount" placeholder="kwota" @bind="_manualAmount" aria-label="Kwota" />
+                <input class="form-control form-control-sm" placeholder="co i dla kogo" @bind="_manualDesc" maxlength="500" aria-label="Opis" />
+                <button class="btn btn-sm btn-primary" @onclick="AddManual" disabled="@_busy">Dopisz</button>
+            </div>
+        </div>
+        <p class="acc-fine">Ewidencja liczy sprzedaż w dniu wpłaty: przychód z dnia i sumę narastająco od początku miesiąca. Wymagania dotyczące ewidencji przy działalności nierejestrowanej sprawdź z księgową — Hantly porządkuje dane, ale nie zastępuje doradcy.</p>
+    }
+
+    @if (_tab == "koszty")
+    {
+        <div class="pp-card acc-form">
+            <h2 class="pp-card-title mb-2">Dodaj koszt</h2>
+            <div class="row g-2">
+                <div class="col-md-2"><label class="form-label small mb-1">Data</label><input type="date" class="form-control form-control-sm" @bind="_exp.Date" /></div>
+                <div class="col-md-2"><label class="form-label small mb-1">Kwota brutto</label><input type="number" step="0.01" min="0" class="form-control form-control-sm" @bind="_exp.Amount" /></div>
+                <div class="col-md-4"><label class="form-label small mb-1">Sprzedawca</label><input class="form-control form-control-sm" @bind="_exp.Vendor" maxlength="200" placeholder="np. Hetzner" /></div>
+                <div class="col-md-4">
+                    <label class="form-label small mb-1">Kategoria</label>
+                    <select class="form-select form-select-sm" @bind="_exp.Category">
+                        @foreach (var c in AccountingService.ExpenseCategories)
+                        {
+                            <option value="@c">@c</option>
+                        }
+                    </select>
+                </div>
+                <div class="col-md-6"><label class="form-label small mb-1">Opis</label><input class="form-control form-control-sm" @bind="_exp.Description" maxlength="500" placeholder="np. serwer za październik" /></div>
+                <div class="col-md-3"><label class="form-label small mb-1">Nr faktury / paragonu</label><input class="form-control form-control-sm" @bind="_exp.DocumentNumber" maxlength="100" /></div>
+                <div class="col-md-3">
+                    <label class="form-label small mb-1">Dowód (PDF, zdjęcie)</label>
+                    <InputFile class="form-control form-control-sm" OnChange="PickProof" accept=".pdf,.jpg,.jpeg,.png,.webp,.heic" />
+                </div>
+            </div>
+            <div class="d-flex align-items-center gap-2 mt-2">
+                <button class="btn btn-sm btn-primary" @onclick="AddExpense" disabled="@_busy"><i class="bi bi-plus-lg me-1"></i>Dodaj koszt</button>
+                @if (_proofName is not null) { <span class="small text-muted"><i class="bi bi-paperclip"></i> @_proofName</span> }
+            </div>
+        </div>
+
+        <div class="pp-card pp-card-flush">
+            <div class="acc-filters">
+                <select class="form-select form-select-sm" @bind="_expYear" @bind:after="LoadExpenses" aria-label="Rok">
+                    @for (var y = Today.Year; y >= Today.Year - 5; y--)
+                    {
+                        <option value="@y">@y</option>
+                    }
+                </select>
+                <span class="small text-muted">Razem: <b>@FinanceRules.Money(_expenses.Sum(e => e.Amount))</b></span>
+                <a class="btn btn-sm btn-outline-secondary ms-auto" href="@ExportUrl("koszty.csv", new DateOnly(_expYear, 1, 1), new DateOnly(_expYear, 12, 31))" download><i class="bi bi-filetype-csv me-1"></i>CSV</a>
+            </div>
+            @if (_expenses.Count == 0)
+            {
+                <p class="text-muted small p-3 mb-0">Brak kosztów w tym roku.</p>
+            }
+            else
+            {
+                <div class="acc-cats">
+                    @foreach (var g in _expenses.GroupBy(e => e.Category).OrderByDescending(g => g.Sum(e => e.Amount)))
+                    {
+                        <span class="pp-chip pp-tone-muted">@g.Key · @FinanceRules.Money(g.Sum(e => e.Amount))</span>
+                    }
+                </div>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle small mb-0 acc-table">
+                        <thead class="table-light"><tr><th>Data</th><th>Sprzedawca</th><th>Opis</th><th>Kategoria</th><th class="text-end">Kwota</th><th>Dowód</th><th></th></tr></thead>
+                        <tbody>
+                            @foreach (var e in _expenses)
+                            {
+                                <tr>
+                                    <td class="text-nowrap">@e.Date.ToString("dd.MM.yyyy")</td>
+                                    <td>@e.Vendor</td>
+                                    <td>@e.Description @if (e.DocumentNumber is not null) { <small class="text-muted">· @e.DocumentNumber</small> }</td>
+                                    <td>@e.Category</td>
+                                    <td class="text-end text-nowrap fw-semibold">@FinanceRules.Money(e.Amount)</td>
+                                    <td>
+                                        @if (e.AttachmentName is not null)
+                                        {
+                                            <a href="/api/panel/ksiegowosc/koszt/@e.Id/dowod" title="@e.AttachmentName"><i class="bi bi-paperclip"></i> pobierz</a>
+                                        }
+                                        else
+                                        {
+                                            <span class="pp-chip pp-tone-warn">brak</span>
+                                        }
+                                    </td>
+                                    <td class="text-end">
+                                        @if (_deleteExpId == e.Id)
+                                        {
+                                            <span class="acc-inline">
+                                                <input class="form-control form-control-sm" placeholder="powód" @bind="_deleteExpReason" aria-label="Powód usunięcia" />
+                                                <button class="btn btn-sm btn-outline-danger" @onclick="() => DeleteExpense(e)">Usuń</button>
+                                            </span>
+                                        }
+                                        else
+                                        {
+                                            <button class="btn btn-sm btn-link text-danger p-0" @onclick="() => { _deleteExpId = e.Id; _deleteExpReason = null; }">usuń</button>
+                                        }
+                                    </td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            }
+        </div>
+    }
+
+    @if (_tab == "eksport")
+    {
+        <div class="pp-card">
+            <h2 class="pp-card-title mb-2">Paczka dla księgowej i kopia poza Hantly</h2>
+            <p class="text-muted small">Jeden plik ZIP: ewidencja sprzedaży (CSV i PDF), rejestr dokumentów z PDF-ami, koszty z dowodami i podsumowanie. Pobieraj ją co miesiąc i odkładaj poza aplikacją — to Twoja kopia bezpieczeństwa.</p>
+            <div class="acc-period">
+                <button class="btn btn-sm @(_exportPreset == "prev" ? "btn-dark" : "btn-outline-secondary")" @onclick='() => ExportPreset("prev")'>Poprzedni miesiąc</button>
+                <button class="btn btn-sm @(_exportPreset == "month" ? "btn-dark" : "btn-outline-secondary")" @onclick='() => ExportPreset("month")'>Ten miesiąc</button>
+                <button class="btn btn-sm @(_exportPreset == "quarter" ? "btn-dark" : "btn-outline-secondary")" @onclick='() => ExportPreset("quarter")'>Ten kwartał</button>
+                <button class="btn btn-sm @(_exportPreset == "prevyear" ? "btn-dark" : "btn-outline-secondary")" @onclick='() => ExportPreset("prevyear")'>Poprzedni rok</button>
+                <button class="btn btn-sm @(_exportPreset == "year" ? "btn-dark" : "btn-outline-secondary")" @onclick='() => ExportPreset("year")'>Ten rok</button>
+                <input type="date" class="form-control form-control-sm acc-date" @bind="_eFrom" aria-label="Od" />
+                <input type="date" class="form-control form-control-sm acc-date" @bind="_eTo" aria-label="Do" />
+            </div>
+            <div class="acc-exports">
+                <a class="acc-export main" href="@ExportUrl("paczka.zip", _eFrom, _eTo)" download><i class="bi bi-file-earmark-zip"></i><b>Paczka ZIP</b><span>wszystko naraz</span></a>
+                <a class="acc-export" href="@ExportUrl("ewidencja.pdf", _eFrom, _eTo)" target="_blank"><i class="bi bi-file-pdf"></i><b>Ewidencja PDF</b><span>do wydruku</span></a>
+                <a class="acc-export" href="@ExportUrl("ewidencja.csv", _eFrom, _eTo)" download><i class="bi bi-filetype-csv"></i><b>Ewidencja CSV</b><span>Excel</span></a>
+                <a class="acc-export" href="@ExportUrl("dokumenty.csv", _eFrom, _eTo)" download><i class="bi bi-receipt"></i><b>Rejestr dokumentów</b><span>CSV</span></a>
+                <a class="acc-export" href="@ExportUrl("koszty.csv", _eFrom, _eTo)" download><i class="bi bi-bag"></i><b>Koszty</b><span>CSV</span></a>
+            </div>
+            <p class="acc-fine mt-3 mb-0">Ostatnia paczka: @(_o.LastExport is { } le ? TimeZoneInfo.ConvertTimeFromUtc(le, AccountingService.Tz).ToString("dd.MM.yyyy HH:mm") : "jeszcze nie pobrana"). Dane księgowe są też w nocnej kopii bazy Portalu.</p>
+        </div>
+    }
+
+    @if (_tab == "historia")
+    {
+        <div class="pp-card pp-card-flush">
+            <div class="pp-card-head"><h2 class="pp-card-title">Historia zmian</h2><span class="text-muted small">Tylko dopisywana — nikt jej nie edytuje.</span></div>
+            <div class="table-responsive">
+                <table class="table table-sm align-middle small mb-0 acc-table">
+                    <thead class="table-light"><tr><th>Kiedy</th><th>Kto</th><th>Co</th><th>Szczegóły</th></tr></thead>
+                    <tbody>
+                        @foreach (var e in _history)
+                        {
+                            <tr>
+                                <td class="text-nowrap">@TimeZoneInfo.ConvertTimeFromUtc(DateTime.SpecifyKind(e.At, DateTimeKind.Utc), AccountingService.Tz).ToString("dd.MM.yyyy HH:mm")</td>
+                                <td class="text-nowrap">@e.Actor</td>
+                                <td class="text-nowrap">@AccountingService.ActionLabel(e.Action)</td>
+                                <td>@e.Detail</td>
+                            </tr>
+                        }
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    }
+
+    @if (_tab == "ustawienia" && _form is not null)
+    {
+        @if (_s.Mode == FinanceModes.Unregistered)
+        {
+            <div class="pp-card acc-switch">
+                <div class="pp-card-head">
+                    <span class="pp-icon pp-icon-sm pp-tone-ok"><i class="bi bi-building-add"></i></span>
+                    <h2 class="pp-card-title">Firma założona? Przełącz księgowość</h2>
+                    <button class="btn btn-sm btn-outline-primary ms-auto" @onclick="() => _switchOpen = !_switchOpen">@(_switchOpen ? "Zwiń" : "Przełącz na firmę")</button>
+                </div>
+                <p class="small text-muted mb-0">Od daty rozpoczęcia z CEIDG dokumenty wystawia firma (z NIP-em). Ewidencja, numeracja i wszystkie dotychczasowe dokumenty zostają — nic nie znika i nic się nie przepisuje.</p>
+                @if (_switchOpen)
+                {
+                    <ol class="acc-steps">
+                        <li>Wniosek CEIDG (biznes.gov.pl) — po przekroczeniu limitu w ciągu 7 dni od dnia przekroczenia.</li>
+                        <li>Forma opodatkowania i ZUS — wybierasz we wniosku albo później w terminach z przepisów.</li>
+                        <li>VAT: zostajesz przy zwolnieniu albo składasz VAT-R przed pierwszą sprzedażą z VAT.</li>
+                        <li>Tutaj: data z CEIDG i dane firmy — od tej daty nowe dokumenty mają NIP.</li>
+                    </ol>
+                    <div class="row g-2">
+                        <div class="col-md-3"><label class="form-label small mb-1">Data rozpoczęcia (CEIDG)</label><input type="date" class="form-control form-control-sm" @bind="_swSince" /></div>
+                        <div class="col-md-5"><label class="form-label small mb-1">Nazwa firmy</label><input class="form-control form-control-sm" @bind="_swName" maxlength="300" /></div>
+                        <div class="col-md-2"><label class="form-label small mb-1">NIP</label><input class="form-control form-control-sm" @bind="_swNip" maxlength="20" /></div>
+                        <div class="col-md-2"><label class="form-label small mb-1">REGON</label><input class="form-control form-control-sm" @bind="_swRegon" maxlength="20" /></div>
+                        <div class="col-md-6"><label class="form-label small mb-1">Adres firmy</label><textarea class="form-control form-control-sm" rows="2" @bind="_swAddress"></textarea></div>
+                        <div class="col-md-3"><label class="form-label small mb-1">Konto bankowe</label><input class="form-control form-control-sm" @bind="_swBank" maxlength="40" /></div>
+                        <div class="col-md-3">
+                            <label class="form-label small mb-1">VAT</label>
+                            <select class="form-select form-select-sm" @bind="_swVat"><option value="zw">zwolnienie (bez VAT)</option><option value="vat">czynny podatnik VAT</option></select>
+                        </div>
+                    </div>
+                    <label class="form-check small mt-2"><input class="form-check-input" type="checkbox" @bind="_swConfirm" /> <span class="form-check-label">Dane są zgodne z wpisem w CEIDG. Dokumenty od tej daty będą wystawiane jako firma.</span></label>
+                    <button class="btn btn-sm btn-success mt-2" @onclick="SwitchToBusiness" disabled="@(!_swConfirm || _busy)"><i class="bi bi-building-check me-1"></i>Przełącz na firmę</button>
+                }
+            </div>
+        }
+
+        <div class="pp-card acc-form">
+            <h2 class="pp-card-title mb-3">Forma działalności i ewidencja</h2>
+            <div class="row g-2">
+                <div class="col-md-4">
+                    <label class="form-label small mb-1">Forma</label>
+                    <select class="form-select form-select-sm" @bind="_fMode">
+                        <option value="">— wybierz —</option>
+                        <option value="@FinanceModes.Unregistered">Działalność nierejestrowana</option>
+                        <option value="@FinanceModes.Business">Firma (CEIDG)</option>
+                    </select>
+                </div>
+                <div class="col-md-4"><label class="form-label small mb-1">Działalność nierejestrowana od</label><input type="date" class="form-control form-control-sm" @bind="_fUnregSince" /></div>
+                <div class="col-md-4"><label class="form-label small mb-1">Ewidencja wpłat od</label><input type="date" class="form-control form-control-sm" @bind="_fStart" /></div>
+                @if (_fMode == FinanceModes.Business)
+                {
+                    <div class="col-md-4"><label class="form-label small mb-1">Firma od (CEIDG)</label><input type="date" class="form-control form-control-sm" @bind="_fBizSince" /></div>
+                    <div class="col-md-4">
+                        <label class="form-label small mb-1">VAT</label>
+                        <select class="form-select form-select-sm" @bind="_fVat"><option value="zw">zwolnienie (bez VAT)</option><option value="vat">czynny podatnik VAT (23%)</option></select>
+                    </div>
+                }
+            </div>
+            <p class="acc-fine mt-2 mb-0">„Ewidencja wpłat od” — wpłaty sprzed tej daty nie trafią do ewidencji ani nie dostaną dokumentów. Ustaw ją na dzień, od którego chcesz prowadzić porządek (np. początek kwartału).</p>
+
+            <h3 class="acc-h3">Dane sprzedawcy (na dokumentach)</h3>
+            <div class="row g-2">
+                <div class="col-md-6"><label class="form-label small mb-1">@(_fMode == FinanceModes.Business ? "Nazwa firmy" : "Imię i nazwisko")</label><input class="form-control form-control-sm" @bind="_form.SellerName" maxlength="300" /></div>
+                <div class="col-md-6"><label class="form-label small mb-1">E-mail na dokumentach</label><input class="form-control form-control-sm" @bind="_form.SellerEmail" maxlength="256" /></div>
+                <div class="col-md-6"><label class="form-label small mb-1">Adres</label><textarea class="form-control form-control-sm" rows="2" @bind="_form.SellerAddress" placeholder="ul. Przykładowa 1&#10;00-001 Miasto"></textarea></div>
+                <div class="col-md-6">
+                    <div class="row g-2">
+                        <div class="col-6"><label class="form-label small mb-1">NIP @(_fMode == FinanceModes.Business ? "" : "(firma)")</label><input class="form-control form-control-sm" @bind="_form.SellerTaxId" maxlength="20" disabled="@(_fMode != FinanceModes.Business)" /></div>
+                        <div class="col-6"><label class="form-label small mb-1">REGON</label><input class="form-control form-control-sm" @bind="_form.SellerRegon" maxlength="20" disabled="@(_fMode != FinanceModes.Business)" /></div>
+                        <div class="col-12"><label class="form-label small mb-1">Konto bankowe (opcjonalnie)</label><input class="form-control form-control-sm" @bind="_form.SellerBank" maxlength="40" /></div>
+                    </div>
+                </div>
+                <div class="col-12">
+                    <label class="form-label small mb-1">Adnotacja o zwolnieniu z VAT (puste — tekst domyślny)</label>
+                    <input class="form-control form-control-sm" @bind="_form.VatNote" maxlength="300" placeholder="@VatNotePlaceholder" />
+                </div>
+            </div>
+
+            <h3 class="acc-h3">Dokumenty</h3>
+            <div class="d-flex flex-wrap gap-3 small">
+                <label class="form-check"><input class="form-check-input" type="checkbox" @bind="_form.AutoIssue" /> <span class="form-check-label">Wystawiaj dokument sam po każdej wpłacie</span></label>
+                <label class="form-check"><input class="form-check-input" type="checkbox" @bind="_form.EmailDocs" /> <span class="form-check-label">Wysyłaj PDF nabywcy e-mailem</span></label>
+            </div>
+            <p class="acc-fine">Osoba prywatna dostaje rachunek, trener z NIP-em — fakturę (bez VAT, a przy czynnym VAT — fakturę VAT). Dane nabywcy trener uzupełnia w swoim panelu.</p>
+            <div class="row g-2">
+                <div class="col-md-4">
+                    <label class="form-label small mb-1">Kto wystawia</label>
+                    <select class="form-select form-select-sm" @bind="_form.Provider">
+                        <option value="local">Hantly (numeracja i PDF tutaj)</option>
+                        <option value="fakturownia">Fakturownia.pl</option>
+                    </select>
+                </div>
+                <div class="col-md-8">
+                    <label class="form-label small mb-1">Numeracja (przedrostki)</label>
+                    <div class="acc-inline">
+                        <input class="form-control form-control-sm acc-prefix" @bind="_form.PrefixReceipt" maxlength="12" aria-label="Przedrostek rachunków" />
+                        <input class="form-control form-control-sm acc-prefix" @bind="_form.PrefixInvoice" maxlength="12" aria-label="Przedrostek faktur" />
+                        <input class="form-control form-control-sm acc-prefix" @bind="_form.PrefixCorrection" maxlength="12" aria-label="Przedrostek korekt" />
+                        <span class="small text-muted">np. @FinanceRules.FormatNumber(_form.PrefixReceipt, Today.Year, 7), @FinanceRules.FormatNumber(_form.PrefixInvoice, Today.Year, 7)</span>
+                    </div>
+                </div>
+            </div>
+            @if (_form.Provider == "fakturownia")
+            {
+                <div class="acc-fakt">
+                    <div class="row g-2 align-items-end">
+                        <div class="col-md-4"><label class="form-label small mb-1">Subdomena konta</label>
+                            <div class="input-group input-group-sm"><input class="form-control" @bind="_form.FakturowniaDomain" placeholder="mojafirma" /><span class="input-group-text">.fakturownia.pl</span></div></div>
+                        <div class="col-md-5"><label class="form-label small mb-1">Token API @(_s.HasFakturowniaToken ? "(zapisany — wpisz nowy, żeby zmienić)" : "")</label>
+                            <input class="form-control form-control-sm" type="password" autocomplete="off" @bind="_token" placeholder="@(_s.HasFakturowniaToken ? "••••••••" : "Ustawienia → Ustawienia konta → Integracja")" /></div>
+                        <div class="col-md-3 d-flex gap-1">
+                            <button class="btn btn-sm btn-outline-secondary" @onclick="TestFakturownia" disabled="@_busy">Sprawdź połączenie</button>
+                            @if (_s.HasFakturowniaToken)
+                            {
+                                <button class="btn btn-sm btn-link text-danger" @onclick="RemoveToken">Usuń token</button>
+                            }
+                        </div>
+                    </div>
+                    @if (_testMsg is not null) { <p class="small mt-2 mb-0 @(_testOk ? "text-success" : "text-danger")">@_testMsg</p> }
+                    <p class="acc-fine mt-2 mb-0">Fakturownia nadaje numer i trzyma oryginał (z jej ustawieniami sprzedawcy, a po założeniu firmy — także wysyłką do KSeF, jeśli ją tam włączysz). Gdy nie odpowiada, dokument czeka i ponawiamy próby; w razie potrzeby wystawisz go z numerem Hantly. Token jest zaszyfrowany.</p>
+                </div>
+            }
+
+            <h3 class="acc-h3">Limity i rezerwa</h3>
+            <div class="row g-2">
+                <div class="col-md-4"><label class="form-label small mb-1">Limit kwartalny (nierejestrowana)</label>
+                    <input class="form-control form-control-sm" @bind="_fQuarterLimit" placeholder="@($"domyślnie {FinanceRules.Money(FinanceRules.QuarterLimit(Today.Year, FinanceRules.QuarterOf(Today)).Limit)}")" /></div>
+                <div class="col-md-4"><label class="form-label small mb-1">Limit zwolnienia z VAT (rok)</label>
+                    <input class="form-control form-control-sm" @bind="_fVatLimit" placeholder="@($"domyślnie {FinanceRules.Money(FinanceRules.DefaultVatLimit(Today.Year))}")" /></div>
+                <div class="col-md-4"><label class="form-label small mb-1">Rezerwa na podatek (% dochodu)</label>
+                    <input class="form-control form-control-sm" @bind="_fReserve" /></div>
+            </div>
+            <p class="acc-fine mt-2">Kwoty domyślne wynikają z przepisów znanych w chwili wydania Hantly. Gdy się zmienią, wpisz nowe — to nadpisze domyślne.</p>
+
+            <button class="btn btn-primary btn-sm" @onclick="SaveSettings" disabled="@_busy"><i class="bi bi-check2 me-1"></i>Zapisz ustawienia</button>
+        </div>
+        <p class="acc-fine">Hantly pilnuje porządku: ewidencji, numeracji, limitów i kopii. Interpretację przepisów (limit, VAT, PIT, ZUS, KSeF) zawsze potwierdź z księgową lub doradcą podatkowym.</p>
+    }
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "tab")] public string? TabQuery { get; set; }
+    [SupplyParameterFromQuery(Name = "q")] public string? Query { get; set; }
+
+    private static readonly (string Key, string Label, string Icon)[] Tabs =
+    [
+        ("przeglad", "Przegląd", "bi-speedometer2"), ("dokumenty", "Dokumenty", "bi-receipt"), ("ewidencja", "Ewidencja sprzedaży", "bi-journal-text"),
+        ("koszty", "Koszty", "bi-bag"), ("eksport", "Eksport", "bi-file-earmark-zip"), ("historia", "Historia", "bi-clock-history"), ("ustawienia", "Ustawienia", "bi-gear")
+    ];
+
+    private static DateOnly Today => AccountingService.Today;
+
+    private string _tab = "przeglad";
+    private string _actor = "admin";
+    private AccountingService.Settings? _s;
+    private AccountingService.Overview? _o;
+    private bool _busy;
+    private string? _flash;
+    private bool _flashOk;
+
+    // Dokumenty
+    private List<SalesDocument> _docs = [];
+    private List<SalesLedgerEntry> _noDoc = [];
+    private int _fYear = Today.Year, _fMonth;
+    private string _fKind = "";
+    private string? _fQuery;
+    private bool _fProblems;
+    private SalesDocument? _open;
+    private string? _emailTo, _corrReason, _cancelReason;
+    private decimal? _corrAmount;
+    private AccountingService.ManualDocument? _newDoc;
+    private List<Tenant> _tenants = [];
+
+    // Ewidencja
+    private List<AccountingService.LedgerDay> _days = [];
+    private DateOnly _lFrom = new(Today.Year, Today.Month, 1), _lTo = Today;
+    private string _ledgerMonth = Today.ToString("yyyy-MM");
+    private int? _reverseId;
+    private string? _reverseReason;
+    private DateOnly _manualDate = Today;
+    private decimal? _manualAmount;
+    private string? _manualDesc;
+
+    // Koszty
+    private Expense _exp = NewExpense();
+    private string? _proofName;
+    private List<Expense> _expenses = [];
+    private int _expYear = Today.Year;
+    private int? _deleteExpId;
+    private string? _deleteExpReason;
+
+    // Eksport, historia
+    private DateOnly _eFrom, _eTo;
+    private string _exportPreset = "prev";
+    private List<FinanceEvent> _history = [];
+
+    // Ustawienia
+    private SettingsForm? _form;
+    private string _fMode = "";
+    private DateOnly? _fUnregSince, _fStart, _fBizSince;
+    private string _fVat = "zw";
+    private string? _fQuarterLimit, _fVatLimit, _fReserve, _token, _testMsg;
+    private bool _testOk, _switchOpen, _swConfirm;
+    private DateOnly _swSince = Today;
+    private string? _swName, _swNip, _swRegon, _swAddress, _swBank;
+    private string _swVat = "zw";
+
+    private decimal MonthMax => Math.Max(1, _o?.Months.Max(m => Math.Max(m.Revenue, m.Costs)) ?? 1);
+    private string VatNotePlaceholder => FinanceRules.DefaultVatNote(string.IsNullOrEmpty(_fMode) ? FinanceModes.Unregistered : _fMode, SalesDocumentKinds.Receipt);
+
+    /// <summary>Pola formularza ustawień (rekord ustawień jest niezmienny).</summary>
+    private sealed class SettingsForm
+    {
+        public string SellerName { get; set; } = "";
+        public string SellerAddress { get; set; } = "";
+        public string SellerEmail { get; set; } = "";
+        public string SellerTaxId { get; set; } = "";
+        public string SellerRegon { get; set; } = "";
+        public string SellerBank { get; set; } = "";
+        public string VatNote { get; set; } = "";
+        public bool AutoIssue { get; set; }
+        public bool EmailDocs { get; set; }
+        public string Provider { get; set; } = "local";
+        public string FakturowniaDomain { get; set; } = "";
+        public string PrefixReceipt { get; set; } = "";
+        public string PrefixInvoice { get; set; } = "";
+        public string PrefixCorrection { get; set; } = "";
+    }
+
+    private static Expense NewExpense() => new() { Date = Today, Category = "serwer" };
+
+    protected override async Task OnInitializedAsync()
+    {
+        _actor = (await AuthState.GetAuthenticationStateAsync()).User.Identity?.Name ?? "admin";
+        ExportPreset("prev");
+        await ReloadAsync();
+        var start = Tabs.Any(t => t.Key == TabQuery) ? TabQuery! : _s?.Configured == false ? "przeglad" : "przeglad";
+        if (!string.IsNullOrWhiteSpace(Query)) { _fQuery = Query; _fYear = 0; }
+        await SelectTab(start);
+    }
+
+    private async Task ReloadAsync()
+    {
+        _s = await Acc.GetSettingsAsync();
+        _o = await Acc.OverviewAsync();
+    }
+
+    private async Task SelectTab(string tab)
+    {
+        _tab = tab;
+        switch (tab)
+        {
+            case "dokumenty": await LoadDocs(); break;
+            case "ewidencja": await LoadLedger(); break;
+            case "koszty": await LoadExpenses(); break;
+            case "historia": _history = await Acc.HistoryAsync(); break;
+            case "ustawienia": FillForm(); break;
+        }
+    }
+
+    private void Flash(string? error, string ok)
+    {
+        _flashOk = error is null;
+        _flash = error ?? ok;
+    }
+
+    private string ModeHeadline() => _o!.ModeToday switch
+    {
+        FinanceModes.Unregistered => "Działalność nierejestrowana",
+        FinanceModes.Business => _s!.Vat == "vat" ? "Firma — czynny podatnik VAT" : "Firma — zwolnienie z VAT",
+        _ => "Księgowość nie jest jeszcze ustawiona"
+    };
+
+    private string ModeDetail()
+    {
+        var s = _s!;
+        if (!s.Configured) return "Wpłaty nie trafiają jeszcze do ewidencji. Ustaw formę działalności i dane sprzedawcy.";
+        var parts = new List<string>();
+        if (_o!.ModeToday == FinanceModes.Business && s.BusinessSince is { } b) parts.Add($"od {b:dd.MM.yyyy}");
+        else if (s.UnregisteredSince is { } u) parts.Add($"od {u:dd.MM.yyyy}");
+        if (s.Start is { } st) parts.Add($"ewidencja od {st:dd.MM.yyyy}");
+        if (s.Mode == FinanceModes.Business && s.UnregisteredSince is { } u2 && s.BusinessSince is { } b2) parts.Add($"wcześniej nierejestrowana ({u2:dd.MM.yyyy} – {b2.AddDays(-1):dd.MM.yyyy})");
+        return string.Join(" · ", parts);
+    }
+
+    private IEnumerable<(bool Ok, string Text, string? Tab)> Checklist()
+    {
+        var s = _s!;
+        var o = _o!;
+        yield return (s.MissingSellerData().Count == 0, "Dane sprzedawcy na dokumentach", "ustawienia");
+        yield return (s.Start is not null, s.Start is { } st ? $"Ewidencja prowadzona od {st:dd.MM.yyyy}" : "Ewidencja wpłat włączona", "ustawienia");
+        yield return (s.AutoIssue, "Dokument po każdej wpłacie", "ustawienia");
+        yield return (o.PaymentsWithoutDoc == 0, "Każda wpłata ma dokument", "dokumenty");
+        yield return (o.PendingDocs == 0, "Brak dokumentów czekających na numer", "dokumenty");
+        yield return (o.ExpensesWithoutProof == 0, "Koszty mają dowody", "koszty");
+        yield return (o.LastExport is { } le && AccountingService.LocalDate(le) >= new DateOnly(Today.Year, Today.Month, 1).AddMonths(Today.Day >= 5 ? 0 : -1),
+            "Kopia za poprzedni miesiąc poza Hantly", "eksport");
+    }
+
+    private static string MonthName(int m) => FinanceRules.Pl.DateTimeFormat.MonthNames[m - 1] is { Length: > 0 } n ? char.ToUpper(n[0]) + n[1..] : m.ToString();
+
+    private static string Pct(decimal value, decimal total, decimal offset = 0)
+    {
+        if (total <= 0) return "0";
+        var room = Math.Max(0, 100 - offset * 100 / total);
+        var p = Math.Clamp(value * 100 / total, 0, room);
+        return p.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private static string ExportUrl(string file, DateOnly from, DateOnly to) => $"/api/panel/ksiegowosc/{file}?od={from:yyyy-MM-dd}&do={to:yyyy-MM-dd}";
+
+    private async Task SyncNow()
+    {
+        _busy = true;
+        try
+        {
+            var r = await Acc.SyncAsync(_actor);
+            var msg = $"Nowe wpisy w ewidencji: {r.Ledger}, dokumenty: {r.Documents}, z Fakturowni: {r.Synced}, wysłane: {r.Emailed}.";
+            Flash(r.Errors.Count > 0 ? msg + " Uwaga: " + r.Errors.Distinct().First() : null, msg);
+            await ReloadAsync();
+            await SelectTab(_tab);
+        }
+        finally { _busy = false; }
+    }
+
+    // ── Start ──
+
+    private void StartWith(string mode)
+    {
+        _tab = "ustawienia";
+        FillForm();
+        _fMode = mode;
+        _fStart ??= new DateOnly(Today.Year, Today.Month, 1);
+        if (mode == FinanceModes.Unregistered) _fUnregSince ??= _fStart;
+        else _fBizSince ??= _fStart;
+    }
+
+    // ── Dokumenty ──
+
+    private async Task LoadDocs()
+    {
+        _docs = await Acc.DocumentsAsync(new AccountingService.DocumentFilter(_fYear == 0 ? null : _fYear, _fMonth == 0 ? null : _fMonth,
+            string.IsNullOrEmpty(_fKind) ? null : _fKind, _fQuery, _fProblems));
+        _noDoc = await Acc.PaymentsWithoutDocumentAsync();
+    }
+
+    private void OpenDoc(SalesDocument d)
+    {
+        _open = _open?.Id == d.Id ? null : d;
+        _emailTo = null; _corrAmount = null; _corrReason = null; _cancelReason = null;
+    }
+
+    private async Task AfterDocChange(string? error, string ok)
+    {
+        Flash(error, ok);
+        if (error is null) _open = null;
+        await LoadDocs();
+        _o = await Acc.OverviewAsync();
+    }
+
+    private async Task IssueFor(SalesLedgerEntry e)
+    {
+        if (e.PaymentRecordId is not { } id) return;
+        _busy = true;
+        try
+        {
+            var (doc, error) = await Acc.IssueForPaymentAsync(id, _actor);
+            await AfterDocChange(error, doc is null ? "Dokument już istnieje." : $"Wystawiono {SalesDocumentKinds.Label(doc.Kind).ToLowerInvariant()} {doc.Number}.");
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task IssueAllMissing()
+    {
+        _busy = true;
+        try
+        {
+            var ok = 0; string? last = null;
+            foreach (var e in _noDoc.Where(x => x.PaymentRecordId is not null).ToList())
+            {
+                var (doc, error) = await Acc.IssueForPaymentAsync(e.PaymentRecordId!.Value, _actor);
+                if (doc is not null) ok++;
+                last = error ?? last;
+            }
+            await AfterDocChange(ok == 0 ? last : null, $"Wystawiono dokumentów: {ok}.");
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task SendDoc(SalesDocument d)
+    {
+        _busy = true;
+        try
+        {
+            var (ok, error) = await Acc.EmailDocumentAsync(d.Id, _actor, string.IsNullOrWhiteSpace(_emailTo) ? null : _emailTo.Trim());
+            await AfterDocChange(ok ? null : error ?? "Nie udało się wysłać.", $"Wysłano {d.Number}.");
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task Correct(SalesDocument d)
+    {
+        _busy = true;
+        try
+        {
+            var (doc, error) = await Acc.CorrectAsync(d.Id, _corrAmount ?? 0, _corrReason ?? "", _actor);
+            await AfterDocChange(error, $"Wystawiono korektę {doc?.Number} do {d.Number}.");
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task Cancel(SalesDocument d)
+    {
+        _busy = true;
+        try { await AfterDocChange(await Acc.CancelAsync(d.Id, _cancelReason ?? "", _actor), $"Anulowano {d.Number}. Wpłata czeka na nowy dokument."); }
+        finally { _busy = false; }
+    }
+
+    private async Task Retry(SalesDocument d)
+    {
+        _busy = true;
+        try { await AfterDocChange(await Acc.RetryProviderAsync(d.Id, _actor), "Fakturownia nadała numer."); }
+        finally { _busy = false; }
+    }
+
+    private async Task IssueLocal(SalesDocument d)
+    {
+        _busy = true;
+        try { await AfterDocChange(await Acc.IssueLocallyAsync(d.Id, _actor), "Dokument wystawiony z numerem Hantly."); }
+        finally { _busy = false; }
+    }
+
+    private async Task OpenNewDocument()
+    {
+        _tab = "dokumenty";
+        await LoadDocs();
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _tenants = await db.Tenants.AsNoTracking().Where(t => t.Status != TenantStatus.Destroyed).OrderBy(t => t.CompanyName).ToListAsync();
+        _newDoc = new AccountingService.ManualDocument { Kind = AccountingService.ManualKinds(_s!, Today)[0] };
+    }
+
+    private void PickTenant(ChangeEventArgs e)
+    {
+        if (_newDoc is null) return;
+        var t = int.TryParse(e.Value?.ToString(), out var id) ? _tenants.FirstOrDefault(x => x.Id == id) : null;
+        _newDoc.TenantId = t?.Id;
+        if (t is null) return;
+        _newDoc.BuyerTaxId = t.InvoiceTaxId;
+        _newDoc.BuyerName = t.InvoiceName ?? (t.InvoiceTaxId is null ? t.OwnerName : t.CompanyName);
+        _newDoc.BuyerAddress = t.InvoiceAddress;
+        _newDoc.BuyerEmail = t.InvoiceEmail ?? t.OwnerEmail;
+        var kinds = AccountingService.ManualKinds(_s!, _newDoc.SaleDate);
+        var want = FinanceRules.KindFor(_s!.ModeOn(_newDoc.SaleDate), _s.Vat, t.InvoiceTaxId);
+        if (kinds.Contains(want)) _newDoc.Kind = want;
+    }
+
+    private async Task IssueManual()
+    {
+        if (_newDoc is null) return;
+        _busy = true;
+        try
+        {
+            var (doc, error) = await Acc.IssueManualAsync(_newDoc, _actor);
+            if (error is null) _newDoc = null;
+            await AfterDocChange(error, doc is null ? "" : doc.Status == SalesDocumentStatus.Pending
+                ? "Dokument czeka na numer z Fakturowni."
+                : $"Wystawiono {SalesDocumentKinds.Label(doc.Kind).ToLowerInvariant()} {doc.Number}.");
+        }
+        finally { _busy = false; }
+    }
+
+    // ── Ewidencja ──
+
+    private async Task LoadLedger() => _days = await Acc.LedgerDaysAsync(_lFrom, _lTo);
+
+    private async Task SetLedgerMonth(ChangeEventArgs e)
+    {
+        if (!DateOnly.TryParseExact($"{e.Value}-01", "yyyy-MM-dd", out var d)) return;
+        _ledgerMonth = d.ToString("yyyy-MM");
+        await LedgerRange((d, d.AddMonths(1).AddDays(-1)));
+    }
+
+    private static (DateOnly, DateOnly) LedgerQuarter()
+    {
+        var q = FinanceRules.QuarterOf(Today);
+        return (FinanceRules.QuarterStart(Today.Year, q), FinanceRules.QuarterEnd(Today.Year, q));
+    }
+
+    private async Task LedgerRange((DateOnly From, DateOnly To) r)
+    {
+        (_lFrom, _lTo) = r;
+        await LoadLedger();
+    }
+
+    private async Task Reverse(SalesLedgerEntry e)
+    {
+        _busy = true;
+        try
+        {
+            var error = await Acc.ReverseEntryAsync(e.Id, _reverseReason ?? "", _actor);
+            Flash(error, "Dodano wpis prostujący.");
+            if (error is null) _reverseId = null;
+            await LoadLedger();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task AddManual()
+    {
+        _busy = true;
+        try
+        {
+            var error = await Acc.AddManualEntryAsync(_manualDate, _manualAmount ?? 0, _manualDesc ?? "", _actor);
+            Flash(error, "Dopisano sprzedaż do ewidencji.");
+            if (error is null) { _manualAmount = null; _manualDesc = null; }
+            await LoadLedger();
+            _o = await Acc.OverviewAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    // ── Koszty ──
+
+    private async Task LoadExpenses() => _expenses = await Acc.ExpensesAsync(new DateOnly(_expYear, 1, 1), new DateOnly(_expYear, 12, 31));
+
+    private async Task PickProof(InputFileChangeEventArgs e)
+    {
+        _exp.Attachment = null; _proofName = null;
+        if (e.File.Size > AccountingService.MaxAttachmentBytes) { Flash("Plik może mieć najwyżej 10 MB.", ""); return; }
+        using var ms = new MemoryStream();
+        await e.File.OpenReadStream(AccountingService.MaxAttachmentBytes).CopyToAsync(ms);
+        _exp.Attachment = ms.ToArray();
+        _exp.AttachmentName = Path.GetFileName(e.File.Name);
+        _exp.AttachmentType = e.File.ContentType;
+        _proofName = _exp.AttachmentName;
+    }
+
+    private async Task AddExpense()
+    {
+        _busy = true;
+        try
+        {
+            var error = await Acc.AddExpenseAsync(_exp, _actor);
+            Flash(error, "Dodano koszt.");
+            if (error is null) { _exp = NewExpense(); _proofName = null; }
+            await LoadExpenses();
+            _o = await Acc.OverviewAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task DeleteExpense(Expense e)
+    {
+        var error = await Acc.DeleteExpenseAsync(e.Id, _deleteExpReason ?? "", _actor);
+        Flash(error, "Koszt usunięty (zostaje w historii zmian).");
+        if (error is null) _deleteExpId = null;
+        await LoadExpenses();
+        _o = await Acc.OverviewAsync();
+    }
+
+    // ── Eksport ──
+
+    private void ExportPreset(string preset)
+    {
+        _exportPreset = preset;
+        var t = Today;
+        var month = new DateOnly(t.Year, t.Month, 1);
+        (_eFrom, _eTo) = preset switch
+        {
+            "month" => (month, t),
+            "quarter" => LedgerQuarter(),
+            "year" => (new DateOnly(t.Year, 1, 1), t),
+            "prevyear" => (new DateOnly(t.Year - 1, 1, 1), new DateOnly(t.Year - 1, 12, 31)),
+            _ => (month.AddMonths(-1), month.AddDays(-1))
+        };
+    }
+
+    // ── Ustawienia ──
+
+    private void FillForm()
+    {
+        var s = _s!;
+        _form = new SettingsForm
+        {
+            SellerName = s.SellerName, SellerAddress = s.SellerAddress, SellerEmail = s.SellerEmail, SellerTaxId = s.SellerTaxId,
+            SellerRegon = s.SellerRegon, SellerBank = s.SellerBank, VatNote = s.VatNote, AutoIssue = s.AutoIssue, EmailDocs = s.EmailDocs,
+            Provider = s.Provider, FakturowniaDomain = s.FakturowniaDomain, PrefixReceipt = s.PrefixReceipt, PrefixInvoice = s.PrefixInvoice,
+            PrefixCorrection = s.PrefixCorrection
+        };
+        _fMode = s.Mode;
+        _fUnregSince = s.UnregisteredSince;
+        _fStart = s.Start;
+        _fBizSince = s.BusinessSince;
+        _fVat = s.Vat;
+        _fQuarterLimit = s.QuarterLimit?.ToString("0.00", FinanceRules.Pl);
+        _fVatLimit = s.VatLimit?.ToString("0.00", FinanceRules.Pl);
+        _fReserve = s.TaxReservePct.ToString("0.#", FinanceRules.Pl);
+        if (string.IsNullOrWhiteSpace(_swName)) _swName = s.SellerName;
+        if (string.IsNullOrWhiteSpace(_swAddress)) _swAddress = s.SellerAddress;
+        if (string.IsNullOrWhiteSpace(_swBank)) _swBank = s.SellerBank;
+        _testMsg = null;
+    }
+
+    private async Task SaveSettings()
+    {
+        if (_form is null) return;
+        _busy = true;
+        try
+        {
+            var f = _form;
+            var n = _s! with
+            {
+                Mode = _fMode, UnregisteredSince = _fUnregSince, Start = _fStart, BusinessSince = _fBizSince, Vat = _fVat,
+                SellerName = f.SellerName ?? "", SellerAddress = f.SellerAddress ?? "", SellerEmail = f.SellerEmail ?? "",
+                SellerTaxId = _fMode == FinanceModes.Business ? f.SellerTaxId ?? "" : "",
+                SellerRegon = _fMode == FinanceModes.Business ? f.SellerRegon ?? "" : "",
+                SellerBank = f.SellerBank ?? "", VatNote = f.VatNote ?? "", AutoIssue = f.AutoIssue, EmailDocs = f.EmailDocs,
+                Provider = f.Provider, FakturowniaDomain = f.FakturowniaDomain ?? "",
+                PrefixReceipt = f.PrefixReceipt ?? "", PrefixInvoice = f.PrefixInvoice ?? "", PrefixCorrection = f.PrefixCorrection ?? "",
+                QuarterLimit = FinanceRules.ParseAmount(_fQuarterLimit) is > 0 and var q ? q : null,
+                VatLimit = FinanceRules.ParseAmount(_fVatLimit) is > 0 and var v ? v : null,
+                TaxReservePct = FinanceRules.ParseAmount(_fReserve) is >= 0 and <= 100 and var p ? p : 12m
+            };
+            var error = await Acc.SaveSettingsAsync(n, _actor);
+            if (error is null && !string.IsNullOrWhiteSpace(_token))
+            {
+                await Acc.SetFakturowniaTokenAsync(_token, _actor);
+                _token = null;
+            }
+            Flash(error, "Zapisano ustawienia księgowości.");
+            if (error is null)
+            {
+                await ReloadAsync();
+                FillForm();
+            }
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task TestFakturownia()
+    {
+        _busy = true;
+        try
+        {
+            // Najpierw zapisujemy subdomenę i nowy token, żeby test sprawdzał to, co jest w formularzu.
+            if (FakturowniaClient.NormalizeDomain(_form?.FakturowniaDomain) is not { } domain)
+            {
+                (_testOk, _testMsg) = (false, "Podaj subdomenę konta (część adresu przed .fakturownia.pl).");
+                return;
+            }
+            await Acc.SetFakturowniaDomainAsync(domain, _actor);
+            if (!string.IsNullOrWhiteSpace(_token)) { await Acc.SetFakturowniaTokenAsync(_token, _actor); _token = null; }
+            (_testOk, _testMsg) = await Fakturownia.TestAsync();
+            _s = await Acc.GetSettingsAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task RemoveToken()
+    {
+        await Acc.SetFakturowniaTokenAsync(null, _actor);
+        _s = await Acc.GetSettingsAsync();
+        Flash(null, "Token Fakturowni usunięty.");
+    }
+
+    private async Task SwitchToBusiness()
+    {
+        _busy = true;
+        try
+        {
+            var error = await Acc.SwitchToBusinessAsync(_swSince, _swName ?? "", _swAddress ?? "", _swNip ?? "", _swRegon ?? "", _swBank ?? "", _swVat, _actor);
+            Flash(error, $"Gratulacje! Od {_swSince:dd.MM.yyyy} dokumenty wystawia firma. Ewidencja i numeracja biegną dalej.");
+            if (error is null)
+            {
+                _switchOpen = false;
+                await ReloadAsync();
+                FillForm();
+            }
+        }
+        finally { _busy = false; }
+    }
+}

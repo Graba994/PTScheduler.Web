@@ -211,6 +211,49 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         /// <summary>„false” — bez automatycznych przypomnień o zaległościach.</summary>
         public const string BillingReminders = "billing_reminders";
 
+        // Księgowość platformy (działalność nierejestrowana → firma)
+        /// <summary>„unregistered” | „business”; puste — księgowość jeszcze nieskonfigurowana.</summary>
+        public const string FinanceMode = "finance_mode";
+        /// <summary>Od kiedy prowadzona jest działalność nierejestrowana (yyyy-MM-dd).</summary>
+        public const string FinanceUnregisteredSince = "finance_unregistered_since";
+        /// <summary>Data rozpoczęcia firmy z CEIDG (yyyy-MM-dd) — od tego dnia dokumenty wystawia firma.</summary>
+        public const string FinanceBusinessSince = "finance_business_since";
+        /// <summary>Od której daty wpłaty trafiają do ewidencji (yyyy-MM-dd).</summary>
+        public const string FinanceStart = "finance_start";
+        public const string FinanceSellerName = "finance_seller_name";
+        public const string FinanceSellerAddress = "finance_seller_address";
+        public const string FinanceSellerEmail = "finance_seller_email";
+        public const string FinanceSellerTaxId = "finance_seller_tax_id";
+        public const string FinanceSellerRegon = "finance_seller_regon";
+        public const string FinanceSellerBank = "finance_seller_bank";
+        /// <summary>Firma: „zw” (zwolnienie podmiotowe z VAT) albo „vat” (czynny podatnik VAT, 23%).</summary>
+        public const string FinanceVat = "finance_vat";
+        /// <summary>Własna adnotacja o podstawie zwolnienia z VAT (puste — tekst domyślny dla trybu).</summary>
+        public const string FinanceVatNote = "finance_vat_note";
+        /// <summary>„true” — dokument sprzedaży powstaje sam po każdej wpłacie.</summary>
+        public const string FinanceAutoIssue = "finance_auto_issue";
+        /// <summary>„true” — dokument idzie e-mailem (PDF) do nabywcy.</summary>
+        public const string FinanceEmailDocs = "finance_email_docs";
+        /// <summary>„local” (numeracja i PDF w Hantly) albo „fakturownia”.</summary>
+        public const string FinanceProvider = "finance_provider";
+        /// <summary>Subdomena konta Fakturowni (np. „hantly” dla hantly.fakturownia.pl).</summary>
+        public const string FinanceFakturowniaDomain = "finance_fakturownia_domain";
+        /// <summary>Token API Fakturowni (zaszyfrowany Data Protection).</summary>
+        public const string FinanceFakturowniaToken = "finance_fakturownia_token";
+        /// <summary>Własny limit kwartalny działalności nierejestrowanej (puste — 225% płacy minimalnej).</summary>
+        public const string FinanceQuarterLimit = "finance_quarter_limit";
+        /// <summary>Limit zwolnienia podmiotowego z VAT na rok (firma, „zw”).</summary>
+        public const string FinanceVatLimit = "finance_vat_limit";
+        /// <summary>Ile procent dochodu odkładać na podatek (szacunek).</summary>
+        public const string FinanceTaxReservePct = "finance_tax_reserve_pct";
+        public const string FinancePrefixReceipt = "finance_prefix_receipt";
+        public const string FinancePrefixInvoice = "finance_prefix_invoice";
+        public const string FinancePrefixCorrection = "finance_prefix_correction";
+        /// <summary>Ostatnie powiadomienie o limicie (np. „2026-Q4-80”) — jeden e-mail na próg w kwartale.</summary>
+        public const string FinanceLimitAlertSent = "finance_limit_alert_sent";
+        /// <summary>Kiedy ostatnio pobrano paczkę dla księgowej / eksport (UTC, ISO).</summary>
+        public const string FinanceLastExportAt = "finance_last_export_at";
+
         // Update tracking
         public const string LastTenantBuildCommit = "last_tenant_build_commit";
         public const string LastTenantBuildTime = "last_tenant_build_time";
@@ -287,6 +330,14 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         [Keys.LeoReportEnabled] = "true",
         [Keys.LeoReportHour] = "7",
         [Keys.LeoWeeklyEnabled] = "true",
+        [Keys.FinanceAutoIssue] = "true",
+        [Keys.FinanceEmailDocs] = "true",
+        [Keys.FinanceProvider] = "local",
+        [Keys.FinanceVat] = "zw",
+        [Keys.FinanceTaxReservePct] = "12",
+        [Keys.FinancePrefixReceipt] = "RACH",
+        [Keys.FinancePrefixInvoice] = "FV",
+        [Keys.FinancePrefixCorrection] = "KOR",
     };
 
     public async Task<string> GetAsync(string key)
