@@ -25,11 +25,47 @@ public class HantlyMotionTests
     }
 
     [Theory]
-    [InlineData(null, "enter,look,tricks,hover,talk,doze,party")]
-    [InlineData("", "")]
-    [InlineData("party, look ,nieznany,look", "look,party")]
-    public void Effects_KnownOnly_InFixedOrder(string? saved, string expected) =>
-        AssistantService.EffectsOrDefault(saved).Should().Be(expected);
+    [InlineData(null, null, "enter,look,tricks,hover,talk,doze,party,react")]
+    [InlineData("look,party", null, "look,party,react")] // dawna lista włączonych: nowsze efekty (reakcje) są włączone
+    [InlineData("", null, "react")]
+    [InlineData("look,party", "react,doze", "enter,look,tricks,hover,talk,party")] // lista wyłączonych ma pierwszeństwo
+    [InlineData(null, "", "enter,look,tricks,hover,talk,doze,party,react")]
+    public void Effects_FromSavedSettings(string? legacyOn, string? off, string expected) =>
+        AssistantService.EffectsFrom(legacyOn, off).Should().Be(expected);
+
+    [Fact]
+    public void EffectsOff_IsTheComplement() =>
+        AssistantService.EffectsOffFor(["look", "react"]).Should().Be("enter,tricks,hover,talk,doze,party");
+
+    [Theory]
+    [InlineData("przychod_w_gore", "stonks")]
+    [InlineData("rekord_tygodnia", "trophy")]
+    [InlineData("niezaplacone", "coins")]
+    [InlineData("okienko", "calendar")]
+    [InlineData("nieaktywni", "magnifier")]
+    [InlineData("dzis", "sun")]
+    [InlineData("nieznany_rodzaj", null)]
+    public void Reaction_MatchesTipKind(string kind, string? expected) =>
+        PTScheduler.Web.Services.PlatformAssistantService.ReactionFor(kind).Should().Be(expected);
+
+    [Fact]
+    public void EveryReaction_HasStylesAndDuration_InScript()
+    {
+        var js = File.ReadAllText(Path.Combine(Root(), "PTScheduler.Web", "wwwroot", "js", "hantly-motion.js"));
+        foreach (var (key, _, _) in AssistantService.Reactions)
+        {
+            js.Should().Contain($"{key}: ", $"skrypt musi znać czas trwania reakcji „{key}”");
+            MascotArt.LiveCss.Should().Contain($".hm-fx.tr-{key} ", $"brak stylu reakcji „{key}”");
+        }
+        var kinds = new[] { "przychod_w_gore", "rekord_tygodnia", "postep", "kamien_milowy", "niezaplacone", "akceptacje", "okienko",
+            "przeciazenie", "nieaktywni", "dzis", "tydzien", "cena", "przed_treningiem", "plan_stoi" };
+        foreach (var kind in kinds)
+        {
+            var r = PTScheduler.Web.Services.PlatformAssistantService.ReactionFor(kind);
+            r.Should().NotBeNull(kind);
+            js.Should().Contain($"{r}: ", $"reakcja „{r}” dla „{kind}” musi istnieć w skrypcie");
+        }
+    }
 
     [Theory]
     [InlineData("calm", "calm")]

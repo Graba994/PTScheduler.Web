@@ -61,18 +61,44 @@ public partial class AssistantService(
         ("hover", "Reaguje na najechanie", "prostuje się i czasem wypuszcza serduszko"),
         ("talk", "Mówi", "rusza ustami, gdy pokazuje podpowiedź"),
         ("doze", "Drzemka", "po kilku minutach bezczynności ziewa i zasypia, budzi się, gdy wrócisz"),
-        ("party", "Konfetti", "przy sukcesach (rekordy, kolejne treningi) wystrzeliwuje konfetti"),
+        ("party", "Konfetti", "przy kamieniach milowych klientów wystrzeliwuje konfetti"),
+        ("react", "Reakcje na wydarzenia", "„stonks” przy wzroście przychodu, puchar przy rekordzie, monety przy płatnościach, lupa przy znikających klientach…"),
     ];
+
+    /// <summary>Reakcje Hantly'ego na rodzaje podpowiedzi (nazwy sztuczek z hantly-motion.js) — do podglądu w Panelu.</summary>
+    public static readonly (string Key, string Label, string Icon)[] Reactions =
+    [
+        ("stonks", "Stonks", "bi-graph-up-arrow"), ("trophy", "Rekord", "bi-trophy"), ("coins", "Płatności", "bi-coin"),
+        ("calendar", "Wolny termin", "bi-calendar-check"), ("magnifier", "Kto zniknął", "bi-search"), ("sun", "Dzień dobry", "bi-sun"),
+        ("chart", "Podsumowanie tygodnia", "bi-bar-chart"), ("tag", "Cena", "bi-tag"), ("ring", "Do akceptacji", "bi-bell"),
+        ("sweat", "Pracowity tydzień", "bi-droplet"), ("warmup", "Przed treningiem", "bi-person-arms-up"), ("party", "Kamień milowy", "bi-stars"),
+    ];
+
+    /// <summary>Efekty ruchu z ustawień: zapisane wyłączone (nowy sposób) albo dawna lista włączonych — wtedy nowsze efekty (np. reakcje) są włączone.</summary>
+    public static string EffectsFrom(string? legacyOn, string? off)
+    {
+        if (off is not null)
+        {
+            var disabled = off.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet();
+            return string.Join(",", MotionEffects.Where(e => !disabled.Contains(e.Key)).Select(e => e.Key));
+        }
+        if (legacyOn is null) return DefaultEffects;
+        var on = legacyOn.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet();
+        return string.Join(",", MotionEffects.Where(e => on.Contains(e.Key) || !LegacyEffects.Contains(e.Key)).Select(e => e.Key));
+    }
+
+    /// <summary>Efekty, które istniały, gdy zapisywano listę włączonych — pozostałe są nowsze i domyślnie włączone.</summary>
+    private static readonly HashSet<string> LegacyEffects = ["enter", "look", "tricks", "hover", "talk", "doze", "party"];
+
+    /// <summary>Do zapisu: lista wyłączonych efektów.</summary>
+    public static string EffectsOffFor(IEnumerable<string> enabled)
+    {
+        var set = enabled.ToHashSet();
+        return string.Join(",", MotionEffects.Where(e => !set.Contains(e.Key)).Select(e => e.Key));
+    }
 
     public static string DefaultEffects => string.Join(",", MotionEffects.Select(e => e.Key));
     public static string MotionOrDefault(string? v) => MotionLevels.Any(m => m.Key == v) ? v! : "normal";
-    /// <summary>Tylko znane efekty, w stałej kolejności; puste ustawienie (nigdy nie zapisane) = wszystkie.</summary>
-    public static string EffectsOrDefault(string? v)
-    {
-        if (v is null) return DefaultEffects;
-        var set = v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet();
-        return string.Join(",", MotionEffects.Where(e => set.Contains(e.Key)).Select(e => e.Key));
-    }
     public const int MaxAssetBytes = 300 * 1024;
     public static readonly string[] AllowedTypes = ["image/svg+xml", "image/png", "image/webp", "image/gif"];
 
@@ -131,7 +157,8 @@ public partial class AssistantService(
     public async Task<Config> GetConfigAsync(Tenant? tenant = null)
     {
         var s = await settings.GetAllAsync(K.AssistantEnabled, K.AssistantName, K.AssistantAnimation, K.AiEnabled, K.AssistantLayout,
-            K.AssistantMotion, K.AssistantEffects);
+            K.AssistantMotion);
+        var effects = await EffectsAsync();
         await using var db = await dbFactory.CreateDbContextAsync();
         var custom = await db.MascotAssets.AsNoTracking().Where(a => !a.Mood.StartsWith(LeoPrefix)).ToDictionaryAsync(a => a.Mood);
         var icons = MascotArt.Moods.ToDictionary(m => m.Key, m => custom.TryGetValue(m.Key, out var a)
@@ -148,7 +175,7 @@ public partial class AssistantService(
             Layout: IsLayout(s[K.AssistantLayout]) ? s[K.AssistantLayout] : "bubble",
             AnimatedSvg: animation == "live" && custom.Count == 0 ? LiveSvg : null,
             Motion: MotionOrDefault(s[K.AssistantMotion]),
-            Effects: EffectsOrDefault(s.GetValueOrDefault(K.AssistantEffects)));
+            Effects: effects);
     }
 
     private static readonly string LiveSvg = MascotArt.AnimatedSvg();
@@ -159,9 +186,13 @@ public partial class AssistantService(
     public sealed record PublicLook(string Name, string Animation, string? AnimatedSvg, Func<string, string> IconUrl,
         string Motion = "normal", string Effects = "");
 
+    /// <summary>Włączone efekty ruchu hantelka (po przecinku) według ustawień Panelu.</summary>
+    public async Task<string> EffectsAsync() =>
+        EffectsFrom(await settings.GetStoredAsync(K.AssistantEffects), await settings.GetStoredAsync(K.AssistantEffectsOff));
+
     public async Task<PublicLook> GetPublicLookAsync()
     {
-        var s = await settings.GetAllAsync(K.AssistantName, K.AssistantAnimation, K.AssistantMotion, K.AssistantEffects);
+        var s = await settings.GetAllAsync(K.AssistantName, K.AssistantAnimation, K.AssistantMotion);
         await using var db = await dbFactory.CreateDbContextAsync();
         var hasCustom = await db.MascotAssets.AnyAsync(a => !a.Mood.StartsWith(LeoPrefix));
         var version = await IconsVersionAsync();
@@ -170,7 +201,7 @@ public partial class AssistantService(
             animation == "live" ? (hasCustom ? "bounce" : "live") : animation,
             animation == "live" && !hasCustom ? LiveSvg : null,
             mood => $"/assistant/mascot/{(MascotArt.IsMood(mood) ? mood : "happy")}.png?v={version}",
-            MotionOrDefault(s[K.AssistantMotion]), EffectsOrDefault(s.GetValueOrDefault(K.AssistantEffects)));
+            MotionOrDefault(s[K.AssistantMotion]), await EffectsAsync());
     }
 
     /// <summary>Wygląd i stan agenta Portalu (Leo) — ikony z własnych plików albo wbudowane.</summary>

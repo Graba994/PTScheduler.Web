@@ -115,6 +115,58 @@ public static class MascotArt
     };
 
     /// <summary>Elementy sztuczek (widoczne tylko w trakcie): ziewnięcie, serduszko, „+1” przy podnoszeniu, konfetti.</summary>
+    /// <summary>Reakcje na wydarzenia — za maskotką: linia „stonks” i wschodzące słońce.</summary>
+    private const string ReactBack = """
+        <g class="hma-stonks">
+          <polyline class="hma-stonks-line" pathLength="100" points="2,100 20,84 32,92 52,66 66,76 92,40 112,18" fill="none" stroke="#22C55E" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+          <path class="hma-stonks-head" d="M104 12 l14 2 -6 13z" fill="#22C55E"/>
+          <text class="hma-stonks-txt" x="84" y="12" font-family="Arial, sans-serif" font-weight="800" font-size="12" fill="#16A34A">+zł</text>
+        </g>
+        <g class="hma-sun">
+          <g class="hma-sun-rays" stroke="#FBBF24" stroke-width="3" stroke-linecap="round"><path d="M60 2 v8"/><path d="M60 50 v8"/><path d="M32 30 h8"/><path d="M80 30 h8"/><path d="M40 10 l6 6"/><path d="M74 44 l6 6"/><path d="M80 10 l-6 6"/><path d="M46 44 l-6 6"/></g>
+          <circle cx="60" cy="30" r="13" fill="#FCD34D"/>
+        </g>
+        """;
+
+    /// <summary>Okulary „deal with it” (jadą razem z twarzą) i kropla potu (z ciałem).</summary>
+    private const string ReactFace = """<g class="hma-shades"><rect x="42" y="57" width="17" height="10" rx="3.5" fill="#0F172A"/><rect x="61" y="57" width="17" height="10" rx="3.5" fill="#0F172A"/><rect x="58" y="60" width="4" height="2.4" rx="1" fill="#0F172A"/><rect x="45" y="59" width="5" height="2" rx="1" fill="#fff" opacity=".5"/><rect x="64" y="59" width="5" height="2" rx="1" fill="#fff" opacity=".5"/></g>""";
+    private const string ReactBody = """<path class="hma-sweat" d="M82 38 c4 6.5 7 10.5 7 14 a7 7 0 0 1 -14 0 c0 -3.5 3 -7.5 7 -14z" fill="#60A5FA"/>""";
+
+    /// <summary>Reakcje na wydarzenia — przed maskotką: puchar, monety, kalendarz, lupa, wykres, metka z ceną, dzwonek.</summary>
+    private const string ReactFront = """
+        <g class="hma-trophy">
+          <path d="M50 4 h20 v8 a10 10 0 0 1 -20 0z" fill="#FBBF24"/>
+          <path d="M50 6 h-5 a5 5 0 0 0 5 8 M70 6 h5 a5 5 0 0 1 -5 8" fill="none" stroke="#F59E0B" stroke-width="2.2"/>
+          <rect x="57.5" y="21" width="5" height="5" fill="#F59E0B"/><rect x="52" y="26" width="16" height="4" rx="1.5" fill="#D97706"/>
+          <path d="M60 7 l1.3 2.7 3 .4 -2.2 2 .5 3 -2.6 -1.4 -2.6 1.4 .5 -3 -2.2 -2 3 -.4z" fill="#fff" opacity=".85"/>
+        </g>
+        <g class="hma-coins" font-family="Arial, sans-serif" font-weight="800" font-size="8" text-anchor="middle">
+          <g class="hma-coin hma-coin1"><circle cx="99" cy="14" r="9.5" fill="#FBBF24" stroke="#D97706" stroke-width="2"/><text x="99" y="17" fill="#92400E">zł</text></g>
+          <g class="hma-coin hma-coin2"><circle cx="80" cy="12" r="8.5" fill="#FCD34D" stroke="#D97706" stroke-width="2"/><text x="80" y="15" fill="#92400E">zł</text></g>
+          <g class="hma-coin hma-coin3"><circle cx="62" cy="10" r="8" fill="#FBBF24" stroke="#D97706" stroke-width="2"/><text x="62" y="13" fill="#92400E">zł</text></g>
+        </g>
+        <g class="hma-cal">
+          <rect x="84" y="4" width="28" height="26" rx="5" fill="#fff" stroke="#CBD5E1" stroke-width="1.5"/>
+          <path d="M84 9 a5 5 0 0 1 5 -5 h18 a5 5 0 0 1 5 5 v3 h-28z" fill="#EF4444"/>
+          <rect x="90" y="1" width="3" height="6" rx="1.5" fill="#475569"/><rect x="103" y="1" width="3" height="6" rx="1.5" fill="#475569"/>
+          <path class="hma-cal-check" pathLength="100" d="M91 21 l4 4 8 -9" fill="none" stroke="#22C55E" stroke-width="3" stroke-linecap="round" stroke-linejoin="round"/>
+        </g>
+        <g class="hma-lens"><circle cx="0" cy="0" r="9" fill="#E0F2FE" fill-opacity=".55" stroke="#334155" stroke-width="3"/><path d="M6.5 6.5 l9 9" stroke="#334155" stroke-width="4" stroke-linecap="round"/><path d="M-4 -3 a5 5 0 0 1 4 -3" fill="none" stroke="#fff" stroke-width="2" stroke-linecap="round"/></g>
+        <g class="hma-chart">
+          <rect x="4" y="2" width="30" height="30" rx="6" fill="#fff" stroke="#CBD5E1" stroke-width="1.5"/>
+          <rect class="hma-bar hma-bar1" x="9" y="18" width="5" height="10" rx="1.5" fill="#A78BFA"/>
+          <rect class="hma-bar hma-bar2" x="16.5" y="13" width="5" height="15" rx="1.5" fill="#8B5CF6"/>
+          <rect class="hma-bar hma-bar3" x="24" y="7" width="5" height="21" rx="1.5" fill="#22C55E"/>
+        </g>
+        <g class="hma-tag">
+          <path d="M100 0 v8" stroke="#94A3B8" stroke-width="1.5"/>
+          <path d="M92 8 h16 l4 6 -4 6 h-16 a3 3 0 0 1 -3 -3 v-6 a3 3 0 0 1 3 -3z" fill="#F472B6"/>
+          <circle cx="93.5" cy="14" r="1.6" fill="#fff"/>
+          <text x="102" y="17.5" font-family="Arial, sans-serif" font-weight="800" font-size="9" text-anchor="middle" fill="#fff">+</text>
+        </g>
+        <g class="hma-bigbell"><path d="M60 2 a9 9 0 0 1 9 9 v7 l3 4 h-24 l3 -4 v-7 a9 9 0 0 1 9 -9z" fill="#FBBF24"/><circle cx="60" cy="25" r="3" fill="#F59E0B"/><path d="M44 8 q-3 4 0 8 M76 8 q3 4 0 8" fill="none" stroke="#FBBF24" stroke-width="2" stroke-linecap="round"/></g>
+        """;
+
     private const string TrickFx = """
         <ellipse class="hma-yawn" cx="60" cy="76" rx="5" ry="6.5" fill="#1E1B4B"/>
         <path class="hma-heart" d="M60 14 c-3-5-11-4-11 2 c0 5 7 8 11 12 c4-4 11-7 11-12 c0-6-8-7-11-2z" fill="#F472B6"/>
@@ -153,7 +205,7 @@ public static class MascotArt
         var faces = string.Concat(Moods.Select(m => $"""<g class="hma-face-{m.Key}">{LiveFace(m.Key)}</g>"""));
         var fx = string.Concat(Moods.Select(m => $"""<g class="hma-fx-{m.Key}">{LiveFx(m.Key)}</g>"""));
         const string burst = """<g class="hma-burst"><circle cx="20" cy="40" r="2.6" fill="#FBBF24"/><circle cx="100" cy="36" r="2.6" fill="#06D6A0"/><circle cx="30" cy="16" r="2" fill="#F472B6"/><circle cx="90" cy="14" r="2" fill="#60A5FA"/><path d="M60 4 l1.6 3.4 3.4 1.6 -3.4 1.6 -1.6 3.4 -1.6 -3.4 -3.4 -1.6 3.4 -1.6z" fill="#FBBF24"/></g>""";
-        return $"""<svg class="hma" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" aria-hidden="true" focusable="false"><style>{LiveCss}</style>{Defs(p)}<g class="hma-shadow">{Shadow}</g><g class="hma-hover"><g class="hma-rig"><g class="hma-breath"><g class="hma-plate-l">{PlateLeft(p)}</g><g class="hma-plate-r">{PlateRight(p)}</g><g class="hma-core">{Core(p, glint: true)}<g class="hma-face">{faces}</g></g></g></g></g><g class="hma-fx">{fx}{burst}{TrickFx}</g></svg>""";
+        return $"""<svg class="hma" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" aria-hidden="true" focusable="false"><style>{LiveCss}</style>{Defs(p)}<g class="hma-back">{ReactBack}</g><g class="hma-shadow">{Shadow}</g><g class="hma-hover"><g class="hma-rig"><g class="hma-breath"><g class="hma-plate-l">{PlateLeft(p)}</g><g class="hma-plate-r">{PlateRight(p)}</g><g class="hma-core">{Core(p, glint: true)}<g class="hma-face">{faces}{ReactFace}</g>{ReactBody}</g></g></g></g><g class="hma-fx">{fx}{burst}{TrickFx}{ReactFront}</g></svg>""";
     }
 
     /// <summary>Style animacji (w SVG). Wszystko pod „.hm-live”, żeby nie dotykać reszty strony.</summary>
@@ -263,6 +315,64 @@ public static class MascotArt
         .hm-fx.tr-party .hm-live .hma-party{opacity:1}
         .hm-fx.tr-party .hm-live .hma-party > *{animation:hmt-confetti 1.3s cubic-bezier(.2,.7,.4,1) both}
         .hm-fx.tr-party .hm-live .hma-rig{animation:hmt-hop .95s cubic-bezier(.3,.7,.4,1) both}
+        /* Reakcje na wydarzenia (grają raz, gdy pokazuje się podpowiedź danego rodzaju) */
+        .hm-live .hma-stonks,.hm-live .hma-sun,.hm-live .hma-shades,.hm-live .hma-sweat,.hm-live .hma-trophy,.hm-live .hma-coins,.hm-live .hma-cal,.hm-live .hma-lens,.hm-live .hma-chart,.hm-live .hma-tag,.hm-live .hma-bigbell{opacity:0}
+        .hm-live .hma-coin,.hm-live .hma-bar,.hm-live .hma-trophy,.hm-live .hma-cal,.hm-live .hma-tag,.hm-live .hma-bigbell,.hm-live .hma-chart{transform-box:fill-box;transform-origin:center}
+        .hm-live .hma-bar{transform-origin:center bottom}
+        .hm-live .hma-tag{transform-origin:top center}
+        .hm-live .hma-bigbell{transform-origin:top center}
+        .hm-live .hma-stonks-line{stroke-dasharray:100;stroke-dashoffset:100}
+        .hm-live .hma-cal-check{stroke-dasharray:100;stroke-dashoffset:100}
+        .hm-fx.tr-stonks .hm-live .hma-stonks{opacity:1}
+        .hm-fx.tr-stonks .hm-live .hma-stonks-line{animation:hmr-draw 1.1s cubic-bezier(.5,0,.3,1) .1s both}
+        .hm-fx.tr-stonks .hm-live .hma-stonks-head,.hm-fx.tr-stonks .hm-live .hma-stonks-txt{animation:hmr-pop 2.6s ease-out both}
+        .hm-fx.tr-stonks .hm-live .hma-shades{animation:hmr-shades 2.8s cubic-bezier(.3,1.4,.5,1) both}
+        .hm-fx.tr-stonks .hm-live .hma-rig{animation:hmr-proud 2.8s ease-in-out both}
+        .hm-fx.tr-stonks .hm-live .hma-stonks{animation:hmr-fade 2.8s ease-in-out both}
+        .hm-fx.tr-trophy .hm-live .hma-trophy{animation:hmr-trophy 2s cubic-bezier(.3,1.5,.5,1) both}
+        .hm-fx.tr-trophy .hm-live .hma-rig{animation:hmt-hop .95s cubic-bezier(.3,.7,.4,1) .15s both}
+        .hm-fx.tr-coins .hm-live .hma-coins{opacity:1}
+        .hm-fx.tr-coins .hm-live .hma-coin{animation:hmr-coin 1.9s cubic-bezier(.5,0,.6,1.3) both}
+        .hm-fx.tr-coins .hm-live .hma-coin2{animation-delay:.25s}.hm-fx.tr-coins .hm-live .hma-coin3{animation-delay:.5s}
+        .hm-fx.tr-coins .hm-live .hma-rig{animation:hmr-nod 1.9s ease-in-out both}
+        .hm-fx.tr-calendar .hm-live .hma-cal{animation:hmr-popin 1.9s cubic-bezier(.3,1.5,.5,1) both}
+        .hm-fx.tr-calendar .hm-live .hma-cal-check{animation:hmr-draw .5s ease-out .55s both}
+        .hm-fx.tr-calendar .hm-live .hma-face{animation:hmr-glance-up 1.9s ease-in-out both}
+        .hm-fx.tr-sweat .hm-live .hma-sweat{animation:hmr-sweat 1.9s ease-in both}
+        .hm-fx.tr-sweat .hm-live .hma-rig{animation:hmt-wiggle .9s ease-in-out .9s both}
+        .hm-fx.tr-magnifier .hm-live .hma-lens{animation:hmr-lens 2.2s ease-in-out both}
+        .hm-fx.tr-magnifier .hm-live .hma-face{animation:hmt-look 2.2s ease-in-out both}
+        .hm-fx.tr-sun .hm-live .hma-sun{animation:hmr-sunrise 2.4s ease-out both}
+        .hm-fx.tr-sun .hm-live .hma-sun-rays{transform-box:fill-box;transform-origin:center;animation:hmr-spin 2.4s linear both}
+        .hm-fx.tr-sun .hm-live .hma-rig{animation:hmt-stretch 1.4s ease-in-out .5s both}
+        .hm-fx.tr-chart .hm-live .hma-chart{animation:hmr-popin 2s cubic-bezier(.3,1.5,.5,1) both}
+        .hm-fx.tr-chart .hm-live .hma-bar{animation:hmr-grow .6s cubic-bezier(.3,1.4,.5,1) both}
+        .hm-fx.tr-chart .hm-live .hma-bar1{animation-delay:.3s}.hm-fx.tr-chart .hm-live .hma-bar2{animation-delay:.45s}.hm-fx.tr-chart .hm-live .hma-bar3{animation-delay:.6s}
+        .hm-fx.tr-tag .hm-live .hma-tag{animation:hmr-swing 2s ease-in-out both}
+        .hm-fx.tr-tag .hm-live .hma-face{animation:hmr-glance-up 2s ease-in-out both}
+        .hm-fx.tr-ring .hm-live .hma-bigbell{animation:hmr-ring 1.8s ease-in-out both}
+        .hm-fx.tr-ring .hm-live .hma-rig{animation:hma-nudge 1.8s ease-in-out both}
+        .hm-fx.tr-warmup .hm-live .hma-rig{animation:hmr-squat 1.8s ease-in-out both}
+        .hm-fx.tr-warmup .hm-live .hma-shadow{animation:hmr-squat-shadow 1.8s ease-in-out both}
+        @keyframes hmr-draw{to{stroke-dashoffset:0}}
+        @keyframes hmr-fade{0%,85%{opacity:1}100%{opacity:0}}
+        @keyframes hmr-pop{0%,40%{opacity:0;transform:translateY(4px)}52%,85%{opacity:1;transform:none}100%{opacity:0}}
+        @keyframes hmr-shades{0%{transform:translateY(-34px);opacity:0}25%{opacity:1}40%,85%{transform:none;opacity:1}100%{transform:none;opacity:0}}
+        @keyframes hmr-proud{0%,100%{transform:none}30%,85%{transform:translateY(-3px) rotate(-5deg)}}
+        @keyframes hmr-trophy{0%{transform:translateY(14px) scale(.2);opacity:0}25%{transform:translateY(-4px) scale(1.15);opacity:1}40%,80%{transform:translateY(0) scale(1);opacity:1}100%{transform:translateY(-8px) scale(.9);opacity:0}}
+        @keyframes hmr-coin{0%{transform:translateY(-26px);opacity:0}15%{opacity:1}45%{transform:translateY(8px)}55%{transform:translateY(4px)}65%,85%{transform:translateY(8px);opacity:1}100%{transform:translateY(8px);opacity:0}}
+        @keyframes hmr-nod{0%,100%{transform:none}30%,60%{transform:rotate(4deg) translateY(1px)}45%,75%{transform:rotate(-2deg)}}
+        @keyframes hmr-popin{0%{transform:scale(.2);opacity:0}25%{transform:scale(1.12);opacity:1}40%,82%{transform:scale(1);opacity:1}100%{transform:scale(.9);opacity:0}}
+        @keyframes hmr-glance-up{0%,100%{transform:none}25%,80%{transform:translate(4px,-3px)}}
+        @keyframes hmr-sweat{0%{transform:translateY(-2px);opacity:0}20%{opacity:1}80%{transform:translateY(16px);opacity:.9}100%{transform:translateY(22px);opacity:0}}
+        @keyframes hmr-lens{0%{transform:translate(8px,56px) rotate(-20deg);opacity:0}15%{opacity:1}50%{transform:translate(104px,52px) rotate(10deg)}80%{transform:translate(30px,58px) rotate(-10deg);opacity:1}100%{transform:translate(30px,58px);opacity:0}}
+        @keyframes hmr-sunrise{0%{transform:translateY(44px);opacity:0}30%{opacity:1}55%,85%{transform:translateY(0);opacity:1}100%{opacity:0}}
+        @keyframes hmr-spin{to{transform:rotate(90deg)}}
+        @keyframes hmr-grow{from{transform:scaleY(0)}to{transform:scaleY(1)}}
+        @keyframes hmr-swing{0%{transform:translateY(-14px) rotate(0);opacity:0}15%{transform:translateY(0) rotate(18deg);opacity:1}35%{transform:rotate(-14deg)}55%{transform:rotate(9deg)}75%,88%{transform:rotate(0);opacity:1}100%{opacity:0}}
+        @keyframes hmr-ring{0%{opacity:0;transform:scale(.4)}12%{opacity:1;transform:scale(1.1)}20%{transform:rotate(18deg)}30%{transform:rotate(-16deg)}40%{transform:rotate(12deg)}50%{transform:rotate(-8deg)}60%,85%{transform:rotate(0);opacity:1}100%{opacity:0}}
+        @keyframes hmr-squat{0%,100%{transform:none}15%,55%{transform:scale(1.08,.86) translateY(4px)}30%,70%{transform:translateY(-10px) scale(.96,1.05)}42%,82%{transform:none}}
+        @keyframes hmr-squat-shadow{0%,42%,82%,100%{transform:scale(1)}30%,70%{transform:scale(.75)}}
         /* Drzemka po bezczynności: ta sama minka co przy wyciszeniu. */
         .hm-fx.is-dozing .hm-live [class^="hma-face-"],.hm-fx.is-dozing .hm-live [class^="hma-fx-"]{display:none}
         .hm-fx.is-dozing .hm-live .hma-face-sleep,.hm-fx.is-dozing .hm-live .hma-fx-sleep{display:inline}

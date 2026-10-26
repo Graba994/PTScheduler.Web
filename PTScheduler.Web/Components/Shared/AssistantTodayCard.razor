@@ -12,7 +12,7 @@
             <span class="atc-mascot" aria-hidden="true">
                 @if (_config.AnimatedSvg is { Length: > 0 } svg)
                 {
-                    <span class="hm-fx" data-hm-motion="@_config.Motion" data-hm-fx="@PTScheduler.Web.Services.PlatformAssistantService.PageFx(_config)"><span class="hm-live st-idle md-@Mood">@((MarkupString)svg)</span></span>
+                    <span class="hm-fx" data-hm-motion="@_config.Motion" data-hm-fx="@PTScheduler.Web.Services.PlatformAssistantService.PageFx(_config)" data-hm-react="@Reaction"><span class="hm-live st-idle md-@Mood">@((MarkupString)svg)</span></span>
                 }
                 else if (_config.Icons.TryGetValue(Mood, out var icon))
                 {
@@ -81,6 +81,8 @@
     private bool _folded;
 
     private string Mood => _tips.FirstOrDefault()?.Mood ?? "happy";
+    /// <summary>Reakcja maskotki na najważniejszą sprawę dnia (raz dziennie — pilnuje tego hantly-motion.js).</summary>
+    private string? Reaction => _tips.Select(t => PTScheduler.Web.Services.PlatformAssistantService.ReactionFor(t.Kind)).FirstOrDefault(r => r is not null);
 
     /// <summary>„2 do załatwienia · 1 powód do dumy · 3 sugestie” — bez zer.</summary>
     private string Summary

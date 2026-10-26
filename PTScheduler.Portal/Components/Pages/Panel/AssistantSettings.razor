@@ -65,7 +65,14 @@
                                     <button type="button" class="btn btn-sm btn-light" title="@label" onclick="PTHmMotion.trick(document.getElementById('hm-preview-fx'), '@key')"><i class="bi @icon me-1"></i>@label</button>
                                 }
                             </div>
-                            <div class="small text-muted">Najedź na hantelka albo poruszaj myszką — zobaczysz, jak reaguje.</div>
+                            <div class="leo-stage-buttons hm-tricks" role="group" aria-label="Reakcje na wydarzenia">
+                                <span class="hm-tricks-k">Reakcje:</span>
+                                @foreach (var (key, label, icon) in AssistantService.Reactions)
+                                {
+                                    <button type="button" class="btn btn-sm btn-light" title="@label" onclick="PTHmMotion.trick(document.getElementById('hm-preview-fx'), '@key')"><i class="bi @icon me-1"></i>@label</button>
+                                }
+                            </div>
+                            <div class="small text-muted">Najedź na hantelka albo poruszaj myszką — zobaczysz, jak reaguje. Reakcje grają raz, gdy w aplikacji pokazuje się podpowiedź danego rodzaju.</div>
                         </div>
                     }
                     else if (IsLeo && _custom.Count == 0)
@@ -642,7 +649,7 @@ else
         var s = await Settings.GetAllAsync(K.AssistantEnabled, K.AssistantName, K.AssistantAnimation, K.AiEnabled, K.AiModel,
             K.AiMonthlyBudgetUsd, K.AiPriceInputPerM, K.AiPriceOutputPerM,
             K.LeoEnabled, K.LeoName, K.LeoAnimation, K.LeoReportEnabled, K.LeoReportHour, K.AdminNotificationEmail, K.AssistantLayout,
-            K.AssistantMotion, K.AssistantEffects);
+            K.AssistantMotion);
         _hantlyName = s[K.AssistantName].Trim() is { Length: > 0 } hn ? hn : AssistantService.DefaultName;
         _leoName = s[K.LeoName].Trim() is { Length: > 0 } ln ? ln : AssistantService.DefaultLeoName;
         _enabled = (IsLeo ? s[K.LeoEnabled] : s[K.AssistantEnabled]) != "false";
@@ -652,7 +659,7 @@ else
         _animation = AssistantService.Animations.Contains(anim) && !(IsLeo && anim == "live") ? anim : IsLeo ? "wave" : "live";
         _layout = AssistantService.IsLayout(s[K.AssistantLayout]) ? s[K.AssistantLayout] : "bubble";
         _motion = AssistantService.MotionOrDefault(s[K.AssistantMotion]);
-        _effects = AssistantService.EffectsOrDefault(s[K.AssistantEffects]).Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
+        _effects = (await Assistant.EffectsAsync()).Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
         _reportOn = s[K.LeoReportEnabled] != "false";
         _reportHour = int.TryParse(s[K.LeoReportHour], out var rh) ? Math.Clamp(rh, 5, 11) : 7;
         _adminEmail = s[K.AdminNotificationEmail];
@@ -706,7 +713,7 @@ else
         {
             values[K.AssistantLayout] = _layout;
             values[K.AssistantMotion] = _motion;
-            values[K.AssistantEffects] = AssistantService.EffectsOrDefault(string.Join(",", _effects));
+            values[K.AssistantEffectsOff] = AssistantService.EffectsOffFor(_effects);
         }
         await Settings.SetManyAsync(values);
         _savedName = DisplayName;

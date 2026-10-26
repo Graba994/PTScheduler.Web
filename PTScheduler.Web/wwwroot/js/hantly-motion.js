@@ -4,12 +4,14 @@
 // - tricks: co jakiś czas sztuczka w spoczynku (podskok, kręcenie się, „+1” z hantlą, rozglądanie się, przeciąganie, shimmy),
 // - hover: po najechaniu prostuje się, czasem wypuszcza serduszko,
 // - doze: po kilku minutach bezczynności ziewa i drzemie, budzi się, gdy wrócisz,
-// - talk / party: wywołuje strona (PTHmMotion.trick(el, 'talk' | 'party')).
+// - talk / party i reakcje na wydarzenia (stonks, trophy, coins, calendar, sweat, magnifier, sun, chart, tag, ring, warmup):
+//   wywołuje strona (PTHmMotion.trick(el, 'stonks')) albo atrybut data-hm-react="stonks" — wtedy raz dziennie po pojawieniu się.
 // Klasy dokładamy otoczce, bo Blazor przepisuje klasy samego .hm-live. Przy „ogranicz ruch” nic się nie dzieje.
 // Ten sam plik jest w Portalu (wwwroot/hantly-motion.js) i w aplikacji trenera (wwwroot/js/hantly-motion.js) — test pilnuje, żeby były identyczne.
 window.PTHmMotion = (function () {
     var reduce = window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    var TRICKS = { wiggle: 900, hop: 950, spin: 900, curl: 1500, look: 1700, stretch: 1200, heart: 1300, talk: 1600, party: 1400, yawn: 1800 };
+    var TRICKS = { wiggle: 900, hop: 950, spin: 900, curl: 1500, look: 1700, stretch: 1200, heart: 1300, talk: 1600, party: 1400, yawn: 1800,
+        stonks: 2800, trophy: 2000, coins: 1900, calendar: 1900, sweat: 1900, magnifier: 2200, sun: 2400, chart: 2000, tag: 2000, ring: 1800, warmup: 1800 };
     var IDLE_POOL = ['wiggle', 'hop', 'spin', 'curl', 'look', 'stretch'];
     var DOZE_MS = { calm: 120000, normal: 180000, lively: 300000 };
     var hosts = [];
@@ -22,7 +24,8 @@ window.PTHmMotion = (function () {
     function live(el) { return el.querySelector('.hm-live'); }
     function resting(el) {
         var l = live(el);
-        return !!l && l.classList.contains('st-idle') && !el.classList.contains('is-dozing');
+        // Bez nakładania się: w trakcie innej sztuczki albo reakcji nie zaczynamy następnej.
+        return !!l && l.classList.contains('st-idle') && !el.classList.contains('is-dozing') && !/(^|\s)tr-/.test(el.className);
     }
     function inView(el) {
         var r = el.getBoundingClientRect();
@@ -91,10 +94,26 @@ window.PTHmMotion = (function () {
         });
     }
 
+    // Reakcja z atrybutu (np. karta „Na dziś”): raz dziennie, gdy maskotka jest na ekranie i w spoczynku.
+    function reactOnce(el) {
+        var name = el.getAttribute('data-hm-react');
+        if (!name || off(el) || !has(el, 'react') || !TRICKS[name]) return;
+        var key = 'hm-react:' + name + ':' + new Date().toISOString().slice(0, 10);
+        try { if (localStorage.getItem(key)) return; } catch (e) { }
+        var tries = 0;
+        (function wait() {
+            if (!document.contains(el) || tries++ > 40) return;
+            if (!resting(el) || !inView(el) || document.hidden) { setTimeout(wait, 500); return; }
+            try { localStorage.setItem(key, '1'); } catch (e) { }
+            trick(el, name);
+        })();
+    }
+
     function attach(el) {
         if (el.__hm) return;
         el.__hm = {};
         hosts.push(el);
+        setTimeout(function () { reactOnce(el); }, 1200);
         el.addEventListener('pointerenter', function (e) {
             if (e.pointerType === 'touch' || off(el) || !has(el, 'hover')) return;
             el.classList.add('is-hover');

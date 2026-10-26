@@ -20,13 +20,35 @@ public class PlatformAssistantService(IHttpClientFactory httpFactory, ILogger<Pl
         Dictionary<string, string>? EmailIcons = null, string Layout = "bubble", string? AnimatedSvg = null, bool PlanAi = false,
         string Motion = "normal", string? Effects = null)
     {
-        public const string AllEffects = "enter,look,tricks,hover,talk,doze,party";
+        public const string AllEffects = "enter,look,tricks,hover,talk,doze,party,react";
         public string EffectList => Effects ?? AllEffects;
         public bool Has(string effect) => EffectList.Split(',').Contains(effect);
     }
 
-    /// <summary>Maskotka w treści strony (karta „Na dziś”, kreator /witaj): oczy za kursorem, sztuczki, najechanie.</summary>
-    public static string PageFx(Config c) => string.Join(",", c.EffectList.Split(',').Where(e => e is "look" or "tricks" or "hover"));
+    /// <summary>Maskotka w treści strony (karta „Na dziś”, kreator /witaj): oczy za kursorem, sztuczki, najechanie, reakcje.</summary>
+    public static string PageFx(Config c) => string.Join(",", c.EffectList.Split(',').Where(e => e is "look" or "tricks" or "hover" or "react"));
+
+    /// <summary>
+    /// Reakcja maskotki na rodzaj podpowiedzi (nazwa sztuczki z hantly-motion.js) — gra raz, gdy podpowiedź się pokazuje.
+    /// Null — zwykłe „mówienie”. Wzrost przychodu: „stonks”, rekord: puchar, płatności: monety, znikający klienci: lupa…
+    /// </summary>
+    public static string? ReactionFor(string kind) => kind switch
+    {
+        "przychod_w_gore" => "stonks",
+        "rekord_tygodnia" or "postep" => "trophy",
+        "kamien_milowy" or "kamien_trenera" => "party",
+        "niezaplacone" or "zaleglosci" or "faktury" => "coins",
+        "akceptacje" or "nieobecnosci" or "poczta_blad" => "ring",
+        "okienko" or "pusty_grafik" => "calendar",
+        "przeciazenie" => "sweat",
+        "nieaktywni" or "cisza" or "ryzyko_odejscia" or "pakiety" => "magnifier",
+        "dzis" => "sun",
+        "tydzien" => "chart",
+        "cena" => "tag",
+        "przed_treningiem" => "warmup",
+        "plan_stoi" => "curl",
+        _ => null,
+    };
 
     private static readonly TimeSpan ConfigTtl = TimeSpan.FromMinutes(30);
     private Config? _config;

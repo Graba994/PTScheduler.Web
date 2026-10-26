@@ -13,8 +13,11 @@ namespace PTScheduler.Web.Services;
 /// AI (przez Portal) najwyżej przeredaguje tekst zapasowy; liczby zawsze pochodzą stąd.
 /// </summary>
 public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFactory, IAppClock clock, RetentionService retention,
-    IEmailSettingsService emailSettings, TrainerProposalsService proposals)
+    IEmailSettingsService emailSettings, TrainerProposalsService proposals, IBusinessReportService reports)
 {
+    /// <summary>Przychód 30 dni vs poprzednie 30 — raport jest ciężki, więc trzymamy wynik godzinę.</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (DateTime At, decimal Now, decimal Before)> RevenueCache = new();
+
     private static readonly CultureInfo Pl = CultureInfo.GetCultureInfo("pl-PL");
 
     /// <param name="Key">Klucz do zamykania („nie pokazuj dziś”); przy <paramref name="Once"/> zamknięcie jest na stałe.</param>
@@ -169,6 +172,21 @@ public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFact
                 $"Rekordowy tydzień: {thisWeek} {Plural(thisWeek, "trening", "treningi", "treningów")}! Poprzedni rekord to {best}. Tak trzymać 💪",
                 new() { ["treningi_w_tym_tygodniu"] = thisWeek.ToString(), ["poprzedni_rekord"] = best.ToString() }, null, null, Once: true));
 
+        // „Stonks”: przychód z ostatnich 30 dni wyraźnie wyższy niż w poprzednich 30 (najwyżej raz na pół miesiąca).
+        try
+        {
+            var (revenue, before) = await RevenueAsync(userId, studioWide);
+            if (before >= 300 && revenue >= before * 1.15m && revenue - before >= 200)
+            {
+                var pct = (int)Math.Round((revenue - before) / before * 100);
+                tips.Add(new($"stonks-{today:yyyy-MM}-{(today.Day <= 15 ? 1 : 2)}", "przychod_w_gore", "celebrate", 35,
+                    $"Stonks! 📈 Przychód z ostatnich 30 dni: {revenue.ToString("N0", Pl)} zł — o {pct}% więcej niż miesiąc wcześniej.",
+                    new() { ["przychod_30_dni"] = revenue.ToString("0", Pl), ["poprzednie_30_dni"] = before.ToString("0", Pl), ["wzrost_procent"] = pct.ToString() },
+                    "Raport", "/stats/business", Once: true));
+            }
+        }
+        catch (Exception) { /* raport jest dodatkiem — bez niego podpowiedzi działają */ }
+
         // Plan na dziś albo pusty grafik na jutro.
         var tomorrow = today.AddDays(1);
         var todayCount = await sessions.CountAsync(s => s.Status == SessionStatus.Scheduled && s.StartTime >= now && s.StartTime < tomorrow);
@@ -195,6 +213,15 @@ public class AssistantTipsService(IDbContextFactory<ApplicationDbContext> dbFact
         catch (Exception) { /* propozycje są dodatkiem */ }
 
         return tips.OrderByDescending(t => t.Priority).ToList();
+    }
+
+    private async Task<(decimal Now, decimal Before)> RevenueAsync(string userId, bool studioWide)
+    {
+        var key = studioWide ? "*" : userId;
+        if (RevenueCache.TryGetValue(key, out var hit) && DateTime.UtcNow - hit.At < TimeSpan.FromHours(1)) return (hit.Now, hit.Before);
+        var r = await reports.GetAsync(30, studioWide ? null : userId);
+        RevenueCache[key] = (DateTime.UtcNow, r.Revenue, r.RevenuePrevious);
+        return (r.Revenue, r.RevenuePrevious);
     }
 
     /// <summary>Rodzaje propozycji wyłączone przez trenera („Nie proponuj tego”).</summary>

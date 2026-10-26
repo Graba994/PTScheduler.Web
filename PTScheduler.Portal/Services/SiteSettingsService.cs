@@ -112,8 +112,10 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string AssistantAnimation = "assistant_animation";
         /// <summary>Ruchliwość animowanego hantelka: calm, normal, lively (jak często robi sztuczki).</summary>
         public const string AssistantMotion = "assistant_motion";
-        /// <summary>Włączone efekty ruchu, po przecinku: enter, look, tricks, hover, talk, doze, party.</summary>
+        /// <summary>Dawniej: włączone efekty ruchu po przecinku (czytane tylko, gdy nie ma <see cref="AssistantEffectsOff"/>).</summary>
         public const string AssistantEffects = "assistant_effects";
+        /// <summary>Wyłączone efekty ruchu po przecinku — nowe efekty są więc od razu włączone.</summary>
+        public const string AssistantEffectsOff = "assistant_effects_off";
         /// <summary>Układ widżetu asystenta w aplikacji trenera: bubble, card, pill, peek.</summary>
         public const string AssistantLayout = "assistant_layout";
         /// <summary>Masterprompt: osobowość i zasady pisania asystenta ({NAZWA} = imię maskotki).</summary>
@@ -274,7 +276,6 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         [Keys.AssistantAnimation] = "live",
         [Keys.AssistantLayout] = "bubble",
         [Keys.AssistantMotion] = "normal",
-        [Keys.AssistantEffects] = "enter,look,tricks,hover,talk,doze,party",
         [Keys.AiEnabled] = "false",
         [Keys.AiModel] = "mistralai/mistral-large",
         [Keys.AiMonthlyBudgetUsd] = "5",
@@ -293,6 +294,13 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         await using var db = dbFactory.CreateDbContext();
         var setting = await db.SiteSettings.FindAsync(key);
         return setting?.Value ?? Defaults.GetValueOrDefault(key, "");
+    }
+
+    /// <summary>Wartość zapisana w bazie albo null, gdy nikt jej nie ustawiał (bez wartości domyślnej).</summary>
+    public async Task<string?> GetStoredAsync(string key)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        return (await db.SiteSettings.AsNoTracking().FirstOrDefaultAsync(s => s.Key == key))?.Value;
     }
 
     public async Task<Dictionary<string, string>> GetAllAsync(params string[] keys)

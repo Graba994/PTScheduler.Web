@@ -222,8 +222,13 @@
             text = text.Replace(placeholder, value);
         _text = text;
         StateHasChanged();
-        // Mówi, gdy pokazuje podpowiedź; przy sukcesach (nastrój „świętuje”) wystrzeliwuje konfetti.
-        await TrickAsync(tip.Mood == "celebrate" ? "party" : "talk", tip.Mood == "celebrate" ? "party" : "talk");
+        // Mówi, gdy pokazuje podpowiedź, i reaguje na jej treść: „stonks” przy wzroście przychodu, puchar przy rekordzie,
+        // monety przy płatnościach… (każda reakcja raz — przy pokazaniu podpowiedzi, nie w kółko).
+        await TrickAsync("talk", "talk");
+        if (PTScheduler.Web.Services.PlatformAssistantService.ReactionFor(tip.Kind) is { } reaction)
+            await TrickAsync(reaction, reaction == "party" ? "party" : "react");
+        else if (tip.Mood == "celebrate")
+            await TrickAsync("party", "party");
         if (tip.Key != "idle" && !IsSeen(tip))
         {
             _prefs.Seen[tip.Key] = SeenMark(tip);
