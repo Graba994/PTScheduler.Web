@@ -47,7 +47,7 @@ public static class MascotArt
     private const string Cheeks = """<circle cx="43" cy="72" r="4.5" fill="#F472B6" opacity=".55"/><circle cx="77" cy="72" r="4.5" fill="#F472B6" opacity=".55"/>""";
 
     private static string OpenEyes(double dx = 0, double dy = 0) =>
-        $"""<ellipse cx="51" cy="63" rx="4.6" ry="5.4" fill="#1E1B4B"/><ellipse cx="69" cy="63" rx="4.6" ry="5.4" fill="#1E1B4B"/><circle cx="{52.6 + dx}" cy="{61 + dy}" r="1.8" fill="#fff"/><circle cx="{70.6 + dx}" cy="{61 + dy}" r="1.8" fill="#fff"/>""";
+        $"""<ellipse cx="51" cy="63" rx="4.6" ry="5.4" fill="#1E1B4B"/><ellipse cx="69" cy="63" rx="4.6" ry="5.4" fill="#1E1B4B"/><circle class="hma-pupil" cx="{52.6 + dx}" cy="{61 + dy}" r="1.8" fill="#fff"/><circle class="hma-pupil" cx="{70.6 + dx}" cy="{61 + dy}" r="1.8" fill="#fff"/>""";
 
     private const string HappyEyes = """<path d="M46 64 q5 -6 10 0" stroke="#1E1B4B" stroke-width="3" fill="none" stroke-linecap="round"/><path d="M64 64 q5 -6 10 0" stroke="#1E1B4B" stroke-width="3" fill="none" stroke-linecap="round"/>""";
 
@@ -227,15 +227,18 @@ public static class MascotArt
         .hm-live.st-sleep .hma-rig{transform:translateY(4px) rotate(-10deg)}
         /* ── Ruch sterowany z hantly-motion.js: klasy na otoczce .hm-fx (Blazor jej nie nadpisuje) ── */
         .hm-fx{display:inline-block;line-height:0;--hm-lx:0;--hm-ly:0}
-        .hm-live .hma-face{transform:translate(calc(var(--hm-lx) * 3px),calc(var(--hm-ly) * 2.2px));transition:transform .35s cubic-bezier(.3,.7,.4,1)}
+        /* Patrzy za kursorem: twarz przesuwa się w stronę kursora, błyski w oczach jeszcze dalej, a całe ciało lekko się wychyla. */
+        .hm-live .hma-face{transform:translate(calc(var(--hm-lx) * 6px),calc(var(--hm-ly) * 4px));transition:transform .3s cubic-bezier(.3,.7,.4,1)}
+        .hm-live .hma-pupil{transform:translate(calc(var(--hm-lx) * 1.6px),calc(var(--hm-ly) * 1.4px));transition:transform .3s ease-out}
         .hm-live .hma-mouth{transform-origin:60px 75px}
         .hm-live .hma-eyes{transform-origin:60px 63px}
-        .hm-live .hma-hover{transform-origin:60px 100px;transition:transform .3s cubic-bezier(.3,1.6,.5,1)}
+        .hm-live .hma-hover{transform-origin:60px 100px;rotate:calc(var(--hm-lx) * 8deg);transition:transform .3s cubic-bezier(.3,1.6,.5,1),rotate .45s cubic-bezier(.3,.7,.4,1)}
         .hm-live .hma-yawn,.hm-live .hma-heart,.hm-live .hma-plus,.hm-live .hma-party{opacity:0}
         .hm-live .hma-heart{transform-origin:60px 22px}
         .hm-live .hma-party > *{transform-box:fill-box;transform-origin:center}
         /* Najechanie: prostuje się i patrzy na Ciebie. */
-        .hm-fx.is-hover .hm-live .hma-hover{transform:translateY(-4px) scale(1.06)}
+        .hm-fx.is-hover .hm-live .hma-hover{transform:translateY(-6px) scale(1.1)}
+        .hm-fx.is-hover .hm-live .hma-face{transform:translate(calc(var(--hm-lx) * 6px),calc(var(--hm-ly) * 4px)) scale(1.06)}
         /* Sztuczki w spoczynku */
         .hm-fx.tr-wiggle .hm-live .hma-rig{animation:hmt-wiggle .9s ease-in-out both}
         .hm-fx.tr-hop .hm-live .hma-rig{animation:hmt-hop .95s cubic-bezier(.3,.7,.4,1) both}

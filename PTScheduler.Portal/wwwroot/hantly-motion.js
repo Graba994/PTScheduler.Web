@@ -40,7 +40,10 @@ window.PTHmMotion = (function () {
     function schedule(el) {
         clearTimeout(el.__hm.timer);
         var m = motion(el);
-        var range = m === 'calm' ? [22000, 40000] : m === 'lively' ? [4500, 9000] : [9000, 18000];
+        var range = m === 'calm' ? [20000, 35000] : m === 'lively' ? [3500, 7000] : [6000, 12000];
+        // Pierwsza sztuczka szybko po pojawieniu się na ekranie — od razu widać, że żyje.
+        var wait = el.__hm.first ? range[0] + Math.random() * (range[1] - range[0]) : 2500 + Math.random() * 2500;
+        el.__hm.first = true;
         el.__hm.timer = setTimeout(function () {
             if (!document.contains(el)) return;
             if (!off(el) && has(el, 'tricks') && resting(el) && !document.hidden && inView(el)) {
@@ -50,7 +53,7 @@ window.PTHmMotion = (function () {
                 trick(el, pick);
             }
             schedule(el);
-        }, range[0] + Math.random() * (range[1] - range[0]));
+        }, wait);
     }
 
     // Oczy za kursorem: wektor od środka maskotki, przycięty do −1…1; po chwili bez ruchu wracają na środek.
@@ -61,7 +64,7 @@ window.PTHmMotion = (function () {
             if (off(el) || !has(el, 'look') || el.classList.contains('is-dozing')) { el.style.removeProperty('--hm-lx'); el.style.removeProperty('--hm-ly'); return; }
             if (!pointer || now - lastMove > 5000 || !inView(el)) { el.style.setProperty('--hm-lx', 0); el.style.setProperty('--hm-ly', 0); return; }
             var r = el.getBoundingClientRect();
-            var dx = (pointer.x - (r.left + r.width / 2)) / 260, dy = (pointer.y - (r.top + r.height * .45)) / 260;
+            var dx = (pointer.x - (r.left + r.width / 2)) / 220, dy = (pointer.y - (r.top + r.height * .45)) / 220;
             el.style.setProperty('--hm-lx', Math.max(-1, Math.min(1, dx)).toFixed(2));
             el.style.setProperty('--hm-ly', Math.max(-1, Math.min(1, dy)).toFixed(2));
         });

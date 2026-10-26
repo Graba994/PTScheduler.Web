@@ -185,13 +185,25 @@
     <section class="card border-0 shadow-sm mt-3">
         <div class="card-header pp-card-header"><span class="pp-icon pp-icon-sm"><i class="bi bi-images"></i></span>Ikony nastrojów</div>
         <div class="card-body">
+            @if (!IsLeo && _custom.Count == 0 && _animation == "live")
+            {
+                <p class="small text-muted mb-1"><i class="bi bi-magic me-1"></i>Tak żyje wbudowany hantelek w aplikacjach trenerów — poruszaj myszką albo najedź na niego. Po wgraniu własnego pliku maskotka przechodzi na prostą animację (podskok), a pełny ruch wraca po „Przywróć domyślną”.</p>
+            }
             <p class="small text-muted">Podmień dowolną ikonę własnym plikiem (SVG, PNG, WebP lub GIF, do @(AssistantService.MaxAssetBytes / 1024) KB, najlepiej kwadrat z przezroczystym tłem). Te same ikony trafiają do e-maili@(IsLeo ? " (poranny raport)" : "") — z SVG automatycznie robimy wersję PNG.</p>
             <div class="hm-grid">
                 @foreach (var m in AssistantService.MoodsFor(_agent))
                 {
                     var custom = _custom.Contains(m.Key);
                     <div class="hm-tile">
-                        <img src="@Icon(m.Key)" alt="@m.Label" width="88" height="88" />
+                        @if (!IsLeo && _custom.Count == 0 && _animation == "live")
+                        {
+                            @* Wbudowany hantelek: ten sam żywy rysunek co w aplikacji (oczy za kursorem, sztuczki, najechanie). *@
+                            <span class="hm-fx hm-tile-live" data-hm-motion="@_motion" data-hm-fx="@string.Join(",", _effects.Where(e => e is "look" or "tricks" or "hover"))"><span class="hm-live st-idle md-@m.Key">@((MarkupString)HantlyAnimatedSvg)</span></span>
+                        }
+                        else
+                        {
+                            <img src="@Icon(m.Key)" alt="" width="88" height="88" />
+                        }
                         <div class="fw-semibold">@m.Label @if (custom) { <span class="badge text-bg-info ms-1">własna</span> }</div>
                         <div class="small text-muted">@m.Hint</div>
                         <label class="btn btn-sm btn-outline-secondary mt-2 mb-0">
