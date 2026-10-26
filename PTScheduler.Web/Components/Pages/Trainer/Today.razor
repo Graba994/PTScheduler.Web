@@ -18,6 +18,7 @@
 @inject PlatformAssistantService Assistant
 @inject EntitlementService Entitlements
 @inject IAppClock Clock
+@inject IJSRuntime JS
 @inject AuthenticationStateProvider AuthState
 @inject NavigationManager Nav
 @rendermode PTScheduler.Web.RenderModes.Server
@@ -117,10 +118,14 @@
                                     break;
                                 default:
                                     <span class="td-close-why">bez notatki</span>
-                                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OpenNoteAsync(v.S, _logged.Contains(v.S.ClientId))">
+                                    <button type="button" class="btn btn-sm btn-outline-primary" @onclick="() => OpenNoteAsync(v.S, _logged.Contains(v.S.ClientId), NoteFromClose)">
                                         @if (_logged.Contains(v.S.ClientId)) { <i class="bi bi-stars me-1"></i><span>Szkic z treningu</span> } else { <i class="bi bi-pencil-square me-1"></i><span>Notatka</span> }
                                     </button>
                                     break;
+                            }
+                            @if (_noteFor == v.S.Id && _noteFrom == NoteFromClose)
+                            {
+                                @NoteEditor(v.S)
                             }
                         </li>
                     }
@@ -178,25 +183,9 @@
                             <p class="td-ai"><i class="bi bi-stars" aria-hidden="true"></i>@c.Summary</p>
                         }
 
-                        @if (_noteFor == s.Id)
-                        {
-                            <div class="td-note">
-                                <textarea class="form-control form-control-sm" rows="3" placeholder="Co warto zapamiętać z tej wizyty?" aria-label="Notatka" @bind="_noteText" @bind:event="oninput"></textarea>
-                                <div class="td-note-actions">
-                                    @if (_logged.Contains(s.ClientId))
-                                    {
-                                        <button type="button" class="btn btn-sm btn-link me-auto px-0" disabled="@_drafting" @onclick="() => DraftAsync(s)">
-                                            @if (_drafting) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-stars me-1"></i> }Szkic z zapisanego treningu
-                                        </button>
-                                    }
-                                    <button type="button" class="btn btn-sm btn-light" @onclick="() => _noteFor = null">Anuluj</button>
-                                    <button type="button" class="btn btn-sm btn-primary" disabled="@(_busy || string.IsNullOrWhiteSpace(_noteText))" @onclick="() => SaveNoteAsync(s)">Zapisz notatkę</button>
-                                </div>
-                            </div>
-                        }
                         <VisitActionBar Session="s" Day="v.Day ?? Proposed(v)" Phone="@v.Card?.Phone" OnChanged="r => OnVisitChanged(v, r)">
                             <ExtraContent>
-                                <button type="button" class="vab-btn icon" title="Notatka" aria-label="Notatka" @onclick="() => OpenNoteAsync(s, false)"><i class="bi bi-pencil-square"></i><span>Notatka</span></button>
+                                <button type="button" class="vab-btn icon" title="Notatka" aria-label="Notatka" @onclick="() => OpenNoteAsync(s, false, NoteFromVisit)"><i class="bi bi-pencil-square"></i><span>Notatka</span></button>
                                 @if (_cardsLoaded && !s.IsPair && s.Status is not (SessionStatus.NoShow or SessionStatus.Cancelled) && !_hasFuture.Contains(s.ClientId))
                                 {
                                     <button type="button" class="td-rebook" disabled="@_busy" title="Ten sam rodzaj i godzina za tydzień" @onclick="() => RebookAsync(s)">
@@ -205,6 +194,10 @@
                                 }
                             </ExtraContent>
                         </VisitActionBar>
+                        @if (_noteFor == s.Id && _noteFrom == NoteFromVisit)
+                        {
+                            @NoteEditor(s)
+                        }
                         @if (_rebookConflict == s.Id)
                         {
                             <div class="td-confirm"><span>Ten termin za tydzień jest zajęty.</span><a class="btn btn-sm btn-outline-primary" href="@($"/calendar?klient={s.ClientId}")">Wybierz inny w kalendarzu</a></div>
@@ -314,6 +307,7 @@
 
     protected override async Task OnAfterRenderAsync(bool firstRender)
     {
+        await FocusNoteAsync();
         if (_loading || _cardsLoaded) return;
         _cardsLoaded = true; // od razu, żeby kolejne rendery nie zaczęły ładować drugi raz
         var config = await SafeConfigAsync();
@@ -411,11 +405,38 @@
         _ => ""
     };
 
-    private async Task OpenNoteAsync(SessionDto s, bool withDraft)
+    private const string NoteFromClose = "close", NoteFromVisit = "visit";
+    private string _noteFrom = NoteFromVisit;
+    private bool _focusNote;
+
+    /// <summary>Notatka otwiera się tam, gdzie kliknięto (w „Domknij dzień” albo pod wizytą), i od razu jest widoczna.</summary>
+    private async Task OpenNoteAsync(SessionDto s, bool withDraft, string from)
     {
-        _noteFor = s.Id; _noteText = "";
+        _noteFor = s.Id; _noteText = ""; _noteFrom = from; _focusNote = true;
         if (withDraft) await DraftAsync(s);
     }
+
+    private async Task FocusNoteAsync()
+    {
+        if (!_focusNote || _noteFor is not { } id) return;
+        _focusNote = false;
+        try { await JS.InvokeVoidAsync("ptFocusNote", $"td-note-{id}"); } catch { }
+    }
+
+    private RenderFragment NoteEditor(SessionDto s) => @<div class="td-note" id="@($"td-note-{s.Id}")">
+        <div class="td-note-head"><i class="bi bi-pencil-square"></i>Notatka · @s.DisplayName</div>
+        <textarea class="form-control" rows="3" placeholder="Co warto zapamiętać z tej wizyty?" aria-label="Notatka" @bind="_noteText" @bind:event="oninput"></textarea>
+        <div class="td-note-actions">
+            @if (_logged.Contains(s.ClientId))
+            {
+                <button type="button" class="btn btn-sm btn-link px-0 td-note-draft" disabled="@_drafting" @onclick="() => DraftAsync(s)">
+                    @if (_drafting) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-stars me-1"></i> }Szkic z zapisanego treningu
+                </button>
+            }
+            <button type="button" class="btn btn-sm btn-light" @onclick="() => _noteFor = null">Anuluj</button>
+            <button type="button" class="btn btn-sm btn-primary" disabled="@(_busy || string.IsNullOrWhiteSpace(_noteText))" @onclick="() => SaveNoteAsync(s)">Zapisz notatkę</button>
+        </div>
+    </div>;
 
     private async Task DraftAsync(SessionDto s)
     {

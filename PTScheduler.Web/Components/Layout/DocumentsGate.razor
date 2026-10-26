@@ -11,53 +11,40 @@
 {
     var doc = _current;
     var required = doc.Kind == PTScheduler.Domain.Constants.DocumentKinds.Required;
-    <div class="health-gate-backdrop">
-        <div class="card doc-gate-card shadow-lg" role="dialog" aria-modal="true" aria-labelledby="docGateTitle">
-            <div class="card-body p-4 d-flex flex-column gap-3">
-                <div class="d-flex align-items-center gap-3">
-                    <div class="doc-gate-icon"><i class="bi @(required ? "bi-file-earmark-check" : "bi-person-check")"></i></div>
-                    <div class="flex-grow-1">
-                        <div class="text-muted small">
-                            @(required ? "Do akceptacji" : "Twoja zgoda")
-                            @if (_pending.Count > 1)
-                            {
-                                <span> · @(_index + 1) z @_pending.Count</span>
-                            }
-                        </div>
-                        <h5 class="fw-bold mb-0" id="docGateTitle">@doc.Title</h5>
-                    </div>
+    <div class="health-gate-backdrop lg-backdrop">
+        <div class="lg-sheet" role="dialog" aria-modal="true" aria-labelledby="docGateTitle">
+            <header class="lg-head">
+                <div class="lg-icon"><i class="bi @(required ? "bi-file-earmark-check" : "bi-person-check")"></i></div>
+                <div class="min-w-0">
+                    <div class="lg-kicker">@(required ? "Do akceptacji" : "Twoja zgoda")@(_pending.Count > 1 ? $" · {_index + 1} z {_pending.Count}" : "")</div>
+                    <h5 class="lg-title" id="docGateTitle">@doc.Title</h5>
                 </div>
+            </header>
+            <div class="lg-body" @key="doc.DocumentId">
                 @if (doc.DecidedVersion is not null)
                 {
-                    <div class="alert alert-info py-2 small mb-0">
-                        <i class="bi bi-info-circle me-1"></i>Treść dokumentu się zmieniła — przeczytaj nową wersję.
-                    </div>
+                    <div class="alert alert-info py-2 small mb-3"><i class="bi bi-info-circle me-1"></i>Treść dokumentu się zmieniła — przeczytaj nową wersję.</div>
                 }
-                <div class="doc-gate-content">@doc.Content</div>
+                <div class="lg-doc lg-doc-text">@doc.Content</div>
                 @if (_error is not null)
                 {
-                    <div class="alert alert-danger py-2 small mb-0">@_error</div>
-                }
-                <div class="d-flex flex-column flex-sm-row gap-2 justify-content-end">
-                    @if (required)
-                    {
-                        <button class="btn btn-primary" disabled="@_busy" @onclick="() => Decide(true)">
-                            <i class="bi bi-check-lg me-1"></i>Akceptuję
-                        </button>
-                    }
-                    else
-                    {
-                        <button class="btn btn-outline-secondary" disabled="@_busy" @onclick="() => Decide(false)">Nie zgadzam się</button>
-                        <button class="btn btn-primary" disabled="@_busy" @onclick="() => Decide(true)">
-                            <i class="bi bi-check-lg me-1"></i>Zgadzam się
-                        </button>
-                    }
-                </div>
-                @if (!required)
-                {
-                    <div class="text-muted small text-center">Decyzję możesz zmienić w każdej chwili w zakładce <strong>Moje dokumenty</strong>.</div>
+                    <div class="alert alert-danger py-2 small mt-3 mb-0">@_error</div>
                 }
             </div>
+            <footer class="lg-foot">
+                @if (required)
+                {
+                    <button class="btn btn-primary lg-btn" disabled="@_busy" @onclick="() => Decide(true)"><i class="bi bi-check-lg me-1"></i>Akceptuję</button>
+                }
+                else
+                {
+                    <div class="lg-actions">
+                        <button class="btn btn-primary lg-btn" disabled="@_busy" @onclick="() => Decide(true)"><i class="bi bi-check-lg me-1"></i>Zgadzam się</button>
+                        <button type="button" class="lg-link" disabled="@_busy" @onclick="() => Decide(false)">Nie zgadzam się</button>
+                    </div>
+                    <div class="text-muted small text-center">Decyzję zmienisz w każdej chwili w <strong>Moich dokumentach</strong>.</div>
+                }
+            </footer>
         </div>
     </div>
 }

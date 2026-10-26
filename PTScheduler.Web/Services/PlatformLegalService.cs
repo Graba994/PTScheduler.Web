@@ -9,7 +9,8 @@ namespace PTScheduler.Web.Services;
 /// </summary>
 public class PlatformLegalService(IHttpClientFactory httpFactory, ILogger<PlatformLegalService> logger)
 {
-    public sealed record Doc(string Key, string Title, string Version, string Url);
+    /// <param name="Html">Treść dokumentu z Portalu (starszy Portal jej nie wysyła — wtedy zostaje link).</param>
+    public sealed record Doc(string Key, string Title, string Version, string Url, string? Html = null);
     public sealed record Status(string PlatformName, List<Doc> Pending);
 
     private static readonly TimeSpan QuietTtl = TimeSpan.FromHours(1);

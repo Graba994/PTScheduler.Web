@@ -1115,10 +1115,15 @@ app.MapGet("/api/internal/tenants/{slug}/legal", async (
     if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
     var portal = PublicBase(ctx);
     var pending = await legal.PendingForTenantAsync(tenant.Id);
+    // Treść dokumentów od razu w odpowiedzi — aplikacja trenera pokazuje je w oknie akceptacji, bez otwierania
+    // nowej karty (w zainstalowanej aplikacji na telefonie nowa karta to pusty ekran).
+    var docs = new List<object>();
+    foreach (var d in pending)
+        docs.Add(new { key = d.Key, title = d.Title, version = d.Version, url = portal + d.Path, html = await legal.RenderAsync(d.Key) });
     return Results.Json(new
     {
         platformName = (await legal.CompanyAsync()).Brand,
-        pending = pending.Select(d => new { key = d.Key, title = d.Title, version = d.Version, url = portal + d.Path })
+        pending = docs
     });
 });
 

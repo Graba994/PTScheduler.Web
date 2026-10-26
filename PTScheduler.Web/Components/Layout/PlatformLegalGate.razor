@@ -10,52 +10,99 @@
    studia — przy pierwszym logowaniu, gdy aplikację założył administrator Portalu, i po każdej zmianie dokumentów. *@
 @if (_status is { Pending.Count: > 0 } status)
 {
-    <div class="health-gate-backdrop">
-        <div class="card doc-gate-card shadow-lg" role="dialog" aria-modal="true" aria-labelledby="legalGateTitle">
-            <div class="card-body p-4 d-flex flex-column gap-3">
-                <div class="d-flex align-items-center gap-3">
-                    <div class="doc-gate-icon"><i class="bi bi-file-earmark-text"></i></div>
-                    <div class="flex-grow-1">
-                        <div class="text-muted small">@status.PlatformName · do akceptacji</div>
-                        <h5 class="fw-bold mb-0" id="legalGateTitle">@(_declined ? "Bez akceptacji nie możesz dalej korzystać z aplikacji" : "Zasady korzystania z aplikacji")</h5>
+    var reading = _reading is { } rk ? status.Pending.FirstOrDefault(d => d.Key == rk) : null;
+    <div class="health-gate-backdrop lg-backdrop">
+        <div class="lg-sheet" role="dialog" aria-modal="true" aria-labelledby="legalGateTitle">
+            @if (reading is not null)
+            {
+                @* Czytanie dokumentu w tym samym oknie — bez nowej karty i bez wychodzenia z aplikacji. *@
+                <header class="lg-head">
+                    <button type="button" class="lg-back" @onclick="BackToList" aria-label="Wróć do listy dokumentów"><i class="bi bi-arrow-left"></i></button>
+                    <div class="min-w-0">
+                        <div class="lg-kicker">@status.PlatformName · wersja @reading.Version</div>
+                        <h5 class="lg-title" id="legalGateTitle">@reading.Title</h5>
                     </div>
+                </header>
+                <div class="lg-body lg-doc" @key="reading.Key">
+                    @if (!string.IsNullOrWhiteSpace(reading.Html))
+                    {
+                        @((MarkupString)PTScheduler.Infrastructure.Services.SafeHtml.Sanitize(reading.Html))
+                    }
+                    else
+                    {
+                        <p class="text-muted">Nie udało się wczytać treści. <a href="@reading.Url" target="_blank" rel="noopener">Otwórz dokument w przeglądarce</a>.</p>
+                    }
                 </div>
-                @if (_declined)
-                {
-                    <p class="mb-0">Te dokumenty są umową między Tobą a @status.PlatformName. Jeśli ich nie akceptujesz, możesz zrezygnować z subskrypcji — dane klientów wyeksportujesz w ciągu 30 dni od końca umowy.</p>
-                    <div class="d-flex flex-column flex-sm-row gap-2 justify-content-end">
-                        <a class="btn btn-outline-secondary" href="/admin/subscription">Zarządzaj subskrypcją</a>
-                        <button class="btn btn-primary" @onclick="() => _declined = false">Wróć do dokumentów</button>
+                <footer class="lg-foot">
+                    @if (NextUnread(status, reading.Key) is { } next)
+                    {
+                        <button class="btn btn-primary lg-btn" @onclick="() => Open(next.Key)">Dalej: @next.Title <i class="bi bi-arrow-right ms-1"></i></button>
+                    }
+                    else
+                    {
+                        <button class="btn btn-primary lg-btn" @onclick="BackToList"><i class="bi bi-check2 me-1"></i>Przeczytane — wróć do akceptacji</button>
+                    }
+                </footer>
+            }
+            else if (_declined)
+            {
+                <header class="lg-head">
+                    <div class="lg-icon lg-icon-warn"><i class="bi bi-exclamation-lg"></i></div>
+                    <div class="min-w-0">
+                        <div class="lg-kicker">@status.PlatformName</div>
+                        <h5 class="lg-title" id="legalGateTitle">Bez akceptacji nie da się dalej korzystać z aplikacji</h5>
                     </div>
-                }
-                else
-                {
-                    <p class="mb-0 text-muted">Przeczytaj dokumenty i potwierdź je, żeby dalej korzystać z aplikacji. Każdy otworzysz, wydrukujesz albo zapiszesz jako PDF.</p>
-                    <ul class="list-group">
+                </header>
+                <div class="lg-body">
+                    <p class="mb-0">Te dokumenty są umową między Tobą a @status.PlatformName. Jeśli ich nie akceptujesz, możesz zrezygnować z subskrypcji — dane klientów wyeksportujesz w ciągu 30 dni od końca umowy.</p>
+                </div>
+                <footer class="lg-foot">
+                    <div class="lg-actions">
+                        <button class="btn btn-primary lg-btn" @onclick="() => _declined = false">Wróć do dokumentów</button>
+                        <a class="lg-link" href="/admin/subscription">Zarządzaj subskrypcją</a>
+                    </div>
+                </footer>
+            }
+            else
+            {
+                <header class="lg-head">
+                    <div class="lg-icon"><i class="bi bi-file-earmark-text"></i></div>
+                    <div class="min-w-0">
+                        <div class="lg-kicker">@status.PlatformName · do akceptacji</div>
+                        <h5 class="lg-title" id="legalGateTitle">Zasady korzystania z aplikacji</h5>
+                    </div>
+                </header>
+                <div class="lg-body">
+                    <p class="lg-lead">Zmieniły się dokumenty @status.PlatformName. Przeczytaj je i potwierdź — zajmie to chwilę.</p>
+                    <div class="lg-docs">
                         @foreach (var d in status.Pending)
                         {
-                            <li class="list-group-item d-flex align-items-center justify-content-between gap-2">
-                                <span><i class="bi bi-file-earmark-text me-2 text-primary"></i>@d.Title <small class="text-muted">· wersja @d.Version</small></span>
-                                <a class="btn btn-sm btn-outline-primary" href="@d.Url" target="_blank" rel="noopener">Czytaj <i class="bi bi-box-arrow-up-right ms-1"></i></a>
-                            </li>
+                            var read = _read.Contains(d.Key);
+                            <button type="button" class="lg-doc-row @(read ? "is-read" : "")" @onclick="() => Open(d.Key)">
+                                <span class="lg-doc-ic"><i class="bi @(read ? "bi-check-lg" : "bi-file-earmark-text")"></i></span>
+                                <span class="lg-doc-name"><b>@d.Title</b><small>@(read ? "Przeczytane" : "Wersja " + d.Version)</small></span>
+                                <span class="lg-doc-go">@(read ? "Otwórz" : "Czytaj")<i class="bi bi-chevron-right"></i></span>
+                            </button>
                         }
-                    </ul>
-                    <label class="form-check d-flex gap-2 align-items-start">
-                        <input class="form-check-input mt-1" type="checkbox" @bind="_checked" />
-                        <span class="form-check-label small">Akceptuję Regulamin wraz z Umową powierzenia przetwarzania danych osobowych (załącznik nr 1) i potwierdzam zapoznanie się z Polityką prywatności.</span>
-                    </label>
+                    </div>
                     @if (_error is not null)
                     {
-                        <div class="alert alert-danger py-2 small mb-0">@_error</div>
+                        <div class="alert alert-danger py-2 small mt-3 mb-0">@_error</div>
                     }
-                    <div class="d-flex flex-column flex-sm-row gap-2 justify-content-end">
-                        <button class="btn btn-outline-secondary" disabled="@_busy" @onclick="() => _declined = true">Nie akceptuję</button>
-                        <button class="btn btn-primary" disabled="@(!_checked || _busy)" @onclick="AcceptAsync">
+                </div>
+                <footer class="lg-foot">
+                    <label class="lg-check">
+                        <input class="form-check-input" type="checkbox" @bind="_checked" />
+                        <span>Akceptuję Regulamin wraz z Umową powierzenia przetwarzania danych osobowych (załącznik nr 1) i potwierdzam zapoznanie się z Polityką prywatności.</span>
+                    </label>
+                    <div class="lg-actions">
+                        <button class="btn btn-primary lg-btn" disabled="@(!_checked || _busy)" @onclick="AcceptAsync">
                             <i class="bi bi-check-lg me-1"></i>@(_busy ? "Zapisuję…" : "Akceptuję")
                         </button>
+                        <button type="button" class="lg-link" disabled="@_busy" @onclick="() => _declined = true">Nie akceptuję</button>
                     </div>
-                }
-            </div>
+                </footer>
+            }
         </div>
     </div>
 }
@@ -70,6 +117,22 @@
     private bool _declined;
     private bool _busy;
     private string? _error;
+    private string? _reading;
+    private readonly HashSet<string> _read = [];
+
+    private void Open(string key)
+    {
+        _reading = key;
+        _read.Add(key);
+    }
+
+    private void BackToList() => _reading = null;
+
+    private static PTScheduler.Web.Services.PlatformLegalService.Doc? NextUnread(PTScheduler.Web.Services.PlatformLegalService.Status s, string current)
+    {
+        var after = s.Pending.SkipWhile(d => d.Key != current).Skip(1);
+        return after.FirstOrDefault();
+    }
 
     protected override void OnInitialized()
     {
