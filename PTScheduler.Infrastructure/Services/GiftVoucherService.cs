@@ -239,7 +239,7 @@ public class GiftVoucherService(
         if (v.Status == GiftVoucherStatus.Pending) throw new InvalidOperationException("Bon nie jest jeszcze opłacony.");
 
         var brand = await branding.GetAsync();
-        var company = brand.CompanyName ?? "PTScheduler";
+        var company = brand.CompanyName ?? "Hantly";
         var accent = ThemeColor(brand.ThemeName);
         byte[]? logo = null;
         try

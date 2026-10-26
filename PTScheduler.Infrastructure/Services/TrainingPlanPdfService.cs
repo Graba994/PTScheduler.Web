@@ -35,7 +35,7 @@ public class TrainingPlanPdfService(
         var branding = await brandingService.GetAsync();
         var data = new PlanData(
             Plan: plan,
-            CompanyName: string.IsNullOrWhiteSpace(branding.CompanyName) ? "PTScheduler" : branding.CompanyName,
+            CompanyName: string.IsNullOrWhiteSpace(branding.CompanyName) ? "Hantly" : branding.CompanyName,
             LogoBytes: await ClientReportService.LoadLogoAsync(branding.LogoPath, webRootPathProvider.WebRootPath),
             TrainerName: trainer is null ? null : ClientReportService.ResolveName(trainer),
             ClientName: plan.Client is { } c ? $"{c.FirstName} {c.LastName}".Trim() : null,

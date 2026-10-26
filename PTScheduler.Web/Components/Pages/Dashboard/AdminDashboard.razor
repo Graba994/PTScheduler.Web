@@ -124,7 +124,7 @@ else
                                     <div class="ad-bar"><span style="width:@(t.WeekPlanned * 100 / max)%"></span><i style="width:@(t.WeekDone * 100 / max)%"></i></div>
                                     <div class="small text-muted">@AccountSwitchService.RoleLabel(t.Role)@(t.Next is { } n ? $" · następna: {n.ToString("ddd d.MM, HH:mm", Pl)}" : " · brak zaplanowanych")</div>
                                 </div>
-                                @if (_canSwitch)
+                                @if (_canSwitch && t.Id != _meId)
                                 {
                                     <form action="Account/SwitchTo" method="post" class="m-0">
                                         <AntiforgeryToken />
@@ -206,6 +206,7 @@ else
     private TechInfo? _tech;
     private SetupState? _setup;
     private bool _canSwitch;
+    private string _meId = "";
 
     protected override async Task OnInitializedAsync()
     {
@@ -213,6 +214,7 @@ else
         _canSwitch = await Switcher.CanUseAsync(user);
         var access = await AdminAccess.LoadAsync(AuthState, Permissions);
         var userId = user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        _meId = userId;
         _setup = await Guide.GetAsync(userId, access);
         if (user.IsInRole(Roles.Root))
             _tech = await Dashboard.GetTechAsync();

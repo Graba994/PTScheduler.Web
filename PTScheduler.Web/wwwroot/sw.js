@@ -108,10 +108,10 @@ self.addEventListener('fetch', e => {
 
 // Web Push notifications
 self.addEventListener('push', e => {
-    let data = { title: 'PTScheduler', body: '' };
+    let data = { title: 'Powiadomienie', body: '' };
     try { data = e.data.json(); } catch (_) {}
     e.waitUntil(
-        self.registration.showNotification(data.title || 'PTScheduler', {
+        self.registration.showNotification(data.title || 'Powiadomienie', {
             body: data.body || '',
             icon: data.icon || '/icons/icon-192.png',
             badge: '/icons/icon-96.png',

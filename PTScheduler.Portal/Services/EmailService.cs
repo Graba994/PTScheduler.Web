@@ -806,7 +806,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                 <h1 style="color: #6366f1;">Witaj w Hantly!</h1>
             </div>
             <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
-            <p>Dzięki za rejestrację. Wybrałeś plan <strong>{WebUtility.HtmlEncode(planName)}</strong> ({price:0} zł/mies.).</p>
+            <p>Dzięki za rejestrację. Twój plan: <strong>{WebUtility.HtmlEncode(planName)}</strong> ({price:0} zł/mies.).</p>
 
             <div style="background: #fef3c7; border-radius: 12px; padding: 20px; margin: 20px 0;">
                 <strong>⏳ Twoja rejestracja czeka na opłacenie.</strong>

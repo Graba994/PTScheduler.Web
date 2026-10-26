@@ -74,7 +74,7 @@ public class EmailTemplateService(
     {
         var template = await GetAsync(key);
         var branding = await brandingService.GetAsync();
-        var companyName = branding.CompanyName ?? "PTScheduler";
+        var companyName = branding.CompanyName ?? "Hantly";
         var accentColor = template.AccentColor;
 
         variables["CompanyName"] = companyName;
@@ -258,7 +258,7 @@ public class EmailTemplateService(
             </table>
             """,
             "#9333EA",
-            "Wiadomość automatyczna z PTScheduler.",
+            "Wiadomość automatyczna — nie odpowiadaj na ten email.",
             ["ClientName", "TrainerName", "SessionType", "SessionDate", "SessionTime", "Reason", "ReasonRow"]),
 
         ["session-rescheduled"] = new(
@@ -305,7 +305,7 @@ public class EmailTemplateService(
             "Nowy pakiet sesji 🎁",
             """
             <p style="color:#374151;font-size:15px">Cześć <strong>{{ClientName}}</strong>!</p>
-            <p style="color:#374151;font-size:15px">Otrzymałeś nowy pakiet treningowy:</p>
+            <p style="color:#374151;font-size:15px">Masz nowy pakiet treningowy:</p>
             <table style="width:100%;border-collapse:collapse;margin:16px 0">
               <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;width:40%">Nazwa pakietu</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{PackageName}}</td></tr>
               <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Typ sesji</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{SessionType}}</td></tr>
@@ -445,7 +445,7 @@ public class EmailTemplateService(
             <p style="color:#6b7280;font-size:13px">📱 Wskazówka: po zalogowaniu na telefonie dodaj aplikację do ekranu głównego — będzie działać jak zwykła aplikacja.</p>
             """,
             "#0284C7",
-            "Wiadomość automatyczna — jeśli nie spodziewałeś(-aś) się zaproszenia, zignoruj ją.",
+            "Wiadomość automatyczna — jeśli to zaproszenie nie było dla Ciebie, zignoruj je.",
             ["ClientName", "TrainerName", "ClientEmail", "InviteLink", "ValidDays", "CompanyName", "AccentColor"]),
 
         ["trainer-new-booking"] = new(
@@ -464,7 +464,7 @@ public class EmailTemplateService(
             <p style="color:#6b7280;font-size:14px">Klient ma status <strong>Oczekuje</strong>. Zatwierdź go w panelu <em>Klienci</em>, żeby uzyskał pełny dostęp do aplikacji.</p>
             """,
             "#16A34A",
-            "Wiadomość automatyczna z PTScheduler.",
+            "Wiadomość automatyczna — nie odpowiadaj na ten email.",
             ["TrainerName", "ClientName", "ClientEmail", "ClientPhone", "PhoneRow", "SessionDate", "Duration", "TrainingGoal", "GoalRow"]),
 
         ["password-reset"] = new(
@@ -477,7 +477,7 @@ public class EmailTemplateService(
             <div style="text-align:center;margin:28px 0">
               <a href="{{ResetLink}}" style="background:{{AccentColor}};color:white;text-decoration:none;padding:12px 32px;border-radius:6px;font-weight:600;font-size:15px;display:inline-block">Zresetuj hasło</a>
             </div>
-            <p style="color:#6b7280;font-size:13px">Jeśli nie prosiłeś o reset hasła, zignoruj tę wiadomość.</p>
+            <p style="color:#6b7280;font-size:13px">Jeśli to nie Ty prosisz o reset hasła, zignoruj tę wiadomość.</p>
             """,
             "#0284C7",
             "Wiadomość automatyczna — nie odpowiadaj na ten email.",

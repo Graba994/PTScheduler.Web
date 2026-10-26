@@ -630,8 +630,8 @@ app.MapGet("/calendar/feed/{token}.ics", async (
         .ToListAsync();
 
     string company;
-    try { company = (await branding.GetAsync()).CompanyName ?? "PTScheduler"; }
-    catch { company = "PTScheduler"; }
+    try { company = (await branding.GetAsync()).CompanyName ?? "Hantly"; }
+    catch { company = "Hantly"; }
 
     var events = sessions.Select(s =>
     {
@@ -684,8 +684,8 @@ app.MapGet("/calendar/my/{token}.ics", async (
         .ToDictionaryAsync(u => u.Id, u => (u.FirstName + " " + u.LastName).Trim());
 
     string company;
-    try { company = (await branding.GetAsync()).CompanyName ?? "PTScheduler"; }
-    catch { company = "PTScheduler"; }
+    try { company = (await branding.GetAsync()).CompanyName ?? "Hantly"; }
+    catch { company = "Hantly"; }
 
     var events = sessions.Select(s =>
     {
@@ -729,7 +729,7 @@ app.MapGet("/manifest.webmanifest", async (HttpContext ctx, IWebHostEnvironment 
     AppBrandingDto? b = null;
     try { b = await branding.GetAsync(); } catch { /* DB down — use safe defaults */ }
 
-    var name      = b?.CompanyName ?? "PTScheduler";
+    var name      = b?.CompanyName ?? "Hantly";
     var short_    = string.IsNullOrWhiteSpace(b?.PwaShortName) ? name : b.PwaShortName;
     var customIcon = b?.PwaIconPath;
 
@@ -1381,7 +1381,7 @@ static string RenderDbErrorPage(StartupHealth h, bool isDev)
 <head>
     <meta charset=""utf-8"" />
     <meta name=""viewport"" content=""width=device-width, initial-scale=1"" />
-    <title>Chwilowy problem techniczny — PTScheduler</title>
+    <title>Chwilowy problem techniczny</title>
     <style>
         :root {{ color-scheme: light; }}
         * {{ box-sizing: border-box; }}

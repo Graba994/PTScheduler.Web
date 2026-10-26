@@ -23,7 +23,7 @@ public static class Fa3XmlBuilder
 
     private static readonly CultureInfo Inv = CultureInfo.InvariantCulture;
 
-    public static string Build(Fa3Invoice inv, DateTime createdUtc, string systemInfo = "PTScheduler")
+    public static string Build(Fa3Invoice inv, DateTime createdUtc, string systemInfo = "Hantly")
     {
         if (inv.Lines.Count == 0) throw new ArgumentException("Faktura musi mieć co najmniej jedną pozycję.");
         if (!Nip.IsValid(inv.Seller.Nip)) throw new ArgumentException("Nieprawidłowy NIP sprzedawcy.");

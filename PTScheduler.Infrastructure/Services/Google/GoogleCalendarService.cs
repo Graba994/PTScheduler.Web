@@ -351,7 +351,7 @@ public class GoogleCalendarService(
 
         var lines = new List<string> { $"{typeName}, {s.SessionType?.DurationMinutes ?? 60} min" };
         if (!string.IsNullOrWhiteSpace(s.MeetingUrl)) lines.Add($"Google Meet: {s.MeetingUrl}");
-        lines.Add("Wizyta z aplikacji PTScheduler — zmiany wprowadzaj w aplikacji, kalendarz zaktualizuje się sam.");
+        lines.Add("Wizyta z aplikacji studia — zmiany wprowadzaj w aplikacji, kalendarz zaktualizuje się sam.");
 
         var startUtc = clock.ToUtc(s.StartTime);
         return new GoogleEventWrite(summary, string.Join("\n", lines), startUtc,

@@ -29,9 +29,9 @@ public class SmtpEmailService(
         if (platform is null) return null;
 
         var fromName = s.FromName;
-        if (string.IsNullOrWhiteSpace(fromName) || fromName == "PTScheduler")
+        if (string.IsNullOrWhiteSpace(fromName) || fromName is "Hantly" or "PTScheduler")
         {
-            try { fromName = (await brandingService.GetAsync()).CompanyName ?? "PTScheduler"; } catch { fromName = "PTScheduler"; }
+            try { fromName = (await brandingService.GetAsync()).CompanyName ?? "Hantly"; } catch { fromName = "Hantly"; }
         }
         // Wysyłkę robi Portal (bez hasła SMTP w instancji) — tu tylko nazwa nadawcy i adres odpowiedzi.
         return new Application.DTOs.EmailSettingsDto
@@ -148,7 +148,7 @@ public class SmtpEmailService(
             var branding = await brandingService.GetAsync();
             var message = NewMessage(s);
             message.To.Add(new MailboxAddress(testAddress, testAddress));
-            message.Subject = "Test połączenia — PTScheduler";
+            message.Subject = "Test połączenia — Hantly";
             message.Body = new TextPart("html") { Text = TestEmailHtml(s.FromName, ThemeColor(branding.ThemeName)) };
             await SendMessageAsync(s, message);
             return (true, null);
@@ -190,13 +190,13 @@ public class SmtpEmailService(
             var html = TestEmailHtml(s.FromName, ThemeColor(branding.ThemeName));
             if (s.Provider == "Platform")
             {
-                await platformEmail.SendAsync(testAddress, testAddress, "Test połączenia — PTScheduler", html, s.FromName, s.ReplyTo);
+                await platformEmail.SendAsync(testAddress, testAddress, "Test połączenia — Hantly", html, s.FromName, s.ReplyTo);
                 return (true, null);
             }
 
             var message = NewMessage(s);
             message.To.Add(new MailboxAddress(testAddress, testAddress));
-            message.Subject = "Test połączenia — PTScheduler";
+            message.Subject = "Test połączenia — Hantly";
             message.Body = new TextPart("html") { Text = html };
 
             await SendMessageAsync(s, message);

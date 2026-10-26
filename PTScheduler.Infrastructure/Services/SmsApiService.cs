@@ -45,7 +45,7 @@ public class SmsApiService(
         if (s is not null && !string.IsNullOrWhiteSpace(s.ApiToken))
         {
             return await SendRawAsync(s.ApiToken, s.SenderName, phone,
-                "Test połączenia SMS — PTScheduler. Konfiguracja działa poprawnie.");
+                "Test połączenia SMS — Hantly. Konfiguracja działa poprawnie.");
         }
 
         return await TestViaPlatformAsync(phone);

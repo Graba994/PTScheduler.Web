@@ -72,7 +72,7 @@ public class ClientReportService(
         var logoBytes = await LoadLogoAsync(branding.LogoPath, webRootPathProvider.WebRootPath);
 
         var data = new ReportData(
-            CompanyName: branding.CompanyName ?? "PTScheduler",
+            CompanyName: branding.CompanyName ?? "Hantly",
             LogoBytes: logoBytes,
             ClientFullName: $"{client.FirstName} {client.LastName}".Trim(),
             ClientEmail: user?.Email ?? "",

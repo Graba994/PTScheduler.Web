@@ -70,7 +70,7 @@ public class InvoiceService(
             logger.LogWarning(ex, "Nie udało się wczytać logo ({LogoPath}) na fakturę zamówienia {OrderId} — generuję bez logo.", branding.LogoPath, order.Id);
         }
 
-        var companyName = !string.IsNullOrWhiteSpace(taxCfg.SellerName) ? taxCfg.SellerName : branding.CompanyName ?? "PTScheduler";
+        var companyName = !string.IsNullOrWhiteSpace(taxCfg.SellerName) ? taxCfg.SellerName : branding.CompanyName ?? "Hantly";
         var itemName = order.Course?.Title ?? order.PackageOffer?.Name ?? order.Description ?? "Usługa";
         var issueDate = order.InvoiceIssuedAt ?? order.PaidAt ?? order.CreatedAt;
         var payDate = order.PaidAt ?? order.CreatedAt;

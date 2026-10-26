@@ -31,7 +31,7 @@ public static class CalendarLinks
         var sb = new StringBuilder();
         sb.Append("BEGIN:VCALENDAR\r\n");
         sb.Append("VERSION:2.0\r\n");
-        sb.Append("PRODID:-//PTScheduler//Sessions//PL\r\n");
+        sb.Append("PRODID:-//Hantly//Sessions//PL\r\n");
         sb.Append("CALSCALE:GREGORIAN\r\n");
         sb.Append("BEGIN:VEVENT\r\n");
         sb.Append($"UID:{uid}\r\n");
@@ -60,7 +60,7 @@ public static class CalendarLinks
 
         Line("BEGIN:VCALENDAR");
         Line("VERSION:2.0");
-        Line("PRODID:-//PTScheduler//Trainer feed//PL");
+        Line("PRODID:-//Hantly//Trainer feed//PL");
         Line("CALSCALE:GREGORIAN");
         Line("METHOD:PUBLISH");
         Line($"X-WR-CALNAME:{Escape(calendarName)}");

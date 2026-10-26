@@ -43,7 +43,7 @@ public partial class WgerCatalogImporter(
         using var http = httpFactory.CreateClient("wger");
         http.Timeout = TimeSpan.FromSeconds(60);
         if (!http.DefaultRequestHeaders.UserAgent.Any())
-            http.DefaultRequestHeaders.UserAgent.ParseAdd("PTScheduler/1.0 (+https://ptscheduler.pl)");
+            http.DefaultRequestHeaders.UserAgent.ParseAdd("Hantly/1.0 (+https://hantly.pl)");
 
         var records = new List<WgerExercise>();
         string? next = $"{BaseUrl}exerciseinfo/?limit={PageSize}&offset=0";

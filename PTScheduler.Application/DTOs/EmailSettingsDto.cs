@@ -10,7 +10,7 @@ public class EmailSettingsDto
     public string Login { get; set; } = "";
     public string Password { get; set; } = "";
     public string FromAddress { get; set; } = "";
-    public string FromName { get; set; } = "PTScheduler";
+    public string FromName { get; set; } = "Hantly";
     public string? ReplyTo { get; set; }
 
     // Tylko do odczytu — stan własnej skrzynki (zapis w IEmailSettingsService.RecordOwnResultAsync).

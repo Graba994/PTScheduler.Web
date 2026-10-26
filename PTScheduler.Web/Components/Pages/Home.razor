@@ -10,15 +10,21 @@
 <AuthorizeView Roles="@Roles.Admin">
     <Authorized>
         <AdminDashboard />
+        @* Właściciel, który sam prowadzi treningi: pod centrum studia jego własny dzień (bez powtórzonych kart). *@
+        @if (_ownerTrainerId is not null)
+        {
+            <TrainerDashboard TrainerUserId="@_ownerTrainerId" Embedded="true" />
+        }
     </Authorized>
-</AuthorizeView>
-
-<!-- TRAINER / SUBORDINATE -->
-<AuthorizeView Roles="@($"{Roles.Trainer},{Roles.Subordinate}")">
-    <Authorized>
-        <PasswordReminder />
-        <TrainerDashboard TrainerUserId="@_trainerUserId" />
-    </Authorized>
+    <NotAuthorized>
+        <!-- TRAINER / SUBORDINATE -->
+        <AuthorizeView Roles="@($"{Roles.Trainer},{Roles.Subordinate}")" Context="trainerAuth">
+            <Authorized>
+                <PasswordReminder />
+                <TrainerDashboard TrainerUserId="@_trainerUserId" />
+            </Authorized>
+        </AuthorizeView>
+    </NotAuthorized>
 </AuthorizeView>
 
 <!-- CLIENT -->
@@ -34,6 +40,7 @@
     private Task<AuthenticationState> AuthStateTask { get; set; } = default!;
 
     private string? _trainerUserId;
+    private string? _ownerTrainerId;
     private string? _clientUserId;
 
     protected override async Task OnInitializedAsync()
@@ -41,7 +48,11 @@
         var auth = await AuthStateTask;
         var userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
 
-        if (auth.User.IsInRole(Roles.Admin)) return;
+        if (auth.User.IsInRole(Roles.Admin))
+        {
+            if (auth.User.IsInRole(Roles.Trainer)) _ownerTrainerId = userId;
+            return;
+        }
         if (auth.User.IsInRole(Roles.Trainer) || auth.User.IsInRole(Roles.Subordinate))
             _trainerUserId = userId;
         else if (auth.User.IsInRole(Roles.Client))

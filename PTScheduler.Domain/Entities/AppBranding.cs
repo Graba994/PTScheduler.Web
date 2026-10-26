@@ -5,7 +5,7 @@ public class AppBranding
     public int Id { get; set; } = 1;
     public string ThemeName { get; set; } = "ocean";
     public string ThemeMode { get; set; } = "light"; // "light" | "dark" | "system"
-    public string CompanyName { get; set; } = "PTScheduler";
+    public string CompanyName { get; set; } = "Hantly";
     public string? LogoPath { get; set; }
     public string? FaviconPath { get; set; }
 

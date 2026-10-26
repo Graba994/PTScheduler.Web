@@ -47,7 +47,7 @@ public class ReceiptService(
             logger.LogWarning(ex, "Nie udało się wczytać logo ({LogoPath}) na paragon zamówienia {OrderId} — generuję bez logo.", branding.LogoPath, order.Id);
         }
 
-        var companyName = branding.CompanyName ?? "PTScheduler";
+        var companyName = branding.CompanyName ?? "Hantly";
         var itemName = order.Course?.Title ?? order.PackageOffer?.Name ?? order.Description ?? "Zamówienie";
         var paidDate = order.PaidAt ?? order.CreatedAt;
 

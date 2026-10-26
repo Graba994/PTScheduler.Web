@@ -4,7 +4,7 @@ public class AppBrandingDto
 {
     public string ThemeName { get; set; } = "ocean";
     public string ThemeMode { get; set; } = "light";
-    public string CompanyName { get; set; } = "PTScheduler";
+    public string CompanyName { get; set; } = "Hantly";
     public string? LogoPath { get; set; }
     public string? FaviconPath { get; set; }
 
@@ -28,7 +28,7 @@ public class SaveBrandingDto
 {
     public string ThemeName { get; set; } = "ocean";
     public string ThemeMode { get; set; } = "light";
-    public string CompanyName { get; set; } = "PTScheduler";
+    public string CompanyName { get; set; } = "Hantly";
 
     public string? PwaShortName { get; set; }
     public bool PwaBannerEnabled { get; set; } = true;

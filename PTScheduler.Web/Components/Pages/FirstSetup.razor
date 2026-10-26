@@ -606,7 +606,7 @@
         try
         {
             var brand = await Branding.GetAsync();
-            _studio = string.IsNullOrWhiteSpace(brand.CompanyName) || brand.CompanyName == "PTScheduler" ? _studio : brand.CompanyName;
+            _studio = string.IsNullOrWhiteSpace(brand.CompanyName) || brand.CompanyName is "Hantly" or "PTScheduler" ? _studio : brand.CompanyName;
             _logo = brand.LogoPath;
         }
         catch (Exception) { }
@@ -833,7 +833,7 @@
         var own = mail.IsEnabled && !string.IsNullOrWhiteSpace(mail.SmtpHost);
         _mailChoice = own ? "own" : _platform ? "hantly" : "own";
         _replyTo = mail.ReplyTo ?? myEmail ?? "";
-        if (!string.IsNullOrWhiteSpace(mail.FromName) && mail.FromName != "PTScheduler") _studio = mail.FromName;
+        if (!string.IsNullOrWhiteSpace(mail.FromName) && mail.FromName is not ("Hantly" or "PTScheduler")) _studio = mail.FromName;
         if (own || !string.IsNullOrWhiteSpace(mail.ReplyTo)) _saved.Add("mail");
     }
 
@@ -850,7 +850,7 @@
             mail.ReplyTo = string.IsNullOrWhiteSpace(_replyTo) ? null : EmailRules.Normalize(_replyTo);
             // Hantly wysyła: własna skrzynka wyłączona, nadawcą zostaje nazwa studia.
             mail.IsEnabled = false;
-            if (string.IsNullOrWhiteSpace(mail.FromName) || mail.FromName == "PTScheduler") mail.FromName = _studio;
+            if (string.IsNullOrWhiteSpace(mail.FromName) || mail.FromName is "Hantly" or "PTScheduler") mail.FromName = _studio;
             mail.Password = ""; // puste = bez zmiany zapisanego hasła
             await MailSettings.SaveAsync(mail);
             _saved.Add("mail");
