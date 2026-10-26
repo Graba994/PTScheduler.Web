@@ -1119,7 +1119,7 @@ app.MapGet("/api/internal/tenants/{slug}/assistant", async (
     var version = await assistant.IconsVersionAsync();
     var emailIcons = MascotArt.Moods.ToDictionary(m => m.Key, m => $"{PublicBase(ctx)}/assistant/mascot/{m.Key}.png?v={version}");
     return Results.Json(new { enabled = c.Enabled, name = c.Name, animation = c.Animation, ai = c.Ai, icons = c.Icons, emailIcons,
-        layout = c.Layout, animatedSvg = c.AnimatedSvg, planAi = await assistant.PlanAiAvailableAsync(tenant) });
+        layout = c.Layout, animatedSvg = c.AnimatedSvg, motion = c.Motion, effects = c.Effects, planAi = await assistant.PlanAiAvailableAsync(tenant) });
 });
 
 // „Zaproponuj plan” w aplikacji trenera — AI dopracowuje szkic z reguł (bez danych osobowych), aplikacja sprawdza wynik.

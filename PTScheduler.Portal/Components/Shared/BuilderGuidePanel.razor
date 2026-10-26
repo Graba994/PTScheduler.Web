@@ -1,4 +1,5 @@
 @implements IDisposable
+@inject IJSRuntime JS
 
 @* Asystent w kreatorze: maskotka i dymek z podpowiedzią do bieżącego kroku (teksty z BuilderGuide).
    Przy nowej podpowiedzi maskotka podskakuje; „×” chowa dymek — maskotka zostaje i otwiera go z powrotem. *@
@@ -9,7 +10,7 @@
                 aria-label="@(_open ? $"Schowaj podpowiedzi — {Name}" : $"Pokaż podpowiedzi — {Name}")">
             @if (_look?.AnimatedSvg is { } svg)
             {
-                <span class="hm-live st-@_stage md-@Line.Mood">@((MarkupString)svg)</span>
+                <span class="hm-fx" @ref="_fx" data-hm-motion="@_look!.Motion" data-hm-fx="@MotionFx"><span class="hm-live st-@_stage md-@Line.Mood">@((MarkupString)svg)</span></span>
             }
             else
             {
@@ -39,6 +40,11 @@
     private string? _lastText;
     private int _version;
     private CancellationTokenSource _cts = new();
+    private ElementReference _fx;
+    private bool _talk;
+
+    /// <summary>W kreatorze: oczy za kursorem, sztuczki, reakcja na najechanie i mówienie (bez drzemki).</summary>
+    private string MotionFx => string.Join(",", (_look?.Effects ?? "").Split(',').Where(e => e is "look" or "tricks" or "hover" or "talk"));
 
     public string Name => _look?.Name ?? AssistantService.DefaultName;
 
@@ -51,6 +57,15 @@
         _lastText = Line.Text;
         // Nowa podpowiedź (zmiana kroku albo reakcja na wpisane dane) — krótki podskok, przy radości salto.
         if (!first && _stage is "idle" or "excited") _ = StageAsync(Line.Mood == "celebrate" ? "excited" : "land", Line.Mood == "celebrate" ? 1050 : 600);
+        _talk = !first && _open;
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!_talk || _look?.AnimatedSvg is null || !MotionFx.Contains("talk")) return;
+        _talk = false;
+        try { await JS.InvokeVoidAsync("PTHmMotion.trick", _fx, "talk", 1400); }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException) { }
     }
 
     private async Task StageAsync(string stage, int ms)

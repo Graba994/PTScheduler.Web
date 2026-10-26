@@ -43,6 +43,36 @@ public partial class AssistantService(
     ];
 
     public static bool IsLayout(string? key) => Layouts.Any(l => l.Key == key);
+
+    /// <summary>Ruchliwość animowanego hantelka — jak często sam z siebie robi sztuczki.</summary>
+    public static readonly (string Key, string Label, string Hint)[] MotionLevels =
+    [
+        ("calm", "Spokojny", "sztuczka raz na pół minuty"),
+        ("normal", "Normalny", "sztuczka co kilkanaście sekund"),
+        ("lively", "Ruchliwy", "ciągle coś robi"),
+    ];
+
+    /// <summary>Efekty ruchu animowanego hantelka (każdy można wyłączyć w Panelu).</summary>
+    public static readonly (string Key, string Label, string Hint)[] MotionEffects =
+    [
+        ("enter", "Wejście podskokami", "po wczytaniu strony wskakuje z boku"),
+        ("look", "Patrzy za kursorem", "oczy idą za myszką albo palcem"),
+        ("tricks", "Sztuczki w spoczynku", "podskok, obrót, „+1” z hantlą, rozglądanie się, przeciąganie"),
+        ("hover", "Reaguje na najechanie", "prostuje się i czasem wypuszcza serduszko"),
+        ("talk", "Mówi", "rusza ustami, gdy pokazuje podpowiedź"),
+        ("doze", "Drzemka", "po kilku minutach bezczynności ziewa i zasypia, budzi się, gdy wrócisz"),
+        ("party", "Konfetti", "przy sukcesach (rekordy, kolejne treningi) wystrzeliwuje konfetti"),
+    ];
+
+    public static string DefaultEffects => string.Join(",", MotionEffects.Select(e => e.Key));
+    public static string MotionOrDefault(string? v) => MotionLevels.Any(m => m.Key == v) ? v! : "normal";
+    /// <summary>Tylko znane efekty, w stałej kolejności; puste ustawienie (nigdy nie zapisane) = wszystkie.</summary>
+    public static string EffectsOrDefault(string? v)
+    {
+        if (v is null) return DefaultEffects;
+        var set = v.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries).ToHashSet();
+        return string.Join(",", MotionEffects.Where(e => set.Contains(e.Key)).Select(e => e.Key));
+    }
     public const int MaxAssetBytes = 300 * 1024;
     public static readonly string[] AllowedTypes = ["image/svg+xml", "image/png", "image/webp", "image/gif"];
 
@@ -93,12 +123,15 @@ public partial class AssistantService(
         """;
 
     /// <param name="AnimatedSvg">Animowany hantelek — tylko przy animacji „live” i wbudowanych ikonach (inaczej null).</param>
+    /// <param name="Motion">Ruchliwość: calm, normal, lively.</param>
+    /// <param name="Effects">Włączone efekty ruchu po przecinku (enter, look, tricks, hover, talk, doze, party).</param>
     public sealed record Config(bool Enabled, string Name, string Animation, bool Ai, Dictionary<string, string> Icons,
-        string Layout = "bubble", string? AnimatedSvg = null);
+        string Layout = "bubble", string? AnimatedSvg = null, string Motion = "normal", string Effects = "");
 
     public async Task<Config> GetConfigAsync(Tenant? tenant = null)
     {
-        var s = await settings.GetAllAsync(K.AssistantEnabled, K.AssistantName, K.AssistantAnimation, K.AiEnabled, K.AssistantLayout);
+        var s = await settings.GetAllAsync(K.AssistantEnabled, K.AssistantName, K.AssistantAnimation, K.AiEnabled, K.AssistantLayout,
+            K.AssistantMotion, K.AssistantEffects);
         await using var db = await dbFactory.CreateDbContextAsync();
         var custom = await db.MascotAssets.AsNoTracking().Where(a => !a.Mood.StartsWith(LeoPrefix)).ToDictionaryAsync(a => a.Mood);
         var icons = MascotArt.Moods.ToDictionary(m => m.Key, m => custom.TryGetValue(m.Key, out var a)
@@ -113,7 +146,9 @@ public partial class AssistantService(
             Ai: s[K.AiEnabled] == "true" && tenant?.AiOff != true,
             Icons: icons,
             Layout: IsLayout(s[K.AssistantLayout]) ? s[K.AssistantLayout] : "bubble",
-            AnimatedSvg: animation == "live" && custom.Count == 0 ? LiveSvg : null);
+            AnimatedSvg: animation == "live" && custom.Count == 0 ? LiveSvg : null,
+            Motion: MotionOrDefault(s[K.AssistantMotion]),
+            Effects: EffectsOrDefault(s.GetValueOrDefault(K.AssistantEffects)));
     }
 
     private static readonly string LiveSvg = MascotArt.AnimatedSvg();
@@ -121,11 +156,12 @@ public partial class AssistantService(
     /// <summary>Wygląd asystenta na publiczną stronę Portalu (lekko: bez danych ikon — własne ikony idą adresem PNG).</summary>
     /// <param name="AnimatedSvg">Animowany hantelek, gdy animacja „live” i wbudowane ikony.</param>
     /// <param name="IconUrl">Adres ikony nastroju (PNG z Portalu) — gdy nie ma animowanego SVG.</param>
-    public sealed record PublicLook(string Name, string Animation, string? AnimatedSvg, Func<string, string> IconUrl);
+    public sealed record PublicLook(string Name, string Animation, string? AnimatedSvg, Func<string, string> IconUrl,
+        string Motion = "normal", string Effects = "");
 
     public async Task<PublicLook> GetPublicLookAsync()
     {
-        var s = await settings.GetAllAsync(K.AssistantName, K.AssistantAnimation);
+        var s = await settings.GetAllAsync(K.AssistantName, K.AssistantAnimation, K.AssistantMotion, K.AssistantEffects);
         await using var db = await dbFactory.CreateDbContextAsync();
         var hasCustom = await db.MascotAssets.AnyAsync(a => !a.Mood.StartsWith(LeoPrefix));
         var version = await IconsVersionAsync();
@@ -133,7 +169,8 @@ public partial class AssistantService(
         return new(string.IsNullOrWhiteSpace(s[K.AssistantName]) ? DefaultName : s[K.AssistantName].Trim(),
             animation == "live" ? (hasCustom ? "bounce" : "live") : animation,
             animation == "live" && !hasCustom ? LiveSvg : null,
-            mood => $"/assistant/mascot/{(MascotArt.IsMood(mood) ? mood : "happy")}.png?v={version}");
+            mood => $"/assistant/mascot/{(MascotArt.IsMood(mood) ? mood : "happy")}.png?v={version}",
+            MotionOrDefault(s[K.AssistantMotion]), EffectsOrDefault(s.GetValueOrDefault(K.AssistantEffects)));
     }
 
     /// <summary>Wygląd i stan agenta Portalu (Leo) — ikony z własnych plików albo wbudowane.</summary>

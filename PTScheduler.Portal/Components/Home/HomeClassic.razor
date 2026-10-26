@@ -758,12 +758,15 @@
 
     private AssistantService.PublicLook _look = new(AssistantService.DefaultName, "live", null, m => $"/assistant/mascot/{m}.png");
 
+    /// <summary>Na stronie: oczy za kursorem, sztuczki i reakcja na najechanie (o ile włączone w Panelu).</summary>
+    private string PageFx => string.Join(",", _look.Effects.Split(',').Where(e => e is "look" or "tricks" or "hover"));
+
     /// <summary>Maskotka asystenta: animowany SVG (wbudowane ikony, animacja „Żywy”) albo ikona nastroju z Panelu.</summary>
     private RenderFragment Mascot(string mood, string css) => __builder =>
     {
         if (_look.AnimatedSvg is { } svg)
         {
-            <span class="hm-live st-idle md-@mood @css">@((MarkupString)svg)</span>
+            <span class="hm-fx" data-hm-motion="@_look.Motion" data-hm-fx="@PageFx"><span class="hm-live st-idle md-@mood @css">@((MarkupString)svg)</span></span>
         }
         else
         {

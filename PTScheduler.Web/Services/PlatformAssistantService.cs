@@ -14,8 +14,19 @@ public class PlatformAssistantService(IHttpClientFactory httpFactory, ILogger<Pl
     /// <param name="Layout">Układ widżetu: bubble, card, pill, peek.</param>
     /// <param name="AnimatedSvg">Animowany hantelek z Portalu (gdy animacja „live” i wbudowane ikony), inaczej null.</param>
     /// <param name="PlanAi">Generator planów z AI — włącza administrator platformy (Portal → Asystent i AI).</param>
+    /// <param name="Motion">Ruchliwość animowanego hantelka z Portalu: calm, normal, lively.</param>
+    /// <param name="Effects">Włączone efekty ruchu po przecinku; null (starszy Portal) = wszystkie.</param>
     public sealed record Config(bool Enabled, string Name, string Animation, bool Ai, Dictionary<string, string> Icons,
-        Dictionary<string, string>? EmailIcons = null, string Layout = "bubble", string? AnimatedSvg = null, bool PlanAi = false);
+        Dictionary<string, string>? EmailIcons = null, string Layout = "bubble", string? AnimatedSvg = null, bool PlanAi = false,
+        string Motion = "normal", string? Effects = null)
+    {
+        public const string AllEffects = "enter,look,tricks,hover,talk,doze,party";
+        public string EffectList => Effects ?? AllEffects;
+        public bool Has(string effect) => EffectList.Split(',').Contains(effect);
+    }
+
+    /// <summary>Maskotka w treści strony (karta „Na dziś”, kreator /witaj): oczy za kursorem, sztuczki, najechanie.</summary>
+    public static string PageFx(Config c) => string.Join(",", c.EffectList.Split(',').Where(e => e is "look" or "tricks" or "hover"));
 
     private static readonly TimeSpan ConfigTtl = TimeSpan.FromMinutes(30);
     private Config? _config;

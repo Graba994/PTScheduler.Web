@@ -44,12 +44,22 @@
                     <button type="button" class="hantly-never" @onclick="MuteKindAsync"><i class="bi bi-bell-slash me-1"></i>Nie proponuj tego</button>
                 }
                 @if (_note is not null) { <div class="hantly-note">@_note</div> }
+                @if (Live)
+                {
+                    <div class="hantly-motion" role="radiogroup" aria-label="Ruch maskotki">
+                        <span>Ruch:</span>
+                        @foreach (var (key, label) in MotionChoices)
+                        {
+                            <button type="button" role="radio" aria-checked="@(MotionPref == key ? "true" : "false")" class="@(MotionPref == key ? "on" : "")" @onclick="() => SetMotionAsync(key)">@label</button>
+                        }
+                    </div>
+                }
             </div>
         }
         <button type="button" class="hantly-btn" aria-label="@($"{_config.Name} — podpowiedzi")" aria-expanded="@(_open ? "true" : "false")" @onclick="ToggleAsync">
             @if (Live)
             {
-                <span class="hm-live hm-mascot-live st-@_stage md-@Mood">@((MarkupString)_config.AnimatedSvg!)</span>
+                <span class="hm-fx" @ref="_fx" data-hm-motion="@EffectiveMotion" data-hm-fx="@_config.EffectList"><span class="hm-live hm-mascot-live st-@_stage md-@Mood">@((MarkupString)_config.AnimatedSvg!)</span></span>
             }
             else
             {
@@ -71,6 +81,29 @@
         public Dictionary<string, string> Dismissed { get; set; } = new();
         /// <summary>Klucz podpowiedzi → „dzień:podpis treści” — przeczytana dziś w tej wersji (znika z licznika).</summary>
         public Dictionary<string, string> Seen { get; set; } = new();
+        /// <summary>Ruch maskotki wybrany przez trenera: „” (jak w Portalu), „calm” albo „off”.</summary>
+        public string Motion { get; set; } = "";
+    }
+
+    private ElementReference _fx;
+    private static readonly (string Key, string Label)[] MotionChoices = [("", "Żywy"), ("calm", "Spokojny"), ("off", "Bez ruchu")];
+    private string MotionPref => _prefs.Motion is "calm" or "off" ? _prefs.Motion : "";
+    /// <summary>Trener może tylko przyciszyć ruch ustawiony w Portalu, nie podkręcić go.</summary>
+    private string EffectiveMotion => MotionPref switch { "off" => "off", "calm" => "calm", _ => _config?.Motion ?? "normal" };
+
+    private async Task SetMotionAsync(string key)
+    {
+        _prefs.Motion = key;
+        await SavePrefsAsync();
+        if (key != "off") await TrickAsync("hop");
+    }
+
+    /// <summary>Jednorazowa sztuczka maskotki (mówienie, konfetti…) — tylko gdy efekt jest włączony w Portalu.</summary>
+    private async Task TrickAsync(string name, string? effect = null)
+    {
+        if (!Live || _muted || (effect is not null && _config?.Has(effect) != true)) return;
+        try { await JS.InvokeVoidAsync("PTHmMotion.trick", _fx, name); }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException or InvalidOperationException) { }
     }
 
     private PTScheduler.Web.Services.PlatformAssistantService.Config? _config;
@@ -151,12 +184,16 @@
             _visible = true;
             _stage = "enter";
             StateHasChanged();
-            if (Live)
+            if (Live && _config.Has("enter") && EffectiveMotion != "off")
             {
                 // Wchodzi podskokami, ląduje z przysiadem, potem oddycha (albo od razu zasypia, gdy wyciszony).
                 await Task.Delay(1500);
                 await StageAsync("land");
                 await Task.Delay(550);
+                await StageAsync(_muted ? "sleep" : "idle");
+            }
+            else if (Live)
+            {
                 await StageAsync(_muted ? "sleep" : "idle");
             }
             if (!_muted && Unseen > 0 && !OnDashboard)
@@ -184,6 +221,9 @@
         foreach (var (placeholder, value) in tip.Placeholders ?? [])
             text = text.Replace(placeholder, value);
         _text = text;
+        StateHasChanged();
+        // Mówi, gdy pokazuje podpowiedź; przy sukcesach (nastrój „świętuje”) wystrzeliwuje konfetti.
+        await TrickAsync(tip.Mood == "celebrate" ? "party" : "talk", tip.Mood == "celebrate" ? "party" : "talk");
         if (tip.Key != "idle" && !IsSeen(tip))
         {
             _prefs.Seen[tip.Key] = SeenMark(tip);

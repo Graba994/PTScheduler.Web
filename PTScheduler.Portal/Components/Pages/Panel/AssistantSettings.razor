@@ -52,13 +52,20 @@
                     @if (!IsLeo && _custom.Count == 0 && _animation == "live")
                     {
                         <div class="leo-stage-preview">
-                            <span class="hm-live hm-live-preview st-@_hmStage md-@(_hmStage == "sleep" ? "sleep" : _previewMood)">@((MarkupString)HantlyAnimatedSvg)</span>
+                            <span class="hm-fx" id="hm-preview-fx" data-hm-motion="@_motion" data-hm-fx="@string.Join(",", _effects)"><span class="hm-live hm-live-preview st-@_hmStage md-@(_hmStage == "sleep" ? "sleep" : _previewMood)">@((MarkupString)HantlyAnimatedSvg)</span></span>
                             <div class="leo-stage-buttons" role="group" aria-label="Ruchy hantelka">
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick="HmEnterAsync"><i class="bi bi-arrow-left me-1"></i>Wejście</button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => HmStageAsync("excited", 1000)'><i class="bi bi-balloon-heart me-1"></i>Salto</button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => HmStageAsync("sleep", 0)'><i class="bi bi-moon me-1"></i>Spanie</button>
                                 <button type="button" class="btn btn-sm btn-outline-secondary" @onclick='() => HmStageAsync("land", 550)'><i class="bi bi-arrow-up me-1"></i>Pobudka</button>
                             </div>
+                            <div class="leo-stage-buttons hm-tricks" role="group" aria-label="Sztuczki hantelka">
+                                @foreach (var (key, label, icon) in TrickButtons)
+                                {
+                                    <button type="button" class="btn btn-sm btn-light" title="@label" onclick="PTHmMotion.trick(document.getElementById('hm-preview-fx'), '@key')"><i class="bi @icon me-1"></i>@label</button>
+                                }
+                            </div>
+                            <div class="small text-muted">Najedź na hantelka albo poruszaj myszką — zobaczysz, jak reaguje.</div>
                         </div>
                     }
                     else if (IsLeo && _custom.Count == 0)
@@ -129,6 +136,30 @@
                             Osoby z włączonym w systemie ograniczeniem ruchu zawsze widzą wersję bez animacji.
                         </div>
                     </div>
+                    @if (!IsLeo && _animation == "live" && _custom.Count == 0)
+                    {
+                        <div class="hm-motion">
+                            <div class="form-label small fw-semibold mb-2">Ruch</div>
+                            <div class="hm-motion-levels" role="radiogroup" aria-label="Ruchliwość">
+                                @foreach (var m in AssistantService.MotionLevels)
+                                {
+                                    <button type="button" role="radio" aria-checked="@(_motion == m.Key ? "true" : "false")" class="@(_motion == m.Key ? "on" : "")" @onclick="() => _motion = m.Key"><b>@m.Label</b><span>@m.Hint</span></button>
+                                }
+                            </div>
+                            <div class="hm-effects">
+                                @foreach (var e in AssistantService.MotionEffects)
+                                {
+                                    var on = _effects.Contains(e.Key);
+                                    <label class="form-check form-switch m-0">
+                                        <input class="form-check-input" type="checkbox" checked="@on" @onchange="ev => ToggleEffect(e.Key, ev.Value is true)" />
+                                        <span class="form-check-label">@e.Label</span>
+                                        <span class="d-block small text-muted">@e.Hint</span>
+                                    </label>
+                                }
+                            </div>
+                            <div class="form-text small">Trenerzy mogą u siebie przyciszyć ruch („Spokojnie” albo „Bez ruchu”) w dymku asystenta.</div>
+                        </div>
+                    }
                     @if (!IsLeo)
                     {
                         <div>
@@ -508,6 +539,20 @@ else
     private string _name = "";
     private string _savedName = AssistantService.DefaultName;
     private string _animation = "bounce";
+    private string _motion = "normal";
+    private HashSet<string> _effects = [];
+
+    private static readonly (string Key, string Label, string Icon)[] TrickButtons =
+    [
+        ("hop", "Podskok", "bi-arrow-up-circle"), ("spin", "Obrót", "bi-arrow-repeat"), ("curl", "„+1”", "bi-plus-circle"),
+        ("wiggle", "Shimmy", "bi-music-note-beamed"), ("look", "Rozgląda się", "bi-eye"), ("stretch", "Przeciąga się", "bi-arrows-vertical"),
+        ("talk", "Mówi", "bi-chat-dots"), ("heart", "Serduszko", "bi-heart"), ("party", "Konfetti", "bi-stars"), ("yawn", "Ziewa", "bi-cup-hot"),
+    ];
+
+    private void ToggleEffect(string key, bool on)
+    {
+        if (on) _effects.Add(key); else _effects.Remove(key);
+    }
     private string _previewMood = "hello";
     private Dictionary<string, string> _icons = new();
     private HashSet<string> _custom = [];
@@ -542,7 +587,8 @@ else
         _message = null;
         var s = await Settings.GetAllAsync(K.AssistantEnabled, K.AssistantName, K.AssistantAnimation, K.AiEnabled, K.AiModel,
             K.AiMonthlyBudgetUsd, K.AiPriceInputPerM, K.AiPriceOutputPerM,
-            K.LeoEnabled, K.LeoName, K.LeoAnimation, K.LeoReportEnabled, K.LeoReportHour, K.AdminNotificationEmail, K.AssistantLayout);
+            K.LeoEnabled, K.LeoName, K.LeoAnimation, K.LeoReportEnabled, K.LeoReportHour, K.AdminNotificationEmail, K.AssistantLayout,
+            K.AssistantMotion, K.AssistantEffects);
         _hantlyName = s[K.AssistantName].Trim() is { Length: > 0 } hn ? hn : AssistantService.DefaultName;
         _leoName = s[K.LeoName].Trim() is { Length: > 0 } ln ? ln : AssistantService.DefaultLeoName;
         _enabled = (IsLeo ? s[K.LeoEnabled] : s[K.AssistantEnabled]) != "false";
@@ -551,6 +597,8 @@ else
         var anim = IsLeo ? s[K.LeoAnimation] : s[K.AssistantAnimation];
         _animation = AssistantService.Animations.Contains(anim) && !(IsLeo && anim == "live") ? anim : IsLeo ? "wave" : "live";
         _layout = AssistantService.IsLayout(s[K.AssistantLayout]) ? s[K.AssistantLayout] : "bubble";
+        _motion = AssistantService.MotionOrDefault(s[K.AssistantMotion]);
+        _effects = AssistantService.EffectsOrDefault(s[K.AssistantEffects]).Split(',', StringSplitOptions.RemoveEmptyEntries).ToHashSet();
         _reportOn = s[K.LeoReportEnabled] != "false";
         _reportHour = int.TryParse(s[K.LeoReportHour], out var rh) ? Math.Clamp(rh, 5, 11) : 7;
         _adminEmail = s[K.AdminNotificationEmail];
@@ -600,7 +648,12 @@ else
             [IsLeo ? K.LeoName : K.AssistantName] = _name.Trim(),
             [IsLeo ? K.LeoAnimation : K.AssistantAnimation] = _animation,
         };
-        if (!IsLeo) values[K.AssistantLayout] = _layout;
+        if (!IsLeo)
+        {
+            values[K.AssistantLayout] = _layout;
+            values[K.AssistantMotion] = _motion;
+            values[K.AssistantEffects] = AssistantService.EffectsOrDefault(string.Join(",", _effects));
+        }
         await Settings.SetManyAsync(values);
         _savedName = DisplayName;
         if (IsLeo) _leoName = DisplayName; else _hantlyName = DisplayName;

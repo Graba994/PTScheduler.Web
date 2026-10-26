@@ -95,13 +95,39 @@ public static class MascotArt
 
     private static string BlinkEyes(double dx = 0, double dy = 0) => $"""<g class="hma-blink">{OpenEyes(dx, dy)}</g>""";
 
+    private static string Eyes(string svg) => $"""<g class="hma-eyes">{svg}</g>""";
+    private static string Mouth(string svg) => $"""<g class="hma-mouth">{svg}</g>""";
+
+    /// <summary>Minka w wersji animowanej: oczy i usta w osobnych grupach (mrugają, mówią, ziewają).</summary>
     private static string LiveFace(string mood) => mood switch
     {
-        "hello" => BlinkEyes() + Cheeks + BigSmile,
-        "think" => BlinkEyes(1.6, -1.6) + """<path d="M54 75 h12" stroke="#1E1B4B" stroke-width="3" stroke-linecap="round"/>""",
-        "remind" => BlinkEyes() + Cheeks + """<ellipse cx="60" cy="75" rx="3.4" ry="3.8" fill="#1E1B4B"/>""",
-        _ => Face(mood),
+        "hello" => Eyes(BlinkEyes()) + Cheeks + Mouth(BigSmile),
+        "happy" => Eyes(HappyEyes) + Cheeks + Mouth(Smile),
+        "celebrate" => Eyes(HappyEyes) + Cheeks + Mouth("""<ellipse cx="60" cy="76" rx="7" ry="6" fill="#1E1B4B"/><ellipse cx="60" cy="79" rx="4" ry="2.5" fill="#F472B6"/>"""),
+        "think" => Eyes(BlinkEyes(1.6, -1.6)) + Mouth("""<path d="M54 75 h12" stroke="#1E1B4B" stroke-width="3" stroke-linecap="round"/>"""),
+        "remind" => Eyes(BlinkEyes()) + Cheeks + Mouth("""<ellipse cx="60" cy="75" rx="3.4" ry="3.8" fill="#1E1B4B"/>"""),
+        "sleep" => Eyes(ClosedEyes) + Cheeks + Mouth("""<path d="M56 75 q4 3 8 0" stroke="#1E1B4B" stroke-width="2.6" fill="none" stroke-linecap="round"/>"""),
+        _ => Eyes(BlinkEyes()) + Cheeks + Mouth(Smile),
     };
+
+    /// <summary>Elementy sztuczek (widoczne tylko w trakcie): ziewnięcie, serduszko, „+1” przy podnoszeniu, konfetti.</summary>
+    private const string TrickFx = """
+        <ellipse class="hma-yawn" cx="60" cy="76" rx="5" ry="6.5" fill="#1E1B4B"/>
+        <path class="hma-heart" d="M60 14 c-3-5-11-4-11 2 c0 5 7 8 11 12 c4-4 11-7 11-12 c0-6-8-7-11-2z" fill="#F472B6"/>
+        <text class="hma-plus" x="94" y="22" font-family="Arial, sans-serif" font-weight="800" font-size="14" fill="#06D6A0">+1</text>
+        <g class="hma-party">
+          <rect style="--dx:-46px;--dy:-34px;--r:-160deg" x="57" y="56" width="6" height="3.5" rx="1" fill="#F472B6"/>
+          <rect style="--dx:44px;--dy:-38px;--r:200deg" x="57" y="56" width="6" height="3.5" rx="1" fill="#06D6A0"/>
+          <rect style="--dx:-30px;--dy:-58px;--r:120deg" x="57" y="56" width="5" height="5" rx="1" fill="#FBBF24"/>
+          <rect style="--dx:30px;--dy:-60px;--r:-140deg" x="57" y="56" width="5" height="5" rx="1" fill="#60A5FA"/>
+          <rect style="--dx:-58px;--dy:-6px;--r:90deg" x="57" y="56" width="6" height="3.5" rx="1" fill="#A78BFA"/>
+          <rect style="--dx:58px;--dy:-10px;--r:-90deg" x="57" y="56" width="6" height="3.5" rx="1" fill="#FBBF24"/>
+          <circle style="--dx:-14px;--dy:-66px" cx="60" cy="58" r="2.6" fill="#06D6A0"/>
+          <circle style="--dx:16px;--dy:-64px" cx="60" cy="58" r="2.6" fill="#F472B6"/>
+          <circle style="--dx:-50px;--dy:-48px" cx="60" cy="58" r="2.2" fill="#60A5FA"/>
+          <circle style="--dx:50px;--dy:-50px" cx="60" cy="58" r="2.2" fill="#A78BFA"/>
+        </g>
+        """;
 
     private static string LiveFx(string mood) => mood switch
     {
@@ -113,14 +139,17 @@ public static class MascotArt
         _ => "",
     };
 
-    /// <summary>Animowany hantelek (inline SVG ze stylami). Rodzic: <c>&lt;span class="hm-live st-idle md-happy"&gt;</c>.</summary>
+    /// <summary>
+    /// Animowany hantelek (inline SVG ze stylami). Rodzic: <c>&lt;span class="hm-live st-idle md-happy"&gt;</c>, a wokół niego
+    /// otoczka <c>&lt;span class="hm-fx" data-hm-motion="normal" data-hm-fx="look,tricks,…"&gt;</c> — tę obsługuje hantly-motion.js.
+    /// </summary>
     public static string AnimatedSvg()
     {
         const string p = "hma-";
         var faces = string.Concat(Moods.Select(m => $"""<g class="hma-face-{m.Key}">{LiveFace(m.Key)}</g>"""));
         var fx = string.Concat(Moods.Select(m => $"""<g class="hma-fx-{m.Key}">{LiveFx(m.Key)}</g>"""));
         const string burst = """<g class="hma-burst"><circle cx="20" cy="40" r="2.6" fill="#FBBF24"/><circle cx="100" cy="36" r="2.6" fill="#06D6A0"/><circle cx="30" cy="16" r="2" fill="#F472B6"/><circle cx="90" cy="14" r="2" fill="#60A5FA"/><path d="M60 4 l1.6 3.4 3.4 1.6 -3.4 1.6 -1.6 3.4 -1.6 -3.4 -3.4 -1.6 3.4 -1.6z" fill="#FBBF24"/></g>""";
-        return $"""<svg class="hma" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" aria-hidden="true" focusable="false"><style>{LiveCss}</style>{Defs(p)}<g class="hma-shadow">{Shadow}</g><g class="hma-rig"><g class="hma-breath"><g class="hma-plate-l">{PlateLeft(p)}</g><g class="hma-plate-r">{PlateRight(p)}</g><g class="hma-core">{Core(p, glint: true)}<g class="hma-face">{faces}</g></g></g></g><g class="hma-fx">{fx}{burst}</g></svg>""";
+        return $"""<svg class="hma" xmlns="http://www.w3.org/2000/svg" viewBox="0 0 120 120" width="120" height="120" aria-hidden="true" focusable="false"><style>{LiveCss}</style>{Defs(p)}<g class="hma-shadow">{Shadow}</g><g class="hma-hover"><g class="hma-rig"><g class="hma-breath"><g class="hma-plate-l">{PlateLeft(p)}</g><g class="hma-plate-r">{PlateRight(p)}</g><g class="hma-core">{Core(p, glint: true)}<g class="hma-face">{faces}</g></g></g></g></g><g class="hma-fx">{fx}{burst}{TrickFx}</g></svg>""";
     }
 
     /// <summary>Style animacji (w SVG). Wszystko pod „.hm-live”, żeby nie dotykać reszty strony.</summary>
@@ -196,6 +225,58 @@ public static class MascotArt
         @keyframes hma-doze{0%{transform:none}100%{transform:translateY(4px) rotate(-10deg)}}
         @keyframes hma-z{0%{transform:translate(0,4px);opacity:0}25%{opacity:1}100%{transform:translate(8px,-12px);opacity:0}}
         .hm-live.st-sleep .hma-rig{transform:translateY(4px) rotate(-10deg)}
+        /* ── Ruch sterowany z hantly-motion.js: klasy na otoczce .hm-fx (Blazor jej nie nadpisuje) ── */
+        .hm-fx{display:inline-block;line-height:0;--hm-lx:0;--hm-ly:0}
+        .hm-live .hma-face{transform:translate(calc(var(--hm-lx) * 3px),calc(var(--hm-ly) * 2.2px));transition:transform .35s cubic-bezier(.3,.7,.4,1)}
+        .hm-live .hma-mouth{transform-origin:60px 75px}
+        .hm-live .hma-eyes{transform-origin:60px 63px}
+        .hm-live .hma-hover{transform-origin:60px 100px;transition:transform .3s cubic-bezier(.3,1.6,.5,1)}
+        .hm-live .hma-yawn,.hm-live .hma-heart,.hm-live .hma-plus,.hm-live .hma-party{opacity:0}
+        .hm-live .hma-heart{transform-origin:60px 22px}
+        .hm-live .hma-party > *{transform-box:fill-box;transform-origin:center}
+        /* Najechanie: prostuje się i patrzy na Ciebie. */
+        .hm-fx.is-hover .hm-live .hma-hover{transform:translateY(-4px) scale(1.06)}
+        /* Sztuczki w spoczynku */
+        .hm-fx.tr-wiggle .hm-live .hma-rig{animation:hmt-wiggle .9s ease-in-out both}
+        .hm-fx.tr-hop .hm-live .hma-rig{animation:hmt-hop .95s cubic-bezier(.3,.7,.4,1) both}
+        .hm-fx.tr-hop .hm-live .hma-shadow{animation:hmt-shadow-hop .95s ease-in-out both}
+        .hm-fx.tr-spin .hm-live .hma-rig{animation:hmt-spin .9s ease-in-out both}
+        .hm-fx.tr-curl .hm-live .hma-rig{animation:hmt-curl 1.5s ease-in-out both}
+        .hm-fx.tr-curl .hm-live .hma-plate-l{animation:hma-flap-l .3s ease-in-out 4 alternate}
+        .hm-fx.tr-curl .hm-live .hma-plate-r{animation:hma-flap-r .3s ease-in-out 4 alternate}
+        .hm-fx.tr-curl .hm-live .hma-plus{animation:hmt-plus 1.5s ease-out both}
+        .hm-fx.tr-look .hm-live .hma-face{animation:hmt-look 1.7s ease-in-out both}
+        .hm-fx.tr-stretch .hm-live .hma-rig{animation:hmt-stretch 1.2s ease-in-out both}
+        .hm-fx.tr-heart .hm-live .hma-heart{animation:hmt-heart 1.3s ease-out both}
+        .hm-fx.tr-talk .hm-live .hma-mouth{animation:hmt-talk .16s ease-in-out infinite alternate}
+        .hm-fx.tr-yawn .hm-live .hma-mouth{opacity:0}
+        .hm-fx.tr-yawn .hm-live .hma-yawn{animation:hmt-yawn 1.8s ease-in-out both}
+        .hm-fx.tr-yawn .hm-live .hma-eyes{animation:hmt-squint 1.8s ease-in-out both}
+        .hm-fx.tr-yawn .hm-live .hma-rig{animation:hmt-stretch 1.8s ease-in-out both}
+        .hm-fx.tr-party .hm-live .hma-party{opacity:1}
+        .hm-fx.tr-party .hm-live .hma-party > *{animation:hmt-confetti 1.3s cubic-bezier(.2,.7,.4,1) both}
+        .hm-fx.tr-party .hm-live .hma-rig{animation:hmt-hop .95s cubic-bezier(.3,.7,.4,1) both}
+        /* Drzemka po bezczynności: ta sama minka co przy wyciszeniu. */
+        .hm-fx.is-dozing .hm-live [class^="hma-face-"],.hm-fx.is-dozing .hm-live [class^="hma-fx-"]{display:none}
+        .hm-fx.is-dozing .hm-live .hma-face-sleep,.hm-fx.is-dozing .hm-live .hma-fx-sleep{display:inline}
+        .hm-fx.is-dozing .hm-live .hma-rig{animation:hma-doze .7s ease-out both}
+        .hm-fx.is-dozing .hm-live .hma-breath{animation:hma-breathe 5s ease-in-out infinite .7s}
+        /* „Bez ruchu” (ustawienie trenera albo Portalu): maskotka stoi spokojnie. */
+        .hm-fx[data-hm-motion="off"] .hm-live *{animation:none!important;transition:none!important}
+        .hm-fx[data-hm-motion="off"] .hm-live .hma-fx{opacity:1}
+        @keyframes hmt-wiggle{0%,100%{transform:rotate(0)}15%{transform:rotate(-9deg)}35%{transform:rotate(8deg)}55%{transform:rotate(-6deg)}75%{transform:rotate(4deg)}}
+        @keyframes hmt-hop{0%{transform:none}12%{transform:scale(1.08,.9)}30%{transform:translateY(-16px) scale(.96,1.05)}48%{transform:translateY(0) scale(1.06,.93)}62%{transform:translateY(-8px)}80%{transform:translateY(0) scale(1.04,.96)}100%{transform:none}}
+        @keyframes hmt-shadow-hop{0%,48%,80%,100%{transform:scale(1);opacity:1}30%{transform:scale(.7);opacity:.6}62%{transform:scale(.85)}}
+        @keyframes hmt-spin{0%{transform:scaleX(1)}25%{transform:scaleX(.1) translateY(-4px)}50%{transform:scaleX(-1) translateY(-6px)}75%{transform:scaleX(-.1) translateY(-4px)}100%{transform:scaleX(1)}}
+        @keyframes hmt-curl{0%,100%{transform:none}20%{transform:translateY(-14px) rotate(-4deg)}40%{transform:translateY(0) scale(1.04,.96)}60%{transform:translateY(-14px) rotate(4deg)}80%{transform:translateY(0) scale(1.04,.96)}}
+        @keyframes hmt-plus{0%,15%{transform:translateY(6px);opacity:0}30%{opacity:1}100%{transform:translateY(-16px);opacity:0}}
+        @keyframes hmt-look{0%,100%{transform:translate(0,0)}20%,40%{transform:translate(-3.5px,-.5px)}55%,80%{transform:translate(3.5px,-.5px)}}
+        @keyframes hmt-stretch{0%,100%{transform:none}35%,60%{transform:scale(.94,1.12)}80%{transform:scale(1.04,.96)}}
+        @keyframes hmt-heart{0%{transform:scale(.3) translateY(10px);opacity:0}25%{transform:scale(1.15);opacity:1}100%{transform:scale(1) translateY(-14px);opacity:0}}
+        @keyframes hmt-talk{from{transform:scaleY(1)}to{transform:scaleY(1.45) translateY(-.5px)}}
+        @keyframes hmt-yawn{0%,100%{transform:scale(.3);opacity:0}20%{opacity:1}35%,70%{transform:scale(1,1.15);opacity:1}90%{transform:scale(.6);opacity:.6}}
+        @keyframes hmt-squint{0%,100%{transform:scaleY(1)}30%,75%{transform:scaleY(.3)}}
+        @keyframes hmt-confetti{0%{transform:translate(0,0) rotate(0) scale(.4);opacity:0}15%{opacity:1}100%{transform:translate(var(--dx),var(--dy)) rotate(var(--r,0deg)) scale(1);opacity:0}}
         @media (prefers-reduced-motion:reduce){.hm-live *{animation:none!important}.hm-live.st-enter .hma-fx,.hm-live.st-land .hma-fx{opacity:1}}
         """;
 }
