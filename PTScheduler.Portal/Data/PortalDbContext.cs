@@ -383,6 +383,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.Property(x => x.Description).HasMaxLength(500);
             e.Property(x => x.Source).HasMaxLength(16);
             e.Property(x => x.CreatedBy).HasMaxLength(256);
+            e.Property(x => x.ExcludedReason).HasMaxLength(500);
             // Wpłata trafia do ewidencji dokładnie raz, nawet gdy synchronizacja ruszy dwa razy naraz.
             e.HasIndex(x => x.PaymentRecordId).IsUnique().HasFilter("\"PaymentRecordId\" IS NOT NULL AND \"Source\" = 'payment'");
             e.HasIndex(x => x.Date);

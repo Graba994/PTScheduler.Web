@@ -1512,6 +1512,9 @@ namespace PTScheduler.Portal.Data.Migrations
 
                     NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
 
+                    b.Property<bool>("AwaitingApproval")
+                        .HasColumnType("boolean");
+
                     b.Property<int?>("BillId")
                         .HasColumnType("integer");
 
@@ -1759,11 +1762,21 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<int?>("DocumentId")
                         .HasColumnType("integer");
 
+                    b.Property<bool>("Excluded")
+                        .HasColumnType("boolean");
+
+                    b.Property<string>("ExcludedReason")
+                        .HasMaxLength(500)
+                        .HasColumnType("character varying(500)");
+
                     b.Property<int?>("PaymentRecordId")
                         .HasColumnType("integer");
 
                     b.Property<int?>("ReversesId")
                         .HasColumnType("integer");
+
+                    b.Property<bool>("SkipDocument")
+                        .HasColumnType("boolean");
 
                     b.Property<string>("Source")
                         .IsRequired()

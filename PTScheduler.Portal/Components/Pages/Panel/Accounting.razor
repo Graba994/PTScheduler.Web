@@ -37,7 +37,14 @@ else
         </div>
         @if (_s.Configured)
         {
-            <span class="pp-chip @(_s.UsesFakturownia ? "pp-tone-info" : "pp-tone-muted")"><i class="bi @(_s.UsesFakturownia ? "bi-cloud-check" : "bi-file-earmark-text")"></i>@(_s.UsesFakturownia ? "Dokumenty w Fakturowni" : "Dokumenty w Hantly")</span>
+            @if (_s.UsesFakturownia)
+            {
+                <span class="pp-chip pp-tone-info" title="Nowe dokumenty powstają w Twoim koncie Fakturowni"><i class="bi bi-cloud-upload"></i>Wysyłka do @(_s.FakturowniaDomain).fakturownia.pl · @(_s.FakturowniaApprove ? "po zatwierdzeniu" : "automatycznie")</span>
+            }
+            else
+            {
+                <span class="pp-chip pp-tone-muted"><i class="bi bi-file-earmark-text"></i>Dokumenty w Hantly</span>
+            }
             <span class="pp-chip @(_s.AutoIssue ? "pp-tone-ok" : "pp-tone-muted")"><i class="bi bi-lightning-charge"></i>@(_s.AutoIssue ? "Automatycznie po wpłacie" : "Dokumenty ręcznie")</span>
         }
     </div>
@@ -200,6 +207,83 @@ else
 
     @if (_tab == "dokumenty")
     {
+        @if (_s.UsesFakturownia)
+        {
+            <div class="acc-alert pp-tone-info acc-fakt-banner">
+                <i class="bi bi-cloud-upload"></i>
+                <div class="min-w-0">
+                    <b>Dokumenty wysyłamy do Fakturowni — @(_s.FakturowniaDomain).fakturownia.pl</b>
+                    <span>@(_s.FakturowniaApprove
+                        ? "Nowy dokument najpierw czeka tutaj na zatwierdzenie. Dopiero „Wyślij do Fakturowni” tworzy go w Twoim koncie, z numerem nadanym przez Fakturownię."
+                        : "Każda opłacona wpłata od razu tworzy dokument w Twoim koncie Fakturowni (numer nadaje Fakturownia). Na czas testów włącz zatwierdzanie w ustawieniach.")</span>
+                </div>
+                @if (_o.AwaitingApproval > 0)
+                {
+                    <button class="btn btn-sm btn-primary ms-auto text-nowrap" @onclick="ApproveAll" disabled="@_busy"><i class="bi bi-send me-1"></i>Wyślij do Fakturowni (@_o.AwaitingApproval)</button>
+                }
+            </div>
+        }
+
+        @if (_s.FakturowniaConnected)
+        {
+            <div class="pp-card acc-import">
+                <div class="pp-card-head mb-0">
+                    <span class="pp-icon pp-icon-sm pp-tone-info"><i class="bi bi-cloud-download"></i></span>
+                    <div class="min-w-0">
+                        <h2 class="pp-card-title">Pobierz z Fakturowni</h2>
+                        <span class="small text-muted">Dokumenty wystawione bezpośrednio w Fakturowni trafią tutaj — jeden rejestr wszystkiego.@(_s.FakturowniaAutoImport ? " Nowe pobieramy też same co 15 minut." : "")</span>
+                    </div>
+                    <button class="btn btn-sm btn-outline-primary ms-auto" @onclick="() => _importOpen = !_importOpen">@(_importOpen ? "Zwiń" : "Pobierz…")</button>
+                </div>
+                @if (_importOpen)
+                {
+                    <div class="acc-period mt-3">
+                        <span class="small text-muted">Wystawione od</span>
+                        <input type="date" class="form-control form-control-sm acc-date" @bind="_iFrom" aria-label="Od" />
+                        <span class="small text-muted">do</span>
+                        <input type="date" class="form-control form-control-sm acc-date" @bind="_iTo" aria-label="Do" />
+                        <button class="btn btn-sm btn-outline-secondary" @onclick="PreviewImport" disabled="@_busy"><i class="bi bi-search me-1"></i>Sprawdź, co jest w Fakturowni</button>
+                    </div>
+                    @if (_candidates is not null)
+                    {
+                        @if (_candidates.Count == 0)
+                        {
+                            <p class="small text-muted mt-3 mb-0">W tym okresie nie ma w Fakturowni faktur, rachunków ani korekt.</p>
+                        }
+                        else
+                        {
+                            <div class="table-responsive mt-3">
+                                <table class="table table-sm align-middle small mb-0 acc-table">
+                                    <thead class="table-light"><tr><th></th><th>Numer</th><th>Wystawiony</th><th>Nabywca</th><th class="text-end">Kwota</th><th>W Hantly</th></tr></thead>
+                                    <tbody>
+                                        @foreach (var c in _candidates)
+                                        {
+                                            <tr class="@(c.Importable ? "" : "text-muted")">
+                                                <td>
+                                                    @if (c.Importable)
+                                                    {
+                                                        <input class="form-check-input" type="checkbox" checked="@_importPick.Contains(c.Doc.Id)" @onchange="() => TogglePick(c.Doc.Id)" aria-label="Pobierz @c.Doc.Number" />
+                                                    }
+                                                </td>
+                                                <td class="font-monospace text-nowrap">@c.Doc.Number</td>
+                                                <td class="text-nowrap">@c.Doc.IssueDate.ToString("dd.MM.yyyy")</td>
+                                                <td>@c.Doc.BuyerName @if (c.TenantName is not null) { <small class="text-muted d-block"><i class="bi bi-link-45deg"></i>@c.TenantName</small> }</td>
+                                                <td class="text-end text-nowrap">@FinanceRules.Money(c.Doc.Gross)</td>
+                                                <td>@ImportStateLabel(c.State)</td>
+                                            </tr>
+                                        }
+                                    </tbody>
+                                </table>
+                            </div>
+                            <label class="form-check small mt-3"><input class="form-check-input" type="checkbox" @bind="_importLedger" /> <span class="form-check-label">Dopisz pobrane do ewidencji sprzedaży</span></label>
+                            <p class="acc-fine mb-2">Zaznacz tylko dla sprzedaży spoza aplikacji. Wpłaty z platformy są już w ewidencji — dopisane drugi raz zawyżyłyby przychód i limit. Pojedynczy dokument dopiszesz też później.</p>
+                            <button class="btn btn-sm btn-primary" @onclick="DoImport" disabled="@(_busy || _importPick.Count == 0)"><i class="bi bi-cloud-download me-1"></i>Pobierz zaznaczone (@_importPick.Count)</button>
+                        }
+                    }
+                }
+            </div>
+        }
+
         @if (_newDoc is not null)
         {
             <div class="pp-card acc-form">
@@ -276,7 +360,13 @@ else
                     <label class="form-check"><input class="form-check-input" type="checkbox" @bind="_newDoc.SendEmail" /> <span class="form-check-label">Wyślij PDF e-mailem</span></label>
                 </div>
                 <p class="acc-fine mt-2">Wpłat z platformy nie wpisuj tutaj — trafiają do ewidencji same. Ten formularz jest dla sprzedaży poza aplikacją (np. wdrożenie, konsultacja).</p>
-                <button class="btn btn-primary btn-sm" @onclick="IssueManual" disabled="@_busy"><i class="bi bi-check2 me-1"></i>Wystaw @SalesDocumentKinds.Label(_newDoc.Kind).ToLowerInvariant()</button>
+                @if (_s.UsesFakturownia)
+                {
+                    <p class="acc-fine mb-2"><i class="bi bi-cloud-upload me-1"></i>@(_s.FakturowniaApprove
+                        ? $"Dokument poczeka na zatwierdzenie, a po nim powstanie w {_s.FakturowniaDomain}.fakturownia.pl."
+                        : $"Dokument powstanie od razu w {_s.FakturowniaDomain}.fakturownia.pl, z numerem Fakturowni.")</p>
+                }
+                <button class="btn btn-primary btn-sm" @onclick="IssueManual" disabled="@_busy"><i class="bi @(_s.UsesFakturownia ? "bi-cloud-upload" : "bi-check2") me-1"></i>@IssueLabel()</button>
             </div>
         }
 
@@ -332,6 +422,36 @@ else
                 <input class="form-control form-control-sm" placeholder="Numer, nabywca, NIP…" @bind="_fQuery" @bind:event="oninput" @bind:after="LoadDocs" aria-label="Szukaj" />
                 <label class="form-check small mb-0 text-nowrap"><input class="form-check-input" type="checkbox" @bind="_fProblems" @bind:after="LoadDocs" /> <span class="form-check-label">Do uwagi</span></label>
             </div>
+            @if (_deleteIds is not null)
+            {
+                var toDelete = _docs.Where(x => _deleteIds.Contains(x.Id)).ToList();
+                var remoteCount = toDelete.Count(x => x.ExternalId is not null);
+                <div class="acc-delete">
+                    <b><i class="bi bi-trash3 me-1"></i>Usunąć @toDelete.Count @FinanceRules.Plural(toDelete.Count, "dokument", "dokumenty", "dokumentów")?</b>
+                    <span class="acc-delete-list">@string.Join(", ", toDelete.Select(x => x.Number.Length > 0 ? x.Number : "bez numeru"))</span>
+                    <p>Usuwaj tylko dokumenty testowe. Prawdziwy dokument prostuje się korektą — usunięcie robi dziurę w numeracji. Korekty usuwanych dokumentów znikną razem z nimi, a wpis o usunięciu zostaje w historii zmian.</p>
+                    @if (remoteCount > 0)
+                    {
+                        <label class="form-check"><input class="form-check-input" type="checkbox" @bind="_deleteRemote" /> <span class="form-check-label">Usuń też w Fakturowni (@remoteCount) — inaczej zostaną w Twoim koncie Fakturowni</span></label>
+                    }
+                    <div class="acc-radio">
+                        <label class="form-check"><input class="form-check-input" type="radio" name="acc-del-ledger" checked="@(_deleteLedger == AccountingService.LedgerExclude)" @onchange="() => _deleteLedger = AccountingService.LedgerExclude" /> <span class="form-check-label">To był test — wyłącz tę sprzedaż z ewidencji (nie liczy się do limitu; można przywrócić)</span></label>
+                        <label class="form-check"><input class="form-check-input" type="radio" name="acc-del-ledger" checked="@(_deleteLedger == AccountingService.LedgerKeep)" @onchange="() => _deleteLedger = AccountingService.LedgerKeep" /> <span class="form-check-label">Sprzedaż była prawdziwa — zostaje w ewidencji, bez dokumentu (nowy wystawisz ręcznie)</span></label>
+                    </div>
+                    <div class="d-flex gap-2">
+                        <button class="btn btn-sm btn-danger" @onclick="ConfirmDelete" disabled="@_busy"><i class="bi bi-trash3 me-1"></i>Usuń@(remoteCount > 0 && _deleteRemote ? " w Hantly i w Fakturowni" : " w Hantly")</button>
+                        <button class="btn btn-sm btn-link" @onclick="() => _deleteIds = null">Nie usuwaj</button>
+                    </div>
+                </div>
+            }
+            else if (_selected.Count > 0)
+            {
+                <div class="acc-bulk">
+                    <span>Zaznaczono: <b>@_selected.Count</b></span>
+                    <button class="btn btn-sm btn-outline-danger" @onclick="() => AskDelete(_selected.ToList())"><i class="bi bi-trash3 me-1"></i>Usuń zaznaczone</button>
+                    <button class="btn btn-sm btn-link" @onclick="() => _selected.Clear()">Odznacz</button>
+                </div>
+            }
             @if (_docs.Count == 0)
             {
                 <p class="text-muted small p-3 mb-0">Brak dokumentów dla tych filtrów.</p>
@@ -341,12 +461,13 @@ else
                 <div class="table-responsive">
                     <table class="table table-sm align-middle small mb-0 acc-table">
                         <thead class="table-light">
-                            <tr><th>Numer</th><th>Rodzaj</th><th>Wystawiony</th><th>Nabywca</th><th class="text-end">Kwota</th><th>Stan</th><th></th></tr>
+                            <tr><th class="acc-sel"><input class="form-check-input" type="checkbox" checked="@(_docs.All(x => _selected.Contains(x.Id)))" @onchange="ToggleAll" aria-label="Zaznacz wszystkie" /></th><th>Numer</th><th>Rodzaj</th><th>Wystawiony</th><th>Nabywca</th><th class="text-end">Kwota</th><th>Stan</th><th></th></tr>
                         </thead>
                         <tbody>
                             @foreach (var d in _docs)
                             {
                                 <tr class="@(d.Status == SalesDocumentStatus.Cancelled ? "acc-cancelled" : "")">
+                                    <td class="acc-sel"><input class="form-check-input" type="checkbox" checked="@_selected.Contains(d.Id)" @onchange="() => ToggleSel(d.Id)" aria-label="Zaznacz dokument" /></td>
                                     <td class="font-monospace text-nowrap">@(d.Number.Length > 0 ? d.Number : "—")</td>
                                     <td class="text-nowrap">@SalesDocumentKinds.Label(d.Kind)</td>
                                     <td class="text-nowrap">@d.IssueDate.ToString("dd.MM.yyyy")</td>
@@ -356,7 +477,14 @@ else
                                         <span class="d-inline-flex flex-wrap gap-1">
                                             @if (d.Status == SalesDocumentStatus.Pending)
                                             {
-                                                <span class="pp-chip pp-tone-warn" title="@d.ExternalError"><i class="bi bi-cloud-slash"></i>czeka na Fakturownię</span>
+                                                @if (d.AwaitingApproval)
+                                                {
+                                                    <span class="pp-chip pp-tone-info" title="Nic nie poszło jeszcze do Fakturowni"><i class="bi bi-hourglass-split"></i>czeka na zatwierdzenie</span>
+                                                }
+                                                else
+                                                {
+                                                    <span class="pp-chip pp-tone-warn" title="@d.ExternalError"><i class="bi bi-cloud-slash"></i>błąd Fakturowni — ponawiamy</span>
+                                                }
                                             }
                                             else if (d.Status == SalesDocumentStatus.Cancelled)
                                             {
@@ -364,7 +492,8 @@ else
                                             }
                                             else
                                             {
-                                                @if (d.ExternalId is not null) { <span class="pp-chip pp-tone-info"><i class="bi bi-cloud-check"></i>Fakturownia</span> }
+                                                @if (d.ExternalId is not null) { <span class="pp-chip pp-tone-info"><i class="bi @(Imported(d) ? "bi-cloud-download" : "bi-cloud-check")"></i>@(Imported(d) ? "z Fakturowni" : "w Fakturowni")</span> }
+                                                @if (!_inLedger.Contains(d.Id)) { <span class="pp-chip pp-tone-muted" title="Ta sprzedaż nie jest w ewidencji">spoza ewidencji</span> }
                                                 @if (d.EmailedAt is not null) { <span class="pp-chip pp-tone-ok"><i class="bi bi-envelope-check"></i>wysłany</span> }
                                                 else if (d.BuyerEmail is not null) { <span class="pp-chip pp-tone-muted">niewysłany</span> }
                                             }
@@ -381,7 +510,7 @@ else
                                 @if (_open?.Id == d.Id)
                                 {
                                     <tr class="acc-open">
-                                        <td colspan="7">
+                                        <td colspan="8">
                                             <div class="acc-doc">
                                                 <div class="acc-doc-meta">
                                                     <div><small>Sprzedaż</small>@d.SaleDate.ToString("dd.MM.yyyy")</div>
@@ -396,8 +525,18 @@ else
                                                 <div class="acc-doc-actions">
                                                     @if (d.Status == SalesDocumentStatus.Pending)
                                                     {
-                                                        <button class="btn btn-sm btn-primary" @onclick="() => Retry(d)" disabled="@_busy">Ponów w Fakturowni</button>
-                                                        <button class="btn btn-sm btn-outline-secondary" @onclick="() => IssueLocal(d)" disabled="@_busy">Wystaw z numerem Hantly</button>
+                                                        <div class="acc-inline">
+                                                            <button class="btn btn-sm btn-primary" @onclick="() => Retry(d)" disabled="@_busy"><i class="bi bi-cloud-upload me-1"></i>@(d.AwaitingApproval ? "Wyślij do Fakturowni" : "Ponów w Fakturowni")</button>
+                                                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => IssueLocal(d)" disabled="@_busy">Wystaw z numerem Hantly</button>
+                                                        </div>
+                                                        <p class="acc-fine mb-0">@(d.AwaitingApproval ? $"Po wysłaniu dokument powstanie w {_s.FakturowniaDomain}.fakturownia.pl z numerem Fakturowni. Numer Hantly — dokument zostanie tylko tutaj." : "Fakturownia nie nadała numeru — ponawiamy co jakiś czas.")</p>
+                                                    }
+                                                    @if (d.Status == SalesDocumentStatus.Issued && !_inLedger.Contains(d.Id))
+                                                    {
+                                                        <div class="acc-inline">
+                                                            <button class="btn btn-sm btn-outline-secondary" @onclick="() => AddToLedger(d)" disabled="@_busy"><i class="bi bi-journal-plus me-1"></i>Dopisz do ewidencji</button>
+                                                            <span class="acc-fine mb-0">Tylko dla sprzedaży spoza aplikacji.</span>
+                                                        </div>
                                                     }
                                                     @if (d.Status == SalesDocumentStatus.Issued)
                                                     {
@@ -410,7 +549,7 @@ else
                                                             <div class="acc-inline">
                                                                 <input class="form-control form-control-sm acc-amount" type="number" min="0" step="0.01" placeholder="kwota" @bind="_corrAmount" aria-label="Kwota korekty" />
                                                                 <input class="form-control form-control-sm" placeholder="przyczyna (np. zwrot za maj)" @bind="_corrReason" maxlength="500" aria-label="Przyczyna korekty" />
-                                                                <button class="btn btn-sm btn-outline-warning" @onclick="() => Correct(d)" disabled="@_busy">Korekta in minus</button>
+                                                                <button class="btn btn-sm btn-outline-warning" @onclick="() => Correct(d)" disabled="@_busy">Korekta in minus@(d.Provider == "fakturownia" && _s.UsesFakturownia ? " → Fakturownia" : "")</button>
                                                             </div>
                                                         }
                                                     }
@@ -426,6 +565,9 @@ else
                                                     {
                                                         <p class="acc-fine mb-0">Dokument wyszedł do nabywcy — błędy prostuje się korektą.</p>
                                                     }
+                                                    <div class="acc-inline acc-doc-delete">
+                                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => AskDelete([d.Id])"><i class="bi bi-trash3 me-1"></i>Usuń dokument (test)</button>
+                                                    </div>
                                                 </div>
                                             </div>
                                         </td>
@@ -509,6 +651,28 @@ else
                 <button class="btn btn-sm btn-primary" @onclick="AddManual" disabled="@_busy">Dopisz</button>
             </div>
         </div>
+        @if (_excluded.Count > 0)
+        {
+            <div class="pp-card">
+                <h2 class="pp-card-title mb-1">Wyłączone z ewidencji</h2>
+                <p class="acc-fine">Sprzedaż oznaczona jako test przy usuwaniu dokumentu. Nie liczy się do sum ani limitu — przywrócisz ją jednym kliknięciem.</p>
+                <div class="table-responsive">
+                    <table class="table table-sm align-middle small mb-0 acc-table">
+                        <tbody>
+                            @foreach (var e in _excluded)
+                            {
+                                <tr>
+                                    <td class="text-nowrap">@e.Date.ToString("dd.MM.yyyy")</td>
+                                    <td>@e.Description <small class="text-muted d-block">@e.ExcludedReason</small></td>
+                                    <td class="text-end text-nowrap">@FinanceRules.Money(e.Amount)</td>
+                                    <td class="text-end"><button class="btn btn-sm btn-outline-secondary" @onclick="() => Restore(e)" disabled="@_busy">Przywróć</button></td>
+                                </tr>
+                            }
+                        </tbody>
+                    </table>
+                </div>
+            </div>
+        }
         <p class="acc-fine">Ewidencja liczy sprzedaż w dniu wpłaty: przychód z dnia i sumę narastająco od początku miesiąca. Wymagania dotyczące ewidencji przy działalności nierejestrowanej sprawdź z księgową — Hantly porządkuje dane, ale nie zastępuje doradcy.</p>
     }
 
@@ -760,9 +924,21 @@ else
                     </div>
                 </div>
             </div>
-            @if (_form.Provider == "fakturownia")
-            {
-                <div class="acc-fakt">
+            <h3 class="acc-h3">Fakturownia.pl (opcjonalnie)</h3>
+            <div class="acc-fakt">
+                @if (_form.Provider == "fakturownia")
+                {
+                    <div class="acc-fakt-warn">
+                        <i class="bi bi-exclamation-triangle"></i>
+                        <span>To Twoje prawdziwe konto Fakturowni: każdy wysłany dokument pojawi się tam z kolejnym numerem (a po włączeniu KSeF w Fakturowni — także w KSeF). Na czas testów zostaw zatwierdzanie włączone albo użyj osobnego, testowego konta Fakturowni.</span>
+                    </div>
+                    <label class="form-check small mb-1"><input class="form-check-input" type="checkbox" @bind="_form.FakturowniaApprove" /> <span class="form-check-label"><b>Wysyłaj do Fakturowni dopiero po moim zatwierdzeniu</b> — dokument czeka w Hantly na „Wyślij do Fakturowni”</span></label>
+                }
+                else
+                {
+                    <p class="acc-fine">Dokumenty wystawia Hantly. Podłączone konto Fakturowni służy wtedy tylko do pobierania dokumentów, które wystawisz bezpośrednio w Fakturowni.</p>
+                }
+                <label class="form-check small mb-2"><input class="form-check-input" type="checkbox" @bind="_form.FakturowniaAutoImport" /> <span class="form-check-label">Pobieraj same nowe dokumenty wystawione w Fakturowni (co 15 minut, bez dopisywania do ewidencji)</span></label>
                     <div class="row g-2 align-items-end">
                         <div class="col-md-4"><label class="form-label small mb-1">Subdomena konta</label>
                             <div class="input-group input-group-sm"><input class="form-control" @bind="_form.FakturowniaDomain" placeholder="mojafirma" /><span class="input-group-text">.fakturownia.pl</span></div></div>
@@ -777,9 +953,8 @@ else
                         </div>
                     </div>
                     @if (_testMsg is not null) { <p class="small mt-2 mb-0 @(_testOk ? "text-success" : "text-danger")">@_testMsg</p> }
-                    <p class="acc-fine mt-2 mb-0">Fakturownia nadaje numer i trzyma oryginał (z jej ustawieniami sprzedawcy, a po założeniu firmy — także wysyłką do KSeF, jeśli ją tam włączysz). Gdy nie odpowiada, dokument czeka i ponawiamy próby; w razie potrzeby wystawisz go z numerem Hantly. Token jest zaszyfrowany.</p>
-                </div>
-            }
+                    <p class="acc-fine mt-2 mb-0">Przy wystawianiu w Fakturowni to ona nadaje numer i trzyma oryginał (z jej ustawieniami sprzedawcy). Gdy nie odpowiada, dokument czeka i ponawiamy próby; w razie potrzeby wystawisz go z numerem Hantly. Token jest zaszyfrowany.</p>
+            </div>
 
             <h3 class="acc-h3">Limity i rezerwa</h3>
             <div class="row g-2">
@@ -829,6 +1004,16 @@ else
     private string? _emailTo, _corrReason, _cancelReason;
     private decimal? _corrAmount;
     private AccountingService.ManualDocument? _newDoc;
+    private HashSet<int> _selected = [];
+    private HashSet<int> _inLedger = [];
+    private List<int>? _deleteIds;
+    private bool _deleteRemote = true;
+    private string _deleteLedger = AccountingService.LedgerExclude;
+    private bool _importOpen, _importLedger;
+    private DateOnly _iFrom = new(Today.Year, 1, 1), _iTo = Today;
+    private List<AccountingService.ImportCandidate>? _candidates;
+    private HashSet<string> _importPick = [];
+    private List<SalesLedgerEntry> _excluded = [];
     private List<Tenant> _tenants = [];
 
     // Ewidencja
@@ -885,6 +1070,8 @@ else
         public string PrefixReceipt { get; set; } = "";
         public string PrefixInvoice { get; set; } = "";
         public string PrefixCorrection { get; set; } = "";
+        public bool FakturowniaApprove { get; set; } = true;
+        public bool FakturowniaAutoImport { get; set; }
     }
 
     private static Expense NewExpense() => new() { Date = Today, Category = "serwer" };
@@ -1002,6 +1189,123 @@ else
         _docs = await Acc.DocumentsAsync(new AccountingService.DocumentFilter(_fYear == 0 ? null : _fYear, _fMonth == 0 ? null : _fMonth,
             string.IsNullOrEmpty(_fKind) ? null : _fKind, _fQuery, _fProblems));
         _noDoc = await Acc.PaymentsWithoutDocumentAsync();
+        var ids = _docs.Select(d => d.Id).ToList();
+        _inLedger = await Acc.DocumentsInLedgerAsync(ids);
+        _selected.IntersectWith(ids);
+    }
+
+    private static bool Imported(SalesDocument d) => d.CreatedBy == "import: Fakturownia";
+
+    private static string ImportStateLabel(string state) => state switch
+    {
+        "exists" => "już jest",
+        "link" => "powiążemy z naszym dokumentem",
+        _ => "nowy"
+    };
+
+    private string IssueLabel()
+    {
+        if (_s!.UsesFakturownia) return _s.FakturowniaApprove ? "Przygotuj do wysyłki do Fakturowni" : "Wystaw w Fakturowni";
+        return "Wystaw " + SalesDocumentKinds.Label(_newDoc!.Kind).ToLowerInvariant();
+    }
+
+    private void ToggleSel(int id)
+    {
+        if (!_selected.Remove(id)) _selected.Add(id);
+    }
+
+    private void ToggleAll()
+    {
+        if (_docs.All(d => _selected.Contains(d.Id))) _selected.Clear();
+        else _selected.UnionWith(_docs.Select(d => d.Id));
+    }
+
+    private void AskDelete(List<int> ids)
+    {
+        _deleteIds = ids;
+        _deleteRemote = true;
+        _deleteLedger = AccountingService.LedgerExclude;
+    }
+
+    private async Task ConfirmDelete()
+    {
+        if (_deleteIds is null) return;
+        _busy = true;
+        try
+        {
+            var r = await Acc.DeleteDocumentsAsync(_deleteIds, _deleteRemote, _deleteLedger, _actor);
+            Flash(r.Error, $"Usunięto dokumentów: {r.Deleted}" + (r.DeletedInFakturownia > 0 ? $", w tym w Fakturowni: {r.DeletedInFakturownia}." : "."));
+            if (r.Error is null) { _deleteIds = null; _selected.Clear(); _open = null; }
+            await LoadDocs();
+            _o = await Acc.OverviewAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task ApproveAll()
+    {
+        _busy = true;
+        try
+        {
+            var (sent, error) = await Acc.ApproveAllAsync(_actor);
+            Flash(sent == 0 ? error ?? "Nic nie wysłano." : null, $"Wysłano do Fakturowni: {sent}." + (error is null ? "" : $" Część nie przeszła: {error}"));
+            await LoadDocs();
+            _o = await Acc.OverviewAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    private void TogglePick(string id)
+    {
+        if (!_importPick.Remove(id)) _importPick.Add(id);
+    }
+
+    private async Task PreviewImport()
+    {
+        _busy = true;
+        try
+        {
+            var (list, error) = await Acc.PreviewImportAsync(_iFrom, _iTo);
+            _candidates = list;
+            _importPick = list?.Where(c => c.Importable).Select(c => c.Doc.Id).ToHashSet() ?? [];
+            if (error is not null) Flash(error, "");
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task DoImport()
+    {
+        if (_candidates is null) return;
+        _busy = true;
+        try
+        {
+            var count = await Acc.ImportAsync(_candidates.Where(c => _importPick.Contains(c.Doc.Id)), _importLedger, _actor);
+            Flash(null, $"Pobrano z Fakturowni: {count}." + (_importLedger ? " Dopisano do ewidencji." : ""));
+            _candidates = null;
+            _importPick.Clear();
+            await LoadDocs();
+            _o = await Acc.OverviewAsync();
+        }
+        finally { _busy = false; }
+    }
+
+    private async Task AddToLedger(SalesDocument d)
+    {
+        _busy = true;
+        try { await AfterDocChange(await Acc.AddDocumentToLedgerAsync(d.Id, _actor), $"Dopisano {d.Number} do ewidencji."); }
+        finally { _busy = false; }
+    }
+
+    private async Task Restore(SalesLedgerEntry e)
+    {
+        _busy = true;
+        try
+        {
+            Flash(await Acc.RestoreEntryAsync(e.Id, _actor), "Wpis wrócił do ewidencji.");
+            await LoadLedger();
+            _o = await Acc.OverviewAsync();
+        }
+        finally { _busy = false; }
     }
 
     private void OpenDoc(SalesDocument d)
@@ -1079,7 +1383,7 @@ else
     private async Task Retry(SalesDocument d)
     {
         _busy = true;
-        try { await AfterDocChange(await Acc.RetryProviderAsync(d.Id, _actor), "Fakturownia nadała numer."); }
+        try { await AfterDocChange(await Acc.RetryProviderAsync(d.Id, _actor), "Wysłano do Fakturowni — numer nadany."); }
         finally { _busy = false; }
     }
 
@@ -1131,7 +1435,11 @@ else
 
     // ── Ewidencja ──
 
-    private async Task LoadLedger() => _days = await Acc.LedgerDaysAsync(_lFrom, _lTo);
+    private async Task LoadLedger()
+    {
+        _days = await Acc.LedgerDaysAsync(_lFrom, _lTo);
+        _excluded = await Acc.ExcludedEntriesAsync();
+    }
 
     private async Task SetLedgerMonth(ChangeEventArgs e)
     {
@@ -1245,7 +1553,7 @@ else
             SellerName = s.SellerName, SellerAddress = s.SellerAddress, SellerEmail = s.SellerEmail, SellerTaxId = s.SellerTaxId,
             SellerRegon = s.SellerRegon, SellerBank = s.SellerBank, VatNote = s.VatNote, AutoIssue = s.AutoIssue, EmailDocs = s.EmailDocs,
             Provider = s.Provider, FakturowniaDomain = s.FakturowniaDomain, PrefixReceipt = s.PrefixReceipt, PrefixInvoice = s.PrefixInvoice,
-            PrefixCorrection = s.PrefixCorrection
+            PrefixCorrection = s.PrefixCorrection, FakturowniaApprove = s.FakturowniaApprove, FakturowniaAutoImport = s.FakturowniaAutoImport
         };
         _fMode = s.Mode;
         _fUnregSince = s.UnregisteredSince;
@@ -1277,6 +1585,7 @@ else
                 SellerBank = f.SellerBank ?? "", VatNote = f.VatNote ?? "", AutoIssue = f.AutoIssue, EmailDocs = f.EmailDocs,
                 Provider = f.Provider, FakturowniaDomain = f.FakturowniaDomain ?? "",
                 PrefixReceipt = f.PrefixReceipt ?? "", PrefixInvoice = f.PrefixInvoice ?? "", PrefixCorrection = f.PrefixCorrection ?? "",
+                FakturowniaApprove = f.FakturowniaApprove, FakturowniaAutoImport = f.FakturowniaAutoImport,
                 QuarterLimit = FinanceRules.ParseAmount(_fQuarterLimit) is > 0 and var q ? q : null,
                 VatLimit = FinanceRules.ParseAmount(_fVatLimit) is > 0 and var v ? v : null,
                 TaxReservePct = FinanceRules.ParseAmount(_fReserve) is >= 0 and <= 100 and var p ? p : 12m

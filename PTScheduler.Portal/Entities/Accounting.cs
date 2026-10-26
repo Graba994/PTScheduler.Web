@@ -58,6 +58,8 @@ public class SalesDocument
     public string? ExternalUrl { get; set; }
     public string? ExternalError { get; set; }
     public int ExternalAttempts { get; set; }
+    /// <summary>Czeka na zatwierdzenie przed wysłaniem do Fakturowni (tryb „po moim zatwierdzeniu”).</summary>
+    public bool AwaitingApproval { get; set; }
     public DateTime? ExternalSyncedAt { get; set; }
 
     public DateTime? EmailedAt { get; set; }
@@ -139,13 +141,18 @@ public class SalesLedgerEntry
     public DateOnly Date { get; set; }
     public decimal Amount { get; set; }
     public string Description { get; set; } = "";
-    /// <summary>„payment” (wpłata z platformy), „manual”, „correction”.</summary>
+    /// <summary>„payment” (wpłata z platformy), „manual”, „correction”, „import” (dokument pobrany z Fakturowni).</summary>
     public string Source { get; set; } = "payment";
     public int? PaymentRecordId { get; set; }
     public int? DocumentId { get; set; }
     public int? TenantId { get; set; }
     /// <summary>Wpis prostujący (in minus) — dotyczy tego wpisu.</summary>
     public int? ReversesId { get; set; }
+    /// <summary>Wyłączony z ewidencji (np. testowa wpłata po usunięciu dokumentu) — nie liczy się do sum ani limitu, można go przywrócić.</summary>
+    public bool Excluded { get; set; }
+    public string? ExcludedReason { get; set; }
+    /// <summary>Bez automatycznego dokumentu (dokument usunięto, a wpłata zostaje) — dokument można wystawić ręcznie.</summary>
+    public bool SkipDocument { get; set; }
     public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
     public string? CreatedBy { get; set; }
 }

@@ -240,6 +240,12 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string FinanceFakturowniaDomain = "finance_fakturownia_domain";
         /// <summary>Token API Fakturowni (zaszyfrowany Data Protection).</summary>
         public const string FinanceFakturowniaToken = "finance_fakturownia_token";
+        /// <summary>„true” — dokument czeka na zatwierdzenie, zanim trafi do Fakturowni (domyślnie tak).</summary>
+        public const string FinanceFakturowniaApprove = "finance_fakturownia_approve";
+        /// <summary>„true” — nowe dokumenty wystawione w Fakturowni pobieramy same (bez dopisywania do ewidencji).</summary>
+        public const string FinanceFakturowniaAutoImport = "finance_fakturownia_auto_import";
+        /// <summary>Do którego dnia pobrano już dokumenty z Fakturowni (yyyy-MM-dd).</summary>
+        public const string FinanceFakturowniaImportedTo = "finance_fakturownia_imported_to";
         /// <summary>Własny limit kwartalny działalności nierejestrowanej (puste — 225% płacy minimalnej).</summary>
         public const string FinanceQuarterLimit = "finance_quarter_limit";
         /// <summary>Limit zwolnienia podmiotowego z VAT na rok (firma, „zw”).</summary>
@@ -333,6 +339,7 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         [Keys.FinanceAutoIssue] = "true",
         [Keys.FinanceEmailDocs] = "true",
         [Keys.FinanceProvider] = "local",
+        [Keys.FinanceFakturowniaApprove] = "true",
         [Keys.FinanceVat] = "zw",
         [Keys.FinanceTaxReservePct] = "12",
         [Keys.FinancePrefixReceipt] = "RACH",

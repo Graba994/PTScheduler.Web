@@ -37,8 +37,11 @@ public class AccountingService(
         string Mode, DateOnly? UnregisteredSince, DateOnly? BusinessSince, DateOnly? Start,
         string SellerName, string SellerAddress, string SellerEmail, string SellerTaxId, string SellerRegon, string SellerBank,
         string Vat, string VatNote, bool AutoIssue, bool EmailDocs, string Provider, string FakturowniaDomain, bool HasFakturowniaToken,
-        decimal? QuarterLimit, decimal? VatLimit, decimal TaxReservePct, string PrefixReceipt, string PrefixInvoice, string PrefixCorrection)
+        decimal? QuarterLimit, decimal? VatLimit, decimal TaxReservePct, string PrefixReceipt, string PrefixInvoice, string PrefixCorrection,
+        bool FakturowniaApprove = true, bool FakturowniaAutoImport = false)
     {
+        /// <summary>Konto Fakturowni podłączone (subdomena i token) — da się z niego pobierać, nawet gdy dokumenty wystawia Hantly.</summary>
+        public bool FakturowniaConnected => !string.IsNullOrWhiteSpace(FakturowniaDomain) && HasFakturowniaToken;
         public bool Configured => Mode is FinanceModes.Unregistered or FinanceModes.Business;
         public bool UsesFakturownia => Provider == "fakturownia";
         public string ModeOn(DateOnly d) => FinanceRules.ModeOn(d, Mode, BusinessSince);
@@ -64,7 +67,8 @@ public class AccountingService(
         K.FinanceMode, K.FinanceUnregisteredSince, K.FinanceBusinessSince, K.FinanceStart, K.FinanceSellerName, K.FinanceSellerAddress,
         K.FinanceSellerEmail, K.FinanceSellerTaxId, K.FinanceSellerRegon, K.FinanceSellerBank, K.FinanceVat, K.FinanceVatNote,
         K.FinanceAutoIssue, K.FinanceEmailDocs, K.FinanceProvider, K.FinanceFakturowniaDomain, K.FinanceFakturowniaToken,
-        K.FinanceQuarterLimit, K.FinanceVatLimit, K.FinanceTaxReservePct, K.FinancePrefixReceipt, K.FinancePrefixInvoice, K.FinancePrefixCorrection
+        K.FinanceQuarterLimit, K.FinanceVatLimit, K.FinanceTaxReservePct, K.FinancePrefixReceipt, K.FinancePrefixInvoice, K.FinancePrefixCorrection,
+        K.FinanceFakturowniaApprove, K.FinanceFakturowniaAutoImport
     ];
 
     public async Task<Settings> GetSettingsAsync()
@@ -79,7 +83,8 @@ public class AccountingService(
             FinanceRules.ParseAmount(s[K.FinanceQuarterLimit]) is > 0 and var q ? q : null,
             FinanceRules.ParseAmount(s[K.FinanceVatLimit]) is > 0 and var v ? v : null,
             FinanceRules.ParseAmount(s[K.FinanceTaxReservePct]) is >= 0 and <= 100 and var pct ? pct : 12m,
-            s[K.FinancePrefixReceipt], s[K.FinancePrefixInvoice], s[K.FinancePrefixCorrection]);
+            s[K.FinancePrefixReceipt], s[K.FinancePrefixInvoice], s[K.FinancePrefixCorrection],
+            s[K.FinanceFakturowniaApprove] != "false", s[K.FinanceFakturowniaAutoImport] == "true");
     }
 
     public async Task<string?> SaveSettingsAsync(Settings n, string actor)
@@ -119,6 +124,8 @@ public class AccountingService(
             [K.FinancePrefixReceipt] = n.PrefixReceipt.Trim().ToUpperInvariant(),
             [K.FinancePrefixInvoice] = n.PrefixInvoice.Trim().ToUpperInvariant(),
             [K.FinancePrefixCorrection] = n.PrefixCorrection.Trim().ToUpperInvariant(),
+            [K.FinanceFakturowniaApprove] = n.FakturowniaApprove ? "true" : "false",
+            [K.FinanceFakturowniaAutoImport] = n.FakturowniaAutoImport ? "true" : "false",
         };
         await settings.SetManyAsync(values);
 
@@ -129,6 +136,8 @@ public class AccountingService(
         if (before.SellerName != n.SellerName.Trim() || before.SellerAddress != n.SellerAddress.Trim() || before.SellerTaxId != FinanceRules.CleanNip(n.SellerTaxId)) changes.Add("dane sprzedawcy");
         if (before.Vat != n.Vat) changes.Add($"VAT: {n.Vat}");
         if (before.Provider != n.Provider) changes.Add($"dokumenty: {(n.Provider == "fakturownia" ? "Fakturownia" : "Hantly")}");
+        if (before.FakturowniaApprove != n.FakturowniaApprove) changes.Add($"wysyłka do Fakturowni: {(n.FakturowniaApprove ? "po zatwierdzeniu" : "automatycznie")}");
+        if (before.FakturowniaAutoImport != n.FakturowniaAutoImport) changes.Add($"pobieranie z Fakturowni: {(n.FakturowniaAutoImport ? "automatycznie" : "ręcznie")}");
         if (before.AutoIssue != n.AutoIssue) changes.Add($"automatyczne dokumenty: {(n.AutoIssue ? "tak" : "nie")}");
         if (before.EmailDocs != n.EmailDocs) changes.Add($"wysyłka e-mailem: {(n.EmailDocs ? "tak" : "nie")}");
         if (before.QuarterLimit != n.QuarterLimit) changes.Add($"limit kwartalny: {(n.QuarterLimit is { } l ? FinanceRules.Money(l) : "domyślny")}");
@@ -233,6 +242,11 @@ public class AccountingService(
         "export" => "Eksport",
         "limit-alert" => "Powiadomienie o limicie",
         "buyer-data" => "Dane do faktury trenera",
+        "doc-approve" => "Zatwierdzenie wysyłki",
+        "doc-delete" => "Usunięcie dokumentu",
+        "doc-provider-delete" => "Usunięcie w Fakturowni",
+        "doc-import" => "Pobranie z Fakturowni",
+        "ledger-restore" => "Przywrócenie wpisu",
         _ => action
     };
 
@@ -278,7 +292,7 @@ public class AccountingService(
             List<int> waiting;
             await using (var db = await dbFactory.CreateDbContextAsync(ct))
                 waiting = await db.SalesLedger.AsNoTracking()
-                    .Where(l => l.Source == "payment" && l.DocumentId == null && l.PaymentRecordId != null && l.Date >= start)
+                    .Where(l => l.Source == "payment" && l.DocumentId == null && l.PaymentRecordId != null && l.Date >= start && !l.Excluded && !l.SkipDocument)
                     .OrderBy(l => l.Id).Select(l => l.PaymentRecordId!.Value).Take(200).ToListAsync(ct);
             foreach (var id in waiting)
             {
@@ -289,6 +303,16 @@ public class AccountingService(
         }
 
         var synced = await RetryPendingAsync(actor, ct);
+        if (s.FakturowniaAutoImport && s.FakturowniaConnected)
+        {
+            try
+            {
+                var (count, error) = await AutoImportAsync(s, actor, ct);
+                synced += count;
+                if (error is not null) errors.Add(error);
+            }
+            catch (Exception ex) { logger.LogWarning(ex, "Pobieranie z Fakturowni nie powiodło się."); }
+        }
         var emailed = s.EmailDocs ? await EmailWaitingAsync(actor, ct) : 0;
         try { await CheckLimitAlertAsync(); } catch (Exception ex) { logger.LogWarning(ex, "Sprawdzenie limitu nie powiodło się."); }
         return new(ledger, documents, synced, emailed, errors);
@@ -367,7 +391,7 @@ public class AccountingService(
         if (error is not null) return (null, error);
 
         var entry = await db.SalesLedger.FirstOrDefaultAsync(l => l.PaymentRecordId == p.Id && l.Source == "payment");
-        if (entry is not null) { entry.DocumentId = doc.Id; await db.SaveChangesAsync(); }
+        if (entry is not null) { entry.DocumentId = doc.Id; entry.SkipDocument = false; await db.SaveChangesAsync(); }
         if (emailNow && s.EmailDocs && doc.Status == SalesDocumentStatus.Issued) await EmailDocumentAsync(doc.Id, actor);
         return (doc, null);
     }
@@ -402,10 +426,13 @@ public class AccountingService(
         {
             doc.Status = SalesDocumentStatus.Pending;
             doc.Year = doc.IssueDate.Year;
-            db.SalesDocuments.Add(doc);
-            Log(db, actor, "doc-issue", "document", null, $"{SalesDocumentKinds.Label(doc.Kind)} dla {doc.BuyerName} na {FinanceRules.Money(doc.Gross)} — czeka na numer z Fakturowni");
+            doc.AwaitingApproval = s.FakturowniaApprove;
+            if (doc.Id == 0) db.SalesDocuments.Add(doc);
             await db.SaveChangesAsync();
-            await SendToProviderAsync(db, doc, original, actor);
+            Log(db, actor, "doc-issue", "document", doc.Id, $"{SalesDocumentKinds.Label(doc.Kind)} dla {doc.BuyerName} na {FinanceRules.Money(doc.Gross)} — "
+                + (doc.AwaitingApproval ? "czeka na zatwierdzenie przed wysłaniem do Fakturowni" : "wysyłamy do Fakturowni"));
+            await db.SaveChangesAsync();
+            if (!doc.AwaitingApproval) await SendToProviderAsync(db, doc, original, actor);
             return null;
         }
 
@@ -447,7 +474,7 @@ public class AccountingService(
             doc.ExternalError = null;
             doc.ExternalSyncedAt = DateTime.UtcNow;
             doc.Status = SalesDocumentStatus.Issued;
-            Log(db, actor, "doc-provider", "document", doc.Id, $"Fakturownia nadała numer {created.Number}");
+            Log(db, actor, "doc-provider", "document", doc.Id, $"Wysłano do Fakturowni — nadała numer {created.Number}");
         }
         else
         {
@@ -462,7 +489,7 @@ public class AccountingService(
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         var pending = await db.SalesDocuments.Include(d => d.Lines)
-            .Where(d => d.Status == SalesDocumentStatus.Pending && d.ExternalAttempts < MaxProviderAttempts).OrderBy(d => d.Id).Take(20).ToListAsync(ct);
+            .Where(d => d.Status == SalesDocumentStatus.Pending && !d.AwaitingApproval && d.ExternalAttempts < MaxProviderAttempts).OrderBy(d => d.Id).Take(20).ToListAsync(ct);
         var ok = 0;
         foreach (var doc in pending)
         {
@@ -481,8 +508,28 @@ public class AccountingService(
         await using var db = await dbFactory.CreateDbContextAsync();
         var doc = await db.SalesDocuments.Include(d => d.Lines).FirstOrDefaultAsync(d => d.Id == docId);
         if (doc is null || doc.Status != SalesDocumentStatus.Pending) return "Ten dokument nie czeka na Fakturownię.";
+        if (doc.AwaitingApproval)
+        {
+            doc.AwaitingApproval = false;
+            Log(db, actor, "doc-approve", "document", doc.Id, $"Zatwierdzono wysyłkę do Fakturowni ({doc.BuyerName}, {FinanceRules.Money(doc.Gross)})");
+        }
         await SendToProviderAsync(db, doc, null, actor);
         return doc.Status == SalesDocumentStatus.Issued ? null : doc.ExternalError;
+    }
+
+    /// <summary>„Zatwierdź i wyślij wszystkie” — dokumenty czekające na zatwierdzenie idą do Fakturowni.</summary>
+    public async Task<(int Sent, string? Error)> ApproveAllAsync(string actor)
+    {
+        List<int> ids;
+        await using (var db = await dbFactory.CreateDbContextAsync())
+            ids = await db.SalesDocuments.Where(d => d.Status == SalesDocumentStatus.Pending && d.AwaitingApproval).OrderBy(d => d.Id).Select(d => d.Id).ToListAsync();
+        var sent = 0; string? error = null;
+        foreach (var id in ids)
+        {
+            var e = await RetryProviderAsync(id, actor);
+            if (e is null) sent++; else error ??= e;
+        }
+        return (sent, error);
     }
 
     /// <summary>Fakturownia nie działa, a dokument jest potrzebny — numer z serii Hantly (dokument zostaje tylko w Hantly).</summary>
@@ -494,6 +541,7 @@ public class AccountingService(
         if (doc is null || doc.Status != SalesDocumentStatus.Pending) return "Ten dokument nie czeka na Fakturownię.";
         doc.Provider = "local";
         doc.ExternalError = null;
+        doc.AwaitingApproval = false;
         Log(db, actor, "doc-local", "document", doc.Id, "Numer z serii Hantly zamiast Fakturowni");
         return await SaveNewAsync(db, doc, s with { Provider = "local" }, actor, null);
     }
@@ -614,7 +662,7 @@ public class AccountingService(
         var error = await SaveNewAsync(db, doc, s, actor, original);
         if (error is not null) return (null, error);
 
-        var inLedger = await db.SalesLedger.AnyAsync(l => (original.PaymentRecordId != null && l.PaymentRecordId == original.PaymentRecordId) || l.DocumentId == original.Id);
+        var inLedger = await db.SalesLedger.AnyAsync(l => !l.Excluded && (original.PaymentRecordId != null && l.PaymentRecordId == original.PaymentRecordId) || l.DocumentId == original.Id);
         if (inLedger)
         {
             db.SalesLedger.Add(new SalesLedgerEntry
@@ -647,6 +695,234 @@ public class AccountingService(
         Log(db, actor, "doc-cancel", "document", doc.Id, $"{doc.Number}: {reason.Trim()}");
         await db.SaveChangesAsync();
         return null;
+    }
+
+    // ── Usuwanie (dokumenty testowe) ──
+
+    /// <summary>Co z ewidencją przy usuwaniu dokumentu: „exclude” — test, wyłącz z ewidencji; „keep” — sprzedaż prawdziwa, zostaje bez dokumentu.</summary>
+    public const string LedgerExclude = "exclude";
+    public const string LedgerKeep = "keep";
+
+    public sealed record DeleteResult(int Deleted, int DeletedInFakturownia, string? Error);
+
+    /// <summary>
+    /// Usuwa dokumenty (np. testowe) razem z ich korektami. Najpierw w Fakturowni (gdy zaznaczono) — jeśli Fakturownia odmówi,
+    /// w Hantly nic nie znika. Wpis w historii zmian zostaje na zawsze. Wpłata nie dostaje automatycznie nowego dokumentu.
+    /// </summary>
+    public async Task<DeleteResult> DeleteDocumentsAsync(IReadOnlyCollection<int> docIds, bool alsoInFakturownia, string ledger, string actor)
+    {
+        if (docIds.Count == 0) return new(0, 0, "Nie wybrano dokumentów.");
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var docs = await db.SalesDocuments.Include(d => d.Lines).Where(d => docIds.Contains(d.Id)).ToListAsync();
+        // Korekty usuwanych dokumentów idą razem z nimi (korekta bez dokumentu korygowanego nie ma sensu).
+        var ids = docs.Select(d => d.Id).ToList();
+        var corrections = await db.SalesDocuments.Include(d => d.Lines).Where(d => d.CorrectsId != null && ids.Contains(d.CorrectsId.Value) && !ids.Contains(d.Id)).ToListAsync();
+        var all = corrections.Concat(docs).ToList();
+        if (all.Count == 0) return new(0, 0, "Nie ma takich dokumentów.");
+
+        var remote = 0;
+        if (alsoInFakturownia)
+            foreach (var d in all.Where(d => d.ExternalId is not null))
+            {
+                var error = await fakturownia.DeleteAsync(d.ExternalId!);
+                if (error is not null)
+                {
+                    Log(db, actor, "doc-provider-error", "document", d.Id, $"Usuwanie {d.Number} w Fakturowni: {error}");
+                    await db.SaveChangesAsync();
+                    return new(0, remote, $"Fakturownia nie usunęła {d.Number}: {error} W Hantly nic nie zostało usunięte"
+                        + (remote > 0 ? $" (w Fakturowni usunięto już {remote})." : ".") + " Usuń go ręcznie w Fakturowni albo odznacz „usuń też w Fakturowni”.");
+                }
+                remote++;
+                Log(db, actor, "doc-provider-delete", "document", d.Id, $"Usunięto {d.Number} w Fakturowni");
+            }
+
+        var allIds = all.Select(d => d.Id).ToList();
+        var entries = await db.SalesLedger.Where(l => l.DocumentId != null && allIds.Contains(l.DocumentId.Value)).ToListAsync();
+        foreach (var e in entries)
+        {
+            var number = all.First(d => d.Id == e.DocumentId).Number;
+            e.DocumentId = null;
+            if (e.Source == "payment") e.SkipDocument = true;
+            if (ledger == LedgerExclude || e.Source == "correction")
+            {
+                e.Excluded = true;
+                e.ExcludedReason = Clip($"Usunięto dokument {(number.Length > 0 ? number : "bez numeru")}{(ledger == LedgerExclude ? " (test)" : " — korekta")}", 500);
+            }
+        }
+        foreach (var d in all)
+        {
+            Log(db, actor, "doc-delete", "document", d.Id,
+                $"{SalesDocumentKinds.Label(d.Kind)} {(d.Number.Length > 0 ? d.Number : "(bez numeru)")} · {d.BuyerName} · {FinanceRules.Money(d.Gross)}"
+                + (d.ExternalId is null ? "" : alsoInFakturownia ? " · usunięty też w Fakturowni" : " · w Fakturowni zostaje")
+                + (ledger == LedgerExclude ? " · wyłączony z ewidencji" : " · sprzedaż zostaje w ewidencji"));
+            db.SalesDocumentLines.RemoveRange(d.Lines);
+        }
+        db.SalesDocuments.RemoveRange(corrections);
+        await db.SaveChangesAsync();
+        db.SalesDocuments.RemoveRange(docs);
+        await db.SaveChangesAsync();
+        return new(all.Count, remote, null);
+    }
+
+    /// <summary>Wpisy wyłączone z ewidencji (po usunięciu dokumentów testowych) — do podglądu i przywrócenia.</summary>
+    public async Task<List<SalesLedgerEntry>> ExcludedEntriesAsync(int take = 100)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        return await db.SalesLedger.AsNoTracking().Where(l => l.Excluded).OrderByDescending(l => l.Date).ThenByDescending(l => l.Id).Take(take).ToListAsync();
+    }
+
+    public async Task<string?> RestoreEntryAsync(int entryId, string actor)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var e = await db.SalesLedger.FirstOrDefaultAsync(l => l.Id == entryId && l.Excluded);
+        if (e is null) return "Ten wpis nie jest wyłączony.";
+        e.Excluded = false;
+        e.ExcludedReason = null;
+        Log(db, actor, "ledger-restore", "ledger", e.Id, $"{e.Date:dd.MM.yyyy} {FinanceRules.Money(e.Amount)}: {e.Description}");
+        await db.SaveChangesAsync();
+        return null;
+    }
+
+    // ── Pobieranie z Fakturowni ──
+
+    public sealed record ImportCandidate(FakturowniaClient.RemoteDoc Doc, string State, int? TenantId, string? TenantName)
+    {
+        /// <summary>„new” — nowy dokument, „link” — nasz dokument czekał na numer, a w Fakturowni już jest (powiążemy), „exists” — już jest w Hantly.</summary>
+        public bool Importable => State is "new" or "link";
+    }
+
+    /// <summary>Podgląd: dokumenty z Fakturowni w okresie i czy są już w Hantly (nic nie zapisuje).</summary>
+    public async Task<(List<ImportCandidate>? List, string? Error)> PreviewImportAsync(DateOnly from, DateOnly to, CancellationToken ct = default)
+    {
+        var (remote, error) = await fakturownia.ListAsync(from, to, ct);
+        if (remote is null) return (null, error);
+        await using var db = await dbFactory.CreateDbContextAsync(ct);
+        var ids = remote.Select(r => r.Id).ToList();
+        var known = (await db.SalesDocuments.AsNoTracking().Where(d => d.ExternalId != null && ids.Contains(d.ExternalId)).Select(d => d.ExternalId!).ToListAsync(ct)).ToHashSet();
+        var tenants = await db.Tenants.AsNoTracking().Where(t => t.Status != TenantStatus.Destroyed)
+            .Select(t => new { t.Id, t.CompanyName, t.InvoiceTaxId, t.OwnerEmail, t.InvoiceEmail }).ToListAsync(ct);
+        var pendingOurs = await db.SalesDocuments.AsNoTracking().Where(d => d.Status == SalesDocumentStatus.Pending).Select(d => d.Id).ToListAsync(ct);
+        return (remote.OrderByDescending(r => r.IssueDate).Select(r =>
+        {
+            var state = known.Contains(r.Id) ? "exists"
+                : r.Oid is { } oid && oid.StartsWith("hantly-") && int.TryParse(oid[7..], out var ourId) && pendingOurs.Contains(ourId) ? "link" : "new";
+            var nip = r.BuyerTaxId is null ? "" : FinanceRules.CleanNip(r.BuyerTaxId);
+            var t = tenants.FirstOrDefault(t => nip.Length == 10 && t.InvoiceTaxId == nip)
+                ?? tenants.FirstOrDefault(t => r.BuyerEmail is not null && (string.Equals(t.InvoiceEmail, r.BuyerEmail, StringComparison.OrdinalIgnoreCase) || string.Equals(t.OwnerEmail, r.BuyerEmail, StringComparison.OrdinalIgnoreCase)));
+            return new ImportCandidate(r, state, t?.Id, t?.CompanyName);
+        }).ToList(), null);
+    }
+
+    /// <summary>
+    /// Zapisuje wybrane dokumenty z Fakturowni w Hantly (jeden rejestr wszystkich dokumentów). Do ewidencji dopisuje je
+    /// tylko na życzenie — sprzedaż z platformy już w niej jest, więc dopisanie jej drugi raz zawyżyłoby przychód i limit.
+    /// </summary>
+    public async Task<int> ImportAsync(IEnumerable<ImportCandidate> chosen, bool addToLedger, string actor)
+    {
+        var s = await GetSettingsAsync();
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var count = 0;
+        foreach (var c in chosen.Where(c => c.Importable))
+        {
+            var r = c.Doc;
+            if (await db.SalesDocuments.AnyAsync(d => d.ExternalId == r.Id)) continue;
+            if (c.State == "link" && int.TryParse(r.Oid![7..], out var ourId)
+                && await db.SalesDocuments.FirstOrDefaultAsync(d => d.Id == ourId && d.Status == SalesDocumentStatus.Pending) is { } ours)
+            {
+                // Fakturownia przyjęła dokument, ale odpowiedź do nas nie dotarła — wiążemy zamiast dublować.
+                ours.ExternalId = r.Id; ours.Number = r.Number; ours.ExternalUrl = r.ViewUrl; ours.ExternalError = null;
+                ours.AwaitingApproval = false; ours.Status = SalesDocumentStatus.Issued; ours.ExternalSyncedAt = DateTime.UtcNow;
+                Log(db, actor, "doc-import", "document", ours.Id, $"Powiązano z {r.Number} z Fakturowni (dokument już tam był)");
+                await db.SaveChangesAsync();
+                count++;
+                continue;
+            }
+            var kind = r.Kind switch
+            {
+                "bill" => SalesDocumentKinds.Receipt,
+                "correction" => SalesDocumentKinds.Correction,
+                _ => r.Lines.Any(l => int.TryParse(l.Tax, out var t) && t > 0) || r.Vat != 0 ? SalesDocumentKinds.InvoiceVat : SalesDocumentKinds.InvoiceExempt
+            };
+            int? corrects = r.CorrectsExternalId is { } ce ? await db.SalesDocuments.Where(d => d.ExternalId == ce).Select(d => (int?)d.Id).FirstOrDefaultAsync() : null;
+            var lines = r.Lines.Count > 0
+                ? r.Lines.Select(l =>
+                {
+                    var rate = int.TryParse(l.Tax, out var t) ? t.ToString() : l.Tax is "zw" or "np" ? l.Tax : "zw";
+                    var net = l.Net != 0 ? l.Net : FinanceRules.Split(l.Gross, rate).Net;
+                    return new SalesDocumentLine
+                    {
+                        Name = Clip(l.Name, 300), Quantity = l.Quantity, Unit = Clip(l.Unit, 16), VatRate = rate,
+                        UnitGross = l.Quantity != 0 ? Math.Round(l.Gross / l.Quantity, 2) : l.Gross, Gross = l.Gross, Net = net, Vat = l.Gross - net
+                    };
+                }).ToList()
+                : [new SalesDocumentLine { Name = Clip($"Dokument {r.Number}", 300), Gross = r.Gross, Net = r.Net, Vat = r.Vat, UnitGross = r.Gross }];
+            var doc = new SalesDocument
+            {
+                Kind = kind, Series = SalesDocumentKinds.SeriesOf(kind), Number = Clip(r.Number, 64), Year = r.IssueDate.Year, Seq = 0,
+                IssueDate = r.IssueDate, SaleDate = r.SaleDate, PaidDate = r.PaidDate, PaymentMethod = Clip(r.PaymentType, 40),
+                Mode = s.Configured ? s.ModeOn(r.SaleDate) : FinanceModes.Unregistered, Status = SalesDocumentStatus.Issued,
+                TenantId = c.TenantId, CorrectsId = corrects, CorrectionReason = kind == SalesDocumentKinds.Correction ? Clip(r.Description, 500) : null,
+                Seller = Clip(r.Seller, 1000), BuyerName = Clip(r.BuyerName, 300), BuyerAddress = r.BuyerAddress, BuyerTaxId = r.BuyerTaxId is null ? null : FinanceRules.CleanNip(r.BuyerTaxId),
+                BuyerEmail = r.BuyerEmail, Net = r.Net, Vat = r.Vat, Gross = r.Gross, Currency = r.Currency is { Length: 3 } cur ? cur : "PLN",
+                VatNote = Clip(r.ExemptNote, 300) is { Length: > 0 } vn ? vn : null, Note = kind == SalesDocumentKinds.Correction ? null : Clip(r.Description, 1000) is { Length: > 0 } dn ? dn : null,
+                Provider = "fakturownia", ExternalId = r.Id, ExternalUrl = r.ViewUrl, ExternalSyncedAt = DateTime.UtcNow,
+                CreatedBy = "import: Fakturownia", Lines = lines
+            };
+            db.SalesDocuments.Add(doc);
+            await db.SaveChangesAsync();
+            Log(db, actor, "doc-import", "document", doc.Id, $"Pobrano {SalesDocumentKinds.Label(kind).ToLowerInvariant()} {r.Number} z Fakturowni · {r.BuyerName} · {FinanceRules.Money(r.Gross)}");
+            if (addToLedger) AddImportedEntry(db, doc, actor);
+            await db.SaveChangesAsync();
+            count++;
+        }
+        return count;
+    }
+
+    private static void AddImportedEntry(PortalDbContext db, SalesDocument doc, string actor)
+    {
+        db.SalesLedger.Add(new SalesLedgerEntry
+        {
+            Date = doc.PaidDate ?? doc.SaleDate, Amount = doc.Gross, Source = "import", DocumentId = doc.Id, TenantId = doc.TenantId, CreatedBy = actor,
+            Description = Clip($"{doc.BuyerName} — {doc.Number} (Fakturownia)", 500)
+        });
+        Log(db, actor, "ledger-manual", "document", doc.Id, $"{FinanceRules.Money(doc.Gross)} z dokumentu {doc.Number} (Fakturownia)");
+    }
+
+    /// <summary>Dokument pobrany z Fakturowni → ewidencja (dla sprzedaży spoza platformy).</summary>
+    public async Task<string?> AddDocumentToLedgerAsync(int docId, string actor)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var doc = await db.SalesDocuments.FirstOrDefaultAsync(d => d.Id == docId);
+        if (doc is null || doc.Status != SalesDocumentStatus.Issued) return "Dokument nie jest wystawiony.";
+        if (await db.SalesLedger.AnyAsync(l => l.DocumentId == docId && !l.Excluded)
+            || (doc.PaymentRecordId != null && await db.SalesLedger.AnyAsync(l => l.PaymentRecordId == doc.PaymentRecordId && !l.Excluded)))
+            return "Ta sprzedaż już jest w ewidencji.";
+        AddImportedEntry(db, doc, actor);
+        await db.SaveChangesAsync();
+        return null;
+    }
+
+    /// <summary>Id dokumentów, których sprzedaż jest w ewidencji (do znaczka „spoza ewidencji”).</summary>
+    public async Task<HashSet<int>> DocumentsInLedgerAsync(IReadOnlyCollection<int> docIds)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var direct = await db.SalesLedger.AsNoTracking().Where(l => !l.Excluded && l.DocumentId != null && docIds.Contains(l.DocumentId.Value)).Select(l => l.DocumentId!.Value).ToListAsync();
+        var viaPayment = await db.SalesDocuments.AsNoTracking()
+            .Where(d => docIds.Contains(d.Id) && d.PaymentRecordId != null && db.SalesLedger.Any(l => !l.Excluded && l.PaymentRecordId == d.PaymentRecordId))
+            .Select(d => d.Id).ToListAsync();
+        return [.. direct, .. viaPayment];
+    }
+
+    /// <summary>Automatyczne pobieranie (bez ewidencji): od ostatniego pobrania (najwyżej 3 dni wstecz na spóźnione) do dziś.</summary>
+    private async Task<(int Count, string? Error)> AutoImportAsync(Settings s, string actor, CancellationToken ct)
+    {
+        var last = DateOnly.TryParseExact(await settings.GetAsync(K.FinanceFakturowniaImportedTo), "yyyy-MM-dd", CultureInfo.InvariantCulture, DateTimeStyles.None, out var d) ? d : (DateOnly?)null;
+        var from = (last ?? s.Start ?? Today).AddDays(-3);
+        var (list, error) = await PreviewImportAsync(from, Today, ct);
+        if (list is null) return (0, error);
+        var count = await ImportAsync(list.Where(c => c.Importable), addToLedger: false, actor);
+        await settings.SetAsync(K.FinanceFakturowniaImportedTo, Today.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+        return (count, null);
     }
 
     public async Task<(bool Ok, string? Error)> EmailDocumentAsync(int docId, string actor, string? to = null)
@@ -735,7 +1011,7 @@ public class AccountingService(
     public async Task<List<SalesLedgerEntry>> PaymentsWithoutDocumentAsync()
     {
         await using var db = await dbFactory.CreateDbContextAsync();
-        return await db.SalesLedger.AsNoTracking().Where(l => l.Source == "payment" && l.DocumentId == null)
+        return await db.SalesLedger.AsNoTracking().Where(l => l.Source == "payment" && l.DocumentId == null && !l.Excluded)
             .OrderByDescending(l => l.Date).Take(100).ToListAsync();
     }
 
@@ -748,7 +1024,7 @@ public class AccountingService(
     {
         await using var db = await dbFactory.CreateDbContextAsync();
         var monthStart = new DateOnly(from.Year, from.Month, 1);
-        var entries = await db.SalesLedger.AsNoTracking().Where(l => l.Date >= monthStart && l.Date <= to).OrderBy(l => l.Date).ThenBy(l => l.Id).ToListAsync();
+        var entries = await db.SalesLedger.AsNoTracking().Where(l => l.Date >= monthStart && l.Date <= to && !l.Excluded).OrderBy(l => l.Date).ThenBy(l => l.Id).ToListAsync();
         return BuildDays(entries).Where(d => d.Date >= from).ToList();
     }
 
@@ -880,7 +1156,7 @@ public class AccountingService(
     public sealed record Overview(Settings Settings, string ModeToday, QuarterView? Quarter, List<QuarterView> YearQuarters,
         decimal MonthRevenue, decimal YearRevenue, decimal YearCosts, decimal TaxReserve, VatView? Vat,
         int PendingDocs, int UnsentDocs, int PaymentsWithoutDoc, int ExpensesWithoutProof, DateTime? LastExport,
-        List<MonthBar> Months, List<Alert> Alerts)
+        List<MonthBar> Months, List<Alert> Alerts, int AwaitingApproval = 0)
     {
         public decimal YearIncome => YearRevenue - YearCosts;
     }
@@ -892,7 +1168,7 @@ public class AccountingService(
         await using var db = await dbFactory.CreateDbContextAsync();
         var yearStart = new DateOnly(today.Year, 1, 1);
         var yearEnd = new DateOnly(today.Year, 12, 31);
-        var raw = await db.SalesLedger.AsNoTracking().Where(l => l.Date >= yearStart && l.Date <= yearEnd)
+        var raw = await db.SalesLedger.AsNoTracking().Where(l => l.Date >= yearStart && l.Date <= yearEnd && !l.Excluded)
             .Select(l => new { l.Date, l.Amount, l.DocumentId }).ToListAsync();
         // Forma wpisu: z dokumentu (korekta sprzedaży sprzed założenia firmy zostaje przy działalności nierejestrowanej), inaczej z daty.
         var docIds = raw.Where(e => e.DocumentId != null).Select(e => e.DocumentId!.Value).Distinct().ToList();
@@ -939,9 +1215,10 @@ public class AccountingService(
             vat = new VatView(today.Year, limit, revenue, FinanceRules.Tone(revenue, limit));
         }
 
-        var pending = await db.SalesDocuments.CountAsync(d => d.Status == SalesDocumentStatus.Pending);
+        var pending = await db.SalesDocuments.CountAsync(d => d.Status == SalesDocumentStatus.Pending && !d.AwaitingApproval);
+        var awaiting = await db.SalesDocuments.CountAsync(d => d.Status == SalesDocumentStatus.Pending && d.AwaitingApproval);
         var unsent = await db.SalesDocuments.CountAsync(d => d.Status == SalesDocumentStatus.Issued && d.EmailedAt == null && d.BuyerEmail != null);
-        var noDoc = await db.SalesLedger.CountAsync(l => l.Source == "payment" && l.DocumentId == null);
+        var noDoc = await db.SalesLedger.CountAsync(l => l.Source == "payment" && l.DocumentId == null && !l.Excluded && !l.SkipDocument);
         var lastExportRaw = await settings.GetAsync(K.FinanceLastExportAt);
         DateTime? lastExport = DateTime.TryParse(lastExportRaw, CultureInfo.InvariantCulture, DateTimeStyles.AdjustToUniversal | DateTimeStyles.AssumeUniversal, out var le) ? le : null;
 
@@ -969,6 +1246,9 @@ public class AccountingService(
                 alerts.Add(new("info", "bi-calendar-check", "Sprawdź limit na ten rok", "Nie znamy płacy minimalnej na ten rok — liczymy z ostatniej znanej. Wpisz aktualny limit w ustawieniach.", "ustawienia"));
             if (vat is { } v && v.Revenue >= v.Limit * 0.8m)
                 alerts.Add(new(v.Tone, "bi-percent", $"Limit zwolnienia z VAT: {v.Percent}%", $"Sprzedaż w tym roku {FinanceRules.Money(v.Revenue)} z {FinanceRules.Money(v.Limit)}. Po przekroczeniu trzeba zarejestrować się do VAT — porozmawiaj z księgową.", null));
+            if (awaiting > 0)
+                alerts.Add(new("info", "bi-cloud-upload", $"{awaiting} {FinanceRules.Plural(awaiting, "dokument czeka", "dokumenty czekają", "dokumentów czeka")} na zatwierdzenie",
+                    $"Nic nie poszło jeszcze do Fakturowni ({s.FakturowniaDomain}.fakturownia.pl). Sprawdź i wyślij — albo usuń, jeśli to test.", "dokumenty"));
             if (pending > 0)
                 alerts.Add(new("warn", "bi-cloud-slash", $"{pending} dok. czeka na Fakturownię", "Fakturownia nie nadała numeru. Ponawiamy co jakiś czas — możesz ponowić ręcznie albo wystawić z numerem Hantly.", "dokumenty"));
             if (noDoc > 0)
@@ -981,7 +1261,7 @@ public class AccountingService(
 
         return new Overview(s, modeToday, current, quarters,
             entries.Where(e => e.Date >= monthStart).Sum(e => e.Amount), yearRevenue, yearCosts, reserve, vat,
-            pending, unsent, noDoc, costs.Count(c => !c.HasProof), lastExport, months, alerts);
+            pending, unsent, noDoc, costs.Count(c => !c.HasProof), lastExport, months, alerts, awaiting);
     }
 
     /// <summary>E-mail do administratora przy 80% i 100% limitu (raz na próg w kwartale).</summary>

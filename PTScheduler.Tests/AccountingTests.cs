@@ -306,6 +306,7 @@ public class AccountingTests
         await settings.SetAsync(K.FinanceProvider, "fakturownia");
         await settings.SetAsync(K.FinanceFakturowniaDomain, "hantly");
         await sp.GetRequiredService<FakturowniaClient>().SetTokenAsync("token-testowy");
+        await settings.SetAsync(K.FinanceFakturowniaApprove, "false");
 
         handler.Respond = _ => new HttpResponseMessage(HttpStatusCode.Created)
         { Content = new StringContent("""{"id":555,"number":"FV 3/10/2026","view_url":"https://hantly.fakturownia.pl/invoice/555"}""", Encoding.UTF8, "application/json") };
@@ -329,6 +330,138 @@ public class AccountingTests
         var local = await acc.GetDocumentAsync(pending.Id);
         local!.Number.Should().Be($"RACH/{Year}/0001");
         local.Provider.Should().Be("local");
+    }
+
+    private static async Task<(AccountingService Acc, IDbContextFactory<PortalDbContext> Db, Tenant Tenant, FakeHandler Handler)> BuildFakturowniaAsync()
+    {
+        var handler = new FakeHandler();
+        var (acc, db, tenant, sp) = await BuildAsync(handler);
+        var settings = sp.GetRequiredService<SiteSettingsService>();
+        await settings.SetAsync(K.FinanceProvider, "fakturownia");
+        await settings.SetAsync(K.FinanceFakturowniaDomain, "hantly");
+        await sp.GetRequiredService<FakturowniaClient>().SetTokenAsync("token-testowy");
+        var id = 700;
+        handler.Respond = r => r.Method == HttpMethod.Post
+            ? new HttpResponseMessage(HttpStatusCode.Created) { Content = new StringContent($$"""{"id":{{++id}},"number":"FV {{id}}/2026"}""", Encoding.UTF8, "application/json") }
+            : new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent("{}") };
+        return (acc, db, tenant, handler);
+    }
+
+    [Fact]
+    public async Task Fakturownia_waits_for_approval_by_default()
+    {
+        var (acc, db, tenant, handler) = await BuildFakturowniaAsync();
+        await AddPaymentAsync(db, tenant.Id, 99m, "Rachunek R/1");
+        await acc.SyncAsync();
+        await acc.SyncAsync();
+
+        handler.Calls.Should().BeEmpty("nic nie idzie do Fakturowni bez zatwierdzenia");
+        var doc = (await acc.DocumentsAsync(new AccountingService.DocumentFilter())).Single();
+        doc.AwaitingApproval.Should().BeTrue();
+        doc.Status.Should().Be(SalesDocumentStatus.Pending);
+        (await acc.OverviewAsync()).AwaitingApproval.Should().Be(1);
+
+        (await acc.ApproveAllAsync("admin")).Should().Be((1, (string?)null));
+        var sent = await acc.GetDocumentAsync(doc.Id);
+        sent!.Number.Should().Be("FV 701/2026");
+        sent.AwaitingApproval.Should().BeFalse();
+        handler.Calls.Should().Equal("POST /invoices.json");
+    }
+
+    [Fact]
+    public async Task Deleting_test_document_removes_it_in_fakturownia_and_excludes_the_sale()
+    {
+        var (acc, db, tenant, handler) = await BuildFakturowniaAsync();
+        await AddPaymentAsync(db, tenant.Id, 99m, "Rachunek R/1");
+        await acc.SyncAsync();
+        await acc.ApproveAllAsync("admin");
+        var doc = (await acc.DocumentsAsync(new AccountingService.DocumentFilter())).Single();
+        (await acc.CorrectAsync(doc.Id, 10m, "test", "admin")).Error.Should().BeNull();
+        await acc.ApproveAllAsync("admin");
+
+        var r = await acc.DeleteDocumentsAsync([doc.Id], alsoInFakturownia: true, AccountingService.LedgerExclude, "admin");
+        r.Error.Should().BeNull();
+        r.Deleted.Should().Be(2, "korekta znika razem z dokumentem");
+        r.DeletedInFakturownia.Should().Be(2);
+        handler.Calls.Where(c => c.StartsWith("DELETE")).Should().HaveCount(2);
+
+        (await acc.DocumentsAsync(new AccountingService.DocumentFilter())).Should().BeEmpty();
+        await acc.SyncAsync();
+        (await acc.DocumentsAsync(new AccountingService.DocumentFilter())).Should().BeEmpty("usunięty test nie wraca przy synchronizacji");
+        (await acc.OverviewAsync()).YearRevenue.Should().Be(0m);
+        (await acc.ExcludedEntriesAsync()).Should().HaveCount(2);
+        (await acc.HistoryAsync()).Count(e => e.Action == "doc-delete").Should().Be(2);
+
+        var payment = (await acc.ExcludedEntriesAsync()).Single(e => e.Source == "payment");
+        (await acc.RestoreEntryAsync(payment.Id, "admin")).Should().BeNull();
+        (await acc.OverviewAsync()).YearRevenue.Should().Be(99m);
+    }
+
+    [Fact]
+    public async Task Deleting_keeps_real_sale_and_stops_when_fakturownia_refuses()
+    {
+        var (acc, db, tenant, handler) = await BuildFakturowniaAsync();
+        await AddPaymentAsync(db, tenant.Id, 50m, "Rachunek R/1");
+        await acc.SyncAsync();
+        await acc.ApproveAllAsync("admin");
+        var doc = (await acc.DocumentsAsync(new AccountingService.DocumentFilter())).Single();
+
+        handler.Respond = _ => new HttpResponseMessage(HttpStatusCode.UnprocessableEntity) { Content = new StringContent("wysłana do KSeF") };
+        var refused = await acc.DeleteDocumentsAsync([doc.Id], true, AccountingService.LedgerKeep, "admin");
+        refused.Error.Should().Contain("KSeF").And.Contain("nic nie zostało usunięte");
+        (await acc.DocumentsAsync(new AccountingService.DocumentFilter())).Should().HaveCount(1);
+
+        (await acc.DeleteDocumentsAsync([doc.Id], false, AccountingService.LedgerKeep, "admin")).Error.Should().BeNull();
+        await acc.SyncAsync();
+        (await acc.DocumentsAsync(new AccountingService.DocumentFilter())).Should().BeEmpty("wpłata bez dokumentu nie dostaje go sama ponownie");
+        (await acc.OverviewAsync()).YearRevenue.Should().Be(50m);
+        (await acc.PaymentsWithoutDocumentAsync()).Should().HaveCount(1);
+    }
+
+    [Fact]
+    public async Task Import_from_fakturownia_links_ours_and_adds_new_ones()
+    {
+        var (acc, db, tenant, handler) = await BuildFakturowniaAsync();
+        (await acc.SaveBuyerAsync(tenant.Id, "Siłownia Jan", "ul. Długa 5\n00-950 Warszawa", "5260250995", null, "test")).Should().BeNull();
+        await AddPaymentAsync(db, tenant.Id, 99m, "Rachunek R/1");
+        await acc.SyncAsync(); // czeka na zatwierdzenie
+        var ours = (await acc.DocumentsAsync(new AccountingService.DocumentFilter())).Single();
+        var today = AccountingService.Today.ToString("yyyy-MM-dd");
+        var list = $$"""
+            [
+              {"id":901,"number":"FV 9/2026","kind":"vat","issue_date":"{{today}}","sell_date":"{{today}}","status":"paid","paid_date":"{{today}}",
+               "buyer_name":"Siłownia Jan","buyer_tax_no":"526-025-09-95","buyer_street":"ul. Długa 5","buyer_post_code":"00-950","buyer_city":"Warszawa",
+               "seller_name":"Patryk","price_net":"300.00","price_gross":"300.00","currency":"PLN","exempt_tax_kind":"art. 113",
+               "positions":[{"name":"Konsultacja","quantity":"2","total_price_gross":"300.00","total_price_net":"300.00","tax":"zw"}]},
+              {"id":902,"number":"FV 10/2026","kind":"vat","issue_date":"{{today}}","price_gross":"99.00","oid":"hantly-{{ours.Id}}","buyer_name":"Siłownia Jan","positions":[]},
+              {"id":903,"number":"PRO 1/2026","kind":"proforma","issue_date":"{{today}}","price_gross":"10.00","buyer_name":"X"}
+            ]
+            """;
+        handler.Respond = _ => new HttpResponseMessage(HttpStatusCode.OK) { Content = new StringContent(list, Encoding.UTF8, "application/json") };
+
+        var (preview, error) = await acc.PreviewImportAsync(AccountingService.Today.AddDays(-30), AccountingService.Today);
+        error.Should().BeNull();
+        preview!.Select(c => (c.Doc.Id, c.State)).Should().BeEquivalentTo(new[] { ("901", "new"), ("902", "link") }, "proformy pomijamy");
+        preview.Single(c => c.Doc.Id == "901").TenantId.Should().Be(tenant.Id);
+
+        (await acc.ImportAsync(preview, addToLedger: false, "admin")).Should().Be(2);
+        var docs = await acc.DocumentsAsync(new AccountingService.DocumentFilter());
+        docs.Should().HaveCount(2, "nasz dokument został powiązany, nie zdublowany");
+        var linked = docs.Single(d => d.Id == ours.Id);
+        linked.Number.Should().Be("FV 10/2026");
+        linked.Status.Should().Be(SalesDocumentStatus.Issued);
+        var imported = docs.Single(d => d.ExternalId == "901");
+        imported.Kind.Should().Be(SalesDocumentKinds.InvoiceExempt);
+        imported.BuyerAddress.Should().Be("ul. Długa 5\n00-950 Warszawa");
+        (await acc.GetDocumentAsync(imported.Id))!.Lines.Single().UnitGross.Should().Be(150m);
+
+        (await acc.DocumentsInLedgerAsync([imported.Id, linked.Id])).Should().BeEquivalentTo([linked.Id]);
+        (await acc.OverviewAsync()).YearRevenue.Should().Be(99m, "pobrane dokumenty nie wchodzą do ewidencji bez zgody");
+        (await acc.AddDocumentToLedgerAsync(imported.Id, "admin")).Should().BeNull();
+        (await acc.AddDocumentToLedgerAsync(imported.Id, "admin")).Should().NotBeNull();
+        (await acc.OverviewAsync()).YearRevenue.Should().Be(399m);
+
+        (await acc.PreviewImportAsync(AccountingService.Today.AddDays(-30), AccountingService.Today)).List!.Should().OnlyContain(c => c.State == "exists");
     }
 
     [Fact]
@@ -407,10 +540,12 @@ public class AccountingTests
     {
         public Func<HttpRequestMessage, HttpResponseMessage> Respond { get; set; } = _ => new HttpResponseMessage(HttpStatusCode.OK);
         public string? LastBody { get; private set; }
+        public List<string> Calls { get; } = [];
 
         protected override async Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, CancellationToken ct)
         {
             LastBody = request.Content is null ? null : await request.Content.ReadAsStringAsync(ct);
+            Calls.Add($"{request.Method} {request.RequestUri!.AbsolutePath}");
             return Respond(request);
         }
     }
