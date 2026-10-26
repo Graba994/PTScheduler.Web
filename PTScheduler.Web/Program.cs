@@ -382,6 +382,9 @@ app.Use(async (ctx, next) =>
         && !PTScheduler.Web.Services.AccountSwitchService.IsSwitched(ctx.User)
         // Wejście z Portalu: operator nie zna hasła tego konta i nie powinien go zmieniać za trenera.
         && !ctx.User.HasClaim(c => c.Type == PTScheduler.Web.Services.AccountSwitchService.PortalAdminClaim)
+        // Publiczne demo: goście wchodzą na konto pokazowe, a zmiana hasła jest tam zablokowana — bez tego
+        // wejście kończyło się na „Tego nie pokażemy w demo” i nie dało się nic kliknąć.
+        && !ctx.RequestServices.GetRequiredService<PTScheduler.Web.Services.PublicDemoService>().IsOn
         && HttpMethods.IsGet(ctx.Request.Method))
     {
         var path = ctx.Request.Path;
