@@ -406,7 +406,7 @@ public class StripeService(
                     Mode = "setup",
                     Customer = tenant.StripeCustomerId,
                     Currency = plan.Currency.ToLowerInvariant(),
-                    PaymentMethodTypes = ["card"],
+                    AllowedPaymentMethodTypes = ["card"],
                     SetupIntentData = new SessionSetupIntentDataOptions { Metadata = meta }
                 };
             }
