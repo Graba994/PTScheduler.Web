@@ -37,8 +37,6 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string StripeSecretKey = "stripe_secret_key";
         public const string StripePublishableKey = "stripe_publishable_key";
         public const string StripeWebhookSecret = "stripe_webhook_secret";
-        public const string StripeSuccessUrl = "stripe_success_url";
-        public const string StripeCancelUrl = "stripe_cancel_url";
         public const string BackupDir = "backup_dir";
         public const string BackupSchedule = "backup_schedule"; // "daily" | "off"
         public const string BackupRetentionDays = "backup_retention_days";

@@ -23,6 +23,7 @@ public class StripeService(
     IDbContextFactory<PortalDbContext> dbFactory,
     TenantService tenants,
     EmailService email,
+    IServiceProvider services,
     ILogger<StripeService> logger)
 {
     public async Task<bool> IsConfiguredAsync()
@@ -37,92 +38,6 @@ public class StripeService(
         if (string.IsNullOrWhiteSpace(key)) return null;
         StripeConfiguration.ApiKey = key;
         return key;
-    }
-
-    // Called from /register when the trainer picks a paid plan. Creates a
-    // Stripe Customer + Checkout Session with a subscription line, saves
-    // the ids on the tenant, and returns the URL to redirect to.
-    public async Task<(bool Success, string? CheckoutUrl, string? Error)> StartSubscriptionCheckoutAsync(
-        int tenantId, string interval)
-    {
-        var key = await ConfigureAsync();
-        if (key is null) return (false, null, "Stripe nie skonfigurowany.");
-
-        await using var db = dbFactory.CreateDbContext();
-        var tenant = await db.Tenants.Include(t => t.Plan).FirstOrDefaultAsync(t => t.Id == tenantId);
-        if (tenant is null) return (false, null, "Tenant nie istnieje.");
-
-        var priceId = interval == "yearly"
-            ? tenant.Plan?.StripeYearlyPriceId
-            : tenant.Plan?.StripeMonthlyPriceId;
-
-        if (string.IsNullOrWhiteSpace(priceId))
-            return (false, null, $"Plan '{tenant.PlanId}' nie ma Stripe Price ID ({interval}). Ustaw w /panel/plans.");
-
-        var settingsMap = await settings.GetAllAsync(
-            SiteSettingsService.Keys.StripeSuccessUrl,
-            SiteSettingsService.Keys.StripeCancelUrl);
-
-        var successUrl = string.IsNullOrWhiteSpace(settingsMap[SiteSettingsService.Keys.StripeSuccessUrl])
-            ? "https://your-portal.example.com/register/success?session_id={CHECKOUT_SESSION_ID}"
-            : settingsMap[SiteSettingsService.Keys.StripeSuccessUrl];
-        var cancelUrl = string.IsNullOrWhiteSpace(settingsMap[SiteSettingsService.Keys.StripeCancelUrl])
-            ? "https://your-portal.example.com/register/cancel"
-            : settingsMap[SiteSettingsService.Keys.StripeCancelUrl];
-
-        try
-        {
-            var customerService = new CustomerService();
-            string customerId = tenant.StripeCustomerId ?? "";
-            if (string.IsNullOrWhiteSpace(customerId))
-            {
-                var customer = await customerService.CreateAsync(new CustomerCreateOptions
-                {
-                    Email = tenant.OwnerEmail,
-                    Name = tenant.OwnerName,
-                    Metadata = new Dictionary<string, string>
-                    {
-                        ["tenantId"] = tenant.Id.ToString(),
-                        ["slug"] = tenant.Slug
-                    }
-                });
-                customerId = customer.Id;
-                tenant.StripeCustomerId = customerId;
-            }
-
-            var checkoutService = new SessionService();
-            var session = await checkoutService.CreateAsync(new SessionCreateOptions
-            {
-                Mode = "subscription",
-                Customer = customerId,
-                LineItems = new List<SessionLineItemOptions>
-                {
-                    new() { Price = priceId, Quantity = 1 }
-                },
-                SubscriptionData = new SessionSubscriptionDataOptions
-                {
-                    TrialPeriodDays = tenant.Plan?.TrialDays > 0 ? tenant.Plan.TrialDays : null,
-                    Metadata = new Dictionary<string, string>
-                    {
-                        ["tenantId"] = tenant.Id.ToString(),
-                        ["slug"] = tenant.Slug
-                    }
-                },
-                SuccessUrl = successUrl,
-                CancelUrl = cancelUrl,
-                AllowPromotionCodes = true
-            });
-
-            tenant.StripeCheckoutSessionId = session.Id;
-            await db.SaveChangesAsync();
-
-            return (true, session.Url, null);
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Stripe checkout session creation failed for tenant {Id}", tenantId);
-            return (false, null, ex.Message);
-        }
     }
 
     // Webhook handler — Stripe posts JSON events here. We only care about
@@ -176,6 +91,15 @@ public class StripeService(
 
     private async Task HandleCheckoutCompletedAsync(Session session)
     {
+        // Jednorazowe płatności sklepu i rachunków trenerów przychodzą tym samym webhookiem — w Stripe wystarczy
+        // jeden endpoint z jednym sekretem. StorePaymentService pobieramy leniwie (zależy od BillingService).
+        if (session.Metadata.TryGetValue("source", out var source) && source == "store")
+        {
+            if (session.Metadata.ContainsKey("orderGroupId"))
+                await services.GetRequiredService<StorePaymentService>().HandlePaymentConfirmationAsync("stripe", session.Id);
+            return;
+        }
+
         if (!session.Metadata.TryGetValue("tenantId", out var idStr)
             && session.SubscriptionId is null) return;
 
@@ -391,6 +315,12 @@ public class StripeService(
         if (plan.MonthlyPrice <= 0) return (true, null);
         try
         {
+            // Produkt z innego trybu (np. z sandboxa po przejściu na klucze live) nie istnieje — zakładamy nowy.
+            if (!string.IsNullOrWhiteSpace(plan.StripeProductId))
+            {
+                try { if ((await new ProductService().GetAsync(plan.StripeProductId)).Deleted == true) plan.StripeProductId = null; }
+                catch (StripeException ex) when (ex.StripeError?.Code == "resource_missing") { plan.StripeProductId = null; }
+            }
             if (string.IsNullOrWhiteSpace(plan.StripeProductId))
             {
                 var product = await new ProductService().CreateAsync(new ProductCreateOptions
@@ -422,7 +352,7 @@ public class StripeService(
             try
             {
                 var existing = await prices.GetAsync(priceId);
-                if (existing.Active && existing.UnitAmount == cents && existing.Recurring?.Interval == interval
+                if (existing.Active && existing.ProductId == productId && existing.UnitAmount == cents && existing.Recurring?.Interval == interval
                     && string.Equals(existing.Currency, currency, StringComparison.OrdinalIgnoreCase))
                     return priceId;
             }
