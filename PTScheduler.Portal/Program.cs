@@ -1026,14 +1026,15 @@ app.MapGet("/api/internal/tenants/{slug}/entitlements", async (
     string slug,
     HttpContext ctx,
     IDbContextFactory<PortalDbContext> dbFactory,
-    IConfiguration config) =>
+    IConfiguration config,
+    TenantService tenants) =>
 {
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
     if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
     var plan = await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == tenant.PlanId);
     if (plan is null) return Results.NotFound();
-    return Results.Content(TenantService.SerializeEntitlements(plan, await AddonService.ExtraLimitsAsync(db, tenant.Id)), "application/json");
+    return Results.Content(TenantService.SerializeEntitlements(plan, await AddonService.ExtraLimitsAsync(db, tenant.Id), await tenants.GarminOnAsync()), "application/json");
 });
 
 // „Zarządzaj subskrypcją” w aplikacji trenera: link do portalu klienta Stripe (karta, faktury, anulowanie).

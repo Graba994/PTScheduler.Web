@@ -50,9 +50,25 @@ else
             @if (c.PackageInfo is not null) { <span class="bs-chip"><i class="bi bi-ticket-perforated"></i>@c.PackageInfo</span> }
             @if (c.UnpaidAtTrainer) { <span class="bs-chip warn"><i class="bi bi-cash-coin"></i>Płatność u Ciebie</span> }
             @if (c.Number == 1 || c.Number % 10 == 0) { <span class="bs-chip good"><i class="bi bi-stars"></i>@(c.Number == 1 ? "Pierwszy trening" : $"{c.Number}. trening — pogratuluj!")</span> }
+            @if (c.Readiness is { } rd)
+            {
+                <span class="bs-chip @(rd.Level switch { PTScheduler.Domain.Rules.ReadinessRules.Level.Low => "warn", PTScheduler.Domain.Rules.ReadinessRules.Level.Good => "good", _ => "" })"><i class="bi bi-smartwatch"></i>Garmin: gotowość @PTScheduler.Domain.Rules.ReadinessRules.Label(rd.Level)</span>
+            }
         </div>
 
         <div class="bs-grid">
+            @if (c.Readiness is { } r)
+            {
+                <section class="bs-card @(r.Level == PTScheduler.Domain.Rules.ReadinessRules.Level.Low ? "bs-alert" : "")">
+                    <h2><i class="bi bi-smartwatch"></i>Zegarek — gotowość na dziś: @PTScheduler.Domain.Rules.ReadinessRules.Label(r.Level) (@r.Score/100)</h2>
+                    @if (r.Reasons.Count > 0)
+                    {
+                        <ul>@foreach (var why in r.Reasons) { <li>@why</li> }</ul>
+                    }
+                    <p class="small mb-1">@r.Suggestion</p>
+                    <p class="small text-muted mb-0">Dane: Garmin@(string.IsNullOrWhiteSpace(c.Device) ? "" : $" {c.Device}") · podpowiedź z reguł, o treningu decydujesz Ty.</p>
+                </section>
+            }
             @if (c.HealthNotes.Count > 0)
             {
                 <section class="bs-card bs-alert">

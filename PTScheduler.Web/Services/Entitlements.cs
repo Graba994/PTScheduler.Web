@@ -68,6 +68,10 @@ public class Entitlements
     // Program poleceń: domyślnie wyłączony — to płatny dodatek w wybranych planach.
     public bool ReferralProgram { get; set; }
 
+    // ── Zegarki klientów ─────────────────────────────────
+    // Garmin u klientów: plan ma „Zegarki klientów” i Garmin jest włączony globalnie w Portalu.
+    public bool Wearables { get; set; }
+
     // Fallback used when TENANT_ENTITLEMENTS isn't set — legacy behavior,
     // no limits, no locked modules.
     public static Entitlements Unlimited() => new()

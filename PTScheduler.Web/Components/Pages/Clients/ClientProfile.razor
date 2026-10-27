@@ -133,6 +133,7 @@ else if (client is not null)
                 @if (_age is int age) { <span class="cp-chip"><i class="bi bi-person"></i>@age lat</span> }
                 @if (client.TrustedForDeferredPayment) { <span class="cp-chip"><i class="bi bi-shield-check"></i>Zaufany</span> }
                 @if (_account is { LastLoginUtc: null }) { <span class="cp-chip muted"><i class="bi bi-phone"></i>Nie korzysta z aplikacji</span> }
+                @if (_garminConnected) { <button type="button" class="cp-chip cp-chip-garmin" @onclick='() => SelectTab("garmin")' title="Zegarek połączony — gotowość i aktywności"><i class="bi bi-smartwatch"></i>Garmin</button> }
             </div>
             @if (!string.IsNullOrWhiteSpace(client.TrainingGoal))
             {
@@ -1366,7 +1367,7 @@ else if (client is not null)
         .Where(s => !(s.Status == SessionStatus.Scheduled && s.EndTime >= StudioClock.Now))
         .OrderByDescending(s => s.StartTime).ToList() ?? [];
 
-    private bool _hasWearable;
+    private bool _hasWearable, _garminConnected;
 
     private IEnumerable<(string Key, string Icon, string Label, int Count)> Tabs()
     {
@@ -1389,7 +1390,13 @@ else if (client is not null)
         _progressionCount = 0; _unreadChat = 0; _lastClientMessage = null; _lastClientMessageAt = null;
 
         // Zegarek (Garmin): zakładka tylko u klientów, którzy go połączyli (albo mają z niego dane).
-        try { _hasWearable = await Wearables.LinkAsync(Id) is not null; } catch { _hasWearable = false; }
+        try
+        {
+            var link = Entitlements.IsAllowed("Wearables") ? await Wearables.LinkAsync(Id) : null;
+            _hasWearable = link is not null;
+            _garminConnected = link is { IsConnected: true };
+        }
+        catch { _hasWearable = _garminConnected = false; }
 
         // Każde źródło osobno: brak jednego (np. wyłączony moduł) nie psuje całego panelu.
         if (_plansOn)

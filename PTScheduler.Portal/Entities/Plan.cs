@@ -82,6 +82,10 @@ public class Plan
     // ── Marketing ─────────────────────────────────
     public bool ReferralProgram { get; set; }
 
+    // ── Zegarki klientów ─────────────────────────────────
+    /// <summary>Garmin Connect u klientów (gotowość przed wizytą, aktywności). Działa, gdy Garmin jest też włączony globalnie w Portalu.</summary>
+    public bool Wearables { get; set; }
+
     // Nigdy nie trafia do JSON-a uprawnień wysyłanego tenantom.
     [System.Text.Json.Serialization.JsonIgnore]
     public ICollection<Tenant> Tenants { get; set; } = [];

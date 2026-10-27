@@ -2,6 +2,7 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Admin,Trainer,Subordinate")]
 @inject IClientService ClientService
 @inject EntitlementService Entitlements
+@inject WearableService Wearables
 @inject NavigationManager Nav
 @inject AuthenticationStateProvider AuthState
 @inject PlatformAssistantService Assistant
@@ -113,7 +114,7 @@ else
                             }
                         </div>
                         <div class="flex-grow-1 overflow-hidden">
-                            <div class="fw-semibold text-truncate">@c.FullName</div>
+                            <div class="fw-semibold text-truncate">@c.FullName@if (_garmin.Contains(c.Id)) { <GarminBadge /> }</div>
                             <div class="text-muted small text-truncate">@c.Email</div>
                             @if (!string.IsNullOrEmpty(c.Phone))
                             {
@@ -297,9 +298,12 @@ else
         var isAdmin = auth.User.IsInRole(Roles.Admin);
         var trainerUserId = isAdmin ? null : auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value;
         clients = await ClientService.GetClientsAsync(trainerUserId);
+        if (Entitlements.IsAllowed("Wearables")) { try { _garmin = await Wearables.ConnectedClientIdsAsync(); } catch { } }
         _showImport = ImportQuery == 1;
     }
 
+    /// <summary>Klienci z połączonym zegarkiem Garmin (ikonka przy nazwisku).</summary>
+    private HashSet<int> _garmin = [];
     private string? _impText;
     private ImportTable? _impTable;
     private Dictionary<int, ImportField> _impMap = [];

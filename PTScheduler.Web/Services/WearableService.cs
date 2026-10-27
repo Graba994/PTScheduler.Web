@@ -209,18 +209,36 @@ public sealed class WearableService(IDbContextFactory<ApplicationDbContext> dbFa
     /// <summary>Gotowość kilku klientów naraz (ekran Dziś) — tylko z połączonym zegarkiem i świeżymi danymi.</summary>
     public async Task<Dictionary<int, ReadinessRules.Result>> ReadinessAsync(IReadOnlyCollection<int> clientIds)
     {
-        if (clientIds.Count == 0) return [];
         await using var db = await dbFactory.CreateDbContextAsync();
+        return await ReadinessAsync(db, clock.Today, clientIds);
+    }
+
+    /// <summary>Gotowość na <paramref name="today"/> dla klientów z połączonym zegarkiem i świeżymi danymi (bez „brak danych”).</summary>
+    public static async Task<Dictionary<int, ReadinessRules.Result>> ReadinessAsync(ApplicationDbContext db, DateOnly today, IReadOnlyCollection<int> clientIds)
+    {
+        if (clientIds.Count == 0) return [];
         var connected = await db.WearableLinks.AsNoTracking()
             .Where(l => clientIds.Contains(l.ClientId) && l.ConnectedAt != null && l.DisconnectedAt == null).Select(l => l.ClientId).ToListAsync();
         if (connected.Count == 0) return [];
-        var since = clock.Today.AddDays(-29);
+        var since = today.AddDays(-29);
         var rows = await db.WearableDays.AsNoTracking().Where(d => connected.Contains(d.ClientId) && d.Date >= since).ToListAsync();
         return rows.GroupBy(r => r.ClientId)
-            .Select(g => (g.Key, ReadinessRules.For(clock.Today, g.Select(ToReadinessDay).ToList())))
+            .Select(g => (g.Key, ReadinessRules.For(today, g.Select(ToReadinessDay).ToList())))
             .Where(x => x.Item2.Level != ReadinessRules.Level.Unknown)
             .ToDictionary(x => x.Key, x => x.Item2);
     }
+
+    /// <summary>Klienci z połączonym zegarkiem — do ikonki Garmina przy nazwisku.</summary>
+    public async Task<HashSet<int>> ConnectedClientIdsAsync()
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        return (await db.WearableLinks.AsNoTracking().Where(l => l.ConnectedAt != null && l.DisconnectedAt == null)
+            .Select(l => l.ClientId).ToListAsync()).ToHashSet();
+    }
+
+    /// <summary>Jedna linijka dla trenera: „Garmin: gotowość niska — krótki sen (5 h 10 min), HRV poniżej normy”.</summary>
+    public static string Line(ReadinessRules.Result r, int reasons = 2) =>
+        $"Garmin: gotowość {ReadinessRules.Label(r.Level)}" + (r.Reasons.Count > 0 && r.Level != ReadinessRules.Level.Good ? $" — {string.Join(", ", r.Reasons.Take(reasons))}" : "");
 
     public static ReadinessRules.Day ToReadinessDay(WearableDay d) =>
         new(d.Date, d.SleepMinutes, d.SleepScore, d.RestingHeartRate, d.HrvLastNight, d.BodyBatteryHigh);

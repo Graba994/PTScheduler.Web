@@ -904,9 +904,11 @@ app.MapPost("/internal/garmin/link", async (HttpContext ctx, PTScheduler.Web.Ser
     await wearables.SetLinkAsync(clientId, connected, r.TryGetProperty("deviceName", out var d) ? d.GetString() : null);
     return Results.Ok();
 });
-app.MapPost("/internal/garmin/data", async (HttpContext ctx, PTScheduler.Web.Services.WearableService wearables) =>
+app.MapPost("/internal/garmin/data", async (HttpContext ctx, PTScheduler.Web.Services.WearableService wearables, PTScheduler.Web.Services.EntitlementService ent) =>
 {
     if (!InternalSecretMatches(ctx)) return Results.NotFound();
+    // Plan bez „Zegarków klientów” (albo Garmin wyłączony w Portalu) — danych nie zapisujemy.
+    if (!ent.IsAllowed("Wearables")) return Results.Ok(new { saved = 0 });
     using var doc = await System.Text.Json.JsonDocument.ParseAsync(ctx.Request.Body);
     var r = doc.RootElement;
     if (!r.TryGetProperty("clientId", out var cid) || !cid.TryGetInt32(out var clientId)

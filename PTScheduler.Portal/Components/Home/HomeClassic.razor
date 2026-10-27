@@ -851,7 +851,8 @@
             SiteSettingsService.Keys.HeroBadge, SiteSettingsService.Keys.HeroTitle, SiteSettingsService.Keys.HeroSubtitle,
             SiteSettingsService.Keys.HeroCta, SiteSettingsService.Keys.HeroCtaUrl, SiteSettingsService.Keys.SectionTitle,
             SiteSettingsService.Keys.CtaTitle, SiteSettingsService.Keys.CtaSubtitle, SiteSettingsService.Keys.CtaButton,
-            SiteSettingsService.Keys.DemoEnabled);
+            SiteSettingsService.Keys.DemoEnabled, SiteSettingsService.Keys.GarminEnabled);
+        _garmin = _settings.GetValueOrDefault(SiteSettingsService.Keys.GarminEnabled) == "true";
 
         _trainers = await FeaturedTrainers.LoadAsync(Settings);
 
@@ -868,5 +869,6 @@
     private string _s(string key, string fallback = "") =>
         _settings.TryGetValue(key, out var val) && !string.IsNullOrWhiteSpace(val) ? val : fallback;
 
-    private static IEnumerable<(string Label, bool Included)> PlanFeatures(Plan p) => HomeShared.PlanFeatures(p);
+    private bool _garmin;
+    private IEnumerable<(string Label, bool Included)> PlanFeatures(Plan p) => HomeShared.PlanFeatures(p, _garmin);
 }

@@ -1,6 +1,7 @@
 @page "/my/garmin"
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Client")]
 @inject PTScheduler.Web.Services.WearableService Wearables
+@inject PTScheduler.Web.Services.EntitlementService Entitlements
 @inject IClientService ClientService
 @inject AuthenticationStateProvider AuthState
 @inject NavigationManager Nav
@@ -32,6 +33,10 @@
     else if (_clientId == 0)
     {
         <div class="alert alert-info">Ta strona jest dla klientów trenera.</div>
+    }
+    else if (!_allowed)
+    {
+        <div class="alert alert-secondary">Łączenie zegarka nie jest dostępne w tej aplikacji.</div>
     }
     else if (_link is { IsConnected: true })
     {
@@ -107,18 +112,21 @@
     private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
     private int _clientId;
     private bool _loading = true, _available, _consent, _busy, _confirmOff, _deleteData, _messageOk;
+    /// <summary>Plan studia ma „Zegarki klientów”, a Garmin jest włączony w Portalu — inaczej klient nic nie widzi.</summary>
+    private bool _allowed;
     private string? _message;
     private PTScheduler.Domain.Entities.WearableLink? _link;
     private PTScheduler.Web.Services.WearableService.Summary? _summary;
 
     protected override async Task OnInitializedAsync()
     {
+        _allowed = Entitlements.IsAllowed("Wearables");
         var user = (await AuthState.GetAuthenticationStateAsync()).User;
         var client = await ClientService.GetClientByUserIdAsync(user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "");
         if (client is not null)
         {
             _clientId = client.Id;
-            await LoadAsync();
+            if (_allowed) await LoadAsync();
         }
         (_message, _messageOk) = Result switch
         {

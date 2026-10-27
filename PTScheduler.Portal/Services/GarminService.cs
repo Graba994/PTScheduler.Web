@@ -36,18 +36,22 @@ public sealed class GarminService(
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(20) };
     private IDataProtector Secrets => dataProtection.CreateProtector("garmin-secrets");
 
-    public sealed record Config(string ClientId, bool HasSecret, string PushKey)
+    /// <param name="On">Globalny włącznik (Portal). Wyłączony — klienci nie widzą Garmina, dane z Garmina są pomijane.</param>
+    public sealed record Config(string ClientId, bool HasSecret, string PushKey, bool On)
     {
-        public bool Enabled => ClientId.Length > 0 && HasSecret;
+        /// <summary>Klucze aplikacji wpisane.</summary>
+        public bool HasKeys => ClientId.Length > 0 && HasSecret;
+        /// <summary>Klient może połączyć zegarek: włącznik i klucze.</summary>
+        public bool Enabled => On && HasKeys;
     }
 
     public async Task<Config> ConfigAsync()
     {
-        var s = await settings.GetAllAsync(K.GarminClientId, K.GarminClientSecret, K.GarminPushKey);
+        var s = await settings.GetAllAsync(K.GarminClientId, K.GarminClientSecret, K.GarminPushKey, K.GarminEnabled);
         var key = s[K.GarminPushKey];
         // Klucz w adresie odbioru danych powstaje od razu — adres można wkleić do Garmina jeszcze przed kluczami aplikacji.
         if (string.IsNullOrWhiteSpace(key)) await settings.SetAsync(K.GarminPushKey, key = NewKey(24));
-        return new(s[K.GarminClientId].Trim(), !string.IsNullOrWhiteSpace(s[K.GarminClientSecret]), key);
+        return new(s[K.GarminClientId].Trim(), !string.IsNullOrWhiteSpace(s[K.GarminClientSecret]), key, s[K.GarminEnabled] == "true");
     }
 
     public async Task SaveConfigAsync(string clientId, string? secret)
@@ -56,6 +60,13 @@ public sealed class GarminService(
         if (!string.IsNullOrWhiteSpace(secret)) values[K.GarminClientSecret] = Secrets.Protect(secret.Trim());
         if (string.IsNullOrWhiteSpace(await settings.GetAsync(K.GarminPushKey))) values[K.GarminPushKey] = NewKey(24);
         await settings.SetManyAsync(values);
+    }
+
+    /// <summary>Globalny włącznik: zapis i od razu nowe uprawnienia do wszystkich studiów (pokaż / ukryj Garmina u klientów).</summary>
+    public async Task<(int Pushed, int Total)> SetOnAsync(bool on)
+    {
+        await settings.SetAsync(K.GarminEnabled, on ? "true" : "false");
+        return await tenants.PushAllEntitlementsAsync();
     }
 
     public string PortalUrl => PortalUrls.Public(config);
@@ -82,7 +93,8 @@ public sealed class GarminService(
     public async Task<(string? Url, string? Error)> StartAsync(Tenant tenant, int clientId, string? returnPath)
     {
         var cfg = await ConfigAsync();
-        if (!cfg.Enabled) return (null, "Garmin nie jest jeszcze włączony na platformie.");
+        if (!cfg.On) return (null, "Łączenie z Garminem jest teraz wyłączone.");
+        if (!cfg.HasKeys) return (null, "Garmin nie jest jeszcze gotowy na platformie — spróbuj wkrótce.");
         if (await ActiveConnectionsAsync() >= StarterLimit) return (null, "Osiągnęliśmy limit połączeń z Garminem — napisz do nas, zwiększymy go.");
         var verifier = NewKey(64);
         var state = NewKey(32);
@@ -261,6 +273,13 @@ public sealed class GarminService(
         await using var db = await dbFactory.CreateDbContextAsync(ct);
         await db.GarminInbox.Where(i => i.ProcessedAt != null && i.ProcessedAt < DateTime.UtcNow.AddDays(-7)).ExecuteDeleteAsync(ct);
         var items = await db.GarminInbox.Where(i => i.ProcessedAt == null && i.Attempts < 12).OrderBy(i => i.Id).Take(25).ToListAsync(ct);
+        if (items.Count > 0 && !(await ConfigAsync()).On)
+        {
+            // Garmin wyłączony globalnie: nie przekazujemy danych do studiów (klienci nie widzą Garmina).
+            foreach (var item in items) { item.ProcessedAt = DateTime.UtcNow; item.Error = "Garmin wyłączony — dane pominięte."; }
+            await db.SaveChangesAsync(ct);
+            return 0;
+        }
         var done = 0;
         foreach (var item in items)
         {

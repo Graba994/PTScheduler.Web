@@ -273,6 +273,40 @@
     </div>
 </section>
 
+@if (_garmin && _plans.Any(p => p.Wearables))
+{
+    <!-- ZEGARKI KLIENTÓW: Garmin -->
+    <section class="ld-section ld-garmin" id="garmin" aria-labelledby="ld-garmin-title">
+        <div class="lp-container ld-garmin-grid">
+            <div class="ld-garmin-copy">
+                <div class="lp-eyebrow">Zegarki klientów · Garmin</div>
+                <h2 id="ld-garmin-title">Wiesz, w jakiej formie klient przyjdzie, <span class="ld-grad">zanim wejdzie na salę.</span></h2>
+                <p>Klient łączy zegarek Garmin jednym kliknięciem. Sen, tętno spoczynkowe, HRV i Body Battery trafiają do Twojej aplikacji — a ta przed treningiem podpowiada, czy to dzień na rekord, czy na lżejszą jednostkę.</p>
+                <ul class="ld-checks">
+                    <li><i class="bi bi-battery-half"></i><span><b>Gotowość na dziś przy każdej wizycie.</b> Na ekranie Dziś, w karcie przed treningiem i w porannym briefie — z powodami, np. „krótki sen, HRV poniżej normy”.</span></li>
+                    <li><i class="bi bi-heart-pulse"></i><span><b>Tętno z treningu przy wizycie.</b> Aktywność z zegarka sama dopina się do wizyty w aplikacji.</span></li>
+                    <li><i class="bi bi-graph-up-arrow"></i><span><b>Całość, nie tylko godzina w studiu.</b> Biegi, rower i kroki między treningami — w karcie klienta.</span></li>
+                    <li><i class="bi bi-shield-check"></i><span><b>Za zgodą klienta, bez zgadywania.</b> Klient sam łączy i odłącza zegarek; do AI trafiają tylko liczby, nigdy imię.</span></li>
+                </ul>
+                @if (GarminPlans.Length > 0)
+                {
+                    <p class="ld-garmin-plans"><i class="bi bi-tags"></i>W planach: <b>@GarminPlans</b></p>
+                }
+            </div>
+            <div class="ld-garmin-card" aria-hidden="true">
+                <div class="ld-garmin-head"><i class="bi bi-smartwatch"></i><span><small>Gotowość na dziś</small><b>Marta · niska</b></span><em>42/100</em></div>
+                <ul>
+                    <li>krótki sen (5 h 10 min)</li>
+                    <li>tętno spoczynkowe +7 względem normy</li>
+                    <li>HRV poniżej normy (38 ms, zwykle 52)</li>
+                </ul>
+                <p><i class="bi bi-lightbulb"></i>Rozważ lżejszy trening — na początku zapytaj o samopoczucie.</p>
+                <div class="ld-garmin-attr">Dane: Garmin Forerunner 265</div>
+            </div>
+        </div>
+    </section>
+}
+
 <!-- TWOJA MARKA: szablony stron -->
 <section class="lp-section lp-section-alt" id="szablony">
     <div class="lp-container">
@@ -356,7 +390,7 @@
             @for (var i = 0; i < mainPlans.Count; i++)
             {
                 var plan = mainPlans[i];
-                var (lead, points) = HomeShared.Highlights(plan, i == 0 ? null : mainPlans[i - 1]);
+                var (lead, points) = HomeShared.Highlights(plan, i == 0 ? null : mainPlans[i - 1], garmin: _garmin);
                 <div class="lp-price @(plan.IsFeatured ? "featured" : "")">
                     @if (plan.IsFeatured)
                     {
@@ -398,7 +432,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var row in HomeShared.CompareRows)
+                            @foreach (var row in HomeShared.CompareRows.Where(r => _garmin || r.Label != HomeShared.GarminLabel))
                             {
                                 <tr>
                                     <th scope="row">@row.Label</th>
@@ -472,6 +506,9 @@
 
 @code {
     private Dictionary<string, string> _settings = new();
+    /// <summary>Garmin włączony globalnie w Portalu — wtedy sekcja o zegarkach i pozycja w cenniku.</summary>
+    private bool _garmin;
+    private string GarminPlans => string.Join(", ", _plans.Where(p => p.Wearables).Select(p => p.Name));
     private List<Plan> _plans = [];
     private List<AppFeedback> _reviews = [];
     private int _activeTrainers;
@@ -595,7 +632,8 @@
         _settings = await Settings.GetAllAsync(
             SiteSettingsService.Keys.HeroTitle, SiteSettingsService.Keys.HeroSubtitle, SiteSettingsService.Keys.HeroCta,
             SiteSettingsService.Keys.HeroCtaUrl, SiteSettingsService.Keys.CtaTitle, SiteSettingsService.Keys.CtaSubtitle,
-            SiteSettingsService.Keys.CtaButton, SiteSettingsService.Keys.DemoEnabled);
+            SiteSettingsService.Keys.CtaButton, SiteSettingsService.Keys.DemoEnabled, SiteSettingsService.Keys.GarminEnabled);
+        _garmin = _settings.GetValueOrDefault(SiteSettingsService.Keys.GarminEnabled) == "true";
 
         await using var db = DbFactory.CreateDbContext();
         _reviews = await db.AppFeedbacks.AsNoTracking()

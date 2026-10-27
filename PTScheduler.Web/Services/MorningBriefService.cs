@@ -29,6 +29,7 @@ public class MorningBriefService(
     IBrandingService branding,
     IAppClock clock,
     IHttpClientFactory httpFactory,
+    EntitlementService entitlements,
     ILogger<MorningBriefService> logger)
 {
     private static readonly CultureInfo Pl = CultureInfo.GetCultureInfo("pl-PL");
@@ -68,6 +69,11 @@ public class MorningBriefService(
             .Select(g => new { g.Key, Flags = g.OrderByDescending(r => r.SubmittedAt).First().FlagCount })
             .ToDictionaryAsync(g => g.Key, g => g.Flags);
 
+        // Gotowość z zegarków (Garmin): przy wizycie klienta z niską albo średnią gotowością — krótki powód.
+        var ready = entitlements.IsAllowed("Wearables")
+            ? await WearableService.ReadinessAsync(db, DateOnly.FromDateTime(today), clientIds)
+            : [];
+
         var lines = new List<SessionLine>();
         var nth = new Dictionary<int, int>();
         foreach (var s in sessions)
@@ -81,6 +87,8 @@ public class MorningBriefService(
             if (s.OffPackagePayment == "trainer" && s.PaidAt is null) flags.Add("płatność u Ciebie");
             if (s.PackageLeft is 1) flags.Add("ostatnie wejście w pakiecie");
             if (healthFlags.GetValueOrDefault(s.ClientId) > 0) flags.Add("uwagi w ankiecie zdrowotnej");
+            if (ready.TryGetValue(s.ClientId, out var r) && r.Level != PTScheduler.Domain.Rules.ReadinessRules.Level.Good)
+                flags.Add(WearableService.Line(r, 1));
             lines.Add(new(s.StartTime, s.Client.Trim(), s.Type, flags));
         }
 

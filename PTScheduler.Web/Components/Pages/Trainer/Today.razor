@@ -76,6 +76,8 @@
                         if (todo != active.Count) { <span><b>@todo</b> do zrobienia</span> }
                         if (unpaid > 0) { <span class="warn"><b>@unpaid</b> płatność na miejscu</span> }
                         if (health > 0) { <span class="warn"><b>@health</b> z uwagami zdrowotnymi</span> }
+                        var tired = active.Select(v => v.S.ClientId).Distinct().Count(id => _ready.TryGetValue(id, out var rr) && rr.Level == PTScheduler.Domain.Rules.ReadinessRules.Level.Low);
+                        if (tired > 0) { <span class="warn" title="Gotowość z zegarków Garmin — szczegóły przy wizycie"><i class="bi bi-smartwatch me-1"></i><b>@tired</b> z niską gotowością</span> }
                     }
                 </div>
             </div>
@@ -149,7 +151,7 @@
                     <div class="td-body">
                         @if (isNext) { <CountdownChip Start="s.StartTime" End="s.EndTime" /> }
                         <div class="td-who">
-                            <a class="td-name" href="@($"/clients/{s.ClientId}")">@s.DisplayName</a>
+                            <a class="td-name" href="@($"/clients/{s.ClientId}")">@s.DisplayName</a>@if (_garmin.Contains(s.ClientId)) { <GarminBadge /> }
                             <span class="td-status">@StatusText(s.Status)</span>
                         </div>
                         <div class="td-meta">
@@ -252,6 +254,7 @@
     private int? _rebookConflict;
     private bool _drafting;
     private Dictionary<int, PTScheduler.Domain.Rules.ReadinessRules.Result> _ready = [];
+    private HashSet<int> _garmin = [];
 
     private string DayTitle => _day == _today ? "Dziś" : _day == _today.AddDays(1) ? "Jutro" : _day == _today.AddDays(-1) ? "Wczoraj" : "Dzień";
     private static string DayHref(DateOnly d) => $"/dzis?d={d:yyyy-MM-dd}";
@@ -317,9 +320,14 @@
         // Karty wizyt (te same co „przed treningiem”) — równolegle, każda z własnym kontekstem bazy.
         var todo = _visits.Where(v => v.S.Status != SessionStatus.Cancelled).ToList();
         // Gotowość z zegarka (Garmin) tylko na dziś — wczorajszy sen nic nie mówi o wizycie za tydzień.
-        if (_day == _today)
+        if (Entitlements.IsAllowed("Wearables"))
         {
-            try { _ready = await Wearables.ReadinessAsync(todo.Select(v => v.S.ClientId).Distinct().ToList()); } catch { _ready = []; }
+            try
+            {
+                _garmin = await Wearables.ConnectedClientIdsAsync();
+                if (_day == _today) _ready = await Wearables.ReadinessAsync(todo.Select(v => v.S.ClientId).Distinct().ToList());
+            }
+            catch { _ready = []; }
         }
         await Task.WhenAll(todo.Select(async v =>
         {
@@ -386,6 +394,8 @@
         if (back > 0) parts.Add(back == 1 ? "Jedna osoba wraca po dłuższej przerwie." : $"{back} osoby wracają po przerwie.");
         if (health > 0) parts.Add(health == 1 ? "Jedna osoba ma uwagi zdrowotne." : $"Uwagi zdrowotne: {health} osoby.");
         if (unpaid > 0) parts.Add(unpaid == 1 ? "Jedną płatność odbierasz na miejscu." : $"Płatności na miejscu: {unpaid}.");
+        var tired = active.Select(v => v.S.ClientId).Distinct().Count(id => _ready.TryGetValue(id, out var r) && r.Level == PTScheduler.Domain.Rules.ReadinessRules.Level.Low);
+        if (tired > 0) parts.Add(tired == 1 ? "Zegarek pokazuje u jednej osoby niską gotowość — rozważ lżejszy trening." : $"Niska gotowość z zegarków: {tired} {AssistantTipsService.Plural(tired, "osoba", "osoby", "osób")} — szczegóły przy wizytach.");
         var rules = string.Join(" ", parts);
         if (config?.Ai != true) return rules;
         var facts = new Dictionary<string, string>
@@ -398,6 +408,7 @@
             ["powroty_po_przerwie"] = back.ToString(),
             ["uwagi_zdrowotne"] = health.ToString(),
             ["platnosci_na_miejscu"] = unpaid.ToString(),
+            ["niska_gotowosc_z_zegarka"] = tired.ToString(),
         };
         try { return await Assistant.PhraseAsync($"day-{_userId}-{_day:yyyyMMdd}", "dzien_trenera", facts, rules, true); }
         catch { return rules; }

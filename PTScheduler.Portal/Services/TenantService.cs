@@ -524,7 +524,8 @@ public class TenantService(
     /// Uprawnienia instancji = plan + aktywne dodatki miesięczne (więcej transferu
     /// i przestrzeni wideo). Wartości „bez limitu” zostają bez zmian.
     /// </summary>
-    public static string SerializeEntitlements(Plan plan, ExtraLimits extra)
+    /// <param name="garminOn">Globalny włącznik Garmina w Portalu — zegarki u klientów tylko, gdy włączone i plan je ma.</param>
+    public static string SerializeEntitlements(Plan plan, ExtraLimits extra, bool garminOn = false)
     {
         var node = System.Text.Json.Nodes.JsonNode.Parse(SerializePlan(plan))!.AsObject();
         static int Add(int baseValue, int extra) =>
@@ -538,13 +539,26 @@ public class TenantService(
         // SMS z oferty dokładają się do limitu planu; gratisowe albo dokupione SMS-y włączają przypomnienia SMS.
         node["maxSmsPerMonth"] = Add(plan.SmsReminders ? plan.MaxSmsPerMonth : 0, extra.SmsPerMonth);
         node["smsReminders"] = plan.SmsReminders || extra.SmsPerMonth > 0 || extra.HasSmsCredits;
+        node["wearables"] = plan.Wearables && garminOn;
         return node.ToJsonString();
     }
 
     public async Task<string> EntitlementsJsonAsync(int tenantId, Plan plan)
     {
         await using var db = dbFactory.CreateDbContext();
-        return SerializeEntitlements(plan, await AddonService.ExtraLimitsAsync(db, tenantId));
+        return SerializeEntitlements(plan, await AddonService.ExtraLimitsAsync(db, tenantId), await GarminOnAsync());
+    }
+
+    public async Task<bool> GarminOnAsync() => await settings.GetAsync(SiteSettingsService.Keys.GarminEnabled) == "true";
+
+    /// <summary>Uprawnienia do wszystkich studiów (np. po przełączeniu globalnego włącznika Garmina).</summary>
+    public async Task<(int Pushed, int Total)> PushAllEntitlementsAsync()
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var tenants = await db.Tenants.AsNoTracking().Where(t => t.Status == TenantStatus.Active).ToListAsync();
+        var plans = await db.Plans.AsNoTracking().ToDictionaryAsync(p => p.Id);
+        var results = await Task.WhenAll(tenants.Where(t => plans.ContainsKey(t.PlanId)).Select(t => PushEntitlementsAsync(t, plans[t.PlanId])));
+        return (results.Count(ok => ok), tenants.Count);
     }
 
     public static string SerializePlan(Plan plan) =>

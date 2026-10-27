@@ -145,6 +145,33 @@ public class GarminTests
         PTScheduler.Portal.Services.GarminService.SafePath("//zly.pl").Should().Be("/garmin");
     }
 
+    [Fact]
+    public void Wearables_entitlement_needs_plan_flag_and_global_switch()
+    {
+        static bool Wearables(string json) => JsonDocument.Parse(json).RootElement.GetProperty("wearables").GetBoolean();
+        var pro = new PTScheduler.Portal.Entities.Plan { Id = "pro", Name = "Pro", Wearables = true };
+        var start = new PTScheduler.Portal.Entities.Plan { Id = "start", Name = "Start", Wearables = false };
+        var none = PTScheduler.Portal.Services.ExtraLimits.None;
+        Wearables(PTScheduler.Portal.Services.TenantService.SerializeEntitlements(pro, none, garminOn: true)).Should().BeTrue();
+        Wearables(PTScheduler.Portal.Services.TenantService.SerializeEntitlements(pro, none, garminOn: false)).Should().BeFalse("wyłączony globalnie — klienci nic nie widzą");
+        Wearables(PTScheduler.Portal.Services.TenantService.SerializeEntitlements(start, none, garminOn: true)).Should().BeFalse("plan bez zegarków");
+
+        // Aplikacja studia czyta flagę z JSON-a uprawnień (camelCase) i ukrywa Garmina, gdy jej nie ma.
+        var ent = JsonSerializer.Deserialize<PTScheduler.Web.Services.Entitlements>(
+            PTScheduler.Portal.Services.TenantService.SerializeEntitlements(pro, none, garminOn: true),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+        ent.Wearables.Should().BeTrue();
+    }
+
+    [Fact]
+    public void Readiness_line_for_trainer()
+    {
+        var low = new ReadinessRules.Result(ReadinessRules.Level.Low, 30, ["krótki sen (5 h 10 min)", "HRV poniżej normy (38 ms, zwykle 52)", "niska Body Battery (34)"], "");
+        WearableService.Line(low).Should().Be("Garmin: gotowość niska — krótki sen (5 h 10 min), HRV poniżej normy (38 ms, zwykle 52)");
+        WearableService.Line(low, 1).Should().Be("Garmin: gotowość niska — krótki sen (5 h 10 min)");
+        WearableService.Line(new ReadinessRules.Result(ReadinessRules.Level.Good, 90, ["Body Battery 54"], "")).Should().Be("Garmin: gotowość dobra");
+    }
+
     private sealed class TestDbFactory(DbContextOptions<ApplicationDbContext> options) : IDbContextFactory<ApplicationDbContext>
     {
         public ApplicationDbContext CreateDbContext() => new(options);

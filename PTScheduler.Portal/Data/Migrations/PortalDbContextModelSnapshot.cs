@@ -1371,6 +1371,9 @@ namespace PTScheduler.Portal.Data.Migrations
                         .IsRequired()
                         .HasColumnType("text");
 
+                    b.Property<bool>("Wearables")
+                        .HasColumnType("boolean");
+
                     b.Property<decimal?>("YearlyPrice")
                         .HasColumnType("numeric");
 
@@ -1425,7 +1428,8 @@ namespace PTScheduler.Portal.Data.Migrations
                             TrainingPlansEnabled = false,
                             TrialDays = 7,
                             TwoFactorAuth = true,
-                            VideoProvider = "youtube"
+                            VideoProvider = "youtube",
+                            Wearables = false
                         },
                         new
                         {
@@ -1474,6 +1478,7 @@ namespace PTScheduler.Portal.Data.Migrations
                             TrialDays = 14,
                             TwoFactorAuth = true,
                             VideoProvider = "youtube",
+                            Wearables = false,
                             YearlyPrice = 490m
                         },
                         new
@@ -1523,6 +1528,7 @@ namespace PTScheduler.Portal.Data.Migrations
                             TrialDays = 14,
                             TwoFactorAuth = true,
                             VideoProvider = "bunny",
+                            Wearables = true,
                             YearlyPrice = 990m
                         },
                         new
@@ -1572,6 +1578,7 @@ namespace PTScheduler.Portal.Data.Migrations
                             TrialDays = 14,
                             TwoFactorAuth = true,
                             VideoProvider = "bunny",
+                            Wearables = true,
                             YearlyPrice = 1990m
                         });
                 });

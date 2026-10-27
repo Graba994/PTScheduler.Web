@@ -21,12 +21,28 @@ else
 {
     @if (_cfg.Enabled)
     {
-        <StatusBanner Tone="ok" Icon="bi-check-circle-fill" Title="Garmin włączony">Klienci mogą łączyć zegarki w swoich aplikacjach. Połączeń: <b>@_active</b> z @GarminService.StarterLimit (limit planu Starter).</StatusBanner>
+        <StatusBanner Tone="ok" Icon="bi-check-circle-fill" Title="Garmin włączony">Klienci studiów z planem, który ma „Zegarki klientów”, mogą łączyć zegarki. Połączeń: <b>@_active</b> z @GarminService.StarterLimit (limit planu Starter).</StatusBanner>
+    }
+    else if (_cfg.On)
+    {
+        <StatusBanner Tone="info" Icon="bi-smartwatch" Title="Włączony, czeka na klucze">Klienci widzą opcję Garmina z informacją „wkrótce”. Po akceptacji wniosku wklej klucze aplikacji poniżej — tryb testowy działa już teraz.</StatusBanner>
     }
     else
     {
-        <StatusBanner Tone="info" Icon="bi-smartwatch" Title="Garmin jeszcze wyłączony">Po akceptacji wniosku w programie Garmin Connect wklej klucze aplikacji poniżej. Tryb testowy działa już teraz.</StatusBanner>
+        <StatusBanner Tone="warn" Icon="bi-toggle-off" Title="Garmin wyłączony">Klienci nigdzie go nie widzą, a dane z Garmina nie trafiają do studiów. Włącz, gdy chcesz go pokazać.</StatusBanner>
     }
+
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body d-flex align-items-start gap-3 flex-wrap">
+            <div class="flex-grow-1" style="min-width:240px">
+                <div class="fw-semibold">Garmin dla klientów</div>
+                <div class="small text-muted">Globalny włącznik dla wszystkich studiów. Dostępność od planu ustawisz w <a href="/panel/plans">Planach cenowych</a> (pole „Zegarki klientów (Garmin)”). Po zmianie od razu wysyłamy nowe uprawnienia do aplikacji studiów; włączony pokazuje też Garmina na stronie głównej i w cenniku.</div>
+            </div>
+            <div class="form-check form-switch fs-4 m-0">
+                <input class="form-check-input" type="checkbox" role="switch" aria-label="Garmin dla klientów" checked="@_cfg.On" disabled="@_busy" @onchange="e => ToggleAsync((bool)(e.Value ?? false))" />
+            </div>
+        </div>
+    </div>
 
     @if (_msg is not null)
     {
@@ -94,13 +110,13 @@ else
                             <input id="g-days" type="number" min="1" max="30" class="form-control" @bind="_testDays" />
                         </div>
                         <div class="col-12 col-md-3 d-flex gap-2 flex-wrap">
-                            <button class="btn btn-outline-primary" disabled="@(_busy || _testTenantId == 0 || _testClientId < 1)" @onclick="TestAsync">
+                            <button class="btn btn-outline-primary" disabled="@(_busy || !_cfg.On || _testTenantId == 0 || _testClientId < 1)" @onclick="TestAsync">
                                 @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> }
                                 Połącz i wyślij dane
                             </button>
                         </div>
                     </div>
-                    <div class="form-text">Id klienta znajdziesz w adresie karty klienta w aplikacji studia (/clients/<b>12</b>).</div>
+                    <div class="form-text">Id klienta znajdziesz w adresie karty klienta w aplikacji studia (/clients/<b>12</b>).@(_cfg.On ? "" : " Najpierw włącz Garmina — wyłączony pomija dane.") Studio musi mieć plan z „Zegarkami klientów”, żeby trener zobaczył dane.</div>
                 </div>
             </div>
         </div>
@@ -221,6 +237,18 @@ else
                             : "Dane są w kolejce, ale studio ich nie przyjęło — sprawdź, czy aplikacja studia działa i ma ten numer klienta.";
         }
         catch (Exception ex) { _msgError = true; _msg = ex.Message; }
+        finally { _busy = false; await LoadAsync(); }
+    }
+
+    private async Task ToggleAsync(bool on)
+    {
+        _busy = true;
+        try
+        {
+            var (pushed, total) = await GarminSvc.SetOnAsync(on);
+            _msgError = pushed < total;
+            _msg = (on ? "Garmin włączony" : "Garmin wyłączony") + (total == 0 ? "." : $" — uprawnienia wysłane do {pushed} z {total} studiów{(pushed < total ? " (pozostałe dostaną je przy następnym starcie)" : "")}.");
+        }
         finally { _busy = false; await LoadAsync(); }
     }
 

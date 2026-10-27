@@ -37,8 +37,10 @@ public static class HomeShared
         new("Co, jeśli zrezygnuję?", "Nie ma umów ani okresu wypowiedzenia. Przed zamknięciem konta możesz wyeksportować dane klientów.")
     ];
 
-    /// <summary>Lista cech planu z jego flag — to samo, co trener dostaje w aplikacji.</summary>
-    public static IEnumerable<(string Label, bool Included)> PlanFeatures(Plan p)
+    public const string GarminLabel = "Zegarki klientów (Garmin)";
+
+    /// <summary>Lista cech planu z jego flag — to samo, co trener dostaje w aplikacji. Garmin tylko, gdy włączony w Portalu.</summary>
+    public static IEnumerable<(string Label, bool Included)> PlanFeatures(Plan p, bool garmin = false)
     {
         yield return (p.MaxClients >= 9999 ? "Nielimitowani klienci" : $"Do {p.MaxClients} klientów", true);
         yield return ("Grafik, rezerwacje online, czat", true);
@@ -52,6 +54,7 @@ public static class HomeShared
         yield return ("Program poleceń", p.ReferralProgram);
         yield return ("Raporty finansowe", p.FinancialReports);
         yield return ("Kalendarz Google i Meet", p.IntegrationGoogleMeet);
+        if (garmin) yield return (GarminLabel, p.Wearables);
         yield return (p.BrandingTier switch
         {
             "premium" => "Pełny branding + własna domena",
@@ -86,11 +89,11 @@ public static class HomeShared
     /// Najważniejsze punkty karty planu: przy pierwszym planie pierwsze cechy, przy wyższych tylko to,
     /// czego nie ma niższy plan („Wszystko z …, a także:”) — karta zostaje krótka.
     /// </summary>
-    public static (string? Lead, List<string> Points) Highlights(Plan plan, Plan? lower, int max = 5)
+    public static (string? Lead, List<string> Points) Highlights(Plan plan, Plan? lower, int max = 5, bool garmin = false)
     {
-        var mine = PlanFeatures(plan).Where(f => f.Included).Select(f => f.Label).ToList();
+        var mine = PlanFeatures(plan, garmin).Where(f => f.Included).Select(f => f.Label).ToList();
         if (lower is null) return (null, mine.Take(max).ToList());
-        var theirs = PlanFeatures(lower).Where(f => f.Included).Select(f => f.Label).ToHashSet();
+        var theirs = PlanFeatures(lower, garmin).Where(f => f.Included).Select(f => f.Label).ToHashSet();
         var extra = mine.Where(l => !theirs.Contains(l)).Take(max).ToList();
         return ($"Wszystko z planu {lower.Name}, a także:", extra);
     }
@@ -112,6 +115,7 @@ public static class HomeShared
         new("Kupony i program poleceń", p => Mark(p.Coupons || p.ReferralProgram)),
         new("Raporty finansowe", p => Mark(p.FinancialReports)),
         new("Kalendarz Google i Meet", p => Mark(p.IntegrationGoogleMeet)),
+        new(GarminLabel, p => Mark(p.Wearables)),
         new("Własna domena", p => Mark(p.BrandingTier is "full" or "premium")),
     ];
 

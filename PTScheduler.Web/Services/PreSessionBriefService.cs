@@ -17,7 +17,9 @@ public class PreSessionBriefService(
     IDbContextFactory<ApplicationDbContext> dbFactory,
     IProgressionService progression,
     IClientProgressService progress,
-    PlatformAssistantService assistant)
+    PlatformAssistantService assistant,
+    EntitlementService entitlements,
+    IAppClock clock)
 {
     public sealed record ExerciseLine(string Name, string Detail);
     public sealed record Card(
@@ -29,7 +31,8 @@ public class PreSessionBriefService(
         string? PlanName, string? PlanDayLabel, int? PlanId, List<ExerciseLine> PlanToday,
         List<ProgressionSuggestionDto> Progression, List<PlanInsightDto> Insights,
         List<(DateTime At, string Text)> Notes, string Summary, string? Mascot, string? MascotName,
-        int? PackageLeft = null, bool SummaryFromAi = false, int? PlanDayId = null);
+        int? PackageLeft = null, bool SummaryFromAi = false, int? PlanDayId = null,
+        PTScheduler.Domain.Rules.ReadinessRules.Result? Readiness = null, string? Device = null);
 
     /// <summary>Karta dla treningu — null, gdy go nie ma albo nie należy do tego trenera.</summary>
     public async Task<Card?> GetAsync(int sessionId, string userId, bool isAdmin)
@@ -125,8 +128,22 @@ public class PreSessionBriefService(
             .OrderByDescending(n => n.CreatedAt).Take(2)
             .Select(n => new { n.CreatedAt, n.Content }).ToListAsync();
 
+        // Gotowość z zegarka (Garmin) — tylko dla wizyty dziś i tylko, gdy plan i Portal na to pozwalają.
+        PTScheduler.Domain.Rules.ReadinessRules.Result? readiness = null;
+        string? device = null;
+        if (entitlements.IsAllowed("Wearables") && DateOnly.FromDateTime(s.StartTime) == clock.Today)
+        {
+            readiness = (await WearableService.ReadinessAsync(db, clock.Today, [s.ClientId])).GetValueOrDefault(s.ClientId);
+            if (readiness is not null)
+                device = await db.WearableLinks.AsNoTracking().Where(l => l.ClientId == s.ClientId).Select(l => l.DeviceName).FirstOrDefaultAsync();
+        }
+
         var number = done + 1;
         var parts = new List<string> { number == 1 ? "[klient] — pierwszy trening. Warto zacząć od rozmowy i testów." : $"[klient] — {number}. trening." };
+        if (readiness is { Level: PTScheduler.Domain.Rules.ReadinessRules.Level.Low })
+            parts.Add($"Zegarek: gotowość niska ({string.Join(", ", readiness.Reasons.Take(2))}) — rozważ lżejszy trening.");
+        else if (readiness is { Level: PTScheduler.Domain.Rules.ReadinessRules.Level.Good })
+            parts.Add("Zegarek: dobra forma — to dzień na mocniejszy trening.");
         if (healthNotes.Count > 0) parts.Add($"W ankiecie zdrowotnej są uwagi ({healthNotes.Count}) — rzuć okiem poniżej.");
         if (suggestions.Count > 0) parts.Add($"{suggestions.Count} {AssistantTipsService.Plural(suggestions.Count, "propozycja zmiany ciężaru", "propozycje zmiany ciężaru", "propozycji zmiany ciężaru")} na dziś.");
         if (s.OffPackagePayment == "trainer" && s.PaidAt is null) parts.Add("Płatność za ten trening u Ciebie.");
@@ -139,6 +156,12 @@ public class PreSessionBriefService(
             ["propozycje_progresji"] = suggestions.Count.ToString(),
             ["platnosc_u_trenera"] = s.OffPackagePayment == "trainer" && s.PaidAt is null ? "tak" : "nie",
         };
+        // Do AI tylko poziom i powody z liczbami — bez imienia (to już [klient]) i bez danych kontaktowych.
+        if (readiness is not null)
+        {
+            facts["gotowosc_z_zegarka"] = PTScheduler.Domain.Rules.ReadinessRules.Label(readiness.Level);
+            facts["powody_gotowosci"] = string.Join("; ", readiness.Reasons);
+        }
         var config = await assistant.GetConfigAsync();
         var rawSummary = await assistant.PhraseAsync($"before-{s.Id}", "przed_treningiem", facts, fallback, config?.Ai == true);
         var summary = rawSummary.Replace("[klient]", string.IsNullOrWhiteSpace(s.FirstName) ? "Klient" : s.FirstName.Trim());
@@ -155,7 +178,7 @@ public class PreSessionBriefService(
             summary,
             config is { Enabled: true } ? config.Icons.GetValueOrDefault(healthNotes.Count > 0 ? "think" : "hello") : null,
             config is { Enabled: true } ? config.Name : null,
-            s.Package?.Left, config?.Ai == true && rawSummary != fallback, dayId);
+            s.Package?.Left, config?.Ai == true && rawSummary != fallback, dayId, readiness, device);
     }
 
 }
@@ -188,15 +211,20 @@ public class BeforeSessionPushService(IServiceScopeFactory scopeFactory, ILogger
             .Select(s => new { Session = s, Client = s.Client.FirstName + " " + s.Client.LastName,
                 Done = db.Sessions.Count(x => x.ClientId == s.ClientId && x.Status == SessionStatus.Completed) })
             .ToListAsync();
+        var ready = due.Count > 0 && scope.ServiceProvider.GetRequiredService<EntitlementService>().IsAllowed("Wearables")
+            ? await WearableService.ReadinessAsync(db, clock.Today, due.Select(d => d.Session.ClientId).Distinct().ToList())
+            : [];
         foreach (var d in due)
         {
             d.Session.TrainerBriefSentAt = DateTime.UtcNow;
             await db.SaveChangesAsync();
             var minutes = Math.Max(1, (int)Math.Round((d.Session.StartTime - now).TotalMinutes));
+            var body = d.Done == 0 ? "Pierwszy trening — zobacz kartę przed treningiem." : $"{d.Done + 1}. trening — zobacz kartę przed treningiem.";
+            if (ready.TryGetValue(d.Session.ClientId, out var r)) body = $"{WearableService.Line(r, 1)}. {body}";
             await push.SendAsync(d.Session.TrainerUserId, new PushMessageDto
             {
                 Title = $"Za {minutes} min: {d.Client.Trim()}",
-                Body = d.Done == 0 ? "Pierwszy trening — zobacz kartę przed treningiem." : $"{d.Done + 1}. trening — zobacz kartę przed treningiem.",
+                Body = body,
                 Url = $"/clients/{d.Session.ClientId}?trening={d.Session.Id}#trening",
                 Category = NotificationTypes.PushBeforeSession
             });
