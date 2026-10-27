@@ -38,6 +38,34 @@ public class SetupService(
         public DateTime? WelcomeTokenExpiresUtc { get; set; }
         /// <summary>Oferta z kreatora już wgrana (powtórka nie dubluje treningów).</summary>
         public bool OfferApplied { get; set; }
+        /// <summary>Decyzje z „Pierwszych ustawień” (np. „payments-offline”), liczone w „Pierwszych krokach”.</summary>
+        public List<string> Decisions { get; set; } = [];
+    }
+
+    /// <summary>Czy w „Pierwszych ustawieniach” zapadła ta decyzja (czytane też przez „Pierwsze kroki”).</summary>
+    public static bool HasDecision(string? onboardingJson, string key)
+    {
+        if (string.IsNullOrWhiteSpace(onboardingJson)) return false;
+        try { return JsonSerializer.Deserialize<OnboardingState>(onboardingJson)?.Decisions.Contains(key) == true; }
+        catch (JsonException) { return false; }
+    }
+
+    public async Task<IReadOnlySet<string>> GetDecisionsAsync()
+    {
+        await using var db = dbFactory.CreateDbContext();
+        return ReadState(await db.AppBrandings.AsNoTracking().FirstOrDefaultAsync()).Decisions.ToHashSet();
+    }
+
+    public async Task SetDecisionAsync(string key, bool on)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var branding = await db.AppBrandings.FirstOrDefaultAsync();
+        if (branding is null) db.AppBrandings.Add(branding = new AppBranding());
+        var state = ReadState(branding);
+        state.Decisions.Remove(key);
+        if (on) state.Decisions.Add(key);
+        branding.OnboardingJson = JsonSerializer.Serialize(state);
+        await db.SaveChangesAsync();
     }
 
     private static OnboardingState ReadState(AppBranding? b)

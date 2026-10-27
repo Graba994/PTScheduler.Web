@@ -29,6 +29,8 @@
 @inject IEmailService MailService
 @inject PTScheduler.Web.Services.PlatformHelpService Help
 @inject PTScheduler.Web.Services.MessageDraftService Drafts
+@inject PTScheduler.Web.Services.PlanGeneratorService Generator
+@inject ITrainingPlanService TrainingPlans
 
 @* Pierwsze ustawienia po publikacji z kreatora: kilka krótkich kroków w jednym miejscu, wszystko wypełnione z góry.
    (Kto prowadzi treningi) → godziny pracy → oferta → zasady odwołań → logo i asystent → strona główna →
@@ -661,6 +663,204 @@
                         </section>
                         break;
 
+                    case "pay":
+                        <section class="wz-card" aria-labelledby="wz-p">
+                            <h1 id="wz-p">Jak klienci za Ciebie płacą?</h1>
+                            <p class="wz-lead">Online klient płaci BLIK-iem albo kartą przy zapisie czy zakupie pakietu, a pieniądze trafiają prosto na Twoje konto w bramce płatności.</p>
+                            @if (_paymentsOn)
+                            {
+                                <div class="wz-detail"><div class="wz-ok"><i class="bi bi-check-circle-fill"></i><span><b>Płatności online działają</b><small>@(_payNames.Count > 0 ? string.Join(", ", _payNames) : "Bramka włączona") — zmienisz to w Zarządzanie → Płatności.</small></span></div></div>
+                            }
+                            else
+                            {
+                                <div class="wz-choices" role="radiogroup">
+                                    <button type="button" role="radio" aria-checked="@(_payChoice == "offline" ? "true" : "false")" class="wz-choice @(_payChoice == "offline" ? "on" : "")" @onclick='() => _payChoice = "offline"'>
+                                        <i class="bi bi-cash-coin"></i>
+                                        <span><b>Na miejscu</b><small>Gotówką, przelewem albo kartą u Ciebie — odhaczasz to w Finansach. Online włączysz, kiedy zechcesz.</small></span>
+                                    </button>
+                                    <button type="button" role="radio" aria-checked="@(_payChoice == "online" ? "true" : "false")" class="wz-choice @(_payChoice == "online" ? "on" : "")" @onclick='() => _payChoice = "online"'>
+                                        <i class="bi bi-credit-card"></i>
+                                        <span><b>Online — mam konto w bramce</b><small>PayU, Przelewy24 albo Autopay. Wkleisz klucze z panelu bramki.</small></span>
+                                    </button>
+                                    <button type="button" role="radio" aria-checked="@(_payChoice == "help" ? "true" : "false")" class="wz-choice @(_payChoice == "help" ? "on" : "")" @onclick='() => _payChoice = "help"'>
+                                        <i class="bi bi-life-preserver"></i>
+                                        <span><b>Online — pomóżcie mi</b><small>Pomożemy założyć konto w bramce i wszystko ustawimy.</small></span>
+                                    </button>
+                                </div>
+                                @if (_payChoice == "online")
+                                {
+                                    <div class="wz-detail">
+                                        <div class="wz-chips" role="radiogroup" aria-label="Bramka płatności">
+                                            @foreach (var g in PayGateways)
+                                            {
+                                                var gate = g.Key;
+                                                <button type="button" role="radio" aria-checked="@(_payKey == gate ? "true" : "false")" class="wz-chip @(_payKey == gate ? "on" : "")" @onclick="() => _payKey = gate">@g.Name</button>
+                                            }
+                                        </div>
+                                        @if (PayMeta is { } meta)
+                                        {
+                                            <p class="wz-muted mt-2">@meta.Description</p>
+                                            <div class="wz-form mb-2">
+                                                @foreach (var f in meta.Fields)
+                                                {
+                                                    var field = f;
+                                                    <div class="wz-field">
+                                                        <label class="form-label" for="@($"wz-pay-{field.Key}")">@field.Label</label>
+                                                        <input id="@($"wz-pay-{field.Key}")" class="form-control" type="@(field.Secret ? "password" : "text")" autocomplete="off" maxlength="200"
+                                                               value="@PayField(field.Key)" @onchange="e => SetPayField(field.Key, e.Value?.ToString())" />
+                                                    </div>
+                                                }
+                                            </div>
+                                            <label class="wz-switch"><input type="checkbox" class="form-check-input" role="switch" @bind="_paySandbox" /><span><b>To klucze testowe (sandbox)</b><small>Klienci nie zapłacą wtedy naprawdę — przełączysz na produkcję w Zarządzanie → Płatności.</small></span></label>
+                                            @if (meta.Key == PTScheduler.Domain.Constants.PaymentProviders.AutoPay)
+                                            {
+                                                <div class="wz-note mt-2 mb-0"><i class="bi bi-link-45deg"></i><span>W panelu Autopay wpisz adres powiadomień <b>@(Nav.BaseUri)payments/autopay/notify</b> i powrotu <b>@(Nav.BaseUri)payments/autopay/return</b>.</span></div>
+                                            }
+                                        }
+                                    </div>
+                                }
+                                else if (_payChoice == "help")
+                                {
+                                    @if (_offers.ContainsKey(PlatformHelpService.PaymentsSetup))
+                                    {
+                                        @HelpCard(PlatformHelpService.PaymentsSetup, "Ustawimy płatności za Ciebie", "Pomożemy założyć konto w PayU albo Przelewy24, wpiszemy klucze i zrobimy płatność testową.", "Ustawienie płatności online")
+                                    }
+                                    else
+                                    {
+                                        <div class="wz-note mt-3 mb-0"><i class="bi bi-chat-dots"></i><span>Napisz do nas z menu Pomoc — ustawimy płatności razem. Do tego czasu klienci płacą na miejscu.</span></div>
+                                    }
+                                }
+                            }
+                            @Error()
+                            <div class="wz-nav">
+                                <button type="button" class="btn btn-link text-muted" @onclick="NextAsync">Pomiń</button>
+                                <button type="button" class="btn btn-primary btn-lg" disabled="@(_busy || (!_paymentsOn && _payChoice is null))" @onclick="SavePayAsync">@Busy()@(_paymentsOn ? "Dalej" : _payChoice == "online" ? "Włącz płatności i dalej" : "Zapisz i dalej")<i class="bi bi-arrow-right ms-1"></i></button>
+                            </div>
+                        </section>
+                        break;
+
+                    case "plan":
+                        <section class="wz-card" aria-labelledby="wz-pl">
+                            <h1 id="wz-pl">Pierwszy plan treningowy</h1>
+                            <p class="wz-lead">Klient zobaczy go w aplikacji i zapisze w nim wyniki, a Ty masz go pod ręką na wizycie. Ułożę propozycję z ćwiczeń z katalogu — dopracujesz ją później w Planach.</p>
+                            @if (_planDone is not null)
+                            {
+                                <div class="wz-detail"><div class="wz-ok"><i class="bi bi-check-circle-fill"></i><span><b>Plan przypisany</b><small>@_planDone</small></span></div></div>
+                            }
+                            else if (_planClients.Count == 0)
+                            {
+                                <div class="wz-note"><i class="bi bi-people"></i><span>Najpierw dodaj klienta w kroku „Klienci”. Plan ułożysz też później w zakładce Plany.</span></div>
+                            }
+                            else
+                            {
+                                <div class="wz-field mb-1">
+                                    <label class="form-label" for="wz-plan-client">Dla kogo</label>
+                                    <select id="wz-plan-client" class="form-select" @bind="_planClientId" @bind:after="PlanClientChanged">
+                                        @foreach (var c in _planClients)
+                                        {
+                                            <option value="@c.Id">@c.FullName@(string.IsNullOrWhiteSpace(c.TrainingGoal) ? "" : $" — {c.TrainingGoal}")</option>
+                                        }
+                                    </select>
+                                </div>
+                                <div class="wz-sub">Cel</div>
+                                <div class="wz-chips" role="radiogroup" aria-label="Cel planu">
+                                    @foreach (var f in Enum.GetValues<PlanGeneratorRules.Focus>())
+                                    {
+                                        var focus = f;
+                                        <button type="button" role="radio" aria-checked="@(_planFocus == focus ? "true" : "false")" class="wz-chip @(_planFocus == focus ? "on" : "")" @onclick="() => { _planFocus = focus; _planProposal = null; }">@PlanGeneratorRules.FocusLabel(focus)</button>
+                                    }
+                                </div>
+                                <div class="wz-sub">Treningi w tygodniu</div>
+                                <div class="wz-chips" role="radiogroup" aria-label="Treningi w tygodniu">
+                                    @foreach (var d in new[] { 2, 3, 4 })
+                                    {
+                                        var days = d;
+                                        <button type="button" role="radio" aria-checked="@(_planDays == days ? "true" : "false")" class="wz-chip @(_planDays == days ? "on" : "")" @onclick="() => { _planDays = days; _planProposal = null; }">@days× w tygodniu</button>
+                                    }
+                                </div>
+                                <div class="wz-sub">Sprzęt</div>
+                                <div class="wz-chips" role="radiogroup" aria-label="Sprzęt">
+                                    @foreach (var (kit, label) in KitChoices)
+                                    {
+                                        var k = kit;
+                                        <button type="button" role="radio" aria-checked="@(_planKit == k ? "true" : "false")" class="wz-chip @(_planKit == k ? "on" : "")" @onclick="() => { _planKit = k; _planProposal = null; }">@label</button>
+                                    }
+                                </div>
+                                <button type="button" class="btn btn-outline-primary mt-3" disabled="@_planBusy" @onclick="ProposePlanAsync">
+                                    @if (_planBusy)
+                                    {
+                                        <span class="spinner-border spinner-border-sm me-1"></span>
+                                    }
+                                    else
+                                    {
+                                        <i class="bi bi-magic me-1"></i>
+                                    }
+                                    @(_planProposal is null ? "Ułóż propozycję" : "Ułóż jeszcze raz")
+                                </button>
+                                @if (_planProposal is { } prop)
+                                {
+                                    @if (prop.Plan.Days.Count == 0)
+                                    {
+                                        <div class="wz-note warn mt-3 mb-0"><i class="bi bi-exclamation-circle"></i><span>Nie udało się dobrać ćwiczeń — zmień sprzęt albo cel.</span></div>
+                                    }
+                                    else
+                                    {
+                                        <div class="wz-plan">
+                                            <div class="wz-plan-head"><b>@prop.Plan.Name</b><small>@prop.Plan.Purpose</small></div>
+                                            <div class="wz-plan-days">
+                                                @foreach (var day in prop.Plan.Days)
+                                                {
+                                                    <div class="wz-plan-day">
+                                                        <span>@day.Label</span>
+                                                        <ol>
+                                                            @foreach (var x in day.Exercises)
+                                                            {
+                                                                <li>@x.Name <small>@Dose(x)</small></li>
+                                                            }
+                                                        </ol>
+                                                    </div>
+                                                }
+                                            </div>
+                                        </div>
+                                    }
+                                }
+                            }
+                            @Error()
+                            <div class="wz-nav">
+                                <button type="button" class="btn btn-link text-muted" @onclick="NextAsync">Pomiń</button>
+                                @if (_planDone is null && _planProposal is { Plan.Days.Count: > 0 })
+                                {
+                                    <button type="button" class="btn btn-primary btn-lg" disabled="@_busy" @onclick="AssignPlanAsync">@Busy()Przypisz plan i dalej<i class="bi bi-arrow-right ms-1"></i></button>
+                                }
+                                else
+                                {
+                                    <button type="button" class="btn btn-primary btn-lg" @onclick="NextAsync">Dalej<i class="bi bi-arrow-right ms-1"></i></button>
+                                }
+                            </div>
+                        </section>
+                        break;
+
+                    case "phone":
+                        <section class="wz-card" aria-labelledby="wz-ph">
+                            <h1 id="wz-ph">Powiadomienia na telefonie</h1>
+                            <p class="wz-lead">Nowa rezerwacja, odwołanie albo wiadomość od klienta — od razu na ekranie, także gdy aplikacja jest zamknięta.</p>
+                            <PTScheduler.Web.Components.Account.Shared.PushDeviceCard />
+                            <div class="wz-or wz-desk-only"><span>albo na telefonie</span></div>
+                            <div class="wz-share wz-desk-only">
+                                <div class="wz-qr" @ref="_qrEl" aria-label="Kod QR otwierający ten krok na telefonie"></div>
+                                <div class="wz-share-txt">
+                                    <small>Jesteś przy komputerze?</small>
+                                    <b>Zeskanuj kod telefonem</b>
+                                    <span class="wz-muted mt-1">Otworzy się ten krok: zaloguj się, dodaj aplikację do ekranu głównego i włącz powiadomienia.</span>
+                                </div>
+                            </div>
+                            <div class="wz-nav">
+                                <button type="button" class="btn btn-link text-muted" @onclick="NextAsync">Pomiń</button>
+                                <button type="button" class="btn btn-primary btn-lg" @onclick="NextAsync">Dalej<i class="bi bi-arrow-right ms-1"></i></button>
+                            </div>
+                        </section>
+                        break;
+
                     default:
                         <section class="wz-card wz-done" aria-labelledby="wz-d">
                             <div class="wz-done-ic" aria-hidden="true"><i class="bi bi-check-lg"></i></div>
@@ -687,9 +887,6 @@
                                     </div>
                                 </div>
                             </div>
-                            <div class="wz-label mt-4">Powiadomienia na tym telefonie</div>
-                            <p class="wz-muted">Nowe rezerwacje i wiadomości od klientów od razu na ekranie — także gdy aplikacja jest zamknięta.</p>
-                            <PTScheduler.Web.Components.Account.Shared.PushDeviceCard />
                             <div class="wz-nav">
                                 <button type="button" class="btn btn-link text-muted" @onclick="() => GoAsync(0)"><i class="bi bi-arrow-counterclockwise me-1"></i>Od początku</button>
                                 <a class="btn btn-primary btn-lg" href="/app?witaj=1" data-enhance-nav="false">Przejdź do aplikacji<i class="bi bi-arrow-right ms-1"></i></a>
@@ -856,6 +1053,32 @@
     private bool _ownOk;
     private string? _ownError;
 
+    // Płatności
+    private string? _payChoice;
+    private string _payKey = "payu";
+    private bool _paySandbox;
+    private readonly Dictionary<string, Dictionary<string, string>> _payFields = [];
+    private List<string> _payNames = [];
+    private static readonly PaymentProviderMeta[] PayGateways =
+        PaymentProviderCatalog.All.Where(m => m.Key is "payu" or "p24" or "autopay").ToArray();
+    private PaymentProviderMeta? PayMeta => PayGateways.FirstOrDefault(m => m.Key == _payKey);
+
+    // Pierwszy plan
+    private bool _isAdmin;
+    private List<ClientDto> _planClients = [];
+    private int _planClientId;
+    private PlanGeneratorRules.Focus _planFocus = PlanGeneratorRules.Focus.General;
+    private int _planDays = 2;
+    private PlanGeneratorRules.Kit _planKit = PlanGeneratorRules.Kit.Gym;
+    private PTScheduler.Web.Services.PlanGeneratorService.Proposal? _planProposal;
+    private bool _planBusy;
+    private string? _planDone;
+    private static readonly (PlanGeneratorRules.Kit Kit, string Label)[] KitChoices =
+        [(PlanGeneratorRules.Kit.Gym, "Siłownia"), (PlanGeneratorRules.Kit.Dumbbells, "Hantle i gumy"), (PlanGeneratorRules.Kit.Bodyweight, "Masa ciała")];
+
+    /// <summary>Krok z linku (np. kod QR „otwórz na telefonie” → ?krok=phone).</summary>
+    [SupplyParameterFromQuery(Name = "krok")] public string? Krok { get; set; }
+
     // Pomoc zespołu i podgląd na małym ekranie
     private Dictionary<int, PTScheduler.Web.Services.PlatformHelpService.Offer> _offers = [];
     private bool _offersLoaded;
@@ -883,7 +1106,7 @@
     private static string StepName(string key) => key switch
     {
         "me" => "Ty", "hours" => "Godziny", "offer" => "Oferta", "rules" => "Zasady", "look" => "Logo", "site" => "Strona",
-        "mail" => "E-maile", "client" => "Klienci", _ => "Gotowe"
+        "mail" => "E-maile", "pay" => "Płatności", "client" => "Klienci", "plan" => "Plan", "phone" => "Telefon", _ => "Gotowe"
     };
 
     private string Mood => Current switch { "done" => "celebrate", "client" or "site" => "happy", "mail" => "think", _ => "hello" };
@@ -933,6 +1156,9 @@
         "mail" => _mailChoice == "own"
             ? "Wpisz adres — sam rozpoznam pocztę i powiem, co kliknąć u dostawcy."
             : "Najprościej zostawić wysyłkę mnie — działa od razu, a nadawcą jest Twoje studio.",
+        "pay" => "Płatność online przy zapisie to mniej przypominania o pieniądzach. Na miejscu też jest w porządku — zmienisz to później.",
+        "plan" => "Plan z katalogu to dobry start. Klient od razu widzi, co będzie robić, a Ty poprawisz szczegóły po pierwszym treningu.",
+        "phone" => "Z powiadomieniami nie przegapisz żadnej rezerwacji — także gdy aplikacja jest zamknięta.",
         "client" => "Zacznij od jednej osoby, która trenuje z Tobą najdłużej — zobaczysz, jak aplikacja działa po stronie klienta.",
         _ => "Świetna robota! Wyślij link klientom albo pokaż im kod QR na treningu."
     };
@@ -959,6 +1185,11 @@
             if (_steps.Contains("mail"))
                 yield return (_saved.Contains("mail") && (_mailChoice != "own" || _ownOk), "E-maile do klientów",
                     _ownOk ? $"z Twojej skrzynki {_ownEmail}" : _mailChoice == "own" ? "własna skrzynka — do podłączenia" : $"wysyła Hantly jako {_studio}", "/admin/email");
+            if (_steps.Contains("pay"))
+                yield return (_saved.Contains("pay"), "Płatności",
+                    _paymentsOn ? (_payNames.Count > 0 ? $"online: {string.Join(", ", _payNames)}" : "online") : _payChoice == "offline" ? "na miejscu" : _ordered.Contains(PlatformHelpService.PaymentsSetup) ? "pomoc zamówiona — odezwiemy się" : "jeszcze nie wybrane", "/admin/payments");
+            if (_steps.Contains("plan"))
+                yield return (_saved.Contains("plan"), "Pierwszy plan", _planDone ?? "jeszcze nie przypisany", "/plans/new");
             if (_steps.Contains("client"))
             {
                 var n = _clientCount + _added.Count;
@@ -973,6 +1204,7 @@
         var me = await UserManager.GetUserAsync(principal);
         _userId = me?.Id ?? "";
         var isAdmin = principal.IsInRole(PTScheduler.Domain.Constants.Roles.Admin);
+        _isAdmin = isAdmin;
         var switchedOwner = principal.HasClaim(c => c.Type == PTScheduler.Web.Services.AccountSwitchService.OriginalUserClaim);
         _isOwner = isAdmin || switchedOwner;
         _canMail = _isOwner;
@@ -1024,6 +1256,11 @@
             _steps.Add("mail");
             await LoadMailAsync(me?.Email);
         }
+        if (access.Can(PTScheduler.Domain.Constants.Permissions.ManagePayments) && Entitlements.IsAllowed("PaymentsEnabled"))
+        {
+            _steps.Add("pay");
+            await LoadPayAsync();
+        }
         if (access.Can(PTScheduler.Domain.Constants.Permissions.ManageClients) || _trainerId is not null)
         {
             _steps.Add("client");
@@ -1031,6 +1268,20 @@
             if (_clientCount > 0) _saved.Add("client");
             await RefreshLimitAsync();
         }
+        if (_trainerId is not null && Entitlements.IsAllowed("TrainingPlansEnabled"))
+        {
+            _steps.Add("plan");
+            try
+            {
+                if ((await TrainingPlans.GetPlansAsync(_trainerId, isAdmin)).Any(x => x.ClientId is not null))
+                {
+                    _saved.Add("plan");
+                    _planDone = "Masz już plan przypisany klientowi — kolejne ułożysz w zakładce Plany.";
+                }
+            }
+            catch (Exception) { }
+        }
+        _steps.Add("phone");
         _loading = false;
     }
 
@@ -1042,8 +1293,15 @@
             _resumed = true;
             var saved = await JS.InvokeAsync<string>("ptFirstSetup.load", StorageKey);
             // Decyzja „kto prowadzi treningi” jest pierwsza i nie da się jej przeskoczyć wznowieniem.
-            var idx = _steps.Contains("me") ? 0 : saved == "done" ? _steps.Count : _steps.IndexOf(saved);
-            if (idx > 0) { _at = idx; StateHasChanged(); }
+            var idx = _steps.Contains("me") ? 0
+                : !string.IsNullOrEmpty(Krok) && _steps.Contains(Krok) ? _steps.IndexOf(Krok)
+                : saved == "done" ? _steps.Count : _steps.IndexOf(saved);
+            if (idx > 0)
+            {
+                _at = idx;
+                if (Current == "plan" && _planDone is null) await LoadPlanClientsAsync();
+                StateHasChanged();
+            }
         }
         if (!_loading && !_offersLoaded)
         {
@@ -1058,10 +1316,11 @@
             _offers = await Help.OffersAsync();
             StateHasChanged();
         }
-        if (Current == "done" && !_qrDrawn && !_loading)
+        if (Current is "done" or "phone" && !_qrDrawn && !_loading)
         {
             _qrDrawn = true;
-            try { await JS.InvokeVoidAsync("ptFirstSetup.qr", _qrEl, Nav.BaseUri); } catch (JSException) { }
+            var url = Current == "phone" ? Nav.BaseUri + "witaj?krok=phone" : Nav.BaseUri;
+            try { await JS.InvokeVoidAsync("ptFirstSetup.qr", _qrEl, url); } catch (JSException) { }
         }
     }
 
@@ -1471,6 +1730,119 @@
         }
     };
 
+    // ── Płatności ──
+    private async Task LoadPayAsync()
+    {
+        try
+        {
+            var pay = await PaymentSettings.GetAsync();
+            _paymentsOn = pay.Enabled;
+            _payNames = pay.EnabledProviders.Where(x => x.Key != "sim")
+                .Select(x => PaymentProviderCatalog.Find(x.Key)?.Name ?? x.Key).ToList();
+            foreach (var g in PayGateways)
+                _payFields[g.Key] = new Dictionary<string, string>(pay.Provider(g.Key)?.Fields ?? []);
+            if ((await Setup.GetDecisionsAsync()).Contains("payments-offline")) _payChoice = "offline";
+            if (_paymentsOn || _payChoice == "offline") _saved.Add("pay");
+        }
+        catch (Exception) { }
+    }
+
+    private string PayField(string key) => _payFields.TryGetValue(_payKey, out var f) && f.TryGetValue(key, out var v) ? v : "";
+
+    private void SetPayField(string key, string? value)
+    {
+        if (!_payFields.TryGetValue(_payKey, out var f)) _payFields[_payKey] = f = [];
+        f[key] = (value ?? "").Trim();
+    }
+
+    private async Task SavePayAsync()
+    {
+        if (_paymentsOn) { await NextAsync(); return; }
+        if (_payChoice == "online")
+        {
+            if (PayMeta is not { } meta) return;
+            var missing = meta.Fields.Where(f => string.IsNullOrWhiteSpace(PayField(f.Key))).Select(f => f.Label).ToList();
+            if (missing.Count > 0) { _error = $"Uzupełnij: {string.Join(", ", missing)}."; return; }
+        }
+        await RunAsync(async () =>
+        {
+            if (_payChoice == "online")
+            {
+                var pay = await PaymentSettings.GetAsync();
+                var cfg = pay.Provider(_payKey);
+                if (cfg is null) pay.Providers.Add(cfg = new PaymentProviderConfigDto { Key = _payKey });
+                cfg.Enabled = true;
+                cfg.Sandbox = _paySandbox;
+                foreach (var f in PayMeta!.Fields) cfg.Fields[f.Key] = PayField(f.Key);
+                pay.Enabled = true;
+                await PaymentSettings.SaveAsync(pay);
+                await Setup.SetDecisionAsync("payments-offline", false);
+                _paymentsOn = true;
+                _payNames = [PayMeta.Name];
+                _saved.Add("pay");
+            }
+            else if (_payChoice == "offline")
+            {
+                await Setup.SetDecisionAsync("payments-offline", true);
+                _saved.Add("pay");
+            }
+        });
+    }
+
+    // ── Pierwszy plan ──
+    private async Task LoadPlanClientsAsync()
+    {
+        try
+        {
+            _planClients = (await ClientService.GetClientsAsync(_isAdmin ? null : _trainerId))
+                .OrderByDescending(c => c.CreatedAt).Take(100).ToList();
+            if (_planClients.Count > 0 && _planClients.All(c => c.Id != _planClientId))
+            {
+                _planClientId = _planClients[0].Id;
+                PlanClientChanged();
+            }
+        }
+        catch (Exception) { _planClients = []; }
+    }
+
+    private void PlanClientChanged()
+    {
+        _planProposal = null;
+        _planFocus = PlanGeneratorRules.FocusFromGoal(_planClients.FirstOrDefault(c => c.Id == _planClientId)?.TrainingGoal);
+    }
+
+    private async Task ProposePlanAsync()
+    {
+        if (_trainerId is null || _planClientId == 0) return;
+        _planBusy = true;
+        _error = null;
+        try
+        {
+            // Tylko reguły (bez AI) — propozycja w sekundę; AI jest w edytorze planu, gdy trener zechce.
+            var minutes = _types.FirstOrDefault(t => t.Active)?.Minutes ?? 60;
+            _planProposal = await Generator.ProposeAsync(_planClientId, _trainerId, new PlanGeneratorRules.Options(_planDays, minutes, _planFocus, _planKit), false, null);
+        }
+        catch (Exception) { _error = "Nie udało się ułożyć propozycji. Spróbuj jeszcze raz albo pomiń — plan ułożysz w zakładce Plany."; }
+        finally { _planBusy = false; }
+    }
+
+    private async Task AssignPlanAsync()
+    {
+        if (_planProposal is not { } prop || _trainerId is null) return;
+        await RunAsync(async () =>
+        {
+            var meta = await Generator.MetaAsync(prop.Plan.Days.SelectMany(d => d.Exercises).Select(e => e.ExerciseId));
+            var dto = PTScheduler.Web.Services.PlanGeneratorService.ToEditDto(prop.Plan, _planClientId, meta);
+            await TrainingPlans.SavePlanAsync(_trainerId, dto, _isAdmin);
+            var who = _planClients.FirstOrDefault(c => c.Id == _planClientId)?.FullName ?? "Klient";
+            _planDone = $"„{dto.Name}” — {who} widzi go już w aplikacji.";
+            _saved.Add("plan");
+        });
+    }
+
+    private static string Dose(PlanGeneratorRules.Pick x) =>
+        x.DurationSeconds is int sec ? $"{x.Sets} × {sec} s" : $"{x.Sets} × {x.Reps ?? "—"}";
+
     // ── Klient ──
     private async Task AddClientAsync()
     {
@@ -1547,6 +1919,7 @@
     {
         _error = null;
         _at = Math.Clamp(idx, 0, _steps.Count);
+        if (Current == "plan" && _planDone is null) await LoadPlanClientsAsync();
         _qrDrawn = false;
         try { await JS.InvokeVoidAsync("ptFirstSetup.save", StorageKey, _at >= _steps.Count ? "done" : _steps[_at]); } catch (JSException) { }
         try { await JS.InvokeVoidAsync("scrollTo", 0, 0); } catch (JSException) { }

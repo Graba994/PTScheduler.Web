@@ -4,13 +4,15 @@ using System.Text.Json;
 namespace PTScheduler.Web.Services;
 
 /// <summary>
-/// Pomoc zespołu platformy zamawiana z „Pierwszych ustawień” (/witaj): podłączenie skrzynki i strona pod klucz. To pozycje sklepu usług w Portalu — cena z katalogu (z ustaleniami dla tego studia),
+/// Pomoc zespołu platformy zamawiana z „Pierwszych ustawień” (/witaj): podłączenie skrzynki, strona pod klucz
+/// i ustawienie płatności online. To pozycje sklepu usług w Portalu — cena z katalogu (z ustaleniami dla tego studia),
 /// zamówienie trafia do Zgłoszeń w Portalu, a kwota na rachunek dopiero po wykonaniu.
 /// </summary>
 public sealed class PlatformHelpService(ILogger<PlatformHelpService> logger)
 {
     public const int MailSetup = 9;
     public const int SiteSetup = 10;
+    public const int PaymentsSetup = 3;
 
     public sealed record Offer(int Id, string Name, decimal Price);
 
@@ -42,7 +44,7 @@ public sealed class PlatformHelpService(ILogger<PlatformHelpService> logger)
             foreach (var el in catalog.EnumerateArray())
             {
                 var id = el.GetProperty("id").GetInt32();
-                if (id is MailSetup or SiteSetup)
+                if (id is MailSetup or SiteSetup or PaymentsSetup)
                     result[id] = new(id, el.GetProperty("name").GetString() ?? "", el.GetProperty("price").GetDecimal());
             }
         }

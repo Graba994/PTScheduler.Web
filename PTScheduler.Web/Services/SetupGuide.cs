@@ -65,6 +65,9 @@ public sealed class SetupGuide(
                                   where r.Name == Domain.Constants.Roles.Trainer
                                   select ur.UserId).CountAsync();
             var hasLogo = await db.AppBrandings.AnyAsync(b => b.LogoPath != null && b.LogoPath != "");
+            // „Klienci płacą na miejscu” wybrane w /witaj — krok płatności jest wtedy załatwiony bez bramki.
+            var payOffline = Infrastructure.Services.SetupService.HasDecision(
+                await db.AppBrandings.AsNoTracking().Select(b => b.OnboardingJson).FirstOrDefaultAsync(), "payments-offline");
             var paymentsEnabled = false;
             try { paymentsEnabled = (await paymentSettings.GetAsync()).Enabled; }
             catch (Exception ex) { logger.LogWarning(ex, "Nie udało się wczytać ustawień płatności."); }
@@ -122,7 +125,9 @@ public sealed class SetupGuide(
                 steps.Add(new("Włącz powiadomienia na telefonie", "Nowe rezerwacje i wiadomości od razu na ekranie", "/Account/Manage/Notifications", "bi-bell",
                     await db.PushSubscriptions.AnyAsync(x => x.UserId == userId)));
                 if (access.Can(Perms.ManagePayments) && entitlements.IsAllowed("PaymentsEnabled"))
-                    steps.Add(new("Włącz płatności online", "BLIK i karta — pieniądze od razu u Ciebie", "/admin/payments", "bi-credit-card", paymentsEnabled));
+                    steps.Add(paymentsEnabled || !payOffline
+                        ? new("Włącz płatności online", "BLIK i karta — pieniądze od razu u Ciebie", "/admin/payments", "bi-credit-card", paymentsEnabled)
+                        : new("Płatności: na miejscu", "Klienci płacą u Ciebie — online włączysz, kiedy zechcesz", "/admin/payments", "bi-credit-card", true));
             }
             return new SetupState { Steps = steps, Status = status };
         }

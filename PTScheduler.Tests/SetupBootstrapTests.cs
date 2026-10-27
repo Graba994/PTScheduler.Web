@@ -196,4 +196,19 @@ public class SetupBootstrapTests
         (await setup.MakeOwnerTrainerAsync(client.Id)).Should().BeNull();
         (await users.IsInRoleAsync(client, Roles.Trainer)).Should().BeFalse();
     }
+
+    [Fact]
+    public async Task Decisions_are_remembered_for_first_steps()
+    {
+        var (sp, _, setup, _) = await CreateAsync();
+        await setup.SetDecisionAsync("payments-offline", true);
+        (await setup.GetDecisionsAsync()).Should().Contain("payments-offline");
+
+        await using (var db = await sp.GetRequiredService<IDbContextFactory<ApplicationDbContext>>().CreateDbContextAsync())
+            SetupService.HasDecision((await db.AppBrandings.SingleAsync()).OnboardingJson, "payments-offline").Should().BeTrue();
+
+        await setup.SetDecisionAsync("payments-offline", false);
+        (await setup.GetDecisionsAsync()).Should().BeEmpty();
+        SetupService.HasDecision(null, "payments-offline").Should().BeFalse();
+    }
 }

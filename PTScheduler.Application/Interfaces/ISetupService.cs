@@ -24,4 +24,8 @@ public interface ISetupService
     /// loginu). Tylko gdy w aplikacji nie ma jeszcze żadnego trenera. Zwraca Id profilu trenera albo null.
     /// </summary>
     Task<string?> MakeOwnerTrainerAsync(string ownerUserId);
+
+    /// <summary>Decyzje z „Pierwszych ustawień”, np. „payments-offline” (klienci płacą na miejscu — bez bramki).</summary>
+    Task<IReadOnlySet<string>> GetDecisionsAsync();
+    Task SetDecisionAsync(string key, bool on);
 }
