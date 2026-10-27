@@ -238,6 +238,10 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string FinanceFakturowniaDomain = "finance_fakturownia_domain";
         /// <summary>Token API Fakturowni (zaszyfrowany Data Protection).</summary>
         public const string FinanceFakturowniaToken = "finance_fakturownia_token";
+        // Garmin Connect (program partnerski, plan Starter): klucze aplikacji i klucz w adresie odbioru danych.
+        public const string GarminClientId = "garmin_client_id";
+        public const string GarminClientSecret = "garmin_client_secret";
+        public const string GarminPushKey = "garmin_push_key";
         /// <summary>„true” — dokument czeka na zatwierdzenie, zanim trafi do Fakturowni (domyślnie tak).</summary>
         public const string FinanceFakturowniaApprove = "finance_fakturownia_approve";
         /// <summary>„true” — nowe dokumenty wystawione w Fakturowni pobieramy same (bez dopisywania do ewidencji).</summary>

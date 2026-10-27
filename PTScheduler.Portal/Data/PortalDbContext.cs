@@ -53,6 +53,9 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<SalesLedgerEntry> SalesLedger => Set<SalesLedgerEntry>();
     public DbSet<Expense> Expenses => Set<Expense>();
     public DbSet<FinanceEvent> FinanceEvents => Set<FinanceEvent>();
+    public DbSet<GarminConnection> GarminConnections => Set<GarminConnection>();
+    public DbSet<GarminAuthRequest> GarminAuthRequests => Set<GarminAuthRequest>();
+    public DbSet<GarminInboxItem> GarminInbox => Set<GarminInboxItem>();
 
     protected override void OnModelCreating(ModelBuilder b)
     {
@@ -451,6 +454,28 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
         });
 
         SeedPlans(b);
+        b.Entity<GarminConnection>(e =>
+        {
+            e.HasIndex(x => x.GarminUserId).IsUnique();
+            e.HasIndex(x => new { x.TenantId, x.TenantClientId });
+            e.Property(x => x.GarminUserId).HasMaxLength(100);
+            e.Property(x => x.Permissions).HasMaxLength(300);
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<GarminAuthRequest>(e =>
+        {
+            e.HasIndex(x => x.State).IsUnique();
+            e.Property(x => x.State).HasMaxLength(64);
+            e.Property(x => x.CodeVerifier).HasMaxLength(128);
+            e.Property(x => x.ReturnPath).HasMaxLength(200);
+        });
+        b.Entity<GarminInboxItem>(e =>
+        {
+            e.HasIndex(x => new { x.ProcessedAt, x.Id });
+            e.Property(x => x.Kinds).HasMaxLength(200);
+            e.Property(x => x.Error).HasMaxLength(500);
+        });
+
         SeedServiceItems(b);
     }
 

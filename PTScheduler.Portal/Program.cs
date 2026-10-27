@@ -100,6 +100,8 @@ builder.Services.AddScoped<BillingService>();
 builder.Services.AddHostedService<BillingBackgroundService>();
 builder.Services.AddHttpClient(FakturowniaClient.HttpClientName, c => c.Timeout = TimeSpan.FromSeconds(30));
 builder.Services.AddScoped<FakturowniaClient>();
+builder.Services.AddScoped<GarminService>();
+builder.Services.AddHostedService<GarminBackgroundService>();
 builder.Services.AddScoped<AccountingService>();
 builder.Services.AddHostedService<AccountingBackgroundService>();
 builder.Services.AddScoped<ErrorAlertService>();
@@ -697,6 +699,49 @@ app.MapGet("/api/account/logout", async (SignInManager<IdentityUser> signIn) =>
 
 // Stripe webhook — Stripe posts events here as JSON with a signature
 // header. Return 200 quickly; Stripe will retry on any non-2xx.
+// ── Garmin Connect (plan Starter) ──
+// Powrót z logowania do Garmina → z powrotem do aplikacji studia (adres studia + zapamiętana ścieżka).
+app.MapGet("/garmin/callback", async (string? code, string? state, string? error, GarminService garmin) =>
+    Results.Redirect(await garmin.CallbackAsync(code, state, error)));
+
+// Dane z Garmina (push). Klucz w adresie zna tylko Garmin (ustawiony w portalu dewelopera); zły klucz = 404.
+app.MapPost("/api/garmin/push/{key}", async (string key, HttpContext ctx, GarminService garmin) =>
+{
+    using var reader = new StreamReader(ctx.Request.Body);
+    var body = await reader.ReadToEndAsync();
+    return await garmin.ReceiveAsync(key, body) ? Results.Ok() : Results.NotFound();
+});
+
+// Aplikacja studia → Portal (sekret instancji): stan, start logowania klienta, odłączenie.
+app.MapGet("/api/garmin/{slug}/status", async (string slug, HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory, IConfiguration config, GarminService garmin) =>
+{
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    return Results.Json(new { enabled = (await garmin.ConfigAsync()).Enabled });
+});
+app.MapPost("/api/garmin/{slug}/start", async (string slug, HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory, IConfiguration config, GarminService garmin) =>
+{
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    using var doc = await System.Text.Json.JsonDocument.ParseAsync(ctx.Request.Body);
+    if (!doc.RootElement.TryGetProperty("clientId", out var cid) || !cid.TryGetInt32(out var clientId)) return Results.BadRequest(new { error = "Brak klienta." });
+    var path = doc.RootElement.TryGetProperty("returnUrl", out var r) ? r.GetString() : null;
+    var (url, error) = await garmin.StartAsync(tenant, clientId, path);
+    return url is null ? Results.BadRequest(new { error }) : Results.Json(new { url });
+});
+app.MapPost("/api/garmin/{slug}/disconnect", async (string slug, HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory, IConfiguration config, GarminService garmin) =>
+{
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    using var doc = await System.Text.Json.JsonDocument.ParseAsync(ctx.Request.Body);
+    if (!doc.RootElement.TryGetProperty("clientId", out var cid) || !cid.TryGetInt32(out var clientId)) return Results.BadRequest(new { error = "Brak klienta." });
+    var error = await garmin.DisconnectAsync(tenant, clientId);
+    return error is null ? Results.Ok() : Results.Json(new { error }, statusCode: 502);
+});
+
 app.MapPost("/api/webhooks/stripe", async (HttpContext ctx, StripeService stripe) =>
 {
     using var reader = new StreamReader(ctx.Request.Body);

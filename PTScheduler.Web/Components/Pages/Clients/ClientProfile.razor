@@ -28,6 +28,7 @@
 @inject ISurveyService Surveys
 @inject IChatService Chat
 @inject IClientDocumentService DocumentSvc
+@inject PTScheduler.Web.Services.WearableService Wearables
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <PageTitle>@(client?.FullName ?? "Profil klienta")</PageTitle>
@@ -561,6 +562,11 @@ else if (client is not null)
     @if (_tab == "photos" && Entitlements.IsAllowed("BodyMeasurements"))
     {
         <ProgressPhotos ClientId="Id" UserId="@currentUserId" IsStaff="true" />
+    }
+
+    @if (_tab == "garmin" && _hasWearable)
+    {
+        <ClientWearablePanel ClientId="Id" />
     }
 
     @if (_tab == "packages")
@@ -1360,6 +1366,8 @@ else if (client is not null)
         .Where(s => !(s.Status == SessionStatus.Scheduled && s.EndTime >= StudioClock.Now))
         .OrderByDescending(s => s.StartTime).ToList() ?? [];
 
+    private bool _hasWearable;
+
     private IEnumerable<(string Key, string Icon, string Label, int Count)> Tabs()
     {
         yield return ("overview", "bi-grid-1x2", "Przegląd", _attention.Count(a => a.Level != "info"));
@@ -1368,6 +1376,7 @@ else if (client is not null)
         yield return ("packages", "bi-box-seam", "Pakiety", 0);
         yield return ("measurements", "bi-rulers", "Pomiary", 0);
         if (Entitlements.IsAllowed("BodyMeasurements")) yield return ("photos", "bi-camera", "Zdjęcia", 0);
+        if (_hasWearable) yield return ("garmin", "bi-smartwatch", "Garmin", 0);
         yield return ("surveys", "bi-clipboard2-pulse", "Ankiety", 0);
         yield return ("account", "bi-person-gear", "Konto", 0);
     }
@@ -1378,6 +1387,9 @@ else if (client is not null)
         _plansOn = Entitlements.IsAllowed("TrainingPlansEnabled");
         _journal = []; _plans = []; _records = []; _postWorkout = []; _health = null; _insights = [];
         _progressionCount = 0; _unreadChat = 0; _lastClientMessage = null; _lastClientMessageAt = null;
+
+        // Zegarek (Garmin): zakładka tylko u klientów, którzy go połączyli (albo mają z niego dane).
+        try { _hasWearable = await Wearables.LinkAsync(Id) is not null; } catch { _hasWearable = false; }
 
         // Każde źródło osobno: brak jednego (np. wyłączony moduł) nie psuje całego panelu.
         if (_plansOn)

@@ -173,6 +173,7 @@ builder.Services.AddScoped<PTScheduler.Web.Services.ClientNav>();
 builder.Services.AddSingleton<PTScheduler.Web.Services.EntitlementService>();
 builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformInfoService>();
 builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformHelpService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.WearableService>();
 builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformLegalService>();
 builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformAssistantService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.AssistantTipsService>();
@@ -890,6 +891,28 @@ app.MapPost("/internal/entitlements/reload",
     var json = await reader.ReadToEndAsync();
     svc.ReplaceFromJson(json);
     return Results.Ok(new { plan = svc.Current.Name });
+});
+
+// Garmin (przez Portal): potwierdzenie połączenia / odłączenia klienta i dane z zegarka (push z Garmina).
+app.MapPost("/internal/garmin/link", async (HttpContext ctx, PTScheduler.Web.Services.WearableService wearables) =>
+{
+    if (!InternalSecretMatches(ctx)) return Results.NotFound();
+    using var doc = await System.Text.Json.JsonDocument.ParseAsync(ctx.Request.Body);
+    var r = doc.RootElement;
+    if (!r.TryGetProperty("clientId", out var cid) || !cid.TryGetInt32(out var clientId)) return Results.BadRequest();
+    var connected = r.TryGetProperty("connected", out var c) && c.ValueKind == System.Text.Json.JsonValueKind.True;
+    await wearables.SetLinkAsync(clientId, connected, r.TryGetProperty("deviceName", out var d) ? d.GetString() : null);
+    return Results.Ok();
+});
+app.MapPost("/internal/garmin/data", async (HttpContext ctx, PTScheduler.Web.Services.WearableService wearables) =>
+{
+    if (!InternalSecretMatches(ctx)) return Results.NotFound();
+    using var doc = await System.Text.Json.JsonDocument.ParseAsync(ctx.Request.Body);
+    var r = doc.RootElement;
+    if (!r.TryGetProperty("clientId", out var cid) || !cid.TryGetInt32(out var clientId)
+        || !r.TryGetProperty("kind", out var k) || !r.TryGetProperty("records", out var records)) return Results.BadRequest();
+    var saved = await wearables.IngestAsync(clientId, k.GetString() ?? "", records);
+    return Results.Ok(new { saved });
 });
 
 // Dane testowe (scenariusze „kilka miesięcy pracy”) — tylko z Portalu, który pozwala na to wyłącznie kontom testowym.

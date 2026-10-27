@@ -12,6 +12,7 @@
 @inject IClientService ClientService
 @inject ITrainingPlanService PlanService
 @inject PreSessionBriefService Briefs
+@inject WearableService Wearables
 @inject WorkoutNoteDraftService NoteDrafts
 @inject IOffPackageService OffPackage
 @inject IDbContextFactory<ApplicationDbContext> DbFactory
@@ -250,6 +251,7 @@
     private HashSet<int> _logged = [], _noted = [], _hasFuture = [];
     private int? _rebookConflict;
     private bool _drafting;
+    private Dictionary<int, PTScheduler.Domain.Rules.ReadinessRules.Result> _ready = [];
 
     private string DayTitle => _day == _today ? "Dziś" : _day == _today.AddDays(1) ? "Jutro" : _day == _today.AddDays(-1) ? "Wczoraj" : "Dzień";
     private static string DayHref(DateOnly d) => $"/dzis?d={d:yyyy-MM-dd}";
@@ -314,6 +316,11 @@
         _mascot = config is { Enabled: true } ? config.Icons.GetValueOrDefault("hello") : null;
         // Karty wizyt (te same co „przed treningiem”) — równolegle, każda z własnym kontekstem bazy.
         var todo = _visits.Where(v => v.S.Status != SessionStatus.Cancelled).ToList();
+        // Gotowość z zegarka (Garmin) tylko na dziś — wczorajszy sen nic nie mówi o wizycie za tydzień.
+        if (_day == _today)
+        {
+            try { _ready = await Wearables.ReadinessAsync(todo.Select(v => v.S.ClientId).Distinct().ToList()); } catch { _ready = []; }
+        }
         await Task.WhenAll(todo.Select(async v =>
         {
             try { v.Card = await Briefs.GetAsync(v.S.Id, _userId, _isAdmin); } catch { v.Card = null; }
@@ -333,6 +340,13 @@
         var list = new List<Hint>();
         if (v.Card is not { } c) return list;
         if (c.Number == 1) list.Add(new("info", "bi-stars", "Pierwszy trening — zacznij od rozmowy"));
+        if (_ready.TryGetValue(v.S.ClientId, out var r))
+            list.Add(r.Level switch
+            {
+                PTScheduler.Domain.Rules.ReadinessRules.Level.Low => new("warn", "bi-battery", Short($"Garmin: gotowość niska — {string.Join(", ", r.Reasons.Take(2))}")),
+                PTScheduler.Domain.Rules.ReadinessRules.Level.Ok => new("info", "bi-battery-half", Short(r.Reasons.Count > 0 ? $"Garmin: gotowość średnia — {r.Reasons[0]}" : "Garmin: gotowość średnia")),
+                _ => new("good", "bi-battery-full", "Garmin: dobra forma na dziś")
+            });
         if (c.HealthNotes.Count > 0) list.Add(new("warn", "bi-heart-pulse", Short("Zdrowie: " + c.HealthNotes[0])));
         if (c.LastFeeling.Any(f => f.StartsWith("Ból", StringComparison.OrdinalIgnoreCase)))
             list.Add(new("warn", "bi-bandaid", "Ostatnio zgłoszony ból"));

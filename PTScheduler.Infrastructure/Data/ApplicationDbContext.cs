@@ -84,6 +84,9 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<ShortLink> ShortLinks => Set<ShortLink>();
     public DbSet<SlotInvitation> SlotInvitations => Set<SlotInvitation>();
     public DbSet<SlotWatch> SlotWatches => Set<SlotWatch>();
+    public DbSet<WearableLink> WearableLinks => Set<WearableLink>();
+    public DbSet<WearableDay> WearableDays => Set<WearableDay>();
+    public DbSet<WearableActivity> WearableActivities => Set<WearableActivity>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -331,6 +334,31 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             e.HasIndex(x => x.Code).IsUnique();
             e.Property(x => x.Code).HasMaxLength(16);
             e.Property(x => x.TargetPath).HasMaxLength(500);
+        });
+        // Zegarek klienta (Garmin przez Portal): jedno połączenie na klienta i dostawcę, dzień i aktywność bez duplikatów.
+        builder.Entity<WearableLink>(e =>
+        {
+            e.HasIndex(x => new { x.ClientId, x.Provider }).IsUnique();
+            e.Property(x => x.Provider).HasMaxLength(20);
+            e.Property(x => x.DeviceName).HasMaxLength(100);
+            e.HasOne(x => x.Client).WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<WearableDay>(e =>
+        {
+            e.HasIndex(x => new { x.ClientId, x.Provider, x.Date }).IsUnique();
+            e.Property(x => x.Provider).HasMaxLength(20);
+            e.HasOne(x => x.Client).WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<WearableActivity>(e =>
+        {
+            e.HasIndex(x => new { x.Provider, x.ExternalId }).IsUnique();
+            e.HasIndex(x => new { x.ClientId, x.StartUtc });
+            e.Property(x => x.Provider).HasMaxLength(20);
+            e.Property(x => x.ExternalId).HasMaxLength(80);
+            e.Property(x => x.Name).HasMaxLength(150);
+            e.Property(x => x.Type).HasMaxLength(60);
+            e.Property(x => x.DeviceName).HasMaxLength(100);
+            e.HasOne(x => x.Client).WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<SlotWatch>(e =>
         {

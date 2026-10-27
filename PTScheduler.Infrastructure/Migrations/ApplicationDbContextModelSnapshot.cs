@@ -3390,6 +3390,184 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.ToTable("TrainingPlans");
                 });
 
+            modelBuilder.Entity("PTScheduler.Domain.Entities.WearableActivity", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("AverageHeartRate")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("DeviceName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<int?>("DistanceMeters")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("DurationSeconds")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("ExternalId")
+                        .IsRequired()
+                        .HasMaxLength(80)
+                        .HasColumnType("character varying(80)");
+
+                    b.Property<int?>("Kilocalories")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("MaxHeartRate")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(150)
+                        .HasColumnType("character varying(150)");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int?>("SessionId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("StartUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Type")
+                        .IsRequired()
+                        .HasMaxLength(60)
+                        .HasColumnType("character varying(60)");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId", "StartUtc");
+
+                    b.HasIndex("Provider", "ExternalId")
+                        .IsUnique();
+
+                    b.ToTable("WearableActivities");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.WearableDay", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int?>("ActiveKilocalories")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("AverageStress")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("AwakeMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("BodyBatteryHigh")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("BodyBatteryLow")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<int?>("DeepSleepMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("HrvLastNight")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("LightSleepMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<int?>("RemSleepMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("RestingHeartRate")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("SleepMinutes")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("SleepScore")
+                        .HasColumnType("integer");
+
+                    b.Property<int?>("Steps")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("UpdatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId", "Provider", "Date")
+                        .IsUnique();
+
+                    b.ToTable("WearableDays");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.WearableLink", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime?>("ConnectedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("ConsentAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("DeviceName")
+                        .HasMaxLength(100)
+                        .HasColumnType("character varying(100)");
+
+                    b.Property<DateTime?>("DisconnectedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("LastDataAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Provider")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId", "Provider")
+                        .IsUnique();
+
+                    b.ToTable("WearableLinks");
+                });
+
             modelBuilder.Entity("PTScheduler.Domain.Entities.WebPushSettings", b =>
                 {
                     b.Property<int>("Id")
@@ -4228,6 +4406,39 @@ namespace PTScheduler.Infrastructure.Migrations
                         .WithMany()
                         .HasForeignKey("ClientId")
                         .OnDelete(DeleteBehavior.SetNull);
+
+                    b.Navigation("Client");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.WearableActivity", b =>
+                {
+                    b.HasOne("PTScheduler.Domain.Entities.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Client");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.WearableDay", b =>
+                {
+                    b.HasOne("PTScheduler.Domain.Entities.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Client");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.WearableLink", b =>
+                {
+                    b.HasOne("PTScheduler.Domain.Entities.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
 
                     b.Navigation("Client");
                 });

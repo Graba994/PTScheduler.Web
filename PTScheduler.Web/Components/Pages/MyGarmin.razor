@@ -1,0 +1,157 @@
+@page "/my/garmin"
+@attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Client")]
+@inject PTScheduler.Web.Services.WearableService Wearables
+@inject IClientService ClientService
+@inject AuthenticationStateProvider AuthState
+@inject NavigationManager Nav
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Domain.Rules
+@rendermode PTScheduler.Web.RenderModes.Server
+
+@* Zegarek Garmin klienta: wyraźna zgoda → logowanie do Garmina (przez platformę) → dane trafiają do trenera.
+   Odłączenie = wycofanie zgody (opcjonalnie z usunięciem danych). Garmin wymaga podania modelu urządzenia przy danych. *@
+
+<AppTitle Page="Zegarek Garmin" />
+
+<div class="gm">
+    <div class="mb-3">
+        <h4 class="mb-1 fw-bold"><i class="bi bi-smartwatch me-2"></i>Zegarek Garmin</h4>
+        <div class="text-muted small">Twój trener zobaczy sen i regenerację z zegarka — i dopasuje trening do formy w danym dniu.</div>
+    </div>
+
+    @if (_message is not null)
+    {
+        <div class="alert @(_messageOk ? "alert-success" : "alert-warning") py-2 small">@_message</div>
+    }
+
+    @if (_loading)
+    {
+        <div class="text-center py-5"><div class="spinner-border text-primary"></div></div>
+    }
+    else if (_clientId == 0)
+    {
+        <div class="alert alert-info">Ta strona jest dla klientów trenera.</div>
+    }
+    else if (_link is { IsConnected: true })
+    {
+        <section class="gm-card">
+            <div class="gm-status"><i class="bi bi-check-circle-fill"></i><span><b>Zegarek połączony</b><small>od @_link.ConnectedAt!.Value.ToLocalTime().ToString("d MMMM yyyy", Pl)@(_link.LastDataAt is { } last ? $" · ostatnie dane {last.ToLocalTime():dd.MM HH:mm}" : " · czekamy na pierwsze dane")</small></span></div>
+            @if (_summary?.Days.FirstOrDefault() is { } d)
+            {
+                <div class="gm-tiles">
+                    @if (d.SleepMinutes is int sleep) { <div class="gm-tile"><small>Sen</small><b>@ReadinessRules.Duration(sleep)</b></div> }
+                    @if (d.BodyBatteryHigh is int bb) { <div class="gm-tile"><small>Body Battery</small><b>@bb</b></div> }
+                    @if (d.RestingHeartRate is int rhr) { <div class="gm-tile"><small>Tętno spoczynkowe</small><b>@rhr</b></div> }
+                    @if (d.Steps is int steps) { <div class="gm-tile"><small>Kroki</small><b>@steps.ToString("N0", Pl)</b></div> }
+                </div>
+                <div class="gm-attr">Dane: Garmin@(string.IsNullOrWhiteSpace(_link.DeviceName) ? "" : $" {_link.DeviceName}") · @d.Date.ToString("d MMMM", Pl)</div>
+            }
+            <div class="gm-what">
+                <b>Co widzi trener</b>
+                <span>Sen, tętno spoczynkowe, HRV, Body Battery, kroki i aktywności (np. bieg, rower). Nie widzi lokalizacji ani tras.</span>
+            </div>
+            @if (_confirmOff)
+            {
+                <div class="gm-off">
+                    <label class="form-check">
+                        <input type="checkbox" class="form-check-input" @bind="_deleteData" />
+                        <span class="form-check-label">Usuń też dane z zegarka zapisane w aplikacji</span>
+                    </label>
+                    <div class="d-flex gap-2 flex-wrap mt-2">
+                        <button class="btn btn-danger btn-sm" disabled="@_busy" @onclick="DisconnectAsync">Odłącz zegarek</button>
+                        <button class="btn btn-link btn-sm" @onclick="() => _confirmOff = false">Anuluj</button>
+                    </div>
+                </div>
+            }
+            else
+            {
+                <button class="btn btn-outline-danger btn-sm align-self-start" @onclick="() => _confirmOff = true"><i class="bi bi-x-circle me-1"></i>Odłącz zegarek</button>
+            }
+        </section>
+    }
+    else if (!_available)
+    {
+        <section class="gm-card text-center">
+            <i class="bi bi-smartwatch gm-big"></i>
+            <b>Łączenie z Garminem będzie dostępne wkrótce</b>
+            <span class="text-muted small">Damy znać w aplikacji, gdy tylko ruszy.</span>
+        </section>
+    }
+    else
+    {
+        <section class="gm-card">
+            <ul class="gm-benefits">
+                <li><i class="bi bi-moon-stars"></i><span><b>Trening pod Twoją formę</b><small>Po krótkiej nocy trener zaplanuje lżejszy dzień, po dobrej — mocniejszy.</small></span></li>
+                <li><i class="bi bi-heart-pulse"></i><span><b>Tętno z treningu przy wizycie</b><small>Aktywność z zegarka sama dopina się do treningu w aplikacji.</small></span></li>
+                <li><i class="bi bi-graph-up-arrow"></i><span><b>Postępy także poza treningami</b><small>Biegi, rower i kroki — trener widzi całość, nie tylko godzinę w studiu.</small></span></li>
+            </ul>
+            <label class="gm-consent">
+                <input type="checkbox" class="form-check-input" @bind="_consent" />
+                <span>Zgadzam się, żeby dane z mojego zegarka Garmin (sen, tętno, HRV, Body Battery, kroki, aktywności) trafiały do mojego trenera w tej aplikacji.
+                    Mogą być analizowane automatycznie, także z pomocą AI — bez mojego imienia i danych kontaktowych. Zgodę wycofam w każdej chwili, odłączając zegarek.
+                    Szczegóły: <a href="/legal/privacy" target="_blank">Polityka prywatności</a>.</span>
+            </label>
+            <button class="btn btn-primary btn-lg gm-connect" disabled="@(!_consent || _busy)" @onclick="ConnectAsync">
+                @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-smartwatch me-1"></i> }
+                Połącz z Garmin Connect
+            </button>
+            <small class="text-muted">Zalogujesz się na stronie Garmina i wybierzesz, co udostępniasz. Dane z czasu przed połączeniem nie są przesyłane.</small>
+        </section>
+    }
+</div>
+
+@code {
+    [SupplyParameterFromQuery(Name = "garmin")] public string? Result { get; set; }
+
+    private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
+    private int _clientId;
+    private bool _loading = true, _available, _consent, _busy, _confirmOff, _deleteData, _messageOk;
+    private string? _message;
+    private PTScheduler.Domain.Entities.WearableLink? _link;
+    private PTScheduler.Web.Services.WearableService.Summary? _summary;
+
+    protected override async Task OnInitializedAsync()
+    {
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        var client = await ClientService.GetClientByUserIdAsync(user.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "");
+        if (client is not null)
+        {
+            _clientId = client.Id;
+            await LoadAsync();
+        }
+        (_message, _messageOk) = Result switch
+        {
+            "ok" => ("Gotowe! Zegarek połączony — pierwsze dane pojawią się po najbliższej synchronizacji z Garmin Connect.", true),
+            "anulowano" => ("Łączenie przerwane — możesz spróbować ponownie.", false),
+            "blad" => ("Nie udało się połączyć z Garminem. Spróbuj ponownie za chwilę.", false),
+            _ => (null, false)
+        };
+        _loading = false;
+    }
+
+    private async Task LoadAsync()
+    {
+        _link = await Wearables.LinkAsync(_clientId);
+        _summary = _link is { IsConnected: true } ? await Wearables.SummaryAsync(_clientId, 7) : null;
+        _available = _link is { IsConnected: true } || await Wearables.AvailableAsync();
+    }
+
+    private async Task ConnectAsync()
+    {
+        _busy = true; _message = null;
+        var (url, error) = await Wearables.StartConnectAsync(_clientId, "/my/garmin");
+        if (url is not null) { Nav.NavigateTo(url, forceLoad: true); return; }
+        _busy = false; _messageOk = false; _message = error;
+    }
+
+    private async Task DisconnectAsync()
+    {
+        _busy = true;
+        var error = await Wearables.DisconnectAsync(_clientId, _deleteData);
+        _messageOk = error is null;
+        _message = error ?? (_deleteData ? "Zegarek odłączony, dane usunięte." : "Zegarek odłączony. Wcześniejsze dane zostają u trenera, dopóki ich nie usuniesz.");
+        _confirmOff = false; _busy = false;
+        await LoadAsync();
+    }
+}
