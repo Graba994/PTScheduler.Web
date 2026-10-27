@@ -499,16 +499,13 @@ public class LeoAnalytics(IDbContextFactory<PortalDbContext> dbFactory, LeoServi
         };
         var seen = string.Join("\n", warnings.Take(4).Select(w => $"- {Lower(w.Title)} ({Lower(w.Detail.TrimEnd('.'))})"));
         var body = $"""
-            Dzień dobry,
+            Cześć!
 
-            zaglądamy, czy wszystko w porządku — w ostatnich dniach w aplikacji widać zmiany:
+            Zaglądamy, czy wszystko gra — w ostatnich dniach w aplikacji widać zmiany:
             {seen}
 
-            Czasem to po prostu sezon albo urlop, ale jeśli coś przeszkadza w pracy, chętnie pomożemy. {warnings[0].Action}
-            Daj znać, jeśli wolisz krótką rozmowę telefoniczną.
-
-            Pozdrawiamy
-            Zespół {"{MARKA}"}
+            Może to po prostu urlop albo sezon, ale jeśli coś przeszkadza w pracy, chętnie pomożemy. {warnings[0].Action}
+            Wolisz pogadać przez telefon? Daj znać, zadzwonimy.
             """;
         return assistant.DraftReplyAsync("ostrzezenie",
             "W aplikacji trenera widać nietypowe zmiany aktywności. Napisz życzliwą, krótką wiadomość: zapytaj, czy wszystko w porządku, i zaproponuj jedną konkretną pomoc z sugestii. Nie strasz, nie pisz o „monitorowaniu”.",
@@ -529,15 +526,12 @@ public class LeoAnalytics(IDbContextFactory<PortalDbContext> dbFactory, LeoServi
         }
         var nextText = next is null ? "wyższy plan" : $"plan {next.Name} ({(ClientLimit(next) == 0 ? "bez limitu klientów" : $"do {next.MaxClients} klientów")}, {Zl(next.MonthlyPrice)} miesięcznie)";
         var body = $"""
-            Dzień dobry,
+            Cześć!
 
-            gratulujemy — w aplikacji jest już {s.Clients} z {s.ClientLimit} klientów dostępnych w planie {s.PlanName}. Świetnie się rozwijasz!
-            Żeby limit nie zatrzymał nowych zapisów, warto rozważyć {nextText}. Zmiana zajmuje chwilę i nic nie ginie.
+            Gratulacje — masz już {s.Clients} z {s.ClientLimit} klientów w planie {s.PlanName}. Świetnie Ci idzie! 🎉
+            Żeby limit nie zatrzymał nowych zapisów, zerknij na {nextText}. Zmiana zajmuje chwilę i nic nie ginie.
 
-            Chętnie odpowiemy na pytania albo pomożemy przy zmianie.
-
-            Pozdrawiamy
-            Zespół {"{MARKA}"}
+            Masz pytania? Odpisz, pomożemy.
             """;
         return assistant.DraftReplyAsync("wyzszy_plan",
             "Trener zbliża się do limitu klientów w swoim planie. Napisz krótką, życzliwą wiadomość: pogratuluj rozwoju i zaproponuj wyższy plan z faktów, bez nacisku. Nie obiecuj rabatów.",
@@ -550,27 +544,21 @@ public class LeoAnalytics(IDbContextFactory<PortalDbContext> dbFactory, LeoServi
             "Trenerowi dobrze idzie (więcej klientów lub wizyt). Napisz krótką wiadomość z gratulacjami i delikatną prośbą o polecenie platformy innym trenerom (jest program poleceń). Bez nacisku.",
             new() { ["co_widac"] = item.Note }, "Gratulacje — świetny miesiąc!",
             $"""
-            Dzień dobry,
+            Cześć!
 
-            widzimy, że u Ciebie dzieje się dużo dobrego: {Lower(item.Note)}. Gratulujemy!
-            Jeśli znasz innych trenerów, którym aplikacja mogłaby pomóc — w programie poleceń oboje dostajecie miesiąc gratis. Link do polecania jest w aplikacji.
-
-            Pozdrawiamy
-            Zespół {"{MARKA}"}
+            Widzimy, że u Ciebie sporo się dzieje: {Lower(item.Note)}. Gratulacje! 💪
+            Znasz innych trenerów, którym aplikacja by pomogła? Z programem poleceń oboje dostajecie miesiąc gratis — link znajdziesz w aplikacji.
             """),
         _ => assistant.DraftReplyAsync("uspiony",
             "Trener przestał korzystać z aplikacji (brak logowań lub wizyt). Napisz krótką, życzliwą wiadomość z jedną praktyczną wskazówką i propozycją pomocy. Bez wyrzutów.",
             new() { ["co_widac"] = item.Note }, "Jak możemy pomóc?",
             $"""
-            Dzień dobry,
+            Cześć!
 
-            dawno nie widzieliśmy Cię w aplikacji — czy wszystko w porządku? Jeśli coś przeszkadza albo czegoś brakuje, daj znać.
-            Mała wskazówka: wizyty powtarzalne („tak samo za tydzień”) układają grafik na tygodnie do przodu jednym kliknięciem.
+            Dawno Cię u nas nie było — wszystko gra? Jeśli coś przeszkadza albo czegoś brakuje, napisz śmiało.
+            Mały trik: wizyty powtarzalne („tak samo za tydzień”) układają grafik na tygodnie do przodu jednym kliknięciem.
 
-            Chętnie pomożemy w krótkiej rozmowie.
-
-            Pozdrawiamy
-            Zespół {"{MARKA}"}
+            Chcesz, żebyśmy pokazali to w 10 minut przez telefon? Daj znać.
             """),
     };
 

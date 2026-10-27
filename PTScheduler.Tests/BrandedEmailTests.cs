@@ -16,7 +16,8 @@ public class BrandedEmailTests
         var html = EmailService.BrandedMessage(Body);
         html.Should().Contain(EmailService.LogoMarker);
         html.Should().NotContain("Pozdrawiamy");
-        html.Split("Zespół Hantly").Length.Should().Be(2, "podpis zespołu pojawia się dokładnie raz — z szablonu");
+        html.Should().NotContain("Zespół Hantly");
+        html.Split("Ekipa Hantly").Length.Should().Be(2, "podpis ekipy pojawia się dokładnie raz — z szablonu");
     }
 
     [Fact]
@@ -32,6 +33,7 @@ public class BrandedEmailTests
     public void Thanks_without_team_signature_stays_in_text()
     {
         EmailService.StripSignature("Dzień dobry,\n\nDziękujemy!").Should().EndWith("Dziękujemy!");
-        EmailService.BrandedMessage("Treść", "Studio X").Should().Contain("Zespół Studio X");
+        EmailService.BrandedMessage("Treść", "Studio X").Should().Contain("Ekipa Studio X");
+        EmailService.StripSignature("Cześć!\n\nTreść.\n\nTrzymaj się!\nEkipa Hantly").Should().EndWith("Treść.");
     }
 }

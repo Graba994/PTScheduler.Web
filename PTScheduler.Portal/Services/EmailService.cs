@@ -499,9 +499,9 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         """;
 
     /// <summary>
-    /// Firmowa wiadomość od zespołu platformy (szkice Leo: ryzyko odejścia, zgłoszenia, opinie): logo, biała karta
-    /// z paskiem w kolorze marki, treść z akapitami i listami, stały podpis zespołu i stopka. Podpis z treści
-    /// („Pozdrawiamy, Zespół Hantly”) usuwamy — dodaje go szablon, więc każda wiadomość kończy się tak samo.
+    /// Firmowa wiadomość od ekipy platformy (szkice Leo: ryzyko odejścia, zgłoszenia, opinie): logo, biała karta
+    /// z paskiem w kolorze marki, treść z akapitami i listami, stały podpis „Ekipa Hantly” i stopka. Ton luźny, na „Ty”.
+    /// Podpis z treści („Pozdrawiamy, Zespół Hantly”) usuwamy — dodaje go szablon, więc każda wiadomość kończy się tak samo.
     /// </summary>
     public static string BrandedMessage(string body, string brand = "Hantly")
     {
@@ -545,8 +545,8 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                           <div style="width:40px;height:40px;border-radius:12px;background:#ede9fe;color:#7c3aed;font:800 18px/40px -apple-system,'Segoe UI',Arial,sans-serif;text-align:center">{b[..1]}</div>
                         </td>
                         <td style="padding:16px 0 0 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;font-size:14px;line-height:1.45;color:#1f2937">
-                          <b>Zespół {b}</b><br>
-                          <span style="color:#6b6680">Odpisz na tę wiadomość — odpowiadamy zwykle w ciągu jednego dnia roboczego.</span>
+                          <b>Ekipa {b}</b><br>
+                          <span style="color:#6b6680">Masz pytanie? Po prostu odpisz — czytamy każdą wiadomość.</span>
                         </td>
                       </tr>
                     </table>
@@ -554,7 +554,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                 </td></tr>
                 <tr><td align="center" style="padding:18px 12px 0;font-family:-apple-system,'Segoe UI',Arial,sans-serif;font-size:12px;line-height:1.5;color:#8b8799">
                   {b} · aplikacja dla trenerów personalnych · <a href="https://hantly.pl" style="color:#7c3aed;text-decoration:none">hantly.pl</a><br>
-                  Dostajesz tę wiadomość, bo prowadzisz studio w {b}.
+                  Piszemy, bo prowadzisz studio w {b}.
                 </td></tr>
               </table>
             </td></tr>
@@ -575,21 +575,23 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
                 return $"""<a href="{href}" style="color:#7c3aed">{url}</a>{rest}""";
             });
 
-    /// <summary>Usuwa końcowy podpis zespołu („Pozdrawiamy,\nZespół Hantly”) — szablon dodaje własny.</summary>
+    /// <summary>Usuwa końcowy podpis („Pozdrawiamy,\nZespół Hantly”, „Ekipa Hantly”) — szablon dodaje własny.</summary>
     public static string StripSignature(string body, string brand = "Hantly")
     {
         var lines = body.Replace("\r", "").TrimEnd().Split('\n').ToList();
         bool IsSign(string l)
         {
             var t = l.Trim().TrimEnd(',', '.', '!').ToLowerInvariant();
-            return t.Length == 0 || t is "pozdrawiamy" or "pozdrawiam" or "serdecznie pozdrawiamy" or "z pozdrowieniami" or "dziękujemy" or "do usłyszenia"
-                || t == $"zespół {brand.ToLowerInvariant()}" || t == "zespół hantly" || t == $"— zespół {brand.ToLowerInvariant()}";
+            var team = t.TrimStart('—', '-', ' ');
+            return t.Length == 0 || t is "pozdrawiamy" or "pozdrawiam" or "serdecznie pozdrawiamy" or "pozdrawiamy serdecznie" or "z pozdrowieniami"
+                    or "dziękujemy" or "do usłyszenia" or "trzymaj się" or "trzymamy kciuki" or "pozdro" or "na razie"
+                || team == $"zespół {brand.ToLowerInvariant()}" || team == $"ekipa {brand.ToLowerInvariant()}" || team is "zespół hantly" or "ekipa hantly";
         }
         var cut = lines.Count;
         while (cut > 0 && IsSign(lines[cut - 1])) cut--;
         // Odcinamy tylko, gdy na końcu był podpis zespołu (samo „Dziękujemy!” w treści zostaje).
         var tail = string.Join(" ", lines.Skip(cut)).ToLowerInvariant();
-        return tail.Contains("zespół") ? string.Join("\n", lines.Take(cut)).TrimEnd() : body.TrimEnd();
+        return tail.Contains("zespół") || tail.Contains("ekipa") ? string.Join("\n", lines.Take(cut)).TrimEnd() : body.TrimEnd();
     }
 
     /// <summary>Podgląd w panelu: logo jako obrazek w samym HTML (data:), jak w skrzynce odbiorcy.</summary>

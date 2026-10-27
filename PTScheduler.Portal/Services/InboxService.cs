@@ -379,7 +379,7 @@ public class InboxService(
             ["czy_trener_platformy"] = t?.TenantId is null ? "nie wiadomo" : "tak",
         };
         if (t?.Tenant is { } tenant) facts["studio"] = tenant.CompanyName;
-        const string fallback = "Dzień dobry,\n\ndziękujemy za wiadomość. Sprawdzimy temat i wrócimy z odpowiedzią najszybciej, jak to możliwe. Jeśli to pilne, napisz proszę, jak najlepiej się skontaktować.\n\nPozdrawiamy\nZespół {MARKA}";
+        const string fallback = "Cześć!\n\nDzięki za wiadomość. Sprawdzamy temat i wrócimy z odpowiedzią najszybciej, jak się da. Jeśli to pilne, napisz, jak najlepiej się z Tobą złapać.";
         return await assistant.DraftReplyAsync("poczta",
             "Ktoś napisał na adres kontaktowy platformy. Odpowiedz konkretnie na treść wiadomości; jeśli czegoś nie wiadomo, poproś o szczegóły albo zaproponuj krótką rozmowę.",
             facts, InboxParsing.ReplySubject(t?.Subject ?? "Twoja wiadomość"), fallback, message: text);

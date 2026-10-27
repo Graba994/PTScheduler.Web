@@ -433,7 +433,10 @@ public partial class AssistantService(
             Administrator przeczyta i poprawi szkic przed wysłaniem.
 
             Zasady:
-            - Po polsku, uprzejmie i konkretnie, 3–7 zdań. Zacznij od „Dzień dobry,” (bez imienia, jeśli go nie podano). Nie dodawaj podpisu ani pozdrowień na końcu — logo, podpis zespołu i stopkę dodaje firmowy szablon.
+            - Po polsku, luźno i ciepło, na „Ty” — jak życzliwa ekipa, nie urząd. 3–6 krótkich zdań, konkretnie.
+            - Zacznij od „Cześć!” (albo „Cześć, [imię]!”, jeśli imię jest w faktach). Najwyżej jedno emoji.
+            - Bez korpomowy: żadnych „uprzejmie informujemy”, „w razie pytań prosimy o kontakt”, „z poważaniem”.
+            - Nie dodawaj podpisu ani pozdrowień na końcu — logo, podpis ekipy i stopkę dodaje szablon.
             - Formy neutralne płciowo: nie zgaduj płci trenera („dziękujemy za wiadomość”, „daj znać”, nie „napisałeś/napisałaś”).
             - Korzystaj tylko z podanych faktów. Nie obiecuj terminów, zwrotów pieniędzy, rabatów ani nowych funkcji.
             - Gdy czegoś nie wiadomo, zaproponuj krótką rozmowę albo poproś o szczegóły.
