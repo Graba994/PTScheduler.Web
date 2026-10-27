@@ -101,6 +101,8 @@ public class AppLaunchService(IServiceScopeFactory scopes, ILogger<AppLaunchServ
         }
         var idx = launch.Steps.FindIndex(s => s.Key == key);
         if (idx < 0) return;
+        // Przy ponownej próbie kroki zrobione wcześniej nie wracają do „w toku”.
+        if (launch.Steps[idx].State == StepState.Done) return;
         for (var i = 0; i < idx; i++)
             if (launch.Steps[i].State is StepState.Waiting or StepState.Running && launch.Steps[i].State != StepState.Failed)
                 launch.Steps[i].State = launch.Steps[i].State == StepState.Running ? StepState.Done : StepState.Skipped;
@@ -143,7 +145,10 @@ public class AppLaunchService(IServiceScopeFactory scopes, ILogger<AppLaunchServ
             launch.Attempt = attempt;
             if (attempt > 1)
             {
-                foreach (var st in launch.Steps) st.State = StepState.Waiting;
+                // Ponowna próba dzieje się w tle: zrobione kroki zostają zrobione, a przerwany wraca do „w toku” —
+                // lista się nie cofa i nikt nie musi się zastanawiać, co poszło nie tak.
+                foreach (var st in launch.Steps)
+                    if (st.State is StepState.Failed or StepState.Running) st.State = StepState.Running;
                 launch.SetupFailed = false;
                 Notify(launch);
                 await Task.Delay(RetryDelays[attempt - 2]);
