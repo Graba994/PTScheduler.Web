@@ -97,7 +97,8 @@ public sealed class SetupGuide(
                                     select ur.UserId).AnyAsync();
                 if (access.IsAdmin && !iTrain && trainers == 0)
                     // Samo konto administratora (bez roli trenera) nie przyjmuje zapisów — potrzebny profil trenera.
-                    steps.Add(new("Utwórz swój profil trenera", "Na nim prowadzisz treningi i przyjmujesz zapisy", "/admin/users", "bi-person-badge", false));
+                    // Właściciel, który sam trenuje, dostaje rolę trenera na tym samym koncie (pytanie w /witaj).
+                    steps.Add(new("Zdecyduj, kto prowadzi treningi", "Ty — na tym samym koncie, albo osobny trener", "/witaj", "bi-person-badge", false));
                 else
                 {
                     var hoursSet = iTrain ? weeklyHours > 0

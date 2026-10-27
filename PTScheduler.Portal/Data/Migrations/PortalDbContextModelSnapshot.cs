@@ -1986,6 +1986,36 @@ namespace PTScheduler.Portal.Data.Migrations
                         },
                         new
                         {
+                            Id = 9,
+                            Category = "setup",
+                            CreatedAt = new DateTime(2026, 10, 27, 0, 0, 0, 0, DateTimeKind.Utc),
+                            CreditAmount = 0,
+                            DefaultPrice = 49m,
+                            Description = "Podłączymy Twoją pocztę (Gmail, WP, Onet, firmową), żeby e-maile do klientów wychodziły z Twojego adresu. Wyślemy test i sprawdzimy, czy nie trafiają do spamu.",
+                            FulfillmentType = "manual",
+                            Icon = "bi-envelope-at",
+                            IsActive = true,
+                            Name = "Podłączenie własnej skrzynki e-mail",
+                            PriceType = "one_time",
+                            SortOrder = 7
+                        },
+                        new
+                        {
+                            Id = 10,
+                            Category = "setup",
+                            CreatedAt = new DateTime(2026, 10, 27, 0, 0, 0, 0, DateTimeKind.Utc),
+                            CreditAmount = 0,
+                            DefaultPrice = 99m,
+                            Description = "Ułożymy Twoją stronę: teksty o Tobie i ofercie, zdjęcia, opinie i kontakt — gotowa do pokazania klientom.",
+                            FulfillmentType = "manual",
+                            Icon = "bi-window-desktop",
+                            IsActive = true,
+                            Name = "Strona główna pod klucz",
+                            PriceType = "one_time",
+                            SortOrder = 8
+                        },
+                        new
+                        {
                             Id = 100,
                             Category = "addon",
                             CreatedAt = new DateTime(2026, 9, 1, 0, 0, 0, 0, DateTimeKind.Utc),

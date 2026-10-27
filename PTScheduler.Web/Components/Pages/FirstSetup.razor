@@ -6,6 +6,7 @@
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Web.Components.Layout
+@using PTScheduler.Web.Services
 @inject IEmailSettingsService MailSettings
 @inject IBrandingService Branding
 @inject PTScheduler.Infrastructure.Services.PlatformEmailProvider PlatformMail
@@ -24,18 +25,28 @@
 @inject AuthenticationStateProvider AuthState
 @inject Microsoft.AspNetCore.Identity.UserManager<PTScheduler.Infrastructure.Data.ApplicationUser> UserManager
 @inject NavigationManager Nav
+@inject ISiteContentService SiteContent
+@inject IEmailService MailService
+@inject PTScheduler.Web.Services.PlatformHelpService Help
+@inject PTScheduler.Web.Services.MessageDraftService Drafts
 
 @* Pierwsze ustawienia po publikacji z kreatora: kilka krótkich kroków w jednym miejscu, wszystko wypełnione z góry.
-   Godziny pracy → oferta → zasady odwołań → kto wysyła e-maile → pierwszy klient → gotowe.
-   Każdy krok zapisuje się od razu i można go pominąć; przeglądarka pamięta, gdzie trener skończył.
-   Z boku podgląd aplikacji klienta, który zmienia się razem z ustawieniami. Logika godzin i opisów: FirstSetupRules. *@
+   (Kto prowadzi treningi) → godziny pracy → oferta → zasady odwołań → logo i asystent → strona główna →
+   kto wysyła e-maile → pierwszy klient → gotowe (z powiadomieniami na telefonie).
+   Każdy krok zapisuje się od razu i można go pominąć; przy poczcie i stronie można zamówić pomoc zespołu.
+   Przeglądarka pamięta, gdzie trener skończył. Z boku podgląd w telefonie: aplikacja klienta, a przy stronie —
+   strona główna (przewijana). Na małym ekranie podgląd otwiera przycisk „Podgląd”. Logika: FirstSetupRules. *@
 
 <AppTitle Page="Pierwsze ustawienia" />
 
 <div class="wz">
     <div class="wz-top">
-        <div class="wz-eyebrow"><i class="bi bi-stars"></i>Pierwsze ustawienia · ok. 3 minuty</div>
-        <a class="wz-later" href="/app?witaj=1">Dokończę później<i class="bi bi-x-lg"></i></a>
+        <div class="wz-eyebrow"><i class="bi bi-stars"></i>Pierwsze ustawienia · ok. @Minutes</div>
+        <a class="wz-later" href="/app?witaj=1" data-enhance-nav="false">Dokończę później<i class="bi bi-x-lg"></i></a>
+        @if (!_loading)
+        {
+            <button type="button" class="wz-peek" @onclick="() => _peek = true"><i class="bi bi-phone"></i>Podgląd</button>
+        }
     </div>
 
     @if (_loading)
@@ -64,7 +75,7 @@
                     <span class="wz-tip-mascot" aria-hidden="true">
                         @if (_assistant?.AnimatedSvg is { Length: > 0 } svg)
                         {
-                            <span class="hm-fx" data-hm-motion="@_assistant!.Motion" data-hm-fx="@PTScheduler.Web.Services.PlatformAssistantService.PageFx(_assistant)"><span class="hm-live st-idle md-@Mood">@((MarkupString)svg)</span></span>
+                            <span class="hm-fx" data-hm-motion="@(_motion is "calm" or "off" ? _motion : _assistant!.Motion)" data-hm-fx="@PTScheduler.Web.Services.PlatformAssistantService.PageFx(_assistant)"><span class="hm-live st-idle md-@Mood">@((MarkupString)svg)</span></span>
                         }
                         else if (_assistant?.Icons.TryGetValue(Mood, out var icon) == true)
                         {
@@ -80,6 +91,31 @@
 
                 @switch (Current)
                 {
+                    case "me":
+                        <section class="wz-card" aria-labelledby="wz-me">
+                            <h1 id="wz-me">Czy to Ty prowadzisz treningi?</h1>
+                            <p class="wz-lead">Najprościej mieć jedno konto: zarządzasz studiem i prowadzisz treningi — bez drugiego logowania i przełączania kont.</p>
+                            <div class="wz-choices">
+                                <form method="post" action="/Account/OwnerTrains" class="wz-choice-form">
+                                    <AntiforgeryToken />
+                                    <input type="hidden" name="confirm" value="1" />
+                                    <button type="submit" class="wz-choice on">
+                                        <i class="bi bi-person-check"></i>
+                                        <span><b>Tak, prowadzę treningi <em>polecane</em></b><small>Ustawisz swoje godziny pracy i od razu przyjmiesz zapisy klientów.</small></span>
+                                    </button>
+                                </form>
+                                <a class="wz-choice" href="/admin/users">
+                                    <i class="bi bi-person-plus"></i>
+                                    <span><b>Treningi prowadzi ktoś inny</b><small>Dodasz konto trenera z jego adresem e-mail — godziny pracy ustawi na swoim koncie.</small></span>
+                                </a>
+                            </div>
+                            <div class="wz-nav">
+                                <button type="button" class="btn btn-link text-muted" @onclick="NextAsync">Pomiń</button>
+                                <span></span>
+                            </div>
+                        </section>
+                        break;
+
                     case "hours":
                         <section class="wz-card" aria-labelledby="wz-h">
                             <h1 id="wz-h">Kiedy przyjmujesz klientów?</h1>
@@ -258,6 +294,166 @@
                         </section>
                         break;
 
+                    case "look":
+                        <section class="wz-card" aria-labelledby="wz-l">
+                            <h1 id="wz-l">Logo i asystent</h1>
+                            <p class="wz-lead">Kolor aplikacji już jest — z kreatora. Dodaj logo: klienci zobaczą je w aplikacji, na stronie i w e-mailach.</p>
+                            <div class="wz-label">Logo</div>
+                            @if (_canLogo)
+                            {
+                                <div class="wz-logo">
+                                    <span class="wz-logo-prev">
+                                        @if (!string.IsNullOrEmpty(_logo))
+                                        {
+                                            <img src="@_logo" alt="Twoje logo" />
+                                        }
+                                        else
+                                        {
+                                            <span>@Initials</span>
+                                        }
+                                    </span>
+                                    <div class="wz-logo-act">
+                                        <label class="btn btn-outline-primary" for="wz-logo-file">
+                                            @if (_logoBusy)
+                                            {
+                                                <span class="spinner-border spinner-border-sm me-1"></span>
+                                            }
+                                            else
+                                            {
+                                                <i class="bi bi-upload me-1"></i>
+                                            }
+                                            @(string.IsNullOrEmpty(_logo) ? "Wgraj logo" : "Zmień logo")
+                                        </label>
+                                        <InputFile id="wz-logo-file" class="d-none" accept="image/png,image/jpeg,image/svg+xml,image/webp" OnChange="UploadLogoAsync" />
+                                        <small>PNG, SVG albo JPG do 2 MB — najlepiej kwadratowe, na przezroczystym tle.</small>
+                                        @if (!string.IsNullOrEmpty(_logo))
+                                        {
+                                            <button type="button" class="btn btn-link btn-sm text-danger p-0 align-self-start" @onclick="RemoveLogoAsync">Usuń logo</button>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
+                                <div class="wz-note"><i class="bi bi-lock"></i><span>Własne logo jest w planie Starter i wyższych — do tego czasu klienci widzą inicjały studia. <a href="/admin/upgrade">Porównaj plany</a></span></div>
+                            }
+
+                            @if (_assistant is { Enabled: true })
+                            {
+                                <div class="wz-label mt-4">@AssistantName — Twój asystent</div>
+                                <p class="wz-muted">Podpowiada, co zrobić, i szkicuje wiadomości do klientów. Nic nie wysyła sam — zawsze decydujesz Ty.</p>
+                                <div class="wz-sub">Ruch maskotki</div>
+                                <div class="wz-chips" role="radiogroup" aria-label="Ruch maskotki">
+                                    @foreach (var (key, label) in MotionChoices)
+                                    {
+                                        var motion = key;
+                                        <button type="button" role="radio" aria-checked="@(_motion == motion ? "true" : "false")" class="wz-chip @(_motion == motion ? "on" : "")" @onclick="() => _motion = motion">@label</button>
+                                    }
+                                </div>
+                                @if (_trainerId is not null)
+                                {
+                                    <div class="wz-sub">Wiadomości do klientów</div>
+                                    <div class="wz-chips" role="radiogroup" aria-label="Forma zwracania się do klientów">
+                                        <button type="button" role="radio" aria-checked="@(_style.Address != "pan" ? "true" : "false")" class="wz-chip @(_style.Address != "pan" ? "on" : "")" @onclick='() => _style.Address = "ty"'>Na „Ty”</button>
+                                        <button type="button" role="radio" aria-checked="@(_style.Address == "pan" ? "true" : "false")" class="wz-chip @(_style.Address == "pan" ? "on" : "")" @onclick='() => _style.Address = "pan"'>Grzecznościowo</button>
+                                    </div>
+                                    <div class="wz-chips mt-2" role="radiogroup" aria-label="Emoji w wiadomościach">
+                                        @foreach (var (value, label) in EmojiChoices)
+                                        {
+                                            var emoji = value;
+                                            <button type="button" role="radio" aria-checked="@(_style.Emoji == emoji ? "true" : "false")" class="wz-chip @(_style.Emoji == emoji ? "on" : "")" @onclick="() => _style.Emoji = emoji">@label</button>
+                                        }
+                                    </div>
+                                    <div class="wz-says"><i class="bi bi-chat-dots"></i><span><small>Tak zacznie szkic do klienta:</small>@StyleSample</span></div>
+                                }
+                            }
+                            @Error()
+                            <div class="wz-nav">
+                                <button type="button" class="btn btn-link text-muted" @onclick="NextAsync">Pomiń</button>
+                                <button type="button" class="btn btn-primary btn-lg" disabled="@(_busy || _logoBusy)" @onclick="SaveLookAsync">@Busy()Zapisz i dalej<i class="bi bi-arrow-right ms-1"></i></button>
+                            </div>
+                        </section>
+                        break;
+
+                    case "site":
+                        <section class="wz-card" aria-labelledby="wz-s">
+                            <h1 id="wz-s">Twoja strona główna</h1>
+                            <p class="wz-lead">Wizytówka pod adresem <b>@AppHost</b> z przyciskiem zapisów. Wybierz wygląd i popraw najważniejsze teksty — zdjęcia, opinie i resztę dodasz później.</p>
+                            @if (_site is null)
+                            {
+                                <div class="text-center py-4"><div class="spinner-border text-primary"></div></div>
+                            }
+                            else
+                            {
+                                <div class="wz-label">Wygląd strony</div>
+                                <div class="wz-tpls">
+                                    @foreach (var t in VisibleTemplates)
+                                    {
+                                        var tpl = t;
+                                        var th = SiteWidgets.ThemeOf(t.Theme);
+                                        <button type="button" class="wz-tpl @(_site.Template == t.Key ? "on" : "")" aria-pressed="@(_site.Template == t.Key ? "true" : "false")" @onclick="() => PickTemplateAsync(tpl.Key)">
+                                            <span class="wz-tpl-art" style="--bg:@th.Bg;--sf:@th.Surface;--ink:@th.Ink;--ac:@(string.IsNullOrEmpty(th.Accent) ? "var(--c-primary)" : th.Accent)"><span></span><span></span><i class="bi @t.Icon"></i></span>
+                                            <b>@t.Name</b>
+                                        </button>
+                                    }
+                                </div>
+                                @if (!_allTemplates)
+                                {
+                                    <button type="button" class="wz-add" @onclick="() => _allTemplates = true"><i class="bi bi-grid me-1"></i>Pokaż wszystkie szablony (@SiteWidgets.Templates.Count)</button>
+                                }
+                                @if (SiteWidgets.Templates.FirstOrDefault(x => x.Key == _site.Template) is { } current)
+                                {
+                                    <p class="wz-muted mt-2 mb-0">@current.Description</p>
+                                }
+
+                                @if (Hero is { } hero)
+                                {
+                                    <div class="wz-label mt-4">Najważniejsze teksty</div>
+                                    <div class="wz-field mb-2">
+                                        <label class="form-label" for="wz-h1">Nagłówek</label>
+                                        <input id="wz-h1" class="form-control" maxlength="120" value="@hero.Title" @onchange="e => SiteEditAsync(() => { hero.Title = Val(e); hero.Sample = false; })" />
+                                    </div>
+                                    <div class="wz-field mb-2">
+                                        <label class="form-label" for="wz-h2">Krótko: co oferujesz i dla kogo</label>
+                                        <textarea id="wz-h2" class="form-control" rows="2" maxlength="300" @onchange="e => SiteEditAsync(() => { hero.Subtitle = Val(e); hero.Sample = false; })">@hero.Subtitle</textarea>
+                                    </div>
+                                }
+                                @if (About is { } about)
+                                {
+                                    <div class="wz-field mb-2">
+                                        <label class="form-label" for="wz-about">O Tobie</label>
+                                        <textarea id="wz-about" class="form-control" rows="4" maxlength="1200" @onchange="e => SiteEditAsync(() => SetAboutText(about, Val(e)))">@about.Text</textarea>
+                                    </div>
+                                    <div class="wz-field mb-2">
+                                        <label class="form-label" for="wz-quals">Kwalifikacje <span class="text-muted fw-normal">(po przecinku, opcjonalnie)</span></label>
+                                        <input id="wz-quals" class="form-control" maxlength="300" value="@Quals(about)" placeholder="np. Trener personalny, Dietetyka sportowa" @onchange="e => SiteEditAsync(() => SetQuals(about, Val(e)))" />
+                                    </div>
+                                }
+
+                                <div class="wz-label mt-4">Kontakt na stronie</div>
+                                <div class="wz-form">
+                                    <div class="wz-field">
+                                        <label class="form-label" for="wz-sphone">Telefon</label>
+                                        <input id="wz-sphone" type="tel" class="form-control" maxlength="30" value="@_sitePhone" placeholder="np. 600 100 200" @onchange="e => SiteContactAsync(Val(e), _siteInsta)" />
+                                    </div>
+                                    <div class="wz-field">
+                                        <label class="form-label" for="wz-sinsta">Instagram <span class="text-muted fw-normal">(opcjonalnie)</span></label>
+                                        <input id="wz-sinsta" class="form-control" maxlength="60" value="@_siteInsta" placeholder="@@twoj.profil" @onchange="e => SiteContactAsync(_sitePhone, Val(e))" />
+                                    </div>
+                                </div>
+                                <p class="wz-muted mb-0">E-mail na stronie: @(string.IsNullOrWhiteSpace(SiteEmail) ? "brak — dodasz w kroku E-maile" : SiteEmail)@(_siteSaving ? " · zapisuję…" : "")</p>
+
+                                @HelpCard(PlatformHelpService.SiteSetup, "Wolisz, żebyśmy ułożyli ją za Ciebie?", "Napiszemy teksty, dobierzemy zdjęcia i ułożymy sekcje po krótkiej rozmowie o Twojej ofercie.", $"Strona główna pod klucz — szablon: {_site.Template}")
+                                <a class="wz-more" href="/admin/site">Pełny edytor strony: zdjęcia, opinie, metamorfozy, cennik<i class="bi bi-arrow-right"></i></a>
+                            }
+                            @Error()
+                            <div class="wz-nav">
+                                <button type="button" class="btn btn-link text-muted" @onclick="NextAsync">Pomiń</button>
+                                <button type="button" class="btn btn-primary btn-lg" disabled="@(_busy || _site is null)" @onclick="PublishSiteAsync">@Busy()Opublikuj i dalej<i class="bi bi-arrow-right ms-1"></i></button>
+                            </div>
+                        </section>
+                        break;
+
                     case "mail":
                         <section class="wz-card" aria-labelledby="wz-m">
                             <h1 id="wz-m">Kto wysyła e-maile do Twoich klientów?</h1>
@@ -289,12 +485,97 @@
                             }
                             else if (_mailChoice == "own")
                             {
-                                <div class="wz-detail"><p class="m-0"><i class="bi bi-info-circle me-1"></i>Skrzynkę podłączysz w kilka minut w Zarządzanie → E-maile. Do tego czasu maile wysyła Hantly w imieniu studia — klienci niczego nie tracą.</p></div>
+                                <div class="wz-detail wz-own">
+                                    @if (_ownOk)
+                                    {
+                                        <div class="wz-ok"><i class="bi bi-check-circle-fill"></i><span><b>Skrzynka podłączona</b><small>E-maile do klientów wychodzą z adresu @_ownEmail. Testową wiadomość wysłaliśmy na ten adres.</small></span></div>
+                                    }
+                                    else
+                                    {
+                                        <label class="form-label fw-semibold" for="wz-own">Adres, z którego mają wychodzić e-maile</label>
+                                        <input id="wz-own" type="email" class="form-control" maxlength="200" @bind="_ownEmail" @bind:event="oninput" placeholder="studio@@gmail.com" autocomplete="email" />
+                                        @if (MailProviderRules.IsUnsupported(_ownEmail))
+                                        {
+                                            <div class="wz-note warn mt-2 mb-0"><i class="bi bi-exclamation-circle"></i><span>Skrzynek Outlook, Hotmail, iCloud i Yahoo nie podłączymy samym hasłem. @(_platform ? "Zostań przy wysyłce przez Hantly — odpowiedzi klientów i tak trafią na ten adres." : "Użyj innej skrzynki albo zamów podłączenie poczty firmowej.")</span></div>
+                                        }
+                                        else if (OwnProvider is { } prov)
+                                        {
+                                            <div class="wz-prov">
+                                                <span class="wz-prov-name"><i class="bi bi-envelope-check"></i>@prov.Name</span>
+                                                @if (prov.Key is "hosting" or "GoogleWorkspace")
+                                                {
+                                                    <span class="wz-seg" role="radiogroup" aria-label="Rodzaj poczty firmowej">
+                                                        <button type="button" role="radio" aria-checked="@(!_workspace ? "true" : "false")" class="@(!_workspace ? "on" : "")" @onclick="() => _workspace = false">Hosting</button>
+                                                        <button type="button" role="radio" aria-checked="@(_workspace ? "true" : "false")" class="@(_workspace ? "on" : "")" @onclick="() => _workspace = true">Google Workspace</button>
+                                                    </span>
+                                                }
+                                            </div>
+                                            <ol class="wz-howto">
+                                                @foreach (var step in prov.Steps)
+                                                {
+                                                    <li>@((MarkupString)step)</li>
+                                                }
+                                            </ol>
+                                            @if (prov.Note is { } note)
+                                            {
+                                                <p class="wz-muted">@note</p>
+                                            }
+                                            <div class="wz-form mb-2">
+                                                @if (prov.CustomHost)
+                                                {
+                                                    <div class="wz-field">
+                                                        <label class="form-label" for="wz-host">Serwer SMTP</label>
+                                                        <input id="wz-host" class="form-control" maxlength="120" @bind="_ownHost" placeholder="@prov.Host" autocomplete="off" />
+                                                        <div class="form-text">Puste pole = @(string.IsNullOrEmpty(prov.Host) ? "brak" : prov.Host)</div>
+                                                    </div>
+                                                    <div class="wz-field">
+                                                        <label class="form-label" for="wz-port">Port</label>
+                                                        <select id="wz-port" class="form-select" @bind="_ownPort">
+                                                            <option value="465">465 (SSL)</option>
+                                                            <option value="587">587 (TLS)</option>
+                                                        </select>
+                                                    </div>
+                                                }
+                                                <div class="wz-field wz-field-wide">
+                                                    <label class="form-label" for="wz-pass">@prov.PasswordLabel</label>
+                                                    <div class="input-group">
+                                                        <input id="wz-pass" type="@(_showPass ? "text" : "password")" class="form-control" maxlength="200" @bind="_ownPass" @bind:event="oninput" autocomplete="new-password" />
+                                                        <button type="button" class="btn btn-outline-secondary" @onclick="() => _showPass = !_showPass" aria-label="@(_showPass ? "Ukryj hasło" : "Pokaż hasło")"><i class="bi @(_showPass ? "bi-eye-slash" : "bi-eye")"></i></button>
+                                                    </div>
+                                                    <div class="form-text">Hasło zostaje w Twojej aplikacji i służy tylko do wysyłki.</div>
+                                                </div>
+                                            </div>
+                                            <button type="button" class="btn btn-primary" disabled="@(_testingOwn || string.IsNullOrWhiteSpace(_ownPass))" @onclick="VerifyOwnAsync">
+                                                @if (_testingOwn)
+                                                {
+                                                    <span class="spinner-border spinner-border-sm me-1"></span>
+                                                }
+                                                else
+                                                {
+                                                    <i class="bi bi-shield-check me-1"></i>
+                                                }
+                                                Sprawdź i włącz
+                                            </button>
+                                            @if (_ownError is not null)
+                                            {
+                                                <div class="alert alert-danger py-2 small mt-2 mb-0" role="alert">@_ownError</div>
+                                            }
+                                        }
+                                        @if (_platform)
+                                        {
+                                            <p class="wz-muted mt-3 mb-0"><i class="bi bi-info-circle me-1"></i>Do czasu podłączenia e-maile wysyła Hantly w imieniu studia — klienci niczego nie tracą.</p>
+                                        }
+                                    }
+                                </div>
+                                @if (!_ownOk)
+                                {
+                                    @HelpCard(PlatformHelpService.MailSetup, "Wolisz, żebyśmy podłączyli ją za Ciebie?", "Podłączymy skrzynkę, wyślemy test i sprawdzimy, czy wiadomości nie trafiają do spamu.", $"Podłączenie skrzynki: {(string.IsNullOrWhiteSpace(_ownEmail) ? "adres do ustalenia" : _ownEmail.Trim())} ({OwnProvider?.Name ?? "dostawca do ustalenia"})")
+                                }
                             }
                             @Error()
                             <div class="wz-nav">
                                 <button type="button" class="btn btn-link text-muted" @onclick="NextAsync">Pomiń</button>
-                                <button type="button" class="btn btn-primary btn-lg" disabled="@(_busy || _mailChoice is null)" @onclick="SaveMailAsync">@Busy()@(_mailChoice == "own" ? "Dalej" : "Zapisz i dalej")<i class="bi bi-arrow-right ms-1"></i></button>
+                                <button type="button" class="btn btn-primary btn-lg" disabled="@(_busy || _mailChoice is null || _testingOwn)" @onclick="SaveMailAsync">@Busy()@(_mailChoice == "own" ? "Dalej" : "Zapisz i dalej")<i class="bi bi-arrow-right ms-1"></i></button>
                             </div>
                         </section>
                         break;
@@ -406,18 +687,31 @@
                                     </div>
                                 </div>
                             </div>
+                            <div class="wz-label mt-4">Powiadomienia na tym telefonie</div>
+                            <p class="wz-muted">Nowe rezerwacje i wiadomości od klientów od razu na ekranie — także gdy aplikacja jest zamknięta.</p>
+                            <PTScheduler.Web.Components.Account.Shared.PushDeviceCard />
                             <div class="wz-nav">
                                 <button type="button" class="btn btn-link text-muted" @onclick="() => GoAsync(0)"><i class="bi bi-arrow-counterclockwise me-1"></i>Od początku</button>
-                                <a class="btn btn-primary btn-lg" href="/app?witaj=1">Przejdź do aplikacji<i class="bi bi-arrow-right ms-1"></i></a>
+                                <a class="btn btn-primary btn-lg" href="/app?witaj=1" data-enhance-nav="false">Przejdź do aplikacji<i class="bi bi-arrow-right ms-1"></i></a>
                             </div>
                         </section>
                         break;
                 }
             </div>
 
-            <aside class="wz-side" aria-label="Podgląd aplikacji klienta">
-                <div class="wz-side-k"><i class="bi bi-phone"></i>Tak widzi to klient</div>
-                <div class="wz-phone">
+            <aside class="wz-side @(_peek ? "open" : "")" aria-label="Podgląd w telefonie" @onclick="() => _peek = false">
+                <div class="wz-side-k"><i class="bi @(ShowSite ? "bi-globe2" : "bi-phone")"></i>@(ShowSite ? "Twoja strona na telefonie" : "Tak widzi to klient")</div>
+                <button type="button" class="wz-side-close" aria-label="Zamknij podgląd" @onclick="() => _peek = false"><i class="bi bi-x-lg"></i></button>
+                <div class="wz-phone" @onclick:stopPropagation="true">
+                    @if (ShowSite)
+                    {
+                        <div class="wz-scr wz-scr-site">
+                            @* key: nowy adres = nowa ramka, więc spacer po stronie rusza od nowa po każdej zmianie. *@
+                            <iframe @key="SiteSrc" src="@SiteSrc" title="Podgląd strony głównej" onload="ptFirstSetup.tour(this)"></iframe>
+                        </div>
+                    }
+                    else
+                    {
                     <div class="wz-scr">
                         <div class="wz-bar"><span>9:41</span><span><i class="bi bi-reception-4"></i><i class="bi bi-battery-full"></i></span></div>
                         <div class="wz-app-head">
@@ -464,7 +758,12 @@
                         </div>
                         <div class="wz-app-rules @(Current == "rules" ? "hl" : "")"><i class="bi bi-info-circle"></i>@ClientRules</div>
                     </div>
+                    }
                 </div>
+                @if (ShowSite)
+                {
+                    <small class="wz-side-hint">Przewiń palcem albo kółkiem myszy</small>
+                }
             </aside>
         </div>
     }
@@ -530,6 +829,40 @@
     private bool _limitReached => _studioClients >= _maxClients;
     private readonly List<(string Name, string Note)> _added = [];
 
+    // Logo i asystent
+    private bool _canLogo;
+    private bool _logoBusy;
+    private string _motion = "";
+    private PTScheduler.Domain.Entities.TrainerStyle _style = new();
+    private static readonly (string Key, string Label)[] MotionChoices = [("", "Żywy"), ("calm", "Spokojny"), ("off", "Bez ruchu")];
+    private static readonly (string Key, string Label)[] EmojiChoices = [("brak", "Bez emoji"), ("czasem", "Emoji czasem"), ("często", "Emoji często")];
+
+    // Strona główna (szkic — publikacja przyciskiem „Opublikuj i dalej”)
+    private SiteContentDto? _site;
+    private bool _allTemplates;
+    private bool _siteSaving;
+    private int _siteVersion;
+    private string? _sitePhone, _siteInsta;
+    private bool _sitePublished;
+
+    // Własna skrzynka
+    private string _ownEmail = "";
+    private string _ownPass = "";
+    private string? _ownHost;
+    private int _ownPort = 465;
+    private bool _workspace;
+    private bool _showPass;
+    private bool _testingOwn;
+    private bool _ownOk;
+    private string? _ownError;
+
+    // Pomoc zespołu i podgląd na małym ekranie
+    private Dictionary<int, PTScheduler.Web.Services.PlatformHelpService.Offer> _offers = [];
+    private bool _offersLoaded;
+    private readonly HashSet<int> _ordered = [];
+    private bool _ordering;
+    private bool _peek;
+
     private static readonly int[] Durations = [30, 45, 60, 75, 90, 120];
     private static readonly (int Hours, string Label)[] CancelOptions = [(6, "6 h przed"), (12, "12 h przed"), (24, "24 h przed"), (48, "48 h przed"), (-1, "Zawsze bez kosztów")];
     private static readonly string[] Times = Enumerable.Range(10, 37).Select(i => new TimeOnly(i / 2, i % 2 * 30).ToString("HH:mm")).ToArray();
@@ -549,10 +882,43 @@
 
     private static string StepName(string key) => key switch
     {
-        "hours" => "Godziny", "offer" => "Oferta", "rules" => "Zasady", "mail" => "E-maile", "client" => "Klienci", _ => "Gotowe"
+        "me" => "Ty", "hours" => "Godziny", "offer" => "Oferta", "rules" => "Zasady", "look" => "Logo", "site" => "Strona",
+        "mail" => "E-maile", "client" => "Klienci", _ => "Gotowe"
     };
 
-    private string Mood => Current switch { "done" => "celebrate", "client" => "happy", "mail" => "think", _ => "hello" };
+    private string Mood => Current switch { "done" => "celebrate", "client" or "site" => "happy", "mail" => "think", _ => "hello" };
+
+    private string Minutes
+    {
+        get
+        {
+            var n = Math.Max(3, _steps.Count);
+            return $"{n} {Pl(n, "minuta", "minuty", "minut")}";
+        }
+    }
+
+    /// <summary>Telefon z podglądu pokazuje stronę główną przy kroku „Strona” i na koniec (już opublikowaną).</summary>
+    private bool ShowSite => _steps.Contains("site") && Current is "site" or "done";
+    private string SiteSrc => Current == "done" ? $"/?v={_siteVersion}" : $"/?draft=1&v={_siteVersion}";
+
+    private SiteBlock? Hero => _site?.Blocks.FirstOrDefault(b => b.Type == "hero" && b.Visible);
+    private SiteBlock? About => _site?.Blocks.FirstOrDefault(b => b.Type == "about" && b.Visible);
+    private string SiteEmail => string.IsNullOrWhiteSpace(_replyTo) ? "" : _replyTo.Trim();
+    private IEnumerable<SiteWidgets.PageTemplate> VisibleTemplates =>
+        _allTemplates ? SiteWidgets.Templates
+        : SiteWidgets.Templates.Take(6).Concat(SiteWidgets.Templates.Skip(6).Where(t => t.Key == _site?.Template));
+
+    private MailProviderRules.Provider? OwnProvider => MailProviderRules.Detect(_ownEmail, _workspace);
+
+    private string StyleSample
+    {
+        get
+        {
+            var formal = _style.Address == "pan";
+            var text = formal ? "Dzień dobry! Zwolnił się termin jutro o 18:00 — czy pasuje na trening?" : "Hej [klient]! Zwolnił mi się termin jutro o 18:00 — wpadasz na trening?";
+            return text + _style.Emoji switch { "brak" => "", "często" => " 💪🔥", _ => " 💪" };
+        }
+    }
 
     private string Tip => Current switch
     {
@@ -561,7 +927,12 @@
             : "To najważniejszy krok: bez godzin pracy klienci nie mają się na co zapisać.",
         "offer" => "Ceny możesz zmieniać w każdej chwili. Pakiet zachęca do regularności — klienci chętniej wracają.",
         "rules" => "Większość trenerów wybiera 24 godziny. Jasne zasady to mniej niezręcznych rozmów o odwołanych treningach.",
-        "mail" => "Najprościej zostawić wysyłkę mnie — działa od razu, a nadawcą jest Twoje studio.",
+        "me" => "Jedno konto to mniej klikania: ustawienia studia i Twój grafik w jednym miejscu.",
+        "look" => "Logo robi dużą różnicę — klienci od razu wiedzą, że to Twoja aplikacja.",
+        "site" => "Wystarczy nagłówek i parę zdań o Tobie. Podgląd strony odświeża się po każdej zmianie.",
+        "mail" => _mailChoice == "own"
+            ? "Wpisz adres — sam rozpoznam pocztę i powiem, co kliknąć u dostawcy."
+            : "Najprościej zostawić wysyłkę mnie — działa od razu, a nadawcą jest Twoje studio.",
         "client" => "Zacznij od jednej osoby, która trenuje z Tobą najdłużej — zobaczysz, jak aplikacja działa po stronie klienta.",
         _ => "Świetna robota! Wyślij link klientom albo pokaż im kod QR na treningu."
     };
@@ -581,8 +952,13 @@
             }
             if (_steps.Contains("rules"))
                 yield return (_saved.Contains("rules"), "Zasady odwołań", ClientRules, "/trainer/availability");
+            if (_steps.Contains("look"))
+                yield return (!string.IsNullOrEmpty(_logo), "Logo", string.IsNullOrEmpty(_logo) ? "jeszcze nie dodane" : "dodane — widać je w aplikacji i e-mailach", "/admin/branding");
+            if (_steps.Contains("site"))
+                yield return (_sitePublished, "Strona główna", _sitePublished ? $"opublikowana pod adresem {AppHost}" : "zmiany czekają na publikację", "/admin/site");
             if (_steps.Contains("mail"))
-                yield return (_saved.Contains("mail"), "E-maile do klientów", _mailChoice == "own" ? "własna skrzynka — do podłączenia" : $"wysyła Hantly jako {_studio}", "/admin/email");
+                yield return (_saved.Contains("mail") && (_mailChoice != "own" || _ownOk), "E-maile do klientów",
+                    _ownOk ? $"z Twojej skrzynki {_ownEmail}" : _mailChoice == "own" ? "własna skrzynka — do podłączenia" : $"wysyła Hantly jako {_studio}", "/admin/email");
             if (_steps.Contains("client"))
             {
                 var n = _clientCount + _added.Count;
@@ -600,7 +976,11 @@
         var switchedOwner = principal.HasClaim(c => c.Type == PTScheduler.Web.Services.AccountSwitchService.OriginalUserClaim);
         _isOwner = isAdmin || switchedOwner;
         _canMail = _isOwner;
-        _trainerId = principal.IsInRole(PTScheduler.Domain.Constants.Roles.Trainer) ? me?.Id : await Setup.GetTrainerProfileIdAsync();
+        // Samo konto administratora (bez roli trenera i bez żadnego trenera w aplikacji): najpierw pytamy,
+        // czy właściciel sam prowadzi treningi — zapisany w kreatorze profil mógł już stracić rolę.
+        var iTrain = principal.IsInRole(PTScheduler.Domain.Constants.Roles.Trainer);
+        var askWhoTrains = isAdmin && !iTrain && (await UserManager.GetUsersInRoleAsync(PTScheduler.Domain.Constants.Roles.Trainer)).Count == 0;
+        _trainerId = iTrain ? me?.Id : askWhoTrains ? null : await Setup.GetTrainerProfileIdAsync();
         var access = await AdminAccess.LoadAsync(AuthState, Permission);
 
         try
@@ -611,7 +991,9 @@
         }
         catch (Exception) { }
         try { _assistant = await Platform.GetConfigAsync(); } catch (Exception) { }
+        _canLogo = isAdmin && Entitlements.IsAllowed("CustomLogo");
 
+        if (askWhoTrains) _steps.Add("me");
         if (_trainerId is not null)
         {
             _steps.Add("hours");
@@ -628,6 +1010,14 @@
             _cfg = await Availability.GetConfigAsync(_trainerId);
             try { _paymentsOn = (await PaymentSettings.GetAsync()).Enabled; } catch (Exception) { }
             if (!_paymentsOn) _cfg.OffPackageOnline = false;
+        }
+        if (isAdmin)
+        {
+            _steps.Add("look");
+            if (_trainerId is not null) { try { _style = await Drafts.GetStyleAsync(_trainerId); } catch (Exception) { } }
+            if (!string.IsNullOrEmpty(_logo)) _saved.Add("look");
+            _steps.Add("site");
+            await LoadSiteAsync(me?.Email);
         }
         if (_canMail)
         {
@@ -651,8 +1041,22 @@
         {
             _resumed = true;
             var saved = await JS.InvokeAsync<string>("ptFirstSetup.load", StorageKey);
-            var idx = saved == "done" ? _steps.Count : _steps.IndexOf(saved);
+            // Decyzja „kto prowadzi treningi” jest pierwsza i nie da się jej przeskoczyć wznowieniem.
+            var idx = _steps.Contains("me") ? 0 : saved == "done" ? _steps.Count : _steps.IndexOf(saved);
             if (idx > 0) { _at = idx; StateHasChanged(); }
+        }
+        if (!_loading && !_offersLoaded)
+        {
+            // Ceny pomocy zespołu z Portalu — po pierwszym wyświetleniu, żeby wolny Portal nie wstrzymywał kreatora.
+            _offersLoaded = true;
+            try
+            {
+                var motion = await JS.InvokeAsync<string>("ptFirstSetup.getMotion");
+                _motion = motion is "calm" or "off" ? motion : "";
+            }
+            catch (JSException) { }
+            _offers = await Help.OffersAsync();
+            StateHasChanged();
         }
         if (Current == "done" && !_qrDrawn && !_loading)
         {
@@ -835,13 +1239,22 @@
         _replyTo = mail.ReplyTo ?? myEmail ?? "";
         if (!string.IsNullOrWhiteSpace(mail.FromName) && mail.FromName is not ("Hantly" or "PTScheduler")) _studio = mail.FromName;
         if (own || !string.IsNullOrWhiteSpace(mail.ReplyTo)) _saved.Add("mail");
+        _ownOk = own;
+        _ownEmail = own ? mail.FromAddress : _replyTo;
+        _workspace = mail.Provider == "GoogleWorkspace";
     }
 
     private void CheckReply() => _replyProblem = string.IsNullOrWhiteSpace(_replyTo) ? null : EmailRules.Problem(_replyTo);
 
     private async Task SaveMailAsync()
     {
-        if (_mailChoice == "own") { _saved.Add("mail"); await NextAsync(); return; }
+        if (_mailChoice == "own")
+        {
+            // Niepodłączona skrzynka nie blokuje — do tego czasu (o ile się da) wysyła Hantly w imieniu studia.
+            if (_ownOk) _saved.Add("mail");
+            await NextAsync();
+            return;
+        }
         CheckReply();
         if (_replyProblem is not null) return;
         await RunAsync(async () =>
@@ -856,6 +1269,207 @@
             _saved.Add("mail");
         });
     }
+
+    // ── Własna skrzynka ──
+    /// <summary>Test z danymi z formularza (wiadomość na ten sam adres); zapis i włączenie dopiero, gdy serwer ją przyjmie.</summary>
+    private async Task VerifyOwnAsync()
+    {
+        _ownError = null;
+        if (EmailRules.Problem(_ownEmail) is { } problem) { _ownError = problem; return; }
+        if (OwnProvider is not { } prov) return;
+        var host = prov.CustomHost && !string.IsNullOrWhiteSpace(_ownHost) ? _ownHost.Trim() : prov.Host;
+        if (string.IsNullOrWhiteSpace(host)) { _ownError = "Wpisz serwer SMTP z panelu hostingu."; return; }
+        _testingOwn = true;
+        try
+        {
+            var email = EmailRules.Normalize(_ownEmail);
+            var dto = await MailSettings.GetAsync();
+            dto.Provider = prov.Key is "Gmail" or "GoogleWorkspace" ? prov.Key : "Custom";
+            dto.SmtpHost = host;
+            dto.SmtpPort = prov.CustomHost ? _ownPort : prov.Port;
+            dto.UseTls = true;
+            dto.Login = email;
+            // Hasło aplikacji Google pokazuje się w grupach po 4 znaki — spacje nie są jego częścią.
+            dto.Password = prov.Key is "Gmail" or "GoogleWorkspace" ? _ownPass.Replace(" ", "") : _ownPass.Trim();
+            dto.FromAddress = email;
+            if (string.IsNullOrWhiteSpace(dto.FromName) || dto.FromName is "Hantly" or "PTScheduler") dto.FromName = _studio;
+            if (string.IsNullOrWhiteSpace(dto.ReplyTo)) dto.ReplyTo = email;
+            var (ok, error) = await MailService.TestOwnAsync(dto, email);
+            if (!ok)
+            {
+                _ownError = $"Skrzynka nie przyjęła wiadomości ({error}). Sprawdź hasło i czy dostęp dla programów pocztowych jest włączony — albo zamów podłączenie poniżej.";
+                return;
+            }
+            dto.IsEnabled = true;
+            await MailSettings.SaveAsync(dto);
+            _ownOk = true;
+            _ownEmail = email;
+            _ownPass = "";
+            if (string.IsNullOrWhiteSpace(_replyTo)) _replyTo = email;
+            _saved.Add("mail");
+        }
+        catch (Exception)
+        {
+            _ownError = "Nie udało się sprawdzić skrzynki. Spróbuj jeszcze raz albo zamów podłączenie poniżej.";
+        }
+        finally { _testingOwn = false; }
+    }
+
+    // ── Logo i asystent ──
+    private async Task UploadLogoAsync(InputFileChangeEventArgs e)
+    {
+        _error = null;
+        if (e.File.Size > 2 * 1024 * 1024) { _error = "Logo może mieć najwyżej 2 MB."; return; }
+        _logoBusy = true;
+        try
+        {
+            await using var stream = e.File.OpenReadStream(2 * 1024 * 1024);
+            _logo = await Branding.UploadLogoAsync(stream, e.File.Name);
+            _saved.Add("look");
+            _siteVersion++;
+        }
+        catch (Exception) { _error = "Nie udało się wgrać logo. Spróbuj pliku PNG albo JPG do 2 MB."; }
+        finally { _logoBusy = false; }
+    }
+
+    private async Task RemoveLogoAsync()
+    {
+        try { await Branding.DeleteLogoAsync(); _logo = null; _siteVersion++; }
+        catch (Exception) { _error = "Nie udało się usunąć logo."; }
+    }
+
+    private async Task SaveLookAsync() => await RunAsync(async () =>
+    {
+        try { await JS.InvokeVoidAsync("ptFirstSetup.setMotion", _motion); } catch (JSException) { }
+        if (_trainerId is not null && _assistant is { Enabled: true })
+        {
+            _style.TrainerUserId = _trainerId;
+            await Drafts.SaveStyleAsync(_style);
+        }
+        _saved.Add("look");
+    });
+
+    // ── Strona główna ──
+    private async Task LoadSiteAsync(string? ownerEmail)
+    {
+        try
+        {
+            _site = await SiteContent.GetDraftAsync();
+            var legacy = _site.LayoutVersion < 2 || _site.Blocks.Count == 0;
+            if (legacy)
+                _site = SiteWidgets.BuildTemplate(string.IsNullOrWhiteSpace(_site.Template) ? "personal" : _site.Template, _site);
+            var contact = _site.Blocks.FirstOrDefault(b => b.Type == "contact")?.Items.Where(i => !SiteWidgets.IsPlaceholderContact(i)).ToList() ?? [];
+            _sitePhone = contact.FirstOrDefault(i => i.Icon == "bi-telephone")?.Value;
+            _siteInsta = contact.FirstOrDefault(i => i.Icon == "bi-instagram")?.Value;
+            if (string.IsNullOrWhiteSpace(_sitePhone)) _sitePhone = (await Setup.GetPrefillAsync())?.Phone;
+            _sitePublished = !await SiteContent.HasUnpublishedDraftAsync();
+            if (_sitePublished && !legacy) _saved.Add("site");
+        }
+        catch (Exception) { _site = null; }
+    }
+
+    private static string? Val(ChangeEventArgs e) => string.IsNullOrWhiteSpace(e.Value?.ToString()) ? null : e.Value!.ToString()!.Trim();
+
+    private static string Quals(SiteBlock about) => about.Sample ? "" : string.Join(", ", about.Items.Select(i => i.Title).Where(t => !string.IsNullOrWhiteSpace(t)));
+
+    /// <summary>Własny tekst „O mnie” zdejmuje przykład — razem z przykładowymi certyfikatami z szablonu.</summary>
+    private static void SetAboutText(SiteBlock about, string? text)
+    {
+        if (about.Sample) about.Items = [];
+        about.Text = text;
+        about.Sample = false;
+    }
+
+    private static void SetQuals(SiteBlock about, string? value)
+    {
+        about.Items = (value ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Take(8).Select(t => new SiteBlockItem { Title = t.Length > 60 ? t[..60] : t }).ToList();
+        about.Sample = false;
+    }
+
+    private async Task SiteEditAsync(Action change)
+    {
+        if (_site is null) return;
+        change();
+        await SaveSiteDraftAsync();
+    }
+
+    private async Task SiteContactAsync(string? phone, string? insta)
+    {
+        if (_site is null) return;
+        _sitePhone = phone;
+        _siteInsta = insta;
+        SiteWidgets.ApplyContact(_site, phone, SiteEmail, insta);
+        await SaveSiteDraftAsync();
+    }
+
+    private async Task PickTemplateAsync(string key)
+    {
+        if (_site is null || _site.Template == key) return;
+        // Nowy szablon = nowe sekcje z przykładową treścią; kontakt wpisany wyżej zostaje.
+        _site = SiteWidgets.BuildTemplate(key, _site);
+        SiteWidgets.ApplyContact(_site, _sitePhone, SiteEmail, _siteInsta);
+        await SaveSiteDraftAsync();
+    }
+
+    private async Task SaveSiteDraftAsync()
+    {
+        _siteSaving = true;
+        try
+        {
+            await SiteContent.SaveDraftAsync(_site!);
+            _sitePublished = false;
+            _siteVersion++;
+        }
+        catch (Exception) { _error = "Nie udało się zapisać szkicu strony. Spróbuj jeszcze raz."; }
+        finally { _siteSaving = false; }
+    }
+
+    private async Task PublishSiteAsync() => await RunAsync(async () =>
+    {
+        SiteWidgets.ApplyContact(_site!, _sitePhone, SiteEmail, _siteInsta);
+        await SiteContent.SaveDraftAsync(_site!);
+        await SiteContent.PublishDraftAsync();
+        _sitePublished = true;
+        _siteVersion++;
+        _saved.Add("site");
+    });
+
+    // ── Pomoc zespołu ──
+    private async Task OrderHelpAsync(int itemId, string notes)
+    {
+        _ordering = true;
+        _error = null;
+        try
+        {
+            var (ok, error) = await Help.OrderAsync(itemId, $"{notes} · zamówione z „Pierwszych ustawień”");
+            if (ok) _ordered.Add(itemId);
+            else _error = error;
+        }
+        finally { _ordering = false; }
+    }
+
+    private RenderFragment HelpCard(int id, string title, string text, string notes) => __builder =>
+    {
+        if (_offers.TryGetValue(id, out var offer))
+        {
+            <div class="wz-help">
+                <span class="wz-help-ic" aria-hidden="true"><i class="bi bi-life-preserver"></i></span>
+                <span class="wz-help-txt">
+                    <b>@title</b>
+                    <small>@text @(offer.Price > 0 ? "Płacisz dopiero po wykonaniu — kwotę doliczymy do najbliższego rachunku." : "W ramach Twoich ustaleń z zespołem.")</small>
+                </span>
+                @if (_ordered.Contains(id))
+                {
+                    <span class="wz-help-done"><i class="bi bi-check-circle-fill"></i>Zamówione — odezwiemy się w 1 dzień roboczy</span>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-outline-primary btn-sm" disabled="@_ordering" @onclick="() => OrderHelpAsync(id, notes)">Zamów · @PlatformHelpService.PriceText(offer.Price)</button>
+                }
+            </div>
+        }
+    };
 
     // ── Klient ──
     private async Task AddClientAsync()

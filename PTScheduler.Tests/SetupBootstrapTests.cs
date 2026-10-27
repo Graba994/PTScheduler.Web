@@ -166,4 +166,34 @@ public class SetupBootstrapTests
         users.Users.Count(u => u.Email == "anna@example.com").Should().Be(1);
         (await setup.RedeemWelcomeTokenAsync("t2")).Should().NotBeNull("powtórka odświeża token wejścia");
     }
+
+    [Fact]
+    public async Task OwnerTrains_AddsTrainerRole_OnlyWhenNoTrainerYet()
+    {
+        var (_, users, setup, _) = await CreateAsync();
+        var owner = new ApplicationUser { UserName = "wlasciciel@example.com", Email = "wlasciciel@example.com" };
+        (await users.CreateAsync(owner)).Succeeded.Should().BeTrue();
+        await users.AddToRoleAsync(owner, Roles.Admin);
+
+        (await setup.MakeOwnerTrainerAsync(owner.Id)).Should().Be(owner.Id);
+        (await users.IsInRoleAsync(owner, Roles.Trainer)).Should().BeTrue("jedno konto: zarządza i prowadzi treningi");
+        (await setup.GetTrainerProfileIdAsync()).Should().Be(owner.Id);
+
+        // Drugi administrator, gdy trener już jest — nic nie zmieniamy po cichu.
+        var other = new ApplicationUser { UserName = "drugi@example.com", Email = "drugi@example.com" };
+        await users.CreateAsync(other);
+        await users.AddToRoleAsync(other, Roles.Admin);
+        (await setup.MakeOwnerTrainerAsync(other.Id)).Should().BeNull();
+        (await users.IsInRoleAsync(other, Roles.Trainer)).Should().BeFalse();
+    }
+
+    [Fact]
+    public async Task OwnerTrains_RefusesNonAdmin()
+    {
+        var (_, users, setup, _) = await CreateAsync();
+        var client = new ApplicationUser { UserName = "klient@example.com", Email = "klient@example.com" };
+        await users.CreateAsync(client);
+        (await setup.MakeOwnerTrainerAsync(client.Id)).Should().BeNull();
+        (await users.IsInRoleAsync(client, Roles.Trainer)).Should().BeFalse();
+    }
 }

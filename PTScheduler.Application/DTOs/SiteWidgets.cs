@@ -133,6 +133,39 @@ public static class SiteWidgets
         }
     }
 
+    /// <summary>
+    /// Kontakt z „Pierwszych ustawień”: telefon, e-mail i Instagram w widgecie Kontakt (zamiast danych z szablonu)
+    /// i numer w przyciskach „zadzwoń”. Pozostałe prawdziwe pozycje (adres, Facebook…) zostają.
+    /// </summary>
+    public static void ApplyContact(SiteContentDto content, string? phone, string? email, string? instagram)
+    {
+        var tel = string.IsNullOrWhiteSpace(phone) ? null : new string(phone.Where(c => char.IsDigit(c) || c == '+').ToArray());
+        if (tel is { Length: < 6 }) tel = null;
+        var handle = InstagramHandle(instagram);
+        foreach (var b in content.Blocks)
+        {
+            if (b.CtaUrl?.StartsWith("tel:") == true) b.CtaUrl = tel is null ? "/book" : "tel:" + tel;
+            if (b.Cta2Url?.StartsWith("tel:") == true) b.Cta2Url = tel is null ? "/book" : "tel:" + tel;
+            if (b.Type != "contact") continue;
+            var items = new List<SiteBlockItem>();
+            if (tel is not null) items.Add(new() { Icon = "bi-telephone", Title = "Telefon", Value = phone!.Trim(), Url = "tel:" + tel });
+            if (!string.IsNullOrWhiteSpace(email)) items.Add(new() { Icon = "bi-envelope", Title = "E-mail", Value = email.Trim(), Url = "mailto:" + email.Trim() });
+            if (handle is not null) items.Add(new() { Icon = "bi-instagram", Title = "Instagram", Value = "@" + handle, Url = "https://instagram.com/" + handle });
+            items.AddRange(b.Items.Where(i => !IsPlaceholderContact(i) && i.Icon is not ("bi-telephone" or "bi-envelope" or "bi-instagram")));
+            b.Items = items;
+        }
+    }
+
+    /// <summary>„@anna.fit”, „instagram.com/anna.fit/” albo „anna.fit” → „anna.fit”.</summary>
+    public static string? InstagramHandle(string? value)
+    {
+        var v = (value ?? "").Trim().TrimEnd('/');
+        var slash = v.LastIndexOf('/');
+        if (slash >= 0) v = v[(slash + 1)..];
+        v = v.TrimStart('@').Split('?')[0];
+        return v.Length is > 0 and <= 30 && v.All(c => char.IsLetterOrDigit(c) || c is '.' or '_') ? v : null;
+    }
+
     private static SiteBlock Sample(string type) => type switch
     {
         "hero" => new()

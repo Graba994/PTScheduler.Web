@@ -77,6 +77,23 @@ namespace Microsoft.AspNetCore.Routing
                 return TypedResults.LocalRedirect(error is null ? target : "~/Account/Login");
             }).RequireAuthorization();
 
+            // „Pierwsze ustawienia”: właściciel sam prowadzi treningi — rola trenera na tym samym koncie
+            // i od razu odświeżone ciasteczko (nowe role bez wylogowania). Pole formularza = ochrona antyforgery.
+            accountGroup.MapPost("/OwnerTrains", async (
+                HttpContext context,
+                [FromServices] UserManager<ApplicationUser> userManager,
+                [FromServices] SignInManager<ApplicationUser> signInManager,
+                [FromServices] PTScheduler.Application.Interfaces.ISetupService setup,
+                [FromForm] string? confirm) =>
+            {
+                var me = await userManager.GetUserAsync(context.User);
+                if (me is null) return TypedResults.LocalRedirect("~/Account/Login");
+                // Nowa rola zmienia znacznik bezpieczeństwa — ciasteczko odświeżamy na świeżo wczytanym koncie.
+                if (await setup.MakeOwnerTrainerAsync(me.Id) is not null && await userManager.FindByIdAsync(me.Id) is { } fresh)
+                    await signInManager.RefreshSignInAsync(fresh);
+                return TypedResults.LocalRedirect("~/witaj");
+            }).RequireAuthorization();
+
             accountGroup.MapPost("/PasskeyCreationOptions", async (
                 HttpContext context,
                 [FromServices] UserManager<ApplicationUser> userManager,

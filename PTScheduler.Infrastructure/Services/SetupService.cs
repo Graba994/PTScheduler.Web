@@ -293,6 +293,25 @@ public class SetupService(
         return state.TrainerUserId;
     }
 
+    public async Task<string?> MakeOwnerTrainerAsync(string ownerUserId)
+    {
+        var owner = await userManager.FindByIdAsync(ownerUserId);
+        if (owner is null || !await userManager.IsInRoleAsync(owner, Roles.Admin) || await userManager.IsInRoleAsync(owner, Roles.Root))
+            return null;
+        var trainer = await EnsureTrainerProfileAsync(owner);
+        if (trainer is null) return null;
+
+        await using var db = dbFactory.CreateDbContext();
+        var branding = await db.AppBrandings.FirstOrDefaultAsync();
+        if (branding is null) db.AppBrandings.Add(branding = new AppBranding());
+        var state = ReadState(branding);
+        state.TrainerUserId = trainer.Id;
+        state.OwnerUserId ??= owner.Id;
+        branding.OnboardingJson = JsonSerializer.Serialize(state);
+        await db.SaveChangesAsync();
+        return trainer.Id;
+    }
+
     /// <summary>Rodzaje treningów i pakiet z kreatora zamiast domyślnych „45/60/90 minut”.</summary>
     private static async Task ApplyOfferAsync(ApplicationDbContext db, SetupBootstrapDto dto, string ownerId)
     {

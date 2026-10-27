@@ -701,6 +701,31 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
                 Icon = "bi-star",
                 SortOrder = 11
             },
+            // Pomoc z „Pierwszych ustawień” (/witaj) — zamówienie trafia do Zgłoszeń, kwota na rachunek po wykonaniu.
+            new ServiceItem
+            {
+                Id = 9,
+                CreatedAt = new DateTime(2026, 10, 27, 0, 0, 0, DateTimeKind.Utc),
+                Name = "Podłączenie własnej skrzynki e-mail",
+                Description = "Podłączymy Twoją pocztę (Gmail, WP, Onet, firmową), żeby e-maile do klientów wychodziły z Twojego adresu. Wyślemy test i sprawdzimy, czy nie trafiają do spamu.",
+                Category = "setup",
+                DefaultPrice = 49,
+                PriceType = "one_time",
+                Icon = "bi-envelope-at",
+                SortOrder = 7
+            },
+            new ServiceItem
+            {
+                Id = 10,
+                CreatedAt = new DateTime(2026, 10, 27, 0, 0, 0, DateTimeKind.Utc),
+                Name = "Strona główna pod klucz",
+                Description = "Ułożymy Twoją stronę: teksty o Tobie i ofercie, zdjęcia, opinie i kontakt — gotowa do pokazania klientom.",
+                Category = "setup",
+                DefaultPrice = 99,
+                PriceType = "one_time",
+                Icon = "bi-window-desktop",
+                SortOrder = 8
+            },
             // SMS credit packs
             new ServiceItem
             {
