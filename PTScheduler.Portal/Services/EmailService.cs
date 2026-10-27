@@ -498,6 +498,106 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         </html>
         """;
 
+    /// <summary>
+    /// Firmowa wiadomość od zespołu platformy (szkice Leo: ryzyko odejścia, zgłoszenia, opinie): logo, biała karta
+    /// z paskiem w kolorze marki, treść z akapitami i listami, stały podpis zespołu i stopka. Podpis z treści
+    /// („Pozdrawiamy, Zespół Hantly”) usuwamy — dodaje go szablon, więc każda wiadomość kończy się tak samo.
+    /// </summary>
+    public static string BrandedMessage(string body, string brand = "Hantly")
+    {
+        var b = WebUtility.HtmlEncode(string.IsNullOrWhiteSpace(brand) ? "Hantly" : brand.Trim());
+        var blocks = StripSignature(body.Replace("\r", "").Trim(), brand)
+            .Split("\n\n", StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var html = new System.Text.StringBuilder();
+        foreach (var block in blocks)
+        {
+            var lines = block.Split('\n', StringSplitOptions.TrimEntries);
+            if (lines.All(l => l.StartsWith("- ") || l.StartsWith("• ") || l.StartsWith("* ")))
+            {
+                html.Append("""<ul style="margin:0 0 14px;padding-left:20px">""");
+                foreach (var l in lines) html.Append($"""<li style="margin:0 0 6px">{Inline(l[2..])}</li>""");
+                html.Append("</ul>");
+            }
+            else html.Append($"""<p style="margin:0 0 14px">{string.Join("<br>", lines.Select(Inline))}</p>""");
+        }
+        // Zajawka w skrzynce: pierwsze zdania po powitaniu.
+        var lead = (blocks.Length > 1 ? blocks[1] : blocks.FirstOrDefault() ?? "").Replace("\n", " ");
+        var preheader = WebUtility.HtmlEncode(lead.Length > 110 ? lead[..110] + "…" : lead);
+        return $"""
+            <!DOCTYPE html>
+            <html lang="pl">
+            <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light"></head>
+            <body style="margin:0;padding:0;background:#f4f2fb;-webkit-text-size-adjust:100%">
+            <span style="display:none;max-height:0;overflow:hidden;opacity:0;color:transparent">{preheader}</span>
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background:#f4f2fb">
+            <tr><td align="center" style="padding:28px 12px 32px">
+              <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="max-width:560px">
+                <tr><td align="center" style="padding:0 0 18px">{LogoMarker}</td></tr>
+                <tr><td style="background:#ffffff;border-radius:18px;overflow:hidden;border:1px solid #ebe7f6">
+                  <div style="height:5px;background:#7c3aed;background-image:linear-gradient(90deg,#7c3aed,#a855f7)"></div>
+                  <div style="padding:30px 32px 6px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;font-size:15px;line-height:1.6;color:#1f2937">
+                    {html}
+                  </div>
+                  <div style="padding:6px 32px 28px">
+                    <table role="presentation" cellpadding="0" cellspacing="0" style="border-top:1px solid #efecf7;width:100%">
+                      <tr>
+                        <td style="padding-top:16px;width:44px;vertical-align:top">
+                          <div style="width:40px;height:40px;border-radius:12px;background:#ede9fe;color:#7c3aed;font:800 18px/40px -apple-system,'Segoe UI',Arial,sans-serif;text-align:center">{b[..1]}</div>
+                        </td>
+                        <td style="padding:16px 0 0 12px;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Arial,sans-serif;font-size:14px;line-height:1.45;color:#1f2937">
+                          <b>Zespół {b}</b><br>
+                          <span style="color:#6b6680">Odpisz na tę wiadomość — odpowiadamy zwykle w ciągu jednego dnia roboczego.</span>
+                        </td>
+                      </tr>
+                    </table>
+                  </div>
+                </td></tr>
+                <tr><td align="center" style="padding:18px 12px 0;font-family:-apple-system,'Segoe UI',Arial,sans-serif;font-size:12px;line-height:1.5;color:#8b8799">
+                  {b} · aplikacja dla trenerów personalnych · <a href="https://hantly.pl" style="color:#7c3aed;text-decoration:none">hantly.pl</a><br>
+                  Dostajesz tę wiadomość, bo prowadzisz studio w {b}.
+                </td></tr>
+              </table>
+            </td></tr>
+            </table>
+            </body>
+            </html>
+            """;
+    }
+
+    /// <summary>Tekst akapitu: bezpieczny HTML i klikalne adresy (https://…, www.…).</summary>
+    private static string Inline(string text) =>
+        System.Text.RegularExpressions.Regex.Replace(WebUtility.HtmlEncode(text), @"\b(https?://[^\s<]+|www\.[^\s<]+)",
+            m =>
+            {
+                var url = m.Value.TrimEnd('.', ',', ')', ';');
+                var rest = m.Value[url.Length..];
+                var href = url.StartsWith("www.") ? "https://" + url : url;
+                return $"""<a href="{href}" style="color:#7c3aed">{url}</a>{rest}""";
+            });
+
+    /// <summary>Usuwa końcowy podpis zespołu („Pozdrawiamy,\nZespół Hantly”) — szablon dodaje własny.</summary>
+    public static string StripSignature(string body, string brand = "Hantly")
+    {
+        var lines = body.Replace("\r", "").TrimEnd().Split('\n').ToList();
+        bool IsSign(string l)
+        {
+            var t = l.Trim().TrimEnd(',', '.', '!').ToLowerInvariant();
+            return t.Length == 0 || t is "pozdrawiamy" or "pozdrawiam" or "serdecznie pozdrawiamy" or "z pozdrowieniami" or "dziękujemy" or "do usłyszenia"
+                || t == $"zespół {brand.ToLowerInvariant()}" || t == "zespół hantly" || t == $"— zespół {brand.ToLowerInvariant()}";
+        }
+        var cut = lines.Count;
+        while (cut > 0 && IsSign(lines[cut - 1])) cut--;
+        // Odcinamy tylko, gdy na końcu był podpis zespołu (samo „Dziękujemy!” w treści zostaje).
+        var tail = string.Join(" ", lines.Skip(cut)).ToLowerInvariant();
+        return tail.Contains("zespół") ? string.Join("\n", lines.Take(cut)).TrimEnd() : body.TrimEnd();
+    }
+
+    /// <summary>Podgląd w panelu: logo jako obrazek w samym HTML (data:), jak w skrzynce odbiorcy.</summary>
+    public static string ForPreview(string html) =>
+        LogoPng.Value is { } png
+            ? html.Replace(LogoMarker, $"""<img src="data:image/png;base64,{Convert.ToBase64String(png)}" width="132" alt="Hantly" style="display:inline-block;border:0;width:132px;height:auto">""")
+            : html.Replace(LogoMarker, """<div style="font-weight:800;font-size:20px;color:#7c3aed">Hantly</div>""");
+
     private static string Shell(string inner) =>
         $"""
         <!DOCTYPE html>
