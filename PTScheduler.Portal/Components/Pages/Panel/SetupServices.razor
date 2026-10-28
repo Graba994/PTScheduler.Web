@@ -3,6 +3,7 @@
 @attribute [Authorize(Roles = "Admin")]
 @inject SiteSettingsService Settings
 @inject VideoHubService VideoHub
+@inject ImageHubService ImageHub
 @inject IDbContextFactory<PortalDbContext> DbFactory
 @inject GoogleOAuthBroker Google
 @inject NavigationManager Nav
@@ -88,6 +89,48 @@ else
         </div>
     </section>
 
+    <!-- Zdjęcia -->
+    <section id="images" class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm"><i class="bi bi-images"></i></span>Zdjęcia (Bunny Storage)</h2>
+            <p class="small text-muted">
+                Zdjęcia ćwiczeń trenerów trafiają do jednej strefy Bunny Storage, do folderów <code>slug/cwiczenia</code>, i wyświetlają się przez CDN.
+                Aplikacja zmniejsza je przed wysłaniem (WebP, do 1600 px, bez danych o lokalizacji). Liczą się do tego samego limitu co filmy.
+                Bez tej konfiguracji zdjęcia zapisują się na serwerze aplikacji trenera.
+            </p>
+            <details class="small mb-3">
+                <summary class="fw-semibold">Jak utworzyć strefę w Bunny (jednorazowo)</summary>
+                <ol class="mt-2 mb-0 ps-3">
+                    <li>Bunny → <em>Storage → Add Storage Zone</em>: nazwa np. <code>hantly-media</code>, typ <strong>Standard</strong>, region główny w Europie (Falkenstein), bez replikacji.</li>
+                    <li>W strefie: <em>Connected Pull Zones → Connect Pull Zone</em> (np. <code>hantly-media</code>) — to adres CDN, np. <code>hantly-media.b-cdn.net</code>.</li>
+                    <li><em>FTP &amp; API Access</em>: skopiuj <strong>Password</strong> (nie „Read-only password”) i <strong>Hostname</strong> regionu (np. <code>storage.bunnycdn.com</code>).</li>
+                </ol>
+            </details>
+            <div class="row g-3 align-items-end">
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold" for="stZone">Nazwa strefy</label>
+                    <input id="stZone" class="form-control font-monospace" @bind="_stZone" placeholder="np. hantly-media" autocomplete="off" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold" for="stKey">Hasło strefy</label>
+                    <input id="stKey" type="password" class="form-control font-monospace" @bind="_stKey" placeholder="@(_stKeySet ? "Zapisane — wpisz nowe, aby zmienić" : "FTP & API Access → Password")" autocomplete="new-password" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold" for="stHost">Host regionu</label>
+                    <input id="stHost" class="form-control font-monospace" @bind="_stHost" placeholder="@ImageHubService.DefaultHost" autocomplete="off" />
+                </div>
+                <div class="col-md-3">
+                    <label class="form-label small fw-semibold" for="stCdn">Adres CDN</label>
+                    <input id="stCdn" class="form-control font-monospace" @bind="_stCdn" placeholder="hantly-media.b-cdn.net" autocomplete="off" />
+                </div>
+            </div>
+            <div class="d-flex gap-2 mt-3">
+                <button class="btn btn-primary btn-sm" @onclick="SaveStorageAsync">Zapisz i sprawdź</button>
+            </div>
+            <div class="small text-muted mt-3">Zdjęcia trenerów: <strong>@_imagesCount</strong> · zajęte <strong>@VideoHubService.Gb(_imagesBytes)</strong>.</div>
+        </div>
+    </section>
+
     <!-- Google -->
     <section id="google" class="card border-0 shadow-sm mb-4">
         <div class="card-body">
@@ -167,6 +210,11 @@ else
     private int _librariesCount, _tenantsCount, _videosCount, _videoTenants;
     private long _videosBytes;
 
+    private string _stZone = "", _stKey = "", _stHost = "", _stCdn = "";
+    private bool _stKeySet;
+    private int _imagesCount;
+    private long _imagesBytes;
+
     private bool _shareSmtp;
     private bool _smtpConfigured;
 
@@ -186,7 +234,13 @@ else
             SiteSettingsService.Keys.PlatformBunnyLibraryId, SiteSettingsService.Keys.PlatformBunnyApiKey, SiteSettingsService.Keys.PlatformBunnyCdnHostname,
             SiteSettingsService.Keys.ShareSmtpWithTenants, SiteSettingsService.Keys.SmtpHost,
             SiteSettingsService.Keys.PlatformGoogleClientId, SiteSettingsService.Keys.PlatformGoogleClientSecret,
-            SiteSettingsService.Keys.PlatformGoogleRedirectUri);
+            SiteSettingsService.Keys.PlatformGoogleRedirectUri,
+            SiteSettingsService.Keys.PlatformBunnyStorageZone, SiteSettingsService.Keys.PlatformBunnyStorageKey,
+            SiteSettingsService.Keys.PlatformBunnyStorageHost, SiteSettingsService.Keys.PlatformBunnyStorageCdn);
+        _stZone = s[SiteSettingsService.Keys.PlatformBunnyStorageZone];
+        _stKeySet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformBunnyStorageKey]);
+        _stHost = s[SiteSettingsService.Keys.PlatformBunnyStorageHost];
+        _stCdn = s[SiteSettingsService.Keys.PlatformBunnyStorageCdn];
         _smsTokenSet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformSmsApiToken]);
         _smsSender = s[SiteSettingsService.Keys.PlatformSmsSenderName];
         _bunnyKeySet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformBunnyApiKey]);
@@ -206,6 +260,8 @@ else
         _videosBytes = await db.TenantVideos.SumAsync(v => (long?)v.SizeBytes) ?? 0;
         _videoTenants = await db.TenantVideos.Select(v => v.TenantId).Distinct().CountAsync();
         _googleGrants = await db.GoogleCalendarGrants.CountAsync();
+        _imagesCount = await db.TenantImages.CountAsync();
+        _imagesBytes = await db.TenantImages.SumAsync(i => (long?)i.SizeBytes) ?? 0;
         _loading = false;
     }
 
@@ -238,6 +294,20 @@ else
         if (string.IsNullOrWhiteSpace(key)) { Show("Wpisz klucz API biblioteki.", false); return; }
         var (ok, msg) = await VideoHub.TestAsync(_bunnyLibrary, key);
         Show(msg, ok);
+    }
+
+    private async Task SaveStorageAsync()
+    {
+        if (string.IsNullOrWhiteSpace(_stZone)) { Show("Wpisz nazwę strefy Bunny Storage.", false); return; }
+        if (ImageHubService.CleanHost(_stCdn) is null) { Show("Wpisz adres CDN strefy, np. hantly-media.b-cdn.net.", false); return; }
+        var key = string.IsNullOrWhiteSpace(_stKey) ? await ImageHub.SavedKeyAsync() : _stKey.Trim();
+        if (string.IsNullOrWhiteSpace(key)) { Show("Wpisz hasło strefy.", false); return; }
+        var (ok, msg) = await ImageHub.TestAsync(_stZone, key, _stHost);
+        if (!ok) { Show(msg, false); return; }
+        await ImageHub.SaveStorageAsync(_stZone, string.IsNullOrWhiteSpace(_stKey) ? null : _stKey, _stHost, _stCdn);
+        _stKey = "";
+        Show("Zapisano — nowe zdjęcia ćwiczeń trafią do Bunny Storage.", true);
+        await LoadAsync();
     }
 
     private async Task SaveGoogleAsync()

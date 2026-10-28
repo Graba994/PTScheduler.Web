@@ -13,6 +13,7 @@ public class TenantService(
     NpmService npm,
     BunnyPlatformService bunny,
     VideoHubService videoHub,
+    ImageHubService imageHub,
     IConfiguration config,
     ILogger<TenantService> logger)
 {
@@ -316,6 +317,7 @@ public class TenantService(
 
             // Filmy z centralnej biblioteki, foldery trenera i jego ćwiczenia w Społeczności (oraz stara osobna biblioteka).
             try { await videoHub.DeleteAllAsync(tenant); } catch (Exception ex) { logger.LogWarning(ex, "Nie udało się usunąć wideo tenanta {Slug}.", tenant.Slug); }
+            try { await imageHub.DeleteAllAsync(tenant); } catch (Exception ex) { logger.LogWarning(ex, "Nie udało się usunąć zdjęć tenanta {Slug}.", tenant.Slug); }
             await bunny.DeleteLibraryAsync(tenant);
 
             if (!string.IsNullOrWhiteSpace(tenant.Domain))

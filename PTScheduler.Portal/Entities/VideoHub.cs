@@ -27,6 +27,22 @@ public static class VideoKinds
     public static bool IsValid(string? kind) => kind is Courses or Exercises;
 }
 
+/// <summary>
+/// Zdjęcie trenera w Bunny Storage platformy (np. ćwiczenia). Liczy się do tego samego limitu co filmy —
+/// rozmiar zapisanego pliku (już zmniejszonego w aplikacji trenera).
+/// </summary>
+public class TenantImage
+{
+    public int Id { get; set; }
+    public int TenantId { get; set; }
+    public Tenant? Tenant { get; set; }
+    /// <summary>Ścieżka w strefie: „{slug}/{kind}/{guid}.webp”.</summary>
+    public string Path { get; set; } = string.Empty;
+    public string Kind { get; set; } = VideoKinds.Exercises;
+    public long SizeBytes { get; set; }
+    public DateTime CreatedAt { get; set; } = DateTime.UtcNow;
+}
+
 /// <summary>Kolekcja Bunny („folder”) jednego trenera dla danego rodzaju filmów: „{slug} · kursy”, „{slug} · cwiczenia”.</summary>
 public class TenantVideoFolder
 {

@@ -85,6 +85,7 @@ builder.Services.AddScoped<StripeService>();
 builder.Services.AddScoped<CreditService>();
 builder.Services.AddScoped<BunnyPlatformService>();
 builder.Services.AddScoped<VideoHubService>();
+builder.Services.AddScoped<ImageHubService>();
 builder.Services.AddScoped<CommunityExerciseService>();
 builder.Services.AddScoped<TenantDemoService>();
 builder.Services.AddScoped<PublicDemoService>();

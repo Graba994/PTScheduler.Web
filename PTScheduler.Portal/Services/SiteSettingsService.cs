@@ -278,6 +278,11 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string PlatformBunnyCdnHostname = "platform_bunny_cdn_hostname";
         /// <summary>Klucz konta Bunny (Account → API) — Portal zakłada nim osobną bibliotekę dla każdej instancji.</summary>
         public const string PlatformBunnyAccountKey = "platform_bunny_account_key";
+        /// <summary>Bunny Storage na zdjęcia trenerów (np. ćwiczeń): strefa, hasło strefy, host regionu i adres CDN (pull zone).</summary>
+        public const string PlatformBunnyStorageZone = "platform_bunny_storage_zone";
+        public const string PlatformBunnyStorageKey = "platform_bunny_storage_key";
+        public const string PlatformBunnyStorageHost = "platform_bunny_storage_host";
+        public const string PlatformBunnyStorageCdn = "platform_bunny_storage_cdn";
 
         // Wspólny SMTP platformy dla instancji trenerów (nadawca = nazwa studia, odpowiedzi do trenera)
         public const string ShareSmtpWithTenants = "share_smtp_with_tenants";

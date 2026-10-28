@@ -101,6 +101,14 @@ public class VideoHubService(
         return Quota(plan.MaxVideoStorageGB, extra.StorageGb, bought);
     }
 
+    /// <summary>Zajęte miejsce trenera: filmy i zdjęcia razem (jeden limit z pakietu).</summary>
+    public static async Task<long> UsedBytesAsync(PortalDbContext db, int tenantId, CancellationToken ct = default) =>
+        (await db.TenantVideos.Where(v => v.TenantId == tenantId).SumAsync(v => (long?)v.SizeBytes, ct) ?? 0)
+        + (await db.TenantImages.Where(i => i.TenantId == tenantId).SumAsync(i => (long?)i.SizeBytes, ct) ?? 0);
+
+    /// <summary>Blokada na trenera — równoległe przesyłania (filmy i zdjęcia) nie przekroczą wspólnego limitu.</summary>
+    public static SemaphoreSlim Gate(int tenantId) => Locks.GetOrAdd(tenantId, _ => new SemaphoreSlim(1, 1));
+
     public static bool PlanHasVideo(Plan plan) =>
         string.Equals(plan.VideoProvider, "bunny", StringComparison.OrdinalIgnoreCase) && plan.MaxVideoStorageGB > 0;
 
@@ -121,7 +129,7 @@ public class VideoHubService(
         await using var db = await dbFactory.CreateDbContextAsync();
         var lib = await LibraryAsync();
         var quota = await QuotaBytesAsync(db, tenant);
-        var used = await db.TenantVideos.Where(v => v.TenantId == tenant.Id).SumAsync(v => (long?)v.SizeBytes) ?? 0;
+        var used = await UsedBytesAsync(db, tenant.Id);
         var count = await db.TenantVideos.CountAsync(v => v.TenantId == tenant.Id);
         string? reason = lib is null ? "Hosting wideo nie jest jeszcze skonfigurowany na platformie."
             : quota <= 0 ? "Twój pakiet nie zawiera hostingu wideo." : null;
@@ -141,16 +149,16 @@ public class VideoHubService(
         var lib = await LibraryAsync();
         if (lib is null) return (null, "Hosting wideo nie jest jeszcze skonfigurowany na platformie.");
 
-        var gate = Locks.GetOrAdd(tenant.Id, _ => new SemaphoreSlim(1, 1));
+        var gate = Gate(tenant.Id);
         await gate.WaitAsync(ct);
         try
         {
             await using var db = await dbFactory.CreateDbContextAsync(ct);
             var quota = await QuotaBytesAsync(db, tenant);
             if (quota <= 0) return (null, "Twój pakiet nie zawiera hostingu wideo.");
-            var used = await db.TenantVideos.Where(v => v.TenantId == tenant.Id).SumAsync(v => (long?)v.SizeBytes, ct) ?? 0;
+            var used = await UsedBytesAsync(db, tenant.Id, ct);
             if (!Fits(used, sizeBytes, quota))
-                return (null, $"Brak miejsca: zajęte {Gb(used)} z {Gb(quota)}, plik ma {Gb(sizeBytes)}. Dokup przestrzeń w Sklepie albo usuń niepotrzebne filmy.");
+                return (null, $"Brak miejsca: zajęte {Gb(used)} z {Gb(quota)}, plik ma {Gb(sizeBytes)}. Dokup przestrzeń w Sklepie albo usuń niepotrzebne filmy i zdjęcia.");
 
             var collection = await EnsureFolderAsync(db, lib, tenant, kind, ct);
             var cleanTitle = string.IsNullOrWhiteSpace(title) ? "Film" : title.Trim()[..Math.Min(180, title.Trim().Length)];

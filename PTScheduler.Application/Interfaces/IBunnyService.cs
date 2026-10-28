@@ -6,6 +6,8 @@ public sealed record VideoHubStatus(bool Enabled, string? Reason, string? Librar
     public static readonly VideoHubStatus Off = new(false, "Hosting wideo działa w aplikacjach na platformie Hantly.", null, 0, 0, 0, null);
     public long FreeBytes => QuotaBytes == long.MaxValue ? long.MaxValue : Math.Max(0, QuotaBytes - UsedBytes);
     public int Percent => QuotaBytes is <= 0 or long.MaxValue ? 0 : (int)Math.Min(100, 100 * UsedBytes / QuotaBytes);
+    /// <summary>Zdjęcia też idą na platformę (Bunny Storage, ten sam limit). Inaczej zapisujemy je na serwerze aplikacji.</summary>
+    public bool ImagesEnabled { get; init; }
 }
 
 public sealed record VideoItem(string VideoRef, string Kind, string Title, long SizeBytes, DateTime CreatedAt);
@@ -39,6 +41,12 @@ public interface IBunnyService
     Task<(bool Ok, int Removed, string? Error)> DeleteAllAsync();
 
     Task<string?> EmbedUrlAsync(string? videoRef);
+
+    /// <summary>Zdjęcie (już zmniejszone) do Bunny Storage platformy, w folder trenera. Zwraca publiczny adres z CDN.</summary>
+    Task<(string? Url, string? Error)> UploadImageAsync(string kind, byte[] data, CancellationToken ct = default);
+
+    /// <summary>Usuwa zdjęcie z platformy — Portal usuwa tylko zdjęcia tej aplikacji.</summary>
+    Task<bool> DeleteImageAsync(string url);
 }
 
 /// <summary>Odnośnik do filmu: „{libraryId}/{guid}” albo sam GUID (stara biblioteka).</summary>

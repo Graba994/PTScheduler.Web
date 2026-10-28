@@ -2884,6 +2884,43 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.ToTable("TenantEvents");
                 });
 
+            modelBuilder.Entity("PTScheduler.Portal.Entities.TenantImage", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)");
+
+                    b.Property<string>("Path")
+                        .IsRequired()
+                        .HasMaxLength(200)
+                        .HasColumnType("character varying(200)");
+
+                    b.Property<long>("SizeBytes")
+                        .HasColumnType("bigint");
+
+                    b.Property<int>("TenantId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Path")
+                        .IsUnique();
+
+                    b.HasIndex("TenantId");
+
+                    b.ToTable("TenantImages");
+                });
+
             modelBuilder.Entity("PTScheduler.Portal.Entities.TenantMailCounter", b =>
                 {
                     b.Property<int>("Id")
@@ -3567,6 +3604,17 @@ namespace PTScheduler.Portal.Data.Migrations
                 });
 
             modelBuilder.Entity("PTScheduler.Portal.Entities.TenantEvent", b =>
+                {
+                    b.HasOne("PTScheduler.Portal.Entities.Tenant", "Tenant")
+                        .WithMany()
+                        .HasForeignKey("TenantId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Tenant");
+                });
+
+            modelBuilder.Entity("PTScheduler.Portal.Entities.TenantImage", b =>
                 {
                     b.HasOne("PTScheduler.Portal.Entities.Tenant", "Tenant")
                         .WithMany()

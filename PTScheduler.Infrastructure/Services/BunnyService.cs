@@ -44,7 +44,10 @@ public class BunnyService(IWebRootPathProvider webRoot, IHttpClientFactory httpF
                     e.GetProperty("quotaBytes").GetInt64(),
                     e.GetProperty("usedBytes").GetInt64(),
                     e.GetProperty("videos").GetInt32(),
-                    Str(e, "legacyLibraryId") ?? LocalLegacyLibrary());
+                    Str(e, "legacyLibraryId") ?? LocalLegacyLibrary())
+                {
+                    ImagesEnabled = e.TryGetProperty("imagesEnabled", out var im) && im.ValueKind == JsonValueKind.True
+                };
                 _statusAt = DateTime.UtcNow;
                 return _status;
             }
@@ -201,6 +204,42 @@ public class BunnyService(IWebRootPathProvider webRoot, IHttpClientFactory httpF
                 e.GetProperty("createdAt").GetDateTime())).ToList();
         }
         catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException) { return []; }
+    }
+
+    public async Task<(string? Url, string? Error)> UploadImageAsync(string kind, byte[] data, CancellationToken ct = default)
+    {
+        if (!Managed) return (null, VideoHubStatus.Off.Reason);
+        try
+        {
+            using var req = Request(HttpMethod.Post, $"images?kind={Uri.EscapeDataString(kind)}");
+            req.Content = new ByteArrayContent(data);
+            req.Content.Headers.ContentType = new MediaTypeHeaderValue("application/octet-stream");
+            using var resp = await Http(90).SendAsync(req, ct);
+            var e = await resp.Content.ReadFromJsonAsync<JsonElement>(cancellationToken: ct);
+            _status = null;
+            return resp.IsSuccessStatusCode && Str(e, "url") is { } url
+                ? (url, null)
+                : (null, Str(e, "error") ?? "Nie udało się zapisać zdjęcia — spróbuj ponownie.");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+        {
+            logger.LogWarning(ex, "Portal: zdjęcie nie zostało zapisane.");
+            return (null, "Nie udało się połączyć z platformą — spróbuj za chwilę.");
+        }
+    }
+
+    public async Task<bool> DeleteImageAsync(string url)
+    {
+        if (!Managed) return false;
+        try
+        {
+            using var req = Request(HttpMethod.Post, "images/delete");
+            req.Content = JsonContent.Create(new { url });
+            using var resp = await Http(30).SendAsync(req);
+            _status = null;
+            return resp.IsSuccessStatusCode;
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException) { return false; }
     }
 
     public async Task<(bool Ok, int Removed, string? Error)> DeleteAllAsync()

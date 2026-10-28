@@ -9,21 +9,41 @@ public static class VideoHubEndpoints
 {
     public sealed record CreateVideoRequest(string? Title, string? Kind, long SizeBytes);
     public sealed record CopyRequest(int Id);
+    public sealed record DeleteImageRequest(string? Url);
 
     public static void MapVideoHub(this WebApplication app)
     {
         var g = app.MapGroup("/api/internal/tenants/{slug}");
 
-        g.MapGet("/video", async (string slug, HttpContext ctx, IDbContextFactory<PortalDbContext> dbf, IConfiguration config, VideoHubService hub) =>
+        g.MapGet("/video", async (string slug, HttpContext ctx, IDbContextFactory<PortalDbContext> dbf, IConfiguration config, VideoHubService hub, ImageHubService images) =>
             await WithTenant(slug, ctx, dbf, config, async t =>
             {
                 var s = await hub.StatusAsync(t);
                 return Results.Json(new
                 {
                     enabled = s.Enabled, reason = s.Reason, libraryId = s.LibraryId, cdnHostname = s.CdnHostname,
-                    quotaBytes = s.QuotaBytes, usedBytes = s.UsedBytes, videos = s.Videos, legacyLibraryId = s.LegacyLibraryId
+                    quotaBytes = s.QuotaBytes, usedBytes = s.UsedBytes, videos = s.Videos, legacyLibraryId = s.LegacyLibraryId,
+                    imagesEnabled = s.QuotaBytes > 0 && await images.EnabledAsync()
                 });
             }));
+
+        // Zdjęcie (już zmniejszone w aplikacji) — surowe bajty w treści, rodzaj w zapytaniu. Ten sam limit co filmy.
+        g.MapPost("/images", async (string slug, string? kind, HttpContext ctx, IDbContextFactory<PortalDbContext> dbf, IConfiguration config, ImageHubService images) =>
+            await WithTenant(slug, ctx, dbf, config, async t =>
+            {
+                if (ctx.Request.ContentLength is > ImageHubService.MaxBytes)
+                    return Results.Json(new { error = "Zdjęcie jest za duże (najwięcej 10 MB)." }, statusCode: StatusCodes.Status413PayloadTooLarge);
+                using var buffer = new MemoryStream();
+                await ctx.Request.Body.CopyToAsync(buffer, ctx.RequestAborted);
+                var (url, size, error) = await images.UploadAsync(t, kind ?? VideoKinds.Exercises, buffer.ToArray(), ctx.RequestAborted);
+                return url is null
+                    ? Results.Json(new { error }, statusCode: StatusCodes.Status409Conflict)
+                    : Results.Json(new { url, sizeBytes = size });
+            }));
+
+        g.MapPost("/images/delete", async (string slug, DeleteImageRequest body, HttpContext ctx, IDbContextFactory<PortalDbContext> dbf, IConfiguration config, ImageHubService images) =>
+            await WithTenant(slug, ctx, dbf, config, async t =>
+                !string.IsNullOrWhiteSpace(body.Url) && await images.DeleteAsync(t, body.Url) ? Results.Ok() : Results.NotFound()));
 
         g.MapGet("/video/list", async (string slug, HttpContext ctx, IDbContextFactory<PortalDbContext> dbf, IConfiguration config, VideoHubService hub) =>
             await WithTenant(slug, ctx, dbf, config, async t =>
@@ -48,8 +68,12 @@ public static class VideoHubEndpoints
             await WithTenant(slug, ctx, dbf, config, async t => await hub.DeleteAsync(t, guid) ? Results.Ok() : Results.NotFound()));
 
         // RODO: wszystkie dane wideo trenera (filmy, foldery, udostępnione ćwiczenia).
-        g.MapDelete("/video", async (string slug, HttpContext ctx, IDbContextFactory<PortalDbContext> dbf, IConfiguration config, VideoHubService hub) =>
-            await WithTenant(slug, ctx, dbf, config, async t => Results.Json(new { removed = await hub.DeleteAllAsync(t) })));
+        g.MapDelete("/video", async (string slug, HttpContext ctx, IDbContextFactory<PortalDbContext> dbf, IConfiguration config, VideoHubService hub, ImageHubService images) =>
+            await WithTenant(slug, ctx, dbf, config, async t =>
+            {
+                var removed = await hub.DeleteAllAsync(t);
+                return Results.Json(new { removed, images = await images.DeleteAllAsync(t) });
+            }));
 
         g.MapGet("/community/exercises", async (string slug, string? q, string? muscle, HttpContext ctx, IDbContextFactory<PortalDbContext> dbf, IConfiguration config, CommunityExerciseService community) =>
             await WithTenant(slug, ctx, dbf, config, async t =>

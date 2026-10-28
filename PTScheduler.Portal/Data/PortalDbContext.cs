@@ -47,6 +47,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<InboxMessage> InboxMessages => Set<InboxMessage>();
     public DbSet<TenantVideo> TenantVideos => Set<TenantVideo>();
     public DbSet<TenantVideoFolder> TenantVideoFolders => Set<TenantVideoFolder>();
+    public DbSet<TenantImage> TenantImages => Set<TenantImage>();
     public DbSet<CommunityExercise> CommunityExercises => Set<CommunityExercise>();
     public DbSet<SalesDocument> SalesDocuments => Set<SalesDocument>();
     public DbSet<SalesDocumentLine> SalesDocumentLines => Set<SalesDocumentLine>();
@@ -166,6 +167,15 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.Property(x => x.VideoGuid).HasMaxLength(64);
             e.Property(x => x.Kind).HasMaxLength(20);
             e.Property(x => x.Title).HasMaxLength(200);
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+        });
+
+        b.Entity<TenantImage>(e =>
+        {
+            e.HasIndex(x => x.Path).IsUnique();
+            e.HasIndex(x => x.TenantId);
+            e.Property(x => x.Path).HasMaxLength(200);
+            e.Property(x => x.Kind).HasMaxLength(20);
             e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
 

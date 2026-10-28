@@ -14,6 +14,7 @@
 @inject PTScheduler.Web.Services.PlatformAssistantService Platform
 @inject PTScheduler.Web.Services.CommunityExerciseClient Community
 @inject IBunnyService Bunny
+@inject ExerciseMediaService Media
 @inject EntitlementService Entitlements
 @inject NavigationManager Nav
 @rendermode PTScheduler.Web.RenderModes.Server
@@ -428,151 +429,115 @@ else
 @* ---------- Dodaj / edytuj własne ---------- *@
 @if (_showEdit)
 {
-    <div class="modal fade show d-block" tabindex="-1" style="background:rgba(0,0,0,.5)">
-        <div class="modal-dialog modal-dialog-centered modal-lg">
+    <div class="modal fade show d-block exm-modal" tabindex="-1" style="background:rgba(0,0,0,.5)">
+        <div class="modal-dialog modal-dialog-centered modal-dialog-scrollable modal-lg modal-fullscreen-sm-down">
             <div class="modal-content">
                 <div class="modal-header">
                     <h5 class="modal-title">@(_form.Id is null ? "Nowe ćwiczenie" : "Edytuj ćwiczenie")</h5>
-                    <button type="button" class="btn-close" @onclick="CancelEdit"></button>
+                    <button type="button" class="btn-close" aria-label="Zamknij" @onclick="CancelEdit"></button>
                 </div>
                 <div class="modal-body">
                     @if (!string.IsNullOrEmpty(_editError))
                     {
                         <div class="alert alert-danger py-2 small">@_editError</div>
                     }
-                    <div class="row g-3">
-                        <div class="col-12 col-md-6">
-                            <label class="form-label">Nazwa (PL) <span class="text-danger">*</span></label>
-                            <input class="form-control" @bind="_form.NamePl" maxlength="120" />
-                        </div>
-                        <div class="col-12 col-md-6">
-                            <label class="form-label">Nazwa (EN)</label>
-                            <input class="form-control" @bind="_form.NameEn" maxlength="120" placeholder="opcjonalnie" />
-                        </div>
-                        <div class="col-6 col-md-4">
-                            <label class="form-label">Kategoria</label>
-                            <select class="form-select" @bind="_form.Category">
-                                @foreach (var c in Enum.GetValues<ExerciseCategory>())
-                                {
-                                    <option value="@c">@CategoryPl(c)</option>
-                                }
-                            </select>
-                        </div>
-                        <div class="col-6 col-md-4">
-                            <label class="form-label">Poziom</label>
-                            <select class="form-select" @bind="_form.Level">
-                                @foreach (var l in Enum.GetValues<ExerciseLevel>())
-                                {
-                                    <option value="@l">@LevelPl(l)</option>
-                                }
-                            </select>
-                        </div>
-                        <div class="col-12 col-md-4">
-                            <label class="form-label">Sprzęt</label>
-                            <input class="form-control" @bind="_form.Equipment" maxlength="60" placeholder="np. sztanga" />
-                        </div>
-                        <div class="col-12">
-                            <label class="form-label">Co mierzymy w serii</label>
-                            <div class="d-flex flex-wrap gap-2">
-                                @foreach (var t in Enum.GetValues<ExerciseTracking>())
-                                {
-                                    <button type="button" class="btn btn-sm @(_form.Tracking == t ? "btn-primary" : "btn-outline-secondary")" @onclick="() => _form.Tracking = t">
-                                        @ExerciseTrackingRules.Label(t)
-                                    </button>
-                                }
-                            </div>
-                            <div class="form-text">Od tego zależą pola w planie i podczas treningu klienta (np. bieg: dystans i czas, deska: czas).</div>
-                        </div>
 
-                        <div class="col-12 col-md-6">
-                            <label class="form-label">Partie główne</label>
-                            <div class="muscle-grid">
-                                @foreach (var m in Enum.GetValues<MuscleGroup>())
-                                {
-                                    <label class="muscle-chk">
-                                        <input type="checkbox" checked="@_form.PrimaryMuscles.Contains(m)"
-                                               @onchange="e => TogglePrimary(m, (bool)e.Value!)" />
-                                        <span>@Muscles.Label(m)</span>
-                                    </label>
-                                }
-                            </div>
-                        </div>
-                        <div class="col-12 col-md-6">
-                            <label class="form-label">Partie wspomagające</label>
-                            <div class="muscle-grid">
-                                @foreach (var m in Enum.GetValues<MuscleGroup>())
-                                {
-                                    <label class="muscle-chk">
-                                        <input type="checkbox" checked="@_form.SecondaryMuscles.Contains(m)"
-                                               @onchange="e => ToggleSecondary(m, (bool)e.Value!)" />
-                                        <span>@Muscles.Label(m)</span>
-                                    </label>
-                                }
-                            </div>
-                        </div>
+                    <div class="exm-section">
+                        <label class="form-label fw-semibold" for="ex-name">Nazwa ćwiczenia</label>
+                        <input id="ex-name" class="form-control form-control-lg" @bind="_form.NamePl" maxlength="120" placeholder="np. Przysiad bułgarski" autocomplete="off" />
+                        @if (_showEnFields)
+                        {
+                            <input class="form-control mt-2" @bind="_form.NameEn" maxlength="120" placeholder="Nazwa po angielsku (opcjonalnie)" aria-label="Nazwa po angielsku" />
+                        }
+                    </div>
 
-                        <div class="col-12">
-                            <label class="form-label">Opis (PL)</label>
-                            <textarea class="form-control" rows="3" @bind="_form.DescriptionPl"></textarea>
-                        </div>
-                        <div class="col-12">
-                            <label class="form-label">Opis (EN)</label>
-                            <textarea class="form-control" rows="2" @bind="_form.DescriptionEn"></textarea>
-                        </div>
-
-                        <div class="col-12">
-                            <label class="form-label">Zdjęcia (adresy URL, po jednym w wierszu)</label>
-                            <textarea class="form-control" rows="2" @bind="_imagesText" placeholder="https://…/1.jpg"></textarea>
-                        </div>
-                        <div class="col-12 col-md-4">
-                            <label class="form-label">Film</label>
-                            <select class="form-select" @bind="_form.VideoType">
-                                <option value="@ExerciseVideoType.None">brak</option>
-                                <option value="@ExerciseVideoType.YouTube">YouTube (link)</option>
-                                @if (VideoPlan || _form.VideoType == ExerciseVideoType.Bunny)
-                                {
-                                    <option value="@ExerciseVideoType.Bunny">Wgrany film</option>
-                                }
-                                <option value="@ExerciseVideoType.Url">Plik wideo (link)</option>
-                            </select>
-                        </div>
-                        <div class="col-12 col-md-8">
-                            @if (_form.VideoType == ExerciseVideoType.Bunny)
+                    <div class="exm-section">
+                        <span class="form-label fw-semibold d-block">Co mierzymy w serii</span>
+                        <div class="exm-chips">
+                            @foreach (var t in Enum.GetValues<ExerciseTracking>())
                             {
-                                <label class="form-label">Plik</label>
-                                @if (!string.IsNullOrWhiteSpace(_form.VideoRef))
-                                {
-                                    <div class="d-flex align-items-center gap-2 mb-2 small"><i class="bi bi-camera-video text-primary"></i><span class="flex-grow-1">Film wgrany na platformę</span></div>
-                                }
-                                @if (_videoStatus is { Enabled: true })
-                                {
-                                    <InputFile OnChange="UploadExerciseVideo" accept="video/*" class="form-control form-control-sm" disabled="@_uploading" />
-                                    <div class="form-text">Folder „ćwiczenia” · wolne miejsce: @(_videoStatus.FreeBytes == long.MaxValue ? "bez limitu" : $"{_videoStatus.FreeBytes / (1024.0 * 1024 * 1024):0.##} GB")</div>
-                                    @if (_uploading)
+                                var track = t;
+                                <button type="button" class="exm-chip @(_form.Tracking == track ? "on" : "")" aria-pressed="@(_form.Tracking == track ? "true" : "false")" @onclick="() => _form.Tracking = track">
+                                    @ExerciseTrackingRules.Label(track)
+                                </button>
+                            }
+                        </div>
+                        <small class="exm-hint">Od tego zależą pola w planie i podczas treningu klienta (np. bieg: dystans i czas, deska: czas).</small>
+                    </div>
+
+                    <div class="exm-section">
+                        <div class="row g-2">
+                            <div class="col-6 col-md-4">
+                                <label class="form-label small fw-semibold" for="ex-cat">Kategoria</label>
+                                <select id="ex-cat" class="form-select" @bind="_form.Category">
+                                    @foreach (var c in Enum.GetValues<ExerciseCategory>())
                                     {
-                                        <div class="progress mt-1" style="height:6px"><div class="progress-bar progress-bar-striped progress-bar-animated" style="width:@(UploadPct)%"></div></div>
-                                        <div class="form-text">Wgrywam… @UploadPct% — nie zamykaj okna.</div>
+                                        <option value="@c">@CategoryPl(c)</option>
                                     }
-                                }
-                                else if (_videoStatus is not null)
-                                {
-                                    <div class="form-text text-warning">@_videoStatus.Reason</div>
-                                }
-                                @if (_uploadMsg is not null) { <div class="small mt-1 @(_uploadError ? "text-danger" : "text-success")">@_uploadMsg</div> }
-                            }
-                            else if (_form.VideoType != ExerciseVideoType.None)
+                                </select>
+                            </div>
+                            <div class="col-6 col-md-4">
+                                <label class="form-label small fw-semibold" for="ex-lvl">Poziom</label>
+                                <select id="ex-lvl" class="form-select" @bind="_form.Level">
+                                    @foreach (var l in Enum.GetValues<ExerciseLevel>())
+                                    {
+                                        <option value="@l">@LevelPl(l)</option>
+                                    }
+                                </select>
+                            </div>
+                            <div class="col-12 col-md-4">
+                                <label class="form-label small fw-semibold" for="ex-eq">Sprzęt</label>
+                                <input id="ex-eq" class="form-control" @bind="_form.Equipment" maxlength="60" placeholder="np. hantle" list="ex-eq-list" autocomplete="off" />
+                                <datalist id="ex-eq-list">
+                                    @foreach (var eq in _equipment)
+                                    {
+                                        <option value="@eq"></option>
+                                    }
+                                </datalist>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div class="exm-section">
+                        <span class="form-label fw-semibold d-block">Partie mięśni</span>
+                        <small class="exm-hint d-block mb-2">Kliknij raz — główna, drugi raz — wspomagająca, trzeci — odznacz.</small>
+                        <div class="exm-chips">
+                            @foreach (var m in Enum.GetValues<MuscleGroup>())
                             {
-                                <label class="form-label">Link do filmu</label>
-                                <input class="form-control" @bind="_form.VideoRef" placeholder="@(_form.VideoType == ExerciseVideoType.YouTube ? "https://youtube.com/watch?v=…" : "https://…/film.mp4")" />
+                                var muscle = m;
+                                var state = _form.PrimaryMuscles.Contains(muscle) ? "main" : _form.SecondaryMuscles.Contains(muscle) ? "help" : "";
+                                <button type="button" class="exm-chip exm-muscle @state" @onclick="() => CycleMuscle(muscle)"
+                                        aria-label="@($"{Muscles.Label(muscle)}: {(state == "main" ? "główna" : state == "help" ? "wspomagająca" : "nie wybrano")}")">
+                                    @if (state == "main") { <i class="bi bi-circle-fill"></i> } else if (state == "help") { <i class="bi bi-circle-half"></i> }
+                                    @Muscles.Label(muscle)
+                                </button>
                             }
                         </div>
+                        <div class="exm-legend"><span><i class="bi bi-circle-fill"></i> główna</span><span><i class="bi bi-circle-half"></i> wspomagająca</span></div>
+                    </div>
+
+                    <div class="exm-section">
+                        <label class="form-label fw-semibold" for="ex-desc">Jak wykonać</label>
+                        <textarea id="ex-desc" class="form-control" rows="3" @bind="_form.DescriptionPl" placeholder="Krótko: ustawienie, ruch, na co uważać"></textarea>
+                        @if (_showEnFields)
+                        {
+                            <textarea class="form-control mt-2" rows="2" @bind="_form.DescriptionEn" placeholder="Opis po angielsku (opcjonalnie)" aria-label="Opis po angielsku"></textarea>
+                        }
+                        else
+                        {
+                            <button type="button" class="btn btn-link btn-sm px-0 exm-more" @onclick="() => _showEnFields = true"><i class="bi bi-translate me-1"></i>Dodaj nazwę i opis po angielsku</button>
+                        }
+                    </div>
+
+                    <div class="exm-section">
+                        <ExerciseMediaFields @ref="_media" Form="_form" />
                     </div>
                 </div>
                 <div class="modal-footer">
                     <button class="btn btn-outline-secondary" @onclick="CancelEdit">Anuluj</button>
                     <button class="btn btn-primary" @onclick="Save" disabled="@_saving">
                         @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }
-                        Zapisz
+                        Zapisz ćwiczenie
                     </button>
                 </div>
             </div>
@@ -703,13 +668,8 @@ else
     private bool _shareAuthor = true;
     private bool _shareBusy;
     private string? _shareError;
-    private VideoHubStatus? _videoStatus;
-    private bool _uploading;
-    private bool _uploadError;
-    private string? _uploadMsg;
-    private long _uploadTotal, _uploadDone;
-    private string? _uploadedUnsaved;
-    private int UploadPct => _uploadTotal > 0 ? (int)(100 * _uploadDone / _uploadTotal) : 0;
+    private ExerciseMediaFields? _media;
+    private bool _showEnFields;
 
     /// <summary>Wgrywanie filmów i Społeczność — tylko w pakiecie z wideo (Bunny).</summary>
     private bool VideoPlan => Entitlements.Current.VideoProvider == "bunny" && Entitlements.Current.MaxVideoStorageGB > 0;
@@ -789,44 +749,11 @@ else
         _shareBusy = false;
     }
 
-    private async Task UploadExerciseVideo(InputFileChangeEventArgs e)
-    {
-        _uploadMsg = null; _uploadError = false;
-        var f = e.File;
-        const long max = 4L * 1024 * 1024 * 1024;
-        if (f.Size > max) { _uploadMsg = "Plik jest za duży — najwięcej 4 GB."; _uploadError = true; return; }
-        if (_videoStatus is { } v && v.FreeBytes < f.Size) { _uploadMsg = "Brak miejsca na platformie — dokup miejsce w Sklepie albo usuń niepotrzebne filmy."; _uploadError = true; return; }
-        _uploading = true; _uploadTotal = f.Size; _uploadDone = 0;
-        try
-        {
-            await using var stream = f.OpenReadStream(max);
-            var progress = new Progress<long>(done => { _uploadDone = done; _ = InvokeAsync(StateHasChanged); });
-            var title = string.IsNullOrWhiteSpace(_form.NamePl) ? Path.GetFileNameWithoutExtension(f.Name) : _form.NamePl;
-            var (ok, videoRef, err) = await Bunny.UploadAsync(title, VideoKinds.Exercises, stream, f.Size, progress);
-            if (!ok || videoRef is null) { _uploadMsg = err ?? "Przesyłanie nie powiodło się."; _uploadError = true; return; }
-            // Wcześniej wgrany, niezapisany film zwalnia miejsce.
-            if (_uploadedUnsaved is not null) await Bunny.DeleteAsync(_uploadedUnsaved);
-            _uploadedUnsaved = videoRef;
-            _form.VideoRef = videoRef;
-            _uploadMsg = "Wgrano — film będzie gotowy za kilka minut. Zapisz ćwiczenie.";
-            _videoStatus = await Bunny.GetStatusAsync(refresh: true);
-        }
-        catch (Exception ex) { _uploadMsg = ex.Message; _uploadError = true; }
-        finally { _uploading = false; }
-    }
-
     private async Task CancelEdit()
     {
-        // Film wgrany do ćwiczenia, którego nie zapisano, nie może zajmować opłaconego miejsca.
-        if (_uploadedUnsaved is not null) { await Bunny.DeleteAsync(_uploadedUnsaved); _uploadedUnsaved = null; }
+        // Zdjęcia i film wgrane do ćwiczenia, którego nie zapisano, nie mogą zajmować opłaconego miejsca.
+        if (_media is not null) await _media.DiscardAsync();
         _showEdit = false;
-    }
-
-    private async Task EnsureVideoStatusAsync()
-    {
-        _uploadMsg = null;
-        _uploadedUnsaved = null;
-        if (VideoPlan && _videoStatus is null) _videoStatus = await Bunny.GetStatusAsync();
     }
 
     private readonly ExerciseFilterDto _filter = new();
@@ -840,7 +767,6 @@ else
 
     private bool _showEdit;
     private SaveExerciseDto _form = new();
-    private string _imagesText = string.Empty;
     private string? _editError;
     private bool _saving;
 
@@ -911,19 +837,17 @@ else
         if (card is not null) card.IsFavorite = _detail.IsFavorite;
     }
 
-    private async Task OpenCreate()
+    private void OpenCreate()
     {
         _form = new SaveExerciseDto();
-        _imagesText = string.Empty;
         _editError = null;
-        await EnsureVideoStatusAsync();
+        _showEnFields = false;
         _showEdit = true;
     }
 
-    private async Task OpenEditFromDetail()
+    private void OpenEditFromDetail()
     {
         if (_detail is null) return;
-        await EnsureVideoStatusAsync();
         _form = new SaveExerciseDto
         {
             Id = _detail.Id,
@@ -942,7 +866,7 @@ else
             Tracking = _detail.Tracking,
             Attribution = _detail.Attribution
         };
-        _imagesText = string.Join("\n", _detail.ImageUrls);
+        _showEnFields = !string.IsNullOrWhiteSpace(_detail.DescriptionEn) || (!string.IsNullOrWhiteSpace(_detail.NameEn) && _detail.NameEn != _detail.NamePl);
         _editError = null;
         _showDetail = false;
         _showEdit = true;
@@ -952,40 +876,37 @@ else
         Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Scheme == Uri.UriSchemeHttps;
 
     /// <summary>Ćwiczenie z katalogu jako własne — np. żeby dodać do niego film z YouTube.</summary>
-    private async Task CopyDetailAsMine()
+    private void CopyDetailAsMine()
     {
-        await OpenEditFromDetail();
+        OpenEditFromDetail();
         _form.Id = null;
     }
 
-    private void TogglePrimary(MuscleGroup m, bool on)
+    /// <summary>Jedno kliknięcie zmienia stan: brak → główna → wspomagająca → brak.</summary>
+    private void CycleMuscle(MuscleGroup m)
     {
-        if (on) { if (!_form.PrimaryMuscles.Contains(m)) _form.PrimaryMuscles.Add(m); }
-        else _form.PrimaryMuscles.Remove(m);
-    }
-    private void ToggleSecondary(MuscleGroup m, bool on)
-    {
-        if (on) { if (!_form.SecondaryMuscles.Contains(m)) _form.SecondaryMuscles.Add(m); }
-        else _form.SecondaryMuscles.Remove(m);
+        if (_form.PrimaryMuscles.Remove(m)) { _form.SecondaryMuscles.Add(m); return; }
+        if (_form.SecondaryMuscles.Remove(m)) return;
+        _form.PrimaryMuscles.Add(m);
     }
 
     private async Task Save()
     {
         _editError = null;
         if (string.IsNullOrWhiteSpace(_form.NamePl)) { _editError = "Podaj nazwę (PL)."; return; }
-        _form.ImageUrls = _imagesText
-            .Split(['\n', '\r'], StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .ToList();
+        if (_form.VideoType is ExerciseVideoType.YouTube or ExerciseVideoType.Url && string.IsNullOrWhiteSpace(_form.VideoRef))
+            _form.VideoType = ExerciseVideoType.None;
+        if (_form.VideoType == ExerciseVideoType.YouTube && ExerciseMediaFields.YouTubeId(_form.VideoRef) is null && _form.VideoRef!.Contains('/'))
+        { _editError = "Nie rozpoznaję linku z YouTube — skopiuj adres filmu z paska przeglądarki albo z „Udostępnij”."; return; }
+        if (_form.VideoType == ExerciseVideoType.Url && !IsHttpUrl(_form.VideoRef))
+        { _editError = "Link do filmu musi zaczynać się od https://."; return; }
         _saving = true;
         try
         {
-            var previous = _form.Id is int id ? (await Catalog.GetAsync(_userId, id))?.VideoRef : null;
-            if (_form.VideoType != ExerciseVideoType.Bunny && _uploadedUnsaved is not null) { await Bunny.DeleteAsync(_uploadedUnsaved); _form.VideoRef = null; }
             if (_form.Id is null) await Catalog.CreateAsync(_userId, _form);
             else await Catalog.UpdateAsync(_userId, _form);
-            // Zastąpiony film z platformy zwalnia miejsce (Portal usuwa tylko filmy tej aplikacji).
-            if (previous is not null && previous != _form.VideoRef && previous.Contains('/')) await Bunny.DeleteAsync(previous);
-            _uploadedUnsaved = null;
+            // Pliki, które wypadły z ćwiczenia, zwalniają miejsce (jeśli nie używa ich inne ćwiczenie ani lekcja).
+            if (_media is not null) await _media.CommitAsync();
             _showEdit = false;
             await LoadAsync();
         }
@@ -1004,10 +925,12 @@ else
         try
         {
             var video = _detail.VideoType == ExerciseVideoType.Bunny ? _detail.VideoRef : null;
+            var images = _detail.ImageUrls.ToList();
             var id = _detail.Id;
             await Catalog.DeleteAsync(_userId, id);
             if (_sharedIds.Contains(id)) { await Community.UnshareAsync(id); _sharedIds.Remove(id); }
-            if (video is not null && video.Contains('/')) await Bunny.DeleteAsync(video);
+            await Media.DeleteVideoIfUnusedAsync(video);
+            foreach (var url in images) await Media.DeleteImageIfUnusedAsync(url);
             CloseDetail();
             await LoadAsync();
         }
