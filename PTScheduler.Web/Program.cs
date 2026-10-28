@@ -176,6 +176,7 @@ builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformHelpService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.WearableService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.ExerciseMediaService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.WearableInsightsService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.WearableWorkoutService>();
 builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformLegalService>();
 builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformAssistantService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.AssistantTipsService>();

@@ -3583,6 +3583,50 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.ToTable("WearableLinks");
                 });
 
+            modelBuilder.Entity("PTScheduler.Domain.Entities.WearableWorkout", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<int>("ClientId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateOnly>("Date")
+                        .HasColumnType("date");
+
+                    b.Property<long?>("GarminScheduleId")
+                        .HasColumnType("bigint");
+
+                    b.Property<long>("GarminWorkoutId")
+                        .HasColumnType("bigint");
+
+                    b.Property<string>("Name")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)");
+
+                    b.Property<int?>("PlanDayId")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("SentAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("SentByUserId")
+                        .HasColumnType("text");
+
+                    b.Property<int?>("SessionId")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("ClientId", "Date");
+
+                    b.ToTable("WearableWorkouts");
+                });
+
             modelBuilder.Entity("PTScheduler.Domain.Entities.WebPushSettings", b =>
                 {
                     b.Property<int>("Id")
@@ -4448,6 +4492,17 @@ namespace PTScheduler.Infrastructure.Migrations
                 });
 
             modelBuilder.Entity("PTScheduler.Domain.Entities.WearableLink", b =>
+                {
+                    b.HasOne("PTScheduler.Domain.Entities.Client", "Client")
+                        .WithMany()
+                        .HasForeignKey("ClientId")
+                        .OnDelete(DeleteBehavior.Cascade)
+                        .IsRequired();
+
+                    b.Navigation("Client");
+                });
+
+            modelBuilder.Entity("PTScheduler.Domain.Entities.WearableWorkout", b =>
                 {
                     b.HasOne("PTScheduler.Domain.Entities.Client", "Client")
                         .WithMany()

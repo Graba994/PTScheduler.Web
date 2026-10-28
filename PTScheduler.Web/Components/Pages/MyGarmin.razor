@@ -3,6 +3,8 @@
 @inject PTScheduler.Web.Services.WearableService Wearables
 @inject PTScheduler.Web.Services.EntitlementService Entitlements
 @inject PTScheduler.Web.Services.WearableInsightsService Insights
+@inject PTScheduler.Web.Services.WearableWorkoutService Workouts
+@inject IAppClock Clock
 @inject IClientService ClientService
 @inject AuthenticationStateProvider AuthState
 @inject NavigationManager Nav
@@ -59,6 +61,18 @@
                     <b><i class="bi bi-calendar-week me-1"></i>Twój tydzień · @w.From.ToString("d.MM", Pl)–@w.To.ToString("d.MM", Pl)</b>
                     <small class="gm-src">@Src</small>
                     <span>@WearableWeekRules.Text(w)</span>
+                </div>
+            }
+            @if (_planned.Count > 0)
+            {
+                <div class="gm-sessions">
+                    <b><i class="bi bi-calendar2-check me-1"></i>Treningi od trenera na zegarku</b>
+                    <ul>
+                        @foreach (var pw in _planned)
+                        {
+                            <li><span>@pw.Date.ToString("dddd d.MM", Pl)</span><small>@pw.Name — w Garmin Connect™ i w kalendarzu zegarka</small></li>
+                        }
+                    </ul>
                 </div>
             }
             @if (_sessionsOn && _sessionActs.Count > 0)
@@ -178,6 +192,7 @@
     private PTScheduler.Domain.Entities.WearableLink? _link;
     private PTScheduler.Web.Services.WearableService.Summary? _summary;
     private bool _sessionsOn, _weekOn;
+    private List<PTScheduler.Domain.Entities.WearableWorkout> _planned = [];
     private string Src => PTScheduler.Web.Services.WearableService.Attribution(_link?.DeviceName);
     private WearableWeekRules.Week? _week;
     private List<PTScheduler.Web.Services.WearableInsightsService.SessionActivity> _sessionActs = [];
@@ -211,6 +226,7 @@
         {
             _week = _weekOn ? await Insights.WeekAsync(_clientId) : null;
             _sessionActs = _sessionsOn ? await Insights.SessionActivitiesAsync(_clientId) : [];
+            _planned = await Workouts.UpcomingAsync(_clientId, Clock.Today);
         }
         _available = _link is { IsConnected: true } || await Wearables.AvailableAsync();
     }

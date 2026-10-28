@@ -82,3 +82,19 @@ public class WearableActivity
     public DateTime? SummarySentAt { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }
+
+/// <summary>Dzień planu wysłany na zegarek klienta (Garmin Training API): trening w Garmin Connect zaplanowany na dzień.</summary>
+public class WearableWorkout
+{
+    public int Id { get; set; }
+    public int ClientId { get; set; }
+    public Client Client { get; set; } = null!;
+    public int? PlanDayId { get; set; }
+    public int? SessionId { get; set; }
+    public DateOnly Date { get; set; }
+    public string Name { get; set; } = "";
+    public long GarminWorkoutId { get; set; }
+    public long? GarminScheduleId { get; set; }
+    public string? SentByUserId { get; set; }
+    public DateTime SentAt { get; set; } = DateTime.UtcNow;
+}

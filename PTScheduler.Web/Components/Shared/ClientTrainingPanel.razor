@@ -6,6 +6,7 @@
 @inject IDbContextFactory<PTScheduler.Infrastructure.Data.ApplicationDbContext> DbFactory
 @inject PTScheduler.Application.Interfaces.IAppClock Clock
 @inject AuthenticationStateProvider AuthState
+@inject PTScheduler.Web.Services.WearableWorkoutService Workouts
 
 @* Profil klienta → „Trening”: najbliższa wizyta z podsumowaniem asystenta (dawna karta „przed treningiem”),
    dzień planu do zrobienia (proponowany kolejny, do zmiany jednym kliknięciem) i start treningu na żywo. *@
@@ -102,6 +103,20 @@
                                     <span><b>Ten dzień na wizytę @_targetAt?.ToString("dddd d.MM, HH:mm", Pl)?</b><small>Klient zobaczy, co będziecie robić. Bez wyboru — kolejny dzień z planu.</small></span>
                                     <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_saving" @onclick="() => AssignAsync(day.Id)">Ustaw na wizytę</button>
                                 }
+                            </div>
+                        }
+                        @if (_watchOn && day.Exercises.Count > 0 && day.Id is int watchDayId)
+                        {
+                            <div class="ctp-watch">
+                                <img src="/img/garmin-connect-app.png" alt="" width="32" height="32" />
+                                <span class="ctp-watch-txt"><b>Na zegarek klienta</b><small>Trening pojawi się w Garmin Connect™ i w kalendarzu zegarka na wybrany dzień.</small></span>
+                                <input type="date" class="form-control form-control-sm" aria-label="Dzień treningu na zegarku" value="@_watchDate.ToString("yyyy-MM-dd")"
+                                       @onchange='e => { if (DateOnly.TryParse(e.Value?.ToString(), out var dd)) _watchDate = dd; }' />
+                                <button type="button" class="btn btn-sm btn-outline-primary" disabled="@_watchBusy" @onclick="() => SendToWatchAsync(watchDayId)">
+                                    @if (_watchBusy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-smartwatch me-1"></i> }
+                                    Wyślij
+                                </button>
+                                @if (_watchMsg is not null) { <div class="ctp-watch-msg @(_watchOk ? "ok" : "err")" role="status">@_watchMsg</div> }
                             </div>
                         }
                         <div class="ctp-actions">
@@ -230,6 +245,25 @@
             // Na wizytę proponuj plan do pracy z trenerem — samodzielny tylko, gdy nie ma innego.
             : (_plans.FirstOrDefault(p => p.Use != PTScheduler.Domain.Enums.PlanUse.Solo) ?? _plans.FirstOrDefault())?.Id;
         if (planId is { } pid) await LoadPlanAsync(pid);
+        _watchOn = await Workouts.CanSendAsync(ClientId);
+        _watchDate = DateOnly.FromDateTime(_targetAt ?? now);
+    }
+
+    // ── Plan na zegarek (Garmin Training API) ──
+    private bool _watchOn, _watchBusy, _watchOk;
+    private DateOnly _watchDate;
+    private string? _watchMsg;
+
+    private async Task SendToWatchAsync(int dayId)
+    {
+        _watchBusy = true; _watchMsg = null;
+        try
+        {
+            var sessionId = _targetAt is { } at && DateOnly.FromDateTime(at) == _watchDate ? _targetSessionId : null;
+            var r = await Workouts.SendPlanDayAsync(ClientId, dayId, _watchDate, _userId, sessionId);
+            _watchOk = r.Ok; _watchMsg = r.Message;
+        }
+        finally { _watchBusy = false; }
     }
 
     private int? _lastDayId;

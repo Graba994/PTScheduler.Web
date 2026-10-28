@@ -31,10 +31,10 @@ public sealed class WearableService(IDbContextFactory<ApplicationDbContext> dbFa
             ? null : (url.TrimEnd('/'), slug, Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET"));
     }
 
-    private static async Task<(bool Ok, JsonDocument? Json, string? Error)> CallPortalAsync(HttpMethod method, string path, object? body)
+    internal static async Task<(bool Ok, JsonDocument? Json, string? Error)> CallPortalAsync(HttpMethod method, string path, object? body, int timeoutSeconds = 15)
     {
         if (Portal() is not { } p) return (false, null, "Aplikacja nie jest połączona z platformą.");
-        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(15) };
+        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(timeoutSeconds) };
         using var req = new HttpRequestMessage(method, $"{p.Url}/api/garmin/{p.Slug}{path}");
         if (body is not null) req.Content = new StringContent(JsonSerializer.Serialize(body), Encoding.UTF8, "application/json");
         if (!string.IsNullOrEmpty(p.Secret)) req.Headers.TryAddWithoutValidation("X-Internal-Secret", p.Secret);
@@ -111,6 +111,7 @@ public sealed class WearableService(IDbContextFactory<ApplicationDbContext> dbFa
         await using var db = await dbFactory.CreateDbContextAsync();
         db.WearableDays.RemoveRange(await db.WearableDays.Where(d => d.ClientId == clientId).ToListAsync());
         db.WearableActivities.RemoveRange(await db.WearableActivities.Where(a => a.ClientId == clientId).ToListAsync());
+        db.WearableWorkouts.RemoveRange(await db.WearableWorkouts.Where(w => w.ClientId == clientId).ToListAsync());
         await db.SaveChangesAsync();
     }
 

@@ -719,7 +719,8 @@ app.MapGet("/api/garmin/{slug}/status", async (string slug, HttpContext ctx, IDb
     await using var db = await dbFactory.CreateDbContextAsync();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
     if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
-    return Results.Json(new { enabled = (await garmin.ConfigAsync()).Enabled });
+    var cfg = await garmin.ConfigAsync();
+    return Results.Json(new { enabled = cfg.Enabled, workouts = cfg.Workouts });
 });
 app.MapPost("/api/garmin/{slug}/start", async (string slug, HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory, IConfiguration config, GarminService garmin) =>
 {
@@ -740,6 +741,38 @@ app.MapPost("/api/garmin/{slug}/disconnect", async (string slug, HttpContext ctx
     using var doc = await System.Text.Json.JsonDocument.ParseAsync(ctx.Request.Body);
     if (!doc.RootElement.TryGetProperty("clientId", out var cid) || !cid.TryGetInt32(out var clientId)) return Results.BadRequest(new { error = "Brak klienta." });
     var error = await garmin.DisconnectAsync(tenant, clientId);
+    return error is null ? Results.Ok() : Results.Json(new { error }, statusCode: 502);
+});
+
+// Plan na zegarek (Training API): studio wysyła gotowy trening, Portal tworzy go u Garmina i planuje na dzień.
+app.MapPost("/api/garmin/{slug}/workout", async (string slug, HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory, IConfiguration config, GarminService garmin) =>
+{
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    using var doc = await System.Text.Json.JsonDocument.ParseAsync(ctx.Request.Body);
+    var r = doc.RootElement;
+    if (!r.TryGetProperty("clientId", out var cid) || cid.ValueKind != System.Text.Json.JsonValueKind.Number || !cid.TryGetInt32(out var clientId)
+        || !r.TryGetProperty("workout", out var workout) || workout.ValueKind != System.Text.Json.JsonValueKind.Object
+        || !r.TryGetProperty("date", out var d) || !DateOnly.TryParseExact(d.GetString(), "yyyy-MM-dd", out var date))
+        return Results.BadRequest(new { error = "Niepełne dane treningu." });
+    long? replace = r.TryGetProperty("replaceWorkoutId", out var rep) && rep.ValueKind == System.Text.Json.JsonValueKind.Number && rep.TryGetInt64(out var old) ? old : null;
+    var res = await garmin.PushWorkoutAsync(tenant, clientId, workout, date, replace);
+    return res.Error is null && res.WorkoutId is not null
+        ? Results.Json(new { workoutId = res.WorkoutId, scheduleId = res.ScheduleId })
+        : Results.Json(new { error = res.Error, workoutId = res.WorkoutId }, statusCode: 502);
+});
+app.MapPost("/api/garmin/{slug}/workout/delete", async (string slug, HttpContext ctx, IDbContextFactory<PortalDbContext> dbFactory, IConfiguration config, GarminService garmin) =>
+{
+    await using var db = await dbFactory.CreateDbContextAsync();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    using var doc = await System.Text.Json.JsonDocument.ParseAsync(ctx.Request.Body);
+    var r = doc.RootElement;
+    if (!r.TryGetProperty("clientId", out var cid) || !cid.TryGetInt32(out var clientId)
+        || !r.TryGetProperty("workoutId", out var w) || w.ValueKind != System.Text.Json.JsonValueKind.Number || !w.TryGetInt64(out var workoutId))
+        return Results.BadRequest(new { error = "Brak treningu." });
+    var error = await garmin.DeleteWorkoutAsync(tenant, clientId, workoutId);
     return error is null ? Results.Ok() : Results.Json(new { error }, statusCode: 502);
 });
 

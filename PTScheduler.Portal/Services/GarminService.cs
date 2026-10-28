@@ -28,6 +28,10 @@ public sealed class GarminService(
     public const string TokenUrl = "https://diauth.garmin.com/di-oauth2-service/oauth/token";
     public const string UserIdUrl = "https://apis.garmin.com/wellness-api/rest/user/id";
     public const string RegistrationUrl = "https://apis.garmin.com/wellness-api/rest/user/registration";
+    /// <summary>Training API V2: tworzenie treningu, operacje na treningu i harmonogram (wg dokumentacji Garmina 2.0).</summary>
+    public const string WorkoutCreateUrl = "https://apis.garmin.com/workoutportal/workout/v2";
+    public const string WorkoutUrl = "https://apis.garmin.com/training-api/workout/v2/";
+    public const string ScheduleUrl = "https://apis.garmin.com/training-api/schedule/";
     /// <summary>Limit połączonych osób w planie Starter.</summary>
     public const int StarterLimit = 1000;
     /// <summary>Rodzaje danych przekazywane do studiów (reszta: odłączenia i zmiany uprawnień — obsługujemy tutaj).</summary>
@@ -37,8 +41,11 @@ public sealed class GarminService(
     private IDataProtector Secrets => dataProtection.CreateProtector("garmin-secrets");
 
     /// <param name="On">Globalny włącznik (Portal). Wyłączony — klienci nie widzą Garmina, dane z Garmina są pomijane.</param>
-    public sealed record Config(string ClientId, bool HasSecret, string PushKey, bool On)
+    /// <param name="TrainingOn">Plany na zegarek (Training API) — osobny włącznik, bo wymaga dodania API w portalu Garmina.</param>
+    public sealed record Config(string ClientId, bool HasSecret, string PushKey, bool On, bool TrainingOn = false)
     {
+        /// <summary>Studia mogą wysyłać treningi na zegarki klientów.</summary>
+        public bool Workouts => Enabled && TrainingOn;
         /// <summary>Klucze aplikacji wpisane.</summary>
         public bool HasKeys => ClientId.Length > 0 && HasSecret;
         /// <summary>Klient może połączyć zegarek: włącznik i klucze.</summary>
@@ -47,11 +54,12 @@ public sealed class GarminService(
 
     public async Task<Config> ConfigAsync()
     {
-        var s = await settings.GetAllAsync(K.GarminClientId, K.GarminClientSecret, K.GarminPushKey, K.GarminEnabled);
+        var s = await settings.GetAllAsync(K.GarminClientId, K.GarminClientSecret, K.GarminPushKey, K.GarminEnabled, K.GarminTrainingEnabled);
         var key = s[K.GarminPushKey];
         // Klucz w adresie odbioru danych powstaje od razu — adres można wkleić do Garmina jeszcze przed kluczami aplikacji.
         if (string.IsNullOrWhiteSpace(key)) await settings.SetAsync(K.GarminPushKey, key = NewKey(24));
-        return new(s[K.GarminClientId].Trim(), !string.IsNullOrWhiteSpace(s[K.GarminClientSecret]), key, s[K.GarminEnabled] == "true");
+        return new(s[K.GarminClientId].Trim(), !string.IsNullOrWhiteSpace(s[K.GarminClientSecret]), key, s[K.GarminEnabled] == "true",
+            s[K.GarminTrainingEnabled] == "true");
     }
 
     public async Task SaveConfigAsync(string clientId, string? secret)
@@ -68,6 +76,8 @@ public sealed class GarminService(
         await settings.SetAsync(K.GarminEnabled, on ? "true" : "false");
         return await tenants.PushAllEntitlementsAsync();
     }
+
+    public Task SetTrainingAsync(bool on) => settings.SetAsync(K.GarminTrainingEnabled, on ? "true" : "false");
 
     public string PortalUrl => PortalUrls.Public(config);
     public string RedirectUri => $"{PortalUrl}/garmin/callback";
@@ -238,6 +248,105 @@ public sealed class GarminService(
             return t.Access;
         }
         catch (Exception ex) { logger.LogWarning(ex, "Token Garmina {User} niedostępny.", c.GarminUserId); return null; }
+    }
+
+    // ── Plany na zegarek (Training API V2) ──
+
+    public sealed record WorkoutResult(long? WorkoutId, long? ScheduleId, string? Error);
+
+    /// <summary>Klient i HttpClient do Training API — w testach podmieniany.</summary>
+    public HttpMessageInvoker TrainingHttp { get; set; } = Http;
+
+    /// <summary>
+    /// Tworzy trening na koncie Garmin klienta i planuje go na <paramref name="date"/>. Gdy podano poprzedni trening
+    /// (ponowna wysyłka tego samego dnia planu), najpierw go usuwa. Połączenie testowe — bez wywołań Garmina.
+    /// </summary>
+    public async Task<WorkoutResult> PushWorkoutAsync(Tenant tenant, int clientId, JsonElement workout, DateOnly date, long? replaceWorkoutId)
+    {
+        if (!(await ConfigAsync()).Workouts) return new(null, null, "Plany na zegarek są wyłączone na platformie.");
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var conn = await db.GarminConnections.FirstOrDefaultAsync(c => c.TenantId == tenant.Id && c.TenantClientId == clientId && c.DisconnectedAt == null);
+        if (conn is null) return new(null, null, "Klient nie ma połączonego zegarka Garmin.");
+        if (conn.IsTest)
+        {
+            // Tryb testowy z panelu: udajemy Garmina, żeby sprawdzić cały przepływ w aplikacji studia.
+            var fake = 900_000_000L + Random.Shared.Next(1, 99_999_999);
+            return new(fake, fake + 1, null);
+        }
+        var token = await AccessTokenAsync(conn);
+        await db.SaveChangesAsync(); // odświeżony token
+        if (token is null) return new(null, null, "Połączenie z Garminem wygasło — klient musi połączyć zegarek ponownie.");
+
+        try
+        {
+            if (replaceWorkoutId is long old) await SendAsync(HttpMethod.Delete, WorkoutUrl + old, token, null); // brak (404) też jest w porządku
+
+            using var created = await SendAsync(HttpMethod.Post, WorkoutCreateUrl, token, workout.GetRawText());
+            var createdText = await created.Content.ReadAsStringAsync();
+            if (!created.IsSuccessStatusCode) return new(null, null, Explain(created.StatusCode, createdText));
+            var workoutId = ReadId(createdText, "workoutId");
+            if (workoutId is null) return new(null, null, "Garmin nie zwrócił numeru treningu.");
+
+            using var scheduled = await SendAsync(HttpMethod.Post, ScheduleUrl, token,
+                JsonSerializer.Serialize(new { workoutId, date = date.ToString("yyyy-MM-dd") }));
+            var scheduleText = await scheduled.Content.ReadAsStringAsync();
+            if (!scheduled.IsSuccessStatusCode)
+                return new(workoutId, null, "Trening jest w Garmin Connect, ale nie udało się go zaplanować: " + Explain(scheduled.StatusCode, scheduleText));
+            return new(workoutId, ReadId(scheduleText, "scheduleId"), null);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException)
+        {
+            logger.LogWarning(ex, "Wysyłka treningu do Garmina (studio {Slug}, klient {Client}) nie powiodła się.", tenant.Slug, clientId);
+            return new(null, null, "Garmin nie odpowiedział — spróbuj za chwilę.");
+        }
+    }
+
+    /// <summary>Usuwa trening z konta Garmin klienta (razem z jego zaplanowaniem).</summary>
+    public async Task<string?> DeleteWorkoutAsync(Tenant tenant, int clientId, long workoutId)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var conn = await db.GarminConnections.FirstOrDefaultAsync(c => c.TenantId == tenant.Id && c.TenantClientId == clientId && c.DisconnectedAt == null);
+        if (conn is null || conn.IsTest) return null;
+        var token = await AccessTokenAsync(conn);
+        await db.SaveChangesAsync();
+        if (token is null) return "Połączenie z Garminem wygasło.";
+        try
+        {
+            using var resp = await SendAsync(HttpMethod.Delete, WorkoutUrl + workoutId, token, null);
+            return resp.IsSuccessStatusCode || resp.StatusCode == System.Net.HttpStatusCode.NotFound ? null : Explain(resp.StatusCode, "");
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException) { return "Garmin nie odpowiedział."; }
+    }
+
+    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string url, string token, string? json)
+    {
+        var req = new HttpRequestMessage(method, url);
+        req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+        if (json is not null) req.Content = new StringContent(json, Encoding.UTF8, "application/json");
+        return await TrainingHttp.SendAsync(req, CancellationToken.None);
+    }
+
+    /// <summary>Kody z dokumentacji Training API → zrozumiały komunikat dla trenera.</summary>
+    public static string Explain(System.Net.HttpStatusCode code, string body) => (int)code switch
+    {
+        412 => "Klient nie zezwolił na import treningów. W aplikacji Garmin Connect: Ustawienia → Połączone aplikacje → Hantly → włącz treningi (albo połącz zegarek ponownie).",
+        401 => "Połączenie z Garminem wygasło — klient musi połączyć zegarek ponownie.",
+        403 => "Garmin nie pozwolił na tę operację — sprawdź, czy Training API jest włączone w aplikacji Garmina.",
+        429 => "Limit wysyłek do Garmina na teraz został wyczerpany — spróbuj za kilka minut.",
+        400 => "Garmin odrzucił trening" + (string.IsNullOrWhiteSpace(body) ? "." : $": {body[..Math.Min(200, body.Length)]}"),
+        _ => $"Garmin odpowiedział błędem ({(int)code})."
+    };
+
+    /// <summary>Numer z odpowiedzi: sama liczba albo pole obiektu.</summary>
+    public static long? ReadId(string text, string field)
+    {
+        if (long.TryParse(text.Trim(), out var plain)) return plain;
+        try
+        {
+            using var doc = JsonDocument.Parse(text);
+            return doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty(field, out var v) && v.TryGetInt64(out var id) ? id : null;
+        }
+        catch (JsonException) { return null; }
     }
 
     // ── Dane z Garmina (push) ──

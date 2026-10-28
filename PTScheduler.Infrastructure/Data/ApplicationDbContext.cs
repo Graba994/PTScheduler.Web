@@ -87,6 +87,7 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
     public DbSet<WearableLink> WearableLinks => Set<WearableLink>();
     public DbSet<WearableDay> WearableDays => Set<WearableDay>();
     public DbSet<WearableActivity> WearableActivities => Set<WearableActivity>();
+    public DbSet<WearableWorkout> WearableWorkouts => Set<WearableWorkout>();
 
     protected override void OnModelCreating(ModelBuilder builder)
     {
@@ -358,6 +359,12 @@ public class ApplicationDbContext(DbContextOptions<ApplicationDbContext> options
             e.Property(x => x.Name).HasMaxLength(150);
             e.Property(x => x.Type).HasMaxLength(60);
             e.Property(x => x.DeviceName).HasMaxLength(100);
+            e.HasOne(x => x.Client).WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
+        });
+        builder.Entity<WearableWorkout>(e =>
+        {
+            e.HasIndex(x => new { x.ClientId, x.Date });
+            e.Property(x => x.Name).HasMaxLength(120);
             e.HasOne(x => x.Client).WithMany().HasForeignKey(x => x.ClientId).OnDelete(DeleteBehavior.Cascade);
         });
         builder.Entity<SlotWatch>(e =>

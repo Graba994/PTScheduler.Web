@@ -244,6 +244,8 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string GarminPushKey = "garmin_push_key";
         /// <summary>Globalny włącznik Garmina: „false” — klienci nigdzie go nie widzą, dane z Garmina są pomijane.</summary>
         public const string GarminEnabled = "garmin_enabled";
+        /// <summary>Plany na zegarek (Training API) — włączamy po dodaniu Training API do aplikacji w portalu dewelopera Garmina.</summary>
+        public const string GarminTrainingEnabled = "garmin_training_enabled";
         /// <summary>„true” — dokument czeka na zatwierdzenie, zanim trafi do Fakturowni (domyślnie tak).</summary>
         public const string FinanceFakturowniaApprove = "finance_fakturownia_approve";
         /// <summary>„true” — nowe dokumenty wystawione w Fakturowni pobieramy same (bez dopisywania do ewidencji).</summary>

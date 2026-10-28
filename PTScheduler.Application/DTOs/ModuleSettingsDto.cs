@@ -21,6 +21,9 @@ public class ModuleSettingsDto
     // Zegarki klientów (Garmin): poniedziałkowy raport tygodnia dla klienta (sen, kroki, aktywności, tętno spoczynkowe).
     public bool WearableWeeklyReportEnabled { get; set; }
 
+    // Zegarki klientów (Garmin): trener wysyła dzień planu na zegarek klienta (Training API; platforma musi to mieć włączone).
+    public bool WearableWorkoutsEnabled { get; set; }
+
     // Źródło publicznego katalogu ćwiczeń (Free Exercise DB albo wger.de).
     public PTScheduler.Domain.Enums.ExerciseSource ExerciseCatalogSource { get; set; } = PTScheduler.Domain.Enums.ExerciseSource.FreeExerciseDb;
 
