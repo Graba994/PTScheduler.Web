@@ -8,6 +8,7 @@
 @inject IModuleSettingsService ModuleSettings
 @inject PTScheduler.Web.Services.ExerciseCatalogSync CatalogSync
 @inject IAppClock Clock
+@inject EntitlementService Entitlements
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Moduły" />
@@ -69,6 +70,34 @@ else
             </div>
         </div>
     </div>
+
+    @if (Entitlements.IsAllowed("Wearables"))
+    {
+        <div class="card mt-3" style="max-width:640px">
+            <div class="card-body">
+                <div class="fw-semibold mb-1"><i class="bi bi-smartwatch me-2" style="color:var(--c-primary)"></i>Zegarki klientów (Garmin)</div>
+                <div class="text-muted small mb-3">Dla klientów z połączonym zegarkiem. Same liczby z zegarka, bez AI; klient może wyłączyć powiadomienia u siebie.</div>
+                <div class="d-flex justify-content-between align-items-start gap-3 mb-3">
+                    <div>
+                        <label class="fw-semibold small" for="mWearSession">Podsumowanie treningu dla klienta</label>
+                        <div class="text-muted small">Po treningu z zegarkiem klient dostaje powiadomienie: czas, kalorie, średnie i maksymalne tętno, dystans.</div>
+                    </div>
+                    <div class="form-check form-switch fs-5 m-0">
+                        <input class="form-check-input" type="checkbox" role="switch" @bind="_settings.WearableSessionSummaryEnabled" id="mWearSession" />
+                    </div>
+                </div>
+                <div class="d-flex justify-content-between align-items-start gap-3">
+                    <div>
+                        <label class="fw-semibold small" for="mWearWeek">Raport tygodnia dla klienta</label>
+                        <div class="text-muted small">W poniedziałek rano: średni sen, kroki, aktywności i tętno spoczynkowe — z porównaniem do poprzedniego tygodnia.</div>
+                    </div>
+                    <div class="form-check form-switch fs-5 m-0">
+                        <input class="form-check-input" type="checkbox" role="switch" @bind="_settings.WearableWeeklyReportEnabled" id="mWearWeek" />
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
 
     <div class="card mt-3" style="max-width:640px">
         <div class="card-body">
@@ -195,6 +224,8 @@ else
             current.CoursesEnabled = _settings.CoursesEnabled;
             current.PackageRemindersEnabled = _settings.PackageRemindersEnabled;
             current.ClientProgressSummariesEnabled = _settings.ClientProgressSummariesEnabled;
+            current.WearableSessionSummaryEnabled = _settings.WearableSessionSummaryEnabled;
+            current.WearableWeeklyReportEnabled = _settings.WearableWeeklyReportEnabled;
             current.ExerciseCatalogSource = _settings.ExerciseCatalogSource;
             await ModuleSettings.SaveAsync(current);
             _stored = current;

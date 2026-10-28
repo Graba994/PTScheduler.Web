@@ -20,6 +20,12 @@ public class WearableLink
     /// <summary>Model urządzenia z ostatniej aktywności — Garmin wymaga go przy pokazywaniu danych.</summary>
     public string? DeviceName { get; set; }
     public DateTime? LastDataAt { get; set; }
+    /// <summary>Klient chce powiadomienie po treningu z podsumowaniem z zegarka (gdy studio to włączyło).</summary>
+    public bool NotifySessions { get; set; } = true;
+    /// <summary>Klient chce poniedziałkowy raport tygodnia z zegarka (gdy studio to włączyło).</summary>
+    public bool NotifyWeekly { get; set; } = true;
+    /// <summary>Poniedziałek tygodnia, za który wysłano ostatni raport — bez powtórek.</summary>
+    public DateOnly? WeeklyReportSentFor { get; set; }
 
     public bool IsConnected => ConnectedAt is not null && DisconnectedAt is null;
 }
@@ -72,5 +78,7 @@ public class WearableActivity
     public int? DistanceMeters { get; set; }
     public string? DeviceName { get; set; }
     public int? SessionId { get; set; }
+    /// <summary>Kiedy klient dostał podsumowanie tego treningu (powiadomienie) — każdy trening raz.</summary>
+    public DateTime? SummarySentAt { get; set; }
     public DateTime UpdatedAt { get; set; } = DateTime.UtcNow;
 }

@@ -15,6 +15,12 @@ public class ModuleSettingsDto
     // Karta „Twoje postępy” na pulpicie klienta (siła, ciało, liczba treningów; tekst może ułożyć AI).
     public bool ClientProgressSummariesEnabled { get; set; } = true;
 
+    // Zegarki klientów (Garmin): powiadomienie z podsumowaniem treningu dopiętego do wizyty (czas, kalorie, tętno).
+    public bool WearableSessionSummaryEnabled { get; set; }
+
+    // Zegarki klientów (Garmin): poniedziałkowy raport tygodnia dla klienta (sen, kroki, aktywności, tętno spoczynkowe).
+    public bool WearableWeeklyReportEnabled { get; set; }
+
     // Źródło publicznego katalogu ćwiczeń (Free Exercise DB albo wger.de).
     public PTScheduler.Domain.Enums.ExerciseSource ExerciseCatalogSource { get; set; } = PTScheduler.Domain.Enums.ExerciseSource.FreeExerciseDb;
 

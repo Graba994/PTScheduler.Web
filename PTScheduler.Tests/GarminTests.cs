@@ -203,6 +203,60 @@ public class GarminTests
         link.AiConsentAt.Should().BeNull("odłączenie zegarka wycofuje też zgodę na AI");
     }
 
+    [Fact]
+    public void Week_report_compares_with_previous_week_and_reads_well()
+    {
+        var mon = new DateOnly(2026, 10, 19);
+        WearableWeekRules.LastFullWeekStart(new DateOnly(2026, 10, 28)).Should().Be(mon); // środa → poprzedni pon.
+        WearableWeekRules.LastFullWeekStart(new DateOnly(2026, 10, 26)).Should().Be(mon); // poniedziałek → tydzień, który się skończył
+
+        var days = new List<WearableDay>();
+        for (var i = 0; i < 7; i++)
+        {
+            days.Add(new WearableDay { Date = mon.AddDays(i), SleepMinutes = 425, Steps = 7500, RestingHeartRate = 58 });
+            days.Add(new WearableDay { Date = mon.AddDays(i - 7), SleepMinutes = 405, Steps = 6000, RestingHeartRate = 60 });
+        }
+        var acts = new[] { new WearableWeekRules.Act(mon.AddDays(1), 3600, true), new WearableWeekRules.Act(mon.AddDays(3), 2700, false),
+                           new WearableWeekRules.Act(mon.AddDays(-2), 3000, false) };
+
+        var w = WearableWeekRules.For(mon, days, acts);
+
+        w.DaysWithData.Should().Be(7);
+        w.Activities.Should().Be(2);
+        w.SessionsWithWatch.Should().Be(1);
+        WearableWeekRules.Text(w).Should().Be($"Sen śr. 7 h 5 min (+20 min) · {52500.ToString("N0", System.Globalization.CultureInfo.GetCultureInfo("pl-PL"))} kroków · 2 aktywności (1 h 45 min) · tętno spocz. 58 (−2)");
+        WearableWeekRules.Text(WearableWeekRules.For(mon, [], [])).Should().Be("Brak danych z zegarka w tym tygodniu.");
+        WearableWeekRules.SessionLine(3120, 430, 138, 171, 5240).Should().Be("52 min · 430 kcal · śr. tętno 138 · max 171 · 5,2 km");
+        ReadinessRules.Duration(45).Should().Be("45 min");
+    }
+
+    [Fact]
+    public async Task Session_summary_goes_once_only_when_studio_and_client_allow_it()
+    {
+        var (svc, db) = await BuildAsync();
+        await using (var ctx = db.CreateDbContext())
+        {
+            ctx.WearableActivities.Add(new WearableActivity { ClientId = 7, ExternalId = "a1", Name = "Trening", StartUtc = DateTime.UtcNow.AddHours(-2), DurationSeconds = 3000, Kilocalories = 400, SessionId = 70 });
+            await ctx.SaveChangesAsync();
+        }
+        var modules = new Moq.Mock<PTScheduler.Application.Interfaces.IModuleSettingsService>();
+        var settings = new PTScheduler.Application.DTOs.ModuleSettingsDto();
+        modules.Setup(m => m.GetAsync()).Returns(() => Task.FromResult(settings));
+        var push = new Moq.Mock<PTScheduler.Application.Interfaces.IWebPushService>();
+        var ent = new EntitlementService(new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(), db, NullLogger<EntitlementService>.Instance);
+        ent.ReplaceFromJson("""{"name":"Pro","wearables":true}""");
+        var insights = new WearableInsightsService(db, modules.Object, push.Object, ent, TestClock.AtWallClock(new DateTime(2026, 10, 27, 12, 0, 0)), NullLogger<WearableInsightsService>.Instance);
+
+        (await insights.NotifySessionSummariesAsync(7)).Should().Be(0, "studio nie włączyło podsumowań");
+        settings.WearableSessionSummaryEnabled = true;
+        await insights.SetClientNotificationsAsync(7, sessions: false, weekly: true);
+        (await insights.NotifySessionSummariesAsync(7)).Should().Be(0, "klient wyłączył powiadomienia");
+        await insights.SetClientNotificationsAsync(7, sessions: true, weekly: true);
+        (await insights.NotifySessionSummariesAsync(7)).Should().Be(1);
+        (await insights.NotifySessionSummariesAsync(7)).Should().Be(0, "każdy trening tylko raz");
+        push.Verify(p => p.SendAsync("u7", Moq.It.Is<PTScheduler.Application.DTOs.PushMessageDto>(m => m.Body.StartsWith("50 min · 400 kcal") && m.Url == "/my/garmin")), Moq.Times.Once);
+    }
+
     private sealed class TestDbFactory(DbContextOptions<ApplicationDbContext> options) : IDbContextFactory<ApplicationDbContext>
     {
         public ApplicationDbContext CreateDbContext() => new(options);

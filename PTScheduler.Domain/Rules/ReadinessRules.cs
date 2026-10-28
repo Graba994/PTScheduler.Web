@@ -72,7 +72,8 @@ public static class ReadinessRules
         return list.Count >= 3 ? list.Average() : null;
     }
 
-    public static string Duration(int minutes) => minutes % 60 == 0 ? $"{minutes / 60} h" : $"{minutes / 60} h {minutes % 60} min";
+    public static string Duration(int minutes) =>
+        minutes < 60 ? $"{Math.Max(0, minutes)} min" : minutes % 60 == 0 ? $"{minutes / 60} h" : $"{minutes / 60} h {minutes % 60} min";
 
     /// <summary>
     /// Wizyta, którą obejmuje aktywność z zegarka: największa część wspólna, co najmniej połowa krótszego z odcinków

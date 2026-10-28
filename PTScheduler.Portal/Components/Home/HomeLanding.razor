@@ -1,6 +1,7 @@
 @inject SiteSettingsService Settings
 @inject IDbContextFactory<PortalDbContext> DbFactory
 @inject AssistantService Assistant
+@inject IWebHostEnvironment Env
 
 @* Szablon „Nowa” strony głównej: sprzedażowa strona na prawdziwych ekranach i nagraniach z aplikacji
    Zamiast zrzutów — zaprojektowane, animowane sceny (HomeScene) i podgląd aplikacji na żywo w hero (nazwa + kolor → /register).
@@ -120,6 +121,30 @@
         </ul>
     </div>
 </section>
+
+@if (_garmin && _plans.Any(p => p.Wearables))
+{
+    <!-- NOWOŚĆ: pasek o zegarkach Garmin -->
+    <section class="ld-garmin-band" aria-label="Nowość: zegarki Garmin">
+        <div class="lp-container">
+        <a href="#garmin" class="ld-garmin-band-in">
+            @if (GarminBadge is { } badge)
+            {
+                <img src="@badge" alt="Works with Garmin Connect" class="ld-garmin-badge" />
+            }
+            else
+            {
+                <span class="ld-garmin-band-ic" aria-hidden="true"><i class="bi bi-smartwatch"></i></span>
+            }
+            <span class="ld-garmin-band-txt">
+                <b>Nowość · zegarki Garmin Twoich klientów</b>
+                <small>Gotowość przed treningiem, tętno z wizyty i raport tygodnia — prosto w Twojej aplikacji.</small>
+            </span>
+            <span class="ld-garmin-band-go">Zobacz <i class="bi bi-arrow-right"></i></span>
+        </a>
+        </div>
+    </section>
+}
 
 <!-- PROBLEM → ROZWIĄZANIE -->
 <section class="ld-section" id="problem">
@@ -290,6 +315,7 @@
                     <li><i class="bi bi-battery-half"></i><span><b>Gotowość na dziś przy każdej wizycie.</b> Na ekranie Dziś, w karcie przed treningiem i w porannym briefie — z powodami, np. „krótki sen, HRV poniżej normy”.</span></li>
                     <li><i class="bi bi-heart-pulse"></i><span><b>Tętno z treningu przy wizycie.</b> Aktywność z zegarka sama dopina się do wizyty w aplikacji.</span></li>
                     <li><i class="bi bi-graph-up-arrow"></i><span><b>Całość, nie tylko godzina w studiu.</b> Biegi, rower i kroki między treningami — w karcie klienta.</span></li>
+                    <li><i class="bi bi-bell"></i><span><b>Klient dostaje podsumowanie po treningu i raport tygodnia.</b> Czas, kalorie i tętno zaraz po wizycie, a w poniedziałek — sen, kroki i aktywność z porównaniem do poprzedniego tygodnia.</span></li>
                     <li><i class="bi bi-emoji-smile"></i><span><b>Klient czuje, że ktoś o niego dba.</b> Trener pyta o krótką noc, zanim klient sam o niej wspomni — to buduje zaufanie i zostaje na dłużej.</span></li>
                     <li><i class="bi bi-shield-check"></i><span><b>Za zgodą klienta, bez zgadywania.</b> Klient sam łączy i odłącza zegarek. AI to osobna, dobrowolna zgoda — trafiają do niego tylko liczby, nigdy imię.</span></li>
                 </ul>
@@ -514,6 +540,10 @@
     private Dictionary<string, string> _settings = new();
     /// <summary>Garmin włączony globalnie w Portalu — wtedy sekcja o zegarkach i pozycja w cenniku.</summary>
     private bool _garmin;
+    /// <summary>Oficjalna odznaka „Works with Garmin” (z portalu dewelopera Garmina) — pokazujemy, gdy plik leży w wwwroot/brand.</summary>
+    private string? GarminBadge => new[] { "works-with-garmin.svg", "works-with-garmin.png" }
+        .FirstOrDefault(f => File.Exists(Path.Combine(Env.WebRootPath, "brand", f))) is { } file ? $"/brand/{file}" : null;
+
     private string GarminPlans => string.Join(", ", _plans.Where(p => p.Wearables).Select(p => p.Name));
     private List<Plan> _plans = [];
     private List<AppFeedback> _reviews = [];

@@ -3441,6 +3441,9 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Property<DateTime>("StartUtc")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("SummarySentAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("Type")
                         .IsRequired()
                         .HasMaxLength(60)
@@ -3558,10 +3561,19 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Property<DateTime?>("LastDataAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<bool>("NotifySessions")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("NotifyWeekly")
+                        .HasColumnType("boolean");
+
                     b.Property<string>("Provider")
                         .IsRequired()
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)");
+
+                    b.Property<DateOnly?>("WeeklyReportSentFor")
+                        .HasColumnType("date");
 
                     b.HasKey("Id");
 

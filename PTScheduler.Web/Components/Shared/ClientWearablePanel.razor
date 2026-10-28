@@ -1,5 +1,6 @@
 @inject PTScheduler.Web.Services.WearableService Wearables
 @inject IAppClock Clock
+@inject PTScheduler.Web.Services.WearableInsightsService Insights
 @using PTScheduler.Application.Interfaces
 @using PTScheduler.Domain.Rules
 
@@ -36,6 +37,14 @@ else
         @if (_s.Link is { IsConnected: false })
         {
             <div class="alert alert-secondary py-2 small mb-0"><i class="bi bi-plug me-1"></i>Klient odłączył zegarek@(_s.Link.DisconnectedAt is { } off ? $" ({off.ToLocalTime():dd.MM.yyyy})" : "") — nowe dane nie przychodzą.</div>
+        }
+
+        @if (_week is { HasData: true } w)
+        {
+            <section class="wr-card">
+                <div class="wr-card-head"><b>Ostatni tydzień</b><small>@w.From.ToString("d.MM", Pl)–@w.To.ToString("d.MM", Pl) · w nawiasie zmiana do tygodnia wcześniej</small></div>
+                <p class="mb-0 small">@WearableWeekRules.Text(w)@(w.SessionsWithWatch > 0 ? $" · na wizytach z zegarkiem: {w.SessionsWithWatch}" : "")</p>
+            </section>
         }
 
         <section class="wr-card">
@@ -105,12 +114,14 @@ else
     private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
     private PTScheduler.Web.Services.WearableService.Summary? _s;
     private double? _rhrBase, _hrvBase;
+    private WearableWeekRules.Week? _week;
 
     protected override async Task OnParametersSetAsync()
     {
         _s = await Wearables.SummaryAsync(ClientId);
         _rhrBase = Avg(_s.Days.Select(d => d.RestingHeartRate));
         _hrvBase = Avg(_s.Days.Select(d => d.HrvLastNight));
+        _week = await Insights.WeekAsync(ClientId);
     }
 
     private static double? Avg(IEnumerable<int?> v)

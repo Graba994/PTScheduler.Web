@@ -2,6 +2,7 @@
 @attribute [Microsoft.AspNetCore.Authorization.Authorize(Roles = "Client")]
 @inject PTScheduler.Web.Services.WearableService Wearables
 @inject PTScheduler.Web.Services.EntitlementService Entitlements
+@inject PTScheduler.Web.Services.WearableInsightsService Insights
 @inject IClientService ClientService
 @inject AuthenticationStateProvider AuthState
 @inject NavigationManager Nav
@@ -52,10 +53,50 @@
                 </div>
                 <div class="gm-attr">Dane: Garmin@(string.IsNullOrWhiteSpace(_link.DeviceName) ? "" : $" {_link.DeviceName}") · @d.Date.ToString("d MMMM", Pl)</div>
             }
+            @if (_weekOn && _week is { HasData: true } w)
+            {
+                <div class="gm-week">
+                    <b><i class="bi bi-calendar-week me-1"></i>Twój tydzień · @w.From.ToString("d.MM", Pl)–@w.To.ToString("d.MM", Pl)</b>
+                    <span>@WearableWeekRules.Text(w)</span>
+                    <small class="gm-attr m-0">Dane: Garmin@(string.IsNullOrWhiteSpace(_link.DeviceName) ? "" : $" {_link.DeviceName}")</small>
+                </div>
+            }
+            @if (_sessionsOn && _sessionActs.Count > 0)
+            {
+                <div class="gm-sessions">
+                    <b><i class="bi bi-heart-pulse me-1"></i>Treningi z zegarkiem</b>
+                    <ul>
+                        @foreach (var sa in _sessionActs)
+                        {
+                            <li><span>@sa.SessionStart.ToString("ddd d.MM, HH:mm", Pl) · @sa.SessionType</span><small>@sa.Line</small></li>
+                        }
+                    </ul>
+                </div>
+            }
             <div class="gm-what">
                 <b>Co widzi trener</b>
                 <span>Sen, tętno spoczynkowe, HRV, Body Battery, kroki i aktywności (np. bieg, rower). Nie widzi lokalizacji ani tras.</span>
             </div>
+            @if (_sessionsOn || _weekOn)
+            {
+                <div class="gm-notify">
+                    <b>Powiadomienia</b>
+                    @if (_sessionsOn)
+                    {
+                        <label class="form-check form-switch m-0">
+                            <input class="form-check-input" type="checkbox" role="switch" checked="@_link.NotifySessions" disabled="@_busy" @onchange='e => SetNotifyAsync(e.Value is true, _link.NotifyWeekly)' />
+                            <span class="form-check-label">Podsumowanie po treningu</span>
+                        </label>
+                    }
+                    @if (_weekOn)
+                    {
+                        <label class="form-check form-switch m-0">
+                            <input class="form-check-input" type="checkbox" role="switch" checked="@_link.NotifyWeekly" disabled="@_busy" @onchange='e => SetNotifyAsync(_link.NotifySessions, e.Value is true)' />
+                            <span class="form-check-label">Raport tygodnia w poniedziałek</span>
+                        </label>
+                    }
+                </div>
+            }
             <label class="gm-ai form-check form-switch">
                 <input class="form-check-input" type="checkbox" role="switch" checked="@(_link.AiConsentAt is not null)" disabled="@_busy" @onchange="ToggleAiAsync" />
                 <span class="form-check-label">
@@ -131,6 +172,9 @@
     private string? _message;
     private PTScheduler.Domain.Entities.WearableLink? _link;
     private PTScheduler.Web.Services.WearableService.Summary? _summary;
+    private bool _sessionsOn, _weekOn;
+    private WearableWeekRules.Week? _week;
+    private List<PTScheduler.Web.Services.WearableInsightsService.SessionActivity> _sessionActs = [];
 
     protected override async Task OnInitializedAsync()
     {
@@ -156,6 +200,12 @@
     {
         _link = await Wearables.LinkAsync(_clientId);
         _summary = _link is { IsConnected: true } ? await Wearables.SummaryAsync(_clientId, 7) : null;
+        (_sessionsOn, _weekOn) = await Insights.EnabledAsync();
+        if (_link is { IsConnected: true })
+        {
+            _week = _weekOn ? await Insights.WeekAsync(_clientId) : null;
+            _sessionActs = _sessionsOn ? await Insights.SessionActivitiesAsync(_clientId) : [];
+        }
         _available = _link is { IsConnected: true } || await Wearables.AvailableAsync();
     }
 
@@ -165,6 +215,14 @@
         var (url, error) = await Wearables.StartConnectAsync(_clientId, "/my/garmin", _aiConsent);
         if (url is not null) { Nav.NavigateTo(url, forceLoad: true); return; }
         _busy = false; _messageOk = false; _message = error;
+    }
+
+    private async Task SetNotifyAsync(bool sessions, bool weekly)
+    {
+        _busy = true;
+        await Insights.SetClientNotificationsAsync(_clientId, sessions, weekly);
+        await LoadAsync();
+        _busy = false;
     }
 
     private async Task ToggleAiAsync(ChangeEventArgs e)

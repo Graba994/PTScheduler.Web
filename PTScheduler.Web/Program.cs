@@ -175,6 +175,7 @@ builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformInfoService>();
 builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformHelpService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.WearableService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.ExerciseMediaService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.WearableInsightsService>();
 builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformLegalService>();
 builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformAssistantService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.AssistantTipsService>();
@@ -202,6 +203,7 @@ builder.Services.AddScoped<PTScheduler.Web.Services.MedalService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.MedalBackgroundService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.ClientRecapService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.ClientRecapBackgroundService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.WearableWeeklyReportBackgroundService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.BeforeSessionPushService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.MorningBriefBackgroundService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.SetupGuide>();
@@ -905,7 +907,8 @@ app.MapPost("/internal/garmin/link", async (HttpContext ctx, PTScheduler.Web.Ser
     await wearables.SetLinkAsync(clientId, connected, r.TryGetProperty("deviceName", out var d) ? d.GetString() : null);
     return Results.Ok();
 });
-app.MapPost("/internal/garmin/data", async (HttpContext ctx, PTScheduler.Web.Services.WearableService wearables, PTScheduler.Web.Services.EntitlementService ent) =>
+app.MapPost("/internal/garmin/data", async (HttpContext ctx, PTScheduler.Web.Services.WearableService wearables, PTScheduler.Web.Services.EntitlementService ent,
+    PTScheduler.Web.Services.WearableInsightsService insights) =>
 {
     if (!InternalSecretMatches(ctx)) return Results.NotFound();
     // Plan bez „Zegarków klientów” (albo Garmin wyłączony w Portalu) — danych nie zapisujemy.
@@ -914,7 +917,10 @@ app.MapPost("/internal/garmin/data", async (HttpContext ctx, PTScheduler.Web.Ser
     var r = doc.RootElement;
     if (!r.TryGetProperty("clientId", out var cid) || !cid.TryGetInt32(out var clientId)
         || !r.TryGetProperty("kind", out var k) || !r.TryGetProperty("records", out var records)) return Results.BadRequest();
-    var saved = await wearables.IngestAsync(clientId, k.GetString() ?? "", records);
+    var kind = k.GetString() ?? "";
+    var saved = await wearables.IngestAsync(clientId, kind, records);
+    // Trening dopięty do wizyty → klient dostaje podsumowanie (gdy studio to włączyło).
+    if (kind == "activities" && saved > 0) await insights.NotifySessionSummariesAsync(clientId);
     return Results.Ok(new { saved });
 });
 
