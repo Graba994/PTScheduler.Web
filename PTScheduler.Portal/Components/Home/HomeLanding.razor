@@ -1,7 +1,6 @@
 @inject SiteSettingsService Settings
 @inject IDbContextFactory<PortalDbContext> DbFactory
 @inject AssistantService Assistant
-@inject IWebHostEnvironment Env
 
 @* Szablon „Nowa” strony głównej: sprzedażowa strona na prawdziwych ekranach i nagraniach z aplikacji
    Zamiast zrzutów — zaprojektowane, animowane sceny (HomeScene) i podgląd aplikacji na żywo w hero (nazwa + kolor → /register).
@@ -128,14 +127,7 @@
     <section class="ld-garmin-band" aria-label="Nowość: zegarki Garmin">
         <div class="lp-container">
         <a href="#garmin" class="ld-garmin-band-in">
-            @if (GarminBadge is { } badge)
-            {
-                <img src="@badge" alt="Works with Garmin Connect" class="ld-garmin-badge" />
-            }
-            else
-            {
-                <span class="ld-garmin-band-ic" aria-hidden="true"><i class="bi bi-smartwatch"></i></span>
-            }
+            <img src="/brand/garmin-connect-app.png" alt="Aplikacja Garmin Connect™" class="ld-garmin-app" width="48" height="48" />
             <span class="ld-garmin-band-txt">
                 <b>Nowość · zegarki Garmin Twoich klientów</b>
                 <small>Klient łączy aplikację Garmin Connect™ — a Ty widzisz gotowość przed treningiem, tętno z wizyty i raport tygodnia.</small>
@@ -308,7 +300,10 @@
     <section class="ld-section ld-garmin" id="garmin" aria-labelledby="ld-garmin-title">
         <div class="lp-container ld-garmin-grid">
             <div class="ld-garmin-copy">
-                <div class="lp-eyebrow">Zegarki klientów · Garmin</div>
+                <div class="ld-garmin-app-row">
+                    <img src="/brand/garmin-connect-app.png" alt="" width="40" height="40" class="ld-garmin-app" />
+                    <div class="lp-eyebrow">Zegarki klientów · Garmin Connect™</div>
+                </div>
                 <h2 id="ld-garmin-title">Wiesz, w jakiej formie klient przyjdzie, <span class="ld-grad">zanim wejdzie na salę.</span></h2>
                 <p>Klient łączy swoje konto w aplikacji Garmin Connect™ jednym kliknięciem. Sen, tętno spoczynkowe, HRV i Body Battery trafiają do Twojej aplikacji — a ta przed treningiem podpowiada, czy to dzień na rekord, czy na lżejszą jednostkę.</p>
                 <ul class="ld-checks">
@@ -323,6 +318,7 @@
                 {
                     <p class="ld-garmin-plans"><i class="bi bi-tags"></i>W planach: <b>@GarminPlans</b></p>
                 }
+                <p class="ld-garmin-app-note">Aplikacja Garmin Connect™ to centrum danych o zdrowiu i aktywności z zegarka Garmin — klient łączy ją z Twoją aplikacją w kilka sekund.</p>
             </div>
             <div class="ld-garmin-card" aria-hidden="true">
                 <div class="ld-garmin-head"><i class="bi bi-smartwatch"></i><span><small>Gotowość na dziś</small><b>Marta · niska</b></span><em>42/100</em></div>
@@ -540,10 +536,6 @@
     private Dictionary<string, string> _settings = new();
     /// <summary>Garmin włączony globalnie w Portalu — wtedy sekcja o zegarkach i pozycja w cenniku.</summary>
     private bool _garmin;
-    /// <summary>Oficjalna odznaka „Works with Garmin” (z portalu dewelopera Garmina) — pokazujemy, gdy plik leży w wwwroot/brand.</summary>
-    private string? GarminBadge => new[] { "works-with-garmin.svg", "works-with-garmin.png" }
-        .FirstOrDefault(f => File.Exists(Path.Combine(Env.WebRootPath, "brand", f))) is { } file ? $"/brand/{file}" : null;
-
     private string GarminPlans => string.Join(", ", _plans.Where(p => p.Wearables).Select(p => p.Name));
     private List<Plan> _plans = [];
     private List<AppFeedback> _reviews = [];
