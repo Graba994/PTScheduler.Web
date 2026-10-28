@@ -45,26 +45,27 @@
             <div class="gm-status"><i class="bi bi-check-circle-fill"></i><span><b>Zegarek połączony</b><small>od @_link.ConnectedAt!.Value.ToLocalTime().ToString("d MMMM yyyy", Pl)@(_link.LastDataAt is { } last ? $" · ostatnie dane {last.ToLocalTime():dd.MM HH:mm}" : " · czekamy na pierwsze dane")</small></span></div>
             @if (_summary?.Days.FirstOrDefault() is { } d)
             {
+                <div class="gm-src"><b>@d.Date.ToString("d MMMM", Pl)</b> · @Src</div>
                 <div class="gm-tiles">
                     @if (d.SleepMinutes is int sleep) { <div class="gm-tile"><small>Sen</small><b>@ReadinessRules.Duration(sleep)</b></div> }
                     @if (d.BodyBatteryHigh is int bb) { <div class="gm-tile"><small>Body Battery</small><b>@bb</b></div> }
                     @if (d.RestingHeartRate is int rhr) { <div class="gm-tile"><small>Tętno spoczynkowe</small><b>@rhr</b></div> }
                     @if (d.Steps is int steps) { <div class="gm-tile"><small>Kroki</small><b>@steps.ToString("N0", Pl)</b></div> }
                 </div>
-                <div class="gm-attr">Dane: Garmin@(string.IsNullOrWhiteSpace(_link.DeviceName) ? "" : $" {_link.DeviceName}") · @d.Date.ToString("d MMMM", Pl)</div>
             }
             @if (_weekOn && _week is { HasData: true } w)
             {
                 <div class="gm-week">
                     <b><i class="bi bi-calendar-week me-1"></i>Twój tydzień · @w.From.ToString("d.MM", Pl)–@w.To.ToString("d.MM", Pl)</b>
+                    <small class="gm-src">@Src</small>
                     <span>@WearableWeekRules.Text(w)</span>
-                    <small class="gm-attr m-0">Dane: Garmin@(string.IsNullOrWhiteSpace(_link.DeviceName) ? "" : $" {_link.DeviceName}")</small>
                 </div>
             }
             @if (_sessionsOn && _sessionActs.Count > 0)
             {
                 <div class="gm-sessions">
                     <b><i class="bi bi-heart-pulse me-1"></i>Treningi z zegarkiem</b>
+                    <small class="gm-src">@Src</small>
                     <ul>
                         @foreach (var sa in _sessionActs)
                         {
@@ -154,7 +155,7 @@
             </label>
             <button class="btn btn-primary btn-lg gm-connect" disabled="@(!_consent || _busy)" @onclick="ConnectAsync">
                 @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> } else { <i class="bi bi-smartwatch me-1"></i> }
-                Połącz z Garmin Connect
+                Połącz z Garmin Connect™
             </button>
             <small class="text-muted">Zalogujesz się na stronie Garmina i wybierzesz, co udostępniasz. Dane z czasu przed połączeniem nie są przesyłane.</small>
         </section>
@@ -173,6 +174,7 @@
     private PTScheduler.Domain.Entities.WearableLink? _link;
     private PTScheduler.Web.Services.WearableService.Summary? _summary;
     private bool _sessionsOn, _weekOn;
+    private string Src => PTScheduler.Web.Services.WearableService.Attribution(_link?.DeviceName);
     private WearableWeekRules.Week? _week;
     private List<PTScheduler.Web.Services.WearableInsightsService.SessionActivity> _sessionActs = [];
 

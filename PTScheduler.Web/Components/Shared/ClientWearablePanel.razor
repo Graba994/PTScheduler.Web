@@ -20,6 +20,7 @@ else
                 <div>
                     <small>Gotowość na dziś</small>
                     <b>@ReadinessRules.Label(_s.Readiness.Level)@(_s.Readiness.Level == ReadinessRules.Level.Unknown ? "" : $" · {_s.Readiness.Score}/100")</b>
+                    <small class="wr-src">@Src · @PTScheduler.Web.Services.WearableService.DerivedNote</small>
                 </div>
             </div>
             @if (_s.Readiness.Reasons.Count > 0)
@@ -42,13 +43,13 @@ else
         @if (_week is { HasData: true } w)
         {
             <section class="wr-card">
-                <div class="wr-card-head"><b>Ostatni tydzień</b><small>@w.From.ToString("d.MM", Pl)–@w.To.ToString("d.MM", Pl) · w nawiasie zmiana do tygodnia wcześniej</small></div>
+                <div class="wr-card-head"><b>Ostatni tydzień</b><small>@Src · @w.From.ToString("d.MM", Pl)–@w.To.ToString("d.MM", Pl) · w nawiasie zmiana do tygodnia wcześniej</small></div>
                 <p class="mb-0 small">@WearableWeekRules.Text(w)@(w.SessionsWithWatch > 0 ? $" · na wizytach z zegarkiem: {w.SessionsWithWatch}" : "")</p>
             </section>
         }
 
         <section class="wr-card">
-            <div class="wr-card-head"><b>Ostatnie 14 dni</b><small>norma = średnia z 28 dni</small></div>
+            <div class="wr-card-head"><b>Ostatnie 14 dni</b><small>@Src · norma = średnia z 28 dni</small></div>
             @if (_s.Days.Count == 0)
             {
                 <p class="text-muted small mb-0">Czekamy na pierwsze dane — Garmin wysyła je po synchronizacji zegarka z telefonem.</p>
@@ -77,7 +78,7 @@ else
         </section>
 
         <section class="wr-card">
-            <div class="wr-card-head"><b>Aktywności z zegarka</b></div>
+            <div class="wr-card-head"><b>Aktywności z zegarka</b><small>@Src</small></div>
             @if (_s.Activities.Count == 0)
             {
                 <p class="text-muted small mb-0">Brak aktywności od połączenia zegarka.</p>
@@ -104,7 +105,7 @@ else
             }
         </section>
 
-        <div class="wr-attr">Dane: Garmin@(string.IsNullOrWhiteSpace(_s.Link?.DeviceName) ? "" : $" {_s.Link!.DeviceName}") · gotowość liczona z reguł, to podpowiedź — o treningu decydujesz Ty.</div>
+        <div class="wr-attr">Gotowość liczona z reguł, to podpowiedź — o treningu decydujesz Ty.</div>
     </div>
 }
 
@@ -115,6 +116,7 @@ else
     private PTScheduler.Web.Services.WearableService.Summary? _s;
     private double? _rhrBase, _hrvBase;
     private WearableWeekRules.Week? _week;
+    private string Src => PTScheduler.Web.Services.WearableService.Attribution(_s?.Link?.DeviceName);
 
     protected override async Task OnParametersSetAsync()
     {

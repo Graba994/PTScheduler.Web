@@ -204,6 +204,15 @@ public class GarminTests
     }
 
     [Fact]
+    public void Attribution_follows_garmin_brand_guidelines()
+    {
+        WearableService.Attribution("Forerunner 265").Should().Be("Garmin Forerunner 265");
+        WearableService.Attribution("Garmin Venu 3").Should().Be("Garmin Venu 3");
+        WearableService.Attribution(null).Should().Be("Garmin");
+        WearableService.Attribution("  ").Should().Be("Garmin");
+    }
+
+    [Fact]
     public void Week_report_compares_with_previous_week_and_reads_well()
     {
         var mon = new DateOnly(2026, 10, 19);

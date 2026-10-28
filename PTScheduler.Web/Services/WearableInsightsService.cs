@@ -53,7 +53,7 @@ public class WearableInsightsService(
             {
                 await push.SendAsync(userId, new PushMessageDto
                 {
-                    Title = "Twój trening · Garmin",
+                    Title = $"Twój trening · {WearableService.Attribution(a.DeviceName ?? link.DeviceName)}",
                     Body = WearableWeekRules.SessionLine(a.DurationSeconds, a.Kilocalories, a.AverageHeartRate, a.MaxHeartRate, a.DistanceMeters),
                     Url = Url
                 });
@@ -128,7 +128,7 @@ public class WearableInsightsService(
             if (string.IsNullOrEmpty(userId)) continue;
             try
             {
-                await push.SendAsync(userId, new PushMessageDto { Title = "Twój tydzień · Garmin", Body = WearableWeekRules.Text(report), Url = Url });
+                await push.SendAsync(userId, new PushMessageDto { Title = $"Twój tydzień · {WearableService.Attribution(link.DeviceName)}", Body = WearableWeekRules.Text(report), Url = Url });
                 sent++;
             }
             catch (Exception ex) { logger.LogWarning(ex, "Raport tygodnia z zegarka nie wyszedł (klient {Client}).", link.ClientId); }

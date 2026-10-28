@@ -251,6 +251,20 @@ public sealed class WearableService(IDbContextFactory<ApplicationDbContext> dbFa
             .Select(l => l.ClientId).ToListAsync()).ToHashSet();
     }
 
+    /// <summary>
+    /// Podpis źródła wymagany przez wytyczne marki Garmina: „Garmin [model]” (bez modelu — samo „Garmin”),
+    /// umieszczany bezpośrednio pod tytułem widoku z danymi, nigdy w stopce.
+    /// </summary>
+    public static string Attribution(string? device)
+    {
+        var d = device?.Trim();
+        if (string.IsNullOrEmpty(d)) return "Garmin";
+        return d.StartsWith("Garmin", StringComparison.OrdinalIgnoreCase) ? d : $"Garmin {d}";
+    }
+
+    /// <summary>Dopisek przy wnioskach liczonych z danych (gotowość, podsumowania) — „Insights derived in part from Garmin device-sourced data”.</summary>
+    public const string DerivedNote = "wnioski częściowo z danych z urządzenia Garmin";
+
     /// <summary>Jedna linijka dla trenera: „Garmin: gotowość niska — krótki sen (5 h 10 min), HRV poniżej normy”.</summary>
     public static string Line(ReadinessRules.Result r, int reasons = 2) =>
         $"Garmin: gotowość {ReadinessRules.Label(r.Level)}" + (r.Reasons.Count > 0 && r.Level != ReadinessRules.Level.Good ? $" — {string.Join(", ", r.Reasons.Take(reasons))}" : "");
