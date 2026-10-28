@@ -173,6 +173,19 @@ public class GarminTests
     }
 
     [Fact]
+    public void Portal_keeps_only_supported_garmin_data_and_drops_gps_details()
+    {
+        var (payload, kinds) = PTScheduler.Portal.Services.GarminService.Filter(
+            """{"dailies":[{"userId":"u1","steps":100}],"activityDetails":[{"samples":[{"latitudeInDegree":50.29}]}],"epochs":[]}""");
+        kinds.Should().Be("dailies");
+        payload.Should().Contain("\"steps\":100").And.NotContain("latitude").And.NotContain("activityDetails");
+
+        PTScheduler.Portal.Services.GarminService.Filter("""{"activityDetails":[{"samples":[]}]}""").Payload.Should().BeNull();
+        PTScheduler.Portal.Services.GarminService.Filter("nie-json").Payload.Should().BeNull();
+        PTScheduler.Portal.Services.GarminService.Filter("""{"deregistrations":[{"userId":"u1"}]}""").Kinds.Should().Be("deregistrations");
+    }
+
+    [Fact]
     public async Task Ai_consent_is_separate_switchable_and_withdrawn_with_disconnect()
     {
         var (svc, db) = await BuildAsync();

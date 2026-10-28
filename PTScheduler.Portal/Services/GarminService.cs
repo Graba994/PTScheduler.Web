@@ -252,18 +252,33 @@ public sealed class GarminService(
         return true;
     }
 
-    public async Task EnqueueAsync(string payload)
+    /// <summary>Rodzaje danych, które przyjmujemy. Inne (np. „activityDetails” z próbkami GPS) odrzucamy od razu, zanim cokolwiek zapiszemy.</summary>
+    public static readonly string[] Accepted = ["dailies", "sleeps", "hrv", "activities", "deregistrations", "userPermissionsChange"];
+
+    /// <summary>Zostawia w paczce tylko obsługiwane rodzaje danych. Null — nic do zapisania (nieczytelna albo same nieobsługiwane).</summary>
+    public static (string? Payload, string Kinds) Filter(string payload)
     {
-        string kinds;
         try
         {
-            using var doc = JsonDocument.Parse(payload);
-            kinds = doc.RootElement.ValueKind == JsonValueKind.Object
-                ? string.Join(", ", doc.RootElement.EnumerateObject().Select(p => p.Name)) : "";
+            if (System.Text.Json.Nodes.JsonNode.Parse(payload) is not System.Text.Json.Nodes.JsonObject root) return (null, "");
+            var kept = new System.Text.Json.Nodes.JsonObject();
+            foreach (var (name, value) in root.ToList())
+                if (Accepted.Contains(name, StringComparer.Ordinal) && value is not null)
+                {
+                    root.Remove(name);
+                    kept[name] = value;
+                }
+            return kept.Count == 0 ? (null, "") : (kept.ToJsonString(), string.Join(", ", kept.Select(p => p.Key)));
         }
-        catch (JsonException) { kinds = "(nieczytelne)"; }
+        catch (JsonException) { return (null, ""); }
+    }
+
+    public async Task EnqueueAsync(string payload)
+    {
+        var (filtered, kinds) = Filter(payload);
+        if (filtered is null) return;
         await using var db = await dbFactory.CreateDbContextAsync();
-        db.GarminInbox.Add(new GarminInboxItem { Payload = payload, Kinds = kinds.Length > 200 ? kinds[..200] : kinds });
+        db.GarminInbox.Add(new GarminInboxItem { Payload = filtered, Kinds = kinds.Length > 200 ? kinds[..200] : kinds });
         await db.SaveChangesAsync();
     }
 
