@@ -13,6 +13,8 @@
 @inject IAppClock Clock
 @inject AuthenticationStateProvider AuthState
 @inject ILogger<Calendar> Logger
+@inject EntitlementService Entitlements
+@inject WearableService Wearables
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
 @using PTScheduler.Application.Exceptions
@@ -83,9 +85,11 @@
                 <div class="cal-panel-body">
 
                     <div class="d-flex align-items-center gap-3 mb-4">
+                        <GarminAvatar Connected="!_selectedSession.IsPair && _garmin.Contains(_selectedSession.ClientId)">
                         <div class="avatar-circle" style="width:52px;height:52px;font-size:1.1rem">
                             @if (_selectedSession.IsPair) { <i class="bi bi-people-fill"></i> } else { @Initials(_selectedSession.ClientName) }
                         </div>
+                        </GarminAvatar>
                         <div>
                             <div class="fw-bold fs-6">@(_isClientRole ? _selectedSession.ClientName : _selectedSession.DisplayName)</div>
                             <small class="text-muted">@_selectedSession.SessionTypeName@(_selectedSession.IsPair ? " · w parze" : "")</small>
@@ -615,6 +619,8 @@
     private HashSet<string> _activeStatuses = new(StringComparer.OrdinalIgnoreCase);
     private bool IsAllActive => _activeStatuses.Count == 0;
 
+    private HashSet<int> _garmin = [];
+
     protected override async Task OnInitializedAsync()
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
@@ -624,6 +630,8 @@
         _isTrainerRole = auth.User.IsInRole(Roles.Trainer) || auth.User.IsInRole(Roles.Subordinate);
         _isClientRole  = auth.User.IsInRole(Roles.Client);
         _canEdit = _isAdminRole || _isTrainerRole;
+        // Znaczek Garmina na awatarze klienta w szczegółach wizyty (tylko dla trenera).
+        if (_canEdit && Entitlements.IsAllowed("Wearables")) { try { _garmin = await Wearables.ConnectedClientIdsAsync(); } catch (Exception ex) { Logger.LogDebug(ex, "Garmin: brak listy połączonych."); } }
         _userRole = _isAdminRole ? Roles.Admin
                   : auth.User.IsInRole(Roles.Trainer) ? Roles.Trainer
                   : auth.User.IsInRole(Roles.Subordinate) ? Roles.Subordinate

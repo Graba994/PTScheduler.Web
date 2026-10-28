@@ -9,6 +9,7 @@
 @inject ITrainerConfigService TrainerConfigService
 @inject IAppClock Clock
 @inject EntitlementService Entitlements
+@inject WearableService Wearables
 @inject AuthenticationStateProvider AuthState
 @using Microsoft.AspNetCore.Components.Authorization
 @using PTScheduler.Application.DTOs
@@ -428,9 +429,11 @@ else
 
                     <!-- Avatar + name -->
                     <div class="d-flex align-items-center gap-3 mb-4">
+                        <GarminAvatar Connected="_garmin.Contains(_selectedSession.ClientId)">
                         <div class="avatar-circle" style="width:52px;height:52px;font-size:1.1rem">
                             @Initials(_selectedSession.ClientName)
                         </div>
+                        </GarminAvatar>
                         <div>
                             <div class="fw-bold fs-6">@(_isClientRole ? _selectedSession.ClientName : _selectedSession.DisplayName)</div>
                             <small class="text-muted">@_selectedSession.SessionTypeName</small>
@@ -736,6 +739,8 @@ else
     private DateOnly? _seriesEndDate;
     private SeriesPreviewDto? _seriesPreview;
 
+    private HashSet<int> _garmin = [];
+
     protected override async Task OnInitializedAsync()
     {
         var auth = await AuthState.GetAuthenticationStateAsync();
@@ -752,6 +757,7 @@ else
                   : auth.User.IsInRole(Roles.Subordinate) ? Roles.Subordinate
                   : _isClientRole ? Roles.Client : string.Empty;
 
+        if (_canEdit && Entitlements.IsAllowed("Wearables")) { try { _garmin = await Wearables.ConnectedClientIdsAsync(); } catch { _garmin = []; } }
         if (_canEdit)
         {
             var sessionsTrainerFilter = _isAdminRole ? null : _userId;

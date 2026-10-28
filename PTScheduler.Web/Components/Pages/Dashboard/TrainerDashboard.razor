@@ -8,6 +8,7 @@
 @inject ISessionPackageService PackageService
 @inject IClientAttentionService Attention
 @inject EntitlementService Entitlements
+@inject WearableService Wearables
 
 @if (!_loaded)
 {
@@ -158,7 +159,7 @@ else
                     var initials = string.Concat(first.ClientName.Split(' ', StringSplitOptions.RemoveEmptyEntries).Take(2).Select(p => p[0])).ToUpper();
                     <div class="px-3 py-2 @(g != awaitingGroups.Last() ? "border-bottom" : "")">
                         <div class="d-flex align-items-center gap-2 mb-1">
-                            <div class="avatar-circle flex-shrink-0" style="width:28px;height:28px;font-size:.65rem">@initials</div>
+                            <GarminAvatar Connected="_garmin.Contains(g.Key)"><div class="avatar-circle flex-shrink-0" style="width:28px;height:28px;font-size:.65rem">@initials</div></GarminAvatar>
                             <span class="fw-semibold" style="font-size:.875rem">@first.DisplayName</span>
                             @if (sessions.Count > 1)
                             {
@@ -213,7 +214,7 @@ else
                                         </div>
                                         <div class="flex-grow-1 overflow-hidden">
                                             @if (s.Id == NextTodayId) { <CountdownChip Start="s.StartTime" End="s.EndTime" /> }
-                                            <a href="@($"/clients/{s.ClientId}")" class="fw-semibold text-truncate d-block text-body text-decoration-none" style="font-size:.875rem">@s.DisplayName</a>
+                                            <a href="@($"/clients/{s.ClientId}")" class="fw-semibold text-truncate d-block text-body text-decoration-none" style="font-size:.875rem">@s.DisplayName@if (_garmin.Contains(s.ClientId)) { <GarminBadge /> }</a>
                                             <div class="text-muted text-truncate" style="font-size:.75rem">@s.SessionTypeName@(_todayDays.GetValueOrDefault(s.Id) is { } pd ? $" · {pd.DayLabel}" : "")</div>
                                         </div>
                                         @if (!string.IsNullOrEmpty(s.MeetingUrl))
@@ -402,6 +403,7 @@ else
     }
     private List<SessionDto> _upcoming = [];
     private List<SessionDto> _awaiting = [];
+    private HashSet<int> _garmin = [];
     private List<ExpiringPackageDto> _expiring = [];
     private List<ClientAttentionDto> _attention = [];
     private bool _attentionExpanded;
@@ -439,6 +441,7 @@ else
             try { _attention = await Attention.GetAsync(TrainerUserId, Entitlements.IsAllowed("TrainingPlansEnabled")); }
             catch { _attention = []; } // Lista pomocnicza — nie blokuje pulpitu.
             _pending  = await ClientService.GetPendingClientsAsync(TrainerUserId);
+            if (Entitlements.IsAllowed("Wearables")) { try { _garmin = await Wearables.ConnectedClientIdsAsync(); } catch { _garmin = []; } }
 
             // Stats
             var weekDay = (int)now.DayOfWeek;
