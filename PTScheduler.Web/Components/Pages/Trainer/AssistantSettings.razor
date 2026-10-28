@@ -5,6 +5,7 @@
 @inject PlatformAssistantService Platform
 @inject MessageDraftService Drafts
 @inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
 @rendermode PTScheduler.Web.RenderModes.Server
 
 @* „Asystent i AI” w jednym miejscu: jak asystent pisze w Twoim imieniu, co może proponować, poranny brief
@@ -76,11 +77,19 @@
                     <span class="ast-ic"><i class="bi bi-emoji-smile"></i></span>
                     <div class="min-w-0">
                         <b>Maskotka @(_name)</b>
-                        <span>Wygląd i animacje ustala zespół Hantly. U siebie możesz je przyciszyć — w dymku maskotki (prawy dolny róg).</span>
+                        <span>Wygląd i animacje ustala zespół Hantly. U siebie możesz je przyciszyć.</span>
                     </div>
                 </div>
+                <div class="ast-motion" role="radiogroup" aria-label="Ruch maskotki">
+                    <span>Ruch na tym urządzeniu:</span>
+                    @foreach (var (key, label) in MotionChoices)
+                    {
+                        var motion = key;
+                        <button type="button" role="radio" aria-checked="@(_motion == motion ? "true" : "false")" class="@(_motion == motion ? "on" : "")" @onclick="() => SetMotionAsync(motion)">@label</button>
+                    }
+                    @if (_motionSaved) { <small class="text-success"><i class="bi bi-check2"></i> zapisane</small> }
+                </div>
                 <ul class="ast-facts">
-                    <li><i class="bi bi-sliders2"></i>Ruch: „Żywy”, „Spokojny” albo „Bez ruchu”.</li>
                     <li><i class="bi bi-moon"></i>„Wycisz” — maskotka zasypia i nie otwiera dymka sama.</li>
                     <li><i class="bi bi-x-lg"></i>Pojedynczą podpowiedź zamkniesz krzyżykiem — wróci jutro albo wcale.</li>
                 </ul>
@@ -121,6 +130,28 @@
     private bool _ai;
     private PlatformAssistantService.Config? _config;
     private PTScheduler.Domain.Entities.TrainerStyle? _style;
+    private static readonly (string Key, string Label)[] MotionChoices = [("", "Żywy"), ("calm", "Spokojny"), ("off", "Bez ruchu")];
+    private string _motion = "";
+    private bool _motionSaved;
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (!firstRender) return;
+        try
+        {
+            var m = await JS.InvokeAsync<string>("ptFirstSetup.getMotion");
+            _motion = m is "calm" or "off" ? m : "";
+            StateHasChanged();
+        }
+        catch (JSException) { }
+    }
+
+    /// <summary>Ten sam zapis co w Pierwszych ustawieniach (pamięć przeglądarki) — maskotka bierze go po odświeżeniu.</summary>
+    private async Task SetMotionAsync(string key)
+    {
+        _motion = key;
+        try { await JS.InvokeVoidAsync("ptFirstSetup.setMotion", key); _motionSaved = true; } catch (JSException) { }
+    }
 
     protected override async Task OnInitializedAsync()
     {

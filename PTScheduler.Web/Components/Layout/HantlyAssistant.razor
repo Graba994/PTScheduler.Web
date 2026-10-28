@@ -44,16 +44,6 @@
                     <button type="button" class="hantly-never" @onclick="MuteKindAsync"><i class="bi bi-bell-slash me-1"></i>Nie proponuj tego</button>
                 }
                 @if (_note is not null) { <div class="hantly-note">@_note</div> }
-                @if (Live)
-                {
-                    <div class="hantly-motion" role="radiogroup" aria-label="Ruch maskotki">
-                        <span>Ruch:</span>
-                        @foreach (var (key, label) in MotionChoices)
-                        {
-                            <button type="button" role="radio" aria-checked="@(MotionPref == key ? "true" : "false")" class="@(MotionPref == key ? "on" : "")" @onclick="() => SetMotionAsync(key)">@label</button>
-                        }
-                    </div>
-                }
             </div>
         }
         <button type="button" class="hantly-btn" aria-label="@($"{_config.Name} — podpowiedzi")" aria-expanded="@(_open ? "true" : "false")" @onclick="ToggleAsync">
@@ -86,17 +76,10 @@
     }
 
     private ElementReference _fx;
-    private static readonly (string Key, string Label)[] MotionChoices = [("", "Żywy"), ("calm", "Spokojny"), ("off", "Bez ruchu")];
+    // Ruch maskotki ustawia się w „Asystent i AI” (i w Pierwszych ustawieniach) — w dymku tylko podpowiedzi.
     private string MotionPref => _prefs.Motion is "calm" or "off" ? _prefs.Motion : "";
     /// <summary>Trener może tylko przyciszyć ruch ustawiony w Portalu, nie podkręcić go.</summary>
     private string EffectiveMotion => MotionPref switch { "off" => "off", "calm" => "calm", _ => _config?.Motion ?? "normal" };
-
-    private async Task SetMotionAsync(string key)
-    {
-        _prefs.Motion = key;
-        await SavePrefsAsync();
-        if (key != "off") await TrickAsync("hop");
-    }
 
     /// <summary>Jednorazowa sztuczka maskotki (mówienie, konfetti…) — tylko gdy efekt jest włączony w Portalu.</summary>
     private async Task TrickAsync(string name, string? effect = null)
@@ -306,6 +289,9 @@
         _prefs.Dismissed = _prefs.Dismissed.Where(d => d.Value == "once" || d.Value == Today)
             .TakeLast(200).ToDictionary(d => d.Key, d => d.Value);
         _prefs.Seen = _prefs.Seen.Where(d => d.Value.StartsWith(Today + ":")).ToDictionary(d => d.Key, d => d.Value);
+        // Ruch mógł się zmienić na stronie „Asystent i AI” — zostawiamy zapisany, nie ten sprzed wczytania.
+        try { _prefs.Motion = LoadPrefs(await JS.InvokeAsync<string>("PTHantly.load")).Motion; }
+        catch (Exception ex) when (ex is JSException or JSDisconnectedException) { }
         try { await JS.InvokeVoidAsync("PTHantly.save", System.Text.Json.JsonSerializer.Serialize(_prefs)); }
         catch (Exception ex) when (ex is JSException or JSDisconnectedException) { }
     }
