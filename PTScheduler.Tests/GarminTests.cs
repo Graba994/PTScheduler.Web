@@ -172,6 +172,24 @@ public class GarminTests
         WearableService.Line(new ReadinessRules.Result(ReadinessRules.Level.Good, 90, ["Body Battery 54"], "")).Should().Be("Garmin: gotowość dobra");
     }
 
+    [Fact]
+    public async Task Ai_consent_is_separate_switchable_and_withdrawn_with_disconnect()
+    {
+        var (svc, db) = await BuildAsync();
+        (await svc.LinkAsync(7))!.AiConsentAt.Should().BeNull("bez osobnej zgody dane z zegarka nie idą do AI");
+
+        await svc.SetAiConsentAsync(7, true);
+        (await svc.LinkAsync(7))!.AiConsentAt.Should().NotBeNull();
+        await svc.SetAiConsentAsync(7, false);
+        (await svc.LinkAsync(7))!.AiConsentAt.Should().BeNull();
+
+        await svc.SetAiConsentAsync(7, true);
+        await svc.SetLinkAsync(7, false, null);
+        var link = await svc.LinkAsync(7);
+        link!.IsConnected.Should().BeFalse();
+        link.AiConsentAt.Should().BeNull("odłączenie zegarka wycofuje też zgodę na AI");
+    }
+
     private sealed class TestDbFactory(DbContextOptions<ApplicationDbContext> options) : IDbContextFactory<ApplicationDbContext>
     {
         public ApplicationDbContext CreateDbContext() => new(options);

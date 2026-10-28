@@ -26,7 +26,7 @@ public class LegalService(
     [
         new("regulamin", "Regulamin", "/regulamin", "2026-10-26", "regulamin.html"),
         new("powierzenie", "Umowa powierzenia przetwarzania danych", "/umowa-powierzenia", "2026-10-26", "umowa-powierzenia.html"),
-        new("prywatnosc", "Polityka prywatności", "/polityka-prywatnosci", "2026-10-26", "polityka-prywatnosci.html"),
+        new("prywatnosc", "Polityka prywatności", "/polityka-prywatnosci", "2026-10-28", "polityka-prywatnosci.html"),
     ];
 
     public static Doc Get(string key) => Docs.First(d => d.Key == key);

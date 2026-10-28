@@ -64,7 +64,7 @@ public sealed class WearableService(IDbContextFactory<ApplicationDbContext> dbFa
     }
 
     /// <summary>Zgoda klienta + adres logowania do Garmina (przez Portal). Po powrocie Portal potwierdzi połączenie.</summary>
-    public async Task<(string? Url, string? Error)> StartConnectAsync(int clientId, string returnUrl)
+    public async Task<(string? Url, string? Error)> StartConnectAsync(int clientId, string returnUrl, bool aiConsent = false)
     {
         try
         {
@@ -74,6 +74,7 @@ public sealed class WearableService(IDbContextFactory<ApplicationDbContext> dbFa
             var link = await db.WearableLinks.FirstOrDefaultAsync(l => l.ClientId == clientId && l.Provider == Garmin);
             if (link is null) db.WearableLinks.Add(link = new WearableLink { ClientId = clientId, Provider = Garmin });
             link.ConsentAt = DateTime.UtcNow;
+            link.AiConsentAt = aiConsent ? DateTime.UtcNow : null;
             await db.SaveChangesAsync();
             return (u.GetString(), null);
         }
@@ -82,6 +83,16 @@ public sealed class WearableService(IDbContextFactory<ApplicationDbContext> dbFa
             logger.LogWarning(ex, "Start łączenia Garmina dla klienta {ClientId} nie powiódł się.", clientId);
             return (null, "Nie udało się połączyć z platformą. Spróbuj za chwilę.");
         }
+    }
+
+    /// <summary>Zgoda na AI włączana i wycofywana przez klienta w każdej chwili — działa od razu.</summary>
+    public async Task SetAiConsentAsync(int clientId, bool on)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var link = await db.WearableLinks.FirstOrDefaultAsync(l => l.ClientId == clientId && l.Provider == Garmin);
+        if (link is null) return;
+        link.AiConsentAt = on ? DateTime.UtcNow : null;
+        await db.SaveChangesAsync();
     }
 
     /// <summary>Odłączenie (wycofanie zgody): Portal wyrejestrowuje użytkownika u Garmina; dane usuwamy, jeśli klient chce.</summary>
@@ -111,7 +122,11 @@ public sealed class WearableService(IDbContextFactory<ApplicationDbContext> dbFa
         var link = await db.WearableLinks.FirstOrDefaultAsync(l => l.ClientId == clientId && l.Provider == Garmin);
         if (link is null) db.WearableLinks.Add(link = new WearableLink { ClientId = clientId, Provider = Garmin });
         if (connected) { link.ConnectedAt = DateTime.UtcNow; link.DisconnectedAt = null; }
-        else if (link.ConnectedAt is not null) link.DisconnectedAt = DateTime.UtcNow;
+        else
+        {
+            if (link.ConnectedAt is not null) link.DisconnectedAt = DateTime.UtcNow;
+            link.AiConsentAt = null; // odłączenie wycofuje też zgodę na AI
+        }
         if (!string.IsNullOrWhiteSpace(deviceName)) link.DeviceName = deviceName.Trim();
         await db.SaveChangesAsync();
     }

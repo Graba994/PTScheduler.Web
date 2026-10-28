@@ -131,11 +131,17 @@ public class PreSessionBriefService(
         // Gotowość z zegarka (Garmin) — tylko dla wizyty dziś i tylko, gdy plan i Portal na to pozwalają.
         PTScheduler.Domain.Rules.ReadinessRules.Result? readiness = null;
         string? device = null;
+        var wearableAi = false;
         if (entitlements.IsAllowed("Wearables") && DateOnly.FromDateTime(s.StartTime) == clock.Today)
         {
             readiness = (await WearableService.ReadinessAsync(db, clock.Today, [s.ClientId])).GetValueOrDefault(s.ClientId);
             if (readiness is not null)
-                device = await db.WearableLinks.AsNoTracking().Where(l => l.ClientId == s.ClientId).Select(l => l.DeviceName).FirstOrDefaultAsync();
+            {
+                var link = await db.WearableLinks.AsNoTracking().Where(l => l.ClientId == s.ClientId)
+                    .Select(l => new { l.DeviceName, l.AiConsentAt }).FirstOrDefaultAsync();
+                device = link?.DeviceName;
+                wearableAi = link?.AiConsentAt is not null;
+            }
         }
 
         var number = done + 1;
@@ -163,7 +169,10 @@ public class PreSessionBriefService(
             facts["powody_gotowosci"] = string.Join("; ", readiness.Reasons);
         }
         var config = await assistant.GetConfigAsync();
-        var rawSummary = await assistant.PhraseAsync($"before-{s.Id}", "przed_treningiem", facts, fallback, config?.Ai == true);
+        // Dane z zegarka idą do AI tylko za osobną zgodą klienta (wymóg Garmina). Bez niej — podsumowanie z reguł, bez modelu
+        // (tekst zapasowy też trafiłby do modelu, a jest w nim linijka o gotowości).
+        var useAi = config?.Ai == true && (readiness is null || wearableAi);
+        var rawSummary = await assistant.PhraseAsync($"before-{s.Id}", "przed_treningiem", facts, fallback, useAi);
         var summary = rawSummary.Replace("[klient]", string.IsNullOrWhiteSpace(s.FirstName) ? "Klient" : s.FirstName.Trim());
 
         return new Card(s.Id, s.ClientId, s.Client.Trim(), s.Phone, s.StartTime, s.Type, number,

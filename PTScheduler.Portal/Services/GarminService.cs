@@ -271,7 +271,8 @@ public sealed class GarminService(
     public async Task<int> ProcessInboxAsync(CancellationToken ct = default)
     {
         await using var db = await dbFactory.CreateDbContextAsync(ct);
-        await db.GarminInbox.Where(i => i.ProcessedAt != null && i.ProcessedAt < DateTime.UtcNow.AddDays(-7)).ExecuteDeleteAsync(ct);
+        // Najdłużej 7 dni — także paczki, których nie udało się przekazać (polityka prywatności obiecuje ten termin).
+        await db.GarminInbox.Where(i => i.ReceivedAt < DateTime.UtcNow.AddDays(-7)).ExecuteDeleteAsync(ct);
         var items = await db.GarminInbox.Where(i => i.ProcessedAt == null && i.Attempts < 12).OrderBy(i => i.Id).Take(25).ToListAsync(ct);
         if (items.Count > 0 && !(await ConfigAsync()).On)
         {

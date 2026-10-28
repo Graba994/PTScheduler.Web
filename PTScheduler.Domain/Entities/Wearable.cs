@@ -13,6 +13,8 @@ public class WearableLink
     public string Provider { get; set; } = "garmin";
     /// <summary>Zgoda klienta (moment kliknięcia „Połącz” z zaznaczoną zgodą).</summary>
     public DateTime ConsentAt { get; set; } = DateTime.UtcNow;
+    /// <summary>Osobna, dobrowolna zgoda na analizę z pomocą AI (Garmin wymaga jej wprost). Null = bez AI — dane z zegarka nie trafiają do modelu.</summary>
+    public DateTime? AiConsentAt { get; set; }
     public DateTime? ConnectedAt { get; set; }
     public DateTime? DisconnectedAt { get; set; }
     /// <summary>Model urządzenia z ostatniej aktywności — Garmin wymaga go przy pokazywaniu danych.</summary>
