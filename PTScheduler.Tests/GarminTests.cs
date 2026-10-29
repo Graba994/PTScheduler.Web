@@ -204,6 +204,31 @@ public class GarminTests
     }
 
     [Fact]
+    public void Sleep_without_calendar_date_belongs_to_wake_up_day()
+    {
+        // 28.10 23:00 czasu lokalnego (UTC+1) + 7 h 30 min snu → 29.10.
+        var start = new DateTimeOffset(2026, 10, 28, 22, 0, 0, TimeSpan.Zero).ToUnixTimeSeconds();
+        var sleep = GarminParser.Day("sleeps", Json($$"""{"userId":"u","startTimeInSeconds":{{start}},"startTimeOffsetInSeconds":3600,"durationInSeconds":27000,"deepSleepDurationInSeconds":5400}"""))!;
+        sleep.Date.Should().Be(new DateOnly(2026, 10, 29));
+        sleep.SleepMinutes.Should().Be(450);
+        sleep.DeepSleepMinutes.Should().Be(90);
+        GarminParser.Day("hrv", Json("""{"userId":"u","calendarDate":"2026-10-29","lastNightAvg":48}"""))!.HrvLastNight.Should().Be(48);
+    }
+
+    [Fact]
+    public void Portal_diagnostics_show_field_names_only_and_pings_go_only_to_garmin()
+    {
+        var fields = PTScheduler.Portal.Services.GarminService.FieldNames(
+            """{"sleeps":[{"userId":"u","calendarDate":"2026-10-29","durationInSeconds":27000}],"dailies":[]}""");
+        fields.Should().ContainSingle().Which.Should().Be(("sleeps", "userId, calendarDate, durationInSeconds"));
+        PTScheduler.Portal.Services.GarminService.FieldNames("nie-json").Should().BeEmpty();
+
+        PTScheduler.Portal.Services.GarminService.IsPingUrl("https://apis.garmin.com/wellness-api/rest/sleeps?uploadStartTimeInSeconds=1").Should().BeTrue();
+        PTScheduler.Portal.Services.GarminService.IsPingUrl("https://apis.garmin.com.evil.pl/x").Should().BeFalse();
+        PTScheduler.Portal.Services.GarminService.IsPingUrl("http://apis.garmin.com/x").Should().BeFalse();
+    }
+
+    [Fact]
     public void Attribution_follows_garmin_brand_guidelines()
     {
         WearableService.Attribution("Forerunner 265").Should().Be("Garmin Forerunner 265");

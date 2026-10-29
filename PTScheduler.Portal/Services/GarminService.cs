@@ -413,7 +413,9 @@ public sealed class GarminService(
             item.Attempts++;
             try
             {
-                item.Error = await ForwardAsync(db, item.Payload, ct);
+                var (error, summary) = await ForwardAsync(db, item.Payload, ct);
+                item.Error = error;
+                if (summary.Length > 0) item.Kinds = summary.Length > 200 ? summary[..200] : summary;
                 if (item.Error is null) { item.ProcessedAt = DateTime.UtcNow; done++; }
             }
             catch (Exception ex) { item.Error = ex.Message.Length > 500 ? ex.Message[..500] : ex.Message; }
@@ -422,14 +424,18 @@ public sealed class GarminService(
         return done;
     }
 
-    /// <summary>Jedna paczka → studia. Null — wszystko przekazane (albo nie było komu); tekst — błąd do ponowienia.</summary>
-    private async Task<string?> ForwardAsync(PortalDbContext db, string payload, CancellationToken ct)
+    /// <summary>
+    /// Jedna paczka → studia. Błąd null — wszystko przekazane (albo nie było komu); tekst — błąd do ponowienia.
+    /// Podsumowanie: ile rekordów każdego rodzaju studio zapisało (np. „dailies: 1, sleeps: 0”) — do diagnozy w panelu.
+    /// </summary>
+    private async Task<(string? Error, string Summary)> ForwardAsync(PortalDbContext db, string payload, CancellationToken ct)
     {
         using var doc = JsonDocument.Parse(payload);
-        if (doc.RootElement.ValueKind != JsonValueKind.Object) return null;
+        if (doc.RootElement.ValueKind != JsonValueKind.Object) return (null, "");
         var conns = await db.GarminConnections.Include(c => c.Tenant).Where(c => c.DisconnectedAt == null).ToListAsync(ct);
         var byUser = conns.ToDictionary(c => c.GarminUserId);
         var errors = new List<string>();
+        var saved = new Dictionary<string, int>();
 
         foreach (var prop in doc.RootElement.EnumerateObject())
         {
@@ -450,18 +456,77 @@ public sealed class GarminService(
                 continue;
             }
             if (!ForwardKinds.Contains(prop.Name)) continue;
+            saved.TryAdd(prop.Name, 0);
             foreach (var group in prop.Value.EnumerateArray().Where(r => UserOf(r) is { } u && byUser.ContainsKey(u)).GroupBy(r => UserOf(r)!))
             {
                 var c = byUser[group.Key];
                 if (c.Tenant is null) continue;
-                var ok = await PostToTenantAsync(c.Tenant, "/internal/garmin/data",
-                    new { clientId = c.TenantClientId, kind = prop.Name, records = group.ToList() }, ct);
-                if (ok) c.LastDataAt = DateTime.UtcNow;
+                // Tryb „Ping”: Garmin przysyła tylko adres, z którego trzeba pobrać dane (tokenem użytkownika).
+                var records = await ExpandPingsAsync(c, group.ToList(), ct);
+                if (records.Count == 0) continue;
+                var count = await PostToTenantAsync(c.Tenant, "/internal/garmin/data",
+                    new { clientId = c.TenantClientId, kind = prop.Name, records }, ct);
+                if (count is int n) { c.LastDataAt = DateTime.UtcNow; saved[prop.Name] += n; }
                 else errors.Add($"{c.Tenant.Slug}: {prop.Name}");
             }
         }
         await db.SaveChangesAsync(ct);
-        return errors.Count == 0 ? null : "Studio nie przyjęło: " + string.Join(", ", errors.Distinct().Take(5));
+        var summary = string.Join(", ", saved.Select(s => $"{s.Key}: {s.Value}"));
+        return (errors.Count == 0 ? null : "Studio nie przyjęło: " + string.Join(", ", errors.Distinct().Take(5)), summary);
+    }
+
+    /// <summary>Host, z którego wolno pobierać dane po powiadomieniu „Ping” (token użytkownika nie poleci gdzie indziej).</summary>
+    public const string PingHost = "apis.garmin.com";
+
+    public static bool IsPingUrl(string? url) =>
+        Uri.TryCreate(url, UriKind.Absolute, out var u) && u.Scheme == Uri.UriSchemeHttps && u.Host.Equals(PingHost, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Rekordy z „callbackURL” zastępuje danymi pobranymi z Garmina; zwykłe rekordy zostawia bez zmian.</summary>
+    private async Task<List<JsonElement>> ExpandPingsAsync(GarminConnection c, List<JsonElement> records, CancellationToken ct)
+    {
+        var result = new List<JsonElement>();
+        string? token = null;
+        foreach (var r in records)
+        {
+            if (!r.TryGetProperty("callbackURL", out var cb) || cb.ValueKind != JsonValueKind.String) { result.Add(r); continue; }
+            var url = cb.GetString();
+            if (!IsPingUrl(url) || c.IsTest) continue;
+            token ??= await AccessTokenAsync(c);
+            if (token is null) continue;
+            try
+            {
+                using var req = new HttpRequestMessage(HttpMethod.Get, url);
+                req.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token);
+                using var resp = await TrainingHttp.SendAsync(req, ct);
+                if (!resp.IsSuccessStatusCode) { logger.LogWarning("Garmin ping {Url}: {Status}", url, (int)resp.StatusCode); continue; }
+                using var data = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+                if (data.RootElement.ValueKind == JsonValueKind.Array)
+                    result.AddRange(data.RootElement.EnumerateArray().Select(e => e.Clone()));
+            }
+            catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException)
+            {
+                logger.LogWarning(ex, "Pobranie danych Garmina po powiadomieniu nie powiodło się.");
+            }
+        }
+        return result;
+    }
+
+    /// <summary>
+    /// Nazwy pól (bez wartości) w pierwszym rekordzie każdego rodzaju — do diagnozy w panelu, gdy jakiś rodzaj danych
+    /// przychodzi, ale nic się nie zapisuje. Żadnych danych o zdrowiu, tylko nazwy kluczy.
+    /// </summary>
+    public static IReadOnlyList<(string Kind, string Fields)> FieldNames(string payload)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(payload);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object) return [];
+            return doc.RootElement.EnumerateObject()
+                .Where(p => p.Value.ValueKind == JsonValueKind.Array && p.Value.GetArrayLength() > 0 && p.Value[0].ValueKind == JsonValueKind.Object)
+                .Select(p => (p.Name, string.Join(", ", p.Value[0].EnumerateObject().Select(f => f.Name))))
+                .ToList();
+        }
+        catch (JsonException) { return []; }
     }
 
     private static string? UserOf(JsonElement r) =>
@@ -471,10 +536,11 @@ public sealed class GarminService(
     private async Task NotifyLinkAsync(Tenant tenant, int clientId, bool connected) =>
         await PostToTenantAsync(tenant, "/internal/garmin/link", new { clientId, connected }, default);
 
-    private async Task<bool> PostToTenantAsync(Tenant tenant, string path, object body, CancellationToken ct)
+    /// <summary>Zapis w aplikacji studia. Liczba zapisanych rekordów (z odpowiedzi studia) albo null, gdy studio nie przyjęło.</summary>
+    private async Task<int?> PostToTenantAsync(Tenant tenant, string path, object body, CancellationToken ct)
     {
         var secret = TenantSecrets.For(tenant, config);
-        if (string.IsNullOrEmpty(secret)) return false;
+        if (string.IsNullOrEmpty(secret)) return null;
         try
         {
             var baseUrl = await TenantEndpoint.BaseUrlAsync(config, tenant);
@@ -484,12 +550,18 @@ public sealed class GarminService(
             };
             req.Headers.Add("X-Internal-Secret", secret);
             using var resp = await Http.SendAsync(req, ct);
-            return resp.IsSuccessStatusCode;
+            if (!resp.IsSuccessStatusCode) return null;
+            try
+            {
+                using var doc = JsonDocument.Parse(await resp.Content.ReadAsStringAsync(ct));
+                return doc.RootElement.TryGetProperty("saved", out var s) && s.TryGetInt32(out var n) ? n : 0;
+            }
+            catch (JsonException) { return 0; }
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning(ex, "Przekazanie danych Garmina do {Slug} nie powiodło się.", tenant.Slug);
-            return false;
+            return null;
         }
     }
 

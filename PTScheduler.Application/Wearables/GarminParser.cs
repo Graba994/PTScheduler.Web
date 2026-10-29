@@ -25,7 +25,7 @@ public static class GarminParser
 
     public static DayPart? Day(string kind, JsonElement r)
     {
-        if (Str(r, "calendarDate") is not { } ds || !DateOnly.TryParse(ds, System.Globalization.CultureInfo.InvariantCulture, out var date)) return null;
+        if (DateOf(r) is not { } date) return null;
         return kind switch
         {
             "dailies" => new DayPart(date,
@@ -45,6 +45,18 @@ public static class GarminParser
             "hrv" => new DayPart(date, HrvLastNight: Int(r, "lastNightAvg")),
             _ => null
         };
+    }
+
+    /// <summary>
+    /// Dzień rekordu: „calendarDate”, a gdy go brak — czas lokalny końca (start + przesunięcie strefy + czas trwania),
+    /// bo noc należy do dnia, w którym się budzimy.
+    /// </summary>
+    public static DateOnly? DateOf(JsonElement r)
+    {
+        if (Str(r, "calendarDate") is { } ds && DateOnly.TryParse(ds, System.Globalization.CultureInfo.InvariantCulture, out var date)) return date;
+        if (Long(r, "startTimeInSeconds") is not long start) return null;
+        var local = start + (Long(r, "startTimeOffsetInSeconds") ?? 0) + (Long(r, "durationInSeconds") ?? 0);
+        return DateOnly.FromDateTime(DateTimeOffset.FromUnixTimeSeconds(local).UtcDateTime);
     }
 
     public static Activity? ActivityOf(JsonElement r)

@@ -143,6 +143,7 @@ else
                     <button class="btn btn-sm btn-link ms-auto" disabled="@_busy" @onclick="ProcessAsync"><i class="bi bi-arrow-repeat me-1"></i>Przekaż teraz</button>
                 </div>
                 <div class="card-body p-0">
+                    <p class="small text-muted px-3 pt-2 mb-1">Przy każdym rodzaju liczba rekordów zapisanych w aplikacji studia — np. „sleeps: 0” znaczy, że noc przyszła, ale się nie zapisała.</p>
                     @if (_inbox.Count == 0)
                     {
                         <p class="small text-muted p-3 mb-0">Garmin jeszcze nic nie przysłał.</p>
@@ -156,7 +157,19 @@ else
                                 {
                                     <tr>
                                         <td class="text-nowrap">@i.ReceivedAt.ToLocalTime().ToString("dd.MM HH:mm:ss")</td>
-                                        <td>@i.Kinds</td>
+                                        <td>
+                                            @i.Kinds
+                                            @if (GarminService.FieldNames(i.Payload) is { Count: > 0 } fields)
+                                            {
+                                                <details class="mt-1">
+                                                    <summary class="text-muted">pola (bez wartości)</summary>
+                                                    @foreach (var (kind, names) in fields)
+                                                    {
+                                                        <div class="font-monospace text-break" style="font-size:.72rem"><b>@kind:</b> @names</div>
+                                                    }
+                                                </details>
+                                            }
+                                        </td>
                                         <td>
                                             @if (i.ProcessedAt is not null) { <span class="text-success"><i class="bi bi-check2 me-1"></i>przekazane</span> }
                                             else if (i.Attempts == 0) { <span class="text-muted">w kolejce</span> }
