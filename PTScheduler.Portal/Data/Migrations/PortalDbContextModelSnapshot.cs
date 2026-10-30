@@ -3385,7 +3385,19 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<DateTime>("CreatedAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<int?>("CurrentCost")
+                        .HasColumnType("integer");
+
+                    b.Property<string>("CurrentTools")
+                        .HasColumnType("text");
+
                     b.Property<string>("DemoNotes")
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("FollowUpAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("InterestedFeatures")
                         .HasColumnType("text");
 
                     b.Property<string>("InviteCode")
@@ -3406,8 +3418,20 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<string>("Notes")
                         .HasColumnType("text");
 
+                    b.Property<string>("Objections")
+                        .HasColumnType("text");
+
+                    b.Property<string>("Outcome")
+                        .HasColumnType("text");
+
                     b.Property<string>("Pains")
                         .HasColumnType("text");
+
+                    b.Property<string>("PlanFit")
+                        .HasColumnType("text");
+
+                    b.Property<bool>("Presented")
+                        .HasColumnType("boolean");
 
                     b.Property<int?>("PriceBargain")
                         .HasColumnType("integer");
@@ -3423,6 +3447,9 @@ namespace PTScheduler.Portal.Data.Migrations
 
                     b.Property<string>("TrainerName")
                         .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("TrainerType")
                         .HasColumnType("text");
 
                     b.HasKey("Id");

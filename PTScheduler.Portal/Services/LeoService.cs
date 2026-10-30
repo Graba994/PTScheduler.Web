@@ -141,11 +141,13 @@ public class LeoService(IDbContextFactory<PortalDbContext> dbFactory, SiteSettin
                 $"{surveys} {Plural(surveys, "nowa odpowiedź", "nowe odpowiedzi", "nowych odpowiedzi")} w ankiecie w tym tygodniu. Kliknij „Wygeneruj”, a podsumuję wnioski.",
                 new() { ["liczba_odpowiedzi"] = surveys.ToString() }, "Ankieta", "/panel/ankieta"));
 
-        var recall = await db.TrainerMeetings.CountAsync(m => m.NameRecalled == null && m.CreatedAt <= dayAgo && m.CreatedAt >= weekAgo);
-        if (recall > 0)
-            tips.Add(new($"recall-{today:yyyy-MM-dd}", "spotkania", "think", 40,
-                $"Po {recall} {Plural(recall, "spotkaniu", "spotkaniach", "spotkaniach")} nie sprawdzono jeszcze, czy pamiętają nazwę. Dobry moment na krótki SMS.",
-                new() { ["liczba_spotkan"] = recall.ToString() }, "Spotkania", "/panel/spotkania"));
+        // Trenerzy, z którymi umówiony był kontakt na dziś albo wcześniej („wracamy do tematu”).
+        var followDue = DateTime.UtcNow.Date.AddDays(1);
+        var follow = await db.TrainerMeetings.CountAsync(m => m.Outcome == "followup" && m.FollowUpAt != null && m.FollowUpAt < followDue);
+        if (follow > 0)
+            tips.Add(new($"followup-{today:yyyy-MM-dd}", "spotkania", "remind", 55,
+                $"{follow} {Plural(follow, "trener czeka", "trenerów czeka", "trenerów czeka")} na umówiony kontakt po spotkaniu. Krótki telefon albo wiadomość — póki pamiętają rozmowę.",
+                new() { ["liczba_trenerow"] = follow.ToString() }, "Spotkania", "/panel/spotkania"));
 
         // Budżet AI blisko limitu.
         var s = await settings.GetAllAsync(K.AiEnabled, K.AiMonthlyBudgetUsd);

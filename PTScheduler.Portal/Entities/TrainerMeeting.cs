@@ -1,6 +1,9 @@
 namespace PTScheduler.Portal.Entities;
 
-/// <summary>Notatka ze spotkania z trenerem (Panel → Spotkania): test nazwy, jak pracuje dziś, ceny i decyzja.</summary>
+/// <summary>
+/// Notatka ze spotkania z trenerem (Panel → Spotkania): jak pracuje dziś, co zainteresowało go w prezentacji,
+/// obiekcje, wynik i następny krok. Pola testu nazwy zostają dla starszych notatek (nazwa Hantly jest już wybrana).
+/// </summary>
 public class TrainerMeeting
 {
     public int Id { get; set; }
@@ -35,4 +38,24 @@ public class TrainerMeeting
     public bool Committed { get; set; }
     public string? InviteCode { get; set; }
     public string? Notes { get; set; }
+
+    // ── Rozmowa sprzedażowa (od 2026-11) ─────────────────────────────────
+    /// <summary>Jak pracuje: trener personalny, studio, online, fizjoterapeuta…</summary>
+    public string? TrainerType { get; set; }
+    /// <summary>Czego używa dziś do zapisów i rozliczeń (nazwy narzędzi).</summary>
+    public string? CurrentTools { get; set; }
+    /// <summary>Ile dziś płaci miesięcznie za narzędzia (zł).</summary>
+    public int? CurrentCost { get; set; }
+    /// <summary>Co zainteresowało go w prezentacji (klucze slajdów po przecinku).</summary>
+    public string? InterestedFeatures { get; set; }
+    /// <summary>Obiekcje, które padły (klucze po przecinku).</summary>
+    public string? Objections { get; set; }
+    /// <summary>Który plan pasuje (id planu).</summary>
+    public string? PlanFit { get; set; }
+    /// <summary>Wynik: start (zaczyna), followup (wracamy do tematu), no (nie teraz).</summary>
+    public string? Outcome { get; set; }
+    /// <summary>Kiedy się odezwać (dla „wracamy do tematu”).</summary>
+    public DateTime? FollowUpAt { get; set; }
+    /// <summary>Czy pokazano prezentację aplikacji.</summary>
+    public bool Presented { get; set; }
 }

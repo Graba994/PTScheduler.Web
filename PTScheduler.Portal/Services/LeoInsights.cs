@@ -94,15 +94,21 @@ public partial class LeoInsights(IDbContextFactory<PortalDbContext> dbFactory, A
         if (all.Count == 0) return await SaveAsync(Meetings, Empty("Brak notatek ze spotkań — dodaj pierwsze w zakładce „Nowe spotkanie”."));
 
         var n = all.Count;
-        var committed = all.Count(m => m.Committed);
-        var checkedRecall = all.Where(m => m.NameRecalled is not null).ToList();
-        var recalled = checkedRecall.Count(m => m.NameRecalled == true);
-        var picks = all.Where(m => !string.IsNullOrWhiteSpace(m.NamePick)).GroupBy(m => m.NamePick!.Trim())
+        var started = all.Count(m => m.Outcome == "start" || m.Committed);
+        var followups = all.Count(m => m.Outcome == "followup");
+        var declined = all.Count(m => m.Outcome == "no");
+        static IEnumerable<string> Csv(string? s) => (s ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        var objections = all.SelectMany(m => Csv(m.Objections)).GroupBy(k => MeetingPlaybook.ObjectionLabel(k) ?? k)
             .OrderByDescending(g => g.Count()).ToDictionary(g => g.Key, g => $"{Pct(g.Count(), n)}% ({g.Count()} z {n})");
-        var booking = all.SelectMany(m => (m.BookingToday ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        var interests = all.SelectMany(m => Csv(m.InterestedFeatures)).GroupBy(k => MeetingPlaybook.SlideTitle(k) ?? k)
+            .OrderByDescending(g => g.Count()).ToDictionary(g => g.Key, g => $"{Pct(g.Count(), n)}% ({g.Count()} z {n})");
+        var booking = all.SelectMany(m => Csv(m.BookingToday))
             .GroupBy(b => b).OrderByDescending(g => g.Count()).ToDictionary(g => g.Key, g => $"{Pct(g.Count(), n)}% ({g.Count()} z {n})");
+        var planFit = all.Where(m => !string.IsNullOrWhiteSpace(m.PlanFit)).GroupBy(m => m.PlanFit!)
+            .OrderByDescending(g => g.Count()).ToDictionary(g => g.Key, g => g.Count());
         var clients = all.Where(m => m.Clients is not null).Select(m => m.Clients!.Value).ToList();
         var noShows = all.Where(m => m.NoShowsPerMonth is not null).Select(m => m.NoShowsPerMonth!.Value).ToList();
+        var costs = all.Where(m => m.CurrentCost is > 0).Select(m => m.CurrentCost!.Value).ToList();
         var prices = new Dictionary<string, string>();
         foreach (var (label, values) in new[]
         {
@@ -118,31 +124,36 @@ public partial class LeoInsights(IDbContextFactory<PortalDbContext> dbFactory, A
         var data = new
         {
             liczba_spotkan = n,
-            zgoda_na_start = $"{Pct(committed, n)}% ({committed})",
-            test_pamieci_nazwy = checkedRecall.Count > 0 ? $"pamięta {Pct(recalled, checkedRecall.Count)}% ({recalled} z {checkedRecall.Count} sprawdzonych)" : "jeszcze nie sprawdzano",
-            wybrana_nazwa = picks,
+            startuje = $"{Pct(started, n)}% ({started})",
+            wracamy_do_tematu = followups,
+            nie_teraz = declined,
+            obiekcje = objections,
+            co_interesuje = interests,
             jak_zapisuja_dzis = booking,
+            pasujacy_plan = planFit,
             klienci_mediana = clients.Count > 0 ? Median(clients).ToString() : "brak danych",
             nieobecnosci_miesiecznie_mediana = noShows.Count > 0 ? Median(noShows).ToString() : "brak danych",
+            placa_dzis_mediana_zl = costs.Count > 0 ? Median(costs).ToString() : "brak danych",
             ceny_zl_miesiecznie = prices,
             bolaczki = all.Where(m => !string.IsNullOrWhiteSpace(m.Pains)).Select(m => Scrub(m.Pains!, 300)).Take(30).ToList(),
-            obserwacje_z_demo = all.Where(m => !string.IsNullOrWhiteSpace(m.DemoNotes)).Select(m => Scrub(m.DemoNotes!, 300)).Take(30).ToList(),
+            reakcje_na_prezentacje = all.Where(m => !string.IsNullOrWhiteSpace(m.DemoNotes)).Select(m => Scrub(m.DemoNotes!, 300)).Take(30).ToList(),
             notatki = all.Where(m => !string.IsNullOrWhiteSpace(m.Notes)).Select(m => Scrub(m.Notes!, 300)).Take(20).ToList(),
         };
 
         var lines = new List<string>();
         if (n < 8) lines.Add($"- Na razie {n} {Plural(n, "spotkanie", "spotkania", "spotkań")} — za mało na pewne wnioski, ale kierunek już widać.");
-        lines.Add($"- Zgoda na start z kodem: {Pct(committed, n)}% ({committed} z {n}).");
-        if (checkedRecall.Count > 0) lines.Add($"- Nazwę następnego dnia pamięta {Pct(recalled, checkedRecall.Count)}% sprawdzonych ({recalled} z {checkedRecall.Count}).");
-        if (picks.Count > 0) lines.Add($"- Najczęściej wybierana nazwa: „{picks.First().Key}” — {picks.First().Value}.");
+        lines.Add($"- Startuje {Pct(started, n)}% ({started} z {n}), do kontaktu {followups}, nie teraz {declined}.");
+        if (objections.Count > 0) lines.Add($"- Najczęstsza obiekcja: „{objections.First().Key}” — {objections.First().Value}.");
+        if (interests.Count > 0) lines.Add($"- Najbardziej interesuje: {string.Join(", ", interests.Take(3).Select(i => i.Key))}.");
         if (booking.Count > 0) lines.Add($"- Dziś zapisują głównie przez: {string.Join(", ", booking.Take(2).Select(b => $"{b.Key} — {b.Value}"))}.");
         if (prices.Count > 0) lines.Add($"- Ceny miesięcznie: {string.Join("; ", prices.Select(p => $"{p.Key} — {p.Value}"))}.");
         lines.Add("Co zrobić:");
-        if (checkedRecall.Count < n) lines.Add($"- Sprawdź pamięć nazwy u {n - checkedRecall.Count} {Plural(n - checkedRecall.Count, "osoby", "osób", "osób")} (SMS następnego dnia).");
-        lines.Add("- Ustaw cenę planu między medianą „okazja” a „drogo, ale rozważy”.");
+        if (followups > 0) lines.Add($"- Odezwij się do {followups} {Plural(followups, "trenera", "trenerów", "trenerów")} z listy „Do kontaktu”.");
+        if (objections.Count > 0) lines.Add($"- Przećwicz odpowiedź na „{objections.First().Key}” w fiszkach przed kolejnym spotkaniem.");
+        if (interests.Count > 0) lines.Add($"- Zaczynaj prezentację od „{interests.First().Key}” — to najbardziej przekonuje.");
 
         return await SaveAsync(Meetings, await assistant.AnalyzeAsync("spotkania",
-            "Podsumuj notatki ze spotkań z trenerami personalnymi: test nazwy (zapamiętanie, wybór), jak dziś zapisują klientów, bolączki, obserwacje z demo kreatora i odpowiedzi o cenę (pytania Van Westendorpa). Wskaż, co poprawić w produkcie i w rozmowie oraz jaka cena wygląda rozsądnie.",
+            "Podsumuj notatki ze spotkań sprzedażowych z trenerami personalnymi (aplikacja Hantly): jak dziś pracują i zapisują klientów, bolączki (cytaty), co zainteresowało ich w prezentacji, jakie obiekcje padały, który plan pasuje, wyniki rozmów (startuje / wracamy do tematu / nie teraz) i opcjonalne odpowiedzi o cenę. Wskaż, co poprawić w rozmowie i w produkcie oraz od czego zaczynać prezentację.",
             data, string.Join('\n', lines)));
     }
 

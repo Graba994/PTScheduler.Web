@@ -296,6 +296,18 @@
         live(root); scenes(root); videos(root); story(root); tabs(root); reveal(root); laterLink(root); snap(root);
     }
 
+    // Dla stron interaktywnych (np. prezentacja w Panelu): ponowne uruchomienie scen po renderze Blazora,
+    // pełny ekran i ustawienie fokusu dla skrótów klawiszowych.
+    window.PTLanding = {
+        init: init,
+        full: function () {
+            var d = document.documentElement;
+            if (!document.fullscreenElement) { if (d.requestFullscreen) d.requestFullscreen(); }
+            else if (document.exitFullscreen) document.exitFullscreen();
+        },
+        focus: function (el) { if (el && el.focus) el.focus({ preventScroll: true }); }
+    };
+
     document.addEventListener('DOMContentLoaded', function () {
         init();
         if (window.Blazor && Blazor.addEventListener) Blazor.addEventListener('enhancedload', init);
