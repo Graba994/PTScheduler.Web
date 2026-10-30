@@ -26,7 +26,7 @@ public class HomeSalesTests
     {
         var (lead, points) = HomeShared.Highlights(Pro, Start);
         lead.Should().Be("Wszystko z planu Start, a także:");
-        points.Should().Contain("Płatności online, pakiety i karnety").And.Contain("Nielimitowani klienci")
+        points.Should().Contain("Płatności online").And.Contain("Nielimitowani klienci")
             .And.NotContain("Przypomnienia e-mail");
         HomeShared.Highlights(Start, null).Points.Should().HaveCountLessThanOrEqualTo(5);
     }

@@ -604,9 +604,7 @@
                     <p class="lp-price-desc">@plan.Description</p>
                     <div class="lp-price-amount">@plan.MonthlyPrice.ToString("0") <small>@(plan.MonthlyPrice == 0 ? "zł" : "zł / mies.")</small></div>
                     <div class="lp-price-period">
-                        @if (plan.MonthlyPrice == 0) { @($"{plan.TrialDays} dni za darmo") }
-                        else if (plan.YearlyPrice is > 0) { @($"lub {plan.YearlyPrice:0} zł rocznie") @(plan.TrialDays > 0 ? $" · {plan.TrialDays} dni za darmo" : "") }
-                        else if (plan.TrialDays > 0) { @($"{plan.TrialDays} dni za darmo na start") }
+                        @HomeShared.PricePeriod(plan, _plans.FirstOrDefault(p => p.Id == _trialPlanId && p.MonthlyPrice > 0))
                     </div>
                     <ul>
                         @foreach (var (label, included) in PlanFeatures(plan))
@@ -854,6 +852,7 @@
             SiteSettingsService.Keys.DemoEnabled, SiteSettingsService.Keys.GarminEnabled);
         _garmin = _settings.GetValueOrDefault(SiteSettingsService.Keys.GarminEnabled) == "true";
         _sms = await Settings.PlatformSmsOnAsync();
+        _trialPlanId = await Settings.GetAsync(SiteSettingsService.Keys.TrialPlanId);
 
         _trainers = await FeaturedTrainers.LoadAsync(Settings);
 
@@ -871,5 +870,6 @@
         _settings.TryGetValue(key, out var val) && !string.IsNullOrWhiteSpace(val) ? val : fallback;
 
     private bool _garmin, _sms;
+    private string _trialPlanId = "";
     private IEnumerable<(string Label, bool Included)> PlanFeatures(Plan p) => HomeShared.PlanFeatures(p, _garmin, _sms);
 }

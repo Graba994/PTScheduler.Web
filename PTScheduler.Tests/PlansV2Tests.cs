@@ -63,7 +63,7 @@ public class PlansV2Tests
         var start = new Plan { Id = "start", Name = "Start", MaxClients = 3 };
         var pro = new Plan { Id = "pro", Name = "Pro", MaxClients = 75, AiAssistant = true };
         var now = new DateTime(2026, 11, 2, 12, 0, 0, DateTimeKind.Utc);
-        var tenant = new Tenant { PlanId = "start", TrialPlanId = "pro", TrialEndsAt = now.AddDays(10) };
+        var tenant = new Tenant { PlanId = "start", TrialPlanId = "pro", TrialPlanEndsAt = now.AddDays(10) };
 
         PlanFeatureCatalog.Effective(tenant, start, pro, now).MaxClients.Should().Be(75);
         PlanFeatureCatalog.Effective(tenant, start, pro, now.AddDays(11)).MaxClients.Should().Be(3);
@@ -109,7 +109,7 @@ public class PlansV2Tests
         int trialId, oldId;
         await using (var ctx = await db.CreateDbContextAsync())
         {
-            var trial = new Tenant { Slug = "nowe", CompanyName = "Nowe", PlanId = "start", TrialPlanId = "pro", TrialEndsAt = DateTime.UtcNow.AddDays(14) };
+            var trial = new Tenant { Slug = "nowe", CompanyName = "Nowe", PlanId = "start", TrialPlanId = "pro", TrialPlanEndsAt = DateTime.UtcNow.AddDays(14) };
             var old = new Tenant { Slug = "stare", CompanyName = "Stare", PlanId = "start", FeatureFloor = """{"SalesTools":true,"MaxClients":15}""" };
             ctx.Tenants.AddRange(trial, old);
             await ctx.SaveChangesAsync();
@@ -148,6 +148,71 @@ public class PlansV2Tests
         plans["start"].MonthlyPrice.Should().Be(0);
         plans["starter"].AiAssistant.Should().BeFalse("AI w Solo tylko jako zajawka");
         plans.Values.Where(p => p.MonthlyPrice > 0).Should().OnlyContain(p => p.YearlyPrice == p.MonthlyPrice * 10, "rocznie 2 miesiące gratis");
+    }
+
+    [Fact]
+    public async Task Try_for_14_days_once_picks_cheapest_plan_with_the_feature_and_keeps_billing()
+    {
+        var (tenants, db) = await BuildAsync();
+        int id;
+        await using (var ctx = await db.CreateDbContextAsync())
+        {
+            var solo = new Tenant { Slug = "solo", CompanyName = "Solo", PlanId = "starter", TrialEndsAt = null, BillingStatus = "active" };
+            ctx.Tenants.Add(solo);
+            await ctx.SaveChangesAsync();
+            id = solo.Id;
+        }
+        var starter = await (await db.CreateDbContextAsync()).Plans.AsNoTracking().FirstAsync(p => p.Id == "starter");
+        JsonDocument.Parse(await tenants.EntitlementsJsonAsync(id, starter)).RootElement.GetProperty("upgradeTrialAvailable").GetBoolean().Should().BeTrue();
+
+        var r = await tenants.StartUpgradeTrialAsync(id, "WhiteLabel");
+        r.Ok.Should().BeTrue(r.Error);
+        r.PlanName.Should().Be("Business", "white-label jest dopiero w Business");
+
+        await using (var ctx = await db.CreateDbContextAsync())
+        {
+            var t = await ctx.Tenants.FirstAsync(x => x.Id == id);
+            t.TrialPlanId.Should().Be("studio");
+            t.TrialPlanEndsAt.Should().BeCloseTo(DateTime.UtcNow.AddDays(14), TimeSpan.FromMinutes(1));
+            t.TrialEndsAt.Should().BeNull("okres próbny planu nie wstrzymuje rachunków za Solo");
+        }
+        var e = JsonDocument.Parse(await tenants.EntitlementsJsonAsync(id, starter)).RootElement;
+        e.GetProperty("whiteLabel").GetBoolean().Should().BeTrue();
+        e.GetProperty("upgradeTrialAvailable").GetBoolean().Should().BeFalse();
+        (await tenants.StartUpgradeTrialAsync(id, "Automations")).Ok.Should().BeFalse("tylko raz na studio");
+    }
+
+    [Fact]
+    public void Pricing_and_upgrade_page_come_from_the_catalog()
+    {
+        using var ctx = new PortalDbContext(new DbContextOptionsBuilder<PortalDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);
+        ctx.Database.EnsureCreated();
+        var plans = ctx.Plans.AsNoTracking().OrderBy(p => p.SortOrder).ToList();
+        var pro = plans.First(p => p.Id == "pro");
+        var labels = PTScheduler.Portal.Components.Home.HomeShared.PlanFeatures(pro, garmin: true, sms: true).Where(f => f.Included).Select(f => f.Label).ToList();
+        labels.Should().Contain(["Do 75 klientów", "Asystent AI (300 akcji/mies.)", "Zegarki klientów (Garmin)", "Karnety i vouchery"]);
+        PTScheduler.Portal.Components.Home.HomeShared.PlanFeatures(pro).Select(f => f.Label).Should().NotContain("Zegarki klientów (Garmin)", "Garmin wyłączony na platformie");
+        var (lead, points) = PTScheduler.Portal.Components.Home.HomeShared.Highlights(pro, plans.First(p => p.Id == "starter"), 20, true, true);
+        lead.Should().Contain("Solo");
+        points.Should().NotContain("Plany treningowe i trening na żywo", "jest już w Solo");
+
+        // Strona „Ulepsz plan” w studiu: cennik i zyski z tego samego katalogu.
+        var feed = new PlanCatalog.Feed(
+            plans.Where(p => p.IsActive).Select(p => new PlanCatalog.FeedPlan(p.Id, p.Name, p.Description, p.MonthlyPrice, p.YearlyPrice, p.IsFeatured, p.TrialDays,
+                PlanFeatureCatalog.All.ToDictionary(f => f.Key, f => JsonSerializer.SerializeToElement(PlanFeatureCatalog.Get(p, f.Key))))).ToList(),
+            PlanFeatureCatalog.All.Select(f => new PlanCatalog.FeedFeature(f.Key, f.Name, f.Benefit, f.Icon, f.Kind.ToString(), f.Pitch)).ToList());
+        PlanCatalog.Apply(feed);
+        try
+        {
+            var solo = new Entitlements { Id = "starter", Name = "Solo", MonthlyPrice = 59, MaxClients = 20, PaymentsEnabled = true, TrainingPlansEnabled = true,
+                SalesTools = false, Automations = false, AiAssistant = false, WhiteLabel = false, Wearables = false, CoursesEnabled = false };
+            PlanCatalog.HigherThan(solo).Select(p => p.Name).Should().Equal("Pro", "Business");
+            var gains = PlanCatalog.GainsFor(PlanCatalog.Plans.First(p => p.Id == "pro"), solo).Select(b => b.Title).ToList();
+            gains.Should().Contain(["Do 75 klientów", "Asystent AI", "Karnety i vouchery", "Automatyzacje i retencja"]);
+            gains.Should().NotContain("Płatności online", "Solo już je ma");
+            PlanCatalog.Plans.First(p => p.Id == "pro").Price.Should().Be(119);
+        }
+        finally { PlanCatalog.Reset(); }
     }
 
     private static async Task<(TenantService Tenants, IDbContextFactory<PortalDbContext> Db)> BuildAsync()

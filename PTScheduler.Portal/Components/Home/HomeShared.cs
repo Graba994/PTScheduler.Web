@@ -1,3 +1,4 @@
+using PTScheduler.Portal.Services;
 using PTScheduler.Portal.Entities;
 
 namespace PTScheduler.Portal.Components.Home;
@@ -38,37 +39,36 @@ public static class HomeShared
     ];
 
     public const string GarminLabel = "Zegarki klientów (Garmin)";
-    public const string SmsPushLabel = "SMS-y i powiadomienia push";
-    public const string PushLabel = "Powiadomienia push";
-
     /// <summary>
-    /// Lista cech planu z jego flag — to samo, co trener dostaje w aplikacji. Garmin tylko, gdy włączony w Portalu;
-    /// SMS-y tylko, gdy platforma ma bramkę SMS (inaczej same powiadomienia push).
+    /// Lista cech planu z katalogu funkcji (<see cref="PlanFeatureCatalog"/>) — to samo, co trener dostaje w aplikacji
+    /// i co ustawiasz w macierzy planów. Garmin tylko, gdy włączony w Portalu; SMS-y tylko z bramką SMS.
     /// </summary>
     public static IEnumerable<(string Label, bool Included)> PlanFeatures(Plan p, bool garmin = false, bool sms = false)
     {
         yield return (p.MaxClients >= 9999 ? "Nielimitowani klienci" : $"Do {p.MaxClients} klientów", true);
         yield return ("Grafik, rezerwacje online, czat", true);
-        yield return ("Przypomnienia e-mail", p.EmailReminders);
-        yield return sms ? (SmsPushLabel, p.SmsReminders || p.PushNotifications) : (PushLabel, p.PushNotifications);
-        yield return ("Płatności online, pakiety i karnety", p.PaymentsEnabled);
-        yield return ("Plany treningowe i postępy klientów", p.TrainingPlansEnabled);
-        yield return ("Pomiary i zdjęcia sylwetki", p.BodyMeasurements);
-        yield return (p.CoursesEnabled && p.MaxCourses is > 0 and < 9999 ? $"{p.MaxCourses} kursów wideo" : "Kursy wideo", p.CoursesEnabled);
-        yield return ("Kupony rabatowe", p.Coupons);
-        yield return ("Program poleceń", p.ReferralProgram);
-        yield return ("Raporty finansowe", p.FinancialReports);
-        yield return ("Kalendarz Google i Meet", p.IntegrationGoogleMeet);
-        if (garmin) yield return (GarminLabel, p.Wearables);
-        yield return (p.BrandingTier switch
-        {
-            "premium" => "Pełny branding + własna domena",
-            "full" => "Własne logo, kolory i domena",
-            "basic" => "Własne logo i kolory",
-            _ => "Twoja marka (logo, kolory)"
-        }, p.BrandingTier != "preview");
-        if (p.MaxTrainers > 1) yield return ($"{p.MaxTrainers} trenerów w zespole", true);
+        foreach (var f in PlanFeatureCatalog.All.Where(f => f.Pitch && Available(f.Key, garmin, sms)).OrderBy(f => PlanFeatureCatalog.PitchRank(f.Key)))
+            yield return (Label(p, f), PlanFeatureCatalog.Has(p, f) && (f.Key != "MaxTrainers" || p.MaxTrainers > 1));
     }
+
+    /// <summary>Podpis pod ceną: darmowy plan z okresem próbnym wyższego planu, roczna cena, dni próbne.</summary>
+    public static string PricePeriod(Plan plan, Plan? trialPlan) =>
+        plan.MonthlyPrice == 0 ? (trialPlan is { TrialDays: > 0 } tp ? $"na start {tp.TrialDays} dni planu {tp.Name} za darmo" : "za darmo, bez limitu czasu")
+        : plan.YearlyPrice is > 0 ? $"lub {plan.YearlyPrice:0} zł rocznie" + (plan.TrialDays > 0 ? $" · {plan.TrialDays} dni za darmo" : "")
+        : plan.TrialDays > 0 ? $"{plan.TrialDays} dni za darmo na start" : "";
+
+    /// <summary>Funkcja istnieje na platformie (Garmin włączony, bramka SMS podłączona).</summary>
+    public static bool Available(string key, bool garmin, bool sms) =>
+        (garmin || key != "Wearables") && (sms || key is not ("SmsReminders" or "MaxSmsPerMonth"));
+
+    /// <summary>Nazwa z katalogu, a przy funkcjach z limitem — z liczbą z planu (np. „Przypomnienia SMS (150/mies.)”).</summary>
+    private static string Label(Plan p, PlanFeature f) => f.Key switch
+    {
+        "SmsReminders" when p.SmsReminders && p.MaxSmsPerMonth is > 0 and < 9999 => $"{f.Name} ({p.MaxSmsPerMonth}/mies.)",
+        "AiAssistant" when p.AiAssistant && p.MaxAiActionsPerMonth is > 0 and < 99999 => $"{f.Name} ({p.MaxAiActionsPerMonth} akcji/mies.)",
+        "MaxTrainers" => p.MaxTrainers >= 9999 ? "Bez limitu trenerów w zespole" : $"Do {p.MaxTrainers} trenerów w zespole",
+        _ => f.Name
+    };
 
     /// <summary>Plany na pierwszy rzut oka: darmowy (najtańszy), wyróżniony i najwyższy — reszta w porównaniu.</summary>
     public static List<Plan> MainPlans(IReadOnlyList<Plan> plans)
@@ -103,27 +103,20 @@ public static class HomeShared
         return ($"Wszystko z planu {lower.Name}, a także:", extra);
     }
 
-    public sealed record CompareRow(string Label, Func<Plan, string> Value);
+    /// <param name="Key">Pole katalogu — do ukrycia funkcji niedostępnych na platformie (Garmin, SMS).</param>
+    public sealed record CompareRow(string Label, Func<Plan, string> Value, string? Key = null);
 
-    /// <summary>Tabela „Porównaj wszystkie plany”: ✓ / — albo wartość (liczba klientów, trenerów, kursów).</summary>
+    /// <summary>Tabela „Porównaj wszystkie plany” z katalogu funkcji: ✓ / — albo wartość (klienci, trenerzy, limity).</summary>
     public static readonly CompareRow[] CompareRows =
     [
         new("Klienci", p => p.MaxClients >= 9999 ? "bez limitu" : $"do {p.MaxClients}"),
-        new("Trenerzy w zespole", p => p.MaxTrainers >= 9999 ? "bez limitu" : p.MaxTrainers > 1 ? p.MaxTrainers.ToString() : "—"),
         new("Grafik, rezerwacje online, czat", _ => "✓"),
-        new("Przypomnienia e-mail", p => Mark(p.EmailReminders)),
-        new(SmsPushLabel, p => Mark(p.SmsReminders || p.PushNotifications)),
-        new(PushLabel, p => Mark(p.PushNotifications)),
-        new("Płatności online, pakiety i karnety", p => Mark(p.PaymentsEnabled)),
-        new("Plany treningowe i postępy", p => Mark(p.TrainingPlansEnabled)),
-        new("Pomiary i zdjęcia sylwetki", p => Mark(p.BodyMeasurements)),
-        new("Kursy wideo", p => !p.CoursesEnabled ? "—" : p.MaxCourses is > 0 and < 9999 ? p.MaxCourses.ToString()! : "✓"),
-        new("Kupony i program poleceń", p => Mark(p.Coupons || p.ReferralProgram)),
-        new("Raporty finansowe", p => Mark(p.FinancialReports)),
-        new("Kalendarz Google i Meet", p => Mark(p.IntegrationGoogleMeet)),
-        new(GarminLabel, p => Mark(p.Wearables)),
-        new("Własna domena", p => Mark(p.BrandingTier is "full" or "premium")),
+        .. PlanFeatureCatalog.All.Where(f => f.Pitch || f.Key is "MaxSmsPerMonth" or "MaxAiActionsPerMonth" or "MaxVideoStorageGB")
+            .Select(f => new CompareRow(f.Name, p =>
+                (f.Key == "MaxTrainers" && p.MaxTrainers <= 1) || (f.Key == "MaxVideoStorageGB" && p.VideoProvider != "bunny") ? "—" : Short(PlanFeatureCatalog.Describe(p, f)), f.Key)),
     ];
 
-    private static string Mark(bool on) => on ? "✓" : "—";
+    private static string Short(string v) => v.Replace(" akcji/mies.", "").Replace(" SMS/mies.", "").Replace(" trenerów", "");
+
+
 }

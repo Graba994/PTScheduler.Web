@@ -563,16 +563,17 @@ public class TenantService(
         await using var db = dbFactory.CreateDbContext();
         var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Id == tenantId);
         var plans = await db.Plans.AsNoTracking().ToListAsync();
-        var trial = tenant?.TrialPlanId is { } tid && tenant.TrialEndsAt > DateTime.UtcNow ? plans.FirstOrDefault(p => p.Id == tid) : null;
+        var trial = tenant?.TrialPlanId is { } tid && tenant.TrialPlanEndsAt > DateTime.UtcNow ? plans.FirstOrDefault(p => p.Id == tid) : null;
         // Studio dostaje plan z okresu próbnego (np. Pro na start) i nigdy mniej niż miało przed zmianą pakietów.
         var effective = tenant is null ? plan : PlanFeatureCatalog.Effective(tenant, plan, trial, DateTime.UtcNow);
         var json = SerializeEntitlements(effective, await AddonService.ExtraLimitsAsync(db, tenantId), await GarminOnAsync(), await settings.PlatformSmsOnAsync());
         var node = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsObject();
         node["upgradePlans"] = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(PlanFeatureCatalog.UpgradePlans(plans)));
         node["hiddenWhenLocked"] = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(await HiddenFeaturesAsync()));
+        node["upgradeTrialAvailable"] = tenant is not null && UpgradeTrialTarget(tenant, plan, plans, null) is not null;
         if (trial is not null)
         {
-            node["trialEndsAt"] = tenant!.TrialEndsAt;
+            node["trialEndsAt"] = tenant!.TrialPlanEndsAt;
             node["basePlanName"] = plan.Name;
         }
         // Studio widzi swoją cenę (zablokowaną przy zakupie), a nie aktualny cennik.
@@ -582,6 +583,43 @@ public class TenantService(
             node["yearlyPrice"] = PlanPricing.Yearly(tenant, plan);
         }
         return node.ToJsonString();
+    }
+
+    /// <summary>
+    /// Plan do jednorazowego „Wypróbuj 14 dni”: najtańszy aktywny płatny plan wyżej niż obecny, który ma daną funkcję
+    /// (bez funkcji — wyróżniony plan). Null, gdy próba wykorzystana, trwa inny okres próbny albo nie ma wyższego planu.
+    /// </summary>
+    public static Plan? UpgradeTrialTarget(Tenant tenant, Plan current, IReadOnlyCollection<Plan> plans, string? feature)
+    {
+        if (tenant.UpgradeTrialUsedAt is not null || tenant.TrialPlanEndsAt > DateTime.UtcNow) return null;
+        var higher = plans.Where(p => p.IsActive && p.MonthlyPrice > 0 && p.SortOrder > current.SortOrder).OrderBy(p => p.MonthlyPrice).ThenBy(p => p.SortOrder).ToList();
+        if (PlanFeatureCatalog.Find(feature ?? "") is { } f)
+            return higher.FirstOrDefault(p => PlanFeatureCatalog.Has(p, f));
+        return higher.FirstOrDefault(p => p.IsFeatured) ?? higher.FirstOrDefault();
+    }
+
+    public sealed record UpgradeTrialResult(bool Ok, string? Error, string? PlanName, DateTime? Until);
+
+    /// <summary>Jednorazowy okres próbny wyższego planu (z zablokowanej funkcji w aplikacji). Rachunki za obecny plan idą bez zmian.</summary>
+    public async Task<UpgradeTrialResult> StartUpgradeTrialAsync(int tenantId, string? feature)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var tenant = await db.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId);
+        if (tenant is null) return new(false, "Nie ma takiego studia.", null, null);
+        var plans = await db.Plans.AsNoTracking().ToListAsync();
+        var current = plans.FirstOrDefault(p => p.Id == tenant.PlanId);
+        if (current is null) return new(false, "Nie znamy planu studia.", null, null);
+        if (tenant.UpgradeTrialUsedAt is not null) return new(false, "Okres próbny wyższego planu był już wykorzystany.", null, null);
+        if (UpgradeTrialTarget(tenant, current, plans, feature) is not { } target) return new(false, "Nie ma wyższego planu do wypróbowania.", null, null);
+
+        var days = target.TrialDays > 0 ? target.TrialDays : 14;
+        tenant.TrialPlanId = target.Id;
+        tenant.TrialPlanEndsAt = DateTime.UtcNow.AddDays(days);
+        tenant.UpgradeTrialUsedAt = DateTime.UtcNow;
+        db.TenantEvents.Add(new TenantEvent { TenantId = tenant.Id, EventType = TenantEventTypes.PlanChanged, Detail = $"Okres próbny {target.Name} ({days} dni){(feature is null ? "" : $" — z funkcji {feature}")}" });
+        await db.SaveChangesAsync();
+        await PushEntitlementsAsync(tenant.Id);
+        return new(true, null, target.Name, tenant.TrialPlanEndsAt);
     }
 
     /// <summary>Funkcje, których studio bez nich nie widzi wcale (zamiast zajawki) — ustawiane w panelu planów.</summary>

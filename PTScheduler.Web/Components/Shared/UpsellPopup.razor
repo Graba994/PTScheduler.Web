@@ -1,6 +1,6 @@
-@* Okienko, gdy coś się kończy (SMS-y, miejsce na wideo, limit klientów). Pokazuje się raz dziennie
-   (gdy już się skończyło) albo raz na kilka dni (gdy niedługo się skończy) — zamknięcie zapamiętuje
-   przeglądarka (js/upsell.js). *@
+@* Okienko, gdy coś się kończy (SMS-y, miejsce na wideo, limit klientów: od 80% i przy 100%). Najwyżej raz
+   w tygodniu dla danej sprawy — zamknięcie zapamiętuje przeglądarka (js/upsell.js). Nigdy podczas treningu
+   na żywo i nigdy u klientów trenera. *@
 @using PTScheduler.Domain.Constants
 @using PTScheduler.Web.Services
 @inject UpsellService Upsell
@@ -37,12 +37,15 @@
         if (AccountSwitchService.IsSwitched(user)) return;
         var path = Nav.ToBaseRelativePath(Nav.Uri);
         if (path.StartsWith("admin/sklep", StringComparison.OrdinalIgnoreCase) || path.StartsWith("admin/upgrade", StringComparison.OrdinalIgnoreCase)) return;
+        // Trening na żywo i karta przed wizytą — trener pracuje z klientem, okienka by tylko przeszkadzały.
+        var page = path.Split('?', '#')[0].TrimEnd('/');
+        if (page.Equals("train", StringComparison.OrdinalIgnoreCase) || page.StartsWith("trainer/before", StringComparison.OrdinalIgnoreCase)) return;
 
         if (PublicDemo.IsOn) return; // gość demo nie kupuje planu — okienko tylko by przeszkadzało
         try { _notice = (await Upsell.GetAsync()).FirstOrDefault(n => n.IsUrgent); } catch { }
         if (_notice is null) return;
-        // Klucz zmienia się co dzień (skończyło się) albo co 3 dni (kończy się) — wtedy okienko wraca.
-        var day = DateTime.UtcNow.DayOfYear;
-        _key = $"{_notice.Key}-{DateTime.UtcNow.Year}-{(_notice.Level == "critical" ? day : day / 3)}";
+        // Klucz zmienia się co tydzień — zamknięte okienko wraca najwcześniej w kolejnym tygodniu.
+        var now = DateTime.UtcNow;
+        _key = $"{_notice.Key}-{System.Globalization.ISOWeek.GetYear(now)}-w{System.Globalization.ISOWeek.GetWeekOfYear(now)}";
     }
 }

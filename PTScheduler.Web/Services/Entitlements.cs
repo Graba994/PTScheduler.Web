@@ -89,6 +89,8 @@ public class Entitlements
     /// <summary>Okres próbny wyższego planu (np. Pro na start) — do kiedy i jaki plan zostaje potem.</summary>
     public DateTime? TrialEndsAt { get; set; }
     public string? BasePlanName { get; set; }
+    /// <summary>Studio może raz wypróbować wyższy plan przez 14 dni (przycisk na zablokowanym ekranie).</summary>
+    public bool UpgradeTrialAvailable { get; set; }
 
     // ── Zegarki klientów ─────────────────────────────────
     // Garmin u klientów: plan ma „Zegarki klientów” i Garmin jest włączony globalnie w Portalu.

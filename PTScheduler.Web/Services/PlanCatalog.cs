@@ -3,10 +3,54 @@ namespace PTScheduler.Web.Services;
 /// <summary>
 /// Plany platformy (od najniższego) i to, co każdy z nich daje — językiem korzyści dla trenera.
 /// Jedno źródło dla strony „Ulepsz plan”, przycisku „Ulepsz” w menu i podpowiedzi o wyższym planie:
-/// kto ma najwyższy plan, nie dostaje propozycji ulepszenia.
+/// kto ma najwyższy plan, nie dostaje propozycji ulepszenia. Cennik i funkcje przychodzą z Portalu
+/// (<see cref="PlanCatalogSyncService"/>) — lista poniżej to zapas, gdy Portal jest niedostępny.
 /// </summary>
 public static class PlanCatalog
 {
+    // ── Cennik z Portalu ─────────────────────────────────
+    public sealed record FeedFeature(string Key, string Name, string Benefit, string Icon, string Kind, bool Pitch);
+    public sealed record FeedPlan(string Id, string Name, string? Description, decimal MonthlyPrice, decimal? YearlyPrice, bool IsFeatured,
+        int TrialDays, Dictionary<string, System.Text.Json.JsonElement> Features);
+    public sealed record Feed(List<FeedPlan> Plans, List<FeedFeature> Features);
+
+    private static IReadOnlyList<Plan>? _fromPortal;
+
+    /// <summary>Plany z Portalu (null — jeszcze nie pobrane albo Portal niedostępny).</summary>
+    public static bool FromPortal => _fromPortal is not null;
+
+    /// <summary>Wróć do listy zapasowej (testy, odłączony Portal).</summary>
+    public static void Reset() => _fromPortal = null;
+
+    public static void Apply(Feed? feed)
+    {
+        if (feed is null || feed.Plans.Count == 0) return;
+        var pitched = feed.Features.Where(f => f.Pitch).ToList();
+        _fromPortal = feed.Plans.Select(p => new Plan(p.Id, p.Name, p.MonthlyPrice, p.Description ?? "",
+            Int(p.Features.GetValueOrDefault("MaxClients")) is var c && c > 0 ? c : 0,
+            pitched.Where(f => Offers(p, f)).Select(f => ((Func<Entitlements, bool>)(e => Lacks(e, f.Key, p.Features[f.Key])), new Benefit(f.Icon, f.Name, f.Benefit))).ToList()))
+            .ToList();
+    }
+
+    private static int Int(System.Text.Json.JsonElement v) =>
+        v.ValueKind == System.Text.Json.JsonValueKind.Number && v.TryGetInt64(out var n) ? (int)Math.Clamp(n, 0, int.MaxValue) : 0;
+
+    private static bool Offers(FeedPlan p, FeedFeature f) =>
+        p.Features.TryGetValue(f.Key, out var v) && (v.ValueKind == System.Text.Json.JsonValueKind.True || Int(v) > (f.Key == "MaxTrainers" ? 1 : 0));
+
+    /// <summary>Studio nie ma tej funkcji (albo ma mniejszy limit) — wtedy to zysk z wyższego planu.</summary>
+    private static bool Lacks(Entitlements e, string key, System.Text.Json.JsonElement planValue)
+    {
+        var prop = typeof(Entitlements).GetProperty(key);
+        if (prop is null) return false;
+        return prop.GetValue(e) switch
+        {
+            bool b => !b && planValue.ValueKind == System.Text.Json.JsonValueKind.True,
+            int n => n < Int(planValue),
+            _ => false
+        };
+    }
+
     public sealed record Benefit(string Icon, string Title, string Text);
 
     public sealed record Plan(string Id, string Name, decimal Price, string Tagline, int MaxClients,
@@ -50,8 +94,10 @@ public static class PlanCatalog
         G(e => !e.PrioritySupport, "bi-headset", "Priorytetowe wsparcie", "Pomagamy w pierwszej kolejności — z rozmową wdrożeniową."),
     ];
 
-    // Ceny i limity dla nowych klientów (cennik 2026-11); obecni mają swoją cenę zablokowaną w Portalu.
-    public static readonly IReadOnlyList<Plan> Plans =
+    public static IReadOnlyList<Plan> Plans => _fromPortal ?? Fallback;
+
+    // Zapas: ceny i limity dla nowych klientów (cennik 2026-11); obecni mają swoją cenę zablokowaną w Portalu.
+    private static readonly IReadOnlyList<Plan> Fallback =
     [
         new("start", "Start", 0, "Na spokojny początek", 3, []),
         new("starter", "Solo", 59, "Trener, który przyjmuje klientów online", 20, StarterGains),

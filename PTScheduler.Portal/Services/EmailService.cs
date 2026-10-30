@@ -185,7 +185,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         """;
 
     /// <summary>Okres próbny wyższego planu (np. Pro na start) kończy się — potem studio zostaje na darmowym planie.</summary>
-    public string PlanTrialEndingEmailBody(string trainerName, int daysLeft, string trialPlan, string basePlan, int baseClients, string domain) =>
+    public string PlanTrialEndingEmailBody(string trainerName, int daysLeft, string trialPlan, string basePlan, int baseClients, bool baseFree, string domain) =>
         $"""
         <!DOCTYPE html>
         <html>
@@ -193,8 +193,8 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             <!--hantly-logo-->
             <h1 style="color: #7c3aed; font-size: 1.4rem;">Za {daysLeft} dni kończy się okres próbny {WebUtility.HtmlEncode(trialPlan)}</h1>
             <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
-            <p>aplikacja zostaje z Tobą — po okresie próbnym przejdzie na darmowy plan <strong>{WebUtility.HtmlEncode(basePlan)}</strong>
-               ({(baseClients > 0 && baseClients < int.MaxValue ? $"do {baseClients} klientów" : "podstawowe funkcje")}). Dane, klienci i grafik zostają na miejscu.</p>
+            <p>aplikacja zostaje z Tobą — po okresie próbnym wróci na {(baseFree ? "darmowy " : "Twój ")}plan <strong>{WebUtility.HtmlEncode(basePlan)}</strong>
+               ({(baseClients > 0 && baseClients < int.MaxValue ? $"do {baseClients} klientów" : "bez limitu klientów")}). Dane, klienci i grafik zostają na miejscu.</p>
             <p>Chcesz zachować wszystko, z czego korzystasz teraz? Wybierz plan w aplikacji: <strong>Zarządzanie → Plan</strong>.</p>
             <p style="text-align: center; margin: 28px 0;">
                 <a href="https://{domain}/admin/upgrade" style="background: #7c3aed; color: white; padding: 12px 26px; border-radius: 8px; text-decoration: none; font-weight: 600;">Wybierz plan</a>
@@ -205,7 +205,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         </html>
         """;
 
-    public string PlanTrialEndedEmailBody(string trainerName, string trialPlan, string basePlan, string domain) =>
+    public string PlanTrialEndedEmailBody(string trainerName, string trialPlan, string basePlan, bool baseFree, string domain) =>
         $"""
         <!DOCTYPE html>
         <html>
@@ -213,7 +213,7 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
             <!--hantly-logo-->
             <h1 style="color: #7c3aed; font-size: 1.4rem;">Okres próbny {WebUtility.HtmlEncode(trialPlan)} się skończył</h1>
             <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
-            <p>Twoja aplikacja działa dalej na darmowym planie <strong>{WebUtility.HtmlEncode(basePlan)}</strong>. Dane, klienci i grafik zostały na miejscu.</p>
+            <p>Twoja aplikacja działa dalej na {(baseFree ? "darmowym " : "swoim ")}planie <strong>{WebUtility.HtmlEncode(basePlan)}</strong>. Dane, klienci i grafik zostały na miejscu.</p>
             <p>Funkcje z planu {WebUtility.HtmlEncode(trialPlan)} odblokujesz w każdej chwili: <strong>Zarządzanie → Plan</strong>.</p>
             <p style="text-align: center; margin: 28px 0;">
                 <a href="https://{domain}/admin/upgrade" style="background: #7c3aed; color: white; padding: 12px 26px; border-radius: 8px; text-decoration: none; font-weight: 600;">Zobacz plany</a>

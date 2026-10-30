@@ -44,45 +44,13 @@
                         </div>
 
                         <ul class="pricing-features">
-                            <li>
-                                <i class="bi bi-check-lg text-success"></i>
-                                Max @(plan.MaxClients == int.MaxValue ? "bez limitu" : plan.MaxClients.ToString()) klientów
-                            </li>
-                            <li>
-                                <i class="bi bi-check-lg text-success"></i>
-                                Grafik i rezerwacje
-                            </li>
-                            <li>
-                                <i class="bi bi-check-lg text-success"></i>
-                                Pakiety treningowe
-                            </li>
-                            <li>
-                                <i class="bi bi-check-lg text-success"></i>
-                                Własny branding
-                            </li>
-                            <li class="@(plan.PaymentsEnabled ? "" : "disabled")">
-                                <i class="bi @(plan.PaymentsEnabled ? "bi-check-lg text-success" : "bi-x-lg text-muted")"></i>
-                                Płatności online
-                            </li>
-                            <li class="@(plan.CoursesEnabled ? "" : "disabled")">
-                                <i class="bi @(plan.CoursesEnabled ? "bi-check-lg text-success" : "bi-x-lg text-muted")"></i>
-                                Kursy i mentoring
-                            </li>
-                            <li class="@(plan.TrainingPlansEnabled ? "" : "disabled")">
-                                <i class="bi @(plan.TrainingPlansEnabled ? "bi-check-lg text-success" : "bi-x-lg text-muted")"></i>
-                                Plany treningowe
-                            </li>
-                            @if (_sms)
+                            @foreach (var (label, included) in HomeShared.PlanFeatures(plan, _garmin, _sms))
                             {
-                                <li class="@(plan.SmsReminders ? "" : "disabled")">
-                                    <i class="bi @(plan.SmsReminders ? "bi-check-lg text-success" : "bi-x-lg text-muted")"></i>
-                                    Przypomnienia SMS
+                                <li class="@(included ? "" : "disabled")">
+                                    <i class="bi @(included ? "bi-check-lg text-success" : "bi-x-lg text-muted")"></i>
+                                    @label
                                 </li>
                             }
-                            <li class="@(plan.AuditLog ? "" : "disabled")">
-                                <i class="bi @(plan.AuditLog ? "bi-check-lg text-success" : "bi-x-lg text-muted")"></i>
-                                Audit log i RBAC
-                            </li>
                         </ul>
 
                         <a href="/register?plan=@plan.Id" class="btn @(plan.IsFeatured ? "btn-primary" : "btn-outline-primary") w-100">
@@ -187,7 +155,8 @@
             .OrderBy(p => p.SortOrder)
             .ToListAsync();
         _sms = await Settings.PlatformSmsOnAsync();
+        _garmin = await Settings.GetAsync(SiteSettingsService.Keys.GarminEnabled) == "true";
     }
 
-    private bool _sms;
+    private bool _sms, _garmin;
 }

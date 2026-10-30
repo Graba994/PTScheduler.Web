@@ -14,7 +14,14 @@ public enum PlanFeatureKind { Flag, Limit, Choice }
 /// <param name="Unit">Jednostka limitu (np. „klientów”).</param>
 /// <param name="Options">Wartości wyboru od najsłabszej (np. branding).</param>
 public sealed record PlanFeature(string Key, string Group, string Name, string Benefit, PlanFeatureKind Kind = PlanFeatureKind.Flag,
-    string? Unit = null, string[]? Options = null);
+    string? Unit = null, string[]? Options = null)
+{
+    /// <summary>Ikona Bootstrap Icons (albo pt-ico-*) — w cenniku i na stronie „Ulepsz plan”.</summary>
+    public string Icon => PlanFeatureCatalog.Icons.GetValueOrDefault(Key, "bi-check2-circle");
+
+    /// <summary>Warto pokazać w cenniku i zajawkach (techniczne drobiazgi jak bramki płatności czy 2FA — nie).</summary>
+    public bool Pitch => !PlanFeatureCatalog.NotPitched.Contains(Key);
+}
 
 /// <summary>
 /// Katalog funkcji — jedno źródło dla panelu planów (macierz), cennika i uprawnień studiów. Nowa funkcja w aplikacji
@@ -83,6 +90,42 @@ public static class PlanFeatureCatalog
 
         new("MaxStorageGB", "Miejsce na dane", "Miejsce na pliki", "Zdjęcia, dokumenty i załączniki.", PlanFeatureKind.Limit, "GB"),
     ];
+
+    public static readonly Dictionary<string, string> Icons = new()
+    {
+        ["MaxClients"] = "bi-people-fill", ["MaxSessionsPerMonth"] = "bi-calendar-check", ["RecurringSessions"] = "bi-repeat",
+        ["IntegrationGoogleMeet"] = "bi-camera-video", ["BodyMeasurements"] = "bi-rulers", ["Surveys"] = "bi-clipboard2-pulse",
+        ["Documents"] = "bi-file-earmark-check", ["TrainingPlansEnabled"] = "bi-clipboard-pulse", ["Wearables"] = "pt-ico-watch",
+        ["CoursesEnabled"] = "bi-mortarboard", ["MaxCourses"] = "bi-mortarboard", ["VideoProvider"] = "bi-play-btn",
+        ["MaxVideoStorageGB"] = "bi-camera-reels", ["MaxVideoBandwidthGBPerMonth"] = "bi-broadcast", ["PaymentsEnabled"] = "bi-credit-card",
+        ["IntegrationPayU"] = "bi-credit-card-2-front", ["IntegrationPrzelewy24"] = "bi-credit-card-2-front", ["SalesTools"] = "bi-arrow-repeat",
+        ["Coupons"] = "bi-tag", ["ReferralProgram"] = "bi-gift", ["EmailReminders"] = "bi-envelope", ["PushNotifications"] = "bi-bell",
+        ["SmsReminders"] = "bi-chat-dots", ["MaxSmsPerMonth"] = "bi-chat-dots", ["Automations"] = "bi-magic",
+        ["CustomEmailTemplates"] = "bi-envelope-heart", ["AiAssistant"] = "bi-stars", ["MaxAiActionsPerMonth"] = "bi-stars",
+        ["BrandingTier"] = "bi-palette", ["CustomLogo"] = "bi-palette", ["CustomFavicon"] = "bi-app", ["CustomDomain"] = "bi-globe2",
+        ["WhiteLabel"] = "bi-patch-check", ["BasicAnalytics"] = "bi-bar-chart", ["AdvancedAnalytics"] = "bi-bar-chart-line",
+        ["FinancialReports"] = "bi-graph-up-arrow", ["ClientReports"] = "bi-file-earmark-pdf", ["DataExport"] = "bi-download",
+        ["MaxTrainers"] = "bi-person-plus", ["MaxSubordinates"] = "bi-person-badge", ["RoleBasedAccess"] = "bi-people",
+        ["AuditLog"] = "bi-journal-text", ["TwoFactorAuth"] = "bi-shield-lock", ["PrioritySupport"] = "bi-headset", ["MaxStorageGB"] = "bi-hdd",
+    };
+
+    /// <summary>Funkcje, których nie wyliczamy w cenniku i zajawkach — są wszędzie, techniczne albo opisane innym wierszem.</summary>
+    public static readonly HashSet<string> NotPitched =
+    [
+        "MaxSessionsPerMonth", "TwoFactorAuth", "BasicAnalytics", "EmailReminders", "CustomFavicon", "IntegrationPayU", "IntegrationPrzelewy24",
+        "VideoProvider", "BrandingTier", "MaxVideoBandwidthGBPerMonth", "MaxStorageGB", "MaxSubordinates", "MaxCourses", "MaxAiActionsPerMonth",
+        "MaxSmsPerMonth", "MaxVideoStorageGB", "MaxClients",
+    ];
+
+    /// <summary>Kolejność w cenniku i zajawkach — najpierw to, co najbardziej przekonuje; reszta w kolejności katalogu.</summary>
+    public static readonly string[] PitchOrder =
+    [
+        "AiAssistant", "Wearables", "TrainingPlansEnabled", "PaymentsEnabled", "SalesTools", "Automations", "SmsReminders",
+        "MaxTrainers", "WhiteLabel", "CoursesEnabled", "PushNotifications", "IntegrationGoogleMeet", "CustomLogo", "CustomDomain",
+        "AdvancedAnalytics", "FinancialReports", "Coupons", "ReferralProgram", "RoleBasedAccess", "PrioritySupport",
+    ];
+
+    public static int PitchRank(string key) => Array.IndexOf(PitchOrder, key) is var i and >= 0 ? i : PitchOrder.Length + Array.FindIndex(All, f => f.Key == key);
 
     public static PlanFeature? Find(string key) => All.FirstOrDefault(f => f.Key == key);
 
@@ -153,7 +196,7 @@ public static class PlanFeatureCatalog
     /// <summary>Plan, z którego studio korzysta teraz: okres próbny wyższego planu, a do tego podłoga z poprzednich pakietów.</summary>
     public static Plan Effective(Tenant tenant, Plan plan, Plan? trialPlan, DateTime utcNow)
     {
-        var basePlan = trialPlan is not null && tenant.TrialEndsAt > utcNow ? trialPlan : plan;
+        var basePlan = trialPlan is not null && tenant.TrialPlanEndsAt > utcNow ? trialPlan : plan;
         return ApplyFloor(basePlan, tenant.FeatureFloor);
     }
 
@@ -161,7 +204,7 @@ public static class PlanFeatureCatalog
     {
         var plan = tenant.Plan ?? await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == tenant.PlanId);
         if (plan is null) return null;
-        var trial = tenant.TrialPlanId is { } tid && tenant.TrialEndsAt > DateTime.UtcNow
+        var trial = tenant.TrialPlanId is { } tid && tenant.TrialPlanEndsAt > DateTime.UtcNow
             ? await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == tid) : null;
         return Effective(tenant, plan, trial, DateTime.UtcNow);
     }

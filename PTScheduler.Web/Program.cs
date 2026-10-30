@@ -172,6 +172,9 @@ builder.Services.AddScoped<PTScheduler.Web.Services.ToastService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.ClientNav>();
 builder.Services.AddSingleton<PTScheduler.Web.Services.EntitlementService>();
 builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformInfoService>();
+builder.Services.AddSingleton<PTScheduler.Web.Services.PlanCatalogSyncService>();
+builder.Services.AddScoped<PTScheduler.Web.Services.PlanTrialService>();
+builder.Services.AddHostedService(sp => sp.GetRequiredService<PTScheduler.Web.Services.PlanCatalogSyncService>());
 builder.Services.AddSingleton<PTScheduler.Web.Services.PlatformHelpService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.WearableService>();
 builder.Services.AddScoped<PTScheduler.Web.Services.ExerciseMediaService>();
@@ -887,13 +890,15 @@ app.MapGet("/account/welcome",
 // restarting the container. Protected by a shared secret env var
 // TENANT_INTERNAL_SECRET — the portal sends it in the X-Internal-Secret header.
 app.MapPost("/internal/entitlements/reload",
-    async (HttpContext ctx, PTScheduler.Web.Services.EntitlementService svc) =>
+    async (HttpContext ctx, PTScheduler.Web.Services.EntitlementService svc, PTScheduler.Web.Services.PlanCatalogSyncService catalog) =>
 {
     if (!InternalSecretMatches(ctx)) return Results.NotFound();
 
     using var reader = new StreamReader(ctx.Request.Body);
     var json = await reader.ReadToEndAsync();
     svc.ReplaceFromJson(json);
+    // Zmiana w panelu planów — cennik („Ulepsz plan”, kłódki) odświeżamy od razu, nie za 30 minut.
+    _ = catalog.RefreshAsync();
     return Results.Ok(new { plan = svc.Current.Name });
 });
 

@@ -2680,10 +2680,16 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<DateTime?>("TrialEndsAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("TrialPlanEndsAt")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<string>("TrialPlanId")
                         .HasColumnType("text");
 
                     b.Property<DateTime?>("UnhealthySinceUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("UpgradeTrialUsedAt")
                         .HasColumnType("timestamp with time zone");
 
                     b.Property<string>("WebContainerName")

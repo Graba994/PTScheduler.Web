@@ -10,6 +10,7 @@
 @inject ITrainerAvailabilityService AvailabilityService
 @inject ITrainerConfigService TrainerConfigService
 @inject IAppClock Clock
+@inject EntitlementService Entitlements
 @inject IAuditLogService AuditLogService
 @inject NavigationManager Nav
 @using PTScheduler.Application.DTOs
@@ -836,6 +837,16 @@ else
         bookingError = string.Empty;
         try
         {
+            // Limity planu studia (np. po okresie próbnym zostało więcej klientów niż w planie) — klient dostaje
+            // spokojną informację, trener widzi szczegóły u siebie.
+            var (_, clientsCur, clientsMax) = await Entitlements.CheckClientLimitAsync();
+            var (sessionsOk, _, _) = await Entitlements.CheckMonthlySessionsAsync();
+            if (clientsCur > clientsMax || !sessionsOk)
+            {
+                bookingError = "Rezerwacja online jest chwilowo niedostępna — napisz do trenera, a umówicie termin.";
+                return;
+            }
+
             // Final free-slot check
             var free = await AvailabilityService.IsSlotFreeAsync(
                 client.TrainerUserId, selectedSlot.Start, selectedType.DurationMinutes);

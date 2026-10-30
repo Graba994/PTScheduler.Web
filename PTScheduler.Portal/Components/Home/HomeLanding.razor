@@ -460,7 +460,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var row in HomeShared.CompareRows.Where(r => (_garmin || r.Label != HomeShared.GarminLabel) && r.Label != (_sms ? HomeShared.PushLabel : HomeShared.SmsPushLabel)))
+                            @foreach (var row in HomeShared.CompareRows.Where(r => r.Key is null || HomeShared.Available(r.Key, _garmin, _sms)))
                             {
                                 <tr>
                                     <th scope="row">@row.Label</th>
@@ -536,6 +536,8 @@
     private Dictionary<string, string> _settings = new();
     /// <summary>Garmin włączony globalnie w Portalu — wtedy sekcja o zegarkach i pozycja w cenniku.</summary>
     private bool _garmin, _sms;
+    private string _trialPlanId = "";
+    private Plan? _trialPlan => _plans.FirstOrDefault(p => p.Id == _trialPlanId && p.MonthlyPrice > 0);
     private string GarminPlans => string.Join(", ", _plans.Where(p => p.Wearables).Select(p => p.Name));
     private List<Plan> _plans = [];
     private List<AppFeedback> _reviews = [];
@@ -638,10 +640,7 @@
         }
     }
 
-    private static string PricePeriod(Plan plan) =>
-        plan.MonthlyPrice == 0 ? $"{plan.TrialDays} dni za darmo"
-        : plan.YearlyPrice is > 0 ? $"lub {plan.YearlyPrice:0} zł rocznie" + (plan.TrialDays > 0 ? $" · {plan.TrialDays} dni za darmo" : "")
-        : plan.TrialDays > 0 ? $"{plan.TrialDays} dni za darmo na start" : "";
+    private string PricePeriod(Plan plan) => HomeShared.PricePeriod(plan, _trialPlan);
 
     private static string Initials(string author) =>
         string.Concat(author.Split(' ', StringSplitOptions.RemoveEmptyEntries).Where(w => char.IsLetter(w[0])).Take(2).Select(w => char.ToUpperInvariant(w[0])));
@@ -663,6 +662,7 @@
             SiteSettingsService.Keys.CtaButton, SiteSettingsService.Keys.DemoEnabled, SiteSettingsService.Keys.GarminEnabled);
         _garmin = _settings.GetValueOrDefault(SiteSettingsService.Keys.GarminEnabled) == "true";
         _sms = await Settings.PlatformSmsOnAsync();
+        _trialPlanId = await Settings.GetAsync(SiteSettingsService.Keys.TrialPlanId);
 
         await using var db = DbFactory.CreateDbContext();
         _reviews = await db.AppFeedbacks.AsNoTracking()

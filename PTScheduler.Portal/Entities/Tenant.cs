@@ -132,8 +132,15 @@ public class Tenant
     /// </summary>
     public decimal? LockedMonthlyPrice { get; set; }
     public decimal? LockedYearlyPrice { get; set; }
-    /// <summary>Plan na czas okresu próbnego (np. „pro” dla nowych kont na darmowym Starcie) — do <see cref="TrialEndsAt"/>.</summary>
+    /// <summary>Plan na czas okresu próbnego (np. „pro” dla nowych kont na darmowym Starcie) — do <see cref="TrialPlanEndsAt"/>.</summary>
     public string? TrialPlanId { get; set; }
+    /// <summary>
+    /// Koniec okresu próbnego planu — osobno od <see cref="TrialEndsAt"/> (okres próbny rozliczeń), żeby próba wyższego
+    /// planu nie wstrzymywała rachunków za obecny plan.
+    /// </summary>
+    public DateTime? TrialPlanEndsAt { get; set; }
+    /// <summary>Jednorazowe „Wypróbuj 14 dni” z zablokowanej funkcji — kiedy wykorzystane.</summary>
+    public DateTime? UpgradeTrialUsedAt { get; set; }
     /// <summary>
     /// „Podłoga” uprawnień (JSON z polami planu): studio nigdy nie dostaje mniej niż tu — tak obecni klienci
     /// zachowują to, co mieli przed zmianą pakietów. Można tu też dać studiu coś ponad plan.

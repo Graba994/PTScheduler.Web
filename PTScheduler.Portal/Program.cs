@@ -1101,6 +1101,58 @@ app.MapPost("/api/internal/tenants/{slug}/billing/portal", async (
 
 // Polecenia i stopka „Zrobione w …” w aplikacji trenera: link polecający, statystyki i czy stopka
 // jest obowiązkowa w planie (plany z podstawowym brandingiem — wyłączyć można od wyższego planu).
+// „Wypróbuj 14 dni” z zablokowanej funkcji w aplikacji trenera — jednorazowo, bez wpływu na rachunki.
+app.MapPost("/api/internal/tenants/{slug}/plan-trial", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config,
+    TenantService tenants) =>
+{
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    string? feature = null;
+    try
+    {
+        var body = await System.Text.Json.JsonDocument.ParseAsync(ctx.Request.Body);
+        if (body.RootElement.TryGetProperty("feature", out var f) && f.ValueKind == System.Text.Json.JsonValueKind.String) feature = f.GetString();
+    }
+    catch (System.Text.Json.JsonException) { }
+    var r = await tenants.StartUpgradeTrialAsync(tenant.Id, feature);
+    return Results.Json(new { ok = r.Ok, error = r.Error, plan = r.PlanName, until = r.Until });
+});
+
+// Cennik dla aplikacji studia („Ulepsz plan”, kłódki, zajawki): aktywne plany z funkcjami z katalogu.
+// Funkcje niedostępne na całej platformie (SMS bez bramki, Garmin wyłączony) nie trafiają do zajawek.
+app.MapGet("/api/internal/tenants/{slug}/plans", async (
+    string slug,
+    HttpContext ctx,
+    IDbContextFactory<PortalDbContext> dbFactory,
+    IConfiguration config,
+    TenantService tenants) =>
+{
+    await using var db = dbFactory.CreateDbContext();
+    var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
+    if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
+    var smsOn = await tenants.SmsOnAsync();
+    var garminOn = await tenants.GarminOnAsync();
+    var features = PlanFeatureCatalog.All
+        .Where(f => (smsOn || f.Key is not ("SmsReminders" or "MaxSmsPerMonth")) && (garminOn || f.Key != "Wearables"))
+        .ToList();
+    var plans = await db.Plans.AsNoTracking().Where(p => p.IsActive).OrderBy(p => p.SortOrder).ToListAsync();
+    return Results.Json(new
+    {
+        plans = plans.Select(p => new
+        {
+            id = p.Id, name = p.Name, description = p.Description, monthlyPrice = p.MonthlyPrice, yearlyPrice = p.YearlyPrice,
+            isFeatured = p.IsFeatured, trialDays = p.TrialDays,
+            features = features.ToDictionary(f => f.Key, f => PlanFeatureCatalog.Get(p, f.Key))
+        }),
+        features = features.Select(f => new { key = f.Key, name = f.Name, benefit = f.Benefit, icon = f.Icon, kind = f.Kind.ToString(), pitch = f.Pitch })
+    });
+});
+
 app.MapGet("/api/internal/tenants/{slug}/growth", async (
     string slug,
     HttpContext ctx,

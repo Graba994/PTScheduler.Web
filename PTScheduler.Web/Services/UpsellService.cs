@@ -109,8 +109,13 @@ public sealed class UpsellService(
         {
             if (!canUpgrade || plan.MaxClients == int.MaxValue || plan.MaxClients <= 0) return;
             await using var db = dbFactory.CreateDbContext();
-            var active = await db.Clients.CountAsync(c => c.Status == ClientStatus.Active);
-            if (active >= plan.MaxClients)
+            // Tak samo jak limit przy dodawaniu klienta: liczą się wszyscy poza nieaktywnymi.
+            var active = await db.Clients.CountAsync(c => c.Status != ClientStatus.Inactive);
+            if (active > plan.MaxClients)
+                list.Add(new("clients-over", "critical", "bi-people-fill", $"Klientów jest więcej niż w planie ({active}/{plan.MaxClients})",
+                    $"Plan {plan.Name} obejmuje {plan.MaxClients} klientów. Nowe wizyty i rezerwacje online wrócą po wyborze wyższego planu albo oznaczeniu nieaktywnych klientów.",
+                    "Zobacz plany", UpgradeHref));
+            else if (active >= plan.MaxClients)
                 list.Add(new("clients-full", "critical", "bi-people-fill", $"Limit klientów wykorzystany ({active}/{plan.MaxClients})",
                     "Nowi klienci nie zapiszą się, dopóki nie zwiększysz limitu w wyższym planie.",
                     "Zobacz plany", UpgradeHref));

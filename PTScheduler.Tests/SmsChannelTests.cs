@@ -106,7 +106,7 @@ public class SmsChannelTests
         on.GetProperty("maxSmsPerMonth").GetInt32().Should().Be(150);
         PTScheduler.Web.Services.Entitlements.Unlimited().SmsAvailable.Should().BeTrue("instancja samodzielna z własnym kontem SMSAPI");
 
-        HomeShared.PlanFeatures(pro, sms: false).Select(x => x.Label).Should().Contain(HomeShared.PushLabel).And.NotContain(HomeShared.SmsPushLabel);
-        HomeShared.PlanFeatures(pro, sms: true).Select(x => x.Label).Should().Contain(HomeShared.SmsPushLabel);
+        HomeShared.PlanFeatures(pro, sms: false).Select(x => x.Label).Should().Contain("Powiadomienia na telefonie").And.NotContain(l => l.Contains("SMS"));
+        HomeShared.PlanFeatures(pro, sms: true).Select(x => x.Label).Should().Contain("Przypomnienia SMS (150/mies.)");
     }
 }

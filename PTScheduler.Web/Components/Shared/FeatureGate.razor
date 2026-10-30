@@ -1,56 +1,88 @@
 @inject EntitlementService Entitlements
+@inject AuthenticationStateProvider AuthState
+@inject PlanTrialService Trials
+@inject NavigationManager Nav
+@using Microsoft.AspNetCore.Components.Authorization
+@using PTScheduler.Domain.Constants
 
+@* Funkcja spoza planu: właściciel widzi spokojną zajawkę (rozmyty podgląd, trzy korzyści, „Zobacz pakiety”
+   i jednorazowe „Wypróbuj 14 dni”), zespół — informację bez przycisków, klient — tylko że funkcji nie ma.
+   Bez krzykliwych banerów: jeden ekran, raz, tam gdzie trener sam kliknął. *@
 @if (_allowed)
 {
     @ChildContent
 }
-else if (ShowLock)
+else if (ShowLock && _role is not null)
 {
-    <div class="feature-gate-lock">
-        <div class="feature-gate-badge">
-            <i class="bi bi-lock-fill"></i>
-            <span>@Plan</span>
-        </div>
-        <div class="feature-gate-body">
-            <div class="feature-gate-title">@(Title ?? "Ta funkcja jest niedostępna")</div>
-            <div class="feature-gate-desc">
-                @if (Description is not null) { @Description }
+    @if (_role == "owner")
+    {
+        <section class="fg2" aria-labelledby="fg2-@Flag">
+            <div class="fg2-preview" aria-hidden="true">
+                <div class="fg2-sk fg2-sk-head"></div>
+                <div class="fg2-sk-row"><span></span><span></span><span></span></div>
+                <div class="fg2-sk-row"><span></span><span></span><span></span></div>
+                <div class="fg2-sk-row"><span></span><span></span><span></span></div>
+                <div class="fg2-sk-row short"><span></span><span></span></div>
+            </div>
+            <div class="fg2-card">
+                <span class="fg2-badge"><i class="bi bi-lock-fill"></i>Plan @Plan</span>
+                <div class="fg2-ic"><i class="bi @_teaser.Icon"></i></div>
+                <h2 class="fg2-title" id="fg2-@Flag">@(Title ?? _teaser.Title)</h2>
+                <p class="fg2-lead">
+                    @if (Description is not null) { @Description } else { @_teaser.Lead }
+                </p>
+                @if (_teaser.Points.Length > 0)
+                {
+                    <ul class="fg2-points">
+                        @foreach (var point in _teaser.Points.Take(3))
+                        {
+                            <li><i class="bi bi-check2"></i>@point</li>
+                        }
+                    </ul>
+                }
+                @if (_done is not null)
+                {
+                    <div class="fg2-msg ok" role="status"><i class="bi bi-check-circle-fill"></i>@_done</div>
+                }
                 else
                 {
-                    <text>Dostępne w planie <strong>@Plan</strong> i wyższym.</text>
+                    <div class="fg2-actions">
+                        @if (_canTrial)
+                        {
+                            <button type="button" class="btn btn-primary" disabled="@_busy" @onclick="TryAsync">
+                                @if (_busy) { <span class="spinner-border spinner-border-sm me-1"></span> }Wypróbuj @Plan przez 14 dni
+                            </button>
+                        }
+                        @if (ShowUpgrade)
+                        {
+                            <a href="/admin/upgrade" class="btn @(_canTrial ? "btn-outline-secondary" : "btn-primary")">Zobacz pakiety</a>
+                        }
+                    </div>
+                    @if (_canTrial)
+                    {
+                        <p class="fg2-note">Za darmo i jednorazowo. Rachunki za obecny plan bez zmian, a po 14 dniach wszystko wraca do dzisiejszego planu.</p>
+                    }
+                    @if (_error is not null)
+                    {
+                        <div class="fg2-msg err" role="alert">@_error</div>
+                    }
                 }
             </div>
-            @if (ShowUpgrade)
-            {
-                <a href="/upgrade" class="btn btn-sm btn-primary mt-2">
-                    <i class="bi bi-arrow-up-circle me-1"></i>Zobacz pakiety
-                </a>
-            }
-        </div>
-    </div>
+        </section>
+    }
+    else if (_role == "team")
+    {
+        <div class="fg2-quiet"><i class="bi bi-lock"></i><span><b>@(Title ?? _teaser.Title)</b> — dostępne w planie @Plan. Zapytaj właściciela studia.</span></div>
+    }
+    else
+    {
+        <div class="fg2-quiet"><i class="bi bi-info-circle"></i><span>Ta funkcja nie jest jeszcze dostępna w aplikacji Twojego trenera.</span></div>
+    }
 }
-
-<style>
-    .feature-gate-lock {
-        border: 1px dashed #d1d5db;
-        border-radius: .75rem;
-        padding: 1.25rem;
-        background: linear-gradient(180deg, #f9fafb, #fff);
-        text-align: center;
-    }
-    .feature-gate-badge {
-        display: inline-flex; align-items: center; gap: .35rem;
-        background: #6366f1; color: #fff;
-        padding: .2rem .65rem; border-radius: 2rem;
-        font-size: .75rem; font-weight: 600;
-        margin-bottom: .75rem;
-    }
-    .feature-gate-title { font-weight: 600; color: #374151; margin-bottom: .35rem; }
-    .feature-gate-desc { color: #6b7280; font-size: .875rem; }
-</style>
 
 @code {
     [Parameter, EditorRequired] public string Flag { get; set; } = "";
+    /// <summary>Plan, gdy Portal nie podał, w którym planie jest funkcja.</summary>
     [Parameter] public string RequiredPlan { get; set; } = "Pro";
     [Parameter] public string? Title { get; set; }
     [Parameter] public RenderFragment? Description { get; set; }
@@ -58,10 +90,32 @@ else if (ShowLock)
     [Parameter] public bool ShowLock { get; set; } = true;
     [Parameter] public bool ShowUpgrade { get; set; } = true;
 
-    private bool _allowed;
+    private bool _allowed, _busy, _canTrial;
+    private string? _role, _done, _error;
+    private FeatureTeasers.Teaser _teaser = FeatureTeasers.For("");
 
     private string Plan => Entitlements.PlanFor(Flag, RequiredPlan);
 
-    protected override void OnParametersSet() =>
+    protected override async Task OnParametersSetAsync()
+    {
         _allowed = Entitlements.IsAllowed(Flag);
+        if (_allowed) return;
+        _teaser = FeatureTeasers.For(Flag, Title);
+        var user = (await AuthState.GetAuthenticationStateAsync()).User;
+        _role = user.IsInRole(Roles.Admin) || user.IsInRole(Roles.Trainer) ? "owner"
+            : user.IsInRole(Roles.Subordinate) ? "team" : "client";
+        _canTrial = _role == "owner" && ShowUpgrade && Entitlements.Current.UpgradeTrialAvailable;
+    }
+
+    private async Task TryAsync()
+    {
+        _busy = true; _error = null;
+        var r = await Trials.StartAsync(Flag);
+        _busy = false;
+        if (!r.Ok) { _error = r.Message; return; }
+        _done = r.Message;
+        StateHasChanged();
+        await Task.Delay(1200);
+        Nav.NavigateTo(Nav.Uri, forceLoad: true);
+    }
 }

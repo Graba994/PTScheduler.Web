@@ -285,7 +285,7 @@
         _tenantCount = await db.Tenants.Where(t => t.Status != TenantStatus.Destroyed).GroupBy(t => t.PlanId)
             .Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count);
         var now = DateTime.UtcNow;
-        _trialCount = await db.Tenants.Where(t => t.TrialPlanId != null && t.TrialEndsAt > now && t.Status != TenantStatus.Destroyed)
+        _trialCount = await db.Tenants.Where(t => t.TrialPlanId != null && t.TrialPlanEndsAt > now && t.Status != TenantStatus.Destroyed)
             .GroupBy(t => t.TrialPlanId!).Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count);
         _hidden = (await TenantService.HiddenFeaturesAsync()).ToHashSet();
         _hiddenOriginal = [.. _hidden];
