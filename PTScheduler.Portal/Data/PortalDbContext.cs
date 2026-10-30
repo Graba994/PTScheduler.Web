@@ -35,6 +35,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<UptimeMonitor> UptimeMonitors => Set<UptimeMonitor>();
     public DbSet<UptimeBeat> UptimeBeats => Set<UptimeBeat>();
     public DbSet<UptimeIncident> UptimeIncidents => Set<UptimeIncident>();
+    public DbSet<TesterFeedback> TesterFeedback => Set<TesterFeedback>();
     public DbSet<TenantOfferItem> TenantOfferItems => Set<TenantOfferItem>();
     public DbSet<TenantSmsCounter> TenantSmsCounters => Set<TenantSmsCounter>();
     public DbSet<TenantBill> TenantBills => Set<TenantBill>();
@@ -477,6 +478,14 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.Property(x => x.CreatedBy).HasMaxLength(256);
             e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
+        b.Entity<TesterFeedback>(e =>
+        {
+            e.HasIndex(x => new { x.TenantId, x.Week }).IsUnique();
+            e.HasIndex(x => x.CreatedAt);
+            e.Property(x => x.Annoyed).HasMaxLength(2000);
+            e.Property(x => x.Missing).HasMaxLength(2000);
+        });
+
         b.Entity<UptimeMonitor>(e =>
         {
             e.Property(x => x.Name).HasMaxLength(120);

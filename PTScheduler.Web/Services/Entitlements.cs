@@ -92,6 +92,9 @@ public class Entitlements
     /// <summary>Studio może raz wypróbować wyższy plan przez 14 dni (przycisk na zablokowanym ekranie).</summary>
     public bool UpgradeTrialAvailable { get; set; }
 
+    /// <summary>Program testerów (3 miesiące za cotygodniową opinię) — null, gdy studio nie jest testerem.</summary>
+    public TesterInfo? Tester { get; set; }
+
     // ── Zegarki klientów ─────────────────────────────────
     // Garmin u klientów: plan ma „Zegarki klientów” i Garmin jest włączony globalnie w Portalu.
     public bool Wearables { get; set; }
@@ -128,4 +131,15 @@ public class Entitlements
         ReferralProgram = true,
         VideoProvider = "bunny"
     };
+}
+
+/// <summary>Status testera z Portalu: tydzień programu i czy czeka ankieta za bieżący tydzień.</summary>
+public class TesterInfo
+{
+    public DateTime Since { get; set; }
+    public DateTime Until { get; set; }
+    public bool Active { get; set; }
+    public int Week { get; set; }
+    public int Weeks { get; set; }
+    public bool FeedbackDue { get; set; }
 }

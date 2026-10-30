@@ -1045,6 +1045,9 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<string>("Note")
                         .HasColumnType("text");
 
+                    b.Property<bool>("Tester")
+                        .HasColumnType("boolean");
+
                     b.Property<int>("Uses")
                         .HasColumnType("integer");
 
@@ -2710,6 +2713,12 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<DateTime?>("TestAccountSince")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<DateTime?>("TesterSince")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime?>("TesterUntil")
+                        .HasColumnType("timestamp with time zone");
+
                     b.Property<DateTime?>("TrialEndsAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -3357,6 +3366,44 @@ namespace PTScheduler.Portal.Data.Migrations
                         .IsUnique();
 
                     b.ToTable("TenantVideoFolders");
+                });
+
+            modelBuilder.Entity("PTScheduler.Portal.Entities.TesterFeedback", b =>
+                {
+                    b.Property<int>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("integer");
+
+                    NpgsqlPropertyBuilderExtensions.UseIdentityByDefaultColumn(b.Property<int>("Id"));
+
+                    b.Property<string>("Annoyed")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<DateTime>("CreatedAt")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("Missing")
+                        .HasMaxLength(2000)
+                        .HasColumnType("character varying(2000)");
+
+                    b.Property<int>("Rating")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("TenantId")
+                        .HasColumnType("integer");
+
+                    b.Property<int>("Week")
+                        .HasColumnType("integer");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("CreatedAt");
+
+                    b.HasIndex("TenantId", "Week")
+                        .IsUnique();
+
+                    b.ToTable("TesterFeedback");
                 });
 
             modelBuilder.Entity("PTScheduler.Portal.Entities.TrainerMeeting", b =>

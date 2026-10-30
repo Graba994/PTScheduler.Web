@@ -281,7 +281,8 @@ public class BillingService(
         var now = DateTime.UtcNow;
         var billed = db.TenantBills.Where(b => b.PeriodStart == period && b.Status != TenantBillStatus.Cancelled).Select(b => b.TenantId);
         return await db.Tenants.AsNoTracking()
-            .Where(t => t.Status == TenantStatus.Active && t.CancelRequestedAt == null && (t.TrialEndsAt == null || t.TrialEndsAt <= now) && !billed.Contains(t.Id))
+            .Where(t => t.Status == TenantStatus.Active && t.CancelRequestedAt == null && (t.TrialEndsAt == null || t.TrialEndsAt <= now) && !billed.Contains(t.Id)
+                && !(t.TesterUntil > now)) // testerzy bez rachunków do końca programu
             .Select(t => t.Id).ToListAsync();
     }
 

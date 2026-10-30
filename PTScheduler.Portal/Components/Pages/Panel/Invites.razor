@@ -75,7 +75,12 @@
                     {
                         var usable = c.IsUsable(DateTime.UtcNow);
                         <tr class="@(usable ? "" : "text-muted")">
-                            <td data-label="Kod" class="font-monospace fw-semibold">@c.Code</td>
+                            <td data-label="Kod" class="font-monospace fw-semibold">@c.Code
+                                @if (c.Tester)
+                                {
+                                    <span class="badge rounded-pill text-bg-light border ms-1 fw-normal font-sans" title="Program testerów: 3 miesiące za cotygodniową opinię"><i class="bi bi-clipboard2-pulse me-1"></i>tester</span>
+                                }
+                            </td>
                             <td data-label="Dla kogo">@(c.Note ?? "—")</td>
                             <td data-label="Użycia">@c.Uses@(c.MaxUses > 0 ? $" / {c.MaxUses}" : " / ∞")</td>
                             <td data-label="+ dni">@(c.ExtraTrialDays > 0 ? $"+{c.ExtraTrialDays}" : "—")</td>
@@ -137,7 +142,7 @@
     private async Task QuickThreeMonthsAsync()
     {
         var (invite, error) = await InviteSvc.CreateAsync(null, string.IsNullOrWhiteSpace(_note) ? "Spotkanie — 3 miesiące gratis" : _note, 1,
-            InviteService.ThreeMonthsExtraDays, DateTime.UtcNow.AddDays(30));
+            InviteService.ThreeMonthsExtraDays, DateTime.UtcNow.AddDays(30), tester: true);
         if (invite is null) { _message = error; _msgError = true; return; }
         _note = null;
         await LoadAsync();

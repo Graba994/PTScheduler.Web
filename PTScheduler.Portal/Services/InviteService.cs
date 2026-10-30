@@ -19,7 +19,7 @@ public class InviteService(IDbContextFactory<PortalDbContext> dbFactory, EmailSe
     public static string NewCode(string prefix = "PT") =>
         $"{prefix}-{Convert.ToHexString(System.Security.Cryptography.RandomNumberGenerator.GetBytes(3))}";
 
-    public async Task<(InviteCode? Code, string? Error)> CreateAsync(string? code, string? note, int maxUses, int extraDays, DateTime? expiresUtc)
+    public async Task<(InviteCode? Code, string? Error)> CreateAsync(string? code, string? note, int maxUses, int extraDays, DateTime? expiresUtc, bool tester = false)
     {
         var value = string.IsNullOrWhiteSpace(code) ? NewCode()
             : System.Text.RegularExpressions.Regex.Replace(code.Trim().ToUpperInvariant(), "[^A-Z0-9-]", "");
@@ -32,7 +32,8 @@ public class InviteService(IDbContextFactory<PortalDbContext> dbFactory, EmailSe
             Note = string.IsNullOrWhiteSpace(note) ? null : note.Trim()[..Math.Min(120, note.Trim().Length)],
             MaxUses = Math.Max(0, maxUses),
             ExtraTrialDays = Math.Clamp(extraDays, 0, 180),
-            ExpiresAt = expiresUtc
+            ExpiresAt = expiresUtc,
+            Tester = tester
         };
         db.InviteCodes.Add(invite);
         await db.SaveChangesAsync();

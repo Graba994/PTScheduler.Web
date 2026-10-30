@@ -11,6 +11,8 @@ public class InviteCode
     /// <summary>Dla kogo / skąd (np. „szkoła trenerów XYZ”, „akcja Instagram wrzesień”).</summary>
     public string? Note { get; set; }
     public int ExtraTrialDays { get; set; }
+    /// <summary>Kod z programu testerów (3 miesiące za cotygodniową opinię) — studio od startu jest testerem.</summary>
+    public bool Tester { get; set; }
     /// <summary>Ile razy można użyć (0 = bez limitu).</summary>
     public int MaxUses { get; set; } = 1;
     public int Uses { get; set; }

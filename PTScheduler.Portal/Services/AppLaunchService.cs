@@ -203,6 +203,14 @@ public class AppLaunchService(IServiceScopeFactory scopes, ILogger<AppLaunchServ
             }
         }
 
+        // Kod z programu testerów (3 miesiące za cotygodniową opinię): studio od startu jest testerem.
+        if (ok && tenant is not null && tenant.TesterSince is null && tenant.InviteCode is { Length: > 0 } inviteCode
+            && await db.InviteCodes.AsNoTracking().AnyAsync(c => c.Code == inviteCode && c.Tester))
+        {
+            try { await scope.ServiceProvider.GetRequiredService<TesterService>().StartAsync(tenant.Id, TesterRules.DefaultDays, "kod zaproszenia"); }
+            catch (Exception ex) { logger.LogWarning(ex, "Program testerów dla {Slug} nie włączony.", tenant.Slug); }
+        }
+
         if (!ok && tenant is not null)
         {
             tenant.QueuedReason = $"Uruchomienie nie powiodło się po 3 próbach: {Short(output)}";

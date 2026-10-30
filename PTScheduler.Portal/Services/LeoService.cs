@@ -149,6 +149,20 @@ public class LeoService(IDbContextFactory<PortalDbContext> dbFactory, SiteSettin
                 $"{follow} {Plural(follow, "trener czeka", "trenerów czeka", "trenerów czeka")} na umówiony kontakt po spotkaniu. Krótki telefon albo wiadomość — póki pamiętają rozmowę.",
                 new() { ["liczba_trenerow"] = follow.ToString() }, "Spotkania", "/panel/spotkania"));
 
+        // Testerzy bez opinii za co najmniej jeden tydzień (program: 3 miesiące za cotygodniową opinię).
+        var testerNow = DateTime.UtcNow;
+        var testers = await db.Tenants.AsNoTracking().Where(t => t.TesterSince != null && t.TesterUntil > testerNow).ToListAsync();
+        if (testers.Count > 0)
+        {
+            var testerIds = testers.Select(t => t.Id).ToList();
+            var given = await db.TesterFeedback.AsNoTracking().Where(f => testerIds.Contains(f.TenantId)).Select(f => new { f.TenantId, f.Week }).ToListAsync();
+            var behind = testers.Count(t => TesterRules.Missed(t, testerNow, given.Where(g => g.TenantId == t.Id).Select(g => g.Week)) >= 2);
+            if (behind > 0)
+                tips.Add(new($"testers-{today:yyyy-MM-dd}", "testerzy", "remind", 50,
+                    $"{behind} {Plural(behind, "tester zalega", "testerów zalega", "testerów zalega")} z opinią od dwóch tygodni. Krótka wiadomość pomaga — darmowe miesiące są za opinie.",
+                    new() { ["liczba_testerow"] = behind.ToString() }, "Testerzy", "/panel/testerzy"));
+        }
+
         // Budżet AI blisko limitu.
         var s = await settings.GetAllAsync(K.AiEnabled, K.AiMonthlyBudgetUsd);
         if (s[K.AiEnabled] == "true" && decimal.TryParse(s[K.AiMonthlyBudgetUsd], NumberStyles.Number, CultureInfo.InvariantCulture, out var budget) && budget > 0)

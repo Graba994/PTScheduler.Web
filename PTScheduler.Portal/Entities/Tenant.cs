@@ -139,6 +139,13 @@ public class Tenant
     /// planu nie wstrzymywała rachunków za obecny plan.
     /// </summary>
     public DateTime? TrialPlanEndsAt { get; set; }
+
+    /// <summary>
+    /// Program testerów: 3 miesiące za darmo za cotygodniową opinię. Do <see cref="TesterUntil"/> studio nie dostaje
+    /// rachunków ani blokady po okresie próbnym, a aplikacja raz w tygodniu prosi o krótką ankietę (<see cref="TesterFeedback"/>).
+    /// </summary>
+    public DateTime? TesterSince { get; set; }
+    public DateTime? TesterUntil { get; set; }
     /// <summary>Jednorazowe „Wypróbuj 14 dni” z zablokowanej funkcji — kiedy wykorzystane.</summary>
     public DateTime? UpgradeTrialUsedAt { get; set; }
     /// <summary>

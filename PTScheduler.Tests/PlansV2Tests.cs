@@ -206,6 +206,33 @@ public class PlansV2Tests
     }
 
     [Fact]
+    public async Task Tester_status_goes_to_the_studio_app_with_the_due_survey()
+    {
+        var (tenants, db) = await BuildAsync();
+        int id;
+        await using (var ctx = await db.CreateDbContextAsync())
+        {
+            var t = new Tenant { Slug = "tester", CompanyName = "Tester", PlanId = "start", TesterSince = DateTime.UtcNow.AddDays(-8), TesterUntil = DateTime.UtcNow.AddDays(82) };
+            ctx.Tenants.Add(t);
+            await ctx.SaveChangesAsync();
+            id = t.Id;
+        }
+        var start = await (await db.CreateDbContextAsync()).Plans.AsNoTracking().FirstAsync(p => p.Id == "start");
+        var tester = JsonDocument.Parse(await tenants.EntitlementsJsonAsync(id, start)).RootElement.GetProperty("tester");
+        tester.GetProperty("week").GetInt32().Should().Be(1);
+        tester.GetProperty("weeks").GetInt32().Should().Be(13);
+        tester.GetProperty("feedbackDue").GetBoolean().Should().BeTrue();
+
+        await using (var ctx = await db.CreateDbContextAsync())
+        {
+            ctx.TesterFeedback.Add(new TesterFeedback { TenantId = id, Week = 1, Rating = 5 });
+            await ctx.SaveChangesAsync();
+        }
+        JsonDocument.Parse(await tenants.EntitlementsJsonAsync(id, start)).RootElement.GetProperty("tester").GetProperty("feedbackDue").GetBoolean()
+            .Should().BeFalse("opinia za ten tydzień już jest");
+    }
+
+    [Fact]
     public void Pricing_and_upgrade_page_come_from_the_catalog()
     {
         using var ctx = new PortalDbContext(new DbContextOptionsBuilder<PortalDbContext>().UseInMemoryDatabase(Guid.NewGuid().ToString()).Options);

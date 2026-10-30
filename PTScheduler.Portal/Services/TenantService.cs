@@ -574,6 +574,8 @@ public class TenantService(
         node["upgradePlans"] = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(PlanFeatureCatalog.UpgradePlans(plans)));
         node["hiddenWhenLocked"] = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(await HiddenFeaturesAsync()));
         node["upgradeTrialAvailable"] = tenant is not null && UpgradeTrialTarget(tenant, plan, plans, null) is not null;
+        if (tenant is not null && await TesterService.EntitlementAsync(db, tenant) is { } tester)
+            node["tester"] = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(tester));
         if (trial is not null)
         {
             node["trialEndsAt"] = tenant!.TrialPlanEndsAt;

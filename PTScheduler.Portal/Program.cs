@@ -108,6 +108,7 @@ builder.Services.AddHostedService<AccountingBackgroundService>();
 builder.Services.AddScoped<ErrorAlertService>();
 builder.Services.AddHostedService<ErrorAlertBackgroundService>();
 builder.Services.AddScoped<UptimeService>();
+builder.Services.AddScoped<TesterService>();
 builder.Services.AddHostedService<UptimeBackgroundService>();
 builder.Services.AddScoped<BackupService>();
 builder.Services.AddScoped<OffsiteBackupService>();
@@ -1886,6 +1887,7 @@ app.MapGet("/api/credits/{slug}/bunny", async (
 });
 
 app.MapVideoHub();
+app.MapTesterFeedback();
 
 app.MapStaticAssets();
 app.MapRazorComponents<App>()

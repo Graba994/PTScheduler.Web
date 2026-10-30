@@ -107,7 +107,8 @@ public class TrialExpirationService(
 
         // Koniec okresu próbnego wyższego planu (np. Pro na start): studio wraca na swój darmowy plan.
         var trialsDone = await db.Tenants
-            .Where(t => t.TrialPlanId != null && t.TrialPlanEndsAt != null && t.TrialPlanEndsAt < now && t.Status != TenantStatus.Destroyed)
+            .Where(t => t.TrialPlanId != null && t.TrialPlanEndsAt != null && t.TrialPlanEndsAt < now && t.Status != TenantStatus.Destroyed
+                && !(t.TesterUntil > now)) // tester ma plan z okresu próbnego do końca programu
             .ToListAsync(ct);
         foreach (var t in trialsDone)
         {
@@ -134,7 +135,8 @@ public class TrialExpirationService(
                 && t.TrialEndsAt != null
                 && t.TrialEndsAt < now
                 && t.BillingStatus != "active"
-                && t.BillingStatus != "past_due")
+                && t.BillingStatus != "past_due"
+                && !(t.TesterUntil > now)) // program testerów: bez blokady do końca
             .ToListAsync(ct);
 
         foreach (var t in expired)

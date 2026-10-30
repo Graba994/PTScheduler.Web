@@ -213,6 +213,8 @@ builder.Services.AddHostedService<PTScheduler.Web.Services.MorningBriefBackgroun
 builder.Services.AddScoped<PTScheduler.Web.Services.SetupGuide>();
 builder.Services.AddHostedService<SessionReminderService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.EntitlementSyncService>();
+builder.Services.AddSingleton<PTScheduler.Web.Services.TesterFeedbackService>();
+builder.Services.AddHostedService<PTScheduler.Web.Services.TesterReminderBackgroundService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.PackageReminderService>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.SlotWatchNotifier>();
 builder.Services.AddHostedService<PTScheduler.Web.Services.AccountantPackSender>();
