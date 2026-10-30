@@ -292,7 +292,19 @@ else if (_tab == "notes")
         @if (_error is not null) { <div class="alert alert-danger py-2 small">@_error</div> }
         <div class="mx-save">
             <button class="btn btn-primary flex-grow-1" @onclick="SaveAsync"><i class="bi bi-check2 me-1"></i>Zapisz spotkanie</button>
-            @if (_m.Id != 0) { <button class="btn btn-outline-secondary" @onclick="NewMeeting">Nowe</button> }
+            @if (_m.Id != 0)
+            {
+                <button class="btn btn-outline-secondary" @onclick="NewMeeting">Nowe</button>
+                @if (_confirmDelete == _m.Id)
+                {
+                    <button class="btn btn-danger" @onclick="() => DeleteAsync(_m.Id)"><i class="bi bi-trash3 me-1"></i>Na pewno usuń</button>
+                    <button class="btn btn-outline-secondary" @onclick="() => _confirmDelete = null">Anuluj</button>
+                }
+                else
+                {
+                    <button class="btn btn-outline-danger" title="Usuń spotkanie" aria-label="Usuń spotkanie" @onclick="() => _confirmDelete = _m.Id"><i class="bi bi-trash3"></i></button>
+                }
+            }
         </div>
     </div>
 }
@@ -372,7 +384,23 @@ else
                     {
                         <div class="mx-mini">@foreach (var k in Split(x.InterestedFeatures)) { <span><i class="bi bi-star-fill"></i>@(MeetingPlaybook.SlideTitle(k) ?? k)</span> }</div>
                     }
-                    <div class="d-flex justify-content-end"><button class="btn btn-sm btn-outline-primary" @onclick="() => Edit(x)"><i class="bi bi-pencil me-1"></i>Notatki</button></div>
+                    @if (_confirmDelete == x.Id)
+                    {
+                        <div class="mx-delete">
+                            <span>Usunąć spotkanie „@x.TrainerName” razem z notatkami? Tego nie da się cofnąć.</span>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(x.Id)"><i class="bi bi-trash3 me-1"></i>Usuń</button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDelete = null">Anuluj</button>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="d-flex justify-content-end gap-2">
+                            <button class="btn btn-sm btn-outline-danger" title="Usuń spotkanie" aria-label="Usuń spotkanie: @x.TrainerName" @onclick="() => _confirmDelete = x.Id"><i class="bi bi-trash3"></i></button>
+                            <button class="btn btn-sm btn-outline-primary" @onclick="() => Edit(x)"><i class="bi bi-pencil me-1"></i>Notatki</button>
+                        </div>
+                    }
                 </article>
             }
         </div>
@@ -397,6 +425,7 @@ else
     private string _tab = "script";
     private string? _open = "open", _objOpen;
     private string? _message, _error;
+    private int? _confirmDelete;
     private InviteCode? _share;
     private bool _garmin;
 
@@ -546,7 +575,18 @@ else
         await LoadAsync();
     }
 
-    private void NewMeeting() => _m = new TrainerMeeting();
+    private void NewMeeting() { _m = new TrainerMeeting(); _confirmDelete = null; }
+
+    private async Task DeleteAsync(int id)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var name = await db.TrainerMeetings.Where(x => x.Id == id).Select(x => x.TrainerName).FirstOrDefaultAsync();
+        await db.TrainerMeetings.Where(x => x.Id == id).ExecuteDeleteAsync();
+        _confirmDelete = null;
+        _message = name is null ? "Spotkanie było już usunięte." : $"Usunięto spotkanie: {name}.";
+        if (_m.Id == id) { NewMeeting(); _tab = "results"; }
+        await LoadAsync();
+    }
 
     private void Edit(TrainerMeeting x)
     {
@@ -559,6 +599,7 @@ else
             TrainerType = x.TrainerType, CurrentTools = x.CurrentTools, CurrentCost = x.CurrentCost, InterestedFeatures = x.InterestedFeatures,
             Objections = x.Objections, PlanFit = x.PlanFit, Outcome = x.Outcome ?? (x.Committed ? "start" : null), FollowUpAt = x.FollowUpAt, Presented = x.Presented
         };
+        _confirmDelete = null;
         _tab = "notes";
     }
 
