@@ -48,6 +48,37 @@ else
             </section>
         }
 
+        @if (_s.Load is { HasData: true } ld)
+        {
+            var maxUnits = Math.Max(1, ld.Weeks.Max(x => x.Units));
+            <section class="wr-card">
+                <div class="wr-card-head"><b>Obciążenie treningowe</b><small>@Src · ostatnie 7 dni · intensywność z tętna (maks. ok. @ld.EstimatedMaxHr) · @PTScheduler.Web.Services.WearableService.DerivedNote</small></div>
+                <div class="wr-load">
+                    <div class="wr-load-stats">
+                        <div><b>@ReadinessRules.Duration(ld.Minutes)</b><small>@ld.Sessions @(ld.Sessions == 1 ? "aktywność" : "aktywności")</small></div>
+                        <div><b>@ReadinessRules.Duration(ld.HardMinutes)</b><small>intensywnie (≥ 70% rezerwy tętna)</small></div>
+                        <div class="@(ld.ChangePercent is >= 50 ? "warn" : ld.ChangePercent is <= -50 ? "low" : "")">
+                            <b>@(ld.ChangePercent is int ch ? (ch > 0 ? $"+{ch}%" : $"{ch}%") : "—")</b>
+                            <small>@(ld.ChangePercent is null ? "porównanie po 2 tygodniach danych" : "względem zwykłego tygodnia")</small>
+                        </div>
+                    </div>
+                    @if (ld.Warning is not null)
+                    {
+                        <p class="wr-load-warn"><i class="bi bi-exclamation-triangle"></i>@(char.ToUpper(ld.Warning[0]) + ld.Warning[1..]) — porozmawiaj z klientem o regeneracji.</p>
+                    }
+                    <div class="wr-load-bars" role="img" aria-label="Obciążenie w ostatnich 6 tygodniach">
+                        @foreach (var wk in ld.Weeks)
+                        {
+                            <div class="wr-load-bar" title="@($"Tydzień od {wk.From:dd.MM}: {ReadinessRules.Duration(wk.Minutes)}, obciążenie {wk.Units}")">
+                                <span style="height:@(Math.Max(wk.Units > 0 ? 4 : 0, (int)Math.Round(100.0 * wk.Units / maxUnits)))%"></span>
+                                <small>@wk.From.ToString("dd.MM")</small>
+                            </div>
+                        }
+                    </div>
+                </div>
+            </section>
+        }
+
         <section class="wr-card">
             <div class="wr-card-head"><b>Ostatnie 14 dni</b><small>@Src · norma = średnia z 28 dni</small></div>
             @if (_s.Days.Count == 0)

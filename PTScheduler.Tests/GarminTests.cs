@@ -229,6 +229,56 @@ public class GarminTests
     }
 
     [Fact]
+    public void Training_load_compares_last_week_with_usual_and_estimates_max_hr()
+    {
+        var today = new DateOnly(2026, 10, 30);
+        TrainingLoadRules.EstimateMaxHr([new(today, "Bieg", 3600, 150, 182)], age: 40).Should().Be(182, "zmierzone wyżej niż wzór (180)");
+        TrainingLoadRules.EstimateMaxHr([], age: 30).Should().Be(187);
+        TrainingLoadRules.EstimateMaxHr([], age: null).Should().Be(190);
+        TrainingLoadRules.Intensity(150, 190, 50).Should().BeApproximately(0.7143, 0.001);
+        TrainingLoadRules.Intensity(null, 190, 50).Should().Be(0.6);
+
+        // Trzy zwykłe tygodnie: 2 × 60 min po śr. tętnie 120; ostatni tydzień: 4 × 60 min po 150.
+        var acts = new List<TrainingLoadRules.Act>();
+        for (var w = 1; w <= 3; w++)
+        {
+            acts.Add(new(today.AddDays(-7 * w - 1), "Bieg", 3600, 120, 170));
+            acts.Add(new(today.AddDays(-7 * w - 3), "Rower", 3600, 120, 160));
+        }
+        for (var d = 0; d < 4; d++) acts.Add(new(today.AddDays(-d - 1), "Bieg", 3600, 150, 175));
+
+        var r = TrainingLoadRules.For(today, acts, maxHr: 190, restingHr: 50);
+        r.Sessions.Should().Be(4);
+        r.Minutes.Should().Be(240);
+        r.HardMinutes.Should().Be(240);
+        r.TypicalUnits.Should().Be(70);   // 6 × 30 jednostek w 18 dniach danych (2,57 tygodnia)
+        r.ChangePercent.Should().Be(144); // 171 vs 70
+        r.Warning.Should().Contain("ryzyko przeciążenia");
+        r.Weeks.Should().HaveCount(6);
+
+        TrainingLoadRules.For(today, acts.Where(a => a.Date >= today.AddDays(-6)).ToList(), 190, 50).ChangePercent
+            .Should().BeNull("bez 2 tygodni historii nie porównujemy");
+    }
+
+    [Fact]
+    public void Hard_session_yesterday_lowers_readiness_with_reason()
+    {
+        var today = new DateOnly(2026, 10, 30);
+        var acts = new List<TrainingLoadRules.Act> { new(today.AddDays(-1), "Bieg", 90 * 60, 162, 181) };
+        var hints = TrainingLoadRules.ReadinessHints(today, acts, maxHr: 190, restingHr: 50);
+        hints.Should().ContainSingle().Which.Should().Be((8, "wczoraj mocny trening (Bieg, 1 h 30 min, śr. tętno 162)")); // 72 jednostki
+        TrainingLoadRules.ReadinessHints(today, [new(today.AddDays(-1), "Bieg", 120 * 60, 165, 185)], 190, 50).Single().Penalty.Should().Be(15);
+        TrainingLoadRules.ReadinessHints(today, [new(today.AddDays(-1), "Spacer", 30 * 60, 95, 110)], 190, 50).Should().BeEmpty();
+
+        ReadinessRules.Day day = new(today, 470, 85, 52, 55, 80);
+        var plain = ReadinessRules.For(today, [day]);
+        var withLoad = ReadinessRules.For(today, [day], hints);
+        withLoad.Score.Should().Be(plain.Score - 8);
+        withLoad.Reasons.Should().Contain("wczoraj mocny trening (Bieg, 1 h 30 min, śr. tętno 162)");
+        ReadinessRules.For(today, [], hints).Level.Should().Be(ReadinessRules.Level.Unknown, "bez danych z dnia nie zgadujemy gotowości");
+    }
+
+    [Fact]
     public void Attribution_follows_garmin_brand_guidelines()
     {
         WearableService.Attribution("Forerunner 265").Should().Be("Garmin Forerunner 265");

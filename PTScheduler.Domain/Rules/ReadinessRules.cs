@@ -14,7 +14,8 @@ public static class ReadinessRules
     public sealed record Result(Level Level, int Score, IReadOnlyList<string> Reasons, string Suggestion);
 
     /// <summary>Gotowość na <paramref name="today"/> — dzień z zegarka z tej daty albo poprzedniej nocy.</summary>
-    public static Result For(DateOnly today, IReadOnlyList<Day> history)
+    /// <param name="extra">Dodatkowe wskazówki (np. wczorajszy mocny trening z <see cref="TrainingLoadRules"/>): kara do wyniku i powód.</param>
+    public static Result For(DateOnly today, IReadOnlyList<Day> history, IReadOnlyList<(int Penalty, string Reason)>? extra = null)
     {
         var day = history.Where(d => d.Date == today || d.Date == today.AddDays(-1)).OrderByDescending(d => d.Date).FirstOrDefault();
         if (day is null || (day.SleepMinutes is null && day.RestingHeartRate is null && day.Hrv is null && day.BodyBatteryHigh is null))
@@ -47,6 +48,12 @@ public static class ReadinessRules
         {
             if (bb < 40) { score -= 15; reasons.Add($"niska Body Battery ({bb})"); }
             else if (bb < 55) { score -= 5; reasons.Add($"Body Battery {bb}"); }
+        }
+
+        foreach (var (penalty, reason) in extra ?? [])
+        {
+            score -= penalty;
+            reasons.Add(reason);
         }
 
         score = Math.Clamp(score, 0, 100);

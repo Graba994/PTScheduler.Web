@@ -71,7 +71,7 @@ public class MorningBriefService(
 
         // Gotowość z zegarków (Garmin): przy wizycie klienta z niską albo średnią gotowością — krótki powód.
         var ready = entitlements.IsAllowed("Wearables")
-            ? await WearableService.ReadinessAsync(db, DateOnly.FromDateTime(today), clientIds)
+            ? await WearableService.ReadinessAsync(db, DateOnly.FromDateTime(today), clientIds, clock.ToWallClock)
             : [];
 
         var lines = new List<SessionLine>();

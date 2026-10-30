@@ -21,7 +21,7 @@ public sealed class WearableService(IDbContextFactory<ApplicationDbContext> dbFa
     public const string Garmin = "garmin";
 
     public sealed record Summary(WearableLink? Link, IReadOnlyList<WearableDay> Days, IReadOnlyList<WearableActivity> Activities,
-        ReadinessRules.Result Readiness);
+        ReadinessRules.Result Readiness, TrainingLoadRules.Result? Load = null);
 
     private static (string Url, string Slug, string? Secret)? Portal()
     {
@@ -219,18 +219,49 @@ public sealed class WearableService(IDbContextFactory<ApplicationDbContext> dbFa
         var rows = await db.WearableDays.AsNoTracking().Where(d => d.ClientId == clientId && d.Date >= since).OrderByDescending(d => d.Date).ToListAsync();
         var acts = await db.WearableActivities.AsNoTracking().Where(a => a.ClientId == clientId)
             .OrderByDescending(a => a.StartUtc).Take(20).ToListAsync();
-        return new Summary(link, rows, acts, ReadinessRules.For(clock.Today, rows.Select(ToReadinessDay).ToList()));
+        var load = (await LoadInputsAsync(db, clock.Today, [clientId], clock.ToWallClock)).GetValueOrDefault(clientId);
+        var hints = load is null ? null : TrainingLoadRules.ReadinessHints(clock.Today, load.Acts, load.MaxHr, load.RestingHr);
+        return new Summary(link, rows, acts, ReadinessRules.For(clock.Today, rows.Select(ToReadinessDay).ToList(), hints),
+            load is null ? null : TrainingLoadRules.For(clock.Today, load.Acts, load.MaxHr, load.RestingHr));
+    }
+
+    /// <summary>Dane do obciążenia: aktywności z 6 tygodni (dzień lokalny), szacowane tętno maks. i spoczynkowe z normy.</summary>
+    public sealed record LoadInputs(IReadOnlyList<TrainingLoadRules.Act> Acts, int MaxHr, int? RestingHr);
+
+    public static async Task<Dictionary<int, LoadInputs>> LoadInputsAsync(ApplicationDbContext db, DateOnly today, IReadOnlyCollection<int> clientIds,
+        Func<DateTime, DateTime>? toLocal = null)
+    {
+        if (clientIds.Count == 0) return [];
+        var local = toLocal ?? (u => u);
+        var since90 = today.AddDays(-90).ToDateTime(TimeOnly.MinValue);
+        var since42 = today.AddDays(-42);
+        var acts = await db.WearableActivities.AsNoTracking().Where(a => clientIds.Contains(a.ClientId) && a.StartUtc >= since90)
+            .Select(a => new { a.ClientId, a.Name, a.StartUtc, a.DurationSeconds, a.AverageHeartRate, a.MaxHeartRate }).ToListAsync();
+        var births = await db.Clients.AsNoTracking().Where(c => clientIds.Contains(c.Id)).Select(c => new { c.Id, c.DateOfBirth }).ToDictionaryAsync(c => c.Id, c => c.DateOfBirth);
+        var since28 = today.AddDays(-28);
+        var rhr = (await db.WearableDays.AsNoTracking().Where(d => clientIds.Contains(d.ClientId) && d.Date >= since28 && d.RestingHeartRate != null)
+                .Select(d => new { d.ClientId, d.RestingHeartRate }).ToListAsync())
+            .GroupBy(d => d.ClientId).ToDictionary(g => g.Key, g => (int?)Math.Round(g.Average(x => x.RestingHeartRate!.Value)));
+        var result = new Dictionary<int, LoadInputs>();
+        foreach (var g in acts.GroupBy(a => a.ClientId))
+        {
+            var all = g.Select(a => new TrainingLoadRules.Act(DateOnly.FromDateTime(local(a.StartUtc)), a.Name, a.DurationSeconds, a.AverageHeartRate, a.MaxHeartRate)).ToList();
+            var age = births.GetValueOrDefault(g.Key) is DateOnly dob ? today.Year - dob.Year - (today.DayOfYear < dob.DayOfYear ? 1 : 0) : (int?)null;
+            result[g.Key] = new LoadInputs(all.Where(a => a.Date >= since42).ToList(), TrainingLoadRules.EstimateMaxHr(all, age), rhr.GetValueOrDefault(g.Key));
+        }
+        return result;
     }
 
     /// <summary>Gotowość kilku klientów naraz (ekran Dziś) — tylko z połączonym zegarkiem i świeżymi danymi.</summary>
     public async Task<Dictionary<int, ReadinessRules.Result>> ReadinessAsync(IReadOnlyCollection<int> clientIds)
     {
         await using var db = await dbFactory.CreateDbContextAsync();
-        return await ReadinessAsync(db, clock.Today, clientIds);
+        return await ReadinessAsync(db, clock.Today, clientIds, clock.ToWallClock);
     }
 
     /// <summary>Gotowość na <paramref name="today"/> dla klientów z połączonym zegarkiem i świeżymi danymi (bez „brak danych”).</summary>
-    public static async Task<Dictionary<int, ReadinessRules.Result>> ReadinessAsync(ApplicationDbContext db, DateOnly today, IReadOnlyCollection<int> clientIds)
+    public static async Task<Dictionary<int, ReadinessRules.Result>> ReadinessAsync(ApplicationDbContext db, DateOnly today, IReadOnlyCollection<int> clientIds,
+        Func<DateTime, DateTime>? toLocal = null)
     {
         if (clientIds.Count == 0) return [];
         var connected = await db.WearableLinks.AsNoTracking()
@@ -238,8 +269,10 @@ public sealed class WearableService(IDbContextFactory<ApplicationDbContext> dbFa
         if (connected.Count == 0) return [];
         var since = today.AddDays(-29);
         var rows = await db.WearableDays.AsNoTracking().Where(d => connected.Contains(d.ClientId) && d.Date >= since).ToListAsync();
+        var loads = await LoadInputsAsync(db, today, connected, toLocal);
         return rows.GroupBy(r => r.ClientId)
-            .Select(g => (g.Key, ReadinessRules.For(today, g.Select(ToReadinessDay).ToList())))
+            .Select(g => (g.Key, ReadinessRules.For(today, g.Select(ToReadinessDay).ToList(),
+                loads.GetValueOrDefault(g.Key) is { } l ? TrainingLoadRules.ReadinessHints(today, l.Acts, l.MaxHr, l.RestingHr) : null)))
             .Where(x => x.Item2.Level != ReadinessRules.Level.Unknown)
             .ToDictionary(x => x.Key, x => x.Item2);
     }

@@ -134,7 +134,7 @@ public class PreSessionBriefService(
         var wearableAi = false;
         if (entitlements.IsAllowed("Wearables") && DateOnly.FromDateTime(s.StartTime) == clock.Today)
         {
-            readiness = (await WearableService.ReadinessAsync(db, clock.Today, [s.ClientId])).GetValueOrDefault(s.ClientId);
+            readiness = (await WearableService.ReadinessAsync(db, clock.Today, [s.ClientId], clock.ToWallClock)).GetValueOrDefault(s.ClientId);
             if (readiness is not null)
             {
                 var link = await db.WearableLinks.AsNoTracking().Where(l => l.ClientId == s.ClientId)
@@ -221,7 +221,7 @@ public class BeforeSessionPushService(IServiceScopeFactory scopeFactory, ILogger
                 Done = db.Sessions.Count(x => x.ClientId == s.ClientId && x.Status == SessionStatus.Completed) })
             .ToListAsync();
         var ready = due.Count > 0 && scope.ServiceProvider.GetRequiredService<EntitlementService>().IsAllowed("Wearables")
-            ? await WearableService.ReadinessAsync(db, clock.Today, due.Select(d => d.Session.ClientId).Distinct().ToList())
+            ? await WearableService.ReadinessAsync(db, clock.Today, due.Select(d => d.Session.ClientId).Distinct().ToList(), clock.ToWallClock)
             : [];
         foreach (var d in due)
         {
