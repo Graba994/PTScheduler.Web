@@ -32,6 +32,9 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<TenantAddon> TenantAddons => Set<TenantAddon>();
     public DbSet<TenantFeatureException> TenantFeatureExceptions => Set<TenantFeatureException>();
     public DbSet<PlanChangeLog> PlanChangeLogs => Set<PlanChangeLog>();
+    public DbSet<UptimeMonitor> UptimeMonitors => Set<UptimeMonitor>();
+    public DbSet<UptimeBeat> UptimeBeats => Set<UptimeBeat>();
+    public DbSet<UptimeIncident> UptimeIncidents => Set<UptimeIncident>();
     public DbSet<TenantOfferItem> TenantOfferItems => Set<TenantOfferItem>();
     public DbSet<TenantSmsCounter> TenantSmsCounters => Set<TenantSmsCounter>();
     public DbSet<TenantBill> TenantBills => Set<TenantBill>();
@@ -474,6 +477,26 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.Property(x => x.CreatedBy).HasMaxLength(256);
             e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
         });
+        b.Entity<UptimeMonitor>(e =>
+        {
+            e.Property(x => x.Name).HasMaxLength(120);
+            e.Property(x => x.Url).HasMaxLength(500);
+            e.Property(x => x.Keyword).HasMaxLength(200);
+            e.Property(x => x.LastError).HasMaxLength(500);
+            e.HasIndex(x => x.TenantId);
+        });
+        b.Entity<UptimeBeat>(e =>
+        {
+            e.HasIndex(x => new { x.MonitorId, x.At });
+            e.HasIndex(x => x.At);
+            e.Property(x => x.Error).HasMaxLength(300);
+        });
+        b.Entity<UptimeIncident>(e =>
+        {
+            e.HasIndex(x => new { x.MonitorId, x.StartedAt });
+            e.Property(x => x.Error).HasMaxLength(500);
+        });
+
         b.Entity<PlanChangeLog>(e =>
         {
             e.HasIndex(x => x.ChangedAt);

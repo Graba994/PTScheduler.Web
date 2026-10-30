@@ -107,6 +107,8 @@ builder.Services.AddScoped<AccountingService>();
 builder.Services.AddHostedService<AccountingBackgroundService>();
 builder.Services.AddScoped<ErrorAlertService>();
 builder.Services.AddHostedService<ErrorAlertBackgroundService>();
+builder.Services.AddScoped<UptimeService>();
+builder.Services.AddHostedService<UptimeBackgroundService>();
 builder.Services.AddScoped<BackupService>();
 builder.Services.AddScoped<OffsiteBackupService>();
 builder.Services.AddScoped<BackupMaintenanceService>();

@@ -179,6 +179,8 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string ErrorAlertCooldownMinutes = "error_alert_cooldown_minutes";
         public const string ErrorAlertEmail = "error_alert_email";
         public const string ErrorAlertSms = "error_alert_sms";
+        /// <summary>SMS do administratora, gdy monitor dostępności wykryje awarię (e-mail idzie zawsze).</summary>
+        public const string UptimeSmsAlerts = "uptime_sms_alerts";
         // Kopie zapasowe: test odtworzenia i kopia poza serwerem
         /// <summary>„weekly” — co niedzielę Portal odtwarza najnowsze kopie do tymczasowej bazy; „off” — bez testu.</summary>
         public const string BackupVerify = "backup_verify";
