@@ -285,6 +285,8 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         public const string PlatformBunnyApiKey = "platform_bunny_api_key";
         public const string PlatformBunnyLibraryId = "platform_bunny_library_id";
         public const string PlatformBunnyCdnHostname = "platform_bunny_cdn_hostname";
+        /// <summary>Klucz tokenów odtwarzacza (Stream → biblioteka → Security) — Portal podpisuje nim linki do filmów.</summary>
+        public const string PlatformBunnyTokenKey = "platform_bunny_token_key";
         /// <summary>Klucz konta Bunny (Account → API) — Portal zakłada nim osobną bibliotekę dla każdej instancji.</summary>
         public const string PlatformBunnyAccountKey = "platform_bunny_account_key";
         /// <summary>Bunny Storage na zdjęcia trenerów (np. ćwiczeń): strefa, hasło strefy, host regionu i adres CDN (pull zone).</summary>

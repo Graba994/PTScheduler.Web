@@ -21,13 +21,17 @@
                     <i class="bi bi-box-arrow-up"></i> Udostępnij
                 </strong> w Safari, a następnie <strong>Dodaj do ekranu głównego</strong>.
             </div>
+            <button type="button" class="btn btn-link btn-sm p-0 mt-1" @onclick="() => _guide!.ShowAsync()">Pokaż krok po kroku</button>
         </div>
         <button type="button" class="btn-close btn-close-sm ms-1" style="flex-shrink:0"
                 @onclick="DismissIosHint" aria-label="Zamknij"></button>
     </div>
 }
 
+<IosInstallGuide @ref="_guide" />
+
 @code {
+    private IosInstallGuide? _guide;
     private bool _showInstallButton;
     private bool _showIosHint;
     private bool _iosHintDismissed;
@@ -42,7 +46,7 @@
         if (isStandalone) return;
 
         var isIos = await JS.InvokeAsync<bool>("eval",
-            "/iPhone|iPad|iPod/.test(navigator.userAgent) && !(navigator.userAgent.includes('CriOS') || navigator.userAgent.includes('FxiOS'))");
+            "/iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)");
 
         if (isIos)
         {

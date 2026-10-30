@@ -219,6 +219,25 @@
                 try { localStorage.setItem('pwa-banner-dismissed', Date.now().toString()); } catch (e) { }
             },
             otherBannerVisible: () => !!document.querySelector('.pwa-banner'),
+            // Do instrukcji „Dodaj do ekranu głównego”: która przeglądarka na iOS i czy system obsługuje push (16.4+).
+            iosInfo: () => {
+                const ua = navigator.userAgent;
+                const ipad = /ipad/i.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1);
+                const ios = ipad || /iphone|ipod/i.test(ua);
+                const standalone = window.navigator.standalone === true || window.matchMedia('(display-mode: standalone)').matches;
+                let browser = 'safari';
+                if (/FBAN|FBAV|Instagram|Messenger|Line\/|Snapchat|TikTok|musical_ly|Twitter|LinkedInApp|GSA\//i.test(ua)) browser = 'inapp';
+                else if (/CriOS/i.test(ua)) browser = 'chrome';
+                else if (/FxiOS/i.test(ua)) browser = 'firefox';
+                else if (/EdgiOS/i.test(ua)) browser = 'edge';
+                const m = ua.match(/OS (\d+)_(\d+)/) || ua.match(/Version\/(\d+)\.(\d+)/);
+                const major = m ? parseInt(m[1], 10) : 0, minor = m ? parseInt(m[2], 10) : 0;
+                const pushOk = !m || major > 16 || (major === 16 && minor >= 4);
+                return { ios: ios, standalone: standalone, ipad: ipad, browser: browser, pushOk: pushOk, version: m ? major + '.' + minor : '' };
+            },
+            copyLink: async () => {
+                try { await navigator.clipboard.writeText(location.href); return true; } catch (e) { return false; }
+            },
             listen: (dotnetRef) => {
                 window._bannerRef = dotnetRef;
                 // Zdarzenie mogło przyjść, zanim baner się pojawił — wtedy od razu przycisk „Zainstaluj”.

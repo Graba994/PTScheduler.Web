@@ -58,6 +58,29 @@ public class PlansV2Tests
     }
 
     [Fact]
+    public void Gains_list_only_what_target_plan_adds_and_granting_them_reaches_target()
+    {
+        var solo = new Plan { Id = "starter", Name = "Solo", MaxClients = 20, AiAssistant = false, Coupons = true, BrandingTier = "basic" };
+        var pro = new Plan { Id = "pro", Name = "Pro", MaxClients = 75, AiAssistant = true, Coupons = true, BrandingTier = "full" };
+
+        var gains = PlanFeatureCatalog.Gains(solo, pro).ToDictionary(g => g.Feature.Key, g => g.Value);
+
+        gains.Should().ContainKeys("MaxClients", "AiAssistant", "BrandingTier");
+        gains.Should().NotContainKey("Coupons");
+        gains["MaxClients"].Should().Be(75);
+        PlanFeatureCatalog.Gains(pro, solo).Should().BeEmpty();
+
+        var now = DateTime.UtcNow;
+        var exceptions = PlanFeatureCatalog.Gains(solo, pro).Select(g => new TenantFeatureException
+        {
+            Key = g.Feature.Key, ValueJson = PlanFeatureCatalog.ValueJson(g.Feature, g.Value)
+        });
+        var granted = PlanFeatureCatalog.ApplyExceptions(solo, exceptions, now);
+        PlanFeatureCatalog.Gains(granted, pro).Should().BeEmpty();
+        granted.BrandingTier.Should().Be("full");
+    }
+
+    [Fact]
     public void Trial_plan_applies_only_until_trial_end()
     {
         var start = new Plan { Id = "start", Name = "Start", MaxClients = 3 };

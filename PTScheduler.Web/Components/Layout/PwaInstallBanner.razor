@@ -33,6 +33,10 @@
             {
                 <button class="btn btn-primary btn-sm" @onclick="InstallAsync">@_button</button>
             }
+            else if (_mode == Mode.Ios)
+            {
+                <button class="btn btn-primary btn-sm" @onclick="ShowIosGuideAsync">Pokaż jak</button>
+            }
             <button class="btn btn-link btn-sm pwa-banner-close" @onclick="Dismiss" aria-label="Zamknij">
                 <i class="bi bi-x-lg"></i>
             </button>
@@ -40,8 +44,17 @@
     </div>
 }
 
+<IosInstallGuide @ref="_guide" />
+
 @code {
     private enum Mode { Prompt, Ios, Manual }
+    private IosInstallGuide? _guide;
+
+    private async Task ShowIosGuideAsync()
+    {
+        _show = false;
+        if (_guide is not null) await _guide.ShowAsync();
+    }
 
     private bool _show;
     private Mode _mode = Mode.Prompt;

@@ -94,6 +94,38 @@ else
                 <button class="btn btn-primary btn-sm" @onclick="SaveBunnyAsync">Zapisz i sprawdź</button>
                 <button class="btn btn-outline-secondary btn-sm" @onclick="TestBunnyAsync" disabled="@(string.IsNullOrWhiteSpace(_bunnyLibrary) || (!_bunnyKeySet && string.IsNullOrWhiteSpace(_bunnyKey)))">Testuj</button>
             </div>
+            <div class="pp-label mt-4">Ochrona filmów (podpisane linki)</div>
+            <p class="small text-muted mb-2">
+                Bez tego każdy, kto zobaczy link do filmu, może go osadzić u siebie. Z kluczem tokenów Portal podpisuje linki na @((int)VideoHubService.EmbedWindow.TotalHours) godzin —
+                skopiowany link po tym czasie przestaje działać.
+                @(_bunnyTokenSet ? "" : "Teraz linki są bez podpisu.")
+            </p>
+            <details class="small mb-2">
+                <summary class="fw-semibold">Jak włączyć (jednorazowo)</summary>
+                <ol class="mt-2 mb-0">
+                    <li>Bunny → <em>Stream → Twoja biblioteka → Security</em>: skopiuj <strong>Token authentication key</strong> i wklej poniżej, zapisz.</li>
+                    <li>Otwórz dowolny film w aplikacji trenera — powinien działać jak dotąd (link ma już podpis).</li>
+                    <li>Dopiero wtedy w Bunny włącz <strong>Embed view token authentication</strong>. Odwrotna kolejność zatrzyma filmy do czasu zapisania klucza.</li>
+                </ol>
+            </details>
+            <div class="row g-2 align-items-end">
+                <div class="col-md-6">
+                    <label class="form-label small fw-semibold" for="bunnyToken">Token authentication key</label>
+                    <input id="bunnyToken" type="password" class="form-control font-monospace" @bind="_bunnyToken" @bind:event="oninput" placeholder="@(_bunnyTokenSet ? "Zapisany — wpisz nowy, aby zmienić" : "Stream → biblioteka → Security")" autocomplete="off" />
+                </div>
+                <div class="col-md-auto d-flex gap-2">
+                    <button class="btn btn-primary btn-sm" @onclick="SaveTokenAsync" disabled="@string.IsNullOrWhiteSpace(_bunnyToken)">Zapisz klucz</button>
+                    @if (_bunnyTokenSet)
+                    {
+                        <button class="btn btn-outline-danger btn-sm" @onclick="ClearTokenAsync">Wyłącz podpisywanie</button>
+                    }
+                </div>
+            </div>
+            @if (_bunnyTokenSet)
+            {
+                <div class="small text-success mt-2"><i class="bi bi-shield-check me-1"></i>Linki do filmów z centralnej biblioteki są podpisane.</div>
+            }
+
             <div class="small text-muted mt-3">
                 Filmy trenerów: <strong>@_videosCount</strong> · zajęte <strong>@VideoHubService.Gb(_videosBytes)</strong> · trenerzy z filmami: <strong>@_videoTenants</strong> z @_tenantsCount.
                 @if (_librariesCount > 0)
@@ -226,6 +258,8 @@ else
     private string _bunnyLibrary = "";
     private string _bunnyCdn = "";
     private bool _bunnyKeySet;
+    private string _bunnyToken = "";
+    private bool _bunnyTokenSet;
     private int _librariesCount, _tenantsCount, _videosCount, _videoTenants;
     private long _videosBytes;
 
@@ -264,6 +298,7 @@ else
         _smsSender = s[SiteSettingsService.Keys.PlatformSmsSenderName];
         _smsOn = _smsTokenSet && s[SiteSettingsService.Keys.PlatformSmsEnabled] != "false";
         _bunnyKeySet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformBunnyApiKey]);
+        _bunnyTokenSet = await VideoHub.TokenKeySetAsync();
         _bunnyLibrary = s[SiteSettingsService.Keys.PlatformBunnyLibraryId];
         _bunnyCdn = s[SiteSettingsService.Keys.PlatformBunnyCdnHostname];
         _shareSmtp = s[SiteSettingsService.Keys.ShareSmtpWithTenants] != "false";
@@ -325,6 +360,23 @@ else
         await VideoHub.SaveLibraryAsync(_bunnyLibrary, string.IsNullOrWhiteSpace(_bunnyKey) ? null : _bunnyKey, _bunnyCdn);
         _bunnyKey = "";
         Show("Zapisano bibliotekę — foldery trenerów powstaną przy pierwszym filmie.", true);
+        await LoadAsync();
+    }
+
+    private async Task SaveTokenAsync()
+    {
+        var key = _bunnyToken.Trim();
+        if (key.Length < 16 || key.Any(char.IsWhiteSpace)) { Show("To nie wygląda na klucz tokenów — skopiuj „Token authentication key” z Security biblioteki.", false); return; }
+        await VideoHub.SaveTokenKeyAsync(key);
+        _bunnyToken = "";
+        Show("Zapisano — aplikacje trenerów dostają już podpisane linki (do 10 min). Teraz możesz włączyć Embed view token authentication w Bunny.", true);
+        await LoadAsync();
+    }
+
+    private async Task ClearTokenAsync()
+    {
+        await VideoHub.SaveTokenKeyAsync(null);
+        Show("Podpisywanie wyłączone. Najpierw wyłącz Embed view token authentication w Bunny, inaczej filmy przestaną się odtwarzać.", true);
         await LoadAsync();
     }
 

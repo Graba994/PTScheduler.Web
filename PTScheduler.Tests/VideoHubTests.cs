@@ -40,6 +40,20 @@ public class VideoHubTests
     }
 
     [Fact]
+    public void Embed_token_follows_bunny_formula_and_signs_only_central_library()
+    {
+        var token = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes("tok-key" + "a1b2-c3" + "1700000000"))).ToLowerInvariant();
+        VideoHubService.SignedEmbed("555", "a1b2-c3", "tok-key", 1700000000)
+            .Should().Be($"https://iframe.mediadelivery.net/embed/555/a1b2-c3?token={token}&expires=1700000000");
+
+        VideoHubService.SignedEmbedFor("555/a1b2-c3", "555", "tok-key", 1700000000).Should().Contain("token=");
+        VideoHubService.SignedEmbedFor("777/a1b2-c3", "555", "tok-key", 1700000000).Should().BeNull(); // stara biblioteka trenera
+        VideoHubService.SignedEmbedFor("a1b2-c3", "555", "tok-key", 1700000000).Should().BeNull();
+        VideoHubService.SignedEmbedFor("555/a1b2-c3", "555", null, 1700000000).Should().BeNull();  // klucz nie zapisany
+        VideoHubService.SignedEmbedFor("555/../x", "555", "tok-key", 1700000000).Should().BeNull();
+    }
+
+    [Fact]
     public void Video_ref_keeps_library_and_falls_back_for_old_guids()
     {
         var r = VideoRef.Make("555", "a1b2-c3");

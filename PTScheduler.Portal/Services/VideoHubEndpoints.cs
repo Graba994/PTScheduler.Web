@@ -10,6 +10,7 @@ public static class VideoHubEndpoints
     public sealed record CreateVideoRequest(string? Title, string? Kind, long SizeBytes);
     public sealed record CopyRequest(int Id);
     public sealed record DeleteImageRequest(string? Url);
+    public sealed record EmbedRequest(string[]? Refs);
 
     public static void MapVideoHub(this WebApplication app)
     {
@@ -44,6 +45,15 @@ public static class VideoHubEndpoints
         g.MapPost("/images/delete", async (string slug, DeleteImageRequest body, HttpContext ctx, IDbContextFactory<PortalDbContext> dbf, IConfiguration config, ImageHubService images) =>
             await WithTenant(slug, ctx, dbf, config, async t =>
                 !string.IsNullOrWhiteSpace(body.Url) && await images.DeleteAsync(t, body.Url) ? Results.Ok() : Results.NotFound()));
+
+        // Podpisane (czasowe) linki do odtwarzacza — klucz tokenów zostaje w Portalu.
+        g.MapPost("/video/embed", async (string slug, EmbedRequest body, HttpContext ctx, IDbContextFactory<PortalDbContext> dbf, IConfiguration config, VideoHubService hub) =>
+            await WithTenant(slug, ctx, dbf, config, async _ =>
+            {
+                var refs = (body.Refs ?? []).Where(r => !string.IsNullOrWhiteSpace(r) && r.Length <= 140).Take(50).ToList();
+                var (urls, expires) = await hub.SignEmbedsAsync(refs, DateTimeOffset.UtcNow);
+                return Results.Json(new { urls, expires });
+            }));
 
         g.MapGet("/video/list", async (string slug, HttpContext ctx, IDbContextFactory<PortalDbContext> dbf, IConfiguration config, VideoHubService hub) =>
             await WithTenant(slug, ctx, dbf, config, async t =>

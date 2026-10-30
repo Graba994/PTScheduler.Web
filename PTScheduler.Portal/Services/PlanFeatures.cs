@@ -187,6 +187,19 @@ public static class PlanFeatureCatalog
         return result;
     }
 
+    /// <summary>Co plan docelowy daje ponad obecny (włączniki, wyższe limity, mocniejsze wybory) — do dodania jako wyjątki naraz.</summary>
+    public static List<(PlanFeature Feature, object Value)> Gains(Plan current, Plan target) => All
+        .Select(f => (Feature: f, Value: Get(target, f.Key)))
+        .Where(x => x.Value is not null && x.Feature.Kind switch
+        {
+            PlanFeatureKind.Flag => x.Value is true && Get(current, x.Feature.Key) is not true,
+            PlanFeatureKind.Limit => x.Value is int n && n > (Get(current, x.Feature.Key) as int? ?? 0),
+            _ => Rank(x.Feature, x.Value as string) > Rank(x.Feature, Get(current, x.Feature.Key) as string)
+        })
+        .OrderBy(x => PitchRank(x.Feature.Key))
+        .Select(x => (x.Feature, x.Value!))
+        .ToList();
+
     /// <summary>Wartość wyjątku jako JSON dla danej funkcji (włącznik — true, limit — liczba, wybór — tekst).</summary>
     public static string ValueJson(PlanFeature f, object value) => JsonSerializer.Serialize(f.Kind switch
     {

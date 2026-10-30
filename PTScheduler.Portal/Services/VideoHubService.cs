@@ -67,6 +67,51 @@ public class VideoHubService(
         await settings.SetManyAsync(values);
     }
 
+    // ── Podpisane linki do odtwarzacza (Bunny: Embed view token authentication) ─────────
+
+    /// <summary>Jak długo ważny jest podpisany link — dość na cały trening, za krótko, by link krążył po sieci.</summary>
+    public static readonly TimeSpan EmbedWindow = TimeSpan.FromHours(8);
+
+    public async Task<bool> TokenKeySetAsync() => !string.IsNullOrWhiteSpace(await settings.GetAsync(K.PlatformBunnyTokenKey));
+
+    /// <summary>Pusty klucz wyłącza podpisywanie (linki znów bez tokenu).</summary>
+    public async Task SaveTokenKeyAsync(string? tokenKey) =>
+        await settings.SetManyAsync(new Dictionary<string, string>
+        {
+            [K.PlatformBunnyTokenKey] = string.IsNullOrWhiteSpace(tokenKey) ? "" : Secrets.Protect(tokenKey.Trim())
+        });
+
+    /// <summary>Token Bunny: SHA256_HEX(klucz_tokenów + video_id + expires).</summary>
+    public static string SignedEmbed(string libraryId, string guid, string tokenKey, long expires)
+    {
+        var token = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(tokenKey + guid + expires))).ToLowerInvariant();
+        return $"https://iframe.mediadelivery.net/embed/{libraryId}/{guid}?token={token}&expires={expires}";
+    }
+
+    /// <summary>
+    /// Podpisane linki do filmów z centralnej biblioteki. Filmy ze starych bibliotek trenerów i nieznane odnośniki
+    /// dostają null — aplikacja użyje wtedy zwykłego linku.
+    /// </summary>
+    public async Task<(Dictionary<string, string?> Urls, long Expires)> SignEmbedsAsync(IEnumerable<string> refs, DateTimeOffset now)
+    {
+        var expires = now.Add(EmbedWindow).ToUnixTimeSeconds();
+        var s = await settings.GetAllAsync(K.PlatformBunnyLibraryId, K.PlatformBunnyTokenKey);
+        var library = s[K.PlatformBunnyLibraryId]?.Trim();
+        var key = Unprotect(s[K.PlatformBunnyTokenKey]);
+        return (refs.Distinct().ToDictionary(r => r, r => SignedEmbedFor(r, library, key, expires)), expires);
+    }
+
+    /// <summary>Podpisuje tylko odnośnik „{centralna biblioteka}/{guid}” i tylko gdy klucz jest zapisany.</summary>
+    public static string? SignedEmbedFor(string videoRef, string? library, string? tokenKey, long expires)
+    {
+        var i = videoRef.IndexOf('/');
+        if (i <= 0 || string.IsNullOrWhiteSpace(tokenKey) || string.IsNullOrWhiteSpace(library)) return null;
+        var (lib, guid) = (videoRef[..i], videoRef[(i + 1)..]);
+        return lib == library && IsSafeId(guid) ? SignedEmbed(library, guid, tokenKey, expires) : null;
+    }
+
+    private static bool IsSafeId(string s) => s.Length is > 0 and <= 64 && s.All(c => char.IsAsciiLetterOrDigit(c) || c == '-');
+
     /// <summary>Starsze wersje trzymały klucz jawnie — wtedy zwracamy go bez zmian.</summary>
     private string? Unprotect(string? stored)
     {

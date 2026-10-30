@@ -259,11 +259,55 @@ public class BunnyService(IWebRootPathProvider webRoot, IHttpClientFactory httpF
         }
     }
 
+    /// <summary>Podpisane linki z Portalu: odnośnik → (link, do kiedy trzymać w pamięci).</summary>
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, (string Url, DateTime Until)> Signed = new();
+
     public async Task<string?> EmbedUrlAsync(string? videoRef)
     {
         if (string.IsNullOrWhiteSpace(videoRef)) return null;
         var (lib, _) = VideoRef.Parse(videoRef);
-        return VideoRef.Embed(videoRef, lib is null ? (await GetStatusAsync()).LegacyLibraryId : null);
+        var plain = VideoRef.Embed(videoRef, lib is null ? (await GetStatusAsync()).LegacyLibraryId : null);
+        if (plain is null || lib is null || !Managed) return plain;
+
+        var key = videoRef.Trim();
+        if (Signed.TryGetValue(key, out var hit) && hit.Until > DateTime.UtcNow) return hit.Url;
+        var (url, until) = await SignAsync(key, plain);
+        if (Signed.Count > 2000) Signed.Clear();
+        Signed[key] = (url, until);
+        return url;
+    }
+
+    /// <summary>
+    /// Link z tokenem Bunny (Portal zna klucz tokenów). Gdy Portal nie podpisuje (brak klucza, stara biblioteka)
+    /// albo nie odpowiada — zwykły link, sprawdzany ponownie za kilka minut.
+    /// </summary>
+    private async Task<(string Url, DateTime Until)> SignAsync(string videoRef, string plain)
+    {
+        try
+        {
+            using var req = Request(HttpMethod.Post, "video/embed");
+            req.Content = JsonContent.Create(new { refs = new[] { videoRef } });
+            using var resp = await Http(10).SendAsync(req);
+            if (resp.IsSuccessStatusCode)
+            {
+                var e = await resp.Content.ReadFromJsonAsync<JsonElement>();
+                if (e.TryGetProperty("urls", out var urls) && urls.TryGetProperty(videoRef, out var u) && u.ValueKind == JsonValueKind.String)
+                {
+                    // Zapas godziny, żeby nikt nie dostał linku, który wygaśnie w trakcie oglądania.
+                    var expires = DateTimeOffset.FromUnixTimeSeconds(e.GetProperty("expires").GetInt64()).UtcDateTime;
+                    return (u.GetString()!, expires.AddHours(-1));
+                }
+                return (plain, DateTime.UtcNow.AddMinutes(10));
+            }
+            // Starszy Portal bez podpisywania — zwykły link.
+            if (resp.StatusCode == System.Net.HttpStatusCode.NotFound) return (plain, DateTime.UtcNow.AddMinutes(10));
+            logger.LogWarning("Portal: podpis linku do filmu niedostępny ({Status}).", (int)resp.StatusCode);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException or JsonException or KeyNotFoundException or InvalidOperationException)
+        {
+            logger.LogWarning(ex, "Portal: podpis linku do filmu niedostępny.");
+        }
+        return (plain, DateTime.UtcNow.AddMinutes(2));
     }
 
     /// <summary>Biblioteka ze starej, ręcznej konfiguracji trenera — tylko do odtwarzania dawnych filmów.</summary>

@@ -1,0 +1,192 @@
+@inject PTScheduler.Application.Interfaces.IBrandingService BrandingService
+@inject IJSRuntime JS
+
+@* Krok po kroku: jak dodać aplikację do ekranu głównego na iPhonie/iPadzie — bez tego iOS nie wysyła powiadomień push. *@
+@if (_open)
+{
+    <div class="iig-backdrop" @onclick="Close"></div>
+    <div class="iig-sheet" role="dialog" aria-modal="true" aria-labelledby="iig-title" tabindex="-1" @onkeydown="OnKey">
+        <div class="iig-grip" aria-hidden="true"></div>
+        <button type="button" class="iig-close" aria-label="Zamknij" @onclick="Close"><i class="bi bi-x-lg"></i></button>
+
+        @if (_info.Browser == "inapp")
+        {
+            <h2 id="iig-title" class="iig-title">Otwórz w Safari</h2>
+            <p class="iig-lead">Ta strona jest otwarta w aplikacji (np. Instagram, Messenger). Stąd nie da się jej dodać do ekranu głównego.</p>
+            <div class="iig-stage">
+                <div class="iig-phone">
+                    <div class="iig-inapp-bar"><span>@Host</span><span class="iig-dots iig-hit">⋯</span></div>
+                    <div class="iig-menu">
+                        <div>Kopiuj link</div>
+                        <div class="iig-row-hit"><i class="bi bi-compass"></i>Otwórz w Safari</div>
+                    </div>
+                </div>
+            </div>
+            <ol class="iig-list">
+                <li>Naciśnij <b>⋯</b> albo ikonę kompasu w rogu ekranu.</li>
+                <li>Wybierz <b>Otwórz w Safari</b> (albo „Otwórz w przeglądarce”).</li>
+                <li>W Safari wróć tutaj — pokażemy, co dalej.</li>
+            </ol>
+            <button type="button" class="btn btn-outline-primary w-100" @onclick="CopyAsync">
+                <i class="bi @(_copied ? "bi-check2" : "bi-link-45deg") me-1"></i>@(_copied ? "Skopiowano — wklej w Safari" : "Kopiuj link do wklejenia w Safari")
+            </button>
+        }
+        else
+        {
+            var step = Steps[_step];
+            <h2 id="iig-title" class="iig-title">Dodaj @_appName do ekranu głównego</h2>
+            <p class="iig-lead">@(_info.PushOk ? "Tylko tak iPhone pozwala wysyłać powiadomienia — o treningach, zmianach i wiadomościach od trenera." : "Aplikacja z ikony działa szybciej i jak natywna.")</p>
+
+            <div class="iig-stage" aria-hidden="true">
+                @switch (step.Key)
+                {
+                    case "share":
+                        <div class="iig-phone @(_info.Ipad || _info.Browser != "safari" ? "iig-phone--top" : "")" @key="@("s-" + step.Key)">
+                            <div class="iig-page"><span></span><span></span><span></span></div>
+                            <div class="iig-toolbar">
+                                <i class="bi bi-chevron-left"></i><i class="bi bi-chevron-right"></i>
+                                <i class="bi bi-box-arrow-up iig-hit"></i>
+                                <i class="bi bi-book"></i><i class="bi bi-copy"></i>
+                            </div>
+                            <span class="iig-finger"></span>
+                        </div>
+                        break;
+                    case "add":
+                        <div class="iig-phone" @key="@("s-" + step.Key)">
+                            <div class="iig-share">
+                                <div class="iig-share-row"><i class="bi bi-copy"></i>Kopiuj</div>
+                                <div class="iig-share-row"><i class="bi bi-eyeglasses"></i>Dodaj do listy Czytelnia</div>
+                                <div class="iig-share-row iig-row-hit"><i class="bi bi-plus-square"></i>Dodaj do ekranu głównego</div>
+                                <div class="iig-share-row"><i class="bi bi-bookmark"></i>Dodaj zakładkę</div>
+                            </div>
+                        </div>
+                        break;
+                    case "confirm":
+                        <div class="iig-phone" @key="@("s-" + step.Key)">
+                            <div class="iig-confirm">
+                                <div class="iig-confirm-bar"><span>Anuluj</span><b>Do ekranu</b><span class="iig-hit-text">Dodaj</span></div>
+                                <div class="iig-confirm-app">
+                                    <img src="@_icon" alt="" width="44" height="44" />
+                                    <div><b>@_appName</b><small>@Host</small></div>
+                                </div>
+                            </div>
+                        </div>
+                        break;
+                    default:
+                        <div class="iig-phone iig-phone--home" @key="@("s-" + step.Key)">
+                            <div class="iig-home">
+                                @for (var i = 0; i < 7; i++)
+                                {
+                                    <span class="iig-app-blank"></span>
+                                }
+                                <span class="iig-app-new"><img src="@_icon" alt="" width="40" height="40" /><small>@_appName</small></span>
+                            </div>
+                        </div>
+                        break;
+                }
+            </div>
+
+            <div class="iig-step" @key="@("t-" + _step)">
+                <div class="iig-step-no">Krok @(_step + 1) z @Steps.Count</div>
+                <div class="iig-step-title">@step.Title</div>
+                <div class="iig-step-text">@step.Text</div>
+            </div>
+
+            <div class="iig-dots-row" role="tablist" aria-label="Kroki">
+                @for (var i = 0; i < Steps.Count; i++)
+                {
+                    var n = i;
+                    <button type="button" role="tab" class="iig-dot @(n == _step ? "on" : "")" aria-selected="@(n == _step ? "true" : "false")" aria-label="Krok @(n + 1)" @onclick="() => _step = n"></button>
+                }
+            </div>
+
+            <div class="iig-actions">
+                @if (_step > 0)
+                {
+                    <button type="button" class="btn btn-light" @onclick="() => _step--">Wstecz</button>
+                }
+                @if (_step < Steps.Count - 1)
+                {
+                    <button type="button" class="btn btn-primary flex-grow-1" @onclick="() => _step++">Dalej</button>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-primary flex-grow-1" @onclick="Close">Rozumiem</button>
+                }
+            </div>
+
+            @if (_info.Browser != "safari")
+            {
+                <p class="iig-note"><i class="bi bi-info-circle me-1"></i>Najpewniej działa w Safari.
+                    <button type="button" class="btn btn-link btn-sm p-0 align-baseline" @onclick="CopyAsync">@(_copied ? "Link skopiowany" : "Skopiuj link")</button>, otwórz Safari i wklej.</p>
+            }
+            @if (!_info.PushOk)
+            {
+                <p class="iig-note iig-note--warn"><i class="bi bi-exclamation-triangle me-1"></i>Twój iOS (@_info.Version) nie obsługuje powiadomień z aplikacji na ekranie głównym. Zaktualizuj system: Ustawienia → Ogólne → Uaktualnienia (potrzebny iOS 16.4 lub nowszy).</p>
+            }
+        }
+    </div>
+}
+
+@code {
+    private sealed record IosInfo(bool Ios, bool Standalone, bool Ipad, string Browser, bool PushOk, string Version);
+    private sealed record Step(string Key, string Title, string Text);
+
+    private bool _open, _copied;
+    private int _step;
+    private IosInfo _info = new(true, false, false, "safari", true, "");
+    private string _appName = "aplikację";
+    private string _icon = "/icons/icon-96.png";
+    private string Host => _host ?? "";
+    private string? _host;
+
+    /// <summary>Gdzie jest przycisk Udostępnij zależy od urządzenia i przeglądarki.</summary>
+    private List<Step> Steps =>
+    [
+        new("share", "Naciśnij Udostępnij",
+            _info.Browser switch
+            {
+                "chrome" or "edge" => "Ikona kwadratu ze strzałką jest w pasku adresu u góry (albo w menu ⋯).",
+                "firefox" => "Otwórz menu ☰ na dole i wybierz Udostępnij.",
+                _ when _info.Ipad => "Ikona kwadratu ze strzałką jest u góry, obok paska adresu.",
+                _ => "Ikona kwadratu ze strzałką jest na dole ekranu. W nowszym iOS może być pod ⋯."
+            }),
+        new("add", "Wybierz „Dodaj do ekranu głównego”", "Jeśli nie widać tej pozycji, przewiń listę w dół."),
+        new("confirm", "Naciśnij „Dodaj”", "W prawym górnym rogu. Nazwę możesz zostawić."),
+        new("home", "Otwieraj z ikony", _info.PushOk
+            ? $"Ikona {_appName} jest teraz na ekranie głównym. Otwórz ją i włącz powiadomienia w Moje konto → Powiadomienia."
+            : $"Ikona {_appName} jest teraz na ekranie głównym — otwieraj aplikację stąd.")
+    ];
+
+    /// <summary>Otwiera instrukcję dopasowaną do przeglądarki (Safari, Chrome, przeglądarka w Instagramie itp.).</summary>
+    public async Task ShowAsync()
+    {
+        try
+        {
+            var b = await BrandingService.GetAsync();
+            if (!string.IsNullOrWhiteSpace(b.CompanyName)) _appName = b.CompanyName;
+            if (!string.IsNullOrWhiteSpace(b.PwaIconPath)) _icon = b.PwaIconPath;
+            _info = await JS.InvokeAsync<IosInfo>("PTBanner.iosInfo");
+            _host = await JS.InvokeAsync<string>("eval", "location.host");
+        }
+        catch { }
+        _step = 0;
+        _copied = false;
+        _open = true;
+        StateHasChanged();
+    }
+
+    private void Close() => _open = false;
+
+    private void OnKey(KeyboardEventArgs e)
+    {
+        if (e.Key == "Escape") Close();
+        else if (e.Key == "ArrowRight" && _step < Steps.Count - 1) _step++;
+        else if (e.Key == "ArrowLeft" && _step > 0) _step--;
+    }
+
+    private async Task CopyAsync()
+    {
+        try { _copied = await JS.InvokeAsync<bool>("PTBanner.copyLink"); } catch { }
+    }
+}

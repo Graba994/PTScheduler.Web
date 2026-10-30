@@ -159,6 +159,51 @@
                 </div>
             </div>
 
+            @if (BulkPlans.Count > 0)
+            {
+                @if (!_bulkOpen)
+                {
+                    <button type="button" class="btn btn-link btn-sm p-0" @onclick="OpenBulk"><i class="bi bi-stars me-1"></i>Dodaj funkcje z planu…</button>
+                }
+                else
+                {
+                    <div class="tpc-form tpc-bulk">
+                        <div class="d-flex flex-wrap gap-2 align-items-center mb-2">
+                            <span class="small fw-semibold">Funkcje z planu</span>
+                            <select class="form-select form-select-sm w-auto" value="@_bulkPlan" @onchange="e => PickBulkPlan(e.Value?.ToString())" aria-label="Plan">
+                                @foreach (var p in BulkPlans)
+                                {
+                                    <option value="@p.Id">@p.Name</option>
+                                }
+                            </select>
+                            <span class="small text-muted">— zaznacz, co dać studiu ponad @_plan.Name.</span>
+                            <button type="button" class="btn-close ms-auto" aria-label="Zamknij" @onclick="() => _bulkOpen = false"></button>
+                        </div>
+                        <div class="tpc-bulk-list">
+                            @foreach (var (f, v) in BulkGains)
+                            {
+                                var sel = _bulkPicked.Contains(f.Key);
+                                <button type="button" class="tpc-bulk-item @(sel ? "on" : "")" aria-pressed="@(sel ? "true" : "false")" @onclick="() => ToggleBulk(f.Key)">
+                                    <i class="bi @(sel ? "bi-check-square-fill" : "bi-square")"></i>
+                                    <i class="bi @f.Icon tpc-bulk-ico"></i>
+                                    <span>@f.Name@(f.Kind == PlanFeatureKind.Flag ? "" : $": {ShowValue(f, PlanFeatureCatalog.ValueJson(f, v))}")</span>
+                                </button>
+                            }
+                        </div>
+                        <div class="row g-2 mt-1 align-items-center">
+                            <div class="col-auto">
+                                <button type="button" class="btn btn-link btn-sm p-0" @onclick="ToggleAllBulk">@(_bulkPicked.Count == BulkGains.Count ? "Odznacz wszystkie" : "Zaznacz wszystkie")</button>
+                            </div>
+                            <div class="col-md-3"><input type="date" class="form-control form-control-sm" @bind="_bulkUntil" title="Do kiedy (puste = bez końca)" aria-label="Do kiedy" /></div>
+                            <div class="col-md-4"><input class="form-control form-control-sm" maxlength="200" placeholder="Dlaczego (np. negocjacje)" @bind="_bulkNote" aria-label="Notatka" /></div>
+                            <div class="col-md-auto">
+                                <button class="btn btn-primary btn-sm" disabled="@(_bulkPicked.Count == 0)" @onclick="AddBulkAsync"><i class="bi bi-plus-lg me-1"></i>Dodaj zaznaczone (@_bulkPicked.Count)</button>
+                            </div>
+                        </div>
+                    </div>
+                }
+            }
+
             @if (FloorGains.Count > 0)
             {
                 <div class="pp-label mt-3">Zachowane z poprzednich pakietów</div>
@@ -188,6 +233,12 @@
     .tpc-list li { display: flex; gap: .6rem; align-items: flex-start; font-size: .88rem; padding: .45rem .55rem; border: 1px solid var(--pts-border, #e6e8ee); border-radius: 10px; }
     .tpc-list li > i { color: var(--pts-primary, #4f46e5); margin-top: .1rem; }
     .tpc-list li.tpc-expired { opacity: .55; }
+    .tpc-bulk-list { display: grid; grid-template-columns: repeat(auto-fill, minmax(230px, 1fr)); gap: .35rem; }
+    .tpc-bulk-item { display: flex; gap: .45rem; align-items: center; text-align: left; font-size: .85rem; padding: .4rem .55rem; border: 1px solid var(--pts-border, #e6e8ee); border-radius: 9px; background: var(--bs-body-bg, #fff); color: inherit; }
+    .tpc-bulk-item:hover { border-color: var(--pts-primary, #4f46e5); }
+    .tpc-bulk-item.on { border-color: var(--pts-primary, #4f46e5); background: rgba(79, 70, 229, .06); }
+    .tpc-bulk-item > .bi:first-child { color: var(--pts-primary, #4f46e5); }
+    .tpc-bulk-ico { opacity: .7; }
     @@media (max-width: 575.98px) { .tpc-row { grid-template-columns: 1fr; } }
 </style>
 
@@ -207,6 +258,61 @@
     private DateTime? _newUntil;
 
     private PlanFeature? NewFeature => PlanFeatureCatalog.Find(_newKey);
+
+    private bool _bulkOpen;
+    private string _bulkPlan = "", _bulkNote = "";
+    private DateTime? _bulkUntil;
+    private HashSet<string> _bulkPicked = [];
+
+    /// <summary>Plany, które dają studiu coś ponad to, co ma teraz (z wyjątkami i podłogą).</summary>
+    private List<Plan> BulkPlans => _effective is null || _plan is null ? [] :
+        _plans.Where(p => p.Id != _plan.Id && PlanFeatureCatalog.Gains(_effective, p).Count > 0).ToList();
+
+    private List<(PlanFeature Feature, object Value)> BulkGains =>
+        _effective is not null && _plans.FirstOrDefault(p => p.Id == _bulkPlan) is { } target ? PlanFeatureCatalog.Gains(_effective, target) : [];
+
+    private void OpenBulk()
+    {
+        _bulkOpen = true;
+        if (BulkPlans.All(p => p.Id != _bulkPlan)) PickBulkPlan(BulkPlans.FirstOrDefault(p => p.MonthlyPrice > (_plan?.MonthlyPrice ?? 0))?.Id ?? BulkPlans[0].Id);
+    }
+
+    private void PickBulkPlan(string? id)
+    {
+        _bulkPlan = id ?? "";
+        _bulkPicked = [];
+    }
+
+    private void ToggleBulk(string key)
+    {
+        if (!_bulkPicked.Remove(key)) _bulkPicked.Add(key);
+    }
+
+    private void ToggleAllBulk() =>
+        _bulkPicked = _bulkPicked.Count == BulkGains.Count ? [] : BulkGains.Select(g => g.Feature.Key).ToHashSet();
+
+    private Task AddBulkAsync()
+    {
+        var picked = BulkGains.Where(g => _bulkPicked.Contains(g.Feature.Key)).ToList();
+        if (picked.Count == 0) return Task.CompletedTask;
+        var planName = PlanName(_bulkPlan);
+        var until = _bulkUntil is { } d ? DateTime.SpecifyKind(d.Date.AddDays(1), DateTimeKind.Local).ToUniversalTime() : (DateTime?)null;
+        var note = string.IsNullOrWhiteSpace(_bulkNote) ? $"z planu {planName}" : _bulkNote.Trim();
+        return ApplyAsync(async (db, _) =>
+        {
+            var who = await WhoAsync();
+            foreach (var (f, v) in picked)
+                db.TenantFeatureExceptions.Add(new TenantFeatureException
+                {
+                    TenantId = TenantId, Key = f.Key, ValueJson = PlanFeatureCatalog.ValueJson(f, v), Note = note, ExpiresAt = until, CreatedBy = who
+                });
+            _bulkOpen = false;
+            _bulkPicked = [];
+            _bulkNote = "";
+            _bulkUntil = null;
+            return $"Wyjątki z planu {planName}: {string.Join(", ", picked.Select(g => g.Feature.Name))}{(until is { } u ? $" do {u.ToLocalTime():dd.MM.yyyy}" : "")}";
+        });
+    }
 
     protected override async Task OnParametersSetAsync() => await LoadAsync();
 
