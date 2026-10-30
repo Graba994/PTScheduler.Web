@@ -7,6 +7,7 @@
 @inject IDbContextFactory<PortalDbContext> DbFactory
 @inject GoogleOAuthBroker Google
 @inject NavigationManager Nav
+@inject TenantService Tenants
 @rendermode InteractiveServer
 
 <PageTitle>Usługi dla trenerów — Hantly Portal</PageTitle>
@@ -32,6 +33,24 @@ else
         <div class="card-body">
             <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm"><i class="bi bi-chat-dots"></i></span>SMS (SMSAPI.pl)</h2>
             <p class="small text-muted">Jedno konto platformy. Trenerzy kupują pakiety SMS w sklepie usług, a przypomnienia schodzą z ich puli.</p>
+            <div class="form-check form-switch mb-3">
+                <input class="form-check-input" type="checkbox" role="switch" id="smsOn" checked="@_smsOn" @onchange="ToggleSmsAsync" />
+                <label class="form-check-label small fw-semibold" for="smsOn">SMS-y widoczne dla trenerów i klientów</label>
+                <div class="form-text">
+                    @if (!_smsTokenSet)
+                    {
+                        <span>Bez tokenu SMSAPI opcje SMS są ukryte wszędzie — w aplikacjach studiów, w sklepie i w cenniku na stronie głównej.</span>
+                    }
+                    else if (_smsOn)
+                    {
+                        <span>Działa: trenerzy widzą przypomnienia SMS, klienci — ustawienia SMS.</span>
+                    }
+                    else
+                    {
+                        <span>Wyłączone: SMS-y nie wychodzą, a trenerzy i klienci nie widzą żadnych opcji SMS.</span>
+                    }
+                </div>
+            </div>
             <div class="row g-3">
                 <div class="col-md-7">
                     <label class="form-label small fw-semibold" for="smsToken">Token API (OAuth)</label>
@@ -200,7 +219,7 @@ else
     private bool _ok;
 
     private string _smsToken = "";
-    private bool _smsTokenSet;
+    private bool _smsTokenSet, _smsOn;
     private string _smsSender = "";
 
     private string _bunnyKey = "";
@@ -230,7 +249,7 @@ else
     private async Task LoadAsync()
     {
         var s = await Settings.GetAllAsync(
-            SiteSettingsService.Keys.PlatformSmsApiToken, SiteSettingsService.Keys.PlatformSmsSenderName,
+            SiteSettingsService.Keys.PlatformSmsApiToken, SiteSettingsService.Keys.PlatformSmsSenderName, SiteSettingsService.Keys.PlatformSmsEnabled,
             SiteSettingsService.Keys.PlatformBunnyLibraryId, SiteSettingsService.Keys.PlatformBunnyApiKey, SiteSettingsService.Keys.PlatformBunnyCdnHostname,
             SiteSettingsService.Keys.ShareSmtpWithTenants, SiteSettingsService.Keys.SmtpHost,
             SiteSettingsService.Keys.PlatformGoogleClientId, SiteSettingsService.Keys.PlatformGoogleClientSecret,
@@ -243,6 +262,7 @@ else
         _stCdn = s[SiteSettingsService.Keys.PlatformBunnyStorageCdn];
         _smsTokenSet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformSmsApiToken]);
         _smsSender = s[SiteSettingsService.Keys.PlatformSmsSenderName];
+        _smsOn = _smsTokenSet && s[SiteSettingsService.Keys.PlatformSmsEnabled] != "false";
         _bunnyKeySet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformBunnyApiKey]);
         _bunnyLibrary = s[SiteSettingsService.Keys.PlatformBunnyLibraryId];
         _bunnyCdn = s[SiteSettingsService.Keys.PlatformBunnyCdnHostname];
@@ -269,10 +289,30 @@ else
     {
         var values = new Dictionary<string, string> { [SiteSettingsService.Keys.PlatformSmsSenderName] = _smsSender.Trim() };
         if (!string.IsNullOrWhiteSpace(_smsToken)) values[SiteSettingsService.Keys.PlatformSmsApiToken] = _smsToken.Trim();
+        var wasOn = await Settings.PlatformSmsOnAsync();
         await Settings.SetManyAsync(values);
         _smsToken = "";
-        Show("Zapisano ustawienia SMS.", true);
         await LoadAsync();
+        // Pierwszy token odsłania SMS-y w studiach — uprawnienia lecą od razu, bez czekania na synchronizację.
+        if (wasOn != _smsOn) await PushSmsAsync("Zapisano ustawienia SMS.");
+        else Show("Zapisano ustawienia SMS.", true);
+    }
+
+    private async Task ToggleSmsAsync(ChangeEventArgs e)
+    {
+        await Settings.SetAsync(SiteSettingsService.Keys.PlatformSmsEnabled, e.Value is true ? "true" : "false");
+        await LoadAsync();
+        await PushSmsAsync(_smsOn ? "SMS-y włączone." : "SMS-y ukryte u trenerów i klientów.");
+    }
+
+    private async Task PushSmsAsync(string done)
+    {
+        try
+        {
+            var (pushed, total) = await Tenants.PushAllEntitlementsAsync();
+            Show($"{done} Zaktualizowano studia: {pushed}/{total}.", pushed == total);
+        }
+        catch { Show($"{done} Studia odświeżą ustawienia przy najbliższej synchronizacji (do 15 min).", true); }
     }
 
     private async Task SaveBunnyAsync()

@@ -22,6 +22,7 @@ public class SlotInviteService(
     IAppClock clock,
     IChatService chat,
     ISmsService sms,
+    IWebPushService push,
     INotificationPreferencesService prefs,
     EntitlementService entitlements,
     MessageDraftService drafts,
@@ -30,7 +31,7 @@ public class SlotInviteService(
     public const int CooldownDays = 5;
 
     public sealed record Person(int ClientId, string FirstName, string LastName, string? Phone, int Hits, int SameWeekday,
-        DateTime SuggestedStart, int SessionTypeId, bool SelfBooking, bool SmsAllowed, DateTime? LastInvitedUtc);
+        DateTime SuggestedStart, int SessionTypeId, bool SelfBooking, bool SmsAllowed, DateTime? LastInvitedUtc, bool HasApp = false);
 
     public sealed record Opportunity(FreeSlots.Window Window, string Label, int SessionMinutes, List<Person> People);
 
@@ -72,6 +73,7 @@ public class SlotInviteService(
         if (histories.Count == 0) return [];
 
         var smsOn = await SmsAvailableAsync();
+        var pushOn = smsOn && (await push.GetSettingsAsync()).IsConfigured;
         var byId = clients.ToDictionary(c => c.Id);
         var result = new List<Opportunity>();
         var taken = new HashSet<int>();
@@ -90,10 +92,12 @@ public class SlotInviteService(
                 foreach (var r in ranked)
                 {
                     var c = byId[r.ClientId];
-                    var smsAllowed = smsOn && !string.IsNullOrWhiteSpace(c.Phone)
+                    // Klient z aplikacją i powiadomieniami dostaje wiadomość w aplikacji — SMS tylko, gdy sam o to prosił.
+                    var hasApp = await SmsPolicy.PushReplacesSmsAsync(push, prefs, pushOn, c.ApplicationUserId, NotificationTypes.PushMessages);
+                    var smsAllowed = smsOn && !hasApp && !string.IsNullOrWhiteSpace(c.Phone)
                         && await prefs.IsEnabledAsync(c.ApplicationUserId, NotificationTypes.SmsTrainerMessages);
                     people.Add(new(c.Id, c.FirstName, c.LastName, c.Phone, r.Hits, r.SameWeekday, r.SuggestedStart, r.SessionTypeId,
-                        c.AllowSelfBooking, smsAllowed, invited.TryGetValue(c.Id, out var li) ? li : null));
+                        c.AllowSelfBooking, smsAllowed, invited.TryGetValue(c.Id, out var li) ? li : null, hasApp));
                     taken.Add(c.Id);
                 }
                 result.Add(new(w, FreeSlots.Describe(w, now), minutes, people));

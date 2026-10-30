@@ -4,6 +4,7 @@
 @using PTScheduler.Domain.Constants
 @attribute [Authorize(Roles = Roles.Admin + "," + Roles.Trainer)]
 @inject SlotInviteService Invites
+@inject EntitlementService Entitlements
 @inject PlatformAssistantService Platform
 @inject AuthenticationStateProvider AuthState
 @inject NavigationManager Nav
@@ -81,8 +82,11 @@
                                 </label>
                                 <div class="fsl-channels" role="group" aria-label="Jak wysłać">
                                     <button type="button" class="fsl-ch @(pick.App ? "on" : "")" aria-pressed="@(pick.App ? "true" : "false")" @onclick="() => pick.App = !pick.App"><i class="bi bi-chat-dots"></i>W aplikacji</button>
-                                    <button type="button" class="fsl-ch @(pick.Sms ? "on" : "")" aria-pressed="@(pick.Sms ? "true" : "false")" disabled="@(!p.SmsAllowed)"
-                                            title="@(p.SmsAllowed ? "SMS z krótkim linkiem" : SmsOffReason(p))" @onclick="() => pick.Sms = !pick.Sms"><i class="bi bi-phone"></i>SMS</button>
+                                    @if (Entitlements.Current.SmsAvailable)
+                                    {
+                                        <button type="button" class="fsl-ch @(pick.Sms ? "on" : "")" aria-pressed="@(pick.Sms ? "true" : "false")" disabled="@(!p.SmsAllowed)"
+                                                title="@(p.SmsAllowed ? "SMS z krótkim linkiem" : SmsOffReason(p))" @onclick="() => pick.Sms = !pick.Sms"><i class="bi bi-phone"></i>SMS</button>
+                                    }
                                 </div>
                             </li>
                         }
@@ -224,7 +228,8 @@
     }
 
     private static string SmsOffReason(SlotInviteService.Person p) =>
-        string.IsNullOrWhiteSpace(p.Phone) ? "Brak numeru telefonu" : "SMS niedostępny (wyłączony w planie albo klient nie chce SMS-ów)";
+        p.HasApp ? "Klient ma aplikację z powiadomieniami — wystarczy wiadomość w aplikacji"
+        : string.IsNullOrWhiteSpace(p.Phone) ? "Brak numeru telefonu" : "SMS niedostępny (wyłączony w planie albo klient nie chce SMS-ów)";
 
     private string Render(string text, string firstName) =>
         text.Replace(MessageTemplates.ClientTag, firstName.Trim()).Replace(MessageTemplates.LinkTag, (AppUrls.PublicBase() ?? Nav.BaseUri.TrimEnd('/')) + "/l/…");

@@ -26,7 +26,8 @@ public static class PlanCatalog
 
     private static readonly (Func<Entitlements, bool>, Benefit)[] ProGains =
     [
-        G(e => !e.SmsReminders, "bi-chat-dots", "Przypomnienia SMS i push", "Klient dostaje SMS dzień przed treningiem — dużo mniej nieobecności i pustych okienek."),
+        // Bez bramki SMS na platformie nie obiecujemy SMS-ów.
+        G(e => !e.SmsReminders && e.SmsAvailable, "bi-chat-dots", "Przypomnienia SMS i push", "Klient dostaje SMS dzień przed treningiem — dużo mniej nieobecności i pustych okienek."),
         G(e => !e.TrainingPlansEnabled, "bi-clipboard-pulse", "Plany treningowe w aplikacji", "Klient ćwiczy z Twoim planem w telefonie, a Ty widzisz ciężary i postępy."),
         G(e => !e.CoursesEnabled, "bi-mortarboard", "Kursy wideo", "Sprzedajesz programy online — zarabiasz także wtedy, gdy nie prowadzisz treningu."),
         G(e => !e.ReferralProgram, "bi-gift", "Program poleceń", "Klienci przyprowadzają znajomych, a aplikacja sama przyznaje nagrody."),

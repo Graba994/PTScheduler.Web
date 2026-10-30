@@ -17,7 +17,7 @@
         </div>
         <div class="pwa-banner-text">
             <div class="pwa-banner-title">Włącz powiadomienia</div>
-            <div class="pwa-banner-body">Przypomnienia o treningach, komentarze i informacje o pakietach — prosto na telefon.</div>
+            <div class="pwa-banner-body">Przypomnienia o treningach, komentarze i informacje o pakietach — prosto na telefon.@(_replacesSms ? " Zamiast SMS-ów — możesz je zostawić w ustawieniach powiadomień." : "")</div>
         </div>
         <div class="pwa-banner-actions">
             <button class="btn btn-primary btn-sm" @ref="_enableButton">Włącz</button>
@@ -29,7 +29,7 @@
 }
 
 @code {
-    private bool _show;
+    private bool _show, _replacesSms;
     private string _userId = string.Empty;
     private string _publicKey = string.Empty;
     private ElementReference _enableButton;
@@ -67,6 +67,9 @@
             await Task.Delay(TimeSpan.FromSeconds(6));
             if (await JS.InvokeAsync<bool>("PTPush.shouldOffer"))
             {
+                // Klient, któremu przypomnienia idą SMS-em: po włączeniu powiadomień SMS-y się wstrzymają.
+                _replacesSms = user.IsInRole(PTScheduler.Domain.Constants.Roles.Client) && Entitlements.IsAllowed("SmsReminders")
+                    && Entitlements.Current.SmsAvailable;
                 _ref = DotNetObjectReference.Create(this);
                 _show = true;
                 StateHasChanged();

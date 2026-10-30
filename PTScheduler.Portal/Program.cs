@@ -1068,7 +1068,7 @@ app.MapGet("/api/internal/tenants/{slug}/entitlements", async (
     if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
     var plan = await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == tenant.PlanId);
     if (plan is null) return Results.NotFound();
-    return Results.Content(TenantService.SerializeEntitlements(plan, await AddonService.ExtraLimitsAsync(db, tenant.Id), await tenants.GarminOnAsync()), "application/json");
+    return Results.Content(TenantService.SerializeEntitlements(plan, await AddonService.ExtraLimitsAsync(db, tenant.Id), await tenants.GarminOnAsync(), await tenants.SmsOnAsync()), "application/json");
 });
 
 // „Zarządzaj subskrypcją” w aplikacji trenera: link do portalu klienta Stripe (karta, faktury, anulowanie).
@@ -1360,14 +1360,17 @@ app.MapGet("/api/store/{slug}", async (
     IConfiguration config,
     StorePaymentService storePayment,
     AddonService addons,
-    BillingService billing) =>
+    BillingService billing,
+    SiteSettingsService siteSettings) =>
 {
     await using var db = dbFactory.CreateDbContext();
     var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Slug == slug);
     if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
 
+    // Bez bramki SMS na platformie pakiety SMS nie trafiają do sklepu trenera.
+    var smsOn = await siteSettings.PlatformSmsOnAsync();
     var items = await db.ServiceItems.AsNoTracking()
-        .Where(s => s.IsActive)
+        .Where(s => s.IsActive && (smsOn || s.FulfillmentType != "credit_sms"))
         .OrderBy(s => s.SortOrder)
         .ToListAsync();
 

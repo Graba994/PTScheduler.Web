@@ -1,6 +1,7 @@
 @page "/pricing"
 @layout PublicLayout
 @inject IDbContextFactory<PortalDbContext> DbFactory
+@inject SiteSettingsService Settings
 
 <PageTitle>Cennik — Hantly</PageTitle>
 
@@ -71,10 +72,13 @@
                                 <i class="bi @(plan.TrainingPlansEnabled ? "bi-check-lg text-success" : "bi-x-lg text-muted")"></i>
                                 Plany treningowe
                             </li>
-                            <li class="@(plan.SmsReminders ? "" : "disabled")">
-                                <i class="bi @(plan.SmsReminders ? "bi-check-lg text-success" : "bi-x-lg text-muted")"></i>
-                                Przypomnienia SMS
-                            </li>
+                            @if (_sms)
+                            {
+                                <li class="@(plan.SmsReminders ? "" : "disabled")">
+                                    <i class="bi @(plan.SmsReminders ? "bi-check-lg text-success" : "bi-x-lg text-muted")"></i>
+                                    Przypomnienia SMS
+                                </li>
+                            }
                             <li class="@(plan.AuditLog ? "" : "disabled")">
                                 <i class="bi @(plan.AuditLog ? "bi-check-lg text-success" : "bi-x-lg text-muted")"></i>
                                 Audit log i RBAC
@@ -182,5 +186,8 @@
             .Where(p => p.IsActive)
             .OrderBy(p => p.SortOrder)
             .ToListAsync();
+        _sms = await Settings.PlatformSmsOnAsync();
     }
+
+    private bool _sms;
 }

@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using PTScheduler.Application.DTOs;
 using PTScheduler.Application.Interfaces;
+using PTScheduler.Application.Messaging;
 using PTScheduler.Domain.Constants;
 using PTScheduler.Domain.Entities;
 using PTScheduler.Domain.Enums;
@@ -187,6 +188,10 @@ public class AutomationService(
                               && await prefs.IsEnabledAsync(client.ApplicationUserId, NotificationTypes.PushTrainerMessages);
                 var canSms = channels.Sms && rule.ViaSms && !string.IsNullOrWhiteSpace(client.Phone)
                              && await prefs.IsEnabledAsync(client.ApplicationUserId, NotificationTypes.SmsTrainerMessages);
+                // Klient z aplikacją i powiadomieniami: push zamiast SMS (SMS tylko, gdy push nie dotrze albo klient chce oba).
+                var pushInsteadOfSms = canSms && await SmsPolicy.PushReplacesSmsAsync(push, prefs, channels.Push,
+                    client.ApplicationUserId, NotificationTypes.PushTrainerMessages);
+                if (pushInsteadOfSms) canPush = true;
                 if (!canEmail && !canPush && !canSms) continue;
 
                 string? code = null;
@@ -243,7 +248,7 @@ public class AutomationService(
                     }
                     catch (Exception ex) { logger.LogWarning(ex, "Automatyzacja {Kind}: push do klienta {Id} nie wyszedł.", rule.Kind, client.Id); }
                 }
-                if (canSms)
+                if (canSms && !(pushInsteadOfSms && used.Contains("push")))
                 {
                     var plain = text.Replace('\n', ' ');
                     if (plain.Length > 280) plain = plain[..277] + "…";

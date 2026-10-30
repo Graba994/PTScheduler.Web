@@ -41,6 +41,7 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
             PushBeforeSession = prefs.PushBeforeSession,
             SmsReminders = prefs.SmsReminders,
             SmsTrainerMessages = prefs.SmsTrainerMessages,
+            SmsWithApp = prefs.SmsWithApp,
         };
     }
 
@@ -78,6 +79,7 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
         prefs.PushBeforeSession = dto.PushBeforeSession;
         prefs.SmsReminders = dto.SmsReminders;
         prefs.SmsTrainerMessages = dto.SmsTrainerMessages;
+        prefs.SmsWithApp = dto.SmsWithApp;
         await db.SaveChangesAsync();
     }
 
@@ -108,6 +110,7 @@ public class NotificationPreferencesService(IDbContextFactory<ApplicationDbConte
             NotificationTypes.PushBeforeSession => prefs.PushBeforeSession,
             NotificationTypes.SmsReminders => prefs.SmsReminders,
             NotificationTypes.SmsTrainerMessages => prefs.SmsTrainerMessages,
+            NotificationTypes.SmsWithApp => prefs.SmsWithApp,
             _ => true
         };
     }

@@ -2,7 +2,9 @@ using Microsoft.AspNetCore.Identity;
 using Microsoft.EntityFrameworkCore;
 using PTScheduler.Application.DTOs;
 using PTScheduler.Application.Interfaces;
+using PTScheduler.Application.Messaging;
 using PTScheduler.Domain.Constants;
+using PTScheduler.Domain.Entities;
 using PTScheduler.Domain.Enums;
 using PTScheduler.Domain.Rules;
 using PTScheduler.Infrastructure.Data;
@@ -100,6 +102,9 @@ public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<S
                 // klient ma kontakt i nie zrezygnował z przypomnień tym kanałem (Moje konto → Powiadomienia).
                 var emailApplicable = emailEnabled && emailOptedIn && clientUser?.Email is not null;
                 var smsApplicable   = smsEnabled && smsOptedIn && !string.IsNullOrWhiteSpace(session.Client.Phone);
+                // Klient z aplikacją i powiadomieniami: najpierw push, SMS tylko gdy push nie dotarł (albo klient chce oba).
+                var pushFirst = smsApplicable && await SmsPolicy.PushReplacesSmsAsync(push, prefs, pushEnabled,
+                    session.Client.ApplicationUserId, NotificationTypes.PushReminders);
 
                 var trainerName = ResolveName(await userManager.FindByIdAsync(session.TrainerUserId));
                 var clientName = $"{session.Client.FirstName} {session.Client.LastName}".Trim();
@@ -150,6 +155,19 @@ public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<S
                 }
 
                 // ── SMS ─────────────────────────────────────────────────────
+                if (session.ReminderSmsSentAt is null && pushFirst)
+                {
+                    try
+                    {
+                        var report = await push.SendWithReportAsync(session.Client.ApplicationUserId, DayBeforePush(session, trainerName));
+                        if (report.Sent > 0)
+                        {
+                            session.ReminderSmsSentAt = DateTime.UtcNow;
+                            logger.LogInformation("Session {Id}: push reminder delivered — SMS not needed.", session.Id);
+                        }
+                    }
+                    catch (Exception ex) { logger.LogDebug(ex, "Session {Id}: push-first reminder failed — falling back to SMS.", session.Id); }
+                }
                 if (session.ReminderSmsSentAt is null)
                 {
                     if (!smsApplicable)
@@ -204,17 +222,12 @@ public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<S
                     // Oba kanały rozstrzygnięte — sesja w pełni obsłużona. Push wysyłamy raz, przy domknięciu
                     // (najlepszy wysiłek; odbiorca może go wyłączyć w Moje konto → Powiadomienia).
                     session.ReminderSentAt = DateTime.UtcNow;
-                    try
+                    // Przy „najpierw push” powiadomienie już poszło (albo nie dotarło i poszedł SMS) — bez dubla.
+                    if (!pushFirst)
                     {
-                        await push.SendAsync(session.Client.ApplicationUserId, new PushMessageDto
-                        {
-                            Category = NotificationTypes.PushReminders,
-                            Title = $"Jutro trening o {session.StartTime:HH:mm}",
-                            Body = $"{session.SessionType.Name} u {trainerName}. Do zobaczenia!",
-                            Url = "/my"
-                        });
+                        try { await push.SendAsync(session.Client.ApplicationUserId, DayBeforePush(session, trainerName)); }
+                        catch (Exception ex) { logger.LogDebug(ex, "Session {Id}: push reminder failed.", session.Id); }
                     }
-                    catch (Exception ex) { logger.LogDebug(ex, "Session {Id}: push reminder failed.", session.Id); }
                 }
             }
             catch (Exception ex)
@@ -239,6 +252,14 @@ public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<S
             catch (Exception ex) { logger.LogError(ex, "Failed to persist reminder markers for session {Id}", session.Id); }
         }
     }
+
+    private static PushMessageDto DayBeforePush(Session session, string trainerName) => new()
+    {
+        Category = NotificationTypes.PushReminders,
+        Title = $"Jutro trening o {session.StartTime:HH:mm}",
+        Body = $"{session.SessionType.Name} u {trainerName}. Do zobaczenia!",
+        Url = "/my"
+    };
 
     private async Task SendExtraRemindersAsync(ApplicationDbContext db, IAppClock clock, IWebPushService push, bool pushEnabled,
         ISmsService smsService, bool smsEnabled, INotificationPreferencesService prefs, UserManager<ApplicationUser> userManager, int maxSmsPerMonth)
@@ -270,8 +291,9 @@ public class SessionReminderService(IServiceScopeFactory scopeFactory, ILogger<S
                 }
                 catch (Exception ex) { logger.LogDebug(ex, "Session {Id}: extra push reminder failed.", session.Id); }
             }
-            // Bez powiadomień w telefonie — SMS (jeśli klient się zgodził i jest w limicie).
-            if (!delivered && smsEnabled && !string.IsNullOrWhiteSpace(session.Client.Phone)
+            // Bez powiadomień w telefonie — SMS (jeśli klient się zgodził i jest w limicie). Klient, który chce SMS-y
+            // także przy aplikacji, dostaje oba.
+            if ((!delivered || await prefs.IsEnabledAsync(session.Client.ApplicationUserId, NotificationTypes.SmsWithApp)) && smsEnabled && !string.IsNullOrWhiteSpace(session.Client.Phone)
                 && await prefs.IsEnabledAsync(session.Client.ApplicationUserId, NotificationTypes.SmsReminders))
             {
                 var text = PTScheduler.Application.Messaging.MessageTemplates.ForSms($"Przypomnienie: dziś o {session.StartTime:HH:mm} trening u {trainerName}. Do zobaczenia!");

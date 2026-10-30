@@ -7,6 +7,7 @@
 @inject IAutomationService AutomationSvc
 @inject IAppClock Clock
 @inject IServiceProvider Services
+@inject EntitlementService Entitlements
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Automatyzacje" />
@@ -34,7 +35,7 @@
 {
     <div class="au-channels">
         <span class="small text-muted me-1">Kanały:</span>
-        @Chip("E-mail", _channels.Email) @Chip("Push na telefonie", _channels.Push) @Chip("SMS", _channels.Sms)
+        @Chip("E-mail", _channels.Email) @Chip("Push na telefonie", _channels.Push) @if (Entitlements.Current.SmsAvailable) { @Chip("SMS", _channels.Sms) }
         <span class="small text-muted ms-1">Wysyłamy między 9:00 a 20:00. Klient może wyłączyć te wiadomości w ustawieniach powiadomień.</span>
     </div>
 }
@@ -131,7 +132,10 @@ else
                                             <div class="d-flex gap-3 flex-wrap small pt-1">
                                                 <label class="form-check m-0"><input type="checkbox" class="form-check-input" @bind="rule.ViaEmail" /> <span class="form-check-label">e-mail</span></label>
                                                 <label class="form-check m-0"><input type="checkbox" class="form-check-input" @bind="rule.ViaPush" /> <span class="form-check-label">push</span></label>
-                                                <label class="form-check m-0"><input type="checkbox" class="form-check-input" @bind="rule.ViaSms" /> <span class="form-check-label">SMS</span></label>
+                                                @if (Entitlements.Current.SmsAvailable)
+                                                {
+                                                    <label class="form-check m-0"><input type="checkbox" class="form-check-input" @bind="rule.ViaSms" /> <span class="form-check-label">SMS</span></label>
+                                                }
                                             </div>
                                         </div>
                                         @if (def.Group != "welcome")

@@ -38,6 +38,8 @@ public class Entitlements
 
     public bool EmailReminders { get; set; } = true;
     public bool SmsReminders { get; set; }
+    /// <summary>Platforma ma bramkę SMS (Portal: token SMSAPI + włącznik). Bez niej nikt nie widzi opcji SMS — także zajawek.</summary>
+    public bool SmsAvailable { get; set; } = true;
     public bool PushNotifications { get; set; }
 
     public bool RecurringSessions { get; set; } = true;

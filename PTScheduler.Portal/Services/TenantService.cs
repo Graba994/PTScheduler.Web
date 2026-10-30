@@ -527,7 +527,8 @@ public class TenantService(
     /// i przestrzeni wideo). Wartości „bez limitu” zostają bez zmian.
     /// </summary>
     /// <param name="garminOn">Globalny włącznik Garmina w Portalu — zegarki u klientów tylko, gdy włączone i plan je ma.</param>
-    public static string SerializeEntitlements(Plan plan, ExtraLimits extra, bool garminOn = false)
+    /// <param name="smsOn">SMS-y platformy (token + włącznik). Bez nich trener i klienci nie widzą żadnych opcji SMS.</param>
+    public static string SerializeEntitlements(Plan plan, ExtraLimits extra, bool garminOn = false, bool smsOn = true)
     {
         var node = System.Text.Json.Nodes.JsonNode.Parse(SerializePlan(plan))!.AsObject();
         static int Add(int baseValue, int extra) =>
@@ -542,16 +543,24 @@ public class TenantService(
         node["maxSmsPerMonth"] = Add(plan.SmsReminders ? plan.MaxSmsPerMonth : 0, extra.SmsPerMonth);
         node["smsReminders"] = plan.SmsReminders || extra.SmsPerMonth > 0 || extra.HasSmsCredits;
         node["wearables"] = plan.Wearables && garminOn;
+        node["smsAvailable"] = smsOn;
+        if (!smsOn)
+        {
+            node["smsReminders"] = false;
+            node["maxSmsPerMonth"] = 0;
+        }
         return node.ToJsonString();
     }
 
     public async Task<string> EntitlementsJsonAsync(int tenantId, Plan plan)
     {
         await using var db = dbFactory.CreateDbContext();
-        return SerializeEntitlements(plan, await AddonService.ExtraLimitsAsync(db, tenantId), await GarminOnAsync());
+        return SerializeEntitlements(plan, await AddonService.ExtraLimitsAsync(db, tenantId), await GarminOnAsync(), await settings.PlatformSmsOnAsync());
     }
 
     public async Task<bool> GarminOnAsync() => await settings.GetAsync(SiteSettingsService.Keys.GarminEnabled) == "true";
+
+    public Task<bool> SmsOnAsync() => settings.PlatformSmsOnAsync();
 
     /// <summary>Uprawnienia do wszystkich studiów (np. po przełączeniu globalnego włącznika Garmina).</summary>
     public async Task<(int Pushed, int Total)> PushAllEntitlementsAsync()

@@ -1929,6 +1929,9 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Property<bool>("SmsTrainerMessages")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("SmsWithApp")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("TrainerMessages")
                         .HasColumnType("boolean");
 

@@ -273,6 +273,8 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         // Centralized SMS (SMSAPI.pl platform account)
         public const string PlatformSmsApiToken = "platform_sms_api_token";
         public const string PlatformSmsSenderName = "platform_sms_sender_name";
+        /// <summary>Włącznik SMS-ów platformy: „false” = trenerzy i klienci nie widzą żadnych opcji SMS (także bez tokenu).</summary>
+        public const string PlatformSmsEnabled = "platform_sms_enabled";
 
         // Centralized Bunny CDN (platform account)
         public const string PlatformBunnyApiKey = "platform_bunny_api_key";
@@ -357,6 +359,13 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         [Keys.FinancePrefixInvoice] = "FV",
         [Keys.FinancePrefixCorrection] = "KOR",
     };
+
+    /// <summary>SMS-y platformy działają: jest token SMSAPI i włącznik nie jest wyłączony.</summary>
+    public async Task<bool> PlatformSmsOnAsync()
+    {
+        var s = await GetAllAsync(Keys.PlatformSmsApiToken, Keys.PlatformSmsEnabled);
+        return !string.IsNullOrWhiteSpace(s[Keys.PlatformSmsApiToken]) && s[Keys.PlatformSmsEnabled] != "false";
+    }
 
     public async Task<string> GetAsync(string key)
     {

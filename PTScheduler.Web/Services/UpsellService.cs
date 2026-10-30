@@ -129,7 +129,7 @@ public sealed class UpsellService(
             var started = await db.AppBrandings.AsNoTracking().Select(b => b.SetupCompletedAt).FirstOrDefaultAsync();
             firstWeek = started is { } at && at > DateTime.UtcNow.AddDays(-FirstWeekDays);
         });
-        var locked = canUpgrade && !firstWeek ? Tips.Where(t => !entitlements.IsAllowed(t.Flag)).ToList() : [];
+        var locked = canUpgrade && !firstWeek ? Tips.Where(t => !entitlements.IsAllowed(t.Flag) && (t.Flag != "SmsReminders" || entitlements.Current.SmsAvailable)).ToList() : [];
         if (locked.Count > 0)
         {
             var t = locked[DateTime.UtcNow.DayOfYear % locked.Count];

@@ -94,7 +94,7 @@ else
     {
         <a href="/admin/upgrade" class="set-upgrade">
             <i class="bi bi-rocket-takeoff-fill"></i>
-            <span><b>Potrzebujesz więcej?</b> Sprawdź wyższy plan — SMS-y, płatności online, kursy i zespół.</span>
+            <span><b>Potrzebujesz więcej?</b> Sprawdź wyższy plan — @(Entitlements.Current.SmsAvailable ? "SMS-y, " : "")płatności online, kursy i zespół.</span>
             <i class="bi bi-chevron-right ms-auto"></i>
         </a>
     }
@@ -104,7 +104,7 @@ else
         @RenderGroup(group)
     }
 
-    var locked = AdminMenu.Groups.SelectMany(g => g.Items).Where(i => _access.Sees(i) && IsLocked(i)).ToList();
+    var locked = AdminMenu.Groups.SelectMany(g => g.Items).Where(i => _access.Sees(i) && AdminMenu.Offered(i, Entitlements) && IsLocked(i)).ToList();
     @if (_access.IsOwner && !_isHighestPlan && locked.Count > 0)
     {
         <details class="set-more set-gold" open>
@@ -387,7 +387,7 @@ else
     private RenderFragment RenderGroup(AdminMenuGroup group) => __builder =>
     {
         // Opcje spoza planu nie zaśmiecają listy — są zebrane w „W wyższym planie”.
-        var items = group.Items.Where(i => _access.Sees(i) && !IsLocked(i)).ToList();
+        var items = group.Items.Where(i => _access.Sees(i) && AdminMenu.Offered(i, Entitlements) && !IsLocked(i)).ToList();
         if (items.Count == 0) return;
         var configured = items.Where(i => _setup.StatusOf(i).IsConfigured && !(i.PlanFlag is not null && !Entitlements.IsAllowed(i.PlanFlag))).ToList();
         var open = items.Except(configured).ToList();

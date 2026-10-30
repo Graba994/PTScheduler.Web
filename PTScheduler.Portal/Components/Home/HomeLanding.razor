@@ -270,7 +270,7 @@
             <div class="lp-eyebrow">Aplikacja dla Twoich klientów</div>
             <h2>Klienci dostają aplikację z Twoim logo. I naprawdę do niej wracają.</h2>
             <ul class="ld-checks">
-                <li><i class="bi bi-phone"></i><span><b>Bez sklepu z aplikacjami.</b> Link w SMS-ie, ikona na ekranie telefonu, powiadomienia — jak zwykła aplikacja.</span></li>
+                <li><i class="bi bi-phone"></i><span><b>Bez sklepu z aplikacjami.</b> Link w wiadomości, ikona na ekranie telefonu, powiadomienia — jak zwykła aplikacja.</span></li>
                 <li><i class="bi bi-clipboard2-pulse"></i><span><b>Plan na dziś w kieszeni.</b> Ciężary z poprzedniego razu, filmy ćwiczeń, odhaczanie serii także bez internetu.</span></li>
                 <li><i class="bi bi-trophy"></i><span><b>Motywacja, która przychodzi sama.</b> Rekordy po treningu, medale za regularność i podsumowanie „Twój miesiąc”.</span></li>
                 <li><i class="bi bi-wallet2"></i><span><b>Rezerwacje i płatności w jednym miejscu.</b> Pakiety, karnety, BLIK i karta — klient wie, ile treningów mu zostało.</span></li>
@@ -418,7 +418,7 @@
             @for (var i = 0; i < mainPlans.Count; i++)
             {
                 var plan = mainPlans[i];
-                var (lead, points) = HomeShared.Highlights(plan, i == 0 ? null : mainPlans[i - 1], garmin: _garmin);
+                var (lead, points) = HomeShared.Highlights(plan, i == 0 ? null : mainPlans[i - 1], garmin: _garmin, sms: _sms);
                 <div class="lp-price @(plan.IsFeatured ? "featured" : "")">
                     @if (plan.IsFeatured)
                     {
@@ -460,7 +460,7 @@
                             </tr>
                         </thead>
                         <tbody>
-                            @foreach (var row in HomeShared.CompareRows.Where(r => _garmin || r.Label != HomeShared.GarminLabel))
+                            @foreach (var row in HomeShared.CompareRows.Where(r => (_garmin || r.Label != HomeShared.GarminLabel) && r.Label != (_sms ? HomeShared.PushLabel : HomeShared.SmsPushLabel)))
                             {
                                 <tr>
                                     <th scope="row">@row.Label</th>
@@ -535,7 +535,7 @@
 @code {
     private Dictionary<string, string> _settings = new();
     /// <summary>Garmin włączony globalnie w Portalu — wtedy sekcja o zegarkach i pozycja w cenniku.</summary>
-    private bool _garmin;
+    private bool _garmin, _sms;
     private string GarminPlans => string.Join(", ", _plans.Where(p => p.Wearables).Select(p => p.Name));
     private List<Plan> _plans = [];
     private List<AppFeedback> _reviews = [];
@@ -576,7 +576,7 @@
     private static readonly FeatureTab[] _features =
     [
         new("bi-calendar-week", "Grafik i zapisy", "Grafik, który układa się sam",
-            ["Klienci rezerwują wolne terminy z Twoich godzin pracy", "Serie wizyt i szablon tygodnia — grafik na miesiąc w minutę", "Przypomnienia e-mail, SMS i push: mniej nieobecności", "Dwustronna synchronizacja z Kalendarzem Google i linki Meet"],
+            ["Klienci rezerwują wolne terminy z Twoich godzin pracy", "Serie wizyt i szablon tygodnia — grafik na miesiąc w minutę", "Przypomnienia e-mail i na telefon: mniej nieobecności", "Dwustronna synchronizacja z Kalendarzem Google i linki Meet"],
             "cal", "Tydzień w kalendarzu trenera i nowa rezerwacja online w czwartek o 18:00"),
         new("bi-people", "Klienci", "Każdy klient jak na dłoni",
             ["Profil z historią wizyt, pakietów, treningów i pomiarów", "Ankieta zdrowotna i zgody RODO przed pierwszym treningiem", "Czat z klientem w aplikacji, z powiadomieniami", "Import klientów z pliku — bez przepisywania"],
@@ -662,6 +662,7 @@
             SiteSettingsService.Keys.HeroCtaUrl, SiteSettingsService.Keys.CtaTitle, SiteSettingsService.Keys.CtaSubtitle,
             SiteSettingsService.Keys.CtaButton, SiteSettingsService.Keys.DemoEnabled, SiteSettingsService.Keys.GarminEnabled);
         _garmin = _settings.GetValueOrDefault(SiteSettingsService.Keys.GarminEnabled) == "true";
+        _sms = await Settings.PlatformSmsOnAsync();
 
         await using var db = DbFactory.CreateDbContext();
         _reviews = await db.AppFeedbacks.AsNoTracking()

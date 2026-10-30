@@ -140,7 +140,7 @@ public class CreditService(
             .Where(c => c.TenantId == tenantId && c.Month == month).Select(c => c.Count).FirstOrDefaultAsync();
         var credits = await db.TenantCredits.AsNoTracking()
             .Where(c => c.TenantId == tenantId && c.CreditType == "sms").Select(c => c.Balance).FirstOrDefaultAsync();
-        var enabled = !string.IsNullOrWhiteSpace(await settings.GetAsync(SiteSettingsService.Keys.PlatformSmsApiToken));
+        var enabled = await settings.PlatformSmsOnAsync();
         return new SmsStatus(enabled, limit, used, credits);
     }
 
@@ -151,7 +151,7 @@ public class CreditService(
     public async Task<SmsSendResult> SendSmsCentralizedAsync(int tenantId, string phone, string message)
     {
         var token = await settings.GetAsync(SiteSettingsService.Keys.PlatformSmsApiToken);
-        if (string.IsNullOrWhiteSpace(token))
+        if (string.IsNullOrWhiteSpace(token) || !await settings.PlatformSmsOnAsync())
             return new(false, "SMS nie są jeszcze uruchomione na platformie.", false);
 
         var status = await GetSmsStatusAsync(tenantId);

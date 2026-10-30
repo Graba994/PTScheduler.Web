@@ -690,6 +690,8 @@
     private Tenant? _referrer;
     private int ExtraDays => (_invite?.ExtraTrialDays ?? 0) + (_referrer is not null ? ReferralService.ReferredBonusDays : 0);
     private bool _cardCancelled;
+    /// <summary>Platforma ma bramkę SMS — bez niej SMS-ów nie ma w opisie planów.</summary>
+    private bool _sms;
 
     private sealed class OfferRow
     {
@@ -812,7 +814,7 @@
         yield return new("bi-people", p.MaxClients >= 100000 ? "Bez limitu klientów" : $"Do {p.MaxClients} klientów", true, null);
         yield return new("bi-phone", p.PushNotifications ? "Aplikacja z Twoją ikoną i powiadomieniami" : "Aplikacja na telefon z Twoją ikoną", true, null);
         yield return Of("bi-credit-card", "Płatności online: BLIK, karta, przelew", x => x.PaymentsEnabled);
-        yield return Of("bi-chat-dots", p.MaxSmsPerMonth > 0 ? $"Przypomnienia SMS ({p.MaxSmsPerMonth}/mies.)" : "Przypomnienia SMS", x => x.SmsReminders && x.MaxSmsPerMonth > 0);
+        if (_sms) yield return Of("bi-chat-dots", p.MaxSmsPerMonth > 0 ? $"Przypomnienia SMS ({p.MaxSmsPerMonth}/mies.)" : "Przypomnienia SMS", x => x.SmsReminders && x.MaxSmsPerMonth > 0);
         yield return Of("bi-clipboard2-pulse", "Plany treningowe i postępy klientów", x => x.TrainingPlansEnabled);
         yield return Of("bi-globe2", "Własna domena, np. twojestudio.pl", x => x.CustomDomain);
         yield return Of("bi-graph-up-arrow", "Raporty finansowe", x => x.FinancialReports);
@@ -1050,6 +1052,7 @@
         string? Q(string key) => query.TryGetValue(key, out var v) && !string.IsNullOrWhiteSpace(v) ? v.ToString() : null;
         Plan = Q("plan"); Nazwa = Q("nazwa"); KodQuery = Q("kod"); Wznow = Q("wznow"); SessionId = Q("session_id"); RefQuery = Q("ref");
         _cardCancelled = Q("karta") == "anulowana";
+        _sms = await Settings.PlatformSmsOnAsync();
 
         await using var db = await DbFactory.CreateDbContextAsync();
         _plans = await db.Plans.AsNoTracking().Where(p => p.IsActive).OrderBy(p => p.SortOrder).ToListAsync();

@@ -31,6 +31,8 @@ public static class NotificationTypes
     public const string SmsReminders = nameof(SmsReminders);
     /// <summary>SMS: automatyczne wiadomości od trenera.</summary>
     public const string SmsTrainerMessages = nameof(SmsTrainerMessages);
+    /// <summary>SMS także przy aplikacji z powiadomieniami — bez tego push zastępuje SMS.</summary>
+    public const string SmsWithApp = nameof(SmsWithApp);
 
     public const string PushMorningBrief = nameof(PushMorningBrief);
     public const string PushBeforeSession = nameof(PushBeforeSession);

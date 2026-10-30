@@ -25,7 +25,7 @@ public static class HomeShared
 
     public static readonly FaqItem[] Faqs =
     [
-        new("Czy muszę coś instalować albo mieć serwer?", "Nie. Po rejestracji dostajesz gotową aplikację pod adresem twoja-nazwa.hantly.pl. Serwery, poczta, SMS-y i kopie zapasowe są po naszej stronie."),
+        new("Czy muszę coś instalować albo mieć serwer?", "Nie. Po rejestracji dostajesz gotową aplikację pod adresem twoja-nazwa.hantly.pl. Serwery, poczta, powiadomienia i kopie zapasowe są po naszej stronie."),
         new("Czy klienci muszą pobierać aplikację ze sklepu?", "Nie. Otwierają link w telefonie i dodają aplikację do ekranu głównego — działa jak zwykła aplikacja, z ikoną i powiadomieniami."),
         new("Jak działają płatności online?", "Podpinasz swoje konto PayU albo Przelewy24. Klienci płacą BLIKIEM, kartą lub przelewem, a pieniądze trafiają bezpośrednio na Twoje konto. Nie pobieramy prowizji od Twoich płatności."),
         new("Czy mogę wystawiać faktury i wysyłać je do KSeF?", "Tak. Aplikacja tworzy faktury z danymi firmy klienta i może wysłać je do KSeF — wystarczy token z Twojego konta w KSeF."),
@@ -38,14 +38,19 @@ public static class HomeShared
     ];
 
     public const string GarminLabel = "Zegarki klientów (Garmin)";
+    public const string SmsPushLabel = "SMS-y i powiadomienia push";
+    public const string PushLabel = "Powiadomienia push";
 
-    /// <summary>Lista cech planu z jego flag — to samo, co trener dostaje w aplikacji. Garmin tylko, gdy włączony w Portalu.</summary>
-    public static IEnumerable<(string Label, bool Included)> PlanFeatures(Plan p, bool garmin = false)
+    /// <summary>
+    /// Lista cech planu z jego flag — to samo, co trener dostaje w aplikacji. Garmin tylko, gdy włączony w Portalu;
+    /// SMS-y tylko, gdy platforma ma bramkę SMS (inaczej same powiadomienia push).
+    /// </summary>
+    public static IEnumerable<(string Label, bool Included)> PlanFeatures(Plan p, bool garmin = false, bool sms = false)
     {
         yield return (p.MaxClients >= 9999 ? "Nielimitowani klienci" : $"Do {p.MaxClients} klientów", true);
         yield return ("Grafik, rezerwacje online, czat", true);
         yield return ("Przypomnienia e-mail", p.EmailReminders);
-        yield return ("SMS-y i powiadomienia push", p.SmsReminders || p.PushNotifications);
+        yield return sms ? (SmsPushLabel, p.SmsReminders || p.PushNotifications) : (PushLabel, p.PushNotifications);
         yield return ("Płatności online, pakiety i karnety", p.PaymentsEnabled);
         yield return ("Plany treningowe i postępy klientów", p.TrainingPlansEnabled);
         yield return ("Pomiary i zdjęcia sylwetki", p.BodyMeasurements);
@@ -89,11 +94,11 @@ public static class HomeShared
     /// Najważniejsze punkty karty planu: przy pierwszym planie pierwsze cechy, przy wyższych tylko to,
     /// czego nie ma niższy plan („Wszystko z …, a także:”) — karta zostaje krótka.
     /// </summary>
-    public static (string? Lead, List<string> Points) Highlights(Plan plan, Plan? lower, int max = 5, bool garmin = false)
+    public static (string? Lead, List<string> Points) Highlights(Plan plan, Plan? lower, int max = 5, bool garmin = false, bool sms = false)
     {
-        var mine = PlanFeatures(plan, garmin).Where(f => f.Included).Select(f => f.Label).ToList();
+        var mine = PlanFeatures(plan, garmin, sms).Where(f => f.Included).Select(f => f.Label).ToList();
         if (lower is null) return (null, mine.Take(max).ToList());
-        var theirs = PlanFeatures(lower, garmin).Where(f => f.Included).Select(f => f.Label).ToHashSet();
+        var theirs = PlanFeatures(lower, garmin, sms).Where(f => f.Included).Select(f => f.Label).ToHashSet();
         var extra = mine.Where(l => !theirs.Contains(l)).Take(max).ToList();
         return ($"Wszystko z planu {lower.Name}, a także:", extra);
     }
@@ -107,7 +112,8 @@ public static class HomeShared
         new("Trenerzy w zespole", p => p.MaxTrainers >= 9999 ? "bez limitu" : p.MaxTrainers > 1 ? p.MaxTrainers.ToString() : "—"),
         new("Grafik, rezerwacje online, czat", _ => "✓"),
         new("Przypomnienia e-mail", p => Mark(p.EmailReminders)),
-        new("SMS-y i powiadomienia push", p => Mark(p.SmsReminders || p.PushNotifications)),
+        new(SmsPushLabel, p => Mark(p.SmsReminders || p.PushNotifications)),
+        new(PushLabel, p => Mark(p.PushNotifications)),
         new("Płatności online, pakiety i karnety", p => Mark(p.PaymentsEnabled)),
         new("Plany treningowe i postępy", p => Mark(p.TrainingPlansEnabled)),
         new("Pomiary i zdjęcia sylwetki", p => Mark(p.BodyMeasurements)),

@@ -23,7 +23,9 @@ public sealed record AdminMenuItem(
     /// <summary>Klucz stanu wyliczanego na stronie „Zarządzanie” (np. liczba typów treningów).</summary>
     string? StatusKey = null,
     /// <summary>Tylko konto techniczne (Root) — funkcje, którymi administrator studia nie musi się zajmować.</summary>
-    bool RootOnly = false);
+    bool RootOnly = false,
+    /// <summary>Uprawnienie, bez którego pozycji w ogóle nie ma — także jako zajawki (np. SMS bez bramki na platformie).</summary>
+    string? HideUnless = null);
 
 /// <param name="Advanced">Rzadko używane — na stronie „Zarządzanie” schowane pod „Więcej ustawień”.</param>
 public sealed record AdminMenuGroup(string Title, string Icon, string Tone, IReadOnlyList<AdminMenuItem> Items, bool Advanced = false);
@@ -86,6 +88,10 @@ public static class AdminMenu
         "trainer/asystent", "admin/coupons", "admin/sklep", "admin/sms", "admin/google-meet", "admin/video", "admin/export", "trainer/intro-config", "admin/automations", "admin/documents"
     };
 
+    /// <summary>Pozycja istnieje w tym studiu (np. SMS tylko, gdy platforma ma bramkę SMS).</summary>
+    public static bool Offered(AdminMenuItem item, PTScheduler.Web.Services.EntitlementService entitlements) =>
+        item.HideUnless is null || entitlements.IsAllowed(item.HideUnless);
+
     public static readonly IReadOnlyList<AdminMenuGroup> Groups =
     [
         new("Oferta i grafik", "bi-calendar-week", "blue",
@@ -123,7 +129,7 @@ public static class AdminMenu
             new("admin/sms", "bi-chat-dots-fill", "Przypomnienia SMS",
                 "SMS dzień przed treningiem",
                 "Klient dostaje SMS-a dzień przed treningiem — mniej nieobecności. SMS-y idą z miesięcznego limitu planu i dodatków; jednorazowe doładowania czekają w odwodzie.",
-                Permissions.ManageSms, "SmsReminders", "Pro")
+                Permissions.ManageSms, "SmsReminders", "Pro", HideUnless: "SmsAvailable")
         ]),
         new("Twoja marka", "bi-palette", "pink",
         [

@@ -265,7 +265,7 @@
                 <p>Ustawiasz godziny pracy, a klienci rezerwują wolne terminy sami — z telefonu, o 23:00, bez pisania do Ciebie.</p>
                 <ul class="lp-ticks">
                     <li><i class="bi bi-check-circle-fill"></i>Rezerwacje online, serie stałych treningów i pierwsza wizyta z Twojej strony</li>
-                    <li><i class="bi bi-check-circle-fill"></i>Przypomnienia e-mail, SMS i push — mniej nieobecności</li>
+                    <li><i class="bi bi-check-circle-fill"></i>Przypomnienia e-mail@(_sms ? ", SMS" : "") i push — mniej nieobecności</li>
                     <li><i class="bi bi-check-circle-fill"></i>Polityka odwołań: późne odwołanie = sesja przepada, bez tłumaczenia się</li>
                     <li><i class="bi bi-check-circle-fill"></i>Dwukierunkowy kalendarz Google: wizyty trafiają do Twojego kalendarza, a prywatne terminy blokują grafik</li>
                 </ul>
@@ -287,7 +287,7 @@
                 </div>
                 <div class="lp-toast lp-toast-live">
                     <i class="bi bi-bell-fill"></i>
-                    <span><b>Ola K.</b> zarezerwowała środę 18:00<small>Przypomnienie SMS wyśle się samo dzień wcześniej</small></span>
+                    <span><b>Ola K.</b> zarezerwowała środę 18:00<small>Przypomnienie wyśle się samo dzień wcześniej</small></span>
                 </div>
             </div>
         </div>
@@ -443,7 +443,7 @@
             <ul class="lp-ticks">
                 <li><i class="bi bi-check-circle-fill"></i>Adres <strong>twoja-nazwa.hantly.pl</strong> albo własna domena</li>
                 <li><i class="bi bi-check-circle-fill"></i>E-maile do klientów z nazwą Twojego studia</li>
-                <li><i class="bi bi-check-circle-fill"></i>Bez konfigurowania serwerów, poczty i SMS-ów — to po naszej stronie</li>
+                <li><i class="bi bi-check-circle-fill"></i>Bez konfigurowania serwerów, poczty i powiadomień — to po naszej stronie</li>
             </ul>
         </div>
         <div class="lp-demo">
@@ -620,7 +620,7 @@
                 </div>
             }
         </div>
-        <p class="lp-price-note">SMS-y i dodatkowe miejsce na wideo dokupujesz w aplikacji, tylko jeśli ich potrzebujesz. Ceny brutto.</p>
+        <p class="lp-price-note">@(_sms ? "SMS-y i dodatkowe" : "Dodatkowe") miejsce na wideo dokupujesz w aplikacji, tylko jeśli ich potrzebujesz. Ceny brutto.</p>
     </div>
 </section>
 
@@ -812,7 +812,7 @@
     private static readonly Feature[] _all =
     [
         new("bi-phone", "Aplikacja na telefon", "Klienci instalują ją z przeglądarki — ikona, pełny ekran, powiadomienia."),
-        new("bi-bell", "Przypomnienia", "E-mail, SMS i push przed treningiem. Treści edytujesz po polsku."),
+        new("bi-bell", "Przypomnienia", "Automatycznie przed treningiem — e-mail i powiadomienie na telefonie. Treści edytujesz po polsku."),
         new("bi-arrow-repeat", "Karnety cykliczne", "Stała liczba sesji co miesiąc, rozliczana automatycznie."),
         new("bi-chat-dots", "Czat z klientem", "Wiadomości z powiadomieniami, historia w jednym miejscu."),
         new("bi-clipboard2-pulse", "Plany treningowe", "Katalog ćwiczeń po polsku, dziennik, rekordy i podpowiedzi „+2,5 kg” z oceny wysiłku."),
@@ -834,7 +834,7 @@
     [
         ("bi-calendar-check", "Grafik i zapisy online"),
         ("bi-credit-card", "Płatności, pakiety i karnety"),
-        ("bi-chat-square-text", "Przypomnienia e-mail, SMS i push"),
+        ("bi-chat-square-text", "Automatyczne przypomnienia o treningach"),
         ("bi-clipboard2-pulse", "Plany treningowe i PDF z Twoim logo"),
         ("bi-rulers", "Czat, pomiary i zdjęcia postępów"),
         ("bi-globe2", "Twoja strona i aplikacja na telefon"),
@@ -853,6 +853,7 @@
             SiteSettingsService.Keys.CtaTitle, SiteSettingsService.Keys.CtaSubtitle, SiteSettingsService.Keys.CtaButton,
             SiteSettingsService.Keys.DemoEnabled, SiteSettingsService.Keys.GarminEnabled);
         _garmin = _settings.GetValueOrDefault(SiteSettingsService.Keys.GarminEnabled) == "true";
+        _sms = await Settings.PlatformSmsOnAsync();
 
         _trainers = await FeaturedTrainers.LoadAsync(Settings);
 
@@ -869,6 +870,6 @@
     private string _s(string key, string fallback = "") =>
         _settings.TryGetValue(key, out var val) && !string.IsNullOrWhiteSpace(val) ? val : fallback;
 
-    private bool _garmin;
-    private IEnumerable<(string Label, bool Included)> PlanFeatures(Plan p) => HomeShared.PlanFeatures(p, _garmin);
+    private bool _garmin, _sms;
+    private IEnumerable<(string Label, bool Included)> PlanFeatures(Plan p) => HomeShared.PlanFeatures(p, _garmin, _sms);
 }

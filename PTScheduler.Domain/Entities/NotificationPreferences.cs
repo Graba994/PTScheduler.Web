@@ -38,6 +38,8 @@ public class NotificationPreferences
     public bool SmsReminders { get; set; } = true;
     /// <summary>SMS: automatyczne wiadomości od trenera.</summary>
     public bool SmsTrainerMessages { get; set; } = true;
+    /// <summary>SMS także wtedy, gdy klient ma aplikację z włączonymi powiadomieniami (domyślnie push zastępuje SMS).</summary>
+    public bool SmsWithApp { get; set; }
 
     // ── Asystent trenera ──
     /// <summary>E-mail (trener): poranny brief — plan dnia, sprawy do załatwienia, pochwały.</summary>
