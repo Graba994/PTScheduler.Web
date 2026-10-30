@@ -170,7 +170,7 @@ public partial class AssistantService(
             Enabled: s[K.AssistantEnabled] != "false" && tenant?.AssistantOff != true,
             Name: name,
             Animation: animation,
-            Ai: s[K.AiEnabled] == "true" && tenant?.AiOff != true,
+            Ai: s[K.AiEnabled] == "true" && tenant?.AiOff != true && (tenant is null || await ai.TenantUnavailableReasonAsync(tenant.Id) is null),
             Icons: icons,
             Layout: IsLayout(s[K.AssistantLayout]) ? s[K.AssistantLayout] : "bubble",
             AnimatedSvg: animation == "live" && custom.Count == 0 ? LiveSvg : null,
@@ -308,7 +308,8 @@ public partial class AssistantService(
     /// „admin” — agent Portalu (Leo) dla administratora platformy.</param>
     /// <summary>Czy dla tego trenera „Zaproponuj plan” może korzystać z AI: włącznik generatora, AI i klucz.</summary>
     public async Task<bool> PlanAiAvailableAsync(Tenant? tenant) =>
-        tenant?.AiOff != true && await settings.GetAsync(K.AiPlanGenerator) == "true" && await ai.UnavailableReasonAsync() is null;
+        tenant?.AiOff != true && await settings.GetAsync(K.AiPlanGenerator) == "true" && await ai.UnavailableReasonAsync() is null
+        && (tenant is null || await ai.TenantUnavailableReasonAsync(tenant.Id) is null);
 
     /// <summary>
     /// Plan treningowy dopracowany przez AI. Wejście z aplikacji trenera (bez danych osobowych): fakty, szkic z reguł,

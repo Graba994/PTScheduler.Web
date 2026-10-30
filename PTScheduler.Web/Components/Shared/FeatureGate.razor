@@ -9,7 +9,7 @@ else if (ShowLock)
     <div class="feature-gate-lock">
         <div class="feature-gate-badge">
             <i class="bi bi-lock-fill"></i>
-            <span>@RequiredPlan</span>
+            <span>@Plan</span>
         </div>
         <div class="feature-gate-body">
             <div class="feature-gate-title">@(Title ?? "Ta funkcja jest niedostępna")</div>
@@ -17,7 +17,7 @@ else if (ShowLock)
                 @if (Description is not null) { @Description }
                 else
                 {
-                    <text>Dostępne w planie <strong>@RequiredPlan</strong> i wyższym.</text>
+                    <text>Dostępne w planie <strong>@Plan</strong> i wyższym.</text>
                 }
             </div>
             @if (ShowUpgrade)
@@ -59,6 +59,8 @@ else if (ShowLock)
     [Parameter] public bool ShowUpgrade { get; set; } = true;
 
     private bool _allowed;
+
+    private string Plan => Entitlements.PlanFor(Flag, RequiredPlan);
 
     protected override void OnParametersSet() =>
         _allowed = Entitlements.IsAllowed(Flag);

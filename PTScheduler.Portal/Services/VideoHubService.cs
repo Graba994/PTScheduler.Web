@@ -94,7 +94,7 @@ public class VideoHubService(
     /// <summary>Przestrzeń, za którą trener płaci: pakiet z wideo (Bunny) + dodatki miesięczne + dokupione GB.</summary>
     public async Task<long> QuotaBytesAsync(PortalDbContext db, Tenant tenant)
     {
-        var plan = tenant.Plan ?? await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == tenant.PlanId);
+        var plan = await PlanFeatureCatalog.EffectiveAsync(db, tenant);
         if (plan is null || !PlanHasVideo(plan)) return 0;
         var extra = await AddonService.ExtraLimitsAsync(db, tenant.Id);
         var bought = (await credits.GetBalancesAsync(tenant.Id)).GetValueOrDefault("cdn_storage_gb", 0);

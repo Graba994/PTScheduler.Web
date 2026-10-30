@@ -184,6 +184,46 @@ public class EmailService(SiteSettingsService settings, ILogger<EmailService> lo
         </html>
         """;
 
+    /// <summary>Okres próbny wyższego planu (np. Pro na start) kończy się — potem studio zostaje na darmowym planie.</summary>
+    public string PlanTrialEndingEmailBody(string trainerName, int daysLeft, string trialPlan, string basePlan, int baseClients, string domain) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
+            <h1 style="color: #7c3aed; font-size: 1.4rem;">Za {daysLeft} dni kończy się okres próbny {WebUtility.HtmlEncode(trialPlan)}</h1>
+            <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>aplikacja zostaje z Tobą — po okresie próbnym przejdzie na darmowy plan <strong>{WebUtility.HtmlEncode(basePlan)}</strong>
+               ({(baseClients > 0 && baseClients < int.MaxValue ? $"do {baseClients} klientów" : "podstawowe funkcje")}). Dane, klienci i grafik zostają na miejscu.</p>
+            <p>Chcesz zachować wszystko, z czego korzystasz teraz? Wybierz plan w aplikacji: <strong>Zarządzanie → Plan</strong>.</p>
+            <p style="text-align: center; margin: 28px 0;">
+                <a href="https://{domain}/admin/upgrade" style="background: #7c3aed; color: white; padding: 12px 26px; border-radius: 8px; text-decoration: none; font-weight: 600;">Wybierz plan</a>
+            </p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">Masz pytania? Odpisz na tego maila.<br>Hantly</p>
+        </body>
+        </html>
+        """;
+
+    public string PlanTrialEndedEmailBody(string trainerName, string trialPlan, string basePlan, string domain) =>
+        $"""
+        <!DOCTYPE html>
+        <html>
+        <body style="font-family: -apple-system, BlinkMacSystemFont, Segoe UI, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; color: #1f2937;">
+            <!--hantly-logo-->
+            <h1 style="color: #7c3aed; font-size: 1.4rem;">Okres próbny {WebUtility.HtmlEncode(trialPlan)} się skończył</h1>
+            <p>Cześć {WebUtility.HtmlEncode(trainerName)},</p>
+            <p>Twoja aplikacja działa dalej na darmowym planie <strong>{WebUtility.HtmlEncode(basePlan)}</strong>. Dane, klienci i grafik zostały na miejscu.</p>
+            <p>Funkcje z planu {WebUtility.HtmlEncode(trialPlan)} odblokujesz w każdej chwili: <strong>Zarządzanie → Plan</strong>.</p>
+            <p style="text-align: center; margin: 28px 0;">
+                <a href="https://{domain}/admin/upgrade" style="background: #7c3aed; color: white; padding: 12px 26px; border-radius: 8px; text-decoration: none; font-weight: 600;">Zobacz plany</a>
+            </p>
+            <hr style="border: none; border-top: 1px solid #e5e7eb; margin: 30px 0;">
+            <p style="color: #6b7280; font-size: 0.875rem; text-align: center;">Masz pytania? Odpisz na tego maila.<br>Hantly</p>
+        </body>
+        </html>
+        """;
+
     public string TrialWarningEmailBody(string trainerName, int daysLeft) =>
         $"""
         <!DOCTYPE html>

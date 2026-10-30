@@ -186,6 +186,21 @@ public class AppLaunchService(IServiceScopeFactory scopes, ILogger<AppLaunchServ
                 tenant.TrialEndsAt = days > 0 ? DateTime.UtcNow.AddDays(days) : null;
                 await db.SaveChangesAsync();
             }
+            // Darmowy plan: na start okres próbny wyższego planu (np. 14 dni Pro), potem darmowy plan bez zawieszania.
+            if (tenant.Plan is { MonthlyPrice: <= 0 } && tenant.TrialPlanId is null && tenant.TrialEndsAt is null
+                && await settings.GetAsync(SiteSettingsService.Keys.TrialPlanId) is { Length: > 0 } trialId
+                && await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == trialId && p.IsActive) is { } trialPlan && trialPlan.Id != tenant.PlanId)
+            {
+                var days = Math.Max(0, trialPlan.TrialDays) + await ReferralService.ExtraTrialDaysAsync(db, tenant);
+                if (days > 0)
+                {
+                    tenant.TrialPlanId = trialPlan.Id;
+                    tenant.TrialEndsAt = DateTime.UtcNow.AddDays(days);
+                    await db.SaveChangesAsync();
+                    try { await tenants.PushEntitlementsAsync(tenant.Id); }
+                    catch (Exception ex) { logger.LogWarning(ex, "Okres próbny {Plan} dla {Slug} nie wysłany — studio pobierze uprawnienia samo.", trialPlan.Id, tenant.Slug); }
+                }
+            }
         }
 
         if (!ok && tenant is not null)

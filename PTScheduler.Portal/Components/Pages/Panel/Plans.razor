@@ -4,13 +4,18 @@
 @inject IDbContextFactory<PortalDbContext> DbFactory
 @inject PTScheduler.Portal.Services.TenantService TenantService
 @inject PTScheduler.Portal.Services.StripeService StripeSvc
+@inject SiteSettingsService Settings
 @rendermode InteractiveServer
+
+@* Plany jako macierz: wiersze to funkcje z katalogu (PlanFeatureCatalog), kolumny to plany. Zmiany zbierają się
+   lokalnie i po podsumowaniu idą do bazy i do studiów. Zmiana ceny nie dotyczy obecnych klientów — przed zapisem
+   blokujemy im dotychczasową cenę. *@
 
 <PageTitle>Plany cenowe — Hantly Portal</PageTitle>
 
-<PanelHeader BackHref="/panel/setup" BackLabel="Konfiguracja platformy" Title="Plany cenowe" Icon="bi-tags" Subtitle="Abonamenty, które trenerzy wybierają przy rejestracji — cena, limity i funkcje. Zmiany limitów trafiają do instancji automatycznie.">
+<PanelHeader BackHref="/panel/setup" BackLabel="Konfiguracja platformy" Title="Plany cenowe" Icon="bi-tags" Subtitle="Co dostaje każdy plan. Kliknij komórkę, żeby włączyć funkcję albo zmienić limit — zmiany trafiają do studiów po zapisaniu.">
     <Actions>
-        <button class="btn btn-primary btn-sm" @onclick="NewPlan"><i class="bi bi-plus-lg me-1"></i>Nowy plan</button>
+        <button class="btn btn-outline-primary btn-sm" @onclick="NewPlan"><i class="bi bi-plus-lg me-1"></i>Nowy plan</button>
     </Actions>
 </PanelHeader>
 
@@ -22,364 +27,498 @@
     </div>
 }
 
-@if (_editing is not null)
-{
-    <div class="card border-0 shadow-sm mb-4">
-        <div class="card-body">
-            <h6 class="fw-bold mb-3">
-                <i class="bi bi-pencil me-2"></i>@(_isNew ? "Nowy plan" : $"Edycja: {_editing.Name}")
-            </h6>
+<div class="pm-notes">
+    <span><i class="bi bi-lock"></i>Zmiana ceny dotyczy tylko nowych klientów — obecni zostają przy swojej cenie.</span>
+    <span><i class="bi bi-shield-check"></i>Studia sprzed zmiany pakietów zachowują to, co miały (nie dostaną mniej).</span>
+    <label class="pm-trial">
+        <i class="bi bi-gift"></i>Nowe konta na darmowym planie na start dostają
+        <select class="form-select form-select-sm" value="@_trialPlanId" @onchange="SetTrialPlan">
+            <option value="">bez okresu próbnego</option>
+            @foreach (var tp in _plans.Where(x => x.MonthlyPrice > 0).OrderBy(x => x.SortOrder))
+            {
+                <option value="@tp.Id">@tp.Name na @tp.TrialDays dni</option>
+            }
+        </select>
+    </label>
+</div>
 
-            <div class="row g-3 mb-3">
-                <div class="col-md-3">
+@if (_details is not null)
+{
+    <div class="card border-0 shadow-sm mb-3">
+        <div class="card-body">
+            <h6 class="fw-bold mb-3"><i class="bi bi-sliders me-2"></i>@(_detailsNew ? "Nowy plan" : $"Szczegóły planu {_details.Name}")</h6>
+            <div class="row g-3">
+                <div class="col-md-2">
                     <label class="form-label small fw-semibold">ID (slug)</label>
-                    <input class="form-control font-monospace" @bind="_editing.Id" disabled="@(!_isNew)" />
+                    <input class="form-control form-control-sm font-monospace" @bind="_details.Id" disabled="@(!_detailsNew)" />
                 </div>
                 <div class="col-md-3">
                     <label class="form-label small fw-semibold">Nazwa</label>
-                    <input class="form-control" @bind="_editing.Name" />
+                    <input class="form-control form-control-sm" @bind="_details.Name" />
                 </div>
-                <div class="col-md-6">
-                    <label class="form-label small fw-semibold">Opis</label>
-                    <input class="form-control" @bind="_editing.Description" />
+                <div class="col-md-5">
+                    <label class="form-label small fw-semibold">Opis (pod nazwą w cenniku)</label>
+                    <input class="form-control form-control-sm" @bind="_details.Description" />
                 </div>
-                <div class="col-md-3">
-                    <label class="form-label small fw-semibold">Cena mies. (zł)</label>
-                    <input type="number" class="form-control" @bind="_editing.MonthlyPrice" />
-                </div>
-                <div class="col-md-3">
-                    <label class="form-label small fw-semibold">Cena roczna (zł)</label>
-                    <input type="number" class="form-control" @bind="_editing.YearlyPrice" />
-                    @if (_editing.MonthlyPrice > 0 && _editing.YearlyPrice is > 0)
-                    {
-                        var saving = _editing.MonthlyPrice * 12 - _editing.YearlyPrice.Value;
-                        <div class="form-text small @(saving > 0 ? "text-success" : "text-danger")">
-                            @(saving > 0 ? $"Taniej o {saving:0} zł ({saving / _editing.MonthlyPrice:0.#} mies. gratis)" : "Roczna powinna być tańsza niż 12 × miesięczna")
-                        </div>
-                    }
-                    else if (_editing.MonthlyPrice > 0)
-                    {
-                        <div class="form-text small">Np. @((_editing.MonthlyPrice * 10).ToString("0")) zł = 2 miesiące gratis</div>
-                    }
-                </div>
-                <div class="col-md-2">
+                <div class="col-md-1">
                     <label class="form-label small fw-semibold">Kolejność</label>
-                    <input type="number" class="form-control" @bind="_editing.SortOrder" />
+                    <input type="number" class="form-control form-control-sm" @bind="_details.SortOrder" />
                 </div>
-                <div class="col-md-4 d-flex align-items-end gap-3">
-                    <div class="form-check">
-                        <input class="form-check-input" type="checkbox" id="ac" @bind="_editing.IsActive" />
-                        <label class="form-check-label small" for="ac">Aktywny</label>
-                    </div>
-                    <div class="form-check">
-                        <input class="form-check-input" type="checkbox" id="fe" @bind="_editing.IsFeatured" />
-                        <label class="form-check-label small" for="fe">Wyróżniony</label>
-                    </div>
+                <div class="col-md-1">
+                    <label class="form-label small fw-semibold">Dni próbne</label>
+                    <input type="number" min="0" max="90" class="form-control form-control-sm" @bind="_details.TrialDays" />
                 </div>
+                @if (_detailsNew)
+                {
+                    <div class="col-md-4">
+                        <label class="form-label small fw-semibold">Funkcje skopiuj z planu</label>
+                        <select class="form-select form-select-sm" @bind="_copyFrom">
+                            @foreach (var cp in _plans.OrderBy(x => x.SortOrder))
+                            {
+                                <option value="@cp.Id">@cp.Name</option>
+                            }
+                        </select>
+                    </div>
+                }
+                else
+                {
+                    <div class="col-md-4">
+                        <label class="form-label small fw-semibold">Stripe — cena miesięczna / roczna</label>
+                        <div class="input-group input-group-sm">
+                            <input class="form-control font-monospace" @bind="_details.StripeMonthlyPriceId" placeholder="price_…" />
+                            <input class="form-control font-monospace" @bind="_details.StripeYearlyPriceId" placeholder="price_…" />
+                        </div>
+                        <div class="form-text">Puste — Portal założy ceny w Stripe sam przy zapisie.</div>
+                    </div>
+                }
             </div>
-
-            <div class="accordion" id="planAcc">
-                @Section("limits", "Limity ilościowe", "bi-graph-up", () =>
+            <div class="mt-3 d-flex gap-2 flex-wrap">
+                <button class="btn btn-primary btn-sm" @onclick="SaveDetailsAsync"><i class="bi bi-check-lg me-1"></i>@(_detailsNew ? "Dodaj plan" : "Zapisz szczegóły")</button>
+                <button class="btn btn-outline-secondary btn-sm" @onclick="() => _details = null">Anuluj</button>
+                @if (!_detailsNew && _tenantCount.GetValueOrDefault(_details.Id) == 0)
                 {
-                    return
-                    @<div class="row g-2">
-                        @Number("Klienci", () => _editing!.MaxClients, v => _editing!.MaxClients = v)
-                        @Number("Trenerzy dodatkowi", () => _editing!.MaxTrainers, v => _editing!.MaxTrainers = v)
-                        @Number("Asystenci trenera", () => _editing!.MaxSubordinates, v => _editing!.MaxSubordinates = v)
-                        @Number("Kursy wideo", () => _editing!.MaxCourses, v => _editing!.MaxCourses = v)
-                        @Number("Wizyty / mies.", () => _editing!.MaxSessionsPerMonth, v => _editing!.MaxSessionsPerMonth = v)
-                        @Number("Storage (GB)", () => _editing!.MaxStorageGB, v => _editing!.MaxStorageGB = v)
-                        @Number("Video storage (GB)", () => _editing!.MaxVideoStorageGB, v => _editing!.MaxVideoStorageGB = v)
-                        @Number("Video bandwidth (GB/mies.)", () => _editing!.MaxVideoBandwidthGBPerMonth, v => _editing!.MaxVideoBandwidthGBPerMonth = v)
-                        @Number("SMS / mies.", () => _editing!.MaxSmsPerMonth, v => _editing!.MaxSmsPerMonth = v)
-                    </div>;
-                })
-
-                @Section("payments", "Płatności", "bi-credit-card", () =>
-                {
-                    return
-                    @<div class="row g-2">
-                        @Flag("Płatności online", () => _editing!.PaymentsEnabled, v => _editing!.PaymentsEnabled = v)
-                        @Flag("Kody rabatowe", () => _editing!.Coupons, v => _editing!.Coupons = v)
-                    </div>;
-                })
-
-                @Section("materials", "Materiały i treści", "bi-book", () =>
-                {
-                    return
-                    @<div class="row g-2">
-                        @Flag("Kursy wideo", () => _editing!.CoursesEnabled, v => _editing!.CoursesEnabled = v)
-                        @Flag("Moduł treningowy (plany, trening, postępy)", () => _editing!.TrainingPlansEnabled, v => _editing!.TrainingPlansEnabled = v)
-                        @Flag("Pomiary ciała", () => _editing!.BodyMeasurements, v => _editing!.BodyMeasurements = v)
-                    </div>;
-                })
-
-                @Section("comm", "Komunikacja", "bi-chat-dots", () =>
-                {
-                    return
-                    @<div class="row g-2">
-                        @Flag("Przypomnienia email", () => _editing!.EmailReminders, v => _editing!.EmailReminders = v)
-                        @Flag("Przypomnienia SMS", () => _editing!.SmsReminders, v => _editing!.SmsReminders = v)
-                        @Flag("Push notyfikacje", () => _editing!.PushNotifications, v => _editing!.PushNotifications = v)
-                    </div>;
-                })
-
-                @Section("schedule", "Grafik", "bi-calendar-week", () =>
-                {
-                    return
-                    @<div class="row g-2">
-                        @Flag("Sesje cykliczne", () => _editing!.RecurringSessions, v => _editing!.RecurringSessions = v)
-                    </div>;
-                })
-
-                @Section("security", "Uprawnienia i bezpieczeństwo", "bi-shield-lock", () =>
-                {
-                    return
-                    @<div class="row g-2">
-                        @Flag("Role i uprawnienia (RBAC)", () => _editing!.RoleBasedAccess, v => _editing!.RoleBasedAccess = v)
-                        @Flag("Audit log", () => _editing!.AuditLog, v => _editing!.AuditLog = v)
-                        @Flag("2FA (dwuskładnikowe)", () => _editing!.TwoFactorAuth, v => _editing!.TwoFactorAuth = v)
-                    </div>;
-                })
-
-                @Section("branding", "Branding i wygląd", "bi-palette", () =>
-                {
-                    return
-                    @<div>
-                        <div class="row g-2 mb-3">
-                            <div class="col-md-6">
-                                <label class="form-label small fw-semibold">Poziom brandingu</label>
-                                <select class="form-select form-select-sm" @bind="_editing!.BrandingTier">
-                                    <option value="preview">Podgląd (watermark)</option>
-                                    <option value="basic">Podstawowy (bazowe kolory)</option>
-                                    <option value="full">Pełny (wszystkie kolory)</option>
-                                    <option value="premium">Premium (kolory premium)</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="row g-2">
-                            @Flag("Własna domena (np. annafit.pl)", () => _editing!.CustomDomain, v => _editing!.CustomDomain = v)
-                            @Flag("Własne logo", () => _editing!.CustomLogo, v => _editing!.CustomLogo = v)
-                            @Flag("Własna favicon", () => _editing!.CustomFavicon, v => _editing!.CustomFavicon = v)
-                            @Flag("Szablony email", () => _editing!.CustomEmailTemplates, v => _editing!.CustomEmailTemplates = v)
-                        </div>
-                    </div>;
-                })
-
-                @Section("reports", "Raporty i analityka", "bi-graph-up-arrow", () =>
-                {
-                    return
-                    @<div class="row g-2">
-                        @Flag("Podstawowe statystyki", () => _editing!.BasicAnalytics, v => _editing!.BasicAnalytics = v)
-                        @Flag("Zaawansowana analityka", () => _editing!.AdvancedAnalytics, v => _editing!.AdvancedAnalytics = v)
-                        @Flag("Raporty finansowe", () => _editing!.FinancialReports, v => _editing!.FinancialReports = v)
-                        @Flag("Raporty klienta (PDF)", () => _editing!.ClientReports, v => _editing!.ClientReports = v)
-                        @Flag("Eksport danych (CSV/JSON)", () => _editing!.DataExport, v => _editing!.DataExport = v)
-                    </div>;
-                })
-
-                @Section("stripe", "Stripe (płatności trenerów)", "bi-credit-card-2-front", () =>
-                {
-                    return
-                    @<div class="row g-3">
-                        <div class="col-md-6">
-                            <label class="form-label small fw-semibold">Stripe monthly price ID</label>
-                            <input class="form-control font-monospace" @bind="_editing!.StripeMonthlyPriceId" placeholder="price_1P..." />
-                            <div class="form-text small">Zostaw puste — po zapisaniu Portal sam założy produkt i ceny w Stripe (także po zmianie kwoty).</div>
-                        </div>
-                        <div class="col-md-6">
-                            <label class="form-label small fw-semibold">Stripe yearly price ID</label>
-                            <input class="form-control font-monospace" @bind="_editing!.StripeYearlyPriceId" placeholder="price_1P..." />
-                        </div>
-                        <div class="col-md-3">
-                            <label class="form-label small fw-semibold">Dni trialu</label>
-                            <input type="number" min="0" max="90" class="form-control" @bind="_editing!.TrialDays" />
-                            <div class="form-text small">Karta jest wymagana zawsze; pierwsza opłata po tylu dniach. 0 = od razu.</div>
-                        </div>
-                    </div>;
-                })
-
-                @Section("integrations", "Integracje", "bi-plug", () =>
-                {
-                    return
-                    @<div>
-                        <div class="text-muted small mb-2 mt-1"><strong>Płatności</strong></div>
-                        <div class="row g-2 mb-2">
-                            @Flag("PayU", () => _editing!.IntegrationPayU, v => _editing!.IntegrationPayU = v)
-                            @Flag("Przelewy24", () => _editing!.IntegrationPrzelewy24, v => _editing!.IntegrationPrzelewy24 = v)
-                        </div>
-                        <div class="text-muted small mb-2"><strong>Wideo (hosting materiałów)</strong></div>
-                        <div class="row g-2 mb-2">
-                            <div class="col-md-6">
-                                <label class="form-label small">Provider wideo</label>
-                                <select class="form-select form-select-sm" @bind="_editing!.VideoProvider">
-                                    <option value="none">Brak</option>
-                                    <option value="youtube">YouTube (linki)</option>
-                                    <option value="bunny">Bunny.net</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="text-muted small mb-2"><strong>Rozmowy</strong></div>
-                        <div class="row g-2">
-                            @Flag("Kalendarz Google i Meet", () => _editing!.IntegrationGoogleMeet, v => _editing!.IntegrationGoogleMeet = v)
-                        </div>
-                        <div class="text-muted small mb-2 mt-2"><strong>Marketing</strong></div>
-                        <div class="row g-2">
-                            @Flag("Program poleceń", () => _editing!.ReferralProgram, v => _editing!.ReferralProgram = v)
-                            @Flag("Zegarki klientów (Garmin)", () => _editing!.Wearables, v => _editing!.Wearables = v)
-                        </div>
-                    </div>;
-                })
-            </div>
-
-            <div class="mt-4 d-flex gap-2">
-                <button class="btn btn-primary" @onclick="Save"><i class="bi bi-floppy me-1"></i>Zapisz</button>
-                <button class="btn btn-outline-secondary" @onclick="Cancel">Anuluj</button>
+                    <button class="btn btn-outline-danger btn-sm ms-auto" @onclick="() => DeleteAsync(_details.Id)"><i class="bi bi-trash me-1"></i>Usuń plan</button>
+                }
             </div>
         </div>
     </div>
 }
 
-<div class="card border-0 shadow-sm">
-    <div class="card-body p-0">
-        @if (_plans.Count == 0)
-        {
-            <p class="text-muted small p-3 mb-0">Brak planów.</p>
-        }
-        else
-        {
-            <div class="table-responsive">
-                <table class="table table-hover mb-0 small align-middle">
-                    <thead class="table-light">
-                        <tr>
-                            <th>ID</th>
-                            <th>Nazwa</th>
-                            <th>Cena/mies.</th>
-                            <th>Klienci</th>
-                            <th>Trenerów</th>
-                            <th>Płatności</th>
-                            <th>Kursy</th>
-                            <th>Trening</th>
-                            <th>SMS</th>
-                            <th>Branding</th>
-                            <th>Aktywny</th>
-                            <th>Trenerów w planie</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach (var p in _plans.OrderBy(x => x.SortOrder))
+<div class="pm-layout">
+    <div class="pm-matrix card border-0 shadow-sm">
+        <div class="pm-scroll">
+            <table class="pm-table">
+                <thead>
+                    <tr>
+                        <th class="pm-feat-col">Funkcja</th>
+                        @foreach (var p in _plans)
                         {
-                            <tr>
-                                <td class="font-monospace text-muted">@p.Id</td>
-                                <td class="fw-semibold">@p.Name @if (p.IsFeatured) { <span class="badge bg-warning text-dark ms-1">★</span> }</td>
-                                <td>@p.MonthlyPrice.ToString("0") zł</td>
-                                <td>@Fmt(p.MaxClients)</td>
-                                <td>@Fmt(p.MaxTrainers)</td>
-                                <td>@Yn(p.PaymentsEnabled)</td>
-                                <td>@Yn(p.CoursesEnabled)</td>
-                                <td>@Yn(p.TrainingPlansEnabled)</td>
-                                <td>@Yn(p.SmsReminders)</td>
-                                <td><span class="badge bg-secondary">@p.BrandingTier</span></td>
-                                <td>@Yn(p.IsActive)</td>
-                                <td>@_planTenantCount.GetValueOrDefault(p.Id, 0)</td>
-                                <td class="text-end">
-                                    <button class="btn btn-sm btn-outline-primary me-1" @onclick="() => Edit(p)">
-                                        <i class="bi bi-pencil"></i>
-                                    </button>
-                                    @if (_planTenantCount.GetValueOrDefault(p.Id, 0) == 0)
+                            <th class="pm-plan-col @(p.IsFeatured ? "pm-featured" : "") @(p.IsActive ? "" : "pm-inactive")">
+                                <div class="pm-plan-name">
+                                    @p.Name
+                                    @if (p.IsFeatured) { <span class="pm-star" title="Wyróżniony w cenniku">★</span> }
+                                    <button class="btn btn-link btn-sm p-0 ms-1" title="Szczegóły planu" @onclick="() => EditDetails(p)"><i class="bi bi-sliders"></i></button>
+                                </div>
+                                <div class="pm-price">
+                                    <input type="number" min="0" class="form-control form-control-sm" value="@Money(p.MonthlyPrice)" @onchange='e => SetPrice(p, e, false)' aria-label="@($"Cena miesięczna {p.Name}")" />
+                                    <span>zł/mies.</span>
+                                </div>
+                                <div class="pm-price">
+                                    <input type="number" min="0" class="form-control form-control-sm" value="@Money(p.YearlyPrice)" @onchange='e => SetPrice(p, e, true)' aria-label="@($"Cena roczna {p.Name}")" placeholder="—" />
+                                    <span>zł/rok</span>
+                                </div>
+                                <div class="pm-plan-meta">
+                                    <label><input type="checkbox" checked="@p.IsActive" @onchange='e => { p.IsActive = e.Value is true; Recompute(); }' /> w cenniku</label>
+                                    <label><input type="checkbox" checked="@p.IsFeatured" @onchange='e => { p.IsFeatured = e.Value is true; Recompute(); }' /> wyróżniony</label>
+                                </div>
+                                <div class="pm-plan-count">@StudioCount(p.Id)</div>
+                            </th>
+                        }
+                    </tr>
+                </thead>
+                <tbody>
+                    @foreach (var group in PlanFeatureCatalog.Groups)
+                    {
+                        <tr class="pm-group"><td colspan="@(_plans.Count + 1)">@group</td></tr>
+                        @foreach (var f in PlanFeatureCatalog.All.Where(x => x.Group == group))
+                        {
+                            <tr class="@(IsDirtyRow(f) ? "pm-dirty" : "")">
+                                <td class="pm-feat-col">
+                                    <div class="pm-feat-name">@f.Name</div>
+                                    <div class="pm-feat-benefit">@f.Benefit</div>
+                                    @if (f.Kind == PlanFeatureKind.Flag)
                                     {
-                                        <button class="btn btn-sm btn-outline-danger" @onclick="() => Delete(p.Id)">
-                                            <i class="bi bi-trash"></i>
+                                        <button type="button" class="pm-vis @(_hidden.Contains(f.Key) ? "hide" : "")" @onclick="() => ToggleHidden(f.Key)"
+                                                title="Co widzi trener w planie bez tej funkcji">
+                                            <i class="bi @(_hidden.Contains(f.Key) ? "bi-eye-slash" : "bi-stars")"></i>@(_hidden.Contains(f.Key) ? "bez planu: ukryte" : "bez planu: zajawka")
                                         </button>
                                     }
                                 </td>
+                                @foreach (var p in _plans)
+                                {
+                                    <td class="pm-cell @(Changed(p, f) ? "pm-changed" : "")">
+                                        @Cell(p, f)
+                                    </td>
+                                }
                             </tr>
                         }
-                    </tbody>
-                </table>
-            </div>
-        }
+                    }
+                </tbody>
+            </table>
+        </div>
     </div>
+
+    <aside class="pm-side">
+        <div class="card border-0 shadow-sm">
+            <div class="card-body">
+                <div class="d-flex align-items-center justify-content-between mb-2">
+                    <span class="small fw-semibold text-muted">Podgląd w cenniku</span>
+                    <select class="form-select form-select-sm w-auto" @bind="_previewId">
+                        @foreach (var pp in _plans)
+                        {
+                            <option value="@pp.Id">@pp.Name</option>
+                        }
+                    </select>
+                </div>
+                @if (_plans.FirstOrDefault(x => x.Id == _previewId) is { } prev)
+                {
+                    var lower = _plans.Where(x => x.IsActive && x.SortOrder < prev.SortOrder && x.MonthlyPrice > 0).OrderByDescending(x => x.SortOrder).FirstOrDefault();
+                    var (lead, points) = PTScheduler.Portal.Components.Home.HomeShared.Highlights(prev, lower, 6, _garmin, _sms);
+                    <div class="pm-card @(prev.IsFeatured ? "featured" : "")">
+                        @if (prev.IsFeatured) { <span class="pm-card-badge">Najczęściej wybierany</span> }
+                        <div class="pm-card-name">@prev.Name</div>
+                        <div class="pm-card-desc">@prev.Description</div>
+                        <div class="pm-card-price">@(prev.MonthlyPrice <= 0 ? "0 zł" : $"{prev.MonthlyPrice:0} zł")<small>@(prev.MonthlyPrice > 0 ? " / mies." : "")</small></div>
+                        @if (prev.YearlyPrice is > 0 && prev.MonthlyPrice > 0)
+                        {
+                            <div class="pm-card-year">albo @prev.YearlyPrice.Value.ToString("0") zł rocznie (@Math.Round(12 - prev.YearlyPrice.Value / prev.MonthlyPrice, 1) mies. gratis)</div>
+                        }
+                        @if (lead is not null) { <div class="pm-card-lead">@lead</div> }
+                        <ul>
+                            @foreach (var pt in points)
+                            {
+                                <li><i class="bi bi-check2"></i>@pt</li>
+                            }
+                        </ul>
+                    </div>
+                }
+            </div>
+        </div>
+    </aside>
 </div>
 
+@if (_changes.Count > 0 || HiddenChanged)
+{
+    <div class="pm-savebar">
+        <span><b>@(_changes.Count + (HiddenChanged ? 1 : 0))</b> @Plural(_changes.Count + (HiddenChanged ? 1 : 0)) do zapisania</span>
+        <button class="btn btn-outline-secondary btn-sm" @onclick="DiscardAsync">Odrzuć</button>
+        <button class="btn btn-primary btn-sm" @onclick="() => _confirm = true"><i class="bi bi-send me-1"></i>Zapisz i wyślij do studiów</button>
+    </div>
+}
+
+@if (_confirm)
+{
+    <div class="pm-modal-backdrop" @onclick="() => _confirm = false"></div>
+    <div class="pm-modal" role="dialog" aria-label="Podsumowanie zmian">
+        <h6 class="fw-bold mb-2">Podsumowanie zmian</h6>
+        @foreach (var byPlan in _changes.GroupBy(c => c.PlanId))
+        {
+            var plan = _plans.First(x => x.Id == byPlan.Key);
+            var studios = _tenantCount.GetValueOrDefault(plan.Id) + _trialCount.GetValueOrDefault(plan.Id);
+            <div class="pm-sum">
+                <div class="pm-sum-head">@plan.Name <span>· dotyczy @studios @(studios == 1 ? "studia" : "studiów")</span></div>
+                <ul>
+                    @foreach (var c in byPlan)
+                    {
+                        <li class="@(c.Loss ? "loss" : "")">@c.Text</li>
+                    }
+                </ul>
+                @if (byPlan.Any(c => c.Loss) && studios > 0)
+                {
+                    <div class="pm-warn"><i class="bi bi-exclamation-triangle"></i>Studia na tym planie stracą te funkcje — poza tymi sprzed zmiany pakietów, które zachowują swoje.</div>
+                }
+                @if (byPlan.Any(c => c.Price) && _tenantCount.GetValueOrDefault(plan.Id) > 0)
+                {
+                    <div class="pm-ok"><i class="bi bi-lock"></i>Obecni klienci tego planu zostają przy dotychczasowej cenie.</div>
+                }
+            </div>
+        }
+        @if (HiddenChanged)
+        {
+            <div class="pm-sum"><div class="pm-sum-head">Widoczność funkcji bez planu</div><div class="small text-muted">Ukryte: @(string.Join(", ", _hidden.Select(k => PlanFeatureCatalog.Find(k)?.Name ?? k).DefaultIfEmpty("nic")))</div></div>
+        }
+        <div class="d-flex gap-2 justify-content-end mt-3">
+            <button class="btn btn-outline-secondary btn-sm" @onclick="() => _confirm = false">Wróć</button>
+            <button class="btn btn-primary btn-sm" disabled="@_saving" @onclick="SaveAsync">
+                @if (_saving) { <span class="spinner-border spinner-border-sm me-1"></span> }Zapisz i wyślij
+            </button>
+        </div>
+    </div>
+}
+
 @code {
-    private List<Plan> _plans = new();
-    private Dictionary<string, int> _planTenantCount = new();
-    private Plan? _editing;
-    private bool _isNew;
+    private List<Plan> _plans = [];
+    private Dictionary<string, Plan> _original = [];
+    private Dictionary<string, int> _tenantCount = [];
+    private Dictionary<string, int> _trialCount = [];
+    private HashSet<string> _hidden = [];
+    private HashSet<string> _hiddenOriginal = [];
+    private List<Change> _changes = [];
+    private string _trialPlanId = "";
+    private string _previewId = "";
+    private bool _garmin, _sms, _confirm, _saving;
     private string? _message;
     private bool _msgError;
+    private Plan? _details;
+    private bool _detailsNew;
+    private string _copyFrom = "";
 
-    protected override async Task OnInitializedAsync() => await Load();
+    private sealed record Change(string PlanId, string Text, bool Loss, bool Price);
 
-    private async Task Load()
+    protected override async Task OnInitializedAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
     {
         await using var db = DbFactory.CreateDbContext();
-        _plans = await db.Plans.AsNoTracking().ToListAsync();
-        _planTenantCount = await db.Tenants.GroupBy(t => t.PlanId)
-            .Select(g => new { g.Key, Count = g.Count() })
-            .ToDictionaryAsync(x => x.Key, x => x.Count);
+        _plans = await db.Plans.AsNoTracking().OrderBy(p => p.SortOrder).ToListAsync();
+        _original = _plans.ToDictionary(p => p.Id, PlanFeatureCatalog.Clone);
+        _tenantCount = await db.Tenants.Where(t => t.Status != TenantStatus.Destroyed).GroupBy(t => t.PlanId)
+            .Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count);
+        var now = DateTime.UtcNow;
+        _trialCount = await db.Tenants.Where(t => t.TrialPlanId != null && t.TrialEndsAt > now && t.Status != TenantStatus.Destroyed)
+            .GroupBy(t => t.TrialPlanId!).Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count);
+        _hidden = (await TenantService.HiddenFeaturesAsync()).ToHashSet();
+        _hiddenOriginal = [.. _hidden];
+        _trialPlanId = await Settings.GetAsync(SiteSettingsService.Keys.TrialPlanId);
+        _garmin = await Settings.GetAsync(SiteSettingsService.Keys.GarminEnabled) == "true";
+        _sms = await Settings.PlatformSmsOnAsync();
+        if (_plans.All(p => p.Id != _previewId)) _previewId = _plans.FirstOrDefault(p => p.IsFeatured)?.Id ?? _plans.FirstOrDefault()?.Id ?? "";
+        _changes = [];
+    }
+
+    private string StudioCount(string planId)
+    {
+        var n = _tenantCount.GetValueOrDefault(planId);
+        var trial = _trialCount.GetValueOrDefault(planId);
+        var text = n == 0 ? "brak studiów" : n == 1 ? "1 studio" : $"{n} studiów";
+        return trial > 0 ? $"{text} + {trial} w okresie próbnym" : text;
+    }
+
+    private RenderFragment Cell(Plan p, PlanFeature f) => f.Kind switch
+    {
+        PlanFeatureKind.Flag => @<input type="checkbox" class="form-check-input" checked="@(PlanFeatureCatalog.Get(p, f.Key) is true)"
+                                        aria-label="@($"{f.Name} w planie {p.Name}")" @onchange='e => Set(p, f, e.Value is true)' />,
+        PlanFeatureKind.Limit => @<input type="text" inputmode="numeric" class="form-control form-control-sm pm-limit"
+                                         value="@LimitText(p, f)" title="∞ = bez limitu, 0 = brak"
+                                         aria-label="@($"{f.Name} w planie {p.Name}")" @onchange='e => SetLimit(p, f, e.Value?.ToString())' />,
+        _ => @<select class="form-select form-select-sm" value="@(PlanFeatureCatalog.Get(p, f.Key) as string)" aria-label="@($"{f.Name} w planie {p.Name}")"
+                      @onchange='e => Set(p, f, e.Value?.ToString())'>
+                  @foreach (var o in f.Options ?? [])
+                  {
+                      <option value="@o">@o</option>
+                  }
+              </select>
+    };
+
+    private static string LimitText(Plan p, PlanFeature f) =>
+        PlanFeatureCatalog.Get(p, f.Key) is int n ? n >= PlanFeatureCatalog.Unlimited ? "∞" : n.ToString() : "0";
+
+    private void SetLimit(Plan p, PlanFeature f, string? raw)
+    {
+        var t = (raw ?? "").Trim().ToLowerInvariant();
+        int value;
+        if (t is "∞" or "bez limitu" or "inf" or "nieograniczone") value = PlanFeatureCatalog.Unlimited;
+        else if (t.Length == 0) value = 0;
+        else if (!int.TryParse(t.Replace(" ", ""), out value) || value < 0) { _message = $"{f.Name}: wpisz liczbę albo ∞."; _msgError = true; return; }
+        Set(p, f, value);
+    }
+
+    private void Set(Plan p, PlanFeature f, object? value)
+    {
+        PlanFeatureCatalog.Set(p, f.Key, value);
+        Recompute();
+    }
+
+    private void SetPrice(Plan p, ChangeEventArgs e, bool yearly)
+    {
+        var ok = decimal.TryParse(e.Value?.ToString()?.Replace(',', '.'), System.Globalization.NumberStyles.Number, System.Globalization.CultureInfo.InvariantCulture, out var v) && v >= 0;
+        if (yearly) p.YearlyPrice = ok && v > 0 ? v : null;
+        else if (ok) p.MonthlyPrice = v;
+        Recompute();
+    }
+
+    private void ToggleHidden(string key)
+    {
+        if (!_hidden.Remove(key)) _hidden.Add(key);
+    }
+
+    private bool HiddenChanged => !_hidden.SetEquals(_hiddenOriginal);
+
+    private bool Changed(Plan p, PlanFeature f) =>
+        _original.TryGetValue(p.Id, out var o) && !Equals(PlanFeatureCatalog.Get(o, f.Key), PlanFeatureCatalog.Get(p, f.Key));
+
+    private bool IsDirtyRow(PlanFeature f) => _plans.Any(p => Changed(p, f));
+
+    private void Recompute()
+    {
+        var list = new List<Change>();
+        foreach (var p in _plans)
+        {
+            if (!_original.TryGetValue(p.Id, out var o)) continue;
+            if (o.MonthlyPrice != p.MonthlyPrice) list.Add(new(p.Id, $"Cena miesięczna: {o.MonthlyPrice:0} → {p.MonthlyPrice:0} zł", false, true));
+            if (o.YearlyPrice != p.YearlyPrice) list.Add(new(p.Id, $"Cena roczna: {o.YearlyPrice?.ToString("0") ?? "—"} → {p.YearlyPrice?.ToString("0") ?? "—"} zł", false, true));
+            if (o.IsActive != p.IsActive) list.Add(new(p.Id, p.IsActive ? "Wraca do cennika" : "Znika z cennika (obecni klienci zostają)", false, false));
+            if (o.IsFeatured != p.IsFeatured) list.Add(new(p.Id, p.IsFeatured ? "Wyróżniony w cenniku" : "Bez wyróżnienia", false, false));
+            foreach (var f in PlanFeatureCatalog.All.Where(f => Changed(p, f)))
+            {
+                var loss = f.Kind switch
+                {
+                    PlanFeatureKind.Flag => PlanFeatureCatalog.Get(p, f.Key) is false,
+                    PlanFeatureKind.Limit => (int)PlanFeatureCatalog.Get(p, f.Key)! < (int)PlanFeatureCatalog.Get(o, f.Key)!,
+                    _ => PlanFeatureCatalog.Rank(f, PlanFeatureCatalog.Get(p, f.Key) as string) < PlanFeatureCatalog.Rank(f, PlanFeatureCatalog.Get(o, f.Key) as string)
+                };
+                list.Add(new(p.Id, $"{f.Name}: {PlanFeatureCatalog.Describe(o, f)} → {PlanFeatureCatalog.Describe(p, f)}", loss, false));
+            }
+        }
+        _changes = list;
+    }
+
+    private async Task DiscardAsync()
+    {
+        await LoadAsync();
+        _message = null;
+    }
+
+    private async Task SaveAsync()
+    {
+        foreach (var p in _plans.Where(p => p.MonthlyPrice > 0 && p.YearlyPrice is > 0 && p.YearlyPrice >= p.MonthlyPrice * 12))
+        {
+            _message = $"{p.Name}: cena roczna musi być niższa niż 12 × miesięczna — inaczej nikt jej nie wybierze.";
+            _msgError = true; _confirm = false; return;
+        }
+        _saving = true;
+        try
+        {
+            var changedPlans = _changes.Select(c => c.PlanId).Distinct().ToList();
+            await using (var db = DbFactory.CreateDbContext())
+            {
+                foreach (var id in changedPlans)
+                {
+                    var edited = _plans.First(p => p.Id == id);
+                    var old = _original[id];
+                    var entity = await db.Plans.FirstAsync(p => p.Id == id);
+                    // Zmiana ceny — obecni klienci tego planu zostają przy dotychczasowej (blokada tylko tam, gdzie jej jeszcze nie ma).
+                    if (old.MonthlyPrice != edited.MonthlyPrice || old.YearlyPrice != edited.YearlyPrice)
+                    {
+                        var unlocked = await db.Tenants.Where(t => t.PlanId == id && t.Status != TenantStatus.Destroyed && t.LockedMonthlyPrice == null).ToListAsync();
+                        foreach (var t in unlocked) PlanPricing.Lock(t, old);
+                    }
+                    var stripeMonthly = entity.StripeMonthlyPriceId;
+                    var stripeYearly = entity.StripeYearlyPriceId;
+                    db.Entry(entity).CurrentValues.SetValues(edited);
+                    entity.StripeMonthlyPriceId = stripeMonthly;
+                    entity.StripeYearlyPriceId = stripeYearly;
+                }
+                await db.SaveChangesAsync();
+            }
+            if (HiddenChanged)
+                await Settings.SetAsync(SiteSettingsService.Keys.PlanFeaturesHidden, System.Text.Json.JsonSerializer.Serialize(_hidden.OrderBy(k => k)));
+
+            int pushed = 0, total = 0;
+            if (HiddenChanged)
+                (pushed, total) = await TenantService.PushAllEntitlementsAsync();
+            else
+                foreach (var id in changedPlans)
+                {
+                    var (ok, all) = await TenantService.PushPlanToTenantsAsync(id);
+                    pushed += ok; total += all;
+                }
+
+            var msg = total == 0 ? "Zapisano." : pushed == total ? $"Zapisano i wysłano do {total} studiów." : $"Zapisano. Wysłano do {pushed}/{total} studiów — pozostałe pobiorą zmiany same (do 15 min).";
+            var error = false;
+            if (await StripeSvc.IsConfiguredAsync())
+                foreach (var id in changedPlans.Where(id => _changes.Any(c => c.PlanId == id && c.Price)))
+                {
+                    var (stripeOk, stripeError) = await StripeSvc.EnsurePricesAsync(id);
+                    if (!stripeOk) { msg += $" Stripe ({id}): {stripeError}"; error = true; }
+                }
+            await LoadAsync();
+            _message = msg; _msgError = error;
+        }
+        catch (Exception ex)
+        {
+            _message = ex.Message; _msgError = true;
+        }
+        finally
+        {
+            _saving = false; _confirm = false;
+        }
+    }
+
+    private async Task SetTrialPlan(ChangeEventArgs e)
+    {
+        _trialPlanId = e.Value?.ToString() ?? "";
+        await Settings.SetAsync(SiteSettingsService.Keys.TrialPlanId, _trialPlanId);
+        var name = _plans.FirstOrDefault(p => p.Id == _trialPlanId)?.Name;
+        _message = name is null ? "Nowe konta na darmowym planie startują bez okresu próbnego." : $"Nowe konta na darmowym planie dostaną na start plan {name}.";
+        _msgError = false;
     }
 
     private void NewPlan()
     {
-        _isNew = true;
-        _editing = new Plan { Id = "", Name = "", IsActive = true, SortOrder = _plans.Count + 1 };
+        _detailsNew = true;
+        _copyFrom = _plans.FirstOrDefault(p => p.IsFeatured)?.Id ?? _plans.FirstOrDefault()?.Id ?? "";
+        _details = new Plan { Id = "", Name = "", IsActive = false, SortOrder = _plans.Count + 1, TrialDays = 14 };
     }
 
-    private void Edit(Plan p)
+    private void EditDetails(Plan p)
     {
-        _isNew = false;
-        _editing = CloneOf(p);
+        _detailsNew = false;
+        _details = PlanFeatureCatalog.Clone(_original.GetValueOrDefault(p.Id) ?? p);
     }
 
-    private void Cancel() => _editing = null;
-
-    private async Task Save()
+    private async Task SaveDetailsAsync()
     {
-        if (_editing is null) return;
-        if (string.IsNullOrWhiteSpace(_editing.Id) || string.IsNullOrWhiteSpace(_editing.Name))
+        if (_details is null) return;
+        if (string.IsNullOrWhiteSpace(_details.Id) || string.IsNullOrWhiteSpace(_details.Name))
         {
             _message = "ID i nazwa są wymagane."; _msgError = true; return;
         }
-        if (_editing.MonthlyPrice > 0 && _editing.YearlyPrice is > 0 && _editing.YearlyPrice >= _editing.MonthlyPrice * 12)
-        {
-            _message = "Cena roczna musi być niższa niż 12 × cena miesięczna — inaczej nikt jej nie wybierze."; _msgError = true; return;
-        }
-
         try
         {
             await using var db = DbFactory.CreateDbContext();
-            if (_isNew)
+            if (_detailsNew)
             {
-                if (await db.Plans.AnyAsync(p => p.Id == _editing.Id))
-                    throw new InvalidOperationException($"Plan o ID '{_editing.Id}' już istnieje.");
-                db.Plans.Add(_editing);
+                var id = _details.Id.Trim().ToLowerInvariant();
+                if (await db.Plans.AnyAsync(p => p.Id == id)) throw new InvalidOperationException($"Plan o ID '{id}' już istnieje.");
+                var source = _plans.FirstOrDefault(p => p.Id == _copyFrom);
+                var plan = source is null ? new Plan() : PlanFeatureCatalog.Clone(_original[source.Id]);
+                plan.Id = id;
+                plan.Name = _details.Name.Trim();
+                plan.Description = _details.Description;
+                plan.SortOrder = _details.SortOrder;
+                plan.TrialDays = Math.Clamp(_details.TrialDays, 0, 90);
+                plan.IsActive = false;
+                plan.IsFeatured = false;
+                plan.StripeProductId = plan.StripeMonthlyPriceId = plan.StripeYearlyPriceId = null;
+                db.Plans.Add(plan);
+                _message = $"Dodano plan {plan.Name} (na razie poza cennikiem) — ustaw funkcje i ceny w macierzy, potem zaznacz „w cenniku”.";
             }
             else
             {
-                var existing = await db.Plans.FirstOrDefaultAsync(p => p.Id == _editing.Id);
-                if (existing is null) throw new InvalidOperationException("Plan nie istnieje.");
-                db.Entry(existing).CurrentValues.SetValues(_editing);
+                var entity = await db.Plans.FirstAsync(p => p.Id == _details.Id);
+                entity.Name = _details.Name.Trim();
+                entity.Description = _details.Description;
+                entity.SortOrder = _details.SortOrder;
+                entity.TrialDays = Math.Clamp(_details.TrialDays, 0, 90);
+                entity.StripeMonthlyPriceId = string.IsNullOrWhiteSpace(_details.StripeMonthlyPriceId) ? null : _details.StripeMonthlyPriceId.Trim();
+                entity.StripeYearlyPriceId = string.IsNullOrWhiteSpace(_details.StripeYearlyPriceId) ? null : _details.StripeYearlyPriceId.Trim();
+                _message = $"Zapisano szczegóły planu {entity.Name}.";
             }
             await db.SaveChangesAsync();
-            var planId = _editing.Id;
-            _editing = null;
-            await Load();
-            var (pushed, total) = await TenantService.PushPlanToTenantsAsync(planId);
-            _message = total == 0 ? "Zapisano."
-                : pushed == total ? $"Zapisano. Uprawnienia odświeżone u {total} trenerów."
-                : $"Zapisano. Uprawnienia odświeżone u {pushed}/{total} trenerów — pozostali dostaną je przy następnym starcie.";
             _msgError = false;
-            // Ceny w Stripe idą za planem — kreator rejestracji używa ich przy podpinaniu karty.
-            if (await StripeSvc.IsConfiguredAsync())
-            {
-                var (stripeOk, stripeError) = await StripeSvc.EnsurePricesAsync(planId);
-                _message += stripeOk ? " Ceny w Stripe aktualne." : $" Stripe: {stripeError}";
-                if (!stripeOk) _msgError = true;
-                await Load();
-            }
+            _details = null;
+            await LoadAsync();
         }
         catch (Exception ex)
         {
@@ -387,16 +526,18 @@
         }
     }
 
-    private async Task Delete(string id)
+    private async Task DeleteAsync(string id)
     {
         try
         {
             await using var db = DbFactory.CreateDbContext();
+            if (await db.Tenants.AnyAsync(t => t.PlanId == id || t.TrialPlanId == id)) throw new InvalidOperationException("Na tym planie są studia — najpierw przenieś je na inny plan.");
             var p = await db.Plans.FirstOrDefaultAsync(x => x.Id == id);
             if (p is null) return;
             db.Plans.Remove(p);
             await db.SaveChangesAsync();
-            await Load();
+            _details = null;
+            await LoadAsync();
             _message = "Plan usunięty."; _msgError = false;
         }
         catch (Exception ex)
@@ -405,46 +546,7 @@
         }
     }
 
-    private static Plan CloneOf(Plan p)
-    {
-        var json = System.Text.Json.JsonSerializer.Serialize(p);
-        return System.Text.Json.JsonSerializer.Deserialize<Plan>(json)!;
-    }
+    private static string Money(decimal? v) => v?.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture) ?? "";
 
-    private static string Fmt(int v) => v == int.MaxValue ? "∞" : v.ToString();
-    private static MarkupString Yn(bool b) => new(b
-        ? "<i class=\"bi bi-check-circle-fill text-success\"></i>"
-        : "<i class=\"bi bi-dash text-muted\"></i>");
-
-    private RenderFragment Section(string id, string title, string icon, Func<RenderFragment> body) =>
-        @<div class="accordion-item">
-            <h2 class="accordion-header">
-                <button class="accordion-button collapsed small fw-semibold" type="button"
-                        data-bs-toggle="collapse" data-bs-target="#sec-@id">
-                    <i class="bi @icon me-2"></i>@title
-                </button>
-            </h2>
-            <div id="sec-@id" class="accordion-collapse collapse" data-bs-parent="#planAcc">
-                <div class="accordion-body">
-                    @body()
-                </div>
-            </div>
-        </div>;
-
-    private RenderFragment Flag(string label, Func<bool> get, Action<bool> set) =>
-        @<div class="col-md-4">
-            <div class="form-check">
-                <input class="form-check-input" type="checkbox" checked="@get()"
-                       @onchange="e => set((bool)e.Value!)" id="f-@label.GetHashCode()" />
-                <label class="form-check-label small" for="f-@label.GetHashCode()">@label</label>
-            </div>
-        </div>;
-
-    private RenderFragment Number(string label, Func<int> get, Action<int> set) =>
-        @<div class="col-md-3">
-            <label class="form-label small mb-1">@label</label>
-            <input type="number" class="form-control form-control-sm"
-                   value="@get()"
-                   @onchange="e => set(int.TryParse(e.Value?.ToString(), out var v) ? v : 0)" />
-        </div>;
+    private static string Plural(int n) => n == 1 ? "zmiana" : n % 10 is >= 2 and <= 4 && n % 100 is < 12 or > 14 ? "zmiany" : "zmian";
 }

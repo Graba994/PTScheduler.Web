@@ -399,8 +399,8 @@
 
     private static string PriceText(Tenant t)
     {
-        if (t.Plan is not { } p || p.MonthlyPrice <= 0) return "0 zł";
-        return t.BillingInterval == "yearly" && p.YearlyPrice is { } y ? $"{y:0.##} zł / rok" : $"{p.MonthlyPrice:0.##} zł / mies.";
+        if (t.Plan is not { } p || PlanPricing.Monthly(t, p) <= 0) return "0 zł";
+        return t.BillingInterval == "yearly" && PlanPricing.Yearly(t, p) is { } y ? $"{y:0.##} zł / rok" : $"{PlanPricing.Monthly(t, p):0.##} zł / mies.";
     }
 
     private static string BillingText(Tenant t) => t.BillingStatus switch
@@ -409,7 +409,7 @@
         "active" => "opłacony",
         "past_due" => "zaległa płatność",
         "canceled" => "anulowany",
-        _ => (t.Plan?.MonthlyPrice ?? 0) <= 0 ? "plan darmowy" : t.TrialEndsAt > DateTime.UtcNow ? "okres próbny" : "rachunki e-mailem"
+        _ => t.TrialPlanId is not null && t.TrialEndsAt > DateTime.UtcNow ? "okres próbny" : (t.Plan?.MonthlyPrice ?? 0) <= 0 ? "plan darmowy" : t.TrialEndsAt > DateTime.UtcNow ? "okres próbny" : "rachunki e-mailem"
     };
 
     private static string DomainText(string? status) => status switch

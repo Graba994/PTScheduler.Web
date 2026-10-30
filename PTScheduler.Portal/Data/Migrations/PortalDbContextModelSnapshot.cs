@@ -1229,7 +1229,13 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<bool>("AdvancedAnalytics")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("AiAssistant")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("AuditLog")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("Automations")
                         .HasColumnType("boolean");
 
                     b.Property<bool>("BasicAnalytics")
@@ -1273,6 +1279,9 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<string>("Description")
                         .HasColumnType("text");
 
+                    b.Property<bool>("Documents")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("EmailReminders")
                         .HasColumnType("boolean");
 
@@ -1293,6 +1302,9 @@ namespace PTScheduler.Portal.Data.Migrations
 
                     b.Property<bool>("IsFeatured")
                         .HasColumnType("boolean");
+
+                    b.Property<int>("MaxAiActionsPerMonth")
+                        .HasColumnType("integer");
 
                     b.Property<int>("MaxClients")
                         .HasColumnType("integer");
@@ -1331,6 +1343,9 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<bool>("PaymentsEnabled")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("PrioritySupport")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("PushNotifications")
                         .HasColumnType("boolean");
 
@@ -1341,6 +1356,9 @@ namespace PTScheduler.Portal.Data.Migrations
                         .HasColumnType("boolean");
 
                     b.Property<bool>("RoleBasedAccess")
+                        .HasColumnType("boolean");
+
+                    b.Property<bool>("SalesTools")
                         .HasColumnType("boolean");
 
                     b.Property<bool>("SmsReminders")
@@ -1358,6 +1376,9 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<string>("StripeYearlyPriceId")
                         .HasColumnType("text");
 
+                    b.Property<bool>("Surveys")
+                        .HasColumnType("boolean");
+
                     b.Property<bool>("TrainingPlansEnabled")
                         .HasColumnType("boolean");
 
@@ -1374,6 +1395,9 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<bool>("Wearables")
                         .HasColumnType("boolean");
 
+                    b.Property<bool>("WhiteLabel")
+                        .HasColumnType("boolean");
+
                     b.Property<decimal?>("YearlyPrice")
                         .HasColumnType("numeric");
 
@@ -1386,7 +1410,9 @@ namespace PTScheduler.Portal.Data.Migrations
                         {
                             Id = "start",
                             AdvancedAnalytics = false,
+                            AiAssistant = false,
                             AuditLog = false,
+                            Automations = false,
                             BasicAnalytics = true,
                             BodyMeasurements = true,
                             BrandingTier = "preview",
@@ -1399,7 +1425,8 @@ namespace PTScheduler.Portal.Data.Migrations
                             CustomFavicon = false,
                             CustomLogo = false,
                             DataExport = false,
-                            Description = "Testuj za darmo przez 7 dni",
+                            Description = "Za darmo — na początek 14 dni pełnego planu Pro",
+                            Documents = false,
                             EmailReminders = true,
                             FinancialReports = false,
                             IntegrationGoogleMeet = false,
@@ -1407,6 +1434,7 @@ namespace PTScheduler.Portal.Data.Migrations
                             IntegrationPrzelewy24 = false,
                             IsActive = true,
                             IsFeatured = false,
+                            MaxAiActionsPerMonth = 0,
                             MaxClients = 3,
                             MaxCourses = 0,
                             MaxSessionsPerMonth = 30,
@@ -1419,23 +1447,29 @@ namespace PTScheduler.Portal.Data.Migrations
                             MonthlyPrice = 0m,
                             Name = "Start",
                             PaymentsEnabled = false,
-                            PushNotifications = false,
+                            PrioritySupport = false,
+                            PushNotifications = true,
                             RecurringSessions = true,
                             ReferralProgram = false,
                             RoleBasedAccess = false,
+                            SalesTools = false,
                             SmsReminders = false,
                             SortOrder = 1,
+                            Surveys = false,
                             TrainingPlansEnabled = false,
-                            TrialDays = 7,
+                            TrialDays = 0,
                             TwoFactorAuth = true,
                             VideoProvider = "youtube",
-                            Wearables = false
+                            Wearables = false,
+                            WhiteLabel = false
                         },
                         new
                         {
                             Id = "starter",
                             AdvancedAnalytics = false,
+                            AiAssistant = false,
                             AuditLog = false,
+                            Automations = false,
                             BasicAnalytics = true,
                             BodyMeasurements = true,
                             BrandingTier = "basic",
@@ -1448,44 +1482,52 @@ namespace PTScheduler.Portal.Data.Migrations
                             CustomFavicon = true,
                             CustomLogo = true,
                             DataExport = false,
-                            Description = "Podstawowe narzędzia dla trenera",
+                            Description = "Trener, który przyjmuje klientów online",
+                            Documents = true,
                             EmailReminders = true,
                             FinancialReports = true,
                             IntegrationGoogleMeet = false,
                             IntegrationPayU = true,
-                            IntegrationPrzelewy24 = false,
+                            IntegrationPrzelewy24 = true,
                             IsActive = true,
                             IsFeatured = false,
-                            MaxClients = 15,
-                            MaxCourses = 3,
-                            MaxSessionsPerMonth = 200,
+                            MaxAiActionsPerMonth = 0,
+                            MaxClients = 20,
+                            MaxCourses = 0,
+                            MaxSessionsPerMonth = 400,
                             MaxSmsPerMonth = 0,
                             MaxStorageGB = 5,
                             MaxSubordinates = 0,
                             MaxTrainers = 0,
                             MaxVideoBandwidthGBPerMonth = 0,
                             MaxVideoStorageGB = 5,
-                            MonthlyPrice = 49m,
-                            Name = "Starter",
+                            MonthlyPrice = 59m,
+                            Name = "Solo",
                             PaymentsEnabled = true,
-                            PushNotifications = false,
+                            PrioritySupport = false,
+                            PushNotifications = true,
                             RecurringSessions = true,
                             ReferralProgram = false,
                             RoleBasedAccess = false,
+                            SalesTools = false,
                             SmsReminders = false,
                             SortOrder = 2,
-                            TrainingPlansEnabled = false,
+                            Surveys = true,
+                            TrainingPlansEnabled = true,
                             TrialDays = 14,
                             TwoFactorAuth = true,
                             VideoProvider = "youtube",
                             Wearables = false,
-                            YearlyPrice = 490m
+                            WhiteLabel = false,
+                            YearlyPrice = 590m
                         },
                         new
                         {
                             Id = "pro",
                             AdvancedAnalytics = true,
+                            AiAssistant = true,
                             AuditLog = false,
+                            Automations = true,
                             BasicAnalytics = true,
                             BodyMeasurements = true,
                             BrandingTier = "full",
@@ -1493,12 +1535,13 @@ namespace PTScheduler.Portal.Data.Migrations
                             Coupons = true,
                             CoursesEnabled = true,
                             Currency = "PLN",
-                            CustomDomain = false,
+                            CustomDomain = true,
                             CustomEmailTemplates = true,
                             CustomFavicon = true,
                             CustomLogo = true,
                             DataExport = true,
-                            Description = "Pełna funkcjonalność dla aktywnych trenerów",
+                            Description = "Wszystko, żeby klienci wracali i polecali Cię dalej",
+                            Documents = true,
                             EmailReminders = true,
                             FinancialReports = true,
                             IntegrationGoogleMeet = true,
@@ -1506,36 +1549,43 @@ namespace PTScheduler.Portal.Data.Migrations
                             IntegrationPrzelewy24 = true,
                             IsActive = true,
                             IsFeatured = true,
-                            MaxClients = 50,
-                            MaxCourses = 10,
-                            MaxSessionsPerMonth = 500,
-                            MaxSmsPerMonth = 50,
-                            MaxStorageGB = 10,
+                            MaxAiActionsPerMonth = 300,
+                            MaxClients = 75,
+                            MaxCourses = 5,
+                            MaxSessionsPerMonth = 2147483647,
+                            MaxSmsPerMonth = 150,
+                            MaxStorageGB = 20,
                             MaxSubordinates = 1,
-                            MaxTrainers = 2,
+                            MaxTrainers = 1,
                             MaxVideoBandwidthGBPerMonth = 100,
                             MaxVideoStorageGB = 20,
-                            MonthlyPrice = 99m,
+                            MonthlyPrice = 119m,
                             Name = "Pro",
                             PaymentsEnabled = true,
+                            PrioritySupport = false,
                             PushNotifications = true,
                             RecurringSessions = true,
                             ReferralProgram = true,
                             RoleBasedAccess = false,
+                            SalesTools = true,
                             SmsReminders = true,
                             SortOrder = 3,
+                            Surveys = true,
                             TrainingPlansEnabled = true,
                             TrialDays = 14,
                             TwoFactorAuth = true,
                             VideoProvider = "bunny",
                             Wearables = true,
-                            YearlyPrice = 990m
+                            WhiteLabel = false,
+                            YearlyPrice = 1190m
                         },
                         new
                         {
                             Id = "studio",
                             AdvancedAnalytics = true,
+                            AiAssistant = true,
                             AuditLog = true,
+                            Automations = true,
                             BasicAnalytics = true,
                             BodyMeasurements = true,
                             BrandingTier = "premium",
@@ -1543,12 +1593,13 @@ namespace PTScheduler.Portal.Data.Migrations
                             Coupons = true,
                             CoursesEnabled = true,
                             Currency = "PLN",
-                            CustomDomain = false,
+                            CustomDomain = true,
                             CustomEmailTemplates = true,
                             CustomFavicon = true,
                             CustomLogo = true,
                             DataExport = true,
-                            Description = "Bez limitów, pełna kontrola, priorytetowe wsparcie",
+                            Description = "Studio z zespołem, Twoja marka i opieka wdrożeniowa",
+                            Documents = true,
                             EmailReminders = true,
                             FinancialReports = true,
                             IntegrationGoogleMeet = true,
@@ -1556,30 +1607,35 @@ namespace PTScheduler.Portal.Data.Migrations
                             IntegrationPrzelewy24 = true,
                             IsActive = true,
                             IsFeatured = false,
+                            MaxAiActionsPerMonth = 1500,
                             MaxClients = 2147483647,
                             MaxCourses = 2147483647,
                             MaxSessionsPerMonth = 2147483647,
-                            MaxSmsPerMonth = 500,
+                            MaxSmsPerMonth = 750,
                             MaxStorageGB = 100,
                             MaxSubordinates = 5,
-                            MaxTrainers = 10,
+                            MaxTrainers = 5,
                             MaxVideoBandwidthGBPerMonth = 1000,
                             MaxVideoStorageGB = 200,
-                            MonthlyPrice = 199m,
+                            MonthlyPrice = 249m,
                             Name = "Business",
                             PaymentsEnabled = true,
+                            PrioritySupport = true,
                             PushNotifications = true,
                             RecurringSessions = true,
                             ReferralProgram = true,
                             RoleBasedAccess = true,
+                            SalesTools = true,
                             SmsReminders = true,
                             SortOrder = 4,
+                            Surveys = true,
                             TrainingPlansEnabled = true,
                             TrialDays = 14,
                             TwoFactorAuth = true,
                             VideoProvider = "bunny",
                             Wearables = true,
-                            YearlyPrice = 1990m
+                            WhiteLabel = true,
+                            YearlyPrice = 2490m
                         });
                 });
 
@@ -2457,6 +2513,9 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<DateTime?>("ExpiresAt")
                         .HasColumnType("timestamp with time zone");
 
+                    b.Property<string>("FeatureFloor")
+                        .HasColumnType("text");
+
                     b.Property<DateTime?>("FirstPaidAt")
                         .HasColumnType("timestamp with time zone");
 
@@ -2514,6 +2573,12 @@ namespace PTScheduler.Portal.Data.Migrations
 
                     b.Property<int?>("LastHealthResponseMs")
                         .HasColumnType("integer");
+
+                    b.Property<decimal?>("LockedMonthlyPrice")
+                        .HasColumnType("numeric");
+
+                    b.Property<decimal?>("LockedYearlyPrice")
+                        .HasColumnType("numeric");
 
                     b.Property<int?>("MailFallbacks")
                         .HasColumnType("integer");
@@ -2614,6 +2679,9 @@ namespace PTScheduler.Portal.Data.Migrations
 
                     b.Property<DateTime?>("TrialEndsAt")
                         .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("TrialPlanId")
+                        .HasColumnType("text");
 
                     b.Property<DateTime?>("UnhealthySinceUtc")
                         .HasColumnType("timestamp with time zone");

@@ -20,7 +20,8 @@ public class AutomationBackgroundService(IServiceScopeFactory scopeFactory, ILog
             {
                 using var scope = scopeFactory.CreateScope();
                 var hour = scope.ServiceProvider.GetRequiredService<IAppClock>().LocalNow.Hour;
-                if (hour is >= 9 and < 20)
+                // Automatyzacje tylko w planie, który je ma — reguły zostają zapisane na wypadek powrotu do wyższego planu.
+                if (hour is >= 9 and < 20 && scope.ServiceProvider.GetRequiredService<EntitlementService>().IsAllowed("Automations"))
                 {
                     var sent = await scope.ServiceProvider.GetRequiredService<IAutomationService>()
                         .RunAsync(await ChannelsAsync(scope.ServiceProvider));

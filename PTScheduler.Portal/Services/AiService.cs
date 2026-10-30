@@ -64,6 +64,19 @@ public class AiService(
         return null;
     }
 
+    /// <summary>Plan studia ma asystenta AI i nie wyczerpał limitu akcji w tym miesiącu. Null = może, inaczej powód.</summary>
+    public async Task<string?> TenantUnavailableReasonAsync(int tenantId)
+    {
+        await using var db = await dbFactory.CreateDbContextAsync();
+        var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Id == tenantId);
+        if (tenant is null || await PlanFeatureCatalog.EffectiveAsync(db, tenant) is not { } plan) return null;
+        if (!plan.AiAssistant || plan.MaxAiActionsPerMonth <= 0) return "Asystent AI nie jest dostępny w planie studia.";
+        if (plan.MaxAiActionsPerMonth >= PlanFeatureCatalog.Unlimited) return null;
+        var start = new DateTime(DateTime.UtcNow.Year, DateTime.UtcNow.Month, 1, 0, 0, 0, DateTimeKind.Utc);
+        var used = await db.AiUsageLogs.CountAsync(l => l.TenantId == tenantId && l.Ok && l.CreatedAt >= start);
+        return used >= plan.MaxAiActionsPerMonth ? $"Wykorzystano limit akcji AI w tym miesiącu ({plan.MaxAiActionsPerMonth})." : null;
+    }
+
     /// <summary>
     /// Jedno krótkie zapytanie do modelu. Zwraca tekst albo błąd (nigdy wyjątek) — wywołujący
     /// ma zawsze gotowy tekst zapasowy. <paramref name="ignoreSwitch"/> = test z Panelu przy wyłączonym AI.
@@ -73,6 +86,8 @@ public class AiService(
     {
         var model = (await settings.GetAsync(K.AiModel)).Trim();
         if (await UnavailableReasonAsync(ignoreSwitch) is { } reason) return new(null, reason, 0, model);
+        // Limit planu studia — wywołujący ma tekst zapasowy, więc bez AI wszystko dalej działa.
+        if (!ignoreSwitch && tenantId is int tid && await TenantUnavailableReasonAsync(tid) is { } planReason) return new(null, planReason, 0, model);
         var key = await GetApiKeyAsync();
         if (string.IsNullOrEmpty(key)) return new(null, "Brak klucza OpenRouter.", 0, model);
 

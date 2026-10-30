@@ -133,7 +133,8 @@ public class CreditService(
         await using var db = dbFactory.CreateDbContext();
         var tenant = await db.Tenants.AsNoTracking().Include(t => t.Plan).FirstOrDefaultAsync(t => t.Id == tenantId);
         var extra = await AddonService.ExtraLimitsAsync(db, tenantId);
-        var planLimit = tenant?.Plan is { SmsReminders: true } plan ? plan.MaxSmsPerMonth : 0;
+        var effective = tenant is null ? null : await PlanFeatureCatalog.EffectiveAsync(db, tenant);
+        var planLimit = effective is { SmsReminders: true } plan ? plan.MaxSmsPerMonth : 0;
         var limit = planLimit >= int.MaxValue - extra.SmsPerMonth ? int.MaxValue : planLimit + extra.SmsPerMonth;
         var month = MonthKey(DateTime.UtcNow);
         var used = await db.TenantSmsCounters.AsNoTracking()

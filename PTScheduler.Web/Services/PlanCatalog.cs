@@ -19,38 +19,44 @@ public static class PlanCatalog
     private static readonly (Func<Entitlements, bool>, Benefit)[] StarterGains =
     [
         G(e => !e.PaymentsEnabled, "bi-credit-card", "Płatności online", "Klient płaci BLIK-iem albo kartą przy zakupie pakietu — pieniądze od razu u Ciebie, bez przypominania."),
+        G(e => !e.TrainingPlansEnabled, "bi-clipboard-pulse", "Plany treningowe w aplikacji", "Klient ćwiczy z Twoim planem w telefonie, a Ty widzisz ciężary i postępy."),
         G(e => !e.CustomLogo, "bi-palette", "Twoje logo i kolory", "Klienci widzą aplikację Twojego studia, także ikonę na telefonie."),
-        G(e => !e.FinancialReports, "bi-graph-up-arrow", "Finanse w jednym miejscu", "Przychody, sprzedane pakiety i zaległości — bez arkusza w Excelu."),
-        G(e => !e.Coupons, "bi-tag", "Kupony rabatowe", "Promocje na start i na święta, które przyciągają nowych klientów."),
+        G(e => !e.FinancialReports, "bi-graph-up-arrow", "Finanse i paczka dla księgowej", "Przychody, sprzedane pakiety i zaległości — bez arkusza w Excelu."),
+        G(e => !e.Documents, "bi-file-earmark-check", "Dokumenty do podpisu", "Regulamin i zgody klient podpisuje w aplikacji — bez papieru."),
+        G(e => !e.Surveys, "bi-clipboard2-pulse", "Ankiety dla klientów", "Pytasz o samopoczucie i opinie — odpowiedzi widzisz w profilu."),
     ];
 
     private static readonly (Func<Entitlements, bool>, Benefit)[] ProGains =
     [
+        G(e => !e.AiAssistant, "bi-stars", "Asystent AI", "Propozycja planu z historii klienta, poranny brief i szkice wiadomości — Ty decydujesz."),
+        G(e => !e.Wearables, "pt-ico-watch", "Zegarki klientów (Garmin)", "Gotowość klienta przed treningiem i plan wysłany prosto na zegarek."),
+        G(e => !e.SalesTools, "bi-arrow-repeat", "Karnety i vouchery", "Karnety odnawiane co miesiąc i bony na prezent — stały przychód."),
+        G(e => !e.Automations, "bi-magic", "Automatyzacje", "Powitanie, „dawno Cię nie było” i urodziny wysyłają się same."),
         // Bez bramki SMS na platformie nie obiecujemy SMS-ów.
-        G(e => !e.SmsReminders && e.SmsAvailable, "bi-chat-dots", "Przypomnienia SMS i push", "Klient dostaje SMS dzień przed treningiem — dużo mniej nieobecności i pustych okienek."),
-        G(e => !e.TrainingPlansEnabled, "bi-clipboard-pulse", "Plany treningowe w aplikacji", "Klient ćwiczy z Twoim planem w telefonie, a Ty widzisz ciężary i postępy."),
+        G(e => !e.SmsReminders && e.SmsAvailable, "bi-chat-dots", "Przypomnienia SMS", "SMS dla klientów bez aplikacji — mniej nieobecności i pustych okienek."),
         G(e => !e.CoursesEnabled, "bi-mortarboard", "Kursy wideo", "Sprzedajesz programy online — zarabiasz także wtedy, gdy nie prowadzisz treningu."),
+        G(e => !e.Coupons, "bi-tag", "Kupony rabatowe", "Promocje na start i na święta, które przyciągają nowych klientów."),
         G(e => !e.ReferralProgram, "bi-gift", "Program poleceń", "Klienci przyprowadzają znajomych, a aplikacja sama przyznaje nagrody."),
         G(e => !e.AdvancedAnalytics, "bi-bar-chart-line", "Statystyki studia", "Widzisz, kto zaczyna odpuszczać — zanim zrezygnuje."),
-        G(e => !e.IntegrationGoogleMeet, "bi-camera-video", "Treningi online z Google Meet", "Link do spotkania dołącza się do wizyty sam."),
-        G(e => !e.CustomEmailTemplates, "bi-envelope-heart", "E-maile Twoim językiem", "Własne powitania i przypomnienia z imieniem klienta."),
-        G(e => !e.DataExport, "bi-download", "Eksport danych", "Zestawienie dla księgowej jednym kliknięciem."),
+        G(e => !e.IntegrationGoogleMeet, "bi-camera-video", "Kalendarz Google i Meet", "Grafik w Twoim kalendarzu, link do spotkania dołącza się sam."),
+        G(e => !e.ClientReports, "bi-file-earmark-pdf", "Raporty dla klientów (PDF)", "Miesięczne podsumowanie postępów, które klient chętnie pokaże znajomym."),
     ];
 
     private static readonly (Func<Entitlements, bool>, Benefit)[] BusinessGains =
     [
         G(e => !e.RoleBasedAccess, "bi-people", "Zespół w studiu", "Dodajesz trenerów i asystentów i decydujesz, co każdy może zobaczyć."),
+        G(e => !e.WhiteLabel, "bi-patch-check", "Tylko Twoja marka", "Klienci nie widzą wzmianek o Hantly — aplikacja jest w pełni Twoja."),
         G(e => !e.AuditLog, "bi-journal-text", "Historia zmian", "Wiesz, kto i co zmienił — spokój przy pracy z zespołem."),
-        G(e => !e.ClientReports, "bi-file-earmark-pdf", "Raporty dla klientów (PDF)", "Miesięczne podsumowanie postępów, które klient chętnie pokaże znajomym."),
-        G(_ => true, "bi-headset", "Priorytetowe wsparcie", "Pomagamy w pierwszej kolejności — także przy konfiguracji."),
+        G(e => !e.PrioritySupport, "bi-headset", "Priorytetowe wsparcie", "Pomagamy w pierwszej kolejności — z rozmową wdrożeniową."),
     ];
 
+    // Ceny i limity dla nowych klientów (cennik 2026-11); obecni mają swoją cenę zablokowaną w Portalu.
     public static readonly IReadOnlyList<Plan> Plans =
     [
         new("start", "Start", 0, "Na spokojny początek", 3, []),
-        new("starter", "Starter", 49, "Podstawowe narzędzia, żeby przyjmować klientów online", 15, StarterGains),
-        new("pro", "Pro", 99, "Wszystko, żeby klienci wracali i polecali Cię dalej", 50, [.. StarterGains, .. ProGains]),
-        new("studio", "Business", 199, "Studio z zespołem — bez limitów i z priorytetowym wsparciem", int.MaxValue, [.. StarterGains, .. ProGains, .. BusinessGains]),
+        new("starter", "Solo", 59, "Trener, który przyjmuje klientów online", 20, StarterGains),
+        new("pro", "Pro", 119, "Wszystko, żeby klienci wracali i polecali Cię dalej", 75, [.. StarterGains, .. ProGains]),
+        new("studio", "Business", 249, "Studio z zespołem, Twoja marka i opieka wdrożeniowa", int.MaxValue, [.. StarterGains, .. ProGains, .. BusinessGains]),
     ];
 
     /// <summary>Plany wyższe od obecnego (po identyfikatorze, a gdy go nie znamy — po cenie).</summary>
@@ -64,8 +70,25 @@ public static class PlanCatalog
             : Plans.Where(p => p.Price > current.MonthlyPrice).ToList();
     }
 
+    /// <summary>
+    /// W okresie próbnym (np. Pro na start) porównujemy z planem, który zostanie potem — inaczej strona „Ulepsz”
+    /// nie miałaby czego pokazać, bo okres próbny ma już wszystko.
+    /// </summary>
+    public static Entitlements AfterTrial(Entitlements current) =>
+        current.TrialEndsAt is not { } end || end <= DateTime.UtcNow ? current : new Entitlements
+        {
+            Id = Plans.FirstOrDefault(p => string.Equals(p.Name, current.BasePlanName, StringComparison.OrdinalIgnoreCase))?.Id ?? "start",
+            Name = current.BasePlanName ?? "Start",
+            MonthlyPrice = 0,
+            MaxClients = Plans.FirstOrDefault(p => string.Equals(p.Name, current.BasePlanName, StringComparison.OrdinalIgnoreCase))?.MaxClients ?? 3,
+            PaymentsEnabled = false, TrainingPlansEnabled = false, CustomLogo = false, FinancialReports = false, Documents = false, Surveys = false,
+            AiAssistant = false, Wearables = false, SalesTools = false, Automations = false, SmsReminders = false, CoursesEnabled = false,
+            Coupons = false, ReferralProgram = false, AdvancedAnalytics = false, IntegrationGoogleMeet = false, ClientReports = false,
+            RoleBasedAccess = false, WhiteLabel = false, AuditLog = false, PrioritySupport = false, SmsAvailable = current.SmsAvailable
+        };
+
     /// <summary>Czy jest jeszcze co ulepszać — tylko wtedy pokazujemy „Ulepsz” i podpowiedzi planu.</summary>
-    public static bool HasUpgrade(Entitlements current) => HigherThan(current).Count > 0;
+    public static bool HasUpgrade(Entitlements current) => HigherThan(AfterTrial(current)).Count > 0;
 
     /// <summary>Co konkretnie zyskasz, przechodząc na dany plan (tylko rzeczy, których dziś nie masz).</summary>
     public static IReadOnlyList<Benefit> GainsFor(Plan plan, Entitlements current)

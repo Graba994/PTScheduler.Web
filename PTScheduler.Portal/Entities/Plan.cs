@@ -86,6 +86,24 @@ public class Plan
     /// <summary>Garmin Connect u klientów (gotowość przed wizytą, aktywności). Działa, gdy Garmin jest też włączony globalnie w Portalu.</summary>
     public bool Wearables { get; set; }
 
+    // ── Sprzedaż, klienci i AI (od planów 2026-11) ─────────────────────────────────
+    /// <summary>Sklep dla klientów: karnety cykliczne i vouchery (pakiety treningów są w każdym planie).</summary>
+    public bool SalesTools { get; set; }
+    /// <summary>Ankiety dla klientów (poza ankietą zdrowotną przed pierwszym treningiem).</summary>
+    public bool Surveys { get; set; }
+    /// <summary>Automatyzacje (powitanie, powroty, urodziny) i retencja klientów.</summary>
+    public bool Automations { get; set; }
+    /// <summary>Dokumenty do podpisu przez klientów.</summary>
+    public bool Documents { get; set; }
+    /// <summary>Asystent AI: generator planów, poranny brief, szkice wiadomości.</summary>
+    public bool AiAssistant { get; set; }
+    /// <summary>Akcje AI w miesiącu (0 = bez AI, int.MaxValue = bez limitu).</summary>
+    public int MaxAiActionsPerMonth { get; set; }
+    /// <summary>Bez marki Hantly u klientów (white-label).</summary>
+    public bool WhiteLabel { get; set; }
+    /// <summary>Priorytetowe wsparcie i rozmowa wdrożeniowa.</summary>
+    public bool PrioritySupport { get; set; }
+
     // Nigdy nie trafia do JSON-a uprawnień wysyłanego tenantom.
     [System.Text.Json.Serialization.JsonIgnore]
     public ICollection<Tenant> Tenants { get; set; } = [];

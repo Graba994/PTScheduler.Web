@@ -52,6 +52,7 @@ public class Entitlements
     public string BrandingTier { get; set; } = "preview";
     public bool CustomLogo { get; set; } = true;
     public bool CustomFavicon { get; set; } = true;
+    public bool CustomDomain { get; set; }
     public bool CustomEmailTemplates { get; set; }
 
     public bool BasicAnalytics { get; set; } = true;
@@ -69,6 +70,25 @@ public class Entitlements
     // ── Marketing ─────────────────────────────────
     // Program poleceń: domyślnie wyłączony — to płatny dodatek w wybranych planach.
     public bool ReferralProgram { get; set; }
+
+    // ── Sprzedaż, klienci i AI (od planów 2026-11) ─────────────────────────────────
+    // Domyślnie włączone — starszy Portal ich nie wysyła, a wcześniej były w każdym planie.
+    public bool SalesTools { get; set; } = true;
+    public bool Surveys { get; set; } = true;
+    public bool Automations { get; set; } = true;
+    public bool Documents { get; set; } = true;
+    public bool AiAssistant { get; set; } = true;
+    public int MaxAiActionsPerMonth { get; set; } = int.MaxValue;
+    public bool WhiteLabel { get; set; }
+    public bool PrioritySupport { get; set; }
+
+    /// <summary>Najtańszy plan z daną funkcją (klucz = pole uprawnień) — nazwa przy kłódce.</summary>
+    public Dictionary<string, string> UpgradePlans { get; set; } = [];
+    /// <summary>Funkcje, których bez planu w ogóle nie pokazujemy (zamiast zajawki) — ustawiane w panelu planów.</summary>
+    public List<string> HiddenWhenLocked { get; set; } = [];
+    /// <summary>Okres próbny wyższego planu (np. Pro na start) — do kiedy i jaki plan zostaje potem.</summary>
+    public DateTime? TrialEndsAt { get; set; }
+    public string? BasePlanName { get; set; }
 
     // ── Zegarki klientów ─────────────────────────────────
     // Garmin u klientów: plan ma „Zegarki klientów” i Garmin jest włączony globalnie w Portalu.

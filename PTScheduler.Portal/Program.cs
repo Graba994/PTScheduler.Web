@@ -1068,7 +1068,7 @@ app.MapGet("/api/internal/tenants/{slug}/entitlements", async (
     if (tenant is null || !InternalAuth.IsAuthorizedFor(ctx, tenant, config)) return Results.Unauthorized();
     var plan = await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == tenant.PlanId);
     if (plan is null) return Results.NotFound();
-    return Results.Content(TenantService.SerializeEntitlements(plan, await AddonService.ExtraLimitsAsync(db, tenant.Id), await tenants.GarminOnAsync(), await tenants.SmsOnAsync()), "application/json");
+    return Results.Content(await tenants.EntitlementsJsonAsync(tenant.Id, plan), "application/json");
 });
 
 // „Zarządzaj subskrypcją” w aplikacji trenera: link do portalu klienta Stripe (karta, faktury, anulowanie).
@@ -1117,7 +1117,7 @@ app.MapGet("/api/internal/tenants/{slug}/growth", async (
     {
         platformName = ReferralService.PlatformName,
         badgeUrl = $"{portal}/?ref={Uri.EscapeDataString(tenant.Slug)}",
-        badgeRequired = tenant.Plan?.BrandingTier is null or "preview" or "basic",
+        badgeRequired = await PlanFeatureCatalog.EffectiveAsync(db, tenant) is not { WhiteLabel: true } and not { BrandingTier: "full" or "premium" },
         referralLink = stats.Link,
         referred = stats.Referred,
         paying = stats.Paying,

@@ -953,6 +953,13 @@ else
             return;
         }
         // Plan limit — reject before hitting the DB if the tenant is at the monthly session cap
+        // Po okresie próbnym (np. Pro → Start) klientów może być więcej niż w planie — nowe wizyty dopiero po wyborze planu albo archiwizacji.
+        var (_, clientsCur, clientsMax) = await Entitlements.CheckClientLimitAsync();
+        if (clientsCur > clientsMax)
+        {
+            _bookingError = $"Plan {Entitlements.Current.Name} obejmuje {clientsMax} aktywnych klientów, a masz {clientsCur}. Wybierz wyższy plan albo oznacz nieaktywnych klientów, żeby dodać wizytę.";
+            return;
+        }
         var (sessionsOk, sessionsCur, sessionsMax) = await Entitlements.CheckMonthlySessionsAsync();
         if (!sessionsOk)
         {

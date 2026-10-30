@@ -8,6 +8,16 @@
    Kolejny plan pokazuje tylko to, co dochodzi ponad poprzedni, żeby nie powtarzać tej samej listy. *@
 
 <div class="upg">
+    @if (Entitlements.Current.TrialEndsAt is { } trialEnd && trialEnd > DateTime.UtcNow)
+    {
+        <div class="upg-sub upg-trial">
+            <i class="bi bi-gift"></i>
+            <div class="flex-grow-1">
+                <b>Okres próbny planu @Entitlements.Current.Name do @trialEnd.ToLocalTime().ToString("d.MM")</b>
+                <div class="small text-muted">Masz wszystkie funkcje planu @Entitlements.Current.Name. Potem aplikacja przejdzie na plan @(Entitlements.Current.BasePlanName ?? "Start") — dane, klienci i grafik zostają. Wybierz plan, żeby zachować wszystko.</div>
+            </div>
+        </div>
+    }
     @if (_billingPortal)
     {
         <div class="upg-sub">
@@ -46,11 +56,13 @@
             @for (var i = 0; i < _offers.Count; i++)
             {
                 var offer = _offers[i];
-                var first = i == 0;
+                // W okresie próbnym polecamy plan, który trener właśnie testuje.
+                var trialName = Entitlements.Current.TrialEndsAt > DateTime.UtcNow ? Entitlements.Current.Name : null;
+                var first = trialName is not null && _offers.Any(o => o.Plan.Name == trialName) ? offer.Plan.Name == trialName : i == 0;
                 <article class="upg-card @(first ? "upg-card-rec" : "")">
                     @if (first)
                     {
-                        <span class="upg-badge"><i class="bi bi-stars me-1"></i>Następny krok</span>
+                        <span class="upg-badge"><i class="bi bi-stars me-1"></i>@(trialName is not null ? "Testujesz teraz" : "Następny krok")</span>
                     }
                     <header class="upg-head">
                         <div class="upg-name">@offer.Plan.Name</div>
@@ -178,7 +190,7 @@
         // Zarządzanie kartą i anulowanie przez portal klienta Stripe — tylko gdy instancja jest podpięta do Portalu.
         _billingPortal = !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("PORTAL_URL"))
                          && !string.IsNullOrEmpty(Environment.GetEnvironmentVariable("TENANT_INTERNAL_SECRET"));
-        _current = Entitlements.Current;
+        _current = PlanCatalog.AfterTrial(Entitlements.Current);
         var shown = new HashSet<string>();
         foreach (var plan in PlanCatalog.HigherThan(_current))
         {

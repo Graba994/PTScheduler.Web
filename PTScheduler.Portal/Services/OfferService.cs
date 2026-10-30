@@ -93,7 +93,9 @@ public class OfferService(
                     || (subscription is null && tenant.BillingInterval == "yearly")
             ? OfferBilling.Yearly : OfferBilling.Monthly;
         var planAmount = subscription?.Amount
-                         ?? (cycle == OfferBilling.Yearly ? tenant.Plan?.YearlyPrice ?? (tenant.Plan?.MonthlyPrice ?? 0) * 12 : tenant.Plan?.MonthlyPrice ?? 0);
+                         ?? (cycle == OfferBilling.Yearly
+                             ? PlanPricing.Yearly(tenant, tenant.Plan) ?? PlanPricing.Monthly(tenant, tenant.Plan) * 12
+                             : PlanPricing.Monthly(tenant, tenant.Plan));
 
         var customPrices = await db.TenantServicePrices.AsNoTracking()
             .Where(p => p.TenantId == tenantId).ToDictionaryAsync(p => p.ServiceItemId, p => p.CustomPrice);

@@ -71,7 +71,7 @@ public class LeoAnalytics(IDbContextFactory<PortalDbContext> dbFactory, LeoServi
             var month = Back(list, 30);
             var plan = t.Plan ?? plans.FirstOrDefault(p => p.Id == t.PlanId);
             var price = plan is null ? 0m
-                : t.BillingInterval == "yearly" && plan.YearlyPrice is > 0 ? Math.Round(plan.YearlyPrice.Value / 12m, 2) : plan.MonthlyPrice;
+                : t.BillingInterval == "yearly" && PlanPricing.Yearly(t, plan) is > 0 and var y ? Math.Round(y / 12m, 2) : PlanPricing.Monthly(t, plan);
             var risk = risks.GetValueOrDefault(t.Id);
             int? sessions7 = latest?.Sessions7, sessions7Prev = week?.Sessions7;
             // Starsza aplikacja (bez okien 7-dniowych): przybyło wizyt w kalendarzu z różnicy liczników.

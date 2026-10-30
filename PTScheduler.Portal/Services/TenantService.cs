@@ -84,6 +84,8 @@ public class TenantService(
             WebContainerName = $"pt-{slug}-web",
             DbContainerName = $"pt-{slug}-db"
         };
+        // Cena z dnia zakupu zostaje — późniejsze zmiany cennika dotyczą tylko nowych klientów.
+        if (await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == planId) is { } chosen) PlanPricing.Lock(tenant, chosen);
 
         db.Tenants.Add(tenant);
         await db.SaveChangesAsync();
@@ -342,6 +344,9 @@ public class TenantService(
             ?? throw new InvalidOperationException("Tenant not found.");
         var oldPlan = tenant.PlanId;
         tenant.PlanId = planId;
+        // Nowy plan — cena z dzisiejszego cennika zostaje dla tego studia na stałe.
+        if (oldPlan != planId && await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == planId) is { } newPlan)
+            PlanPricing.Lock(tenant, newPlan);
 
         db.TenantEvents.Add(new TenantEvent
         {
@@ -366,8 +371,9 @@ public class TenantService(
         await using var db = dbFactory.CreateDbContext();
         var plan = await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == planId);
         if (plan is null) return (0, 0);
-        var tenants = await db.Tenants.AsNoTracking().Where(t => t.PlanId == planId).ToListAsync();
-        var results = await Task.WhenAll(tenants.Select(t => PushEntitlementsAsync(t, plan)));
+        // Także studia w okresie próbnym tego planu (np. Pro na start).
+        var tenants = await db.Tenants.AsNoTracking().Where(t => t.PlanId == planId || t.TrialPlanId == planId).ToListAsync();
+        var results = await Task.WhenAll(tenants.Select(t => PushEntitlementsAsync(t.Id)));
         return (results.Count(ok => ok), tenants.Count);
     }
 
@@ -555,7 +561,34 @@ public class TenantService(
     public async Task<string> EntitlementsJsonAsync(int tenantId, Plan plan)
     {
         await using var db = dbFactory.CreateDbContext();
-        return SerializeEntitlements(plan, await AddonService.ExtraLimitsAsync(db, tenantId), await GarminOnAsync(), await settings.PlatformSmsOnAsync());
+        var tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Id == tenantId);
+        var plans = await db.Plans.AsNoTracking().ToListAsync();
+        var trial = tenant?.TrialPlanId is { } tid && tenant.TrialEndsAt > DateTime.UtcNow ? plans.FirstOrDefault(p => p.Id == tid) : null;
+        // Studio dostaje plan z okresu próbnego (np. Pro na start) i nigdy mniej niż miało przed zmianą pakietów.
+        var effective = tenant is null ? plan : PlanFeatureCatalog.Effective(tenant, plan, trial, DateTime.UtcNow);
+        var json = SerializeEntitlements(effective, await AddonService.ExtraLimitsAsync(db, tenantId), await GarminOnAsync(), await settings.PlatformSmsOnAsync());
+        var node = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsObject();
+        node["upgradePlans"] = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(PlanFeatureCatalog.UpgradePlans(plans)));
+        node["hiddenWhenLocked"] = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(await HiddenFeaturesAsync()));
+        if (trial is not null)
+        {
+            node["trialEndsAt"] = tenant!.TrialEndsAt;
+            node["basePlanName"] = plan.Name;
+        }
+        // Studio widzi swoją cenę (zablokowaną przy zakupie), a nie aktualny cennik.
+        else if (tenant is not null)
+        {
+            node["monthlyPrice"] = PlanPricing.Monthly(tenant, plan);
+            node["yearlyPrice"] = PlanPricing.Yearly(tenant, plan);
+        }
+        return node.ToJsonString();
+    }
+
+    /// <summary>Funkcje, których studio bez nich nie widzi wcale (zamiast zajawki) — ustawiane w panelu planów.</summary>
+    public async Task<List<string>> HiddenFeaturesAsync()
+    {
+        try { return JsonSerializer.Deserialize<List<string>>(await settings.GetAsync(SiteSettingsService.Keys.PlanFeaturesHidden)) ?? []; }
+        catch (JsonException) { return []; }
     }
 
     public async Task<bool> GarminOnAsync() => await settings.GetAsync(SiteSettingsService.Keys.GarminEnabled) == "true";

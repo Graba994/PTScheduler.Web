@@ -69,6 +69,13 @@ public class EntitlementService
         return (bool)(prop.GetValue(_current) ?? false);
     }
 
+    /// <summary>Plan, w którym funkcja jest dostępna (z cennika Portalu), a gdy go nie znamy — podana nazwa.</summary>
+    public string PlanFor(string flag, string fallback = "Pro") =>
+        _current.UpgradePlans.TryGetValue(flag, out var name) && !string.IsNullOrWhiteSpace(name) ? name : fallback;
+
+    /// <summary>Funkcji nie ma w planie i ma być ukryta (bez zajawki).</summary>
+    public bool HiddenWhenLocked(string flag) => !IsAllowed(flag) && _current.HiddenWhenLocked.Contains(flag);
+
     public int Limit(string limitName)
     {
         var prop = typeof(Entitlements).GetProperty(limitName);
@@ -84,7 +91,8 @@ public class EntitlementService
         if (max == int.MaxValue) return (true, 0, int.MaxValue);
 
         await using var db = await _dbFactory.CreateDbContextAsync();
-        var count = await db.Clients.CountAsync();
+        // Nieaktywni (zarchiwizowani) klienci nie zajmują miejsca w planie.
+        var count = await db.Clients.CountAsync(c => c.Status != PTScheduler.Domain.Enums.ClientStatus.Inactive);
         return (count < max, count, max);
     }
 

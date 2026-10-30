@@ -90,7 +90,9 @@ public static class AdminMenu
 
     /// <summary>Pozycja istnieje w tym studiu (np. SMS tylko, gdy platforma ma bramkę SMS).</summary>
     public static bool Offered(AdminMenuItem item, PTScheduler.Web.Services.EntitlementService entitlements) =>
-        item.HideUnless is null || entitlements.IsAllowed(item.HideUnless);
+        (item.HideUnless is null || entitlements.IsAllowed(item.HideUnless))
+        // Funkcja spoza planu ustawiona w panelu planów jako „ukryta” — bez zajawki.
+        && (item.PlanFlag is null || !entitlements.HiddenWhenLocked(item.PlanFlag));
 
     public static readonly IReadOnlyList<AdminMenuGroup> Groups =
     [
@@ -125,7 +127,7 @@ public static class AdminMenu
             new("admin/automations", "bi-magic", "Automatyzacje",
                 "Powitanie, powroty, urodziny",
                 "Wiadomości, które aplikacja wysyła sama: seria powitalna dla nowych klientów, zaproszenie do powrotu po przerwie albo po końcu pakietu (z kuponem) i życzenia urodzinowe. Widzisz, kto dostał wiadomość i kto wrócił.",
-                Permissions.ManageClients),
+                Permissions.ManageClients, "Automations", "Pro"),
             new("admin/sms", "bi-chat-dots-fill", "Przypomnienia SMS",
                 "SMS dzień przed treningiem",
                 "Klient dostaje SMS-a dzień przed treningiem — mniej nieobecności. SMS-y idą z miesięcznego limitu planu i dodatków; jednorazowe doładowania czekają w odwodzie.",
@@ -151,7 +153,7 @@ public static class AdminMenu
             new("admin/memberships", "bi-arrow-repeat", "Karnety miesięczne",
                 "Stała liczba treningów co miesiąc",
                 "Karnet odnawia się co miesiąc — np. 8 treningów za 640 zł. Dobre dla stałych klientów: płacą z góry, a Ty masz przewidywalny przychód.",
-                Permissions.ManagePackages, StatusKey: "memberships"),
+                Permissions.ManagePackages, "SalesTools", "Pro", StatusKey: "memberships"),
             new("trainer/intro-config", "bi-person-lines-fill", "Pierwsza wizyta",
                 "Trening próbny dla nowych osób ze strony",
                 "Ustal, jak nowa osoba może umówić pierwszy trening prosto z Twojej strony — rodzaj zajęć, cena i kilka pytań na start. Najprostsza droga od „ciekawe” do pierwszej wizyty."),
@@ -166,7 +168,7 @@ public static class AdminMenu
             new("admin/vouchers", "bi-ticket-perforated-fill", "Bony podarunkowe",
                 "Prezent na kwotę albo pakiet",
                 "Bon w PDF do wręczenia — na święta, urodziny, Dzień Matki. Obdarowana osoba realizuje go przy zakupie.",
-                Permissions.ManagePayments),
+                Permissions.ManagePayments, "SalesTools", "Pro"),
             new("admin/referrals", "bi-gift-fill", "Program poleceń",
                 "Nagroda za poleconego klienta",
                 "Każdy klient dostaje swój link. Gdy polecona osoba odbędzie pierwszy trening, aplikacja sama przyzna nagrodę (np. darmową sesję).",
@@ -181,7 +183,7 @@ public static class AdminMenu
             new("admin/documents", "bi-file-earmark-check", "Dokumenty i zgody",
                 "Regulamin, wizerunek, oświadczenie zdrowotne",
                 "Klient akceptuje regulamin i zgody w aplikacji przy logowaniu — Ty widzisz, kto i kiedy to zrobił. Zmienisz treść? Możesz poprosić wszystkich o ponowną akceptację.",
-                Permissions.ManageClients),
+                Permissions.ManageClients, "Documents", "Pro"),
             new("admin/email", "bi-envelope-fill", "E-maile",
                 "Nadawca i wysyłka wiadomości",
                 "Potwierdzenia rezerwacji, przypomnienia i faktury wychodzą e-mailem. Tu ustawiasz, od kogo przychodzą i sprawdzasz, czy wysyłka działa.",
@@ -197,7 +199,7 @@ public static class AdminMenu
             new("admin/surveys", "bi-clipboard2-pulse", "Ankiety",
                 "Wywiad zdrowotny i ocena treningu",
                 "Ankieta zdrowotna przed pierwszym treningiem (ze zgodą RODO) i krótka ocena po treningu. Odpowiedzi widzisz w profilu klienta.",
-                Permissions.ManageBranding),
+                Permissions.ManageBranding, "Surveys", "Pro"),
             new("admin/reviews", "bi-star-half", "Opinie klientów",
                 "Zbieraj opinie na swoją stronę",
                 "Aplikacja poprosi klienta o opinię po kilku treningach i podsunie link do opinii w Google. Wybrane opinie pokażesz na swojej stronie.",

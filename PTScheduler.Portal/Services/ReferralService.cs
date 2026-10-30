@@ -85,7 +85,7 @@ public class ReferralService(
         }
 
         var monthValue = referrer.Plan is { } plan
-            ? (referrer.BillingInterval == "yearly" && plan.YearlyPrice is > 0 ? Math.Round(plan.YearlyPrice.Value / 12m, 2) : plan.MonthlyPrice)
+            ? (referrer.BillingInterval == "yearly" && PlanPricing.Yearly(referrer, plan) is > 0 and var y ? Math.Round(y / 12m, 2) : PlanPricing.Monthly(referrer, plan))
             : 0m;
         string how;
         if (!string.IsNullOrWhiteSpace(referrer.StripeSubscriptionId) && monthValue > 0

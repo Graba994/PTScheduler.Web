@@ -276,6 +276,11 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         /// <summary>Włącznik SMS-ów platformy: „false” = trenerzy i klienci nie widzą żadnych opcji SMS (także bez tokenu).</summary>
         public const string PlatformSmsEnabled = "platform_sms_enabled";
 
+        /// <summary>Funkcje ukryte (zamiast zajawki), gdy plan studia ich nie ma — JSON z listą kluczy katalogu.</summary>
+        public const string PlanFeaturesHidden = "plan_features_hidden";
+        /// <summary>Plan na okres próbny nowych kont z darmowym planem (pusty = bez okresu próbnego).</summary>
+        public const string TrialPlanId = "trial_plan_id";
+
         // Centralized Bunny CDN (platform account)
         public const string PlatformBunnyApiKey = "platform_bunny_api_key";
         public const string PlatformBunnyLibraryId = "platform_bunny_library_id";
@@ -339,6 +344,8 @@ public class SiteSettingsService(IDbContextFactory<PortalDbContext> dbFactory)
         [Keys.AssistantLayout] = "bubble",
         [Keys.AssistantMotion] = "normal",
         [Keys.AiEnabled] = "false",
+        [Keys.TrialPlanId] = "pro",
+        [Keys.PlanFeaturesHidden] = "[\"RoleBasedAccess\",\"AuditLog\",\"PrioritySupport\",\"IntegrationPrzelewy24\",\"IntegrationPayU\"]",
         [Keys.AiModel] = "mistralai/mistral-large",
         [Keys.AiMonthlyBudgetUsd] = "5",
         [Keys.AiPriceInputPerM] = "2",

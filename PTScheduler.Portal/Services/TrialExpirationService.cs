@@ -60,6 +60,7 @@ public class TrialExpirationService(
             .Select(e => e.TenantId)
             .ToHashSetAsync(ct);
 
+        var plans = await db.Plans.AsNoTracking().ToDictionaryAsync(p => p.Id, ct);
         foreach (var t in warnings.Where(t => !alreadyWarned.Contains(t.Id)))
         {
             var daysLeft = (int)Math.Ceiling((t.TrialEndsAt!.Value - now).TotalDays);
@@ -73,12 +74,19 @@ public class TrialExpirationService(
             });
             await db.SaveChangesAsync(ct);
 
+            // Okres próbny wyższego planu na darmowym koncie — po nim zostaje darmowy plan, nie zawieszenie.
+            if (t.TrialPlanId is { } trialId && plans.GetValueOrDefault(trialId) is { } trialPlan && plans.GetValueOrDefault(t.PlanId) is { } basePlan)
+            {
+                _ = emailSvc.SendAsync(t.OwnerEmail, $"Za {daysLeft} dni koniec okresu próbnego {trialPlan.Name} — Hantly",
+                    emailSvc.PlanTrialEndingEmailBody(t.OwnerName, daysLeft, trialPlan.Name, basePlan.Name, basePlan.MaxClients, t.Domain));
+                continue;
+            }
             if (!string.IsNullOrEmpty(t.StripeSubscriptionId))
             {
                 // Karta jest podpięta — przypominamy o pierwszej opłacie i o tym, że można zrezygnować.
                 var plan = await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == t.PlanId, ct);
-                var yearly = t.BillingInterval == "yearly" && plan?.YearlyPrice is > 0;
-                var amount = yearly ? plan!.YearlyPrice!.Value : plan?.MonthlyPrice ?? 0;
+                var yearly = t.BillingInterval == "yearly" && PlanPricing.Yearly(t, plan) is > 0;
+                var amount = PlanPricing.ForInterval(t, plan);
                 _ = emailSvc.SendAsync(t.OwnerEmail, $"Za {daysLeft} dni koniec okresu próbnego — Hantly",
                     emailSvc.TrialEndingWithCardEmailBody(t.OwnerName, daysLeft, amount, yearly, plan?.Name ?? t.PlanId, t.Domain));
                 continue;
@@ -87,10 +95,29 @@ public class TrialExpirationService(
             _ = emailSvc.SendAsync(t.OwnerEmail, $"Trial konczy sie za {daysLeft} dni — Hantly", body);
         }
 
+        // Koniec okresu próbnego wyższego planu (np. Pro na start): studio wraca na swój darmowy plan.
+        var trialsDone = await db.Tenants
+            .Where(t => t.TrialPlanId != null && t.TrialEndsAt != null && t.TrialEndsAt < now && t.Status != TenantStatus.Destroyed)
+            .ToListAsync(ct);
+        foreach (var t in trialsDone)
+        {
+            var trialName = plans.GetValueOrDefault(t.TrialPlanId!)?.Name ?? t.TrialPlanId!;
+            var baseName = plans.GetValueOrDefault(t.PlanId)?.Name ?? t.PlanId;
+            t.TrialPlanId = null;
+            db.TenantEvents.Add(new TenantEvent { TenantId = t.Id, EventType = TenantEventTypes.TrialExpired, Detail = $"{trialName} → {baseName}" });
+            await db.SaveChangesAsync(ct);
+            try { await tenantSvc.PushEntitlementsAsync(t.Id); }
+            catch (Exception ex) { logger.LogWarning(ex, "Uprawnienia {Slug} po okresie próbnym nie wysłane — studio pobierze je samo.", t.Slug); }
+            if (t.Status == TenantStatus.Active)
+                _ = emailSvc.SendAsync(t.OwnerEmail, $"Okres próbny {trialName} się skończył — Hantly",
+                    emailSvc.PlanTrialEndedEmailBody(t.OwnerName, trialName, baseName, t.Domain));
+        }
+
         // Subskrypcje Stripe (karta podpięta w kreatorze) rozlicza Stripe: po okresie próbnym pobiera opłatę,
         // a nieudana płatność / anulowanie przychodzą webhookiem — tu ich nie zawieszamy.
         var expired = await db.Tenants
             .Where(t => t.Status == TenantStatus.Active
+                && t.Plan != null && t.Plan.MonthlyPrice > 0 // darmowy plan nie wygasa
                 && t.StripeSubscriptionId == null
                 && t.BillingStatus != "verified" // po weryfikacji z kreatora abonament rozliczają rachunki (BillingService)
                 && t.TrialEndsAt != null

@@ -125,6 +125,21 @@ public class Tenant
     public DateTime? UnhealthySinceUtc { get; set; }
     public bool DownAlertSent { get; set; }
 
+    // ── Cena i uprawnienia z chwili zakupu ─────────────────────────────────
+    /// <summary>
+    /// Cena abonamentu zablokowana dla tego studia — zmiana cennika dotyczy tylko nowych klientów.
+    /// Null = aktualna cena planu (darmowy plan albo studio, którego jeszcze nie objęła zmiana ceny).
+    /// </summary>
+    public decimal? LockedMonthlyPrice { get; set; }
+    public decimal? LockedYearlyPrice { get; set; }
+    /// <summary>Plan na czas okresu próbnego (np. „pro” dla nowych kont na darmowym Starcie) — do <see cref="TrialEndsAt"/>.</summary>
+    public string? TrialPlanId { get; set; }
+    /// <summary>
+    /// „Podłoga” uprawnień (JSON z polami planu): studio nigdy nie dostaje mniej niż tu — tak obecni klienci
+    /// zachowują to, co mieli przed zmianą pakietów. Można tu też dać studiu coś ponad plan.
+    /// </summary>
+    public string? FeatureFloor { get; set; }
+
     public Plan? Plan { get; set; }
     public ICollection<Subscription> Subscriptions { get; set; } = [];
 }
