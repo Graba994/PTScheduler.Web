@@ -30,19 +30,20 @@ public static class GarminParser
         {
             "dailies" => new DayPart(date,
                 Steps: Int(r, "steps"),
-                RestingHeartRate: Int(r, "restingHeartRateInBeatsPerMinute"),
+                // Garmin wysyła 0, gdy czegoś nie zmierzył (zegarek zdjęty) — to brak odczytu, nie wynik.
+                RestingHeartRate: Positive(Int(r, "restingHeartRateInBeatsPerMinute")),
                 AverageStress: Int(r, "averageStressLevel") is >= 0 and var s ? s : null,
-                BodyBatteryHigh: Int(r, "bodyBatteryHighestValue") ?? Int(r, "bodyBatteryChargedValue"),
-                BodyBatteryLow: Int(r, "bodyBatteryLowestValue"),
+                BodyBatteryHigh: Positive(Int(r, "bodyBatteryHighestValue")) ?? Positive(Int(r, "bodyBatteryChargedValue")),
+                BodyBatteryLow: Positive(Int(r, "bodyBatteryHighestValue")) is null ? null : Int(r, "bodyBatteryLowestValue"),
                 ActiveKilocalories: Int(r, "activeKilocalories")),
             "sleeps" => new DayPart(date,
-                SleepMinutes: Minutes(r, "durationInSeconds"),
+                SleepMinutes: Positive(Minutes(r, "durationInSeconds")),
                 DeepSleepMinutes: Minutes(r, "deepSleepDurationInSeconds"),
                 LightSleepMinutes: Minutes(r, "lightSleepDurationInSeconds"),
                 RemSleepMinutes: Minutes(r, "remSleepInSeconds") ?? Minutes(r, "remSleepDurationInSeconds"),
                 AwakeMinutes: Minutes(r, "awakeDurationInSeconds"),
                 SleepScore: r.TryGetProperty("overallSleepScore", out var os) && os.ValueKind == JsonValueKind.Object ? Int(os, "value") : Int(r, "sleepScore")),
-            "hrv" => new DayPart(date, HrvLastNight: Int(r, "lastNightAvg")),
+            "hrv" => new DayPart(date, HrvLastNight: Positive(Int(r, "lastNightAvg"))),
             _ => null
         };
     }
@@ -103,6 +104,8 @@ public static class GarminParser
     private static int? Int(JsonElement r, string name) =>
         r.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.Number && v.TryGetDouble(out var d) && d is > int.MinValue and < int.MaxValue
             ? (int)Math.Round(d, MidpointRounding.AwayFromZero) : null;
+
+    private static int? Positive(int? v) => v is > 0 ? v : null;
 
     private static int? Minutes(JsonElement r, string name) => Int(r, name) is int s ? (int)Math.Round(s / 60.0) : null;
 }

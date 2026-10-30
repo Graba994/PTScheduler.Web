@@ -95,10 +95,17 @@ else
                             {
                                 <tr>
                                     <td class="text-nowrap">@d.Date.ToString("ddd d.MM", Pl)</td>
-                                    <td class="@(d.SleepMinutes is < 360 ? "bad" : "")">@(d.SleepMinutes is int m ? ReadinessRules.Duration(m) : "—")@(d.SleepScore is int sc ? $" · {sc}" : "")</td>
-                                    <td class="@(d.RestingHeartRate is int r && _rhrBase is double rb && r - rb >= 5 ? "bad" : "")">@(d.RestingHeartRate?.ToString() ?? "—")</td>
+                                    @if (!(_sleepsWithWatch && d.SleepMinutes is not > 0 && d.HrvLastNight is not > 0))
+                                    {
+                                        <td class="@(d.SleepMinutes is < 360 ? "bad" : "")">@(d.SleepMinutes is int m and > 0 ? ReadinessRules.Duration(m) : "—")@(d.SleepScore is int sc and > 0 ? $" · {sc}" : "")</td>
+                                    }
+                                    else
+                                    {
+                                        <td><span class="wr-miss" title="Zegarek nie zmierzył tej nocy — prawdopodobnie był zdjęty. Tego dnia nie liczymy gotowości.">brak odczytu</span></td>
+                                    }
+                                    <td class="@(d.RestingHeartRate is int r and > 0 && _rhrBase is double rb && r - rb >= 5 ? "bad" : "")">@(d.RestingHeartRate is > 0 ? d.RestingHeartRate.ToString() : "—")</td>
                                     <td class="@(d.HrvLastNight is int h && _hrvBase is double hb && h <= hb * .85 ? "bad" : "")">@(d.HrvLastNight is int hv ? $"{hv} ms" : "—")</td>
-                                    <td class="@(d.BodyBatteryHigh is < 40 ? "bad" : "")">@(d.BodyBatteryHigh?.ToString() ?? "—")</td>
+                                    <td class="@(d.BodyBatteryHigh is > 0 and < 40 ? "bad" : "")">@(d.BodyBatteryHigh is > 0 ? d.BodyBatteryHigh.ToString() : "—")</td>
                                     <td>@(d.Steps?.ToString("N0", Pl) ?? "—")</td>
                                 </tr>
                             }
@@ -146,6 +153,7 @@ else
     private static readonly System.Globalization.CultureInfo Pl = System.Globalization.CultureInfo.GetCultureInfo("pl-PL");
     private PTScheduler.Web.Services.WearableService.Summary? _s;
     private double? _rhrBase, _hrvBase;
+    private bool _sleepsWithWatch;
     private WearableWeekRules.Week? _week;
     private string Src => PTScheduler.Web.Services.WearableService.Attribution(_s?.Link?.DeviceName);
 
@@ -154,12 +162,13 @@ else
         _s = await Wearables.SummaryAsync(ClientId);
         _rhrBase = Avg(_s.Days.Select(d => d.RestingHeartRate));
         _hrvBase = Avg(_s.Days.Select(d => d.HrvLastNight));
+        _sleepsWithWatch = _s.Days.Any(d => d.SleepMinutes is > 0 || d.HrvLastNight is > 0);
         _week = await Insights.WeekAsync(ClientId);
     }
 
     private static double? Avg(IEnumerable<int?> v)
     {
-        var list = v.Where(x => x is not null).Select(x => (double)x!.Value).ToList();
+        var list = v.Where(x => x is > 0).Select(x => (double)x!.Value).ToList();
         return list.Count >= 3 ? list.Average() : null;
     }
 
@@ -170,7 +179,7 @@ else
 
     private static string Icon(ReadinessRules.Level l) => l switch
     {
-        ReadinessRules.Level.Good => "bi-battery-full", ReadinessRules.Level.Ok => "bi-battery-half", ReadinessRules.Level.Low => "bi-battery", _ => "bi-smartwatch"
+        ReadinessRules.Level.Good => "bi-battery-full", ReadinessRules.Level.Ok => "bi-battery-half", ReadinessRules.Level.Low => "bi-battery", _ => "pt-ico-watch"
     };
 
     private static string ActIcon(string type) => type.ToUpperInvariant() switch

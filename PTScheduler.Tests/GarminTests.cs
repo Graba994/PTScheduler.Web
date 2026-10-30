@@ -204,6 +204,32 @@ public class GarminTests
     }
 
     [Fact]
+    public void Night_without_watch_is_no_reading_and_readiness_is_not_counted()
+    {
+        // Dzień z zegarka zdjętego na noc: Garmin przysyła zera zamiast braku pomiaru.
+        var daily = GarminParser.Day("dailies", Json("""{"calendarDate":"2026-10-30","steps":757,"restingHeartRateInBeatsPerMinute":0,"bodyBatteryHighestValue":0,"bodyBatteryLowestValue":0}"""))!;
+        daily.RestingHeartRate.Should().BeNull();
+        daily.BodyBatteryHigh.Should().BeNull();
+        daily.BodyBatteryLow.Should().BeNull();
+        GarminParser.Day("sleeps", Json("""{"calendarDate":"2026-10-30","durationInSeconds":0}"""))!.SleepMinutes.Should().BeNull();
+        GarminParser.Day("hrv", Json("""{"calendarDate":"2026-10-30","lastNightAvg":0}"""))!.HrvLastNight.Should().BeNull();
+
+        var today = new DateOnly(2026, 10, 30);
+        var h = History(today);
+        ReadinessRules.SleepsWithWatch(today, h).Should().BeTrue();
+        ReadinessRules.For(today, h).Suggestion.Should().Contain("Czekamy na dane z nocy", "noc jeszcze nie dotarła — wczorajszy odczyt nie mówi o dziś");
+        ReadinessRules.For(today, History(today.AddDays(-3))).Suggestion.Should().Be("Brak świeżych danych z zegarka.");
+
+        h.Add(new ReadinessRules.Day(today, 0, null, 51, 0, 30));
+        var r = ReadinessRules.For(today, h);
+        r.Level.Should().Be(ReadinessRules.Level.Unknown);
+        r.Suggestion.Should().Be(ReadinessRules.NoNightReading);
+
+        // Kto nie śpi z zegarkiem — gotowość nadal z tętna i Body Battery.
+        ReadinessRules.For(today, [new(today, null, null, 54, null, 80)]).Level.Should().NotBe(ReadinessRules.Level.Unknown);
+    }
+
+    [Fact]
     public void Sleep_without_calendar_date_belongs_to_wake_up_day()
     {
         // 28.10 23:00 czasu lokalnego (UTC+1) + 7 h 30 min snu → 29.10.

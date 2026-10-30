@@ -17,6 +17,25 @@ public static class ReadinessRules
     /// <param name="extra">Dodatkowe wskazówki (np. wczorajszy mocny trening z <see cref="TrainingLoadRules"/>): kara do wyniku i powód.</param>
     public static Result For(DateOnly today, IReadOnlyList<Day> history, IReadOnlyList<(int Penalty, string Reason)>? extra = null)
     {
+        // Zera od Garmina to brak pomiaru (zegarek zdjęty), nie wynik.
+        history = history.Select(d => d with
+        {
+            SleepMinutes = d.SleepMinutes is > 0 ? d.SleepMinutes : null, Hrv = d.Hrv is > 0 ? d.Hrv : null,
+            RestingHeartRate = d.RestingHeartRate is > 0 ? d.RestingHeartRate : null, BodyBatteryHigh = d.BodyBatteryHigh is > 0 ? d.BodyBatteryHigh : null
+        }).ToList();
+
+        // Kto zwykle śpi z zegarkiem: gotowość tylko z nocy, która się zapisała — bez niej nie zgadujemy z resztek dnia.
+        if (SleepsWithWatch(today, history))
+        {
+            var night = history.FirstOrDefault(d => d.Date == today);
+            if (night is null)
+                return history.Any(d => d.Date == today.AddDays(-1))
+                    ? new(Level.Unknown, 0, [], "Czekamy na dane z nocy — zegarek jeszcze się nie zsynchronizował.")
+                    : new(Level.Unknown, 0, [], "Brak świeżych danych z zegarka.");
+            if (night.SleepMinutes is null && night.Hrv is null)
+                return new(Level.Unknown, 0, [], NoNightReading);
+        }
+
         var day = history.Where(d => d.Date == today || d.Date == today.AddDays(-1)).OrderByDescending(d => d.Date).FirstOrDefault();
         if (day is null || (day.SleepMinutes is null && day.RestingHeartRate is null && day.Hrv is null && day.BodyBatteryHigh is null))
             return new(Level.Unknown, 0, [], "Brak świeżych danych z zegarka.");
@@ -66,6 +85,12 @@ public static class ReadinessRules
         };
         return new(level, score, reasons, suggestion);
     }
+
+    public const string NoNightReading = "Brak odczytu z tej nocy (zegarek zdjęty albo dane jeszcze nie dotarły) — gotowości na dziś nie liczymy.";
+
+    /// <summary>Czy w ostatnich 2 tygodniach zegarek mierzył sen — wtedy noc bez odczytu znaczy „brak danych”, a nie „zły dzień”.</summary>
+    public static bool SleepsWithWatch(DateOnly today, IReadOnlyList<Day> history) =>
+        history.Any(d => d.Date < today && d.Date >= today.AddDays(-14) && (d.SleepMinutes is > 0 || d.Hrv is > 0));
 
     public static string Label(Level level) => level switch
     {
