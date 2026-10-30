@@ -1,0 +1,363 @@
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject PTScheduler.Portal.Services.TenantService TenantSvc
+@inject AuthenticationStateProvider AuthState
+
+@* Plan jednego studia: cena (zablokowana albo indywidualna), okres próbny, wyjątki ponad plan i uprawnienia zachowane
+   z poprzednich pakietów. Każda zmiana trafia do historii studia i od razu do aplikacji. Wyjątki tylko dokładają —
+   studio nigdy nie dostaje mniej niż plan. *@
+
+<div class="card border-0 shadow-sm h-100">
+    <div class="card-body">
+        <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm"><i class="bi bi-sliders"></i></span>Plan i wyjątki</h2>
+
+        @if (_message is not null)
+        {
+            <div class="alert @(_error ? "alert-danger" : "alert-success") py-2 small">@_message</div>
+        }
+
+        @if (_tenant is null || _plan is null)
+        {
+            <p class="text-muted small mb-0">Wczytywanie…</p>
+        }
+        else
+        {
+            <div class="tpc-row">
+                <div class="pp-label">Cena</div>
+                <div>
+                    <b>@Price(PlanPricing.Monthly(_tenant, _plan)) zł / mies.</b>
+                    @if (PlanPricing.Yearly(_tenant, _plan) is { } y) { <span class="text-muted small"> · @Price(y) zł / rok</span> }
+                    @if (_tenant.LockedMonthlyPrice is not null)
+                    {
+                        <span class="badge text-bg-light border ms-1" title="Zmiany cennika nie dotyczą tego studia"><i class="bi bi-lock me-1"></i>zablokowana</span>
+                        @if (_tenant.LockedMonthlyPrice != _plan.MonthlyPrice) { <span class="text-muted small ms-1">(cennik: @Price(_plan.MonthlyPrice) zł)</span> }
+                    }
+                    else if (_plan.MonthlyPrice > 0)
+                    {
+                        <span class="text-muted small ms-1">według cennika</span>
+                    }
+                </div>
+                <button type="button" class="btn btn-link btn-sm p-0" @onclick="() => _editPrice = !_editPrice">Indywidualna cena</button>
+            </div>
+            @if (_editPrice)
+            {
+                <div class="tpc-form">
+                    <div class="input-group input-group-sm">
+                        <input type="number" min="0" class="form-control" placeholder="zł / mies." @bind="_priceMonthly" aria-label="Cena miesięczna" />
+                        <input type="number" min="0" class="form-control" placeholder="zł / rok (opcjonalnie)" @bind="_priceYearly" aria-label="Cena roczna" />
+                        <button class="btn btn-outline-primary" @onclick="SavePriceAsync">Zapisz</button>
+                    </div>
+                    <div class="form-text">Cena tylko dla tego studia — zmiany cennika jej nie ruszą. Stripe: nowa cena obowiązuje od nowej subskrypcji.</div>
+                    @if (_tenant.LockedMonthlyPrice is not null)
+                    {
+                        <button type="button" class="btn btn-link btn-sm p-0 text-danger" @onclick="UnlockPriceAsync">Wróć do ceny z cennika (przyszłe zmiany cennika będą go dotyczyć)</button>
+                    }
+                </div>
+            }
+
+            <div class="tpc-row">
+                <div class="pp-label">Okres próbny</div>
+                <div>
+                    @if (_tenant.TrialPlanId is not null && _tenant.TrialPlanEndsAt > DateTime.UtcNow)
+                    {
+                        <b>@PlanName(_tenant.TrialPlanId) do @_tenant.TrialPlanEndsAt.Value.ToLocalTime().ToString("dd.MM.yyyy")</b>
+                        <span class="text-muted small"> · potem @_plan.Name</span>
+                        <div class="d-flex gap-2 mt-1">
+                            <button class="btn btn-outline-secondary btn-sm" @onclick="() => ExtendTrialAsync(7)">Przedłuż o 7 dni</button>
+                            <button class="btn btn-outline-danger btn-sm" @onclick="EndTrialAsync">Zakończ teraz</button>
+                        </div>
+                    }
+                    else
+                    {
+                        <span class="text-muted small">brak</span>
+                        <div class="input-group input-group-sm mt-1" style="max-width:420px">
+                            <select class="form-select" @bind="_trialPlan" aria-label="Plan na okres próbny">
+                                @foreach (var p in _plans.Where(p => p.MonthlyPrice > 0 && p.Id != _plan.Id))
+                                {
+                                    <option value="@p.Id">@p.Name</option>
+                                }
+                            </select>
+                            <input type="number" min="1" max="90" class="form-control" style="max-width:80px" @bind="_trialDays" aria-label="Dni" />
+                            <button class="btn btn-outline-primary" @onclick="StartTrialAsync">Włącz okres próbny</button>
+                        </div>
+                    }
+                    <div class="small text-muted mt-1">
+                        Jednorazowe „Wypróbuj 14 dni” w aplikacji:
+                        @if (_tenant.UpgradeTrialUsedAt is { } used)
+                        {
+                            <text>wykorzystane @used.ToLocalTime().ToString("dd.MM.yyyy")</text>
+                            <button type="button" class="btn btn-link btn-sm p-0 ms-1" @onclick="ResetUpgradeTrialAsync">przywróć możliwość</button>
+                        }
+                        else { <text>dostępne</text> }
+                    </div>
+                </div>
+            </div>
+
+            <div class="pp-label mt-3">Wyjątki ponad plan @_plan.Name</div>
+            @if (_exceptions.Count == 0)
+            {
+                <p class="text-muted small mb-2">Brak — studio ma dokładnie to, co plan@(FloorGains.Count > 0 ? " i zachowane uprawnienia (niżej)" : "").</p>
+            }
+            else
+            {
+                <ul class="tpc-list">
+                    @foreach (var x in _exceptions)
+                    {
+                        var f = PlanFeatureCatalog.Find(x.Key);
+                        var active = x.IsActive(DateTime.UtcNow);
+                        <li class="@(active ? "" : "tpc-expired")">
+                            <i class="bi @(f?.Icon ?? "bi-plus-circle")"></i>
+                            <div class="flex-grow-1">
+                                <b>@(f?.Name ?? x.Key)</b>@(f?.Kind == PlanFeatureKind.Flag ? "" : $": {ShowValue(f, x.ValueJson)}")
+                                <div class="small text-muted">
+                                    @(x.ExpiresAt is { } e ? (active ? $"do {e.ToLocalTime():dd.MM.yyyy}" : $"wygasł {e.ToLocalTime():dd.MM.yyyy}") : "bez końca")
+                                    @(string.IsNullOrWhiteSpace(x.Note) ? "" : $" · {x.Note}")
+                                    @(x.CreatedBy is null ? "" : $" · {x.CreatedBy}")
+                                </div>
+                            </div>
+                            <button class="btn btn-sm btn-outline-danger" title="Usuń wyjątek" @onclick="() => RemoveExceptionAsync(x.Id)"><i class="bi bi-x-lg"></i></button>
+                        </li>
+                    }
+                </ul>
+            }
+            <div class="tpc-form">
+                <div class="row g-2">
+                    <div class="col-md-5">
+                        <select class="form-select form-select-sm" value="@_newKey" @onchange='e => { _newKey = e.Value?.ToString() ?? ""; _newValue = DefaultValue(); }' aria-label="Funkcja">
+                            <option value="">Dodaj wyjątek…</option>
+                            @foreach (var g in PlanFeatureCatalog.Groups)
+                            {
+                                <optgroup label="@g">
+                                    @foreach (var f in PlanFeatureCatalog.All.Where(f => f.Group == g && !PlanFeatureCatalog.Has(_effective!, f) || f.Group == g && f.Kind != PlanFeatureKind.Flag))
+                                    {
+                                        <option value="@f.Key">@f.Name</option>
+                                    }
+                                </optgroup>
+                            }
+                        </select>
+                    </div>
+                    @if (NewFeature is { } nf)
+                    {
+                        @if (nf.Kind == PlanFeatureKind.Limit)
+                        {
+                            <div class="col-md-2"><input class="form-control form-control-sm" placeholder="∞ albo liczba" @bind="_newValue" aria-label="Limit" /></div>
+                        }
+                        else if (nf.Kind == PlanFeatureKind.Choice)
+                        {
+                            <div class="col-md-2">
+                                <select class="form-select form-select-sm" @bind="_newValue" aria-label="Wartość">
+                                    @foreach (var o in nf.Options ?? [])
+                                    {
+                                        <option value="@o">@o</option>
+                                    }
+                                </select>
+                            </div>
+                        }
+                        <div class="col-md-2"><input type="date" class="form-control form-control-sm" @bind="_newUntil" title="Do kiedy (puste = bez końca)" aria-label="Do kiedy" /></div>
+                        <div class="col-md-3"><input class="form-control form-control-sm" maxlength="200" placeholder="Dlaczego (np. promocja)" @bind="_newNote" aria-label="Notatka" /></div>
+                        <div class="col-12"><button class="btn btn-primary btn-sm" @onclick="AddExceptionAsync"><i class="bi bi-plus-lg me-1"></i>Dodaj wyjątek</button></div>
+                    }
+                </div>
+            </div>
+
+            @if (FloorGains.Count > 0)
+            {
+                <div class="pp-label mt-3">Zachowane z poprzednich pakietów</div>
+                <p class="small text-muted mb-1">Studio miało to przed zmianą pakietów, więc nie traci: @string.Join(", ", FloorGains).</p>
+                @if (_confirmFloor)
+                {
+                    <div class="d-flex gap-2 align-items-center small">
+                        <span class="text-danger">Studio straci te funkcje od razu.</span>
+                        <button class="btn btn-danger btn-sm" @onclick="ClearFloorAsync">Tak, usuń</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => _confirmFloor = false">Anuluj</button>
+                    </div>
+                }
+                else
+                {
+                    <button type="button" class="btn btn-link btn-sm p-0 text-danger" @onclick="() => _confirmFloor = true">Usuń zachowane uprawnienia</button>
+                }
+            }
+        }
+    </div>
+</div>
+
+<style>
+    .tpc-row { display: grid; grid-template-columns: 110px 1fr auto; gap: .25rem .75rem; align-items: start; padding: .5rem 0; border-bottom: 1px solid var(--pts-border, #eef0f4); font-size: .88rem; }
+    .tpc-row .pp-label { margin: 0; }
+    .tpc-form { background: var(--pts-surface-alt, #f8fafc); border-radius: 10px; padding: .6rem .7rem; margin: .4rem 0; }
+    .tpc-list { list-style: none; padding: 0; margin: 0 0 .4rem; display: grid; gap: .4rem; }
+    .tpc-list li { display: flex; gap: .6rem; align-items: flex-start; font-size: .88rem; padding: .45rem .55rem; border: 1px solid var(--pts-border, #e6e8ee); border-radius: 10px; }
+    .tpc-list li > i { color: var(--pts-primary, #4f46e5); margin-top: .1rem; }
+    .tpc-list li.tpc-expired { opacity: .55; }
+    @@media (max-width: 575.98px) { .tpc-row { grid-template-columns: 1fr; } }
+</style>
+
+@code {
+    [Parameter, EditorRequired] public int TenantId { get; set; }
+
+    private Tenant? _tenant;
+    private Plan? _plan, _effective;
+    private List<Plan> _plans = [];
+    private List<TenantFeatureException> _exceptions = [];
+    private string? _message;
+    private bool _error, _editPrice, _confirmFloor;
+    private decimal? _priceMonthly, _priceYearly;
+    private string _trialPlan = "pro";
+    private int _trialDays = 14;
+    private string _newKey = "", _newValue = "", _newNote = "";
+    private DateTime? _newUntil;
+
+    private PlanFeature? NewFeature => PlanFeatureCatalog.Find(_newKey);
+
+    protected override async Task OnParametersSetAsync() => await LoadAsync();
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _tenant = await db.Tenants.AsNoTracking().FirstOrDefaultAsync(t => t.Id == TenantId);
+        _plans = await db.Plans.AsNoTracking().OrderBy(p => p.SortOrder).ToListAsync();
+        _plan = _plans.FirstOrDefault(p => p.Id == _tenant?.PlanId);
+        _exceptions = await db.TenantFeatureExceptions.AsNoTracking().Where(x => x.TenantId == TenantId).OrderByDescending(x => x.CreatedAt).ToListAsync();
+        if (_tenant is not null && _plan is not null)
+        {
+            _effective = PlanFeatureCatalog.Effective(_tenant, _plan, null, DateTime.UtcNow, _exceptions);
+            _priceMonthly ??= PlanPricing.Monthly(_tenant, _plan);
+            _priceYearly ??= PlanPricing.Yearly(_tenant, _plan);
+            if (_plans.All(p => p.Id != _trialPlan || p.Id == _plan.Id)) _trialPlan = _plans.FirstOrDefault(p => p.MonthlyPrice > 0 && p.Id != _plan.Id)?.Id ?? "";
+        }
+    }
+
+    /// <summary>Co studio ma dzięki podłodze, a czego sam plan nie daje.</summary>
+    private List<string> FloorGains => _tenant is null || _plan is null ? [] :
+        PlanFeatureCatalog.All.Where(f => f.Pitch || f.Kind == PlanFeatureKind.Limit)
+            .Where(f => PlanFeatureCatalog.Describe(PlanFeatureCatalog.ApplyFloor(_plan, _tenant.FeatureFloor), f) != PlanFeatureCatalog.Describe(_plan, f))
+            .Select(f => f.Kind == PlanFeatureKind.Flag ? f.Name : $"{f.Name}: {PlanFeatureCatalog.Describe(PlanFeatureCatalog.ApplyFloor(_plan, _tenant.FeatureFloor), f)}")
+            .ToList();
+
+    private string PlanName(string id) => _plans.FirstOrDefault(p => p.Id == id)?.Name ?? id;
+    private static string Price(decimal v) => v.ToString("0.##");
+
+    private static string ShowValue(PlanFeature? f, string json)
+    {
+        try
+        {
+            var v = System.Text.Json.JsonDocument.Parse(json).RootElement;
+            return v.ValueKind == System.Text.Json.JsonValueKind.Number ? (v.GetInt64() >= PlanFeatureCatalog.Unlimited ? "bez limitu" : $"{v.GetInt64()} {f?.Unit}") : v.ToString();
+        }
+        catch (System.Text.Json.JsonException) { return json; }
+    }
+
+    private string DefaultValue() => NewFeature?.Kind switch
+    {
+        PlanFeatureKind.Choice => NewFeature.Options?.LastOrDefault() ?? "",
+        PlanFeatureKind.Limit => "",
+        _ => "true"
+    };
+
+    private async Task<string> WhoAsync() => (await AuthState.GetAuthenticationStateAsync()).User.Identity?.Name ?? "admin";
+
+    /// <summary>Zmiana w bazie + wpis w historii studia + uprawnienia do aplikacji od razu.</summary>
+    private async Task ApplyAsync(Func<PortalDbContext, Tenant, Task<string>> change)
+    {
+        try
+        {
+            await using var db = await DbFactory.CreateDbContextAsync();
+            var tenant = await db.Tenants.FirstAsync(t => t.Id == TenantId);
+            var detail = await change(db, tenant);
+            db.TenantEvents.Add(new TenantEvent { TenantId = TenantId, EventType = TenantEventTypes.PlanChanged, Detail = $"{detail} ({await WhoAsync()})" });
+            await db.SaveChangesAsync();
+            var pushed = await TenantSvc.PushEntitlementsAsync(TenantId);
+            _message = detail + (pushed ? " — aplikacja już to ma." : " — aplikacja pobierze zmianę sama (do 15 min).");
+            _error = false;
+        }
+        catch (Exception ex) { _message = ex.Message; _error = true; }
+        await LoadAsync();
+    }
+
+    private Task SavePriceAsync()
+    {
+        if (_priceMonthly is not >= 0) { _message = "Wpisz cenę miesięczną."; _error = true; return Task.CompletedTask; }
+        _editPrice = false;
+        return ApplyAsync((_, t) =>
+        {
+            t.LockedMonthlyPrice = _priceMonthly;
+            t.LockedYearlyPrice = _priceYearly is > 0 ? _priceYearly : null;
+            return Task.FromResult($"Indywidualna cena: {Price(_priceMonthly!.Value)} zł/mies.{(_priceYearly is > 0 ? $", {Price(_priceYearly.Value)} zł/rok" : "")}");
+        });
+    }
+
+    private Task UnlockPriceAsync()
+    {
+        _editPrice = false;
+        _priceMonthly = _priceYearly = null;
+        return ApplyAsync((_, t) => { t.LockedMonthlyPrice = t.LockedYearlyPrice = null; return Task.FromResult("Cena według cennika"); });
+    }
+
+    private Task StartTrialAsync()
+    {
+        if (_plans.FirstOrDefault(p => p.Id == _trialPlan) is not { } plan) return Task.CompletedTask;
+        var days = Math.Clamp(_trialDays, 1, 90);
+        return ApplyAsync((_, t) =>
+        {
+            t.TrialPlanId = plan.Id;
+            t.TrialPlanEndsAt = DateTime.UtcNow.AddDays(days);
+            return Task.FromResult($"Okres próbny {plan.Name} na {days} dni");
+        });
+    }
+
+    private Task ExtendTrialAsync(int days) => ApplyAsync((_, t) =>
+    {
+        t.TrialPlanEndsAt = (t.TrialPlanEndsAt > DateTime.UtcNow ? t.TrialPlanEndsAt.Value : DateTime.UtcNow).AddDays(days);
+        return Task.FromResult($"Okres próbny przedłużony do {t.TrialPlanEndsAt.Value.ToLocalTime():dd.MM.yyyy}");
+    });
+
+    private Task EndTrialAsync() => ApplyAsync((_, t) =>
+    {
+        t.TrialPlanId = null;
+        t.TrialPlanEndsAt = null;
+        return Task.FromResult("Okres próbny zakończony");
+    });
+
+    private Task ResetUpgradeTrialAsync() => ApplyAsync((_, t) =>
+    {
+        t.UpgradeTrialUsedAt = null;
+        return Task.FromResult("Przywrócona jednorazowa próba wyższego planu");
+    });
+
+    private Task AddExceptionAsync()
+    {
+        if (NewFeature is not { } f) return Task.CompletedTask;
+        object value = _newValue;
+        if (f.Kind == PlanFeatureKind.Limit)
+        {
+            var t = _newValue.Trim().ToLowerInvariant();
+            if (t is "∞" or "bez limitu") value = PlanFeatureCatalog.Unlimited;
+            else if (int.TryParse(t, out var n) && n > 0) value = n;
+            else { _message = "Limit: wpisz liczbę albo ∞."; _error = true; return Task.CompletedTask; }
+        }
+        var until = _newUntil is { } d ? DateTime.SpecifyKind(d.Date.AddDays(1), DateTimeKind.Local).ToUniversalTime() : (DateTime?)null;
+        var note = string.IsNullOrWhiteSpace(_newNote) ? null : _newNote.Trim();
+        return ApplyAsync(async (db, _) =>
+        {
+            db.TenantFeatureExceptions.Add(new TenantFeatureException
+            {
+                TenantId = TenantId, Key = f.Key, ValueJson = PlanFeatureCatalog.ValueJson(f, value), Note = note, ExpiresAt = until, CreatedBy = await WhoAsync()
+            });
+            _newKey = _newValue = _newNote = "";
+            _newUntil = null;
+            return $"Wyjątek: {f.Name}{(f.Kind == PlanFeatureKind.Flag ? "" : $" {ShowValue(f, PlanFeatureCatalog.ValueJson(f, value))}")}{(until is { } u ? $" do {u.ToLocalTime():dd.MM.yyyy}" : "")}";
+        });
+    }
+
+    private Task RemoveExceptionAsync(int id) => ApplyAsync(async (db, _) =>
+    {
+        var x = await db.TenantFeatureExceptions.FirstAsync(e => e.Id == id && e.TenantId == TenantId);
+        db.TenantFeatureExceptions.Remove(x);
+        return $"Usunięty wyjątek: {PlanFeatureCatalog.Find(x.Key)?.Name ?? x.Key}";
+    });
+
+    private Task ClearFloorAsync()
+    {
+        _confirmFloor = false;
+        return ApplyAsync((_, t) => { t.FeatureFloor = null; return Task.FromResult("Usunięte uprawnienia zachowane z poprzednich pakietów"); });
+    }
+}

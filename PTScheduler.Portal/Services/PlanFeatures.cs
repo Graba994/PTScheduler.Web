@@ -170,8 +170,34 @@ public static class PlanFeatureCatalog
         Dictionary<string, JsonElement>? floor;
         try { floor = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(floorJson); }
         catch (JsonException) { return plan; }
-        if (floor is null || floor.Count == 0) return plan;
-        var byKey = new Dictionary<string, JsonElement>(floor, StringComparer.OrdinalIgnoreCase);
+        return floor is null || floor.Count == 0 ? plan : Grant(plan, floor);
+    }
+
+    /// <summary>Wyjątki studia (aktywne) — tak samo jak podłoga: dokładają, nigdy nie zabierają.</summary>
+    public static Plan ApplyExceptions(Plan plan, IEnumerable<TenantFeatureException>? exceptions, DateTime utcNow)
+    {
+        // Po kolei — kilka wyjątków na ten sam limit daje największy, nie ostatni.
+        var result = plan;
+        foreach (var x in exceptions ?? [])
+        {
+            if (!x.IsActive(utcNow)) continue;
+            try { result = Grant(result, new() { [x.Key] = JsonDocument.Parse(x.ValueJson).RootElement.Clone() }); }
+            catch (JsonException) { }
+        }
+        return result;
+    }
+
+    /// <summary>Wartość wyjątku jako JSON dla danej funkcji (włącznik — true, limit — liczba, wybór — tekst).</summary>
+    public static string ValueJson(PlanFeature f, object value) => JsonSerializer.Serialize(f.Kind switch
+    {
+        PlanFeatureKind.Flag => (object)true,
+        PlanFeatureKind.Limit => Convert.ToInt32(value),
+        _ => value.ToString() ?? ""
+    });
+
+    private static Plan Grant(Plan plan, Dictionary<string, JsonElement> values)
+    {
+        var byKey = new Dictionary<string, JsonElement>(values, StringComparer.OrdinalIgnoreCase);
         var result = Clone(plan);
         foreach (var f in All)
         {
@@ -193,20 +219,25 @@ public static class PlanFeatureCatalog
         return result;
     }
 
-    /// <summary>Plan, z którego studio korzysta teraz: okres próbny wyższego planu, a do tego podłoga z poprzednich pakietów.</summary>
-    public static Plan Effective(Tenant tenant, Plan plan, Plan? trialPlan, DateTime utcNow)
+    /// <summary>
+    /// Plan, z którego studio korzysta teraz: okres próbny wyższego planu, podłoga z poprzednich pakietów
+    /// i wyjątki ustawione w panelu dla tego studia.
+    /// </summary>
+    public static Plan Effective(Tenant tenant, Plan plan, Plan? trialPlan, DateTime utcNow, IEnumerable<TenantFeatureException>? exceptions = null)
     {
         var basePlan = trialPlan is not null && tenant.TrialPlanEndsAt > utcNow ? trialPlan : plan;
-        return ApplyFloor(basePlan, tenant.FeatureFloor);
+        return ApplyExceptions(ApplyFloor(basePlan, tenant.FeatureFloor), exceptions, utcNow);
     }
 
     public static async Task<Plan?> EffectiveAsync(PortalDbContext db, Tenant tenant)
     {
         var plan = tenant.Plan ?? await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == tenant.PlanId);
         if (plan is null) return null;
-        var trial = tenant.TrialPlanId is { } tid && tenant.TrialPlanEndsAt > DateTime.UtcNow
+        var now = DateTime.UtcNow;
+        var trial = tenant.TrialPlanId is { } tid && tenant.TrialPlanEndsAt > now
             ? await db.Plans.AsNoTracking().FirstOrDefaultAsync(p => p.Id == tid) : null;
-        return Effective(tenant, plan, trial, DateTime.UtcNow);
+        var exceptions = await db.TenantFeatureExceptions.AsNoTracking().Where(x => x.TenantId == tenant.Id && (x.ExpiresAt == null || x.ExpiresAt > now)).ToListAsync();
+        return Effective(tenant, plan, trial, now, exceptions);
     }
 
     /// <summary>Najtańszy aktywny plan z daną funkcją — nazwa przy kłódce w aplikacji studia.</summary>

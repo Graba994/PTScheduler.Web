@@ -565,7 +565,10 @@ public class TenantService(
         var plans = await db.Plans.AsNoTracking().ToListAsync();
         var trial = tenant?.TrialPlanId is { } tid && tenant.TrialPlanEndsAt > DateTime.UtcNow ? plans.FirstOrDefault(p => p.Id == tid) : null;
         // Studio dostaje plan z okresu próbnego (np. Pro na start) i nigdy mniej niż miało przed zmianą pakietów.
-        var effective = tenant is null ? plan : PlanFeatureCatalog.Effective(tenant, plan, trial, DateTime.UtcNow);
+        var now = DateTime.UtcNow;
+        var exceptions = tenant is null ? [] : await db.TenantFeatureExceptions.AsNoTracking()
+            .Where(x => x.TenantId == tenant.Id && (x.ExpiresAt == null || x.ExpiresAt > now)).ToListAsync();
+        var effective = tenant is null ? plan : PlanFeatureCatalog.Effective(tenant, plan, trial, now, exceptions);
         var json = SerializeEntitlements(effective, await AddonService.ExtraLimitsAsync(db, tenantId), await GarminOnAsync(), await settings.PlatformSmsOnAsync());
         var node = System.Text.Json.Nodes.JsonNode.Parse(json)!.AsObject();
         node["upgradePlans"] = System.Text.Json.Nodes.JsonNode.Parse(JsonSerializer.Serialize(PlanFeatureCatalog.UpgradePlans(plans)));

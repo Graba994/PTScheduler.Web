@@ -215,6 +215,46 @@ public class PlansV2Tests
         finally { PlanCatalog.Reset(); }
     }
 
+    [Fact]
+    public async Task Studio_exception_grants_feature_until_it_expires()
+    {
+        var (tenants, db) = await BuildAsync();
+        int id;
+        await using (var ctx = await db.CreateDbContextAsync())
+        {
+            var t = new Tenant { Slug = "ania", CompanyName = "Ania", PlanId = "starter" };
+            ctx.Tenants.Add(t);
+            await ctx.SaveChangesAsync();
+            id = t.Id;
+            var garmin = PlanFeatureCatalog.Find("Wearables")!;
+            var clients = PlanFeatureCatalog.Find("MaxClients")!;
+            ctx.TenantFeatureExceptions.AddRange(
+                new TenantFeatureException { TenantId = id, Key = "Wearables", ValueJson = PlanFeatureCatalog.ValueJson(garmin, true), ExpiresAt = DateTime.UtcNow.AddDays(30), Note = "promocja" },
+                new TenantFeatureException { TenantId = id, Key = "MaxClients", ValueJson = PlanFeatureCatalog.ValueJson(clients, 40) },
+                new TenantFeatureException { TenantId = id, Key = "MaxClients", ValueJson = PlanFeatureCatalog.ValueJson(clients, 5) },
+                new TenantFeatureException { TenantId = id, Key = "SalesTools", ValueJson = "true", ExpiresAt = DateTime.UtcNow.AddDays(-1) });
+            await ctx.SaveChangesAsync();
+        }
+        var starter = await (await db.CreateDbContextAsync()).Plans.AsNoTracking().FirstAsync(p => p.Id == "starter");
+
+        var e = JsonDocument.Parse(await tenants.EntitlementsJsonAsync(id, starter)).RootElement;
+        e.GetProperty("wearables").GetBoolean().Should().BeFalse("Garmin wyłączony globalnie — wyjątek nie obchodzi włącznika platformy");
+        e.GetProperty("maxClients").GetInt32().Should().BeGreaterThanOrEqualTo(20, "wyjątek nigdy nie zabiera");
+        e.GetProperty("salesTools").GetBoolean().Should().BeFalse("wyjątek wygasł");
+
+        await using (var ctx = await db.CreateDbContextAsync())
+        {
+            var t = await ctx.Tenants.FirstAsync(x => x.Id == id);
+            var ex = await ctx.TenantFeatureExceptions.AsNoTracking().Where(x => x.TenantId == id).ToListAsync();
+            var eff = PlanFeatureCatalog.Effective(t, starter, null, DateTime.UtcNow, ex);
+            eff.Wearables.Should().BeTrue();
+            eff.MaxClients.Should().Be(40);
+            eff.SalesTools.Should().BeFalse();
+            PlanFeatureCatalog.Effective(t, starter, null, DateTime.UtcNow.AddDays(31), ex).Wearables.Should().BeFalse("po terminie studio wraca do planu");
+        }
+        PlanFeatureCatalog.ValueJson(PlanFeatureCatalog.Find("BrandingTier")!, "premium").Should().Be("\"premium\"");
+    }
+
     private static async Task<(TenantService Tenants, IDbContextFactory<PortalDbContext> Db)> BuildAsync()
     {
         var services = new ServiceCollection();

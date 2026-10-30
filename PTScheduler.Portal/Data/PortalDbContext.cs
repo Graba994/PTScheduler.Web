@@ -30,6 +30,8 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
     public DbSet<GoogleCalendarGrant> GoogleCalendarGrants => Set<GoogleCalendarGrant>();
     public DbSet<TenantMailCounter> TenantMailCounters => Set<TenantMailCounter>();
     public DbSet<TenantAddon> TenantAddons => Set<TenantAddon>();
+    public DbSet<TenantFeatureException> TenantFeatureExceptions => Set<TenantFeatureException>();
+    public DbSet<PlanChangeLog> PlanChangeLogs => Set<PlanChangeLog>();
     public DbSet<TenantOfferItem> TenantOfferItems => Set<TenantOfferItem>();
     public DbSet<TenantSmsCounter> TenantSmsCounters => Set<TenantSmsCounter>();
     public DbSet<TenantBill> TenantBills => Set<TenantBill>();
@@ -461,6 +463,22 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
             e.HasIndex(x => x.PaymentExternalId);
             e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId);
             e.HasOne(x => x.ServiceItem).WithMany().HasForeignKey(x => x.ServiceItemId);
+        });
+
+        b.Entity<TenantFeatureException>(e =>
+        {
+            e.HasIndex(x => x.TenantId);
+            e.Property(x => x.Key).HasMaxLength(64);
+            e.Property(x => x.ValueJson).HasMaxLength(64);
+            e.Property(x => x.Note).HasMaxLength(500);
+            e.Property(x => x.CreatedBy).HasMaxLength(256);
+            e.HasOne(x => x.Tenant).WithMany().HasForeignKey(x => x.TenantId).OnDelete(DeleteBehavior.Cascade);
+        });
+        b.Entity<PlanChangeLog>(e =>
+        {
+            e.HasIndex(x => x.ChangedAt);
+            e.Property(x => x.PlanId).HasMaxLength(64);
+            e.Property(x => x.ChangedBy).HasMaxLength(256);
         });
 
         SeedPlans(b);

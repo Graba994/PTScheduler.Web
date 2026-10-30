@@ -5,6 +5,7 @@
 @inject PTScheduler.Portal.Services.TenantService TenantService
 @inject PTScheduler.Portal.Services.StripeService StripeSvc
 @inject SiteSettingsService Settings
+@inject AuthenticationStateProvider AuthState
 @rendermode InteractiveServer
 
 @* Plany jako macierz: wiersze to funkcje z katalogu (PlanFeatureCatalog), kolumny to plany. Zmiany zbierają się
@@ -207,6 +208,39 @@
     </aside>
 </div>
 
+<details class="pm-history card border-0 shadow-sm">
+    <summary><i class="bi bi-clock-history me-1"></i>Historia zmian <span class="text-muted">(@_history.Count)</span></summary>
+    @if (_history.Count == 0)
+    {
+        <p class="text-muted small mb-0 px-3 pb-3">Jeszcze nic nie zmieniano w tym panelu.</p>
+    }
+    else
+    {
+        <ol class="pm-history-list">
+            @foreach (var h in _history)
+            {
+                <li>
+                    <div class="pm-history-head">
+                        <b>@(h.PlanId is null ? "Ustawienia wspólne" : _plans.FirstOrDefault(x => x.Id == h.PlanId)?.Name ?? h.PlanId)</b>
+                        <span>@h.ChangedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")@(h.ChangedBy is null ? "" : $" · {h.ChangedBy}")</span>
+                        @if (h.BeforeJson is not null && _plans.Any(x => x.Id == h.PlanId))
+                        {
+                            <button type="button" class="btn btn-link btn-sm p-0 ms-auto" title="Wczytuje plan sprzed tej zmiany do macierzy — zapisujesz dopiero po przejrzeniu"
+                                    @onclick="() => LoadVersion(h)">Wczytaj wersję sprzed zmiany</button>
+                        }
+                    </div>
+                    <ul>
+                        @foreach (var line in h.Summary.Split('\n', StringSplitOptions.RemoveEmptyEntries))
+                        {
+                            <li>@line</li>
+                        }
+                    </ul>
+                </li>
+            }
+        </ol>
+    }
+</details>
+
 @if (_changes.Count > 0 || HiddenChanged)
 {
     <div class="pm-savebar">
@@ -274,6 +308,57 @@
     private string _copyFrom = "";
 
     private sealed record Change(string PlanId, string Text, bool Loss, bool Price);
+    private List<PlanChangeLog> _history = [];
+
+    /// <summary>Pola planu zapisywane w historii — z nich wczytujemy wersję z powrotem do macierzy.</summary>
+    private static string Snapshot(Plan p)
+    {
+        var d = PlanFeatureCatalog.All.ToDictionary(f => f.Key, f => PlanFeatureCatalog.Get(p, f.Key));
+        d["MonthlyPrice"] = p.MonthlyPrice;
+        d["YearlyPrice"] = p.YearlyPrice;
+        d["IsActive"] = p.IsActive;
+        d["IsFeatured"] = p.IsFeatured;
+        return System.Text.Json.JsonSerializer.Serialize(d);
+    }
+
+    private void LoadVersion(PlanChangeLog h)
+    {
+        if (_plans.FirstOrDefault(x => x.Id == h.PlanId) is not { } plan || h.BeforeJson is null) return;
+        using var doc = System.Text.Json.JsonDocument.Parse(h.BeforeJson);
+        foreach (var prop in doc.RootElement.EnumerateObject())
+        {
+            var v = prop.Value;
+            switch (prop.Name)
+            {
+                case "MonthlyPrice" when v.ValueKind == System.Text.Json.JsonValueKind.Number: plan.MonthlyPrice = v.GetDecimal(); break;
+                case "YearlyPrice": plan.YearlyPrice = v.ValueKind == System.Text.Json.JsonValueKind.Number ? v.GetDecimal() : null; break;
+                case "IsActive": plan.IsActive = v.ValueKind == System.Text.Json.JsonValueKind.True; break;
+                case "IsFeatured": plan.IsFeatured = v.ValueKind == System.Text.Json.JsonValueKind.True; break;
+                default:
+                    if (PlanFeatureCatalog.Find(prop.Name) is not { } f) break;
+                    object? value = f.Kind switch
+                    {
+                        PlanFeatureKind.Flag => v.ValueKind == System.Text.Json.JsonValueKind.True,
+                        PlanFeatureKind.Limit => v.TryGetInt32(out var n) ? n : 0,
+                        _ => v.GetString()
+                    };
+                    PlanFeatureCatalog.Set(plan, f.Key, value);
+                    break;
+            }
+        }
+        Recompute();
+        _message = $"Wczytano plan {plan.Name} sprzed zmiany z {h.ChangedAt.ToLocalTime():dd.MM HH:mm}. Przejrzyj zaznaczone komórki i zapisz albo odrzuć.";
+        _msgError = false;
+    }
+
+    private async Task<string> WhoAsync() => (await AuthState.GetAuthenticationStateAsync()).User.Identity?.Name ?? "admin";
+
+    private async Task LogAsync(string? planId, IEnumerable<string> lines, Plan? before = null)
+    {
+        await using var db = DbFactory.CreateDbContext();
+        db.PlanChangeLogs.Add(new PlanChangeLog { PlanId = planId, ChangedBy = await WhoAsync(), Summary = string.Join("\n", lines), BeforeJson = before is null ? null : Snapshot(before) });
+        await db.SaveChangesAsync();
+    }
 
     protected override async Task OnInitializedAsync() => await LoadAsync();
 
@@ -287,6 +372,7 @@
         var now = DateTime.UtcNow;
         _trialCount = await db.Tenants.Where(t => t.TrialPlanId != null && t.TrialPlanEndsAt > now && t.Status != TenantStatus.Destroyed)
             .GroupBy(t => t.TrialPlanId!).Select(g => new { g.Key, Count = g.Count() }).ToDictionaryAsync(x => x.Key, x => x.Count);
+        _history = await db.PlanChangeLogs.AsNoTracking().OrderByDescending(h => h.ChangedAt).Take(40).ToListAsync();
         _hidden = (await TenantService.HiddenFeaturesAsync()).ToHashSet();
         _hiddenOriginal = [.. _hidden];
         _trialPlanId = await Settings.GetAsync(SiteSettingsService.Keys.TrialPlanId);
@@ -421,6 +507,10 @@
                 }
                 await db.SaveChangesAsync();
             }
+            foreach (var id in changedPlans)
+                await LogAsync(id, _changes.Where(c => c.PlanId == id).Select(c => c.Text), _original[id]);
+            if (HiddenChanged)
+                await LogAsync(null, [$"Bez planu ukryte: {string.Join(", ", _hidden.Select(k => PlanFeatureCatalog.Find(k)?.Name ?? k).DefaultIfEmpty("nic"))}"]);
             if (HiddenChanged)
                 await Settings.SetAsync(SiteSettingsService.Keys.PlanFeaturesHidden, System.Text.Json.JsonSerializer.Serialize(_hidden.OrderBy(k => k)));
 
@@ -460,6 +550,9 @@
         _trialPlanId = e.Value?.ToString() ?? "";
         await Settings.SetAsync(SiteSettingsService.Keys.TrialPlanId, _trialPlanId);
         var name = _plans.FirstOrDefault(p => p.Id == _trialPlanId)?.Name;
+        await LogAsync(null, [name is null ? "Nowe konta na darmowym planie: bez okresu próbnego" : $"Nowe konta na darmowym planie: okres próbny {name}"]);
+        await using (var db = DbFactory.CreateDbContext())
+            _history = await db.PlanChangeLogs.AsNoTracking().OrderByDescending(h => h.ChangedAt).Take(40).ToListAsync();
         _message = name is null ? "Nowe konta na darmowym planie startują bez okresu próbnego." : $"Nowe konta na darmowym planie dostaną na start plan {name}.";
         _msgError = false;
     }
@@ -502,11 +595,18 @@
                 plan.IsFeatured = false;
                 plan.StripeProductId = plan.StripeMonthlyPriceId = plan.StripeYearlyPriceId = null;
                 db.Plans.Add(plan);
+                await LogAsync(plan.Id, [$"Nowy plan {plan.Name} (funkcje skopiowane z {source?.Name ?? "pustego planu"}), na razie poza cennikiem"]);
                 _message = $"Dodano plan {plan.Name} (na razie poza cennikiem) — ustaw funkcje i ceny w macierzy, potem zaznacz „w cenniku”.";
             }
             else
             {
                 var entity = await db.Plans.FirstAsync(p => p.Id == _details.Id);
+                var lines = new List<string>();
+                if (entity.Name != _details.Name.Trim()) lines.Add($"Nazwa: {entity.Name} → {_details.Name.Trim()}");
+                if (entity.Description != _details.Description) lines.Add("Nowy opis w cenniku");
+                if (entity.TrialDays != Math.Clamp(_details.TrialDays, 0, 90)) lines.Add($"Dni próbne: {entity.TrialDays} → {Math.Clamp(_details.TrialDays, 0, 90)}");
+                if (entity.SortOrder != _details.SortOrder) lines.Add($"Kolejność: {entity.SortOrder} → {_details.SortOrder}");
+                if (lines.Count > 0) await LogAsync(entity.Id, lines);
                 entity.Name = _details.Name.Trim();
                 entity.Description = _details.Description;
                 entity.SortOrder = _details.SortOrder;
@@ -536,6 +636,7 @@
             if (p is null) return;
             db.Plans.Remove(p);
             await db.SaveChangesAsync();
+            await LogAsync(null, [$"Usunięty plan {p.Name} ({p.Id})"], p);
             _details = null;
             await LoadAsync();
             _message = "Plan usunięty."; _msgError = false;
