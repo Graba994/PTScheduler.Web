@@ -45,6 +45,7 @@ public static class PlanFeatureCatalog
         new("Documents", "Klienci i grafik", "Dokumenty do podpisu", "Klient podpisuje regulamin i zgody w aplikacji — bez papieru."),
 
         new("TrainingPlansEnabled", "Trening", "Plany treningowe i trening na żywo", "Klient ćwiczy z Twoim planem w telefonie, Ty widzisz ciężary i postępy."),
+        new("MuscleMapLevel", "Trening", "Mapa mięśni", "Postać z pracującymi mięśniami przy każdym ćwiczeniu — ogólnie albo szczegółowo, partia po partii.", PlanFeatureKind.Choice, Options: ["none", "basic", "detailed"]),
         new("Wearables", "Trening", "Zegarki klientów (Garmin)", "Gotowość klienta przed treningiem i plan wysłany prosto na zegarek."),
         new("CoursesEnabled", "Trening", "Kursy wideo", "Sprzedajesz programy online — zarabiasz także bez prowadzenia treningu."),
         new("MaxCourses", "Trening", "Liczba kursów", "Ile kursów wideo możesz prowadzić.", PlanFeatureKind.Limit, "kursów"),
@@ -93,6 +94,7 @@ public static class PlanFeatureCatalog
 
     public static readonly Dictionary<string, string> Icons = new()
     {
+        ["MuscleMapLevel"] = "bi-person-arms-up",
         ["MaxClients"] = "bi-people-fill", ["MaxSessionsPerMonth"] = "bi-calendar-check", ["RecurringSessions"] = "bi-repeat",
         ["IntegrationGoogleMeet"] = "bi-camera-video", ["BodyMeasurements"] = "bi-rulers", ["Surveys"] = "bi-clipboard2-pulse",
         ["Documents"] = "bi-file-earmark-check", ["TrainingPlansEnabled"] = "bi-clipboard-pulse", ["Wearables"] = "pt-ico-watch",
@@ -129,6 +131,16 @@ public static class PlanFeatureCatalog
 
     public static PlanFeature? Find(string key) => All.FirstOrDefault(f => f.Key == key);
 
+    private static readonly Dictionary<string, string> OptionLabels = new()
+    {
+        ["MuscleMapLevel:none"] = "brak", ["MuscleMapLevel:basic"] = "ogólna", ["MuscleMapLevel:detailed"] = "szczegółowa",
+        ["VideoProvider:none"] = "brak", ["VideoProvider:youtube"] = "YouTube", ["VideoProvider:bunny"] = "własny odtwarzacz",
+    };
+
+    /// <summary>Etykieta wartości wyboru do panelu (np. „szczegółowa”); bez tłumaczenia — sama wartość.</summary>
+    public static string OptionLabel(PlanFeature f, string? option) =>
+        option is null ? "—" : OptionLabels.GetValueOrDefault($"{f.Key}:{option}", option);
+
     private static PropertyInfo Prop(string key) =>
         typeof(Plan).GetProperty(key) ?? throw new InvalidOperationException($"Plan nie ma pola {key}.");
 
@@ -148,7 +160,7 @@ public static class PlanFeatureCatalog
     {
         PlanFeatureKind.Flag => Get(plan, f.Key) is true ? "✓" : "—",
         PlanFeatureKind.Limit => Get(plan, f.Key) is int n ? n >= Unlimited ? "bez limitu" : n <= 0 ? "—" : $"{n} {f.Unit}" : "—",
-        _ => Get(plan, f.Key) as string ?? "—"
+        _ => OptionLabel(f, Get(plan, f.Key) as string)
     };
 
     /// <summary>Kopia planu (bez powiązań) — do łączenia z podłogą i okresem próbnym.</summary>

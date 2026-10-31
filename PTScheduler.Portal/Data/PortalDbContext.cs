@@ -565,6 +565,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
                 BasicAnalytics = true,
                 BrandingTier = "preview",
                 VideoProvider = "youtube",
+                MuscleMapLevel = "basic",
                 SortOrder = 1,
                 IsFeatured = false
             },
@@ -601,6 +602,7 @@ public class PortalDbContext(DbContextOptions<PortalDbContext> options)
                 Documents = true,
                 BrandingTier = "basic",
                 VideoProvider = "youtube",
+                MuscleMapLevel = "basic",
                 SortOrder = 2,
                 IsFeatured = false
             },

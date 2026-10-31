@@ -17,6 +17,7 @@
 @inject ExerciseMediaService Media
 @inject EntitlementService Entitlements
 @inject NavigationManager Nav
+@inject MuscleMapPrefs Prefs
 @rendermode PTScheduler.Web.RenderModes.Server
 
 <AppTitle Page="Katalog ćwiczeń" />
@@ -202,7 +203,9 @@ else
                         @if (MapOn && Muscles.Parse(e.PrimaryMuscles) is { Count: > 0 } cardPrimary)
                         {
                             <span class="exercise-mm" aria-hidden="true">
-                                <MuscleMap Primary="@cardPrimary" Secondary="@Muscles.Parse(e.SecondaryMuscles)" Female="@_mmFemale" Compact="true" OnlyActive="true" />
+                                <MuscleMap Primary="@cardPrimary" Secondary="@Muscles.Parse(e.SecondaryMuscles)" Detailed="@Detailed"
+                                           PrimaryDetail="@StoredDetail(e.PrimaryDetail, e.SecondaryDetail)?.P" SecondaryDetail="@StoredDetail(e.PrimaryDetail, e.SecondaryDetail)?.S"
+                                           NameEn="@e.NameEn" Female="@Prefs.Female" Compact="true" OnlyActive="true" />
                             </span>
                         }
                     </div>
@@ -301,34 +304,46 @@ else
                             {
                                 var dPrimary = Muscles.Parse(_detail.PrimaryMuscles);
                                 var dSecondary = Muscles.Parse(_detail.SecondaryMuscles);
+                                var dDetail = MuscleDetails.Resolve(_detail.PrimaryDetail, _detail.SecondaryDetail, _detail.PrimaryMuscles, _detail.SecondaryMuscles, _detail.NameEn);
+                                var rowsP = Detailed ? dDetail.Primary.Select(d => (Label: MuscleDetails.Label(d), Color: MuscleColors.Color(d), Key: (int)d)).ToList()
+                                                     : dPrimary.Select(m => (Label: Muscles.Label(m), Color: MuscleColors.Color(m), Key: (int)m)).ToList();
+                                var rowsS = Detailed ? dDetail.Secondary.Select(d => (Label: MuscleDetails.Label(d), Color: MuscleColors.Color(d), Key: (int)d)).ToList()
+                                                     : dSecondary.Select(m => (Label: Muscles.Label(m), Color: MuscleColors.Color(m), Key: (int)m)).ToList();
                                 <div class="exd-muscles">
                                     <div class="exd-mm">
-                                        <MuscleMap Primary="@dPrimary" Secondary="@dSecondary" Female="@_mmFemale" Picked="@_mmPicked" OnPick="PickDetailMuscle" />
+                                        <MuscleMap Primary="@dPrimary" Secondary="@dSecondary" Detailed="@Detailed" PrimaryDetail="@dDetail.Primary" SecondaryDetail="@dDetail.Secondary"
+                                                   Female="@Prefs.Female" Picked="@_mmPicked" OnPick="PickDetailMuscle" PickedDetail="@_mmPickedDetail" OnPickDetail="PickDetailPart" />
                                     </div>
                                     <div class="exd-mside">
                                         <div class="exd-mhead">
                                             <span>Pracujące mięśnie</span>
-                                            <MuscleSexToggle Female="@_mmFemale" FemaleChanged="v => _mmFemale = v" />
+                                            <MuscleSexToggle Female="@Prefs.Female" FemaleChanged="v => Prefs.Female = v" />
                                         </div>
-                                        @if (dPrimary.Count == 0 && dSecondary.Count == 0)
+                                        @if (Entitlements.Current.MuscleMapDetailed)
+                                        {
+                                            <MuscleViewToggle Detailed="@Detailed" DetailedChanged="SetDetailed" />
+                                        }
+                                        @if (rowsP.Count == 0 && rowsS.Count == 0)
                                         {
                                             <div class="small text-muted">Partie nie są jeszcze opisane.@(_detail.IsMine ? " Uzupełnij je w edycji ćwiczenia." : "")</div>
                                         }
-                                        @if (dPrimary.Count > 0)
+                                        @if (rowsP.Count > 0)
                                         {
                                             <div class="exd-mgroup">Główne</div>
                                         }
-                                        @foreach (var m in dPrimary)
+                                        @foreach (var r in rowsP)
                                         {
-                                            <button type="button" class="exd-mrow p @(_mmPicked == m ? "on" : "")" @onclick="() => PickDetailMuscle(m)"><i></i>@Muscles.Label(m)</button>
+                                            var row = r;
+                                            <button type="button" class="exd-mrow p @(IsPicked(row.Key) ? "on" : "")" style="--c:@row.Color" @onclick="() => PickRow(row.Key)"><i></i>@row.Label</button>
                                         }
-                                        @if (dSecondary.Count > 0)
+                                        @if (rowsS.Count > 0)
                                         {
                                             <div class="exd-mgroup">Pomocnicze</div>
                                         }
-                                        @foreach (var m in dSecondary)
+                                        @foreach (var r in rowsS)
                                         {
-                                            <button type="button" class="exd-mrow s @(_mmPicked == m ? "on" : "")" @onclick="() => PickDetailMuscle(m)"><i></i>@Muscles.Label(m)</button>
+                                            var row = r;
+                                            <button type="button" class="exd-mrow s @(IsPicked(row.Key) ? "on" : "")" style="--c:@row.Color" @onclick="() => PickRow(row.Key)"><i></i>@row.Label</button>
                                         }
                                     </div>
                                 </div>
@@ -547,31 +562,60 @@ else
                     <div class="exm-section">
                         <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
                             <span class="form-label fw-semibold mb-0">Partie mięśni</span>
-                            @if (MapOn) { <MuscleSexToggle Female="@_mmFemale" FemaleChanged="v => _mmFemale = v" /> }
+                            @if (MapOn)
+                            {
+                                <div class="d-flex gap-2 align-items-center">
+                                    @if (Entitlements.Current.MuscleMapDetailed) { <MuscleViewToggle Detailed="@Detailed" DetailedChanged="SetFormDetailed" /> }
+                                    <MuscleSexToggle Female="@Prefs.Female" FemaleChanged="v => Prefs.Female = v" />
+                                </div>
+                            }
                         </div>
                         <small class="exm-hint d-block mb-2">@(MapOn ? "Stuknij mięsień na postaci albo nazwę: raz — główna, drugi raz — pomocnicza, trzeci — odznacz." : "Kliknij raz — główna, drugi raz — wspomagająca, trzeci — odznacz.")</small>
                         <div class="@(MapOn ? "exm-mm-picker" : "")">
                         @if (MapOn)
                         {
                             <div class="exm-mm-fig">
-                                <MuscleMap Primary="@_form.PrimaryMuscles" Secondary="@_form.SecondaryMuscles" Female="@_mmFemale" OnPick="CycleMuscle" />
+                                <MuscleMap Primary="@_form.PrimaryMuscles" Secondary="@_form.SecondaryMuscles" Detailed="@Detailed"
+                                           PrimaryDetail="@_form.PrimaryDetail" SecondaryDetail="@_form.SecondaryDetail"
+                                           Female="@Prefs.Female" OnPick="CycleMuscle" OnPickDetail="CycleDetail" />
                             </div>
                         }
                         <div class="exm-chips @(MapOn ? "mm-colors" : "")">
+                            @if (MapOn && Detailed)
+                            {
+                                @foreach (var fam in MuscleColors.Families)
+                                {
+                                    var famDetails = Enum.GetValues<MuscleDetail>().Where(d => MuscleColors.Of(d) == fam.Family).ToList();
+                                    <span class="exm-fam" style="--c:@fam.Color">@fam.Label</span>
+                                    @foreach (var d in famDetails)
+                                    {
+                                        var detail = d;
+                                        var dstate = _form.PrimaryDetail.Contains(detail) ? "main" : _form.SecondaryDetail.Contains(detail) ? "help" : "";
+                                        <button type="button" class="exm-chip exm-muscle @dstate" style="--c:@MuscleColors.Color(detail)" @onclick="() => CycleDetail(detail)"
+                                                aria-label="@($"{MuscleDetails.Label(detail)}: {(dstate == "main" ? "główna" : dstate == "help" ? "pomocnicza" : "nie wybrano")}")">
+                                            @if (dstate == "main") { <i class="bi bi-circle-fill"></i> } else if (dstate == "help") { <i class="bi bi-circle-half"></i> }
+                                            @MuscleDetails.Label(detail)
+                                        </button>
+                                    }
+                                }
+                            }
+                            else
+                            {
                             @foreach (var m in Enum.GetValues<MuscleGroup>())
                             {
                                 var muscle = m;
                                 var state = _form.PrimaryMuscles.Contains(muscle) ? "main" : _form.SecondaryMuscles.Contains(muscle) ? "help" : "";
-                                <button type="button" class="exm-chip exm-muscle @state" @onclick="() => CycleMuscle(muscle)"
+                                <button type="button" class="exm-chip exm-muscle @state" style="--c:@MuscleColors.Color(muscle)" @onclick="() => CycleMuscle(muscle)"
                                         aria-label="@($"{Muscles.Label(muscle)}: {(state == "main" ? "główna" : state == "help" ? "wspomagająca" : "nie wybrano")}")">
                                     @if (state == "main") { <i class="bi bi-circle-fill"></i> } else if (state == "help") { <i class="bi bi-circle-half"></i> }
                                     @Muscles.Label(muscle)
                                 </button>
                             }
+                            }
                         </div>
                         </div>
                         <div class="exm-legend @(MapOn ? "mm-colors" : "")"><span><i class="bi bi-circle-fill"></i> główna</span><span><i class="bi bi-circle-half"></i> @(MapOn ? "pomocnicza" : "wspomagająca")</span>
-                            @if (MapOn && (_form.PrimaryMuscles.Count + _form.SecondaryMuscles.Count) > 0)
+                            @if (MapOn && (_form.PrimaryMuscles.Count + _form.SecondaryMuscles.Count + _form.PrimaryDetail.Count + _form.SecondaryDetail.Count) > 0)
                             {
                                 <button type="button" class="btn btn-link btn-sm p-0 ms-auto exm-clear" @onclick="ClearMuscles">Wyczyść</button>
                             }
@@ -689,8 +733,8 @@ else
     .exd-mrow { display:flex; align-items:center; gap:.5rem; width:100%; border:1px solid transparent; background:var(--bs-body-bg); color:inherit; border-radius:10px; padding:.4rem .6rem; font-size:.86rem; font-weight:600; text-align:left; transition:border-color .15s, transform .15s; }
     .exd-mrow:hover { transform:translateX(2px); }
     .exd-mrow i { width:.65rem; height:.65rem; border-radius:50%; flex:none; }
-    .exd-mrow.p i { background:#e11d48; }
-    .exd-mrow.s i { background:#fb923c; }
+    .exd-mrow.p i { background:var(--c, #e11d48); }
+    .exd-mrow.s i { background:color-mix(in srgb, var(--c, #fb923c) 45%, var(--bs-body-bg)); box-shadow:inset 0 0 0 2px var(--c, #fb923c); }
     .exd-mgroup { font-size:.66rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--bs-secondary-color); margin-top:.2rem; }
     .exercise-card .card-body .badge { max-width:100%; overflow:hidden; text-overflow:ellipsis; }
     .exd-mrow.on { border-color:#6366f1; }
@@ -894,7 +938,7 @@ else
         _ownSaved = false;
         _showDetail = _detail is not null;
     }
-    private void CloseDetail() { _showDetail = false; _detail = null; _mmPicked = null; }
+    private void CloseDetail() { _showDetail = false; _detail = null; _mmPicked = null; _mmPickedDetail = null; }
 
     private async Task ToggleFav(ExerciseListItemDto item)
     {
@@ -935,6 +979,8 @@ else
             DescriptionEn = _detail.DescriptionEn,
             PrimaryMuscles = Muscles.Parse(_detail.PrimaryMuscles).ToList(),
             SecondaryMuscles = Muscles.Parse(_detail.SecondaryMuscles).ToList(),
+            PrimaryDetail = MuscleDetails.Parse(_detail.PrimaryDetail).ToList(),
+            SecondaryDetail = MuscleDetails.Parse(_detail.SecondaryDetail).ToList(),
             Category = _detail.Category,
             Level = _detail.Level,
             Equipment = _detail.Equipment,
@@ -944,6 +990,7 @@ else
             Tracking = _detail.Tracking,
             Attribution = _detail.Attribution
         };
+        PrepareFormMuscles();
         _showEnFields = !string.IsNullOrWhiteSpace(_detail.DescriptionEn) || (!string.IsNullOrWhiteSpace(_detail.NameEn) && _detail.NameEn != _detail.NamePl);
         _editError = null;
         _showDetail = false;
@@ -962,15 +1009,74 @@ else
 
     // Mapa mięśni (włącznik w Portalu → Konfiguracja → Usługi → Ćwiczenia).
     private bool MapOn => Entitlements.Current.MuscleMap;
-    private bool _mmFemale;
+    /// <summary>Widok szczegółowy — gdy plan go ma i trener nie przełączył na ogólny.</summary>
+    private bool Detailed => Entitlements.Current.MuscleMapDetailed && (Prefs.Detailed ?? true);
     private MuscleGroup? _mmPicked;
+    private MuscleDetail? _mmPickedDetail;
 
     private void PickDetailMuscle(MuscleGroup m) => _mmPicked = _mmPicked == m ? null : m;
+    private void PickDetailPart(MuscleDetail d) => _mmPickedDetail = _mmPickedDetail == d ? null : d;
+    private bool IsPicked(int key) => Detailed ? (int?)_mmPickedDetail == key : (int?)_mmPicked == key;
+    private void PickRow(int key) { if (Detailed) PickDetailPart((MuscleDetail)key); else PickDetailMuscle((MuscleGroup)key); }
+
+    private void SetDetailed(bool detailed)
+    {
+        Prefs.Detailed = detailed;
+        _mmPicked = null;
+        _mmPickedDetail = null;
+    }
+
+    /// <summary>Zapisany wybór szczegółowy trenera (null — mapa wywnioskuje partie z ogólnych i nazwy).</summary>
+    private static (IReadOnlyList<MuscleDetail> P, IReadOnlyList<MuscleDetail> S)? StoredDetail(string? primary, string? secondary)
+    {
+        var p = MuscleDetails.Parse(primary);
+        var s = MuscleDetails.Parse(secondary);
+        return p.Count + s.Count == 0 ? null : (p, s);
+    }
+
+    /// <summary>Formularz w trybie mapy: szczegółowo — partie szczegółowe (zapisane albo wywnioskowane), ogólnie — same ogólne.</summary>
+    private void PrepareFormMuscles()
+    {
+        if (!MapOn) return;
+        if (Detailed)
+        {
+            if (_form.PrimaryDetail.Count + _form.SecondaryDetail.Count == 0 && _form.PrimaryMuscles.Count + _form.SecondaryMuscles.Count > 0)
+            {
+                var (p, s) = MuscleDetails.Infer(_form.PrimaryMuscles, _form.SecondaryMuscles, _form.NameEn);
+                _form.PrimaryDetail = p.ToList();
+                _form.SecondaryDetail = s.ToList();
+            }
+        }
+        else if (_form.PrimaryDetail.Count + _form.SecondaryDetail.Count > 0)
+        {
+            var (p, s) = MuscleDetails.ToGroups(_form.PrimaryDetail, _form.SecondaryDetail);
+            _form.PrimaryMuscles = p;
+            _form.SecondaryMuscles = s;
+            _form.PrimaryDetail = [];
+            _form.SecondaryDetail = [];
+        }
+    }
+
+    private void SetFormDetailed(bool detailed)
+    {
+        SetDetailed(detailed);
+        PrepareFormMuscles();
+    }
+
+    /// <summary>Jak przy partiach ogólnych: brak → główna → pomocnicza → brak.</summary>
+    private void CycleDetail(MuscleDetail d)
+    {
+        if (_form.PrimaryDetail.Remove(d)) { _form.SecondaryDetail.Add(d); return; }
+        if (_form.SecondaryDetail.Remove(d)) return;
+        _form.PrimaryDetail.Add(d);
+    }
 
     private void ClearMuscles()
     {
         _form.PrimaryMuscles.Clear();
         _form.SecondaryMuscles.Clear();
+        _form.PrimaryDetail.Clear();
+        _form.SecondaryDetail.Clear();
     }
 
     /// <summary>Jedno kliknięcie zmienia stan: brak → główna → wspomagająca → brak.</summary>

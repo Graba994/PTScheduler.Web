@@ -94,6 +94,9 @@ public class Entitlements
 
     /// <summary>Mapa mięśni przy ćwiczeniach — globalny włącznik z Portalu (starszy Portal jej nie wysyła: włączona).</summary>
     public bool MuscleMap { get; set; } = true;
+    /// <summary>Poziom mapy mięśni z planu: none / basic (ogólna) / detailed (szczegółowa).</summary>
+    public string MuscleMapLevel { get; set; } = "detailed";
+    public bool MuscleMapDetailed => MuscleMap && MuscleMapLevel == "detailed";
 
     /// <summary>Program testerów (3 miesiące za cotygodniową opinię) — null, gdy studio nie jest testerem.</summary>
     public TesterInfo? Tester { get; set; }

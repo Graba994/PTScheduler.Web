@@ -71,6 +71,58 @@ public static partial class MuscleMapGeometry
         new(MuscleGroup.Calves, true, Part.Torso, "M110,332 C119,325 131,326 134,340 C136,356 132,370 126,382 C120,386 114,384 112,378 C108,362 106,346 110,332 Z"),
     ];
 
+    // ── Partie szczegółowe (widok „Szczegółowo”) ───────────────────────────
+    public sealed record DetailRegion(MuscleDetail Detail, bool Back, Part Part, string Half, bool? Female = null);
+
+    public static readonly DetailRegion[] DetailRegions =
+    [
+        // Przód
+        new(MuscleDetail.Neck, false, Part.Torso, "M104,62 C108,66 112,72 112,78 L108,80 C106,74 104,68 104,62 Z"),
+        new(MuscleDetail.UpperTraps, false, Part.Torso, "M111,74 C124,79 138,83 148,89 C140,90 132,92 126,94 C120,88 115,83 111,80 Z"),
+        new(MuscleDetail.FrontDelts, false, Part.Torso, "M126,94 C134,92 142,90 148,90 C151,102 151,116 149,128 C147,132 145,133 143,131 C143,118 139,106 132,99 C130,97 128,95 126,94 Z"),
+        new(MuscleDetail.SideDelts, false, Part.Torso, "M149,89 C157,93 163,104 163,118 C164,128 160,134 154,135 C152,124 152,104 149,89 Z"),
+        new(MuscleDetail.UpperChest, false, Part.Torso, "M102,98 C114,94 128,94 140,103 C144,108 146,113 146,118 C132,116 116,116 102,118 Z", Female: false),
+        new(MuscleDetail.LowerChest, false, Part.Torso, "M102,119 C116,117 132,117 146,119 C148,124 148,128 147,131 C140,140 126,145 112,144 C106,143 102,141 102,138 Z", Female: false),
+        new(MuscleDetail.UpperChest, false, Part.Torso, "M102,100 C114,96 128,96 140,104 C145,110 148,116 148,122 C132,120 116,120 102,122 Z", Female: true),
+        new(MuscleDetail.LowerChest, false, Part.Torso, "M102,123 C116,121 132,121 148,123 C149,128 148,132 146,136 C140,148 126,152 114,149 C107,147 103,143 102,140 Z", Female: true),
+        new(MuscleDetail.Biceps, false, Part.Arm, "M147,133 C154,135 160,146 163,163 C165,175 163,186 158,188 C154,184 151,172 149,160 C147,150 146,140 147,133 Z"),
+        new(MuscleDetail.Forearms, false, Part.Arm, "M156,196 C163,198 169,212 172,232 C174,246 174,258 170,262 C166,256 162,240 159,224 C157,214 155,204 156,196 Z"),
+        new(MuscleDetail.Abs, false, Part.Torso, "M102,148 L116,148 C118,170 118,194 115,222 C110,228 105,230 102,231 Z"),
+        new(MuscleDetail.Obliques, false, Part.Torso, "M119,149 C128,150 135,158 136,172 C135,188 131,204 122,216 C121,194 121,168 119,149 Z"),
+        new(MuscleDetail.GluteMedius, false, Part.Torso, "M135,212 C140,218 142,226 141,238 C139,248 136,256 133,262 C131,246 131,228 135,212 Z"),
+        new(MuscleDetail.Quads, false, Part.Torso, "M125,233 C128,231 131,229 133,228 C140,252 139,290 133,318 C131,320 129,319 128,316 C126,292 125,262 125,233 Z"),
+        new(MuscleDetail.Quads, false, Part.Torso, "M109,243 C114,238 120,235 124,233 C124,262 125,292 127,316 C123,318 119,314 117,304 C113,284 110,262 109,243 Z"),
+        new(MuscleDetail.Quads, false, Part.Torso, "M109,284 C112,290 114,298 116,306 C118,314 118,319 116,321 C112,320 110,316 109,310 C108,300 108,292 109,284 Z"),
+        new(MuscleDetail.Adductors, false, Part.Torso, "M101,238 L106,240 C105,262 106,284 109,304 C104,292 101,268 101,238 Z"),
+        new(MuscleDetail.Calves, false, Part.Torso, "M110,336 C114,333 117,340 117,356 C116,370 114,380 112,384 C108,370 107,350 110,336 Z"),
+        new(MuscleDetail.Calves, false, Part.Torso, "M130,330 C134,336 134,352 132,368 C130,376 128,380 126,382 C126,364 126,344 130,330 Z"),
+        new(MuscleDetail.Tibialis, false, Part.Torso, "M120,338 C123,336 126,340 126,350 C126,364 124,376 122,388 C119,380 118,364 118,350 C118,344 118,340 120,338 Z"),
+
+        // Tył
+        new(MuscleDetail.Neck, true, Part.Torso, "M101,60 L109,60 L110,72 L101,74 Z"),
+        new(MuscleDetail.UpperTraps, true, Part.Torso, "M101,66 L110,70 C122,78 136,83 148,89 C138,92 128,96 120,100 C112,103 106,105 101,106 Z"),
+        new(MuscleDetail.MidTraps, true, Part.Torso, "M101,108 C107,106 114,104 121,102 C128,99 134,96 139,95 C130,102 124,108 120,116 C112,132 106,150 101,166 Z"),
+        new(MuscleDetail.RearDelts, true, Part.Torso, "M138,101 C142,96 145,92 148,89 C151,99 152,112 152,124 C152,130 150,133 148,133 C147,120 144,110 138,101 Z"),
+        new(MuscleDetail.SideDelts, true, Part.Torso, "M149,89 C157,93 163,104 163,118 C164,128 160,134 154,134 C153,120 153,104 149,89 Z"),
+        new(MuscleDetail.Scapular, true, Part.Torso, "M123,117 C130,108 139,104 144,109 C147,119 145,129 140,137 C134,139 128,137 122,133 Z"),
+        new(MuscleDetail.Rhomboids, true, Part.Torso, "M103,112 L114,113 C114,125 112,137 108,147 L102,151 Z"),
+        new(MuscleDetail.Lats, true, Part.Torso, "M109,152 C119,143 132,140 145,134 C147,154 141,178 131,197 C122,203 112,201 104,195 C104,179 105,163 109,152 Z"),
+        new(MuscleDetail.LowerBack, true, Part.Torso, "M101,172 L110,168 C112,186 112,204 110,220 L101,222 Z"),
+        new(MuscleDetail.Triceps, true, Part.Arm, "M147,133 C152,134 156,140 159,150 C158,166 156,178 155,186 C152,180 150,170 149,160 C147,150 146,140 147,133 Z"),
+        new(MuscleDetail.Triceps, true, Part.Arm, "M160,152 C162,160 164,170 164,178 C163,185 161,188 158,188 C158,176 159,164 160,152 Z"),
+        new(MuscleDetail.Forearms, true, Part.Arm, "M156,196 C163,198 169,212 172,232 C174,246 174,258 170,262 C166,256 162,240 159,224 C157,214 155,204 156,196 Z"),
+        new(MuscleDetail.GluteMedius, true, Part.Torso, "M119,214 C129,207 139,210 141,221 C136,224 130,223 125,222 C121,220 119,217 119,214 Z"),
+        new(MuscleDetail.Glutes, true, Part.Torso, "M101,226 C113,220 131,219 139,229 C143,244 140,259 129,265 C117,268 107,264 101,258 Z"),
+        new(MuscleDetail.Hamstrings, true, Part.Torso, "M122,267 C129,266 134,267 138,272 C140,292 137,308 132,320 C128,323 125,322 123,320 C122,300 122,284 122,267 Z"),
+        new(MuscleDetail.Hamstrings, true, Part.Torso, "M106,270 C111,268 116,267 121,267 C121,284 121,300 122,320 C118,325 112,322 110,318 C106,300 104,286 106,270 Z"),
+        new(MuscleDetail.Adductors, true, Part.Torso, "M101,264 L105,268 C105,284 106,298 109,312 C104,301 101,283 101,264 Z"),
+        new(MuscleDetail.Calves, true, Part.Torso, "M110,332 C114,328 118,327 120,327 C120,346 120,366 119,384 C116,386 113,382 112,378 C108,362 106,346 110,332 Z"),
+        new(MuscleDetail.Calves, true, Part.Torso, "M121,327 C127,326 132,330 134,340 C136,356 132,370 126,382 C124,384 122,385 120,384 C121,366 121,346 121,327 Z"),
+    ];
+
+    public static IEnumerable<DetailRegion> ForDetail(bool back, bool female) =>
+        DetailRegions.Where(r => r.Back == back && (r.Female is null || r.Female == female));
+
     /// <summary>Linie podziału (bez interakcji): kratka brzucha, kolana, kręgosłup.</summary>
     public static readonly (bool Back, string Half)[] Details =
     [

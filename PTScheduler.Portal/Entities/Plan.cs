@@ -75,6 +75,8 @@ public class Plan
     // ── Wideo ─────────────────────────────────
     // none / youtube / bunny
     public string VideoProvider { get; set; } = "youtube";
+    /// <summary>Mapa mięśni przy ćwiczeniach: none / basic (ogólna, 17 partii) / detailed (szczegółowa — przód/bok/tył barków itd.).</summary>
+    public string MuscleMapLevel { get; set; } = "detailed";
 
     // ── Integracje rozmowy ─────────────────────────────────
     public bool IntegrationGoogleMeet { get; set; }

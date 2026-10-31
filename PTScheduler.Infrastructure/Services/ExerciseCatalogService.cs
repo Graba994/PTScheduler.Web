@@ -83,7 +83,7 @@ public class ExerciseCatalogService(
         var rows = await q
             .Select(e => new
             {
-                e.Id, e.NamePl, e.NameEn, e.PrimaryMuscles, e.SecondaryMuscles, e.Category, e.Level,
+                e.Id, e.NamePl, e.NameEn, e.PrimaryMuscles, e.SecondaryMuscles, e.PrimaryDetail, e.SecondaryDetail, e.Category, e.Level,
                 e.Equipment, e.ImageUrls, e.OwnerTrainerUserId, e.VideoType, e.Tracking
             })
             .ToListAsync();
@@ -95,6 +95,8 @@ public class ExerciseCatalogService(
             NameEn = e.NameEn,
             PrimaryMuscles = e.PrimaryMuscles,
             SecondaryMuscles = e.SecondaryMuscles,
+            PrimaryDetail = e.PrimaryDetail,
+            SecondaryDetail = e.SecondaryDetail,
             Category = e.Category,
             Level = e.Level,
             Equipment = e.Equipment,
@@ -136,6 +138,8 @@ public class ExerciseCatalogService(
             TrainerDescription = pref?.CustomDescription,
             PrimaryMuscles = e.PrimaryMuscles,
             SecondaryMuscles = e.SecondaryMuscles,
+            PrimaryDetail = e.PrimaryDetail,
+            SecondaryDetail = e.SecondaryDetail,
             Category = e.Category,
             Level = e.Level,
             Equipment = e.Equipment,
@@ -259,8 +263,21 @@ public class ExerciseCatalogService(
         e.NameEn = string.IsNullOrWhiteSpace(dto.NameEn) ? dto.NamePl.Trim() : dto.NameEn.Trim();
         e.DescriptionPl = dto.DescriptionPl;
         e.DescriptionEn = dto.DescriptionEn;
-        e.PrimaryMuscles = Muscles.ToCsv(dto.PrimaryMuscles);
-        e.SecondaryMuscles = Muscles.ToCsv(dto.SecondaryMuscles);
+        if (dto.PrimaryDetail.Count + dto.SecondaryDetail.Count > 0)
+        {
+            // Wybór szczegółowy: partie ogólne liczymy z niego (objętość, filtry, Społeczność).
+            var (primary, secondary) = MuscleDetails.ToGroups(dto.PrimaryDetail, dto.SecondaryDetail);
+            e.PrimaryMuscles = Muscles.ToCsv(primary);
+            e.SecondaryMuscles = Muscles.ToCsv(secondary);
+            e.PrimaryDetail = MuscleDetails.ToCsv(dto.PrimaryDetail);
+            e.SecondaryDetail = MuscleDetails.ToCsv(dto.SecondaryDetail.Where(d => !dto.PrimaryDetail.Contains(d)));
+        }
+        else
+        {
+            e.PrimaryMuscles = Muscles.ToCsv(dto.PrimaryMuscles);
+            e.SecondaryMuscles = Muscles.ToCsv(dto.SecondaryMuscles);
+            e.PrimaryDetail = e.SecondaryDetail = null;
+        }
         e.Category = dto.Category;
         e.Level = dto.Level;
         e.Equipment = string.IsNullOrWhiteSpace(dto.Equipment) ? null : dto.Equipment.Trim();

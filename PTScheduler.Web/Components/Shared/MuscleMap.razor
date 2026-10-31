@@ -3,9 +3,10 @@
 @using PTScheduler.Web.Services
 @using G = PTScheduler.Web.Services.MuscleMapGeometry
 
-@* Postać z partiami mięśni (przód i tył): główne partie ćwiczenia mocno, pomocnicze jaśniej.
-   Najechanie pokazuje nazwę partii, kliknięcie (gdy podano OnPick) wybiera partię. Rysunek: MuscleMapGeometry. *@
-<svg class="mm @(Compact ? "mm-compact" : "") @(OnPick.HasDelegate ? "mm-pickable" : "")" viewBox="@ViewBox" role="img"
+@* Postać z partiami mięśni (przód i tył). Każda rodzina ma swój kolor (MuscleColors): partia główna — pełny,
+   pomocnicza — jaśniejszy. Widok ogólny: 17 partii z katalogu; szczegółowy: m.in. przód/bok/tył barków, skośne brzucha.
+   Najechanie pokazuje nazwę, kliknięcie (OnPick / OnPickDetail) wybiera partię. Rysunek: MuscleMapGeometry. *@
+<svg class="mm @(Compact ? "mm-compact" : "") @(Pickable ? "mm-pickable" : "")" viewBox="@ViewBox" role="img"
      aria-label="@AriaLabel" xmlns="http://www.w3.org/2000/svg">
     @foreach (var (back, dx) in Views)
     {
@@ -15,16 +16,15 @@
             <path class="mm-body" d="@G.Both(G.TorsoHalf, G.Part.Torso, Female, dx)" />
             <path class="mm-body" d="@G.Both(G.HeadHalf, G.Part.Head, Female, dx)" />
             <path class="mm-hair" d="@G.Both(back ? hair.Back : hair.Front, G.Part.Head, Female, dx)" />
-            @foreach (var group in G.For(back, Female).Where(r => !OnlyActive || Primary.Contains(r.Muscle) || Secondary.Contains(r.Muscle)).GroupBy(r => r.Muscle))
+            @foreach (var e in Entries(back))
             {
-                var m = group.Key;
-                var state = State(m);
-                <g class="mm-m @state @(Picked == m ? "is-picked" : "")" @key="@($"{(back ? "b" : "f")}-{m}")"
-                   @onclick="() => PickAsync(m)">
-                    <title>@($"{Muscles.Label(m)}{(state == "is-primary" ? " — główna" : state == "is-secondary" ? " — pomocnicza" : "")}")</title>
-                    @foreach (var r in group)
+                var entry = e;
+                <g class="mm-m @entry.State @(entry.Picked ? "is-picked" : "")" style="--c:@entry.Color" @key="@($"{(back ? "b" : "f")}-{entry.Key}")"
+                   @onclick="entry.Pick">
+                    <title>@($"{entry.Label}{(entry.State == "is-primary" ? " — główna" : entry.State == "is-secondary" ? " — pomocnicza" : "")}")</title>
+                    @foreach (var half in entry.Shapes)
                     {
-                        <path d="@G.Both(r.Half, r.Part, Female, dx)" />
+                        <path d="@G.Both(half.Half, half.Part, Female, dx)" />
                     }
                 </g>
             }
@@ -43,6 +43,12 @@
 @code {
     [Parameter] public IReadOnlyCollection<MuscleGroup> Primary { get; set; } = [];
     [Parameter] public IReadOnlyCollection<MuscleGroup> Secondary { get; set; } = [];
+    /// <summary>Widok szczegółowy (aktony barków, skośne brzucha…). Bez podanych partii szczegółowych — wnioskowane z ogólnych.</summary>
+    [Parameter] public bool Detailed { get; set; }
+    [Parameter] public IReadOnlyCollection<MuscleDetail>? PrimaryDetail { get; set; }
+    [Parameter] public IReadOnlyCollection<MuscleDetail>? SecondaryDetail { get; set; }
+    /// <summary>Nazwa EN ćwiczenia — pomaga rozpoznać np. tył barków przy „Rear Delt Fly”.</summary>
+    [Parameter] public string? NameEn { get; set; }
     [Parameter] public bool Female { get; set; }
     /// <summary>Mała wersja na kartę ćwiczenia: bez podpisów.</summary>
     [Parameter] public bool Compact { get; set; }
@@ -50,15 +56,60 @@
     [Parameter] public bool OnlyActive { get; set; }
     [Parameter] public MuscleGroup? Picked { get; set; }
     [Parameter] public EventCallback<MuscleGroup> OnPick { get; set; }
+    [Parameter] public MuscleDetail? PickedDetail { get; set; }
+    [Parameter] public EventCallback<MuscleDetail> OnPickDetail { get; set; }
+
+    private sealed record Shape(string Half, G.Part Part);
+    private sealed record Entry(string Key, string Label, string Color, string State, bool Picked, IReadOnlyList<Shape> Shapes, EventCallback Pick);
+
+    private IReadOnlyCollection<MuscleDetail> _p = [], _s = [];
+
+    protected override void OnParametersSet()
+    {
+        if (!Detailed) return;
+        if (PrimaryDetail is not null || SecondaryDetail is not null)
+        {
+            _p = PrimaryDetail ?? [];
+            _s = SecondaryDetail ?? [];
+        }
+        else
+            (_p, _s) = MuscleDetails.Infer(Primary, Secondary, NameEn);
+    }
+
+    private bool Pickable => Detailed ? OnPickDetail.HasDelegate : OnPick.HasDelegate;
+
+    private IEnumerable<Entry> Entries(bool back)
+    {
+        if (Detailed)
+            return G.ForDetail(back, Female)
+                .Where(r => !OnlyActive || _p.Contains(r.Detail) || _s.Contains(r.Detail))
+                .GroupBy(r => r.Detail)
+                .Select(g => new Entry(g.Key.ToString(), MuscleDetails.Label(g.Key), MuscleColors.Color(g.Key),
+                    _p.Contains(g.Key) ? "is-primary" : _s.Contains(g.Key) ? "is-secondary" : "", PickedDetail == g.Key,
+                    g.Select(r => new Shape(r.Half, r.Part)).ToList(),
+                    OnPickDetail.HasDelegate ? EventCallback.Factory.Create(this, () => OnPickDetail.InvokeAsync(g.Key)) : default));
+        return G.For(back, Female)
+            .Where(r => !OnlyActive || Primary.Contains(r.Muscle) || Secondary.Contains(r.Muscle))
+            .GroupBy(r => r.Muscle)
+            .Select(g => new Entry(g.Key.ToString(), Muscles.Label(g.Key), MuscleColors.Color(g.Key),
+                Primary.Contains(g.Key) ? "is-primary" : Secondary.Contains(g.Key) ? "is-secondary" : "", Picked == g.Key,
+                g.Select(r => new Shape(r.Half, r.Part)).ToList(),
+                OnPick.HasDelegate ? EventCallback.Factory.Create(this, () => OnPick.InvokeAsync(g.Key)) : default));
+    }
 
     private IEnumerable<(bool Back, double Dx)> Views => [(false, 0), (true, G.Width + G.Gap)];
 
     private string ViewBox => FormattableString.Invariant($"0 6 {G.Width * 2 + G.Gap} {G.Height - 2}");
 
-    private string AriaLabel => Primary.Count == 0 ? "Mapa mięśni"
-        : $"Główne: {string.Join(", ", Primary.Select(Muscles.Label))}" + (Secondary.Count > 0 ? $"; pomocnicze: {string.Join(", ", Secondary.Select(Muscles.Label))}" : "");
-
-    private string State(MuscleGroup m) => Primary.Contains(m) ? "is-primary" : Secondary.Contains(m) ? "is-secondary" : "";
-
-    private Task PickAsync(MuscleGroup m) => OnPick.HasDelegate ? OnPick.InvokeAsync(m) : Task.CompletedTask;
+    private string AriaLabel
+    {
+        get
+        {
+            var p = Detailed ? _p.Select(MuscleDetails.Label) : Primary.Select(Muscles.Label);
+            var s = Detailed ? _s.Select(MuscleDetails.Label) : Secondary.Select(Muscles.Label);
+            var main = string.Join(", ", p);
+            var help = string.Join(", ", s);
+            return main.Length == 0 ? "Mapa mięśni" : $"Główne: {main}" + (help.Length > 0 ? $"; pomocnicze: {help}" : "");
+        }
+    }
 }

@@ -32,6 +32,13 @@ public class Exercise
     public string PrimaryMuscles { get; set; } = string.Empty;
     public string SecondaryMuscles { get; set; } = string.Empty;
 
+    /// <summary>
+    /// Szczegółowe partie (CSV kluczy <see cref="PTScheduler.Domain.Rules.MuscleDetails"/>, np. „front delts”) — wybór trenera
+    /// na mapie mięśni. Puste = wnioskujemy z partii ogólnych i nazwy (ćwiczenia z katalogu).
+    /// </summary>
+    public string? PrimaryDetail { get; set; }
+    public string? SecondaryDetail { get; set; }
+
     public ExerciseCategory Category { get; set; } = ExerciseCategory.Strength;
     public ExerciseLevel Level { get; set; } = ExerciseLevel.Beginner;
 

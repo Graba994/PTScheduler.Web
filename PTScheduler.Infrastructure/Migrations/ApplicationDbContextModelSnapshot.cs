@@ -1225,8 +1225,14 @@ namespace PTScheduler.Infrastructure.Migrations
                     b.Property<string>("OwnerTrainerUserId")
                         .HasColumnType("text");
 
+                    b.Property<string>("PrimaryDetail")
+                        .HasColumnType("text");
+
                     b.Property<string>("PrimaryMuscles")
                         .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("SecondaryDetail")
                         .HasColumnType("text");
 
                     b.Property<string>("SecondaryMuscles")

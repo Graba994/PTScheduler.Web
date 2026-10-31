@@ -1339,6 +1339,10 @@ namespace PTScheduler.Portal.Data.Migrations
                     b.Property<decimal>("MonthlyPrice")
                         .HasColumnType("numeric");
 
+                    b.Property<string>("MuscleMapLevel")
+                        .IsRequired()
+                        .HasColumnType("text");
+
                     b.Property<string>("Name")
                         .IsRequired()
                         .HasColumnType("text");
@@ -1448,6 +1452,7 @@ namespace PTScheduler.Portal.Data.Migrations
                             MaxVideoBandwidthGBPerMonth = 0,
                             MaxVideoStorageGB = 0,
                             MonthlyPrice = 0m,
+                            MuscleMapLevel = "basic",
                             Name = "Start",
                             PaymentsEnabled = false,
                             PrioritySupport = false,
@@ -1505,6 +1510,7 @@ namespace PTScheduler.Portal.Data.Migrations
                             MaxVideoBandwidthGBPerMonth = 0,
                             MaxVideoStorageGB = 5,
                             MonthlyPrice = 59m,
+                            MuscleMapLevel = "basic",
                             Name = "Solo",
                             PaymentsEnabled = true,
                             PrioritySupport = false,
@@ -1563,6 +1569,7 @@ namespace PTScheduler.Portal.Data.Migrations
                             MaxVideoBandwidthGBPerMonth = 100,
                             MaxVideoStorageGB = 20,
                             MonthlyPrice = 119m,
+                            MuscleMapLevel = "detailed",
                             Name = "Pro",
                             PaymentsEnabled = true,
                             PrioritySupport = false,
@@ -1621,6 +1628,7 @@ namespace PTScheduler.Portal.Data.Migrations
                             MaxVideoBandwidthGBPerMonth = 1000,
                             MaxVideoStorageGB = 200,
                             MonthlyPrice = 249m,
+                            MuscleMapLevel = "detailed",
                             Name = "Business",
                             PaymentsEnabled = true,
                             PrioritySupport = true,

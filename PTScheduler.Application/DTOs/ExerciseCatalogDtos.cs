@@ -31,6 +31,8 @@ public sealed class ExerciseListItemDto
     public string NameEn { get; set; } = string.Empty;
     public string PrimaryMuscles { get; set; } = string.Empty;
     public string SecondaryMuscles { get; set; } = string.Empty;
+    public string? PrimaryDetail { get; set; }
+    public string? SecondaryDetail { get; set; }
     public ExerciseCategory Category { get; set; }
     public ExerciseLevel Level { get; set; }
     public string? Equipment { get; set; }
@@ -54,6 +56,8 @@ public sealed class ExerciseDetailDto
     public string? TrainerDescription { get; set; }
     public string PrimaryMuscles { get; set; } = string.Empty;
     public string SecondaryMuscles { get; set; } = string.Empty;
+    public string? PrimaryDetail { get; set; }
+    public string? SecondaryDetail { get; set; }
     public ExerciseCategory Category { get; set; }
     public ExerciseLevel Level { get; set; }
     public string? Equipment { get; set; }
@@ -81,6 +85,9 @@ public sealed class SaveExerciseDto
     public string? DescriptionEn { get; set; }
     public List<MuscleGroup> PrimaryMuscles { get; set; } = [];
     public List<MuscleGroup> SecondaryMuscles { get; set; } = [];
+    /// <summary>Szczegółowy wybór z mapy mięśni (gdy pusty — zostają same partie ogólne).</summary>
+    public List<MuscleDetail> PrimaryDetail { get; set; } = [];
+    public List<MuscleDetail> SecondaryDetail { get; set; } = [];
     public ExerciseCategory Category { get; set; } = ExerciseCategory.Strength;
     public ExerciseLevel Level { get; set; } = ExerciseLevel.Beginner;
     public string? Equipment { get; set; }
