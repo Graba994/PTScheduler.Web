@@ -30,6 +30,7 @@ public sealed class ExerciseListItemDto
     public string NamePl { get; set; } = string.Empty;
     public string NameEn { get; set; } = string.Empty;
     public string PrimaryMuscles { get; set; } = string.Empty;
+    public string SecondaryMuscles { get; set; } = string.Empty;
     public ExerciseCategory Category { get; set; }
     public ExerciseLevel Level { get; set; }
     public string? Equipment { get; set; }

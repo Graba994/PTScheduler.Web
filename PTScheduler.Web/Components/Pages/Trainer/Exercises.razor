@@ -199,6 +199,12 @@ else
                         {
                             <span class="badge bg-primary badge-mine">@(_sharedIds.Contains(e.Id) ? "moje · w Społeczności" : "moje")</span>
                         }
+                        @if (MapOn && Muscles.Parse(e.PrimaryMuscles) is { Count: > 0 } cardPrimary)
+                        {
+                            <span class="exercise-mm" aria-hidden="true">
+                                <MuscleMap Primary="@cardPrimary" Secondary="@Muscles.Parse(e.SecondaryMuscles)" Female="@_mmFemale" Compact="true" OnlyActive="true" />
+                            </span>
+                        }
                     </div>
                     <div class="card-body p-2">
                         <div class="fw-semibold small text-truncate" title="@e.NamePl">@e.NamePl</div>
@@ -287,10 +293,48 @@ else
                                 <span class="badge bg-info-subtle text-info-emphasis"><i class="bi bi-rulers me-1"></i>@ExerciseTrackingRules.Label(_detail.Tracking)</span>
                                 @if (!string.IsNullOrWhiteSpace(_detail.Equipment))
                                 {
-                                    <span class="badge bg-secondary">@_detail.Equipment</span>
+                                    <span class="badge bg-secondary">@ExerciseLabels.Equipment(_detail.Equipment)</span>
                                 }
                             </div>
 
+                            @if (MapOn)
+                            {
+                                var dPrimary = Muscles.Parse(_detail.PrimaryMuscles);
+                                var dSecondary = Muscles.Parse(_detail.SecondaryMuscles);
+                                <div class="exd-muscles">
+                                    <div class="exd-mm">
+                                        <MuscleMap Primary="@dPrimary" Secondary="@dSecondary" Female="@_mmFemale" Picked="@_mmPicked" OnPick="PickDetailMuscle" />
+                                    </div>
+                                    <div class="exd-mside">
+                                        <div class="exd-mhead">
+                                            <span>Pracujące mięśnie</span>
+                                            <MuscleSexToggle Female="@_mmFemale" FemaleChanged="v => _mmFemale = v" />
+                                        </div>
+                                        @if (dPrimary.Count == 0 && dSecondary.Count == 0)
+                                        {
+                                            <div class="small text-muted">Partie nie są jeszcze opisane.@(_detail.IsMine ? " Uzupełnij je w edycji ćwiczenia." : "")</div>
+                                        }
+                                        @if (dPrimary.Count > 0)
+                                        {
+                                            <div class="exd-mgroup">Główne</div>
+                                        }
+                                        @foreach (var m in dPrimary)
+                                        {
+                                            <button type="button" class="exd-mrow p @(_mmPicked == m ? "on" : "")" @onclick="() => PickDetailMuscle(m)"><i></i>@Muscles.Label(m)</button>
+                                        }
+                                        @if (dSecondary.Count > 0)
+                                        {
+                                            <div class="exd-mgroup">Pomocnicze</div>
+                                        }
+                                        @foreach (var m in dSecondary)
+                                        {
+                                            <button type="button" class="exd-mrow s @(_mmPicked == m ? "on" : "")" @onclick="() => PickDetailMuscle(m)"><i></i>@Muscles.Label(m)</button>
+                                        }
+                                    </div>
+                                </div>
+                            }
+                            else
+                            {
                             <div class="small text-muted mb-1">Partie główne</div>
                             <div class="d-flex flex-wrap gap-1 mb-2">
                                 @foreach (var m in Muscles.Parse(_detail.PrimaryMuscles))
@@ -312,6 +356,8 @@ else
                                         <span class="badge bg-light text-dark border">@Muscles.Label(m)</span>
                                     }
                                 </div>
+                            }
+
                             }
 
                             <div class="ex-own mt-3">
@@ -499,9 +545,19 @@ else
                     </div>
 
                     <div class="exm-section">
-                        <span class="form-label fw-semibold d-block">Partie mięśni</span>
-                        <small class="exm-hint d-block mb-2">Kliknij raz — główna, drugi raz — wspomagająca, trzeci — odznacz.</small>
-                        <div class="exm-chips">
+                        <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap">
+                            <span class="form-label fw-semibold mb-0">Partie mięśni</span>
+                            @if (MapOn) { <MuscleSexToggle Female="@_mmFemale" FemaleChanged="v => _mmFemale = v" /> }
+                        </div>
+                        <small class="exm-hint d-block mb-2">@(MapOn ? "Stuknij mięsień na postaci albo nazwę: raz — główna, drugi raz — pomocnicza, trzeci — odznacz." : "Kliknij raz — główna, drugi raz — wspomagająca, trzeci — odznacz.")</small>
+                        <div class="@(MapOn ? "exm-mm-picker" : "")">
+                        @if (MapOn)
+                        {
+                            <div class="exm-mm-fig">
+                                <MuscleMap Primary="@_form.PrimaryMuscles" Secondary="@_form.SecondaryMuscles" Female="@_mmFemale" OnPick="CycleMuscle" />
+                            </div>
+                        }
+                        <div class="exm-chips @(MapOn ? "mm-colors" : "")">
                             @foreach (var m in Enum.GetValues<MuscleGroup>())
                             {
                                 var muscle = m;
@@ -513,7 +569,13 @@ else
                                 </button>
                             }
                         </div>
-                        <div class="exm-legend"><span><i class="bi bi-circle-fill"></i> główna</span><span><i class="bi bi-circle-half"></i> wspomagająca</span></div>
+                        </div>
+                        <div class="exm-legend @(MapOn ? "mm-colors" : "")"><span><i class="bi bi-circle-fill"></i> główna</span><span><i class="bi bi-circle-half"></i> @(MapOn ? "pomocnicza" : "wspomagająca")</span>
+                            @if (MapOn && (_form.PrimaryMuscles.Count + _form.SecondaryMuscles.Count) > 0)
+                            {
+                                <button type="button" class="btn btn-link btn-sm p-0 ms-auto exm-clear" @onclick="ClearMuscles">Wyczyść</button>
+                            }
+                        </div>
                     </div>
 
                     <div class="exm-section">
@@ -617,6 +679,22 @@ else
     .btn-fav.on { color:#f5b301; }
     .badge-video { position:absolute; bottom:.35rem; right:.4rem; color:#fff; font-size:1.25rem; text-shadow:0 0 4px rgba(0,0,0,.6); }
     .badge-mine { position:absolute; top:.35rem; left:.35rem; font-size:.6rem; }
+    .exercise-mm { position:absolute; left:.35rem; bottom:.35rem; width:58px; padding:3px 4px 1px; border-radius:10px; background:rgba(255,255,255,.9); box-shadow:0 2px 8px rgba(15,23,42,.15); backdrop-filter:blur(4px); pointer-events:none; }
+    [data-bs-theme="dark"] .exercise-mm { background:rgba(15,23,42,.82); }
+    .exd-muscles { display:grid; grid-template-columns:minmax(130px, 180px) 1fr; gap:.9rem; align-items:center; padding:.75rem; margin-bottom:.75rem; border-radius:16px; background:var(--bs-tertiary-bg); }
+    .exd-mm { min-width:0; }
+    .exd-mside { display:flex; flex-direction:column; gap:.35rem; min-width:0; }
+    .exd-mhead { display:flex; justify-content:space-between; align-items:center; gap:.5rem; font-weight:700; font-size:.85rem; margin-bottom:.1rem; white-space:nowrap; }
+    .exd-mrow { line-height:1.25; }
+    .exd-mrow { display:flex; align-items:center; gap:.5rem; width:100%; border:1px solid transparent; background:var(--bs-body-bg); color:inherit; border-radius:10px; padding:.4rem .6rem; font-size:.86rem; font-weight:600; text-align:left; transition:border-color .15s, transform .15s; }
+    .exd-mrow:hover { transform:translateX(2px); }
+    .exd-mrow i { width:.65rem; height:.65rem; border-radius:50%; flex:none; }
+    .exd-mrow.p i { background:#e11d48; }
+    .exd-mrow.s i { background:#fb923c; }
+    .exd-mgroup { font-size:.66rem; font-weight:800; letter-spacing:.06em; text-transform:uppercase; color:var(--bs-secondary-color); margin-top:.2rem; }
+    .exercise-card .card-body .badge { max-width:100%; overflow:hidden; text-overflow:ellipsis; }
+    .exd-mrow.on { border-color:#6366f1; }
+    @@media (max-width: 575.98px) { .exd-muscles { grid-template-columns:1fr; } .exd-mm { max-width:260px; margin:0 auto; width:100%; } }
     .muscle-grid { display:grid; grid-template-columns:1fr 1fr; gap:.15rem .5rem; max-height:180px; overflow:auto; border:1px solid var(--bs-border-color); border-radius:.375rem; padding:.4rem .5rem; }
     .muscle-chk { display:flex; align-items:center; gap:.35rem; font-size:.8rem; margin:0; }
     .muscle-chk input { margin:0; }
@@ -816,7 +894,7 @@ else
         _ownSaved = false;
         _showDetail = _detail is not null;
     }
-    private void CloseDetail() { _showDetail = false; _detail = null; }
+    private void CloseDetail() { _showDetail = false; _detail = null; _mmPicked = null; }
 
     private async Task ToggleFav(ExerciseListItemDto item)
     {
@@ -880,6 +958,19 @@ else
     {
         OpenEditFromDetail();
         _form.Id = null;
+    }
+
+    // Mapa mięśni (włącznik w Portalu → Konfiguracja → Usługi → Ćwiczenia).
+    private bool MapOn => Entitlements.Current.MuscleMap;
+    private bool _mmFemale;
+    private MuscleGroup? _mmPicked;
+
+    private void PickDetailMuscle(MuscleGroup m) => _mmPicked = _mmPicked == m ? null : m;
+
+    private void ClearMuscles()
+    {
+        _form.PrimaryMuscles.Clear();
+        _form.SecondaryMuscles.Clear();
     }
 
     /// <summary>Jedno kliknięcie zmienia stan: brak → główna → wspomagająca → brak.</summary>

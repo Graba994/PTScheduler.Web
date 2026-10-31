@@ -28,6 +28,18 @@ else
         </div>
     }
 
+    <!-- Ćwiczenia -->
+    <section id="exercises" class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <h2 class="pp-card-title pp-card-title-icon mb-3"><span class="pp-icon pp-icon-sm"><i class="bi bi-person-arms-up"></i></span>Ćwiczenia</h2>
+            <div class="form-check form-switch mb-0">
+                <input class="form-check-input" type="checkbox" role="switch" id="muscleMapOn" checked="@_muscleMapOn" @onchange="ToggleMuscleMapAsync" />
+                <label class="form-check-label small fw-semibold" for="muscleMapOn">Mapa mięśni przy ćwiczeniach</label>
+                <div class="form-text">Postać z zaznaczonymi partiami w katalogu ćwiczeń i wybór mięśni na postaci przy dodawaniu własnych ćwiczeń. Wyłączona — zostają same nazwy partii.</div>
+            </div>
+        </div>
+    </section>
+
     <!-- SMS -->
     <section id="sms" class="card border-0 shadow-sm mb-4">
         <div class="card-body">
@@ -297,6 +309,7 @@ else
         _smsTokenSet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformSmsApiToken]);
         _smsSender = s[SiteSettingsService.Keys.PlatformSmsSenderName];
         _smsOn = _smsTokenSet && s[SiteSettingsService.Keys.PlatformSmsEnabled] != "false";
+        _muscleMapOn = await Settings.GetAsync(SiteSettingsService.Keys.MuscleMapEnabled) != "false";
         _bunnyKeySet = !string.IsNullOrWhiteSpace(s[SiteSettingsService.Keys.PlatformBunnyApiKey]);
         _bunnyTokenSet = await VideoHub.TokenKeySetAsync();
         _bunnyLibrary = s[SiteSettingsService.Keys.PlatformBunnyLibraryId];
@@ -338,6 +351,15 @@ else
         await Settings.SetAsync(SiteSettingsService.Keys.PlatformSmsEnabled, e.Value is true ? "true" : "false");
         await LoadAsync();
         await PushSmsAsync(_smsOn ? "SMS-y włączone." : "SMS-y ukryte u trenerów i klientów.");
+    }
+
+    private bool _muscleMapOn = true;
+
+    private async Task ToggleMuscleMapAsync(ChangeEventArgs e)
+    {
+        await Settings.SetAsync(SiteSettingsService.Keys.MuscleMapEnabled, e.Value is true ? "true" : "false");
+        await LoadAsync();
+        await PushSmsAsync(_muscleMapOn ? "Mapa mięśni włączona." : "Mapa mięśni wyłączona.");
     }
 
     private async Task PushSmsAsync(string done)

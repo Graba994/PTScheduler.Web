@@ -92,6 +92,9 @@ public class Entitlements
     /// <summary>Studio może raz wypróbować wyższy plan przez 14 dni (przycisk na zablokowanym ekranie).</summary>
     public bool UpgradeTrialAvailable { get; set; }
 
+    /// <summary>Mapa mięśni przy ćwiczeniach — globalny włącznik z Portalu (starszy Portal jej nie wysyła: włączona).</summary>
+    public bool MuscleMap { get; set; } = true;
+
     /// <summary>Program testerów (3 miesiące za cotygodniową opinię) — null, gdy studio nie jest testerem.</summary>
     public TesterInfo? Tester { get; set; }
 

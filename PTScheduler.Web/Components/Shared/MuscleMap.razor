@@ -15,7 +15,7 @@
             <path class="mm-body" d="@G.Both(G.TorsoHalf, G.Part.Torso, Female, dx)" />
             <path class="mm-body" d="@G.Both(G.HeadHalf, G.Part.Head, Female, dx)" />
             <path class="mm-hair" d="@G.Both(back ? hair.Back : hair.Front, G.Part.Head, Female, dx)" />
-            @foreach (var group in G.For(back, Female).GroupBy(r => r.Muscle))
+            @foreach (var group in G.For(back, Female).Where(r => !OnlyActive || Primary.Contains(r.Muscle) || Secondary.Contains(r.Muscle)).GroupBy(r => r.Muscle))
             {
                 var m = group.Key;
                 var state = State(m);
@@ -28,7 +28,7 @@
                     }
                 </g>
             }
-            @foreach (var d in G.Details.Where(x => x.Back == back))
+            @foreach (var d in G.Details.Where(x => x.Back == back && !OnlyActive))
             {
                 <path class="mm-line" d="@G.Both(d.Half, G.Part.Torso, Female, dx)" />
             }
@@ -46,6 +46,8 @@
     [Parameter] public bool Female { get; set; }
     /// <summary>Mała wersja na kartę ćwiczenia: bez podpisów.</summary>
     [Parameter] public bool Compact { get; set; }
+    /// <summary>Tylko zaangażowane partie (bez szarych) — lekka wersja na listę kart.</summary>
+    [Parameter] public bool OnlyActive { get; set; }
     [Parameter] public MuscleGroup? Picked { get; set; }
     [Parameter] public EventCallback<MuscleGroup> OnPick { get; set; }
 

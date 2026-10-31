@@ -222,6 +222,8 @@ public class PlansV2Tests
         tester.GetProperty("week").GetInt32().Should().Be(1);
         tester.GetProperty("weeks").GetInt32().Should().Be(13);
         tester.GetProperty("feedbackDue").GetBoolean().Should().BeTrue();
+        JsonDocument.Parse(await tenants.EntitlementsJsonAsync(id, start)).RootElement.GetProperty("muscleMap").GetBoolean()
+            .Should().BeTrue("mapa mięśni domyślnie włączona");
 
         await using (var ctx = await db.CreateDbContextAsync())
         {

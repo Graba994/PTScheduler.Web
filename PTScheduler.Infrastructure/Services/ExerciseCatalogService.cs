@@ -83,7 +83,7 @@ public class ExerciseCatalogService(
         var rows = await q
             .Select(e => new
             {
-                e.Id, e.NamePl, e.NameEn, e.PrimaryMuscles, e.Category, e.Level,
+                e.Id, e.NamePl, e.NameEn, e.PrimaryMuscles, e.SecondaryMuscles, e.Category, e.Level,
                 e.Equipment, e.ImageUrls, e.OwnerTrainerUserId, e.VideoType, e.Tracking
             })
             .ToListAsync();
@@ -94,6 +94,7 @@ public class ExerciseCatalogService(
             NamePl = e.NamePl,
             NameEn = e.NameEn,
             PrimaryMuscles = e.PrimaryMuscles,
+            SecondaryMuscles = e.SecondaryMuscles,
             Category = e.Category,
             Level = e.Level,
             Equipment = e.Equipment,
