@@ -1,0 +1,113 @@
+@using PTScheduler.Application.Scheduling
+@inject PTScheduler.Web.Services.SlotWatchService Watch
+
+@* „Daj znać, gdy zwolni się termin”: zwinięta linijka, po kliknięciu dni i godziny. Bez nachalności —
+   po zapisie zostaje jedno zdanie z „Zmień” i „Wyłącz”. *@
+
+<section class="swc @(_open ? "is-open" : "")">
+    @if (!_open)
+    {
+        <div class="swc-line">
+            <i class="bi bi-bell"></i>
+            <div class="min-w-0 flex-grow-1">
+                @if (_state is { Active: true } st)
+                {
+                    <b>Damy znać o wolnym terminie</b>
+                    <small>@SlotWatchRules.Describe(st.Days, st.From, st.To)</small>
+                }
+                else
+                {
+                    <b>Daj znać, gdy zwolni się termin</b>
+                    <small>Gdy ktoś odwoła wizytę w Twoich godzinach, dostaniesz powiadomienie z rezerwacją.</small>
+                }
+            </div>
+            <button type="button" class="btn btn-sm btn-link" @onclick="Open">@(_state is { Active: true } ? "Zmień" : "Ustaw")</button>
+            @if (_state is { Active: true })
+            {
+                <button type="button" class="btn btn-sm btn-link text-muted" @onclick="TurnOffAsync">Wyłącz</button>
+            }
+        </div>
+    }
+    else
+    {
+        <div class="swc-head">
+            <b><i class="bi bi-bell me-1"></i>Kiedy możesz trenować?</b>
+            <button type="button" class="btn-close" aria-label="Zamknij" @onclick="() => _open = false"></button>
+        </div>
+        <div class="swc-days" role="group" aria-label="Dni tygodnia">
+            @for (var i = 0; i < 7; i++)
+            {
+                var bit = 1 << i;
+                <button type="button" class="swc-day @((_days & bit) != 0 ? "on" : "")" aria-pressed="@((_days & bit) != 0)" @onclick="() => _days ^= bit">@SlotWatchRules.DayShort[i]</button>
+            }
+        </div>
+        <div class="swc-hours">
+            <label>od
+                <select class="form-select form-select-sm" @bind="_from">
+                    @foreach (var t in Times) { <option value="@t">@t</option> }
+                </select>
+            </label>
+            <label>do
+                <select class="form-select form-select-sm" @bind="_to">
+                    @foreach (var t in Times) { <option value="@t">@t</option> }
+                </select>
+            </label>
+        </div>
+        @if (_err is not null) { <div class="text-danger small">@_err</div> }
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-sm btn-primary" disabled="@_busy" @onclick="SaveAsync"><i class="bi bi-check2 me-1"></i>Powiadamiaj mnie</button>
+            <button type="button" class="btn btn-sm btn-light" @onclick="() => _open = false">Anuluj</button>
+        </div>
+        <small class="text-muted">Najwyżej jedno powiadomienie na pół dnia. Wyłączysz je tutaj jednym kliknięciem.</small>
+    }
+</section>
+
+@code {
+    [Parameter, EditorRequired] public int ClientId { get; set; }
+
+    private static readonly string[] Times = Enumerable.Range(10, 37).Select(i => $"{i / 2}:{(i % 2 == 0 ? "00" : "30")}").ToArray();
+
+    private SlotWatchService.State? _state;
+    private bool _open, _busy;
+    private int _days = 0b0011111;
+    private string _from = "7:00", _to = "10:00";
+    private string? _err;
+
+    protected override async Task OnParametersSetAsync()
+    {
+        try { _state = await Watch.GetAsync(ClientId); } catch { _state = null; }
+    }
+
+    private void Open()
+    {
+        if (_state is { } st)
+        {
+            _days = st.Days;
+            _from = st.From.ToString("H:mm");
+            _to = st.To.ToString("H:mm");
+        }
+        _err = null;
+        _open = true;
+    }
+
+    private async Task SaveAsync()
+    {
+        _err = null;
+        if (!TimeOnly.TryParse(_from, out var from) || !TimeOnly.TryParse(_to, out var to)) { _err = "Wybierz godziny."; return; }
+        _busy = true;
+        try
+        {
+            await Watch.SaveAsync(ClientId, _days, from, to);
+            _state = new(true, _days, from, to);
+            _open = false;
+        }
+        catch (ArgumentException ex) { _err = ex.Message; }
+        finally { _busy = false; }
+    }
+
+    private async Task TurnOffAsync()
+    {
+        await Watch.TurnOffAsync(ClientId);
+        if (_state is { } st) _state = st with { Active = false };
+    }
+}

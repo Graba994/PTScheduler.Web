@@ -1,0 +1,393 @@
+@page "/panel/dostepnosc"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject UptimeService UptimeSvc
+@inject SiteSettingsService Settings
+@inject NavigationManager Nav
+@implements IDisposable
+@rendermode InteractiveServer
+
+@* Dostępność jak w Uptime Kuma: lista monitorów z paskiem ostatnich sprawdzeń, szczegóły z wykresem czasu odpowiedzi,
+   awarie i certyfikat SSL. Sprawdzanie i alarmy: UptimeService (w tle co 10 s). *@
+
+<PageTitle>Dostępność — Hantly Portal</PageTitle>
+
+<PanelHeader Title="Dostępność" Icon="bi-activity" IconClass="pp-tone-ok"
+             Subtitle="Czy strona i aplikacje trenerów działają tak, jak widzą je klienci — z zewnątrz, przez domenę i SSL.">
+    <Actions>
+        <a class="btn btn-outline-secondary btn-sm" href="/status" target="_blank" rel="noopener"><i class="bi bi-broadcast me-1"></i>Strona statusu</a>
+        <button class="btn btn-primary btn-sm" @onclick="NewMonitor"><i class="bi bi-plus-lg me-1"></i>Dodaj monitor</button>
+    </Actions>
+</PanelHeader>
+
+@if (_message is not null)
+{
+    <div class="alert @(_error ? "alert-danger" : "alert-success") py-2 small d-flex justify-content-between align-items-center">@_message<button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button></div>
+}
+
+@{
+    var down = _list.Count(s => s.Monitor.State == UptimeState.Down);
+    var up = _list.Count(s => s.Monitor.State == UptimeState.Up);
+    var paused = _list.Count(s => s.Monitor.IsPaused);
+}
+<div class="ut-overview @(down > 0 ? "is-down" : "is-up")">
+    <span class="ut-pulse"></span>
+    <div>
+        <div class="ut-overview-title">@(_list.Count == 0 ? "Monitory pojawią się za chwilę" : down > 0 ? $"Nie działa: {down}" : "Wszystko działa")</div>
+        <div class="ut-overview-sub">@up działa · @down nie działa · @paused wstrzymane · sprawdzane z tego serwera co 30 s–5 min</div>
+    </div>
+</div>
+
+<div class="ut-grid">
+    <section class="ut-list" aria-label="Monitory">
+        <input class="form-control form-control-sm mb-2" placeholder="Szukaj…" @bind="_q" @bind:event="oninput" aria-label="Szukaj monitora" />
+        @foreach (var s in Filtered)
+        {
+            var m = s.Monitor;
+            <button type="button" class="ut-item @(m.Id == _selected ? "on" : "")" @onclick="() => SelectAsync(m.Id)">
+                <span class="ut-badge @StateClass(m)">@UptimeRules.Show(s.Uptime24h)</span>
+                <span class="ut-item-main">
+                    <span class="ut-item-name"><i class="bi @(m.TenantId is null ? "bi-globe2" : "bi-person-badge") me-1" title="@(m.TenantId is null ? "Adres" : "Aplikacja trenera")"></i>@m.Name</span>
+                    <span class="ut-bar" aria-hidden="true">
+                        @for (var i = 0; i < Slots - s.Recent.Count; i++)
+                        {
+                            <i class="b-empty"></i>
+                        }
+                        @foreach (var b in s.Recent)
+                        {
+                            <i class="@(b.Up ? "b-up" : "b-down")" title="@($"{b.At.ToLocalTime():dd.MM HH:mm:ss} · {(b.Up ? $"{b.Ms} ms" : b.Error)}")"></i>
+                        }
+                    </span>
+                </span>
+            </button>
+        }
+        @if (_list.Count > 0 && !Filtered.Any())
+        {
+            <p class="text-muted small p-2">Nic nie pasuje do „@_q”.</p>
+        }
+    </section>
+
+    <section class="ut-detail">
+        @if (_editing is not null)
+        {
+            <div class="pp-card">
+                <h2 class="h6 fw-bold mb-3">@(_editing.Id == 0 ? "Nowy monitor" : $"Ustawienia: {_editing.Name}")</h2>
+                <div class="row g-2">
+                    <div class="col-md-6">
+                        <label class="form-label small fw-semibold" for="ut-name">Nazwa</label>
+                        <input id="ut-name" class="form-control" @bind="_editing.Name" maxlength="120" placeholder="np. Strona główna" />
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small fw-semibold" for="ut-url">Adres</label>
+                        <input id="ut-url" class="form-control font-monospace" @bind="_editing.Url" maxlength="500" placeholder="https://" disabled="@(_editing.TenantId is not null)" />
+                        @if (_editing.TenantId is not null) { <div class="form-text">Adres aplikacji trenera — zmienia się sam razem z domeną studia.</div> }
+                    </div>
+                    <div class="col-md-6">
+                        <label class="form-label small fw-semibold" for="ut-kw">Tekst na stronie <span class="fw-normal text-muted">(opcjonalnie)</span></label>
+                        <input id="ut-kw" class="form-control" @bind="_editing.Keyword" maxlength="200" placeholder="np. Healthy" />
+                        <div class="form-text">Gdy wpiszesz — sam kod 200 nie wystarczy, strona musi zawierać ten tekst.</div>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small fw-semibold" for="ut-int">Sprawdzaj co</label>
+                        <select id="ut-int" class="form-select" @bind="_editing.IntervalSeconds">
+                            @foreach (var sec in UptimeRules.Intervals)
+                            {
+                                <option value="@sec">@(sec < 60 ? $"{sec} s" : $"{sec / 60} min")</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-6 col-md-3">
+                        <label class="form-label small fw-semibold" for="ut-ret">Alarm po</label>
+                        <select id="ut-ret" class="form-select" @bind="_editing.RetriesBeforeDown">
+                            @for (var n = 1; n <= 5; n++)
+                            {
+                                <option value="@n">@n @(n == 1 ? "próbie" : "próbach")</option>
+                            }
+                        </select>
+                    </div>
+                    <div class="col-12">
+                        <label class="form-check"><input type="checkbox" class="form-check-input" @bind="_editing.IsPublic" /> <span class="form-check-label">Pokazuj na publicznej stronie <a href="/status" target="_blank" rel="noopener">/status</a></span></label>
+                    </div>
+                </div>
+                <div class="d-flex gap-2 mt-3">
+                    <button class="btn btn-primary btn-sm" @onclick="SaveAsync"><i class="bi bi-check2 me-1"></i>Zapisz</button>
+                    <button class="btn btn-outline-secondary btn-sm" @onclick="() => _editing = null">Anuluj</button>
+                </div>
+            </div>
+        }
+        else if (_detail is { } d)
+        {
+            var m = d.Monitor;
+            <div class="pp-card">
+                <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
+                    <div class="min-w-0">
+                        <h2 class="ut-title">@m.Name</h2>
+                        <a class="ut-url" href="@m.Url" target="_blank" rel="noopener">@m.Url</a>
+                        @if (!string.IsNullOrWhiteSpace(m.Keyword)) { <div class="small text-muted">Szuka tekstu „@m.Keyword”</div> }
+                    </div>
+                    <div class="d-flex flex-wrap gap-2">
+                        <button class="btn btn-outline-primary btn-sm" @onclick="CheckNowAsync" disabled="@_busy"><i class="bi bi-arrow-repeat me-1"></i>Sprawdź teraz</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => PauseAsync(!m.IsPaused)"><i class="bi @(m.IsPaused ? "bi-play-fill" : "bi-pause-fill") me-1"></i>@(m.IsPaused ? "Wznów" : "Wstrzymaj")</button>
+                        <button class="btn btn-outline-secondary btn-sm" @onclick="() => Edit(m)"><i class="bi bi-pencil me-1"></i>Ustawienia</button>
+                        @if (m.TenantId is null)
+                        {
+                            @if (_confirmDelete)
+                            {
+                                <button class="btn btn-danger btn-sm" @onclick="DeleteAsync">Na pewno usuń</button>
+                                <button class="btn btn-outline-secondary btn-sm" @onclick="() => _confirmDelete = false">Anuluj</button>
+                            }
+                            else
+                            {
+                                <button class="btn btn-outline-danger btn-sm" title="Usuń monitor" aria-label="Usuń monitor" @onclick="() => _confirmDelete = true"><i class="bi bi-trash3"></i></button>
+                            }
+                        }
+                    </div>
+                </div>
+
+                <div class="ut-state @StateClass(m)">
+                    <span class="ut-state-dot"></span>
+                    <b>@StateLabel(m)</b>
+                    <span>@(m.StateSince is { } since ? $"od {UptimeRules.Ago(since, DateTime.UtcNow)}" : "")</span>
+                    @if (m.State == UptimeState.Down && m.LastError is not null) { <span class="ut-state-err">— @m.LastError</span> }
+                    else if (m.FailuresInRow > 0 && m.State != UptimeState.Down) { <span class="ut-state-err">— nieudane próby: @m.FailuresInRow z @m.RetriesBeforeDown (@m.LastError)</span> }
+                </div>
+
+                <div class="ut-stats">
+                    <div><span>Odpowiedź teraz</span><b>@(m.LastResponseMs is { } ms ? $"{ms} ms" : "—")</b></div>
+                    <div><span>Średnio (24 h)</span><b>@(d.AvgMs24h is { } a ? $"{a} ms" : "—")</b></div>
+                    <div><span>Uptime 24 h</span><b>@UptimeRules.Show(d.Uptime24h)</b></div>
+                    <div><span>Uptime 7 dni</span><b>@UptimeRules.Show(d.Uptime7d)</b></div>
+                    <div><span>Uptime 30 dni</span><b>@UptimeRules.Show(d.Uptime30d)</b></div>
+                    <div><span>Certyfikat SSL</span><b class="@CertClass(m)">@CertLabel(m)</b></div>
+                </div>
+
+                <div class="ut-chart-head">
+                    <h3>Czas odpowiedzi</h3>
+                    <div class="pp-seg pp-seg-sm" role="tablist" aria-label="Zakres wykresu">
+                        @foreach (var hr in new[] { 3, 24, 168 })
+                        {
+                            var hours = hr;
+                            <button type="button" role="tab" class="@(_hours == hours ? "active" : "")" aria-selected="@(_hours == hours ? "true" : "false")" @onclick="() => SetHoursAsync(hours)">@(hours == 168 ? "7 dni" : $"{hours} h")</button>
+                        }
+                    </div>
+                </div>
+                @Chart(d.Chart)
+            </div>
+
+            <div class="pp-card">
+                <h3 class="ut-h3">Awarie</h3>
+                @if (d.Incidents.Count == 0)
+                {
+                    <p class="text-muted small mb-0"><i class="bi bi-emoji-smile me-1"></i>Bez awarii.</p>
+                }
+                else
+                {
+                    <ul class="ut-incidents">
+                        @foreach (var i in d.Incidents)
+                        {
+                            <li class="@(i.EndedAt is null ? "open" : "")">
+                                <i class="bi @(i.EndedAt is null ? "bi-exclamation-octagon-fill" : "bi-check-circle-fill")"></i>
+                                <div>
+                                    <b>@i.StartedAt.ToLocalTime().ToString("dd.MM.yyyy HH:mm")</b>
+                                    <span>@(i.EndedAt is { } e ? $"przerwa {UptimeService.Duration(e - i.StartedAt)}" : $"trwa od {UptimeService.Duration(DateTime.UtcNow - i.StartedAt)}")</span>
+                                    @if (i.Error is not null) { <small>@i.Error</small> }
+                                </div>
+                            </li>
+                        }
+                    </ul>
+                }
+            </div>
+        }
+        else
+        {
+            <div class="pp-card text-muted small">Wybierz monitor z listy.</div>
+        }
+    </section>
+</div>
+
+<div class="pp-card mt-3">
+    <h3 class="ut-h3">Powiadomienia</h3>
+    <p class="small text-muted mb-2">
+        Awaria i powrót — e-mail na adres administratora (<a href="/panel/orders">Zgłoszenia → ustawienia</a>). Ostrzeżenie o certyfikacie SSL — @UptimeRules.CertWarnDays dni przed końcem.
+        Awarię aplikacji trenera zgłasza też monitor kontenerów — wtedy drugi e-mail nie przychodzi.
+    </p>
+    <label class="form-check mb-0"><input type="checkbox" class="form-check-input" checked="@_sms" @onchange="ToggleSmsAsync" /> <span class="form-check-label">Także SMS przy awarii (z konta SMS platformy, na telefon administratora)</span></label>
+    <p class="small text-muted mt-2 mb-0"><i class="bi bi-info-circle me-1"></i>Portal nie zgłosi własnej awarii — jeśli padnie cały serwer, nie będzie komu wysłać e-maila. Na to warto dodać darmowy zewnętrzny monitor adresu <code>@(_mainDomain)/health</code>.</p>
+</div>
+
+@code {
+    private const int Slots = 48;
+    private List<UptimeService.Summary> _list = [];
+    private UptimeService.Detail? _detail;
+    private int? _selected;
+    private int _hours = 24;
+    private UptimeMonitor? _editing;
+    private string _q = "";
+    private string? _message, _mainDomain;
+    private bool _error, _busy, _confirmDelete, _sms;
+    private Timer? _timer;
+
+    [SupplyParameterFromQuery(Name = "m")] public int? Query { get; set; }
+
+    private IEnumerable<UptimeService.Summary> Filtered => string.IsNullOrWhiteSpace(_q) ? _list
+        : _list.Where(s => s.Monitor.Name.Contains(_q, StringComparison.OrdinalIgnoreCase) || s.Monitor.Url.Contains(_q, StringComparison.OrdinalIgnoreCase));
+
+    protected override async Task OnInitializedAsync()
+    {
+        _sms = await Settings.GetAsync(SiteSettingsService.Keys.UptimeSmsAlerts) == "true";
+        _mainDomain = $"https://{(await Settings.GetAsync(SiteSettingsService.Keys.MainDomain)).Trim()}";
+        await UptimeSvc.SyncTenantsAsync();
+        await LoadAsync();
+        // Najpierw te, które nie działają.
+        _selected = Query ?? _list.OrderBy(s => s.Monitor.State == UptimeState.Down ? 0 : 1).FirstOrDefault()?.Monitor.Id;
+        if (_selected is int id) _detail = await UptimeSvc.DetailAsync(id, _hours);
+        _timer = new Timer(_ => InvokeAsync(RefreshAsync), null, TimeSpan.FromSeconds(15), TimeSpan.FromSeconds(15));
+    }
+
+    private async Task LoadAsync() => _list = await UptimeSvc.SummariesAsync(Slots);
+
+    private async Task RefreshAsync()
+    {
+        try
+        {
+            await LoadAsync();
+            if (_selected is int id && _editing is null) _detail = await UptimeSvc.DetailAsync(id, _hours);
+            StateHasChanged();
+        }
+        catch (ObjectDisposedException) { }
+    }
+
+    private async Task SelectAsync(int id)
+    {
+        _selected = id;
+        _editing = null;
+        _confirmDelete = false;
+        _detail = await UptimeSvc.DetailAsync(id, _hours);
+    }
+
+    private async Task SetHoursAsync(int hours)
+    {
+        _hours = hours;
+        if (_selected is int id) _detail = await UptimeSvc.DetailAsync(id, _hours);
+    }
+
+    private void NewMonitor() => _editing = new UptimeMonitor { IntervalSeconds = 60, RetriesBeforeDown = 2, Url = "https://" };
+
+    private void Edit(UptimeMonitor m) => _editing = new UptimeMonitor
+    {
+        Id = m.Id, Name = m.Name, Url = m.Url, Keyword = m.Keyword, IntervalSeconds = m.IntervalSeconds, TimeoutSeconds = m.TimeoutSeconds,
+        RetriesBeforeDown = m.RetriesBeforeDown, IsPublic = m.IsPublic, TenantId = m.TenantId
+    };
+
+    private async Task SaveAsync()
+    {
+        if (_editing is null) return;
+        if (string.IsNullOrWhiteSpace(_editing.Name)) { Show("Wpisz nazwę monitora.", true); return; }
+        if (_editing.TenantId is null && UptimeRules.ValidateUrl(_editing.Url) is { } err) { Show(err, true); return; }
+        var isNew = _editing.Id == 0;
+        var id = await UptimeSvc.SaveAsync(_editing);
+        _editing = null;
+        if (isNew) await UptimeSvc.CheckAsync(id);
+        Show(isNew ? "Dodano monitor — pierwsze sprawdzenie już jest." : "Zapisano ustawienia.", false);
+        await LoadAsync();
+        await SelectAsync(id);
+    }
+
+    private async Task CheckNowAsync()
+    {
+        if (_selected is not int id) return;
+        _busy = true;
+        var r = await UptimeSvc.CheckAsync(id);
+        _busy = false;
+        Show(r is null ? "Nie znaleziono monitora." : r.Up ? $"Działa — {r.Ms} ms." : $"Nie działa: {r.Error}", r is not { Up: true });
+        await RefreshAsync();
+    }
+
+    private async Task PauseAsync(bool paused)
+    {
+        if (_selected is not int id) return;
+        await UptimeSvc.SetPausedAsync(id, paused);
+        Show(paused ? "Wstrzymano — bez sprawdzeń i alarmów." : "Wznowiono.", false);
+        if (!paused) await UptimeSvc.CheckAsync(id);
+        await RefreshAsync();
+    }
+
+    private async Task DeleteAsync()
+    {
+        if (_selected is not int id) return;
+        await UptimeSvc.DeleteAsync(id);
+        _confirmDelete = false;
+        _selected = null;
+        _detail = null;
+        Show("Usunięto monitor razem z historią.", false);
+        await LoadAsync();
+    }
+
+    private async Task ToggleSmsAsync(ChangeEventArgs e)
+    {
+        _sms = e.Value is true;
+        await Settings.SetManyAsync(new Dictionary<string, string> { [SiteSettingsService.Keys.UptimeSmsAlerts] = _sms ? "true" : "false" });
+        Show(_sms ? "SMS przy awarii włączony." : "SMS przy awarii wyłączony.", false);
+    }
+
+    private void Show(string text, bool error) { _message = text; _error = error; }
+
+    private static string StateClass(UptimeMonitor m) => m.IsPaused ? "st-paused" : m.State switch
+    {
+        UptimeState.Up => m.FailuresInRow > 0 ? "st-warn" : "st-up",
+        UptimeState.Down => "st-down",
+        _ => "st-pending"
+    };
+
+    private static string StateLabel(UptimeMonitor m) => m.IsPaused ? "Wstrzymany" : m.State switch
+    {
+        UptimeState.Up => "Działa",
+        UptimeState.Down => "Nie działa",
+        _ => "Czeka na pierwsze sprawdzenie"
+    };
+
+    private static string CertLabel(UptimeMonitor m) => m.CertExpiresAt is not { } e ? "—"
+        : (e - DateTime.UtcNow).TotalDays is var days && days < 0 ? "wygasł" : $"{(int)days} dni";
+
+    private static string CertClass(UptimeMonitor m) => m.CertExpiresAt is { } e && (e - DateTime.UtcNow).TotalDays < UptimeRules.CertWarnDays ? "text-danger" : "";
+
+    /// <summary>Wykres czasu odpowiedzi (SVG): linia średnich, czerwone kreski tam, gdzie były nieudane próby.</summary>
+    private RenderFragment Chart(List<(DateTime From, int? AvgMs, bool AnyDown)> data) => __builder =>
+    {
+        const double w = 720, h = 150, pad = 4;
+        var max = Math.Max(100, data.Where(x => x.AvgMs is not null).Select(x => x.AvgMs!.Value).DefaultIfEmpty(0).Max() * 1.15);
+        var step = (w - pad * 2) / Math.Max(1, data.Count - 1);
+        var pts = data.Select((x, i) => (X: pad + i * step, Y: x.AvgMs is { } v ? h - pad - (h - pad * 2) * v / max : (double?)null, x.AnyDown, x.From, x.AvgMs)).ToList();
+        var segments = new List<List<(double X, double Y)>>();
+        List<(double X, double Y)>? cur = null;
+        foreach (var p in pts)
+        {
+            if (p.Y is null) { cur = null; continue; }
+            if (cur is null) { cur = []; segments.Add(cur); }
+            cur.Add((p.X, p.Y.Value));
+        }
+        string F(double v) => v.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture);
+        <div class="ut-chart">
+            <svg viewBox="0 0 @F(w) @F(h)" preserveAspectRatio="none" role="img" aria-label="Wykres czasu odpowiedzi">
+                @for (var g = 1; g <= 3; g++)
+                {
+                    <line class="ut-grid-line" x1="0" x2="@F(w)" y1="@F(h * g / 4)" y2="@F(h * g / 4)" />
+                }
+                @foreach (var p in pts.Where(p => p.AnyDown))
+                {
+                    <rect class="ut-down-mark" x="@F(p.X - step / 2)" y="0" width="@F(Math.Max(2, step))" height="@F(h)"><title>@($"{p.From.ToLocalTime():dd.MM HH:mm} — nieudane próby")</title></rect>
+                }
+                @foreach (var seg in segments)
+                {
+                    var line = string.Join(" ", seg.Select(s => $"{F(s.X)},{F(s.Y)}"));
+                    <polygon class="ut-area" points="@($"{F(seg[0].X)},{F(h)} {line} {F(seg[^1].X)},{F(h)}")" />
+                    <polyline class="ut-line" points="@line" />
+                }
+            </svg>
+            <span class="ut-chart-max">@((int)max) ms</span>
+            <div class="ut-chart-axis"><span>@(data.Count > 0 ? data[0].From.ToLocalTime().ToString(_hours > 24 ? "dd.MM HH:mm" : "HH:mm") : "")</span><span>teraz</span></div>
+        </div>
+    };
+
+    public void Dispose() => _timer?.Dispose();
+}

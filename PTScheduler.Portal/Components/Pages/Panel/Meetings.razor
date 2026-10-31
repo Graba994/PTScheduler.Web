@@ -1,0 +1,613 @@
+@page "/panel/spotkania"
+@layout AdminLayout
+@attribute [Authorize(Roles = "Admin")]
+@inject IDbContextFactory<PortalDbContext> DbFactory
+@inject InviteService InviteSvc
+@inject SiteSettingsService Settings
+@inject NavigationManager Nav
+@inject IJSRuntime JS
+@rendermode InteractiveServer
+
+@* Spotkania z trenerami: scenariusz rozmowy w dymkach (Ty / trener / wskazówka, „jeśli powie…”), fiszki do nauki,
+   notatki według etapów rozmowy (z prezentacji gwiazdki trafiają same) i wyniki z listą osób do kontaktu.
+   Treść scenariusza i prezentacji: MeetingPlaybook. *@
+
+<PageTitle>Spotkania z trenerami — Hantly Portal</PageTitle>
+
+<PanelHeader Title="Spotkania z trenerami" Icon="bi-cup-hot" IconClass="pp-tone-info"
+             Subtitle="Scenariusz rozmowy do nauki, prezentacja aplikacji z Hantly, notatki ze spotkania i wyniki.">
+    <Actions>
+        <a class="btn btn-primary btn-sm" href="/panel/spotkania/prezentacja" target="_blank" rel="noopener"><i class="bi bi-easel2 me-1"></i>Prezentacja</a>
+    </Actions>
+</PanelHeader>
+
+<div class="pp-seg mb-3 mx-tabs" role="tablist" aria-label="Widok">
+    @foreach (var (key, label, icon) in Tabs)
+    {
+        <button type="button" role="tab" class="@(_tab == key ? "active" : "")" aria-selected="@(_tab == key ? "true" : "false")" @onclick="() => _tab = key">
+            <i class="bi @icon"></i>@label
+            @if (key == "results" && _meetings.Count > 0) { <span class="mx-count">@_meetings.Count</span> }
+            @if (key == "results" && DueCount > 0) { <span class="mx-count due" title="Do kontaktu dziś">@DueCount</span> }
+        </button>
+    }
+</div>
+
+@if (_message is not null)
+{
+    <div class="alert alert-success py-2 small d-flex justify-content-between align-items-center">@_message<button type="button" class="btn-close btn-close-sm" @onclick="() => _message = null"></button></div>
+}
+
+@if (_tab == "script")
+{
+    <div class="mx-wrap">
+        <section class="mx-cheat">
+            <div class="mx-cheat-head"><i class="bi bi-lightning-charge-fill"></i>Ściąga — 5 zasad</div>
+            <ol>
+                @foreach (var p in MeetingPlaybook.Principles)
+                {
+                    <li>@p</li>
+                }
+            </ol>
+        </section>
+
+        <nav class="mx-timeline" aria-label="Etapy rozmowy">
+            @foreach (var (ph, i) in MeetingPlaybook.Phases.Select((p, i) => (p, i)))
+            {
+                <button type="button" class="mx-tl-step @(_open == ph.Key ? "on" : "")" @onclick="() => _open = _open == ph.Key ? null : ph.Key">
+                    <span class="mx-tl-no">@(i + 1)</span>
+                    <span class="mx-tl-t">@ph.Title</span>
+                    <small>@ph.Time</small>
+                </button>
+            }
+        </nav>
+
+        @foreach (var (ph, i) in MeetingPlaybook.Phases.Select((p, i) => (p, i)))
+        {
+            var open = _open == ph.Key;
+            <article class="mx-phase @(open ? "open" : "")" id="ph-@ph.Key">
+                <button type="button" class="mx-phase-head" aria-expanded="@(open ? "true" : "false")" @onclick="() => _open = open ? null : ph.Key">
+                    <span class="mx-phase-ic"><i class="bi @ph.Icon"></i></span>
+                    <span class="mx-phase-t"><b>@(i + 1). @ph.Title</b><small>@ph.Goal</small></span>
+                    <span class="mx-phase-time">@ph.Time</span>
+                    <i class="bi bi-chevron-down mx-chev"></i>
+                </button>
+                @if (open)
+                {
+                    <div class="mx-chat">
+                        @foreach (var (b, bi) in ph.Blocks.Select((b, bi) => (b, bi)))
+                        {
+                            @Bubble(b, bi)
+                        }
+                        @if (ph.Key == "objections")
+                        {
+                            <div class="mx-obj-grid">
+                                @foreach (var o in MeetingPlaybook.Objections)
+                                {
+                                    var on = _objOpen == o.Key;
+                                    <div class="mx-obj @(on ? "on" : "")">
+                                        <button type="button" class="mx-obj-head" @onclick="() => _objOpen = on ? null : o.Key"><i class="bi bi-chat-square-quote"></i>@o.Label<i class="bi bi-chevron-down ms-auto"></i></button>
+                                        @if (on)
+                                        {
+                                            <div class="mx-obj-body">
+                                                <div class="mx-b trainer" style="--i:0"><span class="mx-av">T</span><p>„@o.TrainerSays”</p></div>
+                                                @foreach (var (r, ri) in o.Replies.Select((r, ri) => (r, ri)))
+                                                {
+                                                    <div class="mx-b you" style="--i:@(ri + 1)"><p>@r</p><span class="mx-av">Ty</span></div>
+                                                }
+                                                <div class="mx-why"><i class="bi bi-lightbulb"></i>@o.Why</div>
+                                            </div>
+                                        }
+                                    </div>
+                                }
+                            </div>
+                        }
+                        @if (ph.Branches.Length > 0)
+                        {
+                            <div class="mx-branches">
+                                <div class="mx-branch-label"><i class="bi bi-signpost-split"></i>Jeśli trener powie…</div>
+                                @foreach (var br in ph.Branches)
+                                {
+                                    <div class="mx-branch">
+                                        <div class="mx-b trainer"><span class="mx-av">T</span><p>„@br.TrainerSays”</p></div>
+                                        <div class="mx-b you"><p>@br.YouSay</p><span class="mx-av">Ty</span></div>
+                                        <div class="mx-why"><i class="bi bi-lightbulb"></i>@br.Why</div>
+                                    </div>
+                                }
+                            </div>
+                        }
+                        @if (ph.Key == "present")
+                        {
+                            <a class="btn btn-outline-primary btn-sm mx-inline-btn" href="/panel/spotkania/prezentacja" target="_blank" rel="noopener"><i class="bi bi-easel2 me-1"></i>Otwórz prezentację</a>
+                        }
+                    </div>
+                }
+            </article>
+        }
+        <div class="mx-cta">
+            <button class="btn btn-outline-primary" @onclick='() => _tab = "learn"'><i class="bi bi-mortarboard me-1"></i>Przećwicz na fiszkach</button>
+            <button class="btn btn-primary" @onclick='() => _tab = "notes"'><i class="bi bi-pencil-square me-1"></i>Zacznij notatki</button>
+        </div>
+    </div>
+}
+else if (_tab == "learn")
+{
+    <div class="mx-wrap">
+        @if (_deck.Count == 0)
+        {
+            <div class="mx-done">
+                <div class="mx-done-ic"><i class="bi bi-trophy-fill"></i></div>
+                <h2>Wszystko umiesz!</h2>
+                <p>@_known.Count z @MeetingPlaybook.Cards().Count fiszek za Tobą. Przejdź scenariusz jeszcze raz przed kolejnym spotkaniem.</p>
+                <button class="btn btn-primary" @onclick="ResetDeck"><i class="bi bi-arrow-repeat me-1"></i>Od nowa</button>
+            </div>
+        }
+        else
+        {
+            var card = _deck[0];
+            var total = MeetingPlaybook.Cards().Count;
+            <div class="mx-learn-head">
+                <span>Umiesz <b>@_known.Count</b> z @total</span>
+                <div class="mx-progress"><i style="width:@(_known.Count * 100 / Math.Max(1, total))%"></i></div>
+                <button class="btn btn-link btn-sm p-0" @onclick="Shuffle"><i class="bi bi-shuffle me-1"></i>Przetasuj</button>
+            </div>
+            <div class="mx-flash @(_flipped ? "flipped" : "")" @key="card.Front" @onclick="() => _flipped = !_flipped" role="button" tabindex="0" aria-label="Fiszka — kliknij, żeby odwrócić">
+                <div class="mx-face front">
+                    <span class="mx-face-tag">Sytuacja</span>
+                    <p>@card.Front</p>
+                    <small><i class="bi bi-hand-index me-1"></i>Pomyśl, co powiesz — potem odwróć</small>
+                </div>
+                <div class="mx-face back">
+                    <span class="mx-face-tag">Twoja odpowiedź</span>
+                    @foreach (var line in card.Back.Split('\n'))
+                    {
+                        <p>@line</p>
+                    }
+                    <small><i class="bi bi-lightbulb me-1"></i>@card.Hint</small>
+                </div>
+            </div>
+            <div class="mx-learn-actions">
+                @if (!_flipped)
+                {
+                    <button class="btn btn-primary" @onclick="() => _flipped = true">Pokaż odpowiedź</button>
+                }
+                else
+                {
+                    <button class="btn btn-outline-secondary" @onclick="Again"><i class="bi bi-arrow-counterclockwise me-1"></i>Jeszcze raz</button>
+                    <button class="btn btn-success" @onclick="Known"><i class="bi bi-check2 me-1"></i>Umiem</button>
+                }
+            </div>
+        }
+    </div>
+}
+else if (_tab == "notes")
+{
+    <div class="mx-wrap mx-notes">
+        <section class="mx-card">
+            <h2><span>1</span>Trener</h2>
+            <input class="form-control mb-2" placeholder="Imię i nazwisko albo nazwa studia *" @bind="_m.TrainerName" maxlength="120" aria-label="Trener" />
+            <div class="row g-2">
+                <div class="col-7"><input class="form-control" placeholder="Telefon albo e-mail" @bind="_m.Contact" maxlength="120" aria-label="Kontakt" /></div>
+                <div class="col-5"><input class="form-control" placeholder="Miasto" @bind="_m.City" maxlength="60" aria-label="Miasto" /></div>
+            </div>
+            <div class="mx-chips mt-2">
+                @foreach (var t in MeetingPlaybook.TrainerTypes)
+                {
+                    <button type="button" class="mx-chip @(_m.TrainerType == t ? "on" : "")" @onclick="() => _m.TrainerType = _m.TrainerType == t ? null : t">@t</button>
+                }
+            </div>
+        </section>
+
+        <section class="mx-card">
+            <h2><span>2</span>Jak pracuje dziś</h2>
+            <div class="mx-label">Jak klienci się zapisują?</div>
+            <div class="mx-chips">
+                @foreach (var b in MeetingPlaybook.BookingOptions)
+                {
+                    <button type="button" class="mx-chip @(Has(_m.BookingToday, b) ? "on" : "")" @onclick="() => _m.BookingToday = Toggle(_m.BookingToday, b)">@b</button>
+                }
+            </div>
+            <div class="row g-2 mt-1">
+                <div class="col-4"><label class="mx-label" for="mx-clients">Klientów</label><input id="mx-clients" type="number" min="0" class="form-control" @bind="_m.Clients" /></div>
+                <div class="col-4"><label class="mx-label" for="mx-noshow">Nieobecności / mies.</label><input id="mx-noshow" type="number" min="0" class="form-control" @bind="_m.NoShowsPerMonth" /></div>
+                <div class="col-4"><label class="mx-label" for="mx-cost">Płaci dziś (zł / mies.)</label><input id="mx-cost" type="number" min="0" class="form-control" @bind="_m.CurrentCost" /></div>
+            </div>
+            <input class="form-control mt-2" placeholder="Czego używa (np. Booksy, Excel, Google Kalendarz)" @bind="_m.CurrentTools" maxlength="200" aria-label="Narzędzia" />
+            <label class="mx-label mt-2" for="mx-pains">Co najbardziej przeszkadza — dosłowne cytaty</label>
+            <textarea id="mx-pains" class="form-control" rows="3" @bind="_m.Pains" maxlength="2000" placeholder="„Odpisuję klientom o 23…”"></textarea>
+        </section>
+
+        <section class="mx-card">
+            <h2><span>3</span>Prezentacja</h2>
+            <button type="button" class="btn btn-outline-primary w-100 mb-2" @onclick="OpenPresentationAsync"><i class="bi bi-easel2 me-1"></i>Otwórz prezentację dla tego trenera</button>
+            <p class="mx-hint">Gwiazdki z prezentacji trafiają tutaj same. Możesz też zaznaczyć ręcznie:</p>
+            <div class="mx-chips">
+                @foreach (var s in MeetingPlaybook.FeatureSlides(_garmin))
+                {
+                    <button type="button" class="mx-chip @(Has(_m.InterestedFeatures, s.Key) ? "on star" : "")" @onclick="() => _m.InterestedFeatures = Toggle(_m.InterestedFeatures, s.Key)">
+                        @if (Has(_m.InterestedFeatures, s.Key)) { <i class="bi bi-star-fill"></i> }@s.Title
+                    </button>
+                }
+            </div>
+            <textarea class="form-control mt-2" rows="2" placeholder="Pytania i reakcje podczas prezentacji" @bind="_m.DemoNotes" maxlength="2000" aria-label="Reakcje"></textarea>
+        </section>
+
+        <section class="mx-card">
+            <h2><span>4</span>Obiekcje</h2>
+            <div class="mx-chips">
+                @foreach (var o in MeetingPlaybook.Objections)
+                {
+                    <button type="button" class="mx-chip @(Has(_m.Objections, o.Key) ? "on warn" : "")" @onclick="() => _m.Objections = Toggle(_m.Objections, o.Key)">@o.Label</button>
+                }
+            </div>
+            @foreach (var o in MeetingPlaybook.Objections.Where(o => Has(_m.Objections, o.Key)))
+            {
+                <div class="mx-obj-hint"><b>@o.Label:</b> @o.Replies[0]</div>
+            }
+        </section>
+
+        <section class="mx-card">
+            <h2><span>5</span>Plan i cena</h2>
+            <div class="mx-label">Który plan pasuje?</div>
+            <div class="mx-chips">
+                @foreach (var p in _plans)
+                {
+                    <button type="button" class="mx-chip @(_m.PlanFit == p.Id ? "on" : "")" @onclick="() => _m.PlanFit = _m.PlanFit == p.Id ? null : p.Id">@p.Name · @(p.MonthlyPrice <= 0 ? "0 zł" : $"{p.MonthlyPrice:0} zł")</button>
+                }
+            </div>
+            <details class="mx-price" open="@(_m.PriceBargain is not null)">
+                <summary>Badanie ceny (cztery pytania, opcjonalnie)</summary>
+                <div class="row g-2 mt-1">
+                    <div class="col-6"><label class="mx-label" for="mx-p1">Podejrzanie tanio</label><input id="mx-p1" type="number" min="0" class="form-control" @bind="_m.PriceTooCheap" /></div>
+                    <div class="col-6"><label class="mx-label" for="mx-p2">Okazja</label><input id="mx-p2" type="number" min="0" class="form-control" @bind="_m.PriceBargain" /></div>
+                    <div class="col-6"><label class="mx-label" for="mx-p3">Drogo, ale do rozważenia</label><input id="mx-p3" type="number" min="0" class="form-control" @bind="_m.PriceExpensive" /></div>
+                    <div class="col-6"><label class="mx-label" for="mx-p4">Za drogo</label><input id="mx-p4" type="number" min="0" class="form-control" @bind="_m.PriceTooExpensive" /></div>
+                </div>
+            </details>
+        </section>
+
+        <section class="mx-card">
+            <h2><span>6</span>Wynik i następny krok</h2>
+            <div class="mx-outcomes">
+                @foreach (var (key, label, icon) in MeetingPlaybook.Outcomes)
+                {
+                    <button type="button" class="mx-outcome o-@key @(_m.Outcome == key ? "on" : "")" @onclick="() => SetOutcome(key)"><i class="bi @icon"></i>@label</button>
+                }
+            </div>
+            @if (_m.Outcome == "followup")
+            {
+                <label class="mx-label mt-2" for="mx-follow">Kiedy się odezwać</label>
+                <input id="mx-follow" type="date" class="form-control" value="@_m.FollowUpAt?.ToLocalTime().ToString("yyyy-MM-dd")" @onchange="SetFollowUp" />
+            }
+            @if (_m.Outcome == "start" || _m.InviteCode is not null)
+            {
+                @if (_m.InviteCode is not null)
+                {
+                    <div class="small mt-2">Kod: <b class="font-monospace">@_m.InviteCode</b></div>
+                }
+                <button type="button" class="btn btn-outline-primary w-100 mt-2" @onclick="GiveCodeAsync"><i class="bi bi-qr-code me-1"></i>@(_m.InviteCode is null ? "Daj kod QR — 3 miesiące gratis" : "Pokaż kod QR")</button>
+            }
+            <textarea class="form-control mt-2" rows="2" placeholder="Inne notatki" @bind="_m.Notes" maxlength="2000" aria-label="Notatki"></textarea>
+        </section>
+
+        @if (_error is not null) { <div class="alert alert-danger py-2 small">@_error</div> }
+        <div class="mx-save">
+            <button class="btn btn-primary flex-grow-1" @onclick="SaveAsync"><i class="bi bi-check2 me-1"></i>Zapisz spotkanie</button>
+            @if (_m.Id != 0)
+            {
+                <button class="btn btn-outline-secondary" @onclick="NewMeeting">Nowe</button>
+                @if (_confirmDelete == _m.Id)
+                {
+                    <button class="btn btn-danger" @onclick="() => DeleteAsync(_m.Id)"><i class="bi bi-trash3 me-1"></i>Na pewno usuń</button>
+                    <button class="btn btn-outline-secondary" @onclick="() => _confirmDelete = null">Anuluj</button>
+                }
+                else
+                {
+                    <button class="btn btn-outline-danger" title="Usuń spotkanie" aria-label="Usuń spotkanie" @onclick="() => _confirmDelete = _m.Id"><i class="bi bi-trash3"></i></button>
+                }
+            }
+        </div>
+    </div>
+}
+else
+{
+    @if (_meetings.Count == 0)
+    {
+        <div class="pp-empty"><i class="bi bi-cup-hot"></i>Jeszcze żadnego spotkania. Zacznij od scenariusza.</div>
+    }
+    else
+    {
+        <LeoInsight Kind="@LeoInsights.Meetings" Title="Wnioski ze spotkań" Hint="Leo zbierze bolączki, obiekcje, to, co interesuje trenerów, i wyniki w kilka punktów." />
+        <div class="mx-wrap mx-results">
+            <div class="mx-kpis">
+                <div><b>@_meetings.Count</b><span>spotkań</span></div>
+                <div class="ok"><b>@_meetings.Count(x => x.Outcome == "start" || x.Committed)</b><span>startuje</span></div>
+                <div class="info"><b>@_meetings.Count(x => x.Outcome == "followup")</b><span>do kontaktu</span></div>
+                <div><b>@_meetings.Count(x => x.Outcome == "no")</b><span>nie teraz</span></div>
+            </div>
+
+            @if (FollowUps.Count > 0)
+            {
+                <section class="mx-card">
+                    <h2>Do kontaktu</h2>
+                    @foreach (var x in FollowUps)
+                    {
+                        var due = x.FollowUpAt is { } f && f.ToLocalTime().Date <= DateTime.Now.Date;
+                        <div class="mx-follow @(due ? "due" : "")">
+                            <i class="bi bi-calendar-event"></i>
+                            <span class="flex-grow-1"><b>@x.TrainerName</b>@(x.Contact is null ? "" : $" · {x.Contact}")</span>
+                            <span class="small">@(x.FollowUpAt is { } d ? (due ? "dziś / zaległe" : d.ToLocalTime().ToString("dd.MM")) : "bez terminu")</span>
+                            <button class="btn btn-sm btn-outline-primary" @onclick="() => Edit(x)"><i class="bi bi-pencil"></i></button>
+                        </div>
+                    }
+                </section>
+            }
+
+            <section class="mx-card">
+                <h2>Najczęstsze obiekcje</h2>
+                @Bars(MeetingPlaybook.Objections.Select(o => (o.Label, _meetings.Count(x => Has(x.Objections, o.Key)))))
+            </section>
+            <section class="mx-card">
+                <h2>Co interesuje trenerów</h2>
+                @Bars(MeetingPlaybook.FeatureSlides(true).Select(s => (s.Title, _meetings.Count(x => Has(x.InterestedFeatures, s.Key)))))
+            </section>
+            <section class="mx-card">
+                <h2>Jak zapisują dziś</h2>
+                @Bars(MeetingPlaybook.BookingOptions.Select(b => (b, _meetings.Count(x => Has(x.BookingToday, b)))))
+            </section>
+            <section class="mx-card">
+                <h2>Pasujący plan</h2>
+                @Bars(_plans.Select(p => (p.Name, _meetings.Count(x => x.PlanFit == p.Id))))
+                @if (_meetings.Any(x => x.PriceBargain is > 0))
+                {
+                    <div class="mx-price-grid">
+                        <div><span>Podejrzanie tanio</span><b>@Median(x => x.PriceTooCheap)</b></div>
+                        <div><span>Okazja</span><b>@Median(x => x.PriceBargain)</b></div>
+                        <div><span>Drogo, ale OK</span><b>@Median(x => x.PriceExpensive)</b></div>
+                        <div><span>Za drogo</span><b>@Median(x => x.PriceTooExpensive)</b></div>
+                    </div>
+                }
+            </section>
+
+            <h2 class="mx-list-title">Wszystkie spotkania</h2>
+            @foreach (var x in _meetings)
+            {
+                <article class="mx-card mx-item">
+                    <div class="d-flex justify-content-between align-items-start gap-2">
+                        <div>
+                            <b>@x.TrainerName</b>
+                            <div class="mx-hint mb-0">@x.CreatedAt.ToLocalTime().ToString("dd.MM HH:mm")@(x.City is null ? "" : $" · {x.City}")@(x.TrainerType is null ? "" : $" · {x.TrainerType}")@(x.Presented ? " · prezentacja" : "")</div>
+                        </div>
+                        @if (OutcomeOf(x) is { } o) { <span class="mx-badge o-@o.Key"><i class="bi @o.Icon"></i>@o.Label</span> }
+                    </div>
+                    @if (!string.IsNullOrWhiteSpace(x.Pains)) { <p class="mx-quote">„@x.Pains”</p> }
+                    @if (!string.IsNullOrWhiteSpace(x.InterestedFeatures))
+                    {
+                        <div class="mx-mini">@foreach (var k in Split(x.InterestedFeatures)) { <span><i class="bi bi-star-fill"></i>@(MeetingPlaybook.SlideTitle(k) ?? k)</span> }</div>
+                    }
+                    @if (_confirmDelete == x.Id)
+                    {
+                        <div class="mx-delete">
+                            <span>Usunąć spotkanie „@x.TrainerName” razem z notatkami? Tego nie da się cofnąć.</span>
+                            <div class="d-flex gap-2">
+                                <button class="btn btn-sm btn-danger" @onclick="() => DeleteAsync(x.Id)"><i class="bi bi-trash3 me-1"></i>Usuń</button>
+                                <button class="btn btn-sm btn-outline-secondary" @onclick="() => _confirmDelete = null">Anuluj</button>
+                            </div>
+                        </div>
+                    }
+                    else
+                    {
+                        <div class="d-flex justify-content-end gap-2">
+                            <button class="btn btn-sm btn-outline-danger" title="Usuń spotkanie" aria-label="Usuń spotkanie: @x.TrainerName" @onclick="() => _confirmDelete = x.Id"><i class="bi bi-trash3"></i></button>
+                            <button class="btn btn-sm btn-outline-primary" @onclick="() => Edit(x)"><i class="bi bi-pencil me-1"></i>Notatki</button>
+                        </div>
+                    }
+                </article>
+            }
+        </div>
+    }
+}
+
+@if (_share is not null)
+{
+    <InviteShare Invite="_share" Link="@InviteSvc.LinkFor(_share.Code, Nav.BaseUri)" DefaultName="@FirstName" DefaultEmail="@ContactEmail"
+                 OnClose="() => _share = null" OnSent="OnInviteSent" />
+}
+
+@code {
+    [SupplyParameterFromQuery(Name = "m")] public int? MeetingId { get; set; }
+
+    private static readonly (string Key, string Label, string Icon)[] Tabs =
+        [("script", "Scenariusz", "bi-chat-square-text"), ("learn", "Nauka", "bi-mortarboard"), ("notes", "Notatki", "bi-pencil-square"), ("results", "Wyniki", "bi-bar-chart")];
+
+    private List<TrainerMeeting> _meetings = [];
+    private List<Plan> _plans = [];
+    private TrainerMeeting _m = new();
+    private string _tab = "script";
+    private string? _open = "open", _objOpen;
+    private string? _message, _error;
+    private int? _confirmDelete;
+    private InviteCode? _share;
+    private bool _garmin;
+
+    // Fiszki: talia do przejścia i karty już umiane (w tej sesji).
+    private List<MeetingPlaybook.Card> _deck = [];
+    private readonly HashSet<string> _known = [];
+    private bool _flipped;
+
+    protected override async Task OnInitializedAsync()
+    {
+        _deck = MeetingPlaybook.Cards().ToList();
+        _garmin = await Settings.GetAsync(SiteSettingsService.Keys.GarminEnabled) == "true";
+        await LoadAsync();
+        if (MeetingId is int id && _meetings.FirstOrDefault(x => x.Id == id) is { } m) Edit(m);
+    }
+
+    private async Task LoadAsync()
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        _meetings = await db.TrainerMeetings.AsNoTracking().OrderByDescending(m => m.CreatedAt).ToListAsync();
+        _plans = await db.Plans.AsNoTracking().Where(p => p.IsActive).OrderBy(p => p.SortOrder).ToListAsync();
+    }
+
+    private List<TrainerMeeting> FollowUps => _meetings.Where(x => x.Outcome == "followup").OrderBy(x => x.FollowUpAt ?? DateTime.MaxValue).ToList();
+
+    private int DueCount => _meetings.Count(x => x.Outcome == "followup" && x.FollowUpAt is { } f && f.ToLocalTime().Date <= DateTime.Now.Date);
+
+    private RenderFragment Bubble(MeetingPlaybook.Block b, int i) => b.Who switch
+    {
+        MeetingPlaybook.Who.You => @<div class="mx-b you" style="--i:@i"><p>@b.Text</p><span class="mx-av">Ty</span></div>,
+        MeetingPlaybook.Who.Trainer => @<div class="mx-b trainer" style="--i:@i"><span class="mx-av">T</span><p>„@b.Text”</p></div>,
+        MeetingPlaybook.Who.Ask => @<div class="mx-ask" style="--i:@i"><div class="mx-ask-t"><i class="bi bi-question-circle"></i>@b.Text</div><ul>@foreach (var q in b.Items ?? []) { <li>@q</li> }</ul></div>,
+        _ => @<div class="mx-tip" style="--i:@i"><i class="bi bi-lightbulb-fill"></i><span>@b.Text</span></div>
+    };
+
+    private RenderFragment Bars(IEnumerable<(string Label, int Count)> rows) => __builder =>
+    {
+        var list = rows.Where(r => r.Count > 0).OrderByDescending(r => r.Count).ToList();
+        if (list.Count == 0)
+        {
+            <p class="mx-hint mb-0">Jeszcze brak danych.</p>
+            return;
+        }
+        var max = list.Max(r => r.Count);
+        foreach (var (label, count) in list)
+        {
+            <div class="mx-bar-row"><span>@label</span><div class="mx-bar"><i style="width:@(count * 100 / max)%"></i></div><b>@count</b></div>
+        }
+    };
+
+    private static IEnumerable<string> Split(string? csv) => (csv ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+    private static bool Has(string? csv, string key) => Split(csv).Contains(key);
+
+    private static string? Toggle(string? csv, string key)
+    {
+        var list = Split(csv).ToList();
+        if (!list.Remove(key)) list.Add(key);
+        return list.Count == 0 ? null : string.Join(",", list);
+    }
+
+    private static (string Key, string Label, string Icon)? OutcomeOf(TrainerMeeting x)
+    {
+        var key = x.Outcome ?? (x.Committed ? "start" : null);
+        return key is null ? null : MeetingPlaybook.Outcomes.FirstOrDefault(o => o.Key == key);
+    }
+
+    private void SetOutcome(string key)
+    {
+        _m.Outcome = _m.Outcome == key ? null : key;
+        _m.Committed = _m.Outcome == "start";
+        if (_m.Outcome == "followup" && _m.FollowUpAt is null) _m.FollowUpAt = DateTime.Today.AddDays(3).ToUniversalTime();
+    }
+
+    private void SetFollowUp(ChangeEventArgs e) =>
+        _m.FollowUpAt = DateTime.TryParse(e.Value?.ToString(), out var d) ? DateTime.SpecifyKind(d.Date.AddHours(9), DateTimeKind.Local).ToUniversalTime() : null;
+
+    // ── Fiszki ──
+    private void Known() { _known.Add(_deck[0].Front); _deck.RemoveAt(0); _flipped = false; }
+    private void Again() { var c = _deck[0]; _deck.RemoveAt(0); _deck.Add(c); _flipped = false; }
+    private void Shuffle() { _deck = _deck.OrderBy(_ => Random.Shared.Next()).ToList(); _flipped = false; }
+    private void ResetDeck() { _known.Clear(); _deck = MeetingPlaybook.Cards().ToList(); _flipped = false; }
+
+    // ── Notatki ──
+    private string? FirstName => _m.TrainerName.Split(' ', StringSplitOptions.RemoveEmptyEntries).FirstOrDefault();
+    private string? ContactEmail => _m.Contact?.Contains('@') == true ? _m.Contact.Trim() : null;
+
+    /// <summary>Zapis szkicu i prezentacja w nowej karcie — gwiazdki z prezentacji trafiają do tego spotkania.</summary>
+    private async Task OpenPresentationAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_m.TrainerName)) { _error = "Wpisz najpierw, z kim jest spotkanie."; return; }
+        _m.Presented = true;
+        await PersistAsync();
+        var url = $"/panel/spotkania/prezentacja?spotkanie={_m.Id}&trener={Uri.EscapeDataString(FirstName ?? "")}";
+        await JS.InvokeVoidAsync("open", url, "_blank");
+    }
+
+    private async Task GiveCodeAsync()
+    {
+        _error = null;
+        await using var db = await DbFactory.CreateDbContextAsync();
+        if (_m.InviteCode is { } existing && await db.InviteCodes.AsNoTracking().FirstOrDefaultAsync(c => c.Code == existing) is { } found)
+        {
+            _share = found;
+            return;
+        }
+        var (invite, error) = await InviteSvc.CreateAsync(null, $"Spotkanie: {(_m.TrainerName.Length > 0 ? _m.TrainerName : "trener")}", 1,
+            InviteService.ThreeMonthsExtraDays, DateTime.UtcNow.AddDays(30), tester: true);
+        if (invite is null) { _error = error; return; }
+        _m.InviteCode = invite.Code;
+        _m.Outcome = "start";
+        _m.Committed = true;
+        _share = invite;
+    }
+
+    private void OnInviteSent(string email)
+    {
+        var line = $"Zaproszenie wysłane na {email}.";
+        _m.Notes = string.IsNullOrWhiteSpace(_m.Notes) ? line : $"{_m.Notes}\n{line}";
+    }
+
+    /// <summary>Zapis z dołączeniem gwiazdek dodanych w prezentacji (inna karta zapisuje je osobno).</summary>
+    private async Task PersistAsync()
+    {
+        _m.TrainerName = _m.TrainerName.Trim();
+        await using var db = await DbFactory.CreateDbContextAsync();
+        if (_m.Id == 0) db.TrainerMeetings.Add(_m);
+        else
+        {
+            var stored = await db.TrainerMeetings.AsNoTracking().FirstOrDefaultAsync(x => x.Id == _m.Id);
+            foreach (var k in Split(stored?.InterestedFeatures))
+                if (!Has(_m.InterestedFeatures, k)) _m.InterestedFeatures = Toggle(_m.InterestedFeatures, k);
+            _m.Presented |= stored?.Presented == true;
+            db.TrainerMeetings.Update(_m);
+        }
+        await db.SaveChangesAsync();
+    }
+
+    private async Task SaveAsync()
+    {
+        _error = null;
+        if (string.IsNullOrWhiteSpace(_m.TrainerName)) { _error = "Wpisz, z kim było spotkanie."; return; }
+        await PersistAsync();
+        _message = $"Zapisano spotkanie: {_m.TrainerName}.";
+        NewMeeting();
+        _tab = "results";
+        await LoadAsync();
+    }
+
+    private void NewMeeting() { _m = new TrainerMeeting(); _confirmDelete = null; }
+
+    private async Task DeleteAsync(int id)
+    {
+        await using var db = await DbFactory.CreateDbContextAsync();
+        var name = await db.TrainerMeetings.Where(x => x.Id == id).Select(x => x.TrainerName).FirstOrDefaultAsync();
+        await db.TrainerMeetings.Where(x => x.Id == id).ExecuteDeleteAsync();
+        _confirmDelete = null;
+        _message = name is null ? "Spotkanie było już usunięte." : $"Usunięto spotkanie: {name}.";
+        if (_m.Id == id) { NewMeeting(); _tab = "results"; }
+        await LoadAsync();
+    }
+
+    private void Edit(TrainerMeeting x)
+    {
+        _m = new TrainerMeeting
+        {
+            Id = x.Id, CreatedAt = x.CreatedAt, TrainerName = x.TrainerName, Contact = x.Contact, City = x.City, NameWritten = x.NameWritten,
+            NamePick = x.NamePick, NameRecalled = x.NameRecalled, BookingToday = x.BookingToday, Clients = x.Clients, NoShowsPerMonth = x.NoShowsPerMonth,
+            Pains = x.Pains, DemoNotes = x.DemoNotes, PriceTooCheap = x.PriceTooCheap, PriceBargain = x.PriceBargain, PriceExpensive = x.PriceExpensive,
+            PriceTooExpensive = x.PriceTooExpensive, Committed = x.Committed, InviteCode = x.InviteCode, Notes = x.Notes,
+            TrainerType = x.TrainerType, CurrentTools = x.CurrentTools, CurrentCost = x.CurrentCost, InterestedFeatures = x.InterestedFeatures,
+            Objections = x.Objections, PlanFit = x.PlanFit, Outcome = x.Outcome ?? (x.Committed ? "start" : null), FollowUpAt = x.FollowUpAt, Presented = x.Presented
+        };
+        _confirmDelete = null;
+        _tab = "notes";
+    }
+
+    private string Median(Func<TrainerMeeting, int?> pick)
+    {
+        var values = _meetings.Select(pick).Where(v => v is > 0).Select(v => v!.Value).OrderBy(v => v).ToList();
+        if (values.Count == 0) return "—";
+        var mid = values.Count / 2;
+        return (values.Count % 2 == 1 ? values[mid] : (values[mid - 1] + values[mid]) / 2).ToString();
+    }
+}

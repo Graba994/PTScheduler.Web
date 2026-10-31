@@ -1,0 +1,26 @@
+@inject PTScheduler.Web.Services.PublicDemoService Demo
+
+@* Publiczne demo: pasek u góry każdej strony aplikacji — co tu działa, czego nie, i droga do własnej aplikacji.
+   Przełączenie trener/klient idzie przez hantly.pl/demo (nowy jednorazowy token z Portalu). *@
+@if (Demo.IsOn)
+{
+    <div class="demo-bar" role="note">
+        <span class="demo-bar-k"><i class="bi bi-eye"></i>Wersja demo</span>
+        <span class="demo-bar-t">Klikaj śmiało — e-maile, SMS-y i płatności są wyłączone, a dane wracają do początku co noc.</span>
+        <span class="demo-bar-links">
+            <AuthorizeView Roles="Client">
+                <Authorized><a href="@DemoUrl("trener")">Zobacz jako trener</a></Authorized>
+                <NotAuthorized><a href="@DemoUrl("klient")">Zobacz jako klient</a></NotAuthorized>
+            </AuthorizeView>
+            <a class="demo-bar-cta" href="@Demo.RegisterUrl" target="_top">Zbuduj swoją aplikację<i class="bi bi-arrow-right"></i></a>
+        </span>
+    </div>
+}
+
+@code {
+    private string DemoUrl(string jako)
+    {
+        var baseUrl = Demo.RegisterUrl.EndsWith("/register", StringComparison.OrdinalIgnoreCase) ? Demo.RegisterUrl[..^"/register".Length] : "https://hantly.pl";
+        return $"{baseUrl}/demo?jako={jako}";
+    }
+}

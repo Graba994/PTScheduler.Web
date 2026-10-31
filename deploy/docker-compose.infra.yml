@@ -1,0 +1,46 @@
+# Shared infrastructure — Nginx Proxy Manager + Portal
+# Start once: docker compose -f docker-compose.infra.yml up -d
+#
+# NPM dashboard: http://YOUR_SERVER_IP:81
+# Default login:  admin@example.com / changeme
+#
+# Portal:         http://YOUR_SERVER_IP:8081 (proxy via NPM)
+# Portal admin:   admin@ptscheduler.pl / Admin123!
+#
+# External DB:    192.168.0.220:5444 / PTAdmin
+
+services:
+
+  npm:
+    image: jc21/nginx-proxy-manager:latest
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "81:81"        # NPM admin panel
+    volumes:
+      - npm_data:/data
+      - npm_letsencrypt:/etc/letsencrypt
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:81/api/"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+
+  portal:
+    build:
+      context: ..
+      dockerfile: PTScheduler.Portal/Dockerfile
+    restart: unless-stopped
+    ports:
+      - "8081:8081"
+    environment:
+      ConnectionStrings__DefaultConnection: "Host=192.168.0.220;Port=5444;Database=PTAdmin;Username=PTAdmin;Password=PTAdmin"
+      Portal__DeployDir: /deploy
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - ./:/deploy
+
+volumes:
+  npm_data:
+  npm_letsencrypt:

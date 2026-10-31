@@ -1,0 +1,122 @@
+using PTScheduler.Portal.Services;
+using PTScheduler.Portal.Entities;
+
+namespace PTScheduler.Portal.Components.Home;
+
+/// <summary>Treści wspólne dla szablonów strony głównej (Nowa i Klasyczna): szablony stron trenera, pytania, cechy planów.</summary>
+public static class HomeShared
+{
+    public sealed record TrainerTemplate(string Key, string Name, string For, string Url, string Accent, string Bg);
+
+    public sealed record FaqItem(string Question, string Answer);
+
+    /// <summary>Szablony strony trenera (zrzuty prawdziwych stron w /img/templates, odświeżane przy zmianach szablonów).</summary>
+    public static readonly TrainerTemplate[] Templates =
+    [
+        new("personal", "Klasyka", "Uniwersalna: korzyści, cennik, wolne terminy", "jan-kowalski.pl", "#0284C7", "#f6f7fb"),
+        new("transform", "Przemiana", "Efekty przed i po na pierwszym planie", "forma-z-trenerem.pl", "#c6f432", "#0b0f17"),
+        new("premium", "Elegancja", "Elegancko, dla treningów wyższej półki", "studio-premium.pl", "#d6b36a", "#0d0d10"),
+        new("women", "Ona", "Sylwetka i pewność siebie bez presji", "silna-ty.pl", "#db2f6f", "#fff6f8"),
+        new("combat", "Ring", "Boks, kickboxing, MMA — mocno i dynamicznie", "ring-club.pl", "#e5202e", "#101010"),
+        new("mindful", "Spokój", "Spokojnie i minimalistycznie", "pilates-studio.pl", "#111111", "#ffffff"),
+        new("run", "Dystans", "Bieganie i triathlon: plany startowe i testy", "biegam-z-ola.pl", "#009e8f", "#f1f8f6"),
+        new("physique", "Forma", "Sylwetka i kulturystyka, przygotowanie do startu", "forma-team.pl", "#3ea6ff", "#0e1114"),
+        new("mama", "Mama", "Trening w ciąży i po porodzie — bezpiecznie", "silna-mama.pl", "#e2774a", "#fff6ef"),
+    ];
+
+    public static readonly FaqItem[] Faqs =
+    [
+        new("Czy muszę coś instalować albo mieć serwer?", "Nie. Po rejestracji dostajesz gotową aplikację pod adresem twoja-nazwa.hantly.pl. Serwery, poczta, powiadomienia i kopie zapasowe są po naszej stronie."),
+        new("Czy klienci muszą pobierać aplikację ze sklepu?", "Nie. Otwierają link w telefonie i dodają aplikację do ekranu głównego — działa jak zwykła aplikacja, z ikoną i powiadomieniami."),
+        new("Jak działają płatności online?", "Podpinasz swoje konto PayU albo Przelewy24. Klienci płacą BLIKIEM, kartą lub przelewem, a pieniądze trafiają bezpośrednio na Twoje konto. Nie pobieramy prowizji od Twoich płatności."),
+        new("Czy mogę wystawiać faktury i wysyłać je do KSeF?", "Tak. Aplikacja tworzy faktury z danymi firmy klienta i może wysłać je do KSeF — wystarczy token z Twojego konta w KSeF."),
+        new("Czy mogę podpiąć własną domenę?", "Tak (od planu Starter), np. annafit.pl. Wpisujesz ją w kreatorze, ustawiasz u dostawcy domeny jeden rekord DNS, a my sami podłączamy domenę i certyfikat HTTPS — dostaniesz e-mail, gdy zadziała."),
+        new("Czy asystent AI ma dostęp do danych moich klientów?", "Asystent korzysta z danych w Twojej aplikacji, żeby wiedzieć, co jest ważne — ale do modelu AI wysyłamy tylko liczby i fakty (np. „3 treningi poza pakietem”), bez imion i danych kontaktowych. Każda liczba w odpowiedzi jest sprawdzana z faktami, a asystenta wyciszysz jednym kliknięciem."),
+        new("Czy dane moich klientów są bezpieczne?", "Każdy trener ma osobną aplikację i osobną bazę danych na serwerach w Europie. Zdjęcia sylwetki i ankiety zdrowotne widzisz tylko Ty i dany klient. Klient może pobrać lub usunąć swoje dane zgodnie z RODO."),
+        new("Czy przy rejestracji trzeba podać kartę?", "Przy planie darmowym nie — wystarczy potwierdzić e-mail kodem. Przy planach płatnych podpinasz kartę: pierwsza opłata dopiero po okresie próbnym, przed nią przypominamy e-mailem, a subskrypcję anulujesz w aplikacji jednym kliknięciem."),
+        new("Czy mogę zacząć za darmo?", "Tak. Plan startowy jest za 0 zł i bez karty — idealny, żeby sprawdzić aplikację z pierwszymi klientami. Na plan płatny przejdziesz w aplikacji, gdy przybędzie klientów; dane zostają."),
+        new("Co, jeśli zrezygnuję?", "Nie ma umów ani okresu wypowiedzenia. Przed zamknięciem konta możesz wyeksportować dane klientów.")
+    ];
+
+    public const string GarminLabel = "Zegarki klientów (Garmin)";
+    /// <summary>
+    /// Lista cech planu z katalogu funkcji (<see cref="PlanFeatureCatalog"/>) — to samo, co trener dostaje w aplikacji
+    /// i co ustawiasz w macierzy planów. Garmin tylko, gdy włączony w Portalu; SMS-y tylko z bramką SMS.
+    /// </summary>
+    public static IEnumerable<(string Label, bool Included)> PlanFeatures(Plan p, bool garmin = false, bool sms = false)
+    {
+        yield return (p.MaxClients >= 9999 ? "Nielimitowani klienci" : $"Do {p.MaxClients} klientów", true);
+        yield return ("Grafik, rezerwacje online, czat", true);
+        foreach (var f in PlanFeatureCatalog.All.Where(f => f.Pitch && Available(f.Key, garmin, sms)).OrderBy(f => PlanFeatureCatalog.PitchRank(f.Key)))
+            yield return (Label(p, f), PlanFeatureCatalog.Has(p, f) && (f.Key != "MaxTrainers" || p.MaxTrainers > 1));
+    }
+
+    /// <summary>Podpis pod ceną: darmowy plan z okresem próbnym wyższego planu, roczna cena, dni próbne.</summary>
+    public static string PricePeriod(Plan plan, Plan? trialPlan) =>
+        plan.MonthlyPrice == 0 ? (trialPlan is { TrialDays: > 0 } tp ? $"na start {tp.TrialDays} dni planu {tp.Name} za darmo" : "za darmo, bez limitu czasu")
+        : plan.YearlyPrice is > 0 ? $"lub {plan.YearlyPrice:0} zł rocznie" + (plan.TrialDays > 0 ? $" · {plan.TrialDays} dni za darmo" : "")
+        : plan.TrialDays > 0 ? $"{plan.TrialDays} dni za darmo na start" : "";
+
+    /// <summary>Funkcja istnieje na platformie (Garmin włączony, bramka SMS podłączona).</summary>
+    public static bool Available(string key, bool garmin, bool sms) =>
+        (garmin || key != "Wearables") && (sms || key is not ("SmsReminders" or "MaxSmsPerMonth"));
+
+    /// <summary>Nazwa z katalogu, a przy funkcjach z limitem — z liczbą z planu (np. „Przypomnienia SMS (150/mies.)”).</summary>
+    private static string Label(Plan p, PlanFeature f) => f.Key switch
+    {
+        "SmsReminders" when p.SmsReminders && p.MaxSmsPerMonth is > 0 and < 9999 => $"{f.Name} ({p.MaxSmsPerMonth}/mies.)",
+        "AiAssistant" when p.AiAssistant && p.MaxAiActionsPerMonth is > 0 and < 99999 => $"{f.Name} ({p.MaxAiActionsPerMonth} akcji/mies.)",
+        "MaxTrainers" => p.MaxTrainers >= 9999 ? "Bez limitu trenerów w zespole" : $"Do {p.MaxTrainers} trenerów w zespole",
+        _ => f.Name
+    };
+
+    /// <summary>Plany na pierwszy rzut oka: darmowy (najtańszy), wyróżniony i najwyższy — reszta w porównaniu.</summary>
+    public static List<Plan> MainPlans(IReadOnlyList<Plan> plans)
+    {
+        if (plans.Count <= 3) return [.. plans];
+        var byPrice = plans.OrderBy(p => p.MonthlyPrice).ToList();
+        var picked = new HashSet<Plan> { byPrice[0], byPrice[^1] };
+        picked.Add(plans.FirstOrDefault(p => p.IsFeatured) ?? byPrice[byPrice.Count / 2]);
+        return [.. plans.Where(picked.Contains)];
+    }
+
+    /// <summary>Dla kogo jest plan — jedno zdanie z jego limitów (bez ręcznego opisu w Panelu).</summary>
+    public static string ForWhom(Plan p)
+    {
+        var clients = p.MaxClients >= 9999 ? "bez limitu klientów" : $"do {p.MaxClients} klientów";
+        if (p.MaxTrainers >= 5) return $"Studio z zespołem: {(p.MaxTrainers >= 9999 ? "bez limitu trenerów" : $"do {p.MaxTrainers} trenerów")}, {clients}";
+        if (p.MonthlyPrice <= 0) return $"Na start: sprawdzasz aplikację z pierwszymi klientami ({clients})";
+        var team = p.MaxTrainers > 1 ? $", do {p.MaxTrainers} trenerów" : "";
+        return p.PaymentsEnabled ? $"Trener z pełnym grafikiem: płatności online, {clients}{team}" : $"Trener, który rośnie: {clients}{team}";
+    }
+
+    /// <summary>
+    /// Najważniejsze punkty karty planu: przy pierwszym planie pierwsze cechy, przy wyższych tylko to,
+    /// czego nie ma niższy plan („Wszystko z …, a także:”) — karta zostaje krótka.
+    /// </summary>
+    public static (string? Lead, List<string> Points) Highlights(Plan plan, Plan? lower, int max = 5, bool garmin = false, bool sms = false)
+    {
+        var mine = PlanFeatures(plan, garmin, sms).Where(f => f.Included).Select(f => f.Label).ToList();
+        if (lower is null) return (null, mine.Take(max).ToList());
+        var theirs = PlanFeatures(lower, garmin, sms).Where(f => f.Included).Select(f => f.Label).ToHashSet();
+        var extra = mine.Where(l => !theirs.Contains(l)).Take(max).ToList();
+        return ($"Wszystko z planu {lower.Name}, a także:", extra);
+    }
+
+    /// <param name="Key">Pole katalogu — do ukrycia funkcji niedostępnych na platformie (Garmin, SMS).</param>
+    public sealed record CompareRow(string Label, Func<Plan, string> Value, string? Key = null);
+
+    /// <summary>Tabela „Porównaj wszystkie plany” z katalogu funkcji: ✓ / — albo wartość (klienci, trenerzy, limity).</summary>
+    public static readonly CompareRow[] CompareRows =
+    [
+        new("Klienci", p => p.MaxClients >= 9999 ? "bez limitu" : $"do {p.MaxClients}"),
+        new("Grafik, rezerwacje online, czat", _ => "✓"),
+        .. PlanFeatureCatalog.All.Where(f => f.Pitch || f.Key is "MaxSmsPerMonth" or "MaxAiActionsPerMonth" or "MaxVideoStorageGB")
+            .Select(f => new CompareRow(f.Name, p =>
+                (f.Key == "MaxTrainers" && p.MaxTrainers <= 1) || (f.Key == "MaxVideoStorageGB" && p.VideoProvider != "bunny") ? "—" : Short(PlanFeatureCatalog.Describe(p, f)), f.Key)),
+    ];
+
+    private static string Short(string v) => v.Replace(" akcji/mies.", "").Replace(" SMS/mies.", "").Replace(" trenerów", "");
+
+
+}

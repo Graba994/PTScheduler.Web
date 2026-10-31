@@ -1,0 +1,875 @@
+@page "/train"
+@using System.Text.Json
+@using Microsoft.AspNetCore.Authorization
+@using Microsoft.Extensions.Logging
+@using PTScheduler.Application.DTOs
+@using PTScheduler.Application.Interfaces
+@using PTScheduler.Application.Surveys
+@using PTScheduler.Domain.Constants
+@using PTScheduler.Domain.Enums
+@using PTScheduler.Domain.Rules
+@attribute [Authorize(Roles = Roles.Client + "," + Roles.Admin + "," + Roles.Trainer + "," + Roles.Subordinate)]
+@inject ITrainingPlanService PlanService
+@inject ISessionService Sessions
+@inject IWorkoutLogService WorkoutLog
+@inject IWorkoutSessionService Session
+@inject IClientService ClientService
+@inject IExerciseCatalogService Catalog
+@inject ISurveyService Surveys
+@inject IAppClock Clock
+@inject AuthenticationStateProvider AuthState
+@inject IJSRuntime JS
+@inject ILoggerFactory LoggerFactory
+@inject PTScheduler.Web.Services.WorkoutCompanionService Companion
+@inject PTScheduler.Web.Services.MedalService MedalSvc
+@inject Microsoft.AspNetCore.Identity.UserManager<PTScheduler.Infrastructure.Data.ApplicationUser> UserManager
+@rendermode PTScheduler.Web.RenderModes.Server
+
+<AppTitle Page="Trenuj" />
+
+<FeatureGate Flag="TrainingPlansEnabled" Title="Moduł treningowy" ShowUpgrade="false">
+<Description>Moduł treningowy nie jest dostępny w pakiecie Twojego trenera.</Description>
+<ChildContent>
+
+<div class="page-header d-flex align-items-center justify-content-between flex-wrap gap-2">
+    <h4 class="page-title mb-0"><i class="bi bi-lightning-charge-fill me-2" style="color:var(--c-primary)"></i>@(_liveFor is null ? "Trenuj" : "Trening na żywo")</h4>
+    @if (_liveFor is not null)
+    {
+        <div class="d-flex gap-2">
+            <a class="btn btn-sm btn-outline-secondary" href="/dzis"><i class="bi bi-sun me-1"></i>Wróć do dnia</a>
+            <a class="btn btn-sm btn-outline-secondary" href="@($"/clients/{_clientId}")"><i class="bi bi-person-vcard me-1"></i>Profil klienta</a>
+        </div>
+    }
+</div>
+@if (_liveFor is not null)
+{
+    <div class="tr-live" role="status">
+        <span class="tr-live-dot" aria-hidden="true"></span>
+        <div><b>Prowadzisz trening: @_liveFor</b><small>Serie zapisują się w dzienniku klienta — klient zobaczy je w swojej aplikacji i dostanie podsumowanie.@(LiveSessionId is not null ? " Po „Zakończ trening” wizyta oznaczy się jako ukończona." : "")</small></div>
+    </div>
+    @if (_visitDone is not null)
+    {
+        <div class="alert alert-success d-flex align-items-center gap-2 flex-wrap small"><i class="bi bi-check2-circle"></i><span class="me-auto">@_visitDone</span><a class="btn btn-sm btn-success" href="/dzis">Wróć do dnia</a></div>
+    }
+}
+@if (_liveDenied)
+{
+    <div class="alert alert-warning">Ten klient nie jest na Twojej liście — trening na żywo prowadzi jego trener.</div>
+}
+
+@if (_clientId is null)
+{
+    <div class="alert alert-warning"><i class="bi bi-info-circle me-2"></i>Twoje konto nie jest jeszcze powiązane z profilem klienta. Skontaktuj się z trenerem.</div>
+}
+else if (_draft is not null)
+{
+    <!-- ===== Tryb treningu ===== -->
+    var totalSets = _draft.Exercises.Sum(e => e.Sets.Count);
+    var doneSets = _draft.Exercises.Sum(e => e.Sets.Count(s => s.Done));
+    var pct = totalSets == 0 ? 0 : doneSets * 100 / totalSets;
+    <div class="train-bar">
+        <div class="d-flex align-items-center gap-2">
+            <div class="flex-grow-1 min-w-0">
+                <div class="fw-semibold text-truncate">@_draft.PlanName · @_draft.DayLabel</div>
+                <div class="small text-muted">start @_draft.StartedAt.ToString("HH:mm") · @doneSets z @totalSets serii</div>
+            </div>
+            <button class="btn btn-success fw-semibold" @onclick="Finish" disabled="@_finishing">
+                @if (_finishing) { <span class="spinner-border spinner-border-sm me-1"></span> }
+                Zakończ
+            </button>
+        </div>
+        <div class="train-progress" role="progressbar" aria-valuenow="@pct" aria-valuemin="0" aria-valuemax="100" aria-label="Postęp treningu">
+            <div style="width:@(pct)%"></div>
+        </div>
+    </div>
+
+    <p class="train-hint"><i class="bi bi-cloud-check me-1"></i>Odhaczaj serie po kolei — postęp zapisuje się sam, także bez internetu.</p>
+
+    @if (!string.IsNullOrEmpty(_error))
+    {
+        <div class="alert alert-danger py-2">@_error</div>
+    }
+
+    @for (var ei = 0; ei < _draft.Exercises.Count; ei++)
+    {
+        var ex = _draft.Exercises[ei];
+        var exIdx = ei;
+        var tr = ex.Tracking;
+        var exDone = ex.Sets.Count > 0 && ex.Sets.All(s => s.Done);
+        var collapsed = exDone && !_expanded.Contains(exIdx);
+        <div class="card train-ex @(exDone ? "is-done" : "")">
+            <button type="button" class="train-ex-head" @onclick="() => ToggleExpanded(exIdx, exDone)" aria-expanded="@(collapsed ? "false" : "true")">
+                @if (!string.IsNullOrEmpty(ex.ThumbnailUrl))
+                {
+                    <img src="@ex.ThumbnailUrl" alt="" class="train-ex-thumb" />
+                }
+                else
+                {
+                    <span class="train-ex-thumb train-ex-thumb-empty"><i class="bi pt-ico-dumbbell"></i></span>
+                }
+                <span class="train-ex-title">
+                    <span class="train-ex-name">@ex.NamePl</span>
+                    <span class="train-ex-target">Cel: @TargetText(ex)@(ex.RestSeconds is int rest && rest > 0 ? $" · przerwa {ExerciseTrackingRules.FormatDuration(rest)}" : "")</span>
+                    @if (!string.IsNullOrEmpty(ex.LastText))
+                    {
+                        <span class="train-ex-last">Ostatnio @ex.LastDate?.ToString("dd.MM"): @ex.LastText</span>
+                    }
+                    @if (ex.TargetWeightKg is { } tw && ex.LastMaxKg is { } lm && lm > 0 && tw > lm)
+                    {
+                        <span class="train-ex-up"><i class="bi bi-arrow-up-circle-fill"></i>Nowy ciężar od trenera: @tw.ToString("0.##") kg (ostatnio @lm.ToString("0.##"))</span>
+                    }
+                </span>
+                @if (exDone)
+                {
+                    <span class="train-ex-status done"><i class="bi bi-check-lg"></i></span>
+                }
+                else
+                {
+                    <span class="train-ex-status">@ex.Sets.Count(s => s.Done)/@ex.Sets.Count</span>
+                }
+            </button>
+
+            @if (!collapsed)
+            {
+                <div class="train-ex-body">
+                    @if (!string.IsNullOrWhiteSpace(ex.Notes))
+                    {
+                        <div class="train-ex-note"><i class="bi bi-chat-quote me-1"></i>@ex.Notes</div>
+                    }
+                    <button type="button" class="train-howto-btn" @onclick="() => ShowHowToAsync(ex)">
+                        <i class="bi bi-play-circle-fill"></i>Jak wykonać to ćwiczenie?
+                    </button>
+                    <div class="train-cols" style="--cols:@Columns(tr).Count">
+                        <span class="text-center">#</span>
+                        @foreach (var col in Columns(tr))
+                        {
+                            <span>@col.Label</span>
+                        }
+                        <span class="text-center"><i class="bi bi-check-lg"></i></span>
+                    </div>
+                    @for (var si = 0; si < ex.Sets.Count; si++)
+                    {
+                        var set = ex.Sets[si];
+                        var setIdx = si;
+                        <div class="train-set @(set.Done ? "is-done" : "")" style="--cols:@Columns(tr).Count">
+                            <span class="train-set-no">@(setIdx + 1)</span>
+                            @foreach (var col in Columns(tr))
+                            {
+                                var c = col;
+                                <NumberStepper Value="c.Get(set)" ValueChanged="v => SetValue(ex, set, c, v)"
+                                               Step="c.StepFor(set)" Mode="c.Mode" Max="c.Max" Label="@($"Seria {setIdx + 1}: {c.Label}")" />
+                            }
+                            <button type="button" class="train-check" @onclick="() => ToggleDone(ex, setIdx)"
+                                    aria-pressed="@(set.Done ? "true" : "false")" aria-label="@($"Seria {setIdx + 1} {(set.Done ? "zrobiona — cofnij" : "— oznacz jako zrobioną")}")">
+                                <i class="bi bi-check-lg"></i>
+                            </button>
+                        </div>
+                    }
+                    <div class="train-ex-actions">
+                        <button class="btn btn-outline-secondary" @onclick="() => AddSet(ex)"><i class="bi bi-plus-lg me-1"></i>Seria</button>
+                        @if (ex.Sets.Count > 0)
+                        {
+                            <button class="btn btn-outline-danger" @onclick="() => RemoveLastSet(ex)"><i class="bi bi-trash3 me-1"></i>Usuń ostatnią</button>
+                        }
+                    </div>
+                </div>
+            }
+        </div>
+    }
+
+    <div class="d-flex flex-column gap-2 my-3">
+        <button class="btn btn-success btn-lg py-3 fw-semibold" @onclick="Finish" disabled="@_finishing">
+            @if (_finishing) { <span class="spinner-border spinner-border-sm me-1"></span> }
+            <i class="bi bi-check2-circle me-1"></i>Zakończ trening
+        </button>
+        <button class="btn btn-link text-danger" @onclick="DiscardDraft"><i class="bi bi-x-circle me-1"></i>Odrzuć trening</button>
+    </div>
+
+    @if (_howTo is not null)
+    {
+        <ExerciseHowTo Name="@_howTo.NamePl" Note="@_howTo.Notes" Detail="_howToDetail" Loading="_howToLoading" OnClose="() => _howTo = null" />
+    }
+}
+else
+{
+    <!-- ===== Wybór planu / dnia ===== -->
+    @if (!string.IsNullOrEmpty(_justFinished))
+    {
+        <div class="alert alert-success"><i class="bi bi-check2-circle me-2"></i>@_justFinished</div>
+    }
+
+    @if (_survey is not null && _surveyDate is { } surveyDate)
+    {
+        <div class="card mb-3 border-primary">
+            <div class="card-body">
+                <h5 class="fw-bold mb-1"><i class="bi bi-emoji-smile me-2" style="color:var(--c-primary)"></i>@_survey.Name</h5>
+                <SurveyForm Template="_survey" Initial="_surveyInitial" SubmitLabel="Wyślij" SkipLabel="Pomiń"
+                            Submit="d => SubmitSurveyAsync(d, surveyDate)" OnSkip="SkipSurvey" />
+            </div>
+        </div>
+    }
+    else if (_summary is not null)
+    {
+        @* Po ankiecie (albo bez niej) — podsumowanie właśnie zakończonego treningu. *@
+        <WorkoutSummary Day="_summary" Survey="_summarySurvey" Celebrate="true" Highlights="_highlights" OnClose="() => _summary = null" />
+        <NewMedalModal Medals="_newMedals" Settings="_medalSettings" OnDone="MedalsSeenAsync" />
+    }
+
+    @if (_selectedPlan is null)
+    {
+        @if (_plans.Count == 0)
+        {
+            @if (_liveFor is not null)
+            {
+                <div class="alert alert-secondary d-flex align-items-center gap-2 flex-wrap"><i class="bi bi-inbox"></i><span class="me-auto">@_liveFor nie ma jeszcze planu — utwórz go, a trening zaczniesz od razu.</span>
+                    <a class="btn btn-sm btn-primary" href="@($"/plans/new?klient={_clientId}")"><i class="bi bi-plus-lg me-1"></i>Utwórz plan</a></div>
+            }
+            else
+            {
+                <div class="alert alert-secondary"><i class="bi bi-inbox me-2"></i>Nie masz jeszcze przypisanego planu treningowego.</div>
+            }
+        }
+        else
+        {
+            // Klient zaczyna sam tylko plany „samodzielnie” i „oba”; trener (na żywo) — każdy.
+            var startable = _plans.Where(p => _liveFor is not null || p.Use != PTScheduler.Domain.Enums.PlanUse.WithTrainer).ToList();
+            var withTrainer = _liveFor is null ? _plans.Where(p => p.Use == PTScheduler.Domain.Enums.PlanUse.WithTrainer).ToList() : [];
+            @if (startable.Count > 0)
+            {
+                <div class="text-muted small mb-2">@(_liveFor is null ? "Wybierz plan na dziś:" : "Wybierz plan:")</div>
+                <div class="row g-2">
+                    @foreach (var p in startable)
+                    {
+                        <div class="col-12 col-md-6">
+                            <button class="card w-100 text-start border-0 shadow-sm" @onclick="() => SelectPlan(p.Id)">
+                                <div class="card-body py-2">
+                                    <div class="fw-semibold">@p.Name</div>
+                                    <div class="text-muted small"><i class="bi bi-calendar3 me-1"></i>@p.DayCount @(PTScheduler.Web.Services.AssistantTipsService.Plural(p.DayCount, "dzień", "dni", "dni")) · @p.ExerciseCount @(PTScheduler.Web.Services.AssistantTipsService.Plural(p.ExerciseCount, "ćwiczenie", "ćwiczenia", "ćwiczeń"))@(p.LastWorkout is { } lw ? $" · ostatnio {lw:dd.MM}" : "")</div>
+                                </div>
+                            </button>
+                        </div>
+                    }
+                </div>
+            }
+            @if (withTrainer.Count > 0)
+            {
+                <div class="tr-with-trainer">
+                    <div class="text-muted small mb-1"><i class="bi bi-people me-1"></i>Na treningach z trenerem — zrobicie je razem:</div>
+                    @foreach (var p in withTrainer)
+                    {
+                        <div class="tr-wt-item"><b>@p.Name</b><span>@(p.NextSessionAt is { } ns ? $"najbliżej: {ns:dd.MM, HH:mm}" : $"{p.DayCount} {PTScheduler.Web.Services.AssistantTipsService.Plural(p.DayCount, "dzień", "dni", "dni")} · {p.ExerciseCount} {PTScheduler.Web.Services.AssistantTipsService.Plural(p.ExerciseCount, "ćwiczenie", "ćwiczenia", "ćwiczeń")}")</span></div>
+                    }
+                </div>
+            }
+            @if (startable.Count == 0 && withTrainer.Count > 0)
+            {
+                <div class="alert alert-secondary small mt-2 mb-0"><i class="bi bi-info-circle me-1"></i>Na razie nie masz planu do samodzielnego trenowania — trener prowadzi Cię na wizytach.</div>
+            }
+        }
+    }
+    else
+    {
+        <div class="d-flex align-items-center gap-2 mb-2">
+            <button class="btn btn-sm btn-outline-secondary" @onclick="() => _selectedPlan = null"><i class="bi bi-arrow-left"></i></button>
+            <div class="fw-semibold flex-grow-1">@_selectedPlan.Name</div>
+            @if (_selectedPlan.Id is { } pdfId)
+            {
+                <a href="@($"/plans/{pdfId}/pdf")" target="_blank" rel="noopener" class="btn btn-sm btn-outline-secondary" title="Plan do wydruku"><i class="bi bi-file-earmark-pdf me-1"></i>PDF</a>
+            }
+        </div>
+        @if (!string.IsNullOrWhiteSpace(_selectedPlan.Purpose))
+        {
+            <div class="train-purpose"><div class="train-purpose-label"><i class="bi bi-compass me-1"></i>Po co ten plan</div>@_selectedPlan.Purpose</div>
+        }
+        <div class="text-muted small mb-2">Wybierz dzień:</div>
+        <div class="row g-2">
+            @foreach (var d in _selectedPlan.Days)
+            {
+                <div class="col-12 col-md-6">
+                    <button class="card w-100 text-start border-0 shadow-sm" @onclick="() => StartDay(d)">
+                        <div class="card-body py-2">
+                            <div class="fw-semibold">@(string.IsNullOrWhiteSpace(d.Label) ? "Dzień" : d.Label)</div>
+                            <div class="text-muted small"><i class="bi pt-ico-dumbbell me-1"></i>@d.Exercises.Count ćwiczeń</div>
+                        </div>
+                    </button>
+                </div>
+            }
+        </div>
+    }
+
+    @if (_history.Count > 0)
+    {
+        <hr class="my-3" />
+        <div class="text-muted small mb-2"><i class="bi bi-clock-history me-1"></i>Ostatnie treningi</div>
+        <ul class="list-group">
+            @foreach (var h in _history)
+            {
+                var open = _historyDay?.Date == h.Date;
+                <li class="list-group-item p-0">
+                    <button type="button" class="train-history-item d-flex justify-content-between align-items-center gap-2 py-2 px-3 small @(open ? "active" : "")"
+                            aria-expanded="@(open ? "true" : "false")" @onclick="() => ToggleHistoryAsync(h.Date)">
+                        <span class="fw-semibold">@h.Date.ToString("dd.MM.yyyy")</span>
+                        <span class="text-muted ms-auto">@h.ExerciseCount ćw. · @h.SetCount serii@(h.TotalVolume > 0 ? $" · {h.TotalVolume:0} kg" : "")</span>
+                        <i class="bi @(open ? "bi-chevron-up" : "bi-chevron-down") text-muted"></i>
+                    </button>
+                    @if (open && _historyDay is not null)
+                    {
+                        <div class="px-2 pb-2">
+                            <WorkoutSummary Day="_historyDay" Survey="_historySurvey" />
+                        </div>
+                    }
+                </li>
+            }
+        </ul>
+    }
+}
+</ChildContent>
+</FeatureGate>
+
+@code {
+    private int? _clientId;
+    // Trening na żywo: trener prowadzi trening klienta (?klient=ID[&plan=ID&dzien=ID]) — zapis trafia do dziennika klienta.
+    [SupplyParameterFromQuery(Name = "klient")] public int? LiveClientId { get; set; }
+    [SupplyParameterFromQuery(Name = "plan")] public int? LivePlanId { get; set; }
+    [SupplyParameterFromQuery(Name = "dzien")] public int? LiveDayId { get; set; }
+    /// <summary>Wizyta, z której trener zaczął trening (Dziś, Pulpit) — po zakończeniu treningu staje się „ukończona”.</summary>
+    [SupplyParameterFromQuery(Name = "wizyta")] public int? LiveSessionId { get; set; }
+    private string? _visitDone;
+    private string? _liveFor;
+    private bool _liveDenied;
+    private string _storeKey = "";
+    private List<TrainingPlanListItemDto> _plans = [];
+    private List<WorkoutHistoryItemDto> _history = [];
+    private PlanEditDto? _selectedPlan;
+
+    private WorkoutDraft? _draft;
+    private bool _draftLoaded;
+    private bool _finishing;
+    private string? _error;
+    private string? _justFinished;
+    private SurveyTemplateDto? _survey;
+    private WorkoutJournalDayDto? _summary;
+    private SurveyResponseDto? _summarySurvey;
+    private PTScheduler.Web.Services.WorkoutCompanionService.Summary? _highlights;
+    private List<PTScheduler.Domain.Rules.MedalRules.Medal> _newMedals = [];
+    private PTScheduler.Web.Services.MedalService.Settings? _medalSettings;
+
+    private async Task MedalsSeenAsync()
+    {
+        _newMedals = [];
+        // Medale „widzi” klient — trener prowadzący trening ich nie odhacza.
+        if (_clientId is { } id && _liveFor is null) await MedalSvc.MarkSeenAsync(id);
+    }
+    private WorkoutJournalDayDto? _historyDay;
+    private SurveyResponseDto? _historySurvey;
+    private string _savedText = "";
+    private DateOnly? _surveyDate;
+    private Dictionary<string, SurveyAnswerInput>? _surveyInitial;
+    private readonly HashSet<int> _expanded = [];
+    private bool _scrollTop;
+
+    // „Jak wykonać?” w trakcie treningu — opis i film z katalogu trenera.
+    private string? _trainerUserId;
+    private DraftExercise? _howTo;
+    private ExerciseDetailDto? _howToDetail;
+    private bool _howToLoading;
+    private readonly Dictionary<int, ExerciseDetailDto?> _howToCache = [];
+
+    private async Task ShowHowToAsync(DraftExercise ex)
+    {
+        _howTo = ex;
+        if (_howToCache.TryGetValue(ex.ExerciseId, out var cached)) { _howToDetail = cached; return; }
+        _howToDetail = null;
+        _howToLoading = true;
+        try
+        {
+            _howToDetail = string.IsNullOrEmpty(_trainerUserId) ? null : await Catalog.GetAsync(_trainerUserId, ex.ExerciseId);
+            _howToCache[ex.ExerciseId] = _howToDetail;
+        }
+        catch (Exception e) { LoggerFactory.CreateLogger("Train").LogWarning(e, "Nie udało się wczytać opisu ćwiczenia {Id}.", ex.ExerciseId); }
+        finally { _howToLoading = false; }
+    }
+
+    protected override async Task OnInitializedAsync()
+    {
+        var auth = await AuthState.GetAuthenticationStateAsync();
+        var userId = auth.User.FindFirst(System.Security.Claims.ClaimTypes.NameIdentifier)?.Value ?? "";
+        ClientDto? client;
+        if (LiveClientId is { } liveId && !auth.User.IsInRole(Roles.Client))
+        {
+            client = await ClientService.GetClientAsync(liveId);
+            if (client is null || !await MayLeadAsync(auth.User, userId, client)) { _liveDenied = true; return; }
+            _liveFor = client.FullName;
+        }
+        else client = await ClientService.GetClientByUserIdAsync(userId);
+        if (client is null) return;
+        _clientId = client.Id;
+        _trainerUserId = client.TrainerUserId;
+        _storeKey = $"pt_workout_v1_{_clientId}";
+        _plans = await PlanService.GetClientPlansAsync(_clientId.Value);
+        _history = await WorkoutLog.GetRecentForClientAsync(_clientId.Value, 10);
+    }
+
+    protected override async Task OnAfterRenderAsync(bool firstRender)
+    {
+        if (_scrollTop)
+        {
+            // Po zakończeniu treningu strona się skraca — pokaż podsumowanie i ankietę od góry.
+            _scrollTop = false;
+            try { await JS.InvokeVoidAsync("window.scrollTo", 0, 0); } catch { /* best-effort */ }
+        }
+        // Raz, gdy klient jest już wczytany (pierwszy render bywa wcześniej niż koniec OnInitializedAsync).
+        if (_clientId is null || _draftLoaded) return;
+        _draftLoaded = true;
+        try
+        {
+            // Lokalny bufor (localStorage) — natychmiastowy, odporny offline.
+            WorkoutDraft? local = null;
+            var json = await JS.InvokeAsync<string?>("PTWorkout.load", _storeKey);
+            if (!string.IsNullOrWhiteSpace(json)) local = Deserialize(json);
+
+            // Backup serwerowy — pozwala wznowić na innym urządzeniu / po utracie telefonu.
+            WorkoutDraft? server = null;
+            try
+            {
+                var s = await Session.GetOpenDraftAsync(_clientId.Value);
+                if (s is not null && !string.IsNullOrWhiteSpace(s.DraftJson)) server = Deserialize(s.DraftJson);
+            }
+            catch (Exception ex) { LoggerFactory.CreateLogger("Train").LogError(ex, "Nie udało się pobrać treningu z serwera."); }
+
+            // Wygrywa nowsza wersja (po SavedAt).
+            _draft = (local, server) switch
+            {
+                (null, null) => null,
+                (not null, null) => local,
+                (null, not null) => server,
+                _ => server!.SavedAt > local!.SavedAt ? server : local
+            };
+
+            if (_draft is not null)
+            {
+                // Ujednolić oba magazyny na wybranej wersji.
+                await PersistDraftAsync();
+                StateHasChanged();
+            }
+            else await AutoStartLiveAsync();
+        }
+        catch (Exception ex) { LoggerFactory.CreateLogger("Train").LogError(ex, "Nie udało się wczytać trwającego treningu."); }
+    }
+
+    /// <summary>Trening na żywo prowadzi administrator, trener klienta albo asystent tego trenera.</summary>
+    private async Task<bool> MayLeadAsync(System.Security.Claims.ClaimsPrincipal user, string userId, ClientDto client)
+    {
+        if (user.IsInRole(Roles.Admin)) return true;
+        if (user.IsInRole(Roles.Trainer)) return client.TrainerUserId == userId;
+        if (user.IsInRole(Roles.Subordinate))
+            return (await UserManager.FindByIdAsync(userId))?.SupervisorId is { } boss && boss == client.TrainerUserId;
+        return false;
+    }
+
+    /// <summary>Z profilu klienta „Zacznij trening na żywo” z wybranym dniem planu — od razu lista ćwiczeń.</summary>
+    private async Task AutoStartLiveAsync()
+    {
+        if (_liveFor is null || _draft is not null || LivePlanId is not { } planId || LiveDayId is not { } dayId) return;
+        await SelectPlan(planId);
+        if (_selectedPlan?.Days.FirstOrDefault(d => d.Id == dayId) is { } day)
+        {
+            await StartDay(day);
+            StateHasChanged();
+        }
+    }
+
+    private static WorkoutDraft? Deserialize(string json)
+    {
+        try { return JsonSerializer.Deserialize<WorkoutDraft>(json); }
+        catch { return null; }
+    }
+
+    private async Task SelectPlan(int planId)
+    {
+        if (_clientId is null) return;
+        _selectedPlan = await PlanService.GetForWorkoutAsync(_clientId.Value, planId);
+    }
+
+    private async Task StartDay(PlanDayEditDto day)
+    {
+        if (_selectedPlan is null) return;
+        _draft = new WorkoutDraft
+        {
+            ClientId = _clientId!.Value,
+            PlanId = _selectedPlan.Id,
+            PlanDayId = day.Id,
+            PlanName = _selectedPlan.Name,
+            DayLabel = string.IsNullOrWhiteSpace(day.Label) ? "Dzień" : day.Label,
+            Date = Clock.Today,
+            StartedAt = Clock.LocalNow,
+            Exercises = day.Exercises.Select(x =>
+            {
+                var ex = new DraftExercise
+                {
+                    ExerciseId = x.ExerciseId,
+                    PlanExerciseId = x.Id,
+                    NamePl = x.ExerciseNamePl,
+                    ThumbnailUrl = x.ThumbnailUrl,
+                    Tracking = x.Tracking,
+                    TargetSets = x.Sets,
+                    TargetReps = x.Reps,
+                    TargetWeightKg = x.TargetWeightKg,
+                    TargetDurationSeconds = x.TargetDurationSeconds,
+                    TargetDistanceMeters = x.TargetDistanceMeters,
+                    RestSeconds = x.RestSeconds,
+                    Notes = x.Notes
+                };
+                // Wypełnione tym, co zadał trener (np. 3 × 10 po 40 kg) — wystarczy odhaczyć albo poprawić −/+.
+                ex.Sets = Enumerable.Range(0, Math.Max(1, x.Sets)).Select(_ => NewSet(ex)).ToList();
+                return ex;
+            }).ToList()
+        };
+        // „Ostatnio” przy każdym ćwiczeniu; bez ciężaru w planie — wpisujemy ostatnio użyte kilogramy.
+        try
+        {
+            var last = await Companion.LastAsync(_clientId!.Value, _draft.Exercises.Select(e => e.ExerciseId).Distinct().ToList(), Clock.Today);
+            foreach (var ex in _draft.Exercises)
+            {
+                if (!last.TryGetValue(ex.ExerciseId, out var l)) continue;
+                ex.LastDate = l.Date;
+                ex.LastText = PTScheduler.Application.Training.WorkoutHighlights.Describe(l.Sets);
+                ex.LastMaxKg = l.MaxKg;
+                if (ex.TargetWeightKg is null && ExerciseTrackingRules.UsesWeight(ex.Tracking))
+                {
+                    var weights = l.Sets.Where(x => x.Reps > 0 && x.WeightKg > 0).Select(x => x.WeightKg).ToList();
+                    for (var i = 0; i < ex.Sets.Count && weights.Count > 0; i++)
+                        ex.Sets[i].Weight = weights[Math.Min(i, weights.Count - 1)];
+                }
+            }
+        }
+        catch (Exception lx) { LoggerFactory.CreateLogger("Train").LogWarning(lx, "Nie udało się wczytać poprzednich serii."); }
+        _expanded.Clear();
+        _selectedPlan = null;
+        await SaveDraft();
+    }
+
+    /// <summary>Nowa seria z celami trenera; zakres „8-12” wypełnia dolną granicą.</summary>
+    private static DraftSet NewSet(DraftExercise ex) => new()
+    {
+        Reps = ExerciseTrackingRules.UsesReps(ex.Tracking) ? ProgressionRules.ParseReps(ex.TargetReps)?.Min ?? 0 : 0,
+        Weight = ExerciseTrackingRules.UsesWeight(ex.Tracking) ? ex.TargetWeightKg ?? 0m : 0m,
+        DurationSeconds = ExerciseTrackingRules.UsesTime(ex.Tracking) ? ex.TargetDurationSeconds : null,
+        DistanceMeters = ExerciseTrackingRules.UsesDistance(ex.Tracking) ? ex.TargetDistanceMeters : null
+    };
+
+    private async Task AddSet(DraftExercise ex)
+    {
+        var last = ex.Sets.LastOrDefault();
+        ex.Sets.Add(last is null ? NewSet(ex) : new DraftSet
+        {
+            Reps = last.Reps, Weight = last.Weight, DurationSeconds = last.DurationSeconds, DistanceMeters = last.DistanceMeters
+        });
+        _expanded.Add(_draft!.Exercises.IndexOf(ex));
+        await SaveDraft();
+    }
+
+    private async Task RemoveLastSet(DraftExercise ex)
+    {
+        if (ex.Sets.Count == 0) return;
+        if (!await JS.InvokeAsync<bool>("confirm", $"Usunąć serię {ex.Sets.Count} z ćwiczenia „{ex.NamePl}”?")) return;
+        ex.Sets.RemoveAt(ex.Sets.Count - 1);
+        await SaveDraft();
+    }
+
+    private async Task SetValue(DraftExercise ex, DraftSet set, Col col, decimal value)
+    {
+        col.Put(set, value);
+        await SaveDraft();
+    }
+
+    private async Task ToggleDone(DraftExercise ex, int index)
+    {
+        var set = ex.Sets[index];
+        set.Done = !set.Done;
+        if (set.Done)
+        {
+            // Zmieniony ciężar/powtórzenia przechodzą na kolejne, jeszcze nieruszane serie.
+            var template = NewSet(ex);
+            foreach (var later in ex.Sets.Skip(index + 1).Where(s => !s.Done))
+                foreach (var col in Columns(ex.Tracking))
+                    if (col.Get(later) == col.Get(template)) col.Put(later, col.Get(set));
+            var exIdx = _draft!.Exercises.IndexOf(ex);
+            if (ex.Sets.All(s => s.Done)) _expanded.Remove(exIdx);
+        }
+        await SaveDraft();
+    }
+
+    private void ToggleExpanded(int exIdx, bool exDone)
+    {
+        if (!exDone) return;
+        if (!_expanded.Remove(exIdx)) _expanded.Add(exIdx);
+    }
+
+    private static string TargetText(DraftExercise ex)
+    {
+        var parts = new List<string>();
+        var reps = string.IsNullOrWhiteSpace(ex.TargetReps) ? null : ex.TargetReps;
+        var time = ex.TargetDurationSeconds is int t && t > 0 ? ExerciseTrackingRules.FormatDuration(t) : null;
+        var dist = ex.TargetDistanceMeters is decimal d && d > 0 ? ExerciseTrackingRules.FormatDistance(d) : null;
+        var kg = ex.TargetWeightKg is decimal w && w > 0 ? $"{w:0.##} kg" : null;
+        var sets = ex.TargetSets > 1 ? $"{ex.TargetSets} × " : "";
+        switch (ex.Tracking)
+        {
+            case ExerciseTracking.Reps: parts.Add(sets + (reps ?? "—")); break;
+            case ExerciseTracking.Time: parts.Add(sets + (time ?? "—")); break;
+            case ExerciseTracking.DistanceTime:
+                parts.Add(sets + (dist ?? "—"));
+                if (time is not null) parts.Add(time);
+                break;
+            case ExerciseTracking.WeightDistance:
+                parts.Add(sets + (dist ?? "—"));
+                if (kg is not null) parts.Add(kg);
+                break;
+            default:
+                parts.Add(sets + (reps ?? "—"));
+                if (kg is not null) parts.Add(kg);
+                break;
+        }
+        return string.Join(" · ", parts);
+    }
+
+    // ----- Kolumny serii zależne od rodzaju ćwiczenia -----
+    public sealed record Col(string Label, NumberStepper.Kind Mode, decimal Max,
+        Func<DraftSet, decimal> Get, Action<DraftSet, decimal> Put, Func<DraftSet, decimal> StepFor);
+
+    private static readonly Col RepsCol = new("Powt.", NumberStepper.Kind.Integer, 999,
+        s => s.Reps, (s, v) => s.Reps = (int)v, _ => 1);
+    private static readonly Col WeightCol = new("Kg", NumberStepper.Kind.Decimal, 1000,
+        s => s.Weight, (s, v) => s.Weight = v, s => s.Weight < 20 ? 1 : 2.5m);
+    private static readonly Col TimeCol = new("Czas", NumberStepper.Kind.Duration, 86400,
+        s => s.DurationSeconds ?? 0, (s, v) => s.DurationSeconds = v > 0 ? (int)v : null, _ => 15);
+    private static readonly Col LongTimeCol = TimeCol with { StepFor = _ => 30 };
+    private static readonly Col KmCol = new("Km", NumberStepper.Kind.Decimal, 1000,
+        s => (s.DistanceMeters ?? 0) / 1000m, (s, v) => s.DistanceMeters = v > 0 ? v * 1000m : null, _ => 0.5m);
+    private static readonly Col MetersCol = new("Metry", NumberStepper.Kind.Integer, 100000,
+        s => s.DistanceMeters ?? 0, (s, v) => s.DistanceMeters = v > 0 ? v : null, _ => 5);
+
+    private static IReadOnlyList<Col> Columns(ExerciseTracking tracking) => tracking switch
+    {
+        ExerciseTracking.Reps => [RepsCol],
+        ExerciseTracking.Time => [TimeCol],
+        ExerciseTracking.DistanceTime => [KmCol, LongTimeCol],
+        ExerciseTracking.WeightDistance => [MetersCol, WeightCol],
+        _ => [RepsCol, WeightCol]
+    };
+
+    private async Task SaveDraft()
+    {
+        if (_draft is null) return;
+        _draft.SavedAt = Clock.LocalNow;
+        await PersistDraftAsync();
+    }
+
+    private async Task PersistDraftAsync()
+    {
+        if (_draft is null || _clientId is null) return;
+        var json = JsonSerializer.Serialize(_draft);
+        // 1) localStorage — natychmiast, działa też bez sieci.
+        try { await JS.InvokeVoidAsync("PTWorkout.save", _storeKey, json); }
+        catch (Exception ex) { LoggerFactory.CreateLogger("Train").LogError(ex, "Nie udało się zapisać treningu w pamięci urządzenia."); }
+        // 2) serwer — backup i sync między urządzeniami (best-effort, gdy online).
+        try { await Session.SaveDraftAsync(_clientId.Value, json); }
+        catch (Exception ex) { LoggerFactory.CreateLogger("Train").LogError(ex, "Nie udało się zsynchronizować treningu z serwerem."); }
+    }
+
+    private async Task DiscardDraft()
+    {
+        if (!await JS.InvokeAsync<bool>("confirm", "Odrzucić trwający trening? Wpisane serie zostaną utracone.")) return;
+        await ClearDraftStore();
+        _draft = null;
+    }
+
+    private async Task ClearDraftStore()
+    {
+        try { await JS.InvokeVoidAsync("PTWorkout.clear", _storeKey); } catch { /* best-effort */ }
+        if (_clientId is not null)
+        {
+            try { await Session.DiscardAsync(_clientId.Value); }
+            catch (Exception ex) { LoggerFactory.CreateLogger("Train").LogError(ex, "Nie udało się usunąć draftu treningu z serwera."); }
+        }
+    }
+
+    /// <summary>Trening na żywo z wizyty: wizyta (i para) staje się „ukończona”, jeśli była zaplanowana i należy do tego klienta.</summary>
+    private async Task CompleteVisitAsync()
+    {
+        if (_liveFor is null || LiveSessionId is not { } sid || _clientId is null) return;
+        try
+        {
+            var visit = await Sessions.GetSessionAsync(sid);
+            if (visit is null || visit.ClientId != _clientId || visit.Status is not (PTScheduler.Domain.Enums.SessionStatus.Scheduled or PTScheduler.Domain.Enums.SessionStatus.AwaitingPackage)) return;
+            await Sessions.UpdateStatusAsync(sid, PTScheduler.Domain.Enums.SessionStatus.Completed, includePartner: true);
+            _visitDone = $"Wizyta {visit.StartTime:HH:mm} oznaczona jako ukończona.";
+        }
+        catch (Exception ex) { LoggerFactory.CreateLogger("Train").LogWarning(ex, "Nie udało się oznaczyć wizyty {Id} jako ukończonej.", sid); }
+    }
+
+    private async Task Finish()
+    {
+        if (_draft is null || _clientId is null) return;
+        _error = null;
+        // Zapisujemy odhaczone serie; gdy nic nie odhaczono, pytamy, czy zapisać wszystko, co wpisane.
+        var onlyDone = _draft.Exercises.Any(e => e.Sets.Any(s => s.Done));
+        if (!onlyDone && _draft.Exercises.Any(e => e.Sets.Count > 0)
+            && !await JS.InvokeAsync<bool>("confirm", "Żadna seria nie jest odhaczona. Zapisać wszystkie serie tak, jak są wpisane?")) return;
+        _finishing = true;
+        try
+        {
+            var dto = new LogWorkoutDto
+            {
+                PlanId = _draft.PlanId,
+                PlanDayId = _draft.PlanDayId,
+                Date = _draft.Date,
+                Exercises = _draft.Exercises.Select(e => new LogExerciseDto
+                {
+                    ExerciseId = e.ExerciseId,
+                    PlanExerciseId = e.PlanExerciseId,
+                    Sets = e.Sets.Where(s => s.Done || !onlyDone).Select((s, i) => new LogSetDto
+                    {
+                        SetNumber = i + 1,
+                        Reps = ExerciseTrackingRules.UsesReps(e.Tracking) ? s.Reps : 0,
+                        WeightKg = ExerciseTrackingRules.UsesWeight(e.Tracking) ? s.Weight : 0m,
+                        DurationSeconds = ExerciseTrackingRules.UsesTime(e.Tracking) ? s.DurationSeconds : null,
+                        DistanceMeters = ExerciseTrackingRules.UsesDistance(e.Tracking) ? s.DistanceMeters : null
+                    }).ToList()
+                }).ToList()
+            };
+            var saved = await WorkoutLog.LogWorkoutAsync(_clientId.Value, dto);
+            await CompleteVisitAsync();
+            var minutes = (int)Math.Clamp(Math.Round((Clock.LocalNow - _draft.StartedAt).TotalMinutes), 5, 300);
+            var workoutDate = _draft.Date;
+            await ClearDraftStore();
+            _draft = null;
+            _savedText = saved > 0
+                ? $"Trening zapisany — {saved} serii."
+                : "Trening zamknięty (brak wypełnionych serii do zapisania).";
+            _justFinished = _savedText;
+            _history = await WorkoutLog.GetRecentForClientAsync(_clientId.Value, 10);
+            _summary = saved > 0 ? await WorkoutLog.GetDayAsync(_clientId.Value, workoutDate) : null;
+            _highlights = null;
+            if (saved > 0)
+            {
+                try { _highlights = await Companion.SummaryAsync(_clientId.Value, workoutDate); }
+                catch (Exception hx) { LoggerFactory.CreateLogger("Train").LogWarning(hx, "Podsumowanie treningu bez wyróżnień."); }
+                try
+                {
+                    _medalSettings = await MedalSvc.GetSettingsAsync();
+                    if (_medalSettings.Enabled)
+                    {
+                        await MedalSvc.SyncAsync(_clientId.Value);
+                        _newMedals = await MedalSvc.UnseenAsync(_clientId.Value);
+                    }
+                }
+                catch (Exception mx) { LoggerFactory.CreateLogger("Train").LogWarning(mx, "Medale po treningu niedostępne."); }
+            }
+            _summarySurvey = null;
+            _historyDay = null;
+            await OfferSurveyAsync(workoutDate, minutes);
+            _scrollTop = true;
+        }
+        catch (Exception ex)
+        {
+            _error = "Nie udało się zapisać treningu. Postęp jest bezpieczny na urządzeniu — spróbuj ponownie.";
+            LoggerFactory.CreateLogger("Train").LogError(ex, "Błąd zapisu treningu klienta {ClientId}.", _clientId);
+        }
+        finally { _finishing = false; }
+    }
+
+    // Krótka ankieta „Jak poszło?” zaraz po treningu (jeśli włączona); czas trwania z zegara treningu.
+    private async Task OfferSurveyAsync(DateOnly date, int minutes)
+    {
+        try
+        {
+            var template = await Surveys.GetTemplateAsync(PTScheduler.Domain.Enums.SurveyKind.PostWorkout);
+            if (!template.IsEnabled) return;
+            _surveyDate = date;
+            _surveyInitial = new() { [SurveyKeys.Duration] = new SurveyAnswerInput { Number = minutes } };
+            _survey = template;
+        }
+        catch (Exception ex)
+        {
+            LoggerFactory.CreateLogger("Train").LogWarning(ex, "Nie udało się wczytać ankiety po treningu.");
+        }
+    }
+
+    // Wywoływane z formularza ankiety (dziecka) — sama zmiana pól nie odświeży tej strony, stąd StateHasChanged.
+    // Drugie kliknięcie „Wyślij” w trakcie zapisu nic nie zrobi (ankieta jest już zamknięta).
+    private async Task<List<string>> SubmitSurveyAsync(Dictionary<string, SurveyAnswerInput> answers, DateOnly date)
+    {
+        if (_clientId is null) return ["Brak profilu klienta."];
+        if (_survey is null) return [];
+        var (errors, response) = await Surveys.SubmitAsync(_clientId.Value, PTScheduler.Domain.Enums.SurveyKind.PostWorkout, answers, date);
+        if (errors.Count == 0)
+        {
+            _survey = null;
+            _summarySurvey = response;
+            _justFinished = $"{_savedText} Dzięki za ocenę — trener ją zobaczy.";
+            _scrollTop = true;
+            await InvokeAsync(StateHasChanged);
+        }
+        return errors;
+    }
+
+    private void SkipSurvey()
+    {
+        _survey = null;
+        _scrollTop = true;
+    }
+
+    private async Task ToggleHistoryAsync(DateOnly date)
+    {
+        if (_historyDay?.Date == date || _clientId is null) { _historyDay = null; return; }
+        _historyDay = await WorkoutLog.GetDayAsync(_clientId.Value, date);
+        var days = Math.Max(1, Clock.Today.DayNumber - date.DayNumber + 1);
+        _historySurvey = (await Surveys.GetPostWorkoutByDateAsync(_clientId.Value, days)).GetValueOrDefault(date);
+    }
+
+    // ----- Model roboczy trzymany w localStorage (JSON) -----
+    public sealed class WorkoutDraft
+    {
+        public int ClientId { get; set; }
+        public int? PlanId { get; set; }
+        public int? PlanDayId { get; set; }
+        public string PlanName { get; set; } = "";
+        public string DayLabel { get; set; } = "";
+        public DateOnly Date { get; set; }
+        public DateTime StartedAt { get; set; }
+        public DateTime SavedAt { get; set; }
+        public List<DraftExercise> Exercises { get; set; } = [];
+    }
+
+    public sealed class DraftExercise
+    {
+        public int ExerciseId { get; set; }
+        public int? PlanExerciseId { get; set; }
+        public string NamePl { get; set; } = "";
+        public string? ThumbnailUrl { get; set; }
+        public ExerciseTracking Tracking { get; set; }
+        public int TargetSets { get; set; }
+        public string? TargetReps { get; set; }
+        public decimal? TargetWeightKg { get; set; }
+        public int? TargetDurationSeconds { get; set; }
+        public decimal? TargetDistanceMeters { get; set; }
+        public int? RestSeconds { get; set; }
+        public string? Notes { get; set; }
+        /// <summary>Ostatni raz z tym ćwiczeniem: data, opis serii („3×10 · 60 kg”) i najwyższy ciężar.</summary>
+        public DateOnly? LastDate { get; set; }
+        public string? LastText { get; set; }
+        public decimal? LastMaxKg { get; set; }
+        public List<DraftSet> Sets { get; set; } = [];
+    }
+
+    public sealed class DraftSet
+    {
+        public int Reps { get; set; }
+        public decimal Weight { get; set; }
+        public int? DurationSeconds { get; set; }
+        public decimal? DistanceMeters { get; set; }
+        public bool Done { get; set; }
+    }
+}

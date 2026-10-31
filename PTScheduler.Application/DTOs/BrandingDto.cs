@@ -4,7 +4,7 @@ public class AppBrandingDto
 {
     public string ThemeName { get; set; } = "ocean";
     public string ThemeMode { get; set; } = "light";
-    public string CompanyName { get; set; } = "PTScheduler";
+    public string CompanyName { get; set; } = "Hantly";
     public string? LogoPath { get; set; }
     public string? FaviconPath { get; set; }
 
@@ -14,17 +14,28 @@ public class AppBrandingDto
     public string? PwaBannerBody { get; set; }
     public string? PwaBannerButton { get; set; }
     public string? PwaIconPath { get; set; }
+
+    public string? LoginTitle { get; set; }
+    public string? LoginSubtitle { get; set; }
+    public string? LoginBackgroundPath { get; set; }
+
+    public bool SetupCompleted { get; set; }
+    public string? SetupMode { get; set; }
+    public DateTime? SetupCompletedAt { get; set; }
 }
 
 public class SaveBrandingDto
 {
     public string ThemeName { get; set; } = "ocean";
     public string ThemeMode { get; set; } = "light";
-    public string CompanyName { get; set; } = "PTScheduler";
+    public string CompanyName { get; set; } = "Hantly";
 
     public string? PwaShortName { get; set; }
     public bool PwaBannerEnabled { get; set; } = true;
     public string? PwaBannerTitle { get; set; }
     public string? PwaBannerBody { get; set; }
     public string? PwaBannerButton { get; set; }
+
+    public string? LoginTitle { get; set; }
+    public string? LoginSubtitle { get; set; }
 }

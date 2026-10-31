@@ -10,4 +10,35 @@ public static class NotificationTypes
     public const string NewClientPending = nameof(NewClientPending);
     public const string ExpiringPackages = nameof(ExpiringPackages);
     public const string SessionReminders = nameof(SessionReminders);
+    /// <summary>Automatyczne wiadomości od trenera: powitanie, „dawno Cię nie było”, życzenia urodzinowe.</summary>
+    public const string TrainerMessages = nameof(TrainerMessages);
+
+    /// <summary>Push: przypomnienie dzień przed treningiem.</summary>
+    public const string PushReminders = nameof(PushReminders);
+    /// <summary>Push: rezerwacje, zmiany i odwołania wizyt, prośby o termin.</summary>
+    public const string PushSessions = nameof(PushSessions);
+    /// <summary>Push: pakiety i karnety (nowe, kończące się, płatności).</summary>
+    public const string PushPackages = nameof(PushPackages);
+    /// <summary>Push: wiadomości z czatu i komentarze do treningów.</summary>
+    public const string PushMessages = nameof(PushMessages);
+    /// <summary>Push: automatyczne wiadomości od trenera (powitanie, urodziny, powroty).</summary>
+    public const string PushTrainerMessages = nameof(PushTrainerMessages);
+    /// <summary>Push (klient): nowy medal za treningi, serię, rekordy albo staż.</summary>
+    public const string PushMedals = nameof(PushMedals);
+    /// <summary>Push (trener): aktywność klientów — ankiety, pomiary, opinie.</summary>
+    public const string PushClientActivity = nameof(PushClientActivity);
+    /// <summary>SMS: przypomnienie dzień przed treningiem (klient może zrezygnować).</summary>
+    public const string SmsReminders = nameof(SmsReminders);
+    /// <summary>SMS: automatyczne wiadomości od trenera.</summary>
+    public const string SmsTrainerMessages = nameof(SmsTrainerMessages);
+    /// <summary>SMS także przy aplikacji z powiadomieniami — bez tego push zastępuje SMS.</summary>
+    public const string SmsWithApp = nameof(SmsWithApp);
+
+    public const string PushMorningBrief = nameof(PushMorningBrief);
+    public const string PushBeforeSession = nameof(PushBeforeSession);
+
+    /// <summary>E-mail (klient): podsumowanie miesiąca / roku.</summary>
+    public const string MonthlySummary = nameof(MonthlySummary);
+    /// <summary>Push (klient): podsumowanie miesiąca / roku.</summary>
+    public const string PushMonthlySummary = nameof(PushMonthlySummary);
 }

@@ -13,6 +13,7 @@ public class BodyMeasurementDto
     public decimal? ThighCm { get; set; }
     public decimal? ArmCm { get; set; }
     public string? Notes { get; set; }
+    public bool AddedByClient { get; set; }
 }
 
 public class CreateBodyMeasurementDto
@@ -27,4 +28,6 @@ public class CreateBodyMeasurementDto
     public decimal? ThighCm { get; set; }
     public decimal? ArmCm { get; set; }
     public string? Notes { get; set; }
+    /// <summary>Klient wpisuje sam — trener dostaje powiadomienie.</summary>
+    public bool AddedByClient { get; set; }
 }

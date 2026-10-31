@@ -1,0 +1,384 @@
+using Microsoft.EntityFrameworkCore;
+using PTScheduler.Application.DTOs;
+using PTScheduler.Application.Interfaces;
+using PTScheduler.Domain.Entities;
+using PTScheduler.Infrastructure.Data;
+
+namespace PTScheduler.Infrastructure.Services;
+
+public class TrainingPlanService(
+    IDbContextFactory<ApplicationDbContext> dbFactory,
+    IAppClock clock) : ITrainingPlanService
+{
+    public async Task<List<TrainingPlanListItemDto>> GetPlansAsync(string trainerUserId, bool isAdmin = false)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        return await db.TrainingPlans.AsNoTracking()
+            // Właściciel studia widzi plany wszystkich trenerów.
+            .Where(p => isAdmin || p.TrainerUserId == trainerUserId)
+            .OrderByDescending(p => p.CreatedAt)
+            .Select(p => new TrainingPlanListItemDto
+            {
+                Id = p.Id,
+                Name = p.Name,
+                IsTemplate = p.IsTemplate,
+                ClientId = p.ClientId,
+                ClientName = p.Client != null ? p.Client.FirstName + " " + p.Client.LastName : null,
+                DayCount = p.Days.Count,
+                ExerciseCount = p.Days.SelectMany(d => d.Exercises).Count(),
+                CreatedAt = p.CreatedAt,
+                Use = p.Use,
+                SortOrder = p.SortOrder,
+                IsArchived = p.IsArchived
+            })
+            .ToListAsync();
+    }
+
+    public async Task<PlanEditDto?> GetForEditAsync(string trainerUserId, int planId, bool isAdmin = false)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var plan = await db.TrainingPlans.AsNoTracking()
+            .Include(p => p.Days).ThenInclude(d => d.Exercises)
+            .FirstOrDefaultAsync(p => p.Id == planId && (isAdmin || p.TrainerUserId == trainerUserId));
+        if (plan is null) return null;
+        return await BuildEditDtoAsync(db, plan);
+    }
+
+    public async Task<List<TrainingPlanListItemDto>> GetClientPlansAsync(int clientId, bool includeArchived = false)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var now = clock.LocalNow;
+        var plans = await db.TrainingPlans.AsNoTracking()
+            .Where(p => p.ClientId == clientId && (includeArchived || !p.IsArchived))
+            .OrderBy(p => p.IsArchived).ThenBy(p => p.SortOrder).ThenByDescending(p => p.CreatedAt)
+            .Select(p => new TrainingPlanListItemDto
+            {
+                Id = p.Id,
+                Name = p.Name,
+                IsTemplate = p.IsTemplate,
+                ClientId = p.ClientId,
+                DayCount = p.Days.Count,
+                ExerciseCount = p.Days.SelectMany(d => d.Exercises).Count(),
+                CreatedAt = p.CreatedAt,
+                Use = p.Use,
+                SortOrder = p.SortOrder,
+                IsArchived = p.IsArchived,
+                LastWorkout = db.WorkoutLogs.Where(l => l.ClientId == clientId && l.PlanExercise!.PlanDay!.PlanId == p.Id)
+                    .Max(l => (DateOnly?)l.WorkoutDate),
+                NextSessionAt = db.Sessions.Where(x => x.ClientId == clientId && x.PlanDay!.PlanId == p.Id
+                        && x.Status == Domain.Enums.SessionStatus.Scheduled && x.StartTime >= now)
+                    .Min(x => (DateTime?)x.StartTime)
+            })
+            .ToListAsync();
+        return plans;
+    }
+
+    public async Task ReorderClientPlansAsync(string userId, bool isAdmin, int clientId, IReadOnlyList<int> orderedPlanIds)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var plans = await db.TrainingPlans
+            .Where(p => p.ClientId == clientId && orderedPlanIds.Contains(p.Id) && (isAdmin || p.TrainerUserId == userId))
+            .ToListAsync();
+        for (var i = 0; i < orderedPlanIds.Count; i++)
+            if (plans.FirstOrDefault(p => p.Id == orderedPlanIds[i]) is { } plan) plan.SortOrder = i;
+        await db.SaveChangesAsync();
+    }
+
+    public async Task SetArchivedAsync(string userId, bool isAdmin, int planId, bool archived)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var plan = await db.TrainingPlans.FirstOrDefaultAsync(p => p.Id == planId && (isAdmin || p.TrainerUserId == userId))
+            ?? throw new InvalidOperationException("Plan nie istnieje.");
+        plan.IsArchived = archived;
+        await db.SaveChangesAsync();
+    }
+
+    public async Task<bool> AssignSessionDayAsync(string userId, bool isAdmin, int sessionId, int? planDayId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var session = await db.Sessions.FirstOrDefaultAsync(s => s.Id == sessionId && (isAdmin || s.TrainerUserId == userId));
+        if (session is null) return false;
+        if (planDayId is { } dayId)
+        {
+            // Dzień musi być z planu tego samego klienta — nie da się podpiąć cudzego planu.
+            var ok = await db.PlanDays.AnyAsync(d => d.Id == dayId && d.Plan!.ClientId == session.ClientId);
+            if (!ok) return false;
+        }
+        session.PlanDayId = planDayId;
+        await db.SaveChangesAsync();
+        return true;
+    }
+
+    public async Task<int> RotateUpcomingAsync(string userId, bool isAdmin, int fromSessionId, int startPlanDayId, int maxSessions = 12)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var from = await db.Sessions.FirstOrDefaultAsync(s => s.Id == fromSessionId && (isAdmin || s.TrainerUserId == userId));
+        if (from is null) return 0;
+        var start = await db.PlanDays.AsNoTracking().FirstOrDefaultAsync(d => d.Id == startPlanDayId && d.Plan!.ClientId == from.ClientId);
+        if (start is null) return 0;
+        var days = await db.PlanDays.AsNoTracking().Where(d => d.PlanId == start.PlanId)
+            .OrderBy(d => d.Order).ThenBy(d => d.Id).Select(d => d.Id).ToListAsync();
+        var otherPlanDayIds = db.PlanDays.Where(d => d.PlanId != start.PlanId).Select(d => d.Id);
+        var sessions = await db.Sessions
+            .Where(s => s.ClientId == from.ClientId && s.StartTime >= from.StartTime
+                        && (s.Status == Domain.Enums.SessionStatus.Scheduled || s.Status == Domain.Enums.SessionStatus.AwaitingPackage)
+                        && (isAdmin || s.TrainerUserId == userId)
+                        && (s.Id == from.Id || s.PlanDayId == null || !otherPlanDayIds.Contains(s.PlanDayId.Value)))
+            .OrderBy(s => s.StartTime).ThenBy(s => s.Id)
+            .Take(maxSessions)
+            .ToListAsync();
+        var idx = days.IndexOf(startPlanDayId);
+        foreach (var s in sessions)
+        {
+            s.PlanDayId = days[idx % days.Count];
+            idx++;
+        }
+        await db.SaveChangesAsync();
+        return sessions.Count;
+    }
+
+    public async Task<Dictionary<int, SessionPlanDayDto>> GetSessionPlanDaysAsync(IReadOnlyCollection<int> sessionIds)
+    {
+        if (sessionIds.Count == 0) return [];
+        await using var db = dbFactory.CreateDbContext();
+        var rows = await db.Sessions.AsNoTracking()
+            .Where(s => sessionIds.Contains(s.Id) && s.PlanDayId != null)
+            .Select(s => new
+            {
+                s.Id, DayId = s.PlanDayId!.Value, s.PlanDay!.PlanId, PlanName = s.PlanDay.Plan!.Name,
+                s.PlanDay.Label, s.PlanDay.Order, Count = s.PlanDay.Exercises.Count
+            })
+            .ToListAsync();
+        return rows.ToDictionary(r => r.Id, r => new SessionPlanDayDto(r.Id, r.PlanId, r.DayId, r.PlanName,
+            string.IsNullOrWhiteSpace(r.Label) ? $"Dzień {r.Order + 1}" : r.Label, r.Count));
+    }
+
+    public async Task<PlanEditDto?> GetForWorkoutAsync(int clientId, int planId)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var plan = await db.TrainingPlans.AsNoTracking()
+            .Include(p => p.Days).ThenInclude(d => d.Exercises)
+            .FirstOrDefaultAsync(p => p.Id == planId && p.ClientId == clientId);
+        if (plan is null) return null;
+        return await BuildEditDtoAsync(db, plan);
+    }
+
+    private static async Task<PlanEditDto> BuildEditDtoAsync(ApplicationDbContext db, TrainingPlan plan)
+    {
+        var exIds = plan.Days.SelectMany(d => d.Exercises).Select(e => e.ExerciseId).Distinct().ToList();
+        var exInfo = await db.Exercises.AsNoTracking()
+            .Where(e => exIds.Contains(e.Id))
+            .Select(e => new { e.Id, e.NamePl, e.ImageUrls, e.Tracking, e.Category, e.Equipment, e.NameEn })
+            .ToDictionaryAsync(e => e.Id);
+
+        return new PlanEditDto
+        {
+            Id = plan.Id,
+            Name = plan.Name,
+            Notes = plan.Notes,
+            Purpose = plan.Purpose,
+            IsTemplate = plan.IsTemplate,
+            ClientId = plan.ClientId,
+            Use = plan.Use,
+            Days = plan.Days.OrderBy(d => d.Order).Select(d => new PlanDayEditDto
+            {
+                Id = d.Id,
+                Order = d.Order,
+                Label = d.Label,
+                Exercises = d.Exercises.OrderBy(x => x.Order).Select(x =>
+                {
+                    exInfo.TryGetValue(x.ExerciseId, out var info);
+                    return new PlanExerciseEditDto
+                    {
+                        Id = x.Id,
+                        ExerciseId = x.ExerciseId,
+                        ExerciseNamePl = info?.NamePl ?? $"#{x.ExerciseId}",
+                        ThumbnailUrl = info is null ? null : FirstImage(info.ImageUrls),
+                        Tracking = info is null ? default
+                            : info.Tracking ?? PTScheduler.Domain.Rules.ExerciseTrackingRules.Guess(info.Category, info.Equipment, info.NameEn, info.NamePl),
+                        Order = x.Order,
+                        Sets = x.Sets,
+                        Reps = x.Reps,
+                        TargetWeightKg = x.TargetWeightKg,
+                        TargetDurationSeconds = x.TargetDurationSeconds,
+                        TargetDistanceMeters = x.TargetDistanceMeters,
+                        Tempo = x.Tempo,
+                        RestSeconds = x.RestSeconds,
+                        Notes = x.Notes
+                    };
+                }).ToList()
+            }).ToList()
+        };
+    }
+
+    public async Task<int> SavePlanAsync(string trainerUserId, PlanEditDto dto, bool isAdmin = false)
+    {
+        if (string.IsNullOrWhiteSpace(dto.Name))
+            throw new InvalidOperationException("Podaj nazwę planu.");
+
+        await using var db = dbFactory.CreateDbContext();
+
+        TrainingPlan plan;
+        var isNew = false;
+        if (dto.Id is > 0)
+        {
+            plan = await db.TrainingPlans
+                .Include(p => p.Days).ThenInclude(d => d.Exercises)
+                .FirstOrDefaultAsync(p => p.Id == dto.Id && (isAdmin || p.TrainerUserId == trainerUserId))
+                ?? throw new InvalidOperationException("Plan nie istnieje.");
+        }
+        else
+        {
+            plan = new TrainingPlan { TrainerUserId = trainerUserId, CreatedAt = clock.UtcNow };
+            db.TrainingPlans.Add(plan);
+            isNew = true;
+        }
+
+        plan.Name = dto.Name.Trim();
+        plan.Notes = string.IsNullOrWhiteSpace(dto.Notes) ? null : dto.Notes.Trim();
+        plan.Purpose = string.IsNullOrWhiteSpace(dto.Purpose) ? null : dto.Purpose.Trim()[..Math.Min(800, dto.Purpose.Trim().Length)];
+        plan.IsTemplate = dto.IsTemplate;
+        // Nowy plan klienta trafia na górę jego listy (kolejność trener zmieni w profilu).
+        if (isNew && !dto.IsTemplate && dto.ClientId is { } newClient)
+            plan.SortOrder = (await db.TrainingPlans.Where(p => p.ClientId == newClient).MinAsync(p => (int?)p.SortOrder) ?? 1) - 1;
+        plan.ClientId = dto.IsTemplate ? null : dto.ClientId;
+        plan.Use = dto.Use;
+
+        // Tylko ćwiczenia widoczne dla trenera (baza publiczna lub własne).
+        var wantedExIds = dto.Days.SelectMany(d => d.Exercises).Select(e => e.ExerciseId).Distinct().ToList();
+        var validExIds = (await db.Exercises
+                .Where(e => wantedExIds.Contains(e.Id) &&
+                    (e.Visibility == Domain.Enums.ExerciseVisibility.Public || (e.OwnerTrainerUserId == trainerUserId || e.OwnerTrainerUserId == plan.TrainerUserId)))
+                .Select(e => e.Id)
+                .ToListAsync())
+            .ToHashSet();
+
+        // --- Dni: dopasuj po Id, usuń brakujące ---
+        var keepDayIds = dto.Days.Where(d => d.Id is > 0).Select(d => d.Id!.Value).ToHashSet();
+        foreach (var existingDay in plan.Days.ToList())
+            if (!keepDayIds.Contains(existingDay.Id))
+                db.PlanDays.Remove(existingDay);
+
+        for (var di = 0; di < dto.Days.Count; di++)
+        {
+            var dd = dto.Days[di];
+            var day = dd.Id is > 0 ? plan.Days.FirstOrDefault(d => d.Id == dd.Id) : null;
+            if (day is null)
+            {
+                day = new PlanDay();
+                plan.Days.Add(day);
+            }
+            day.Order = di;
+            day.Label = dd.Label?.Trim() ?? string.Empty;
+
+            var keepExIds = dd.Exercises.Where(x => x.Id is > 0).Select(x => x.Id!.Value).ToHashSet();
+            foreach (var existingEx in day.Exercises.ToList())
+                if (!keepExIds.Contains(existingEx.Id))
+                    db.PlanExercises.Remove(existingEx);
+
+            var order = 0;
+            foreach (var xe in dd.Exercises)
+            {
+                if (!validExIds.Contains(xe.ExerciseId)) continue; // pomiń niewidoczne/nieistniejące
+                var pe = xe.Id is > 0 ? day.Exercises.FirstOrDefault(p => p.Id == xe.Id) : null;
+                if (pe is null)
+                {
+                    pe = new PlanExercise();
+                    day.Exercises.Add(pe);
+                }
+                pe.ExerciseId = xe.ExerciseId;
+                pe.Order = order++;
+                pe.Sets = xe.Sets;
+                pe.Reps = string.IsNullOrWhiteSpace(xe.Reps) ? null : xe.Reps.Trim();
+                pe.TargetWeightKg = xe.TargetWeightKg;
+                pe.TargetDurationSeconds = xe.TargetDurationSeconds is > 0 ? xe.TargetDurationSeconds : null;
+                pe.TargetDistanceMeters = xe.TargetDistanceMeters is > 0 ? xe.TargetDistanceMeters : null;
+                pe.Tempo = string.IsNullOrWhiteSpace(xe.Tempo) ? null : xe.Tempo.Trim();
+                pe.RestSeconds = xe.RestSeconds;
+                pe.Notes = string.IsNullOrWhiteSpace(xe.Notes) ? null : xe.Notes.Trim();
+            }
+        }
+
+        // „Ostatnio używane" dla ćwiczeń faktycznie wstawionych do planu.
+        await TouchLastUsedAsync(db, trainerUserId, validExIds);
+
+        await db.SaveChangesAsync();
+        return plan.Id;
+    }
+
+    public async Task DeletePlanAsync(string trainerUserId, int planId, bool isAdmin = false)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var plan = await db.TrainingPlans.FirstOrDefaultAsync(p => p.Id == planId && (isAdmin || p.TrainerUserId == trainerUserId));
+        if (plan is null) return;
+        db.TrainingPlans.Remove(plan); // kaskada usuwa dni i ćwiczenia planu
+        await db.SaveChangesAsync();
+    }
+
+    public async Task<int> DuplicateAsync(string trainerUserId, int planId, bool asTemplate, bool isAdmin = false)
+    {
+        await using var db = dbFactory.CreateDbContext();
+        var src = await db.TrainingPlans.AsNoTracking()
+            .Include(p => p.Days).ThenInclude(d => d.Exercises)
+            .FirstOrDefaultAsync(p => p.Id == planId && (isAdmin || p.TrainerUserId == trainerUserId))
+            ?? throw new InvalidOperationException("Plan nie istnieje.");
+
+        var copy = new TrainingPlan
+        {
+            TrainerUserId = trainerUserId,
+            Name = src.Name + " (kopia)",
+            Notes = src.Notes,
+            Purpose = src.Purpose,
+            Use = src.Use,
+            IsTemplate = asTemplate,
+            ClientId = null,
+            CreatedAt = clock.UtcNow,
+            Days = src.Days.OrderBy(d => d.Order).Select(d => new PlanDay
+            {
+                Order = d.Order,
+                Label = d.Label,
+                Exercises = d.Exercises.OrderBy(x => x.Order).Select(x => new PlanExercise
+                {
+                    ExerciseId = x.ExerciseId,
+                    Order = x.Order,
+                    Sets = x.Sets,
+                    Reps = x.Reps,
+                    TargetWeightKg = x.TargetWeightKg,
+                    TargetDurationSeconds = x.TargetDurationSeconds,
+                    TargetDistanceMeters = x.TargetDistanceMeters,
+                    Tempo = x.Tempo,
+                    RestSeconds = x.RestSeconds,
+                    Notes = x.Notes
+                }).ToList()
+            }).ToList()
+        };
+        db.TrainingPlans.Add(copy);
+        await db.SaveChangesAsync();
+        return copy.Id;
+    }
+
+    private async Task TouchLastUsedAsync(ApplicationDbContext db, string trainerUserId, IEnumerable<int> exerciseIds)
+    {
+        var ids = exerciseIds.Distinct().ToList();
+        if (ids.Count == 0) return;
+        var prefs = await db.TrainerExercisePrefs
+            .Where(p => p.TrainerUserId == trainerUserId && ids.Contains(p.ExerciseId))
+            .ToListAsync();
+        var have = prefs.ToDictionary(p => p.ExerciseId);
+        foreach (var id in ids)
+        {
+            if (have.TryGetValue(id, out var pref)) pref.LastUsedAt = clock.UtcNow;
+            else db.TrainerExercisePrefs.Add(new TrainerExercisePref
+            {
+                TrainerUserId = trainerUserId, ExerciseId = id, LastUsedAt = clock.UtcNow
+            });
+        }
+    }
+
+    private static string? FirstImage(string csv)
+    {
+        if (string.IsNullOrEmpty(csv)) return null;
+        var i = csv.IndexOf(',');
+        return i < 0 ? csv : csv[..i];
+    }
+}

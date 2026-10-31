@@ -7,65 +7,96 @@
 @inject SignInManager<ApplicationUser> SignInManager
 @inject IdentityRedirectManager RedirectManager
 
-<PageTitle>Two-factor authentication (2FA)</PageTitle>
+<AppTitle Page="Weryfikacja dwuetapowa" />
+
+<div>
+    <h1 class="h4 fw-bold mb-1">Weryfikacja dwuetapowa</h1>
+    <p class="text-muted small mb-0">Po wpisaniu hasła aplikacja zapyta jeszcze o kod z aplikacji uwierzytelniającej na telefonie (np. Google Authenticator, Microsoft Authenticator). Logowanie Face ID / odciskiem palca działa bez kodu.</p>
+</div>
 
 <StatusMessage />
-<h3>Two-factor authentication (2FA)</h3>
-@if (canTrack)
+
+@if (!canTrack)
 {
-    if (is2faEnabled)
+    <div class="alert alert-warning small mb-0">
+        <strong>Najpierw zaakceptuj pliki cookie.</strong> Bez tego nie da się włączyć weryfikacji dwuetapowej.
+    </div>
+}
+else
+{
+    <div class="acct-card d-flex align-items-center gap-3">
+        <span class="acct-row-icon @(is2faEnabled ? "green" : "slate")"><i class="bi bi-shield-check"></i></span>
+        <div class="flex-grow-1">
+            <div class="fw-semibold">@(is2faEnabled ? "Weryfikacja dwuetapowa jest włączona" : "Weryfikacja dwuetapowa jest wyłączona")</div>
+            <div class="small text-muted">@(is2faEnabled ? "Twoje konto jest lepiej chronione." : "Włącz ją, żeby samo hasło nie wystarczyło do zalogowania.")</div>
+        </div>
+    </div>
+
+    @if (is2faEnabled)
     {
         if (recoveryCodesLeft == 0)
         {
-            <div class="alert alert-danger">
-                <strong>You have no recovery codes left.</strong>
-                <p>You must <a href="Account/Manage/GenerateRecoveryCodes">generate a new set of recovery codes</a> before you can log in with a recovery code.</p>
-            </div>
-        }
-        else if (recoveryCodesLeft == 1)
-        {
-            <div class="alert alert-danger">
-                <strong>You have 1 recovery code left.</strong>
-                <p>You can <a href="Account/Manage/GenerateRecoveryCodes">generate a new set of recovery codes</a>.</p>
+            <div class="alert alert-danger small mb-0">
+                <strong>Nie masz już kodów zapasowych.</strong> <a href="Account/Manage/GenerateRecoveryCodes">Wygeneruj nowe</a>, zanim zgubisz dostęp do telefonu.
             </div>
         }
         else if (recoveryCodesLeft <= 3)
         {
-            <div class="alert alert-warning">
-                <strong>You have @recoveryCodesLeft recovery codes left.</strong>
-                <p>You should <a href="Account/Manage/GenerateRecoveryCodes">generate a new set of recovery codes</a>.</p>
+            <div class="alert alert-warning small mb-0">
+                Zostało Ci <strong>@recoveryCodesLeft</strong> @(recoveryCodesLeft == 1 ? "kod zapasowy" : "kody zapasowe"). <a href="Account/Manage/GenerateRecoveryCodes">Wygeneruj nowe</a>.
             </div>
         }
+    }
 
-        if (isMachineRemembered)
+    <div class="acct-list">
+        <a class="acct-row" href="Account/Manage/EnableAuthenticator" data-enhance-nav="false">
+            <span class="acct-row-icon"><i class="bi bi-phone"></i></span>
+            <span class="acct-row-main">
+                <span class="acct-row-title d-block">@(is2faEnabled ? "Skonfiguruj aplikację ponownie" : "Włącz — dodaj aplikację uwierzytelniającą")</span>
+                <span class="acct-row-sub">Zeskanuj kod QR i wpisz 6 cyfr z aplikacji</span>
+            </span>
+            <i class="bi bi-chevron-right acct-row-chevron"></i>
+        </a>
+        @if (is2faEnabled)
         {
-            <form style="display: inline-block" @formname="forget-browser" @onsubmit="OnSubmitForgetBrowserAsync" method="post">
-                <AntiforgeryToken />
-                <button type="submit" class="btn btn-primary">Forget this browser</button>
-            </form>
+            <a class="acct-row" href="Account/Manage/GenerateRecoveryCodes">
+                <span class="acct-row-icon slate"><i class="bi bi-life-preserver"></i></span>
+                <span class="acct-row-main">
+                    <span class="acct-row-title d-block">Nowe kody zapasowe</span>
+                    <span class="acct-row-sub">Pozostało: @recoveryCodesLeft — na wypadek zgubienia telefonu</span>
+                </span>
+                <i class="bi bi-chevron-right acct-row-chevron"></i>
+            </a>
         }
-
-        <a href="Account/Manage/Disable2fa" class="btn btn-primary">Disable 2FA</a>
-        <a href="Account/Manage/GenerateRecoveryCodes" class="btn btn-primary">Reset recovery codes</a>
-    }
-
-    <h4>Authenticator app</h4>
-    @if (!hasAuthenticator)
-    {
-        <a href="Account/Manage/EnableAuthenticator" class="btn btn-primary">Add authenticator app</a>
-    }
-    else
-    {
-        <a href="Account/Manage/EnableAuthenticator" class="btn btn-primary">Set up authenticator app</a>
-        <a href="Account/Manage/ResetAuthenticator" class="btn btn-primary">Reset authenticator app</a>
-    }
-}
-else
-{
-    <div class="alert alert-danger">
-        <strong>Privacy and cookie policy have not been accepted.</strong>
-        <p>You must accept the policy before you can enable two factor authentication.</p>
+        @if (hasAuthenticator)
+        {
+            <a class="acct-row" href="Account/Manage/ResetAuthenticator">
+                <span class="acct-row-icon amber"><i class="bi bi-arrow-repeat"></i></span>
+                <span class="acct-row-main">
+                    <span class="acct-row-title d-block">Nowy telefon — zresetuj klucz</span>
+                    <span class="acct-row-sub">Stara aplikacja przestanie generować działające kody</span>
+                </span>
+                <i class="bi bi-chevron-right acct-row-chevron"></i>
+            </a>
+        }
+        @if (is2faEnabled)
+        {
+            <a class="acct-row danger" href="Account/Manage/Disable2fa">
+                <span class="acct-row-icon red"><i class="bi bi-shield-x"></i></span>
+                <span class="acct-row-main"><span class="acct-row-title d-block">Wyłącz weryfikację dwuetapową</span></span>
+                <i class="bi bi-chevron-right acct-row-chevron"></i>
+            </a>
+        }
     </div>
+
+    @if (isMachineRemembered)
+    {
+        <form @formname="forget-browser" @onsubmit="OnSubmitForgetBrowserAsync" method="post" class="acct-card d-flex align-items-center gap-3 flex-wrap">
+            <AntiforgeryToken />
+            <div class="flex-grow-1 small">Ta przeglądarka jest zapamiętana i nie pyta o kod.</div>
+            <button type="submit" class="btn btn-outline-secondary btn-sm">Zapomnij tę przeglądarkę</button>
+        </form>
+    }
 }
 
 @code {
@@ -99,7 +130,7 @@ else
         await SignInManager.ForgetTwoFactorClientAsync();
 
         RedirectManager.RedirectToCurrentPageWithStatus(
-            "The current browser has been forgotten. When you login again from this browser you will be prompted for your 2fa code.",
+            "Ta przeglądarka nie jest już zapamiętana — przy następnym logowaniu zapyta o kod.",
             HttpContext);
     }
 }

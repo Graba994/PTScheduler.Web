@@ -1,0 +1,35 @@
+@* Pasek „przełączono na konto X” — widoczny na każdej stronie, dopóki nie wrócisz na swoje konto. *@
+@using PTScheduler.Web.Services
+@inject AccountSwitchService Switcher
+
+@if (_from is not null)
+{
+    <div class="switched-bar" role="status">
+        <i class="bi bi-person-bounding-box"></i>
+        <span class="sb-txt">Jesteś na koncie <b>@_name</b> (@_role)</span>
+        <a href="/switch-account" class="sb-link">Inne konto</a>
+        <form action="Account/SwitchBack" method="post">
+            <AntiforgeryToken />
+            <button type="submit" class="sb-back"><i class="bi bi-arrow-return-left me-1"></i>Wróć do: @_from</button>
+        </form>
+    </div>
+}
+
+@code {
+    [CascadingParameter] private HttpContext? HttpContext { get; set; }
+
+    private string? _from;
+    private string _name = "";
+    private string _role = "";
+
+    protected override async Task OnParametersSetAsync()
+    {
+        _from = null;
+        var user = HttpContext?.User;
+        if (user is null || !AccountSwitchService.IsSwitched(user)) return;
+        _from = (await Switcher.GetActorAsync(user))?.Email ?? "swoje konto";
+        _name = user.Identity?.Name ?? "";
+        var roles = user.Claims.Where(c => c.Type == System.Security.Claims.ClaimTypes.Role).Select(c => c.Value).ToList();
+        _role = AccountSwitchService.RoleLabel(AccountSwitchService.MainRole(roles));
+    }
+}

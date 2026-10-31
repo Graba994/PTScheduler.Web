@@ -8,7 +8,8 @@ namespace PTScheduler.Infrastructure.Services;
 
 public class EmailTemplateService(
     IDbContextFactory<ApplicationDbContext> dbFactory,
-    IBrandingService brandingService) : IEmailTemplateService
+    IBrandingService brandingService,
+    IWebRootPathProvider webRoot) : IEmailTemplateService
 {
     public async Task<List<EmailTemplateDto>> GetAllAsync()
     {
@@ -73,27 +74,45 @@ public class EmailTemplateService(
     {
         var template = await GetAsync(key);
         var branding = await brandingService.GetAsync();
-        var companyName = branding.CompanyName ?? "PTScheduler";
+        var companyName = branding.CompanyName ?? "Hantly";
         var accentColor = template.AccentColor;
 
         variables["CompanyName"] = companyName;
         variables["AccentColor"] = accentColor;
 
-        string? logoHtml = null;
-        if (!string.IsNullOrEmpty(branding.LogoPath))
-        {
-            variables["Logo"] = branding.LogoPath;
-            logoHtml = "<img src=\"{{Logo}}\" alt=\"" + companyName + "\" style=\"max-height:48px;max-width:180px;display:block;margin:0 auto 12px\" />";
-        }
+        // Logo jako obrazek w samej wiadomości (SmtpEmailService dołącza je do maila) — bez SVG i bez
+        // adresów względnych, które w skrzynce kończyły się pustą ikonką. Bez logo: sama nazwa studia.
+        var safeName = System.Net.WebUtility.HtmlEncode(companyName);
+        if (!string.IsNullOrEmpty(branding.LogoPath)) variables["Logo"] = AbsoluteUrl(branding.LogoPath);
+        var logoHtml = EmailLogo.Png(webRoot.WebRootPath, branding.LogoPath) is { } png
+            ? $"<img src=\"{EmailLogo.Src}\" alt=\"{safeName}\" height=\"{LogoHeight(png)}\" style=\"max-height:48px;max-width:180px;height:auto;display:block;margin:0 auto 12px;border:0\" />"
+            : $"<div style=\"color:rgba(255,255,255,.85);font-size:13px;font-weight:bold;letter-spacing:.04em;margin:0 0 6px\">{safeName}</div>";
 
         var subject = ReplacePlaceholders(template.Subject, variables);
         var headerTitle = ReplacePlaceholders(template.HeaderTitle, variables);
         var body = ReplacePlaceholders(template.HtmlBody, variables);
         var footer = ReplacePlaceholders(template.FooterText, variables);
-        var logoRendered = logoHtml is not null ? ReplacePlaceholders(logoHtml, variables) : null;
-
-        var html = WrapInLayout(headerTitle, body, footer, accentColor, logoRendered);
+        var html = WrapInLayout(headerTitle, body, footer, accentColor, logoHtml);
         return (subject, html);
+    }
+
+    /// <summary>Pełny adres pliku aplikacji (TENANT_DOMAIN) — zmienna {{Logo}} we własnych szablonach.</summary>
+    private static string AbsoluteUrl(string path)
+    {
+        var domain = Environment.GetEnvironmentVariable("TENANT_DOMAIN")?.Trim().TrimEnd('/');
+        if (string.IsNullOrEmpty(domain)) return path;
+        var host = domain.StartsWith("http", StringComparison.OrdinalIgnoreCase) ? domain : "https://" + domain;
+        return host + "/" + path.TrimStart('/');
+    }
+
+    /// <summary>Wysokość logo w px (najwyżej 48) z proporcji PNG — część skrzynek ignoruje max-height.</summary>
+    private static int LogoHeight(byte[] png)
+    {
+        if (png.Length < 24) return 48;
+        var w = (png[16] << 24) | (png[17] << 16) | (png[18] << 8) | png[19];
+        var h = (png[20] << 24) | (png[21] << 16) | (png[22] << 8) | png[23];
+        if (w <= 0 || h <= 0) return 48;
+        return (int)Math.Round(Math.Min(48.0, 180.0 * h / w));
     }
 
     private static string ReplacePlaceholders(string text, Dictionary<string, string> vars)
@@ -153,6 +172,42 @@ public class EmailTemplateService(
 
     private static readonly Dictionary<string, DefaultTemplate> Defaults = new()
     {
+        ["automation"] = new(
+            "automation", "Automatyczne wiadomości (powitanie, powrót, urodziny)", "bi-magic",
+            "{{Subject}}",
+            "{{Subject}}",
+            """
+            {{Body}}
+            <div style="text-align:center;margin:24px 0">
+              <a href="{{Link}}" style="background:{{AccentColor}};color:white;text-decoration:none;padding:12px 32px;border-radius:6px;font-weight:600;font-size:15px;display:inline-block">{{ButtonText}}</a>
+            </div>
+            """,
+            "#4F46E5",
+            "Te wiadomości wyłączysz w ustawieniach konta → Powiadomienia → „Wiadomości od trenera”.",
+            ["Subject", "ClientName", "Body", "ButtonText", "Link", "CompanyName", "AccentColor"]),
+
+        ["new-device-login"] = new(
+            "new-device-login", "Nowe logowanie na koncie (bezpieczeństwo)", "bi-shield-exclamation",
+            "Nowe logowanie na Twoim koncie",
+            "Nowe logowanie na Twoim koncie 🔐",
+            """
+            <p style="color:#374151;font-size:15px">Cześć <strong>{{Name}}</strong>!</p>
+            <p style="color:#374151;font-size:15px">Właśnie nastąpiło logowanie na Twoje konto z urządzenia, z którego wcześniej nikt się na nie nie logował:</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0">
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;width:40%">Urządzenie</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{Device}}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Kiedy</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{When}}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Adres IP</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{Ip}}</td></tr>
+            </table>
+            <p style="color:#374151;font-size:15px">Jeśli to Ty — wszystko w porządku, nic nie musisz robić.</p>
+            <div style="text-align:center;margin:24px 0">
+              <a href="{{SecureLink}}" style="background:#DC2626;color:white;text-decoration:none;padding:12px 28px;border-radius:6px;font-weight:600;font-size:15px;display:inline-block">To nie ja — zabezpiecz konto</a>
+            </div>
+            <p style="color:#6b7280;font-size:13px">Po kliknięciu zmienisz hasło i wylogujesz wszystkie inne urządzenia.</p>
+            """,
+            "#DC2626",
+            "Wiadomość bezpieczeństwa — wysyłamy ją zawsze przy logowaniu z nowego urządzenia.",
+            ["Name", "Device", "When", "Ip", "SecureLink", "CompanyName"]),
+
         ["session-booked"] = new(
             "session-booked", "Potwierdzenie rezerwacji", "bi-calendar-check",
             "Potwierdzenie rezerwacji wizyty",
@@ -203,7 +258,7 @@ public class EmailTemplateService(
             </table>
             """,
             "#9333EA",
-            "Wiadomość automatyczna z PTScheduler.",
+            "Wiadomość automatyczna — nie odpowiadaj na ten email.",
             ["ClientName", "TrainerName", "SessionType", "SessionDate", "SessionTime", "Reason", "ReasonRow"]),
 
         ["session-rescheduled"] = new(
@@ -250,7 +305,7 @@ public class EmailTemplateService(
             "Nowy pakiet sesji 🎁",
             """
             <p style="color:#374151;font-size:15px">Cześć <strong>{{ClientName}}</strong>!</p>
-            <p style="color:#374151;font-size:15px">Otrzymałeś nowy pakiet treningowy:</p>
+            <p style="color:#374151;font-size:15px">Masz nowy pakiet treningowy:</p>
             <table style="width:100%;border-collapse:collapse;margin:16px 0">
               <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;width:40%">Nazwa pakietu</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{PackageName}}</td></tr>
               <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Typ sesji</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{SessionType}}</td></tr>
@@ -285,6 +340,114 @@ public class EmailTemplateService(
             "Wiadomość automatyczna — w razie pytań odpisz na ten email.",
             ["ClientName", "TrainerName", "SessionDate", "Duration", "Price", "SetPasswordLink", "AccentColor"]),
 
+        ["package-low-credits"] = new(
+            "package-low-credits", "Kończący się pakiet", "bi-hourglass-split",
+            "Zostały Ci {{Remaining}} — czas na kolejny pakiet",
+            "Zostały Ci {{Remaining}} 💪",
+            """
+            <p style="color:#374151;font-size:15px">Cześć <strong>{{ClientName}}</strong>!</p>
+            <p style="color:#374151;font-size:15px">W pakiecie <strong>{{PackageName}}</strong> zostały Ci <strong>{{Remaining}}</strong>. Żeby nie wypaść z rytmu, zadbaj o kolejny pakiet już teraz.</p>
+            <div style="text-align:center;margin:24px 0">
+              <a href="{{ShopLink}}" style="background:{{AccentColor}};color:white;text-decoration:none;padding:12px 32px;border-radius:6px;font-weight:600;font-size:15px;display:inline-block">{{ShopButton}}</a>
+            </div>
+            <p style="color:#6b7280;font-size:13px">Trener: {{TrainerName}}</p>
+            """,
+            "#0284C7",
+            "Przypomnienia o pakietach wyłączysz w ustawieniach konta → Powiadomienia.",
+            ["ClientName", "PackageName", "Remaining", "ShopLink", "ShopButton", "TrainerName", "CompanyName", "AccentColor"]),
+
+        ["package-rebuy"] = new(
+            "package-rebuy", "Pakiet wykorzystany — kup ponownie", "bi-arrow-repeat",
+            "Pakiet {{PackageName}} wykorzystany — kontynuujemy?",
+            "Brawo, pakiet za Tobą! 🎉",
+            """
+            <p style="color:#374151;font-size:15px">Cześć <strong>{{ClientName}}</strong>!</p>
+            <p style="color:#374151;font-size:15px">Właśnie wykorzystano ostatni trening z pakietu <strong>{{PackageName}}</strong>. Jeśli chcesz trenować dalej w tym samym rytmie, ten sam pakiet kupisz jednym kliknięciem.</p>
+            <div style="text-align:center;margin:24px 0">
+              <a href="{{ShopLink}}" style="background:{{AccentColor}};color:white;text-decoration:none;padding:12px 32px;border-radius:6px;font-weight:600;font-size:15px;display:inline-block">{{ShopButton}}</a>
+            </div>
+            <p style="color:#6b7280;font-size:13px">Trener: {{TrainerName}}</p>
+            """,
+            "#16A34A",
+            "Przypomnienia o pakietach wyłączysz w ustawieniach konta → Powiadomienia.",
+            ["ClientName", "PackageName", "ShopLink", "ShopButton", "TrainerName", "CompanyName", "AccentColor"]),
+
+        ["slot-freed"] = new(
+            "slot-freed", "Zwolnił się termin", "bi-calendar-check",
+            "Zwolnił się termin: {{SessionDate}}",
+            "Zwolnił się termin 🎯",
+            """
+            <p style="color:#374151;font-size:15px">Cześć <strong>{{ClientName}}</strong>!</p>
+            <p style="color:#374151;font-size:15px">Ktoś odwołał wizytę i zwolnił się termin w godzinach, które Cię interesują:</p>
+            <div style="background:#f3f4f6;border-radius:8px;padding:16px;margin:20px 0">
+              <p style="margin:6px 0"><strong>📅 Termin:</strong> {{SessionDate}}</p>
+              <p style="margin:6px 0"><strong>💪 Trening:</strong> {{SessionType}}</p>
+            </div>
+            <div style="text-align:center;margin:24px 0">
+              <a href="{{BookLink}}" style="background:{{AccentColor}};color:white;text-decoration:none;padding:12px 32px;border-radius:6px;font-weight:600;font-size:15px;display:inline-block">Zarezerwuj</a>
+            </div>
+            <p style="color:#6b7280;font-size:13px">Kto pierwszy, ten lepszy — termin może szybko zniknąć.</p>
+            """,
+            "#0284C7",
+            "Te powiadomienia wyłączysz w aplikacji: „Mój grafik” → „Daj znać, gdy zwolni się termin”.",
+            ["ClientName", "SessionDate", "SessionType", "BookLink", "CompanyName", "AccentColor"]),
+
+        ["accountant-pack"] = new(
+            "accountant-pack", "Paczka dla księgowej", "bi-calculator",
+            "Zestawienie za {{Month}} — {{Seller}}",
+            "Zestawienie za {{Month}}",
+            """
+            <p style="color:#374151;font-size:15px">Dzień dobry,</p>
+            <p style="color:#374151;font-size:15px">pod linkiem poniżej jest zestawienie wpływów za <strong>{{Month}}</strong> ({{Seller}}): plik CSV do Excela i PDF.</p>
+            <div style="background:#f3f4f6;border-radius:8px;padding:16px;margin:20px 0">
+              <p style="margin:6px 0"><strong>Płatności online:</strong> {{OnlineTotal}}</p>
+              <p style="margin:6px 0"><strong>Opłacone u trenera:</strong> {{AtTrainerTotal}}</p>
+              <p style="margin:6px 0"><strong>Wpływy razem:</strong> {{ReceivedTotal}}</p>
+              <p style="margin:6px 0"><strong>Wystawione faktury:</strong> {{InvoiceCount}}</p>
+            </div>
+            <div style="text-align:center;margin:24px 0">
+              <a href="{{DownloadLink}}" style="background:{{AccentColor}};color:white;text-decoration:none;padding:12px 32px;border-radius:6px;font-weight:600;font-size:15px;display:inline-block">Pobierz zestawienie (ZIP)</a>
+            </div>
+            <p style="color:#6b7280;font-size:13px">Link działa {{ValidDays}} dni i nie wymaga logowania — prosimy go nie przekazywać dalej.</p>
+            """,
+            "#0F766E",
+            "Wiadomość wysłana na prośbę {{Seller}}.",
+            ["Month", "Seller", "OnlineTotal", "AtTrainerTotal", "ReceivedTotal", "InvoiceCount", "DownloadLink", "ValidDays", "CompanyName", "AccentColor"]),
+
+        ["package-expiring"] = new(
+            "package-expiring", "Wygasający pakiet", "bi-calendar-x",
+            "Twój pakiet wygasa {{ExpiresAt}}",
+            "Pakiet wkrótce wygaśnie ⏳",
+            """
+            <p style="color:#374151;font-size:15px">Cześć <strong>{{ClientName}}</strong>!</p>
+            <p style="color:#374151;font-size:15px">Pakiet <strong>{{PackageName}}</strong> wygasa <strong>{{ExpiresAt}}</strong>, a zostały w nim jeszcze <strong>{{Remaining}}</strong>. Umów je, zanim przepadną — albo przedłuż współpracę kolejnym pakietem.</p>
+            <div style="text-align:center;margin:24px 0">
+              <a href="{{ShopLink}}" style="background:{{AccentColor}};color:white;text-decoration:none;padding:12px 32px;border-radius:6px;font-weight:600;font-size:15px;display:inline-block">{{ShopButton}}</a>
+            </div>
+            <p style="color:#6b7280;font-size:13px">Trener: {{TrainerName}}</p>
+            """,
+            "#D97706",
+            "Przypomnienia o pakietach wyłączysz w ustawieniach konta → Powiadomienia.",
+            ["ClientName", "PackageName", "Remaining", "ExpiresAt", "ShopLink", "ShopButton", "TrainerName", "CompanyName", "AccentColor"]),
+
+        ["client-invite"] = new(
+            "client-invite", "Zaproszenie klienta", "bi-envelope-heart",
+            "Zaproszenie do {{CompanyName}}",
+            "Twoje konto jest gotowe 👋",
+            """
+            <p style="color:#374151;font-size:15px">Cześć <strong>{{ClientName}}</strong>!</p>
+            <p style="color:#374151;font-size:15px">{{TrainerName}} zaprasza Cię do aplikacji <strong>{{CompanyName}}</strong>. Znajdziesz w niej swój grafik treningów, pakiety i postępy.</p>
+            <div style="text-align:center;margin:24px 0">
+              <a href="{{InviteLink}}" style="background:{{AccentColor}};color:white;text-decoration:none;padding:12px 32px;border-radius:6px;font-weight:600;font-size:15px;display:inline-block">Ustaw hasło i zaloguj się</a>
+            </div>
+            <p style="color:#374151;font-size:14px">Twój login: <strong>{{ClientEmail}}</strong></p>
+            <p style="color:#6b7280;font-size:13px">Link jest ważny {{ValidDays}} dni i działa jednorazowo. Jeśli wygaśnie, poproś trenera o nowe zaproszenie.</p>
+            <p style="color:#6b7280;font-size:13px">📱 Wskazówka: po zalogowaniu na telefonie dodaj aplikację do ekranu głównego — będzie działać jak zwykła aplikacja.</p>
+            """,
+            "#0284C7",
+            "Wiadomość automatyczna — jeśli to zaproszenie nie było dla Ciebie, zignoruj je.",
+            ["ClientName", "TrainerName", "ClientEmail", "InviteLink", "ValidDays", "CompanyName", "AccentColor"]),
+
         ["trainer-new-booking"] = new(
             "trainer-new-booking", "Nowy zapis klienta", "bi-person-fill-add",
             "Nowy zapis: {{ClientName}}",
@@ -301,7 +464,7 @@ public class EmailTemplateService(
             <p style="color:#6b7280;font-size:14px">Klient ma status <strong>Oczekuje</strong>. Zatwierdź go w panelu <em>Klienci</em>, żeby uzyskał pełny dostęp do aplikacji.</p>
             """,
             "#16A34A",
-            "Wiadomość automatyczna z PTScheduler.",
+            "Wiadomość automatyczna — nie odpowiadaj na ten email.",
             ["TrainerName", "ClientName", "ClientEmail", "ClientPhone", "PhoneRow", "SessionDate", "Duration", "TrainingGoal", "GoalRow"]),
 
         ["password-reset"] = new(
@@ -314,7 +477,7 @@ public class EmailTemplateService(
             <div style="text-align:center;margin:28px 0">
               <a href="{{ResetLink}}" style="background:{{AccentColor}};color:white;text-decoration:none;padding:12px 32px;border-radius:6px;font-weight:600;font-size:15px;display:inline-block">Zresetuj hasło</a>
             </div>
-            <p style="color:#6b7280;font-size:13px">Jeśli nie prosiłeś o reset hasła, zignoruj tę wiadomość.</p>
+            <p style="color:#6b7280;font-size:13px">Jeśli to nie Ty prosisz o reset hasła, zignoruj tę wiadomość.</p>
             """,
             "#0284C7",
             "Wiadomość automatyczna — nie odpowiadaj na ten email.",
@@ -386,5 +549,42 @@ public class EmailTemplateService(
             "#D97706",
             "Wiadomość automatyczna — nie odpowiadaj na ten email.",
             ["ClientName", "PackageName", "ExpiresAt", "RemainingCredits", "TrainerName"]),
+
+        ["pair-partner-cancelled"] = new(
+            "pair-partner-cancelled", "Trening w parze: partner odwołał", "bi-people",
+            "{{PartnerName}} nie będzie na treningu {{SessionDate}}",
+            "Zmiana w treningu w parze 👥",
+            """
+            <p style="color:#374151;font-size:15px">Cześć <strong>{{ClientName}}</strong>!</p>
+            <p style="color:#374151;font-size:15px"><strong>{{PartnerName}}</strong> odwołuje swój udział we wspólnym treningu. <strong>Twój trening zostaje</strong> — trenujesz tego dnia z trenerem bez pary.</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0">
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;width:40%">Typ wizyty</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{SessionType}}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Data i godzina</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{SessionDate}} o {{SessionTime}}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Trener</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{TrainerName}}</td></tr>
+            </table>
+            <p style="color:#6b7280;font-size:13px">Jeśli też nie możesz przyjść, odwołaj wizytę w aplikacji w zakładce Grafik.</p>
+            """,
+            "#7C3AED",
+            "Wiadomość automatyczna — nie odpowiadaj na ten email.",
+            ["ClientName", "PartnerName", "TrainerName", "SessionType", "SessionDate", "SessionTime"]),
+
+        ["pair-package-shared"] = new(
+            "pair-package-shared", "Pakiet dla pary: partner kupił", "bi-people-fill",
+            "{{BuyerName}} kupuje pakiet {{PackageName}} — trenujecie razem",
+            "Macie wspólny pakiet 🎉",
+            """
+            <p style="color:#374151;font-size:15px">Cześć <strong>{{ClientName}}</strong>!</p>
+            <p style="color:#374151;font-size:15px"><strong>{{BuyerName}}</strong> kupuje pakiet <strong>{{PackageName}}</strong> dla Was obojga. Pakiet jest już przypisany także do Ciebie.</p>
+            <table style="width:100%;border-collapse:collapse;margin:16px 0">
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px;width:40%">Wspólnych treningów</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{TotalSessions}}</td></tr>
+              <tr><td style="padding:8px 0;color:#6b7280;font-size:14px">Trener</td><td style="padding:8px 0;font-size:14px;font-weight:600">{{TrainerName}}</td></tr>
+              {{ExpiresRow}}
+            </table>
+            <p style="color:#374151;font-size:14px">Jak to działa: za każdy wspólny trening z pakietu schodzi 1. Gdy jedna osoba odwoła, druga może przyjść sama — wtedy też schodzi 1.</p>
+            {{ActionButton}}
+            """,
+            "#7C3AED",
+            "Wiadomość automatyczna — nie odpowiadaj na ten email.",
+            ["ClientName", "BuyerName", "PackageName", "TotalSessions", "TrainerName", "ExpiresAt", "ExpiresRow", "ActionLink", "ActionButton"]),
     };
 }
