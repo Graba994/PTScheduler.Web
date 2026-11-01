@@ -202,10 +202,12 @@ else
                         }
                         @if (MapOn && Muscles.Parse(e.PrimaryMuscles) is { Count: > 0 } cardPrimary)
                         {
-                            <span class="exercise-mm" aria-hidden="true">
-                                <MuscleMap Primary="@cardPrimary" Secondary="@Muscles.Parse(e.SecondaryMuscles)" Detailed="@Detailed"
-                                           PrimaryDetail="@StoredDetail(e.PrimaryDetail, e.SecondaryDetail)?.P" SecondaryDetail="@StoredDetail(e.PrimaryDetail, e.SecondaryDetail)?.S"
-                                           NameEn="@e.NameEn" Female="@Prefs.Female" Compact="true" OnlyActive="true" />
+                            @* Na karcie zawsze widok ogólny — duże partie są czytelne w małym rozmiarze; szczegóły w oknie ćwiczenia. *@
+                            <span class="exercise-mm" style="--c:@MuscleColors.Color(cardPrimary[0])" title="@string.Join(", ", cardPrimary.Select(Muscles.Label))">
+                                <span class="exercise-mm-fig" aria-hidden="true">
+                                    <MuscleMap Primary="@cardPrimary" Secondary="@Muscles.Parse(e.SecondaryMuscles)" Female="@Prefs.Female" Compact="true" OnlyActive="true" Overlay="true" />
+                                </span>
+                                <span class="exercise-mm-label"><i></i><span>@Muscles.ShortLabel(cardPrimary[0])@(cardPrimary.Count > 1 ? $" +{cardPrimary.Count - 1}" : "")</span></span>
                             </span>
                         }
                     </div>
@@ -723,8 +725,15 @@ else
     .btn-fav.on { color:#f5b301; }
     .badge-video { position:absolute; bottom:.35rem; right:.4rem; color:#fff; font-size:1.25rem; text-shadow:0 0 4px rgba(0,0,0,.6); }
     .badge-mine { position:absolute; top:.35rem; left:.35rem; font-size:.6rem; }
-    .exercise-mm { position:absolute; left:.35rem; bottom:.35rem; width:58px; padding:3px 4px 1px; border-radius:10px; background:rgba(255,255,255,.9); box-shadow:0 2px 8px rgba(15,23,42,.15); backdrop-filter:blur(4px); pointer-events:none; }
-    [data-bs-theme="dark"] .exercise-mm { background:rgba(15,23,42,.82); }
+    .exercise-mm { position:absolute; left:.45rem; bottom:.45rem; display:flex; flex-direction:column; align-items:center; gap:.15rem; width:78px; padding:.35rem .35rem .28rem; border-radius:14px;
+        background:linear-gradient(160deg, rgba(15,23,42,.78), rgba(30,41,59,.62)); border:1px solid rgba(255,255,255,.16);
+        box-shadow:0 6px 18px rgba(15,23,42,.35), inset 0 0 0 1px rgba(255,255,255,.04); backdrop-filter:blur(10px) saturate(1.4); -webkit-backdrop-filter:blur(10px) saturate(1.4); pointer-events:none; }
+    .exercise-mm-fig { display:block; width:100%; }
+    .exercise-mm-label { display:flex; align-items:center; gap:.3rem; max-width:100%; color:#fff; font-size:.62rem; font-weight:700; line-height:1.2; letter-spacing:.01em; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+    .exercise-mm-label span { overflow:hidden; text-overflow:ellipsis; }
+    .exercise-mm-label i { flex:none; width:.45rem; height:.45rem; border-radius:50%; background:var(--c); box-shadow:0 0 6px var(--c); }
+    .exercise-card:hover .exercise-mm { border-color:color-mix(in srgb, var(--c) 55%, rgba(255,255,255,.2)); }
+    @@media (max-width: 575.98px) { .exercise-mm { width:58px; left:.3rem; bottom:.3rem; padding:.25rem .25rem .2rem; border-radius:11px; } .exercise-mm-label { font-size:.56rem; } }
     .exd-muscles { display:grid; grid-template-columns:minmax(130px, 180px) 1fr; gap:.9rem; align-items:center; padding:.75rem; margin-bottom:.75rem; border-radius:16px; background:var(--bs-tertiary-bg); }
     .exd-mm { min-width:0; }
     .exd-mside { display:flex; flex-direction:column; gap:.35rem; min-width:0; }

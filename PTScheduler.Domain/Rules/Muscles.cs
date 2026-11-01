@@ -75,4 +75,17 @@ public static class Muscles
 
     /// <summary>Etykieta PL do UI.</summary>
     public static string Label(MuscleGroup m) => LabelPl[m];
+
+    /// <summary>Krótka etykieta PL — na małe znaczniki (np. mapa mięśni na karcie ćwiczenia).</summary>
+    public static string ShortLabel(MuscleGroup m) => m switch
+    {
+        MuscleGroup.Chest => "Klatka",
+        MuscleGroup.Hamstrings => "Dwugłowe ud",
+        MuscleGroup.Quadriceps => "Czworogłowe",
+        MuscleGroup.Lats => "Najszersze",
+        MuscleGroup.LowerBack => "Dół pleców",
+        MuscleGroup.MiddleBack => "Środek pleców",
+        MuscleGroup.Traps => "Kaptury",
+        _ => LabelPl[m]
+    };
 }
